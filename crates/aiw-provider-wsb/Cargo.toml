@@ -1,0 +1,19 @@
+[package]
+name = "aiw-provider-wsb"
+description = "Secure-by-default Windows Sandbox configuration planner"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+aiw-windows-command-line.workspace = true
+hex.workspace = true
+schemars.workspace = true
+serde.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

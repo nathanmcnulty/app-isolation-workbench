@@ -8,7 +8,11 @@
     Description = 'Thin PowerShell administration surface for the App Isolation Workbench CLI.'
     PowerShellVersion = '7.4'
     FunctionsToExport = @(
+        'ConvertTo-AiwWindowsSandboxConfig',
         'Get-AiwHostProbe',
+        'Get-AiwMxcCapabilityProbePlan',
+        'Get-AiwMxcInvocationPlan',
+        'Get-AiwTokenEvidence',
         'Invoke-Aiw',
         'Test-AiwEvidence',
         'Test-AiwProject'

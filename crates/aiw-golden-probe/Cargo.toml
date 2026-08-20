@@ -1,0 +1,21 @@
+[package]
+name = "aiw-golden-probe"
+description = "Golden in-target evidence probe for App Isolation Workbench"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "aiw-golden-probe"
+path = "src/main.rs"
+
+[dependencies]
+aiw-token.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

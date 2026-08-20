@@ -14,7 +14,7 @@ CLI / PowerShell / future UI (ordinary user)
                         disposable worker boundary
 ```
 
-The repository begins with contracts that do not require elevation. Windows Sandbox, Hyper-V, MXC, MSIX Packaging Tool, ACP, PSF, and signing integrations will be separate provider crates behind narrow typed interfaces.
+The repository begins with contracts that do not require elevation. Direct Windows Sandbox and MXC plan adapters now sit behind narrow typed interfaces; neither adapter launches a process. Hyper-V, MSIX Packaging Tool, ACP, PSF, and signing remain future providers.
 
 ## Current components
 
@@ -22,6 +22,11 @@ The repository begins with contracts that do not require elevation. Windows Sand
 - `aiw-evidence`: an append-only JSON-lines record chain using deterministic, integer-only canonical JSON and SHA-256.
 - `aiw-core`: legal run-state transitions and deterministic scenario/assertion comparison.
 - `aiw-probe`: read-only environment and executable discovery. It does not execute discovered tools.
+- `aiw-token`: the isolated native Win32 boundary for querying the exact target process token.
+- `aiw-golden-probe`: a small in-target executable that emits versioned token evidence to stdout or a new output file.
+- `aiw-provider-wsb`: validates mapped-folder intent and renders deterministic hardened `.wsb` XML.
+- `aiw-provider-mxc`: serializes the pinned MXC contract and returns inspectable dry-run/execution plans without running them.
+- `aiw-windows-command-line`: shared, shell-free Windows argument quoting.
 - `aiw-cli`: the stable JSON command surface consumed by PowerShell and the future desktop UI.
 
 ## Planned boundaries
@@ -32,7 +37,7 @@ ordinary-user orchestrator
         +-- short-lived elevated helper
         |      fixed verbs: worker setup, trace control, package deployment
         |
-        +-- MXC process adapter
+        +-- MXC process adapter (plan-only today)
         |
         +-- Windows Sandbox or checkpointed Hyper-V worker
                  |
@@ -49,3 +54,6 @@ An optional host-side AIW Analyst will consume only bounded normalized evidence.
 ## Compatibility posture
 
 Backend support is evidence, not configuration intent. A run records the requested backend, effective backend, target token, process descendants, policy hash, worker/OS provenance, trace completeness, and cleanup outcome. Unsupported or silently degraded execution invalidates isolation conclusions.
+
+See [Runtime evidence foundation](RUNTIME-EVIDENCE.md) for the dated API/source snapshot and [Updating the MXC pin](MXC-PIN-UPDATE.md) for the required review process.
+The proposed distribution and local-model trust split is documented in [Supply chain, bundling, and signing](SUPPLY-CHAIN-AND-SIGNING.md).

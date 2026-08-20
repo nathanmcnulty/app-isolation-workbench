@@ -8,7 +8,10 @@ use std::process::ExitCode;
 use aiw_core::{RunSummary, compare_runs};
 use aiw_evidence::{EvidenceRecord, verify_records};
 use aiw_probe::probe_host;
+use aiw_provider_mxc::{MxcGoldenProbePlan, plan_capability_probe, plan_golden_probe};
+use aiw_provider_wsb::{WindowsSandboxPlan, render_config, validate_host_mappings};
 use aiw_schema::{ModelPack, Project, ValidationIssue, validate_model_pack, validate_project};
+use aiw_token::{TokenEvidence, collect_current_process_token};
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use schemars::schema_for;
@@ -30,6 +33,7 @@ enum Command {
     ModelPack(ModelPackArgs),
     Evidence(EvidenceArgs),
     Probe(ProbeArgs),
+    Provider(ProviderArgs),
     Schema(SchemaArgs),
     Compare(CompareArgs),
 }
@@ -85,6 +89,32 @@ struct ProbeArgs {
 #[derive(Debug, Subcommand)]
 enum ProbeCommand {
     Host,
+    Token,
+}
+
+#[derive(Debug, Args)]
+struct ProviderArgs {
+    #[command(subcommand)]
+    command: ProviderCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ProviderCommand {
+    /// Render a hardened Windows Sandbox configuration after checking mapped folders.
+    Wsb {
+        #[arg(long)]
+        plan: PathBuf,
+    },
+    /// Render inspectable MXC dry-run and execution invocations without launching them.
+    Mxc {
+        #[arg(long)]
+        plan: PathBuf,
+    },
+    /// Describe MXC's capability-probe invocation and its host-mutation caveat.
+    MxcProbe {
+        #[arg(long)]
+        binary: String,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -98,6 +128,9 @@ enum SchemaKind {
     Project,
     ModelPack,
     EvidenceRecord,
+    TokenEvidence,
+    WindowsSandboxPlan,
+    MxcGoldenProbePlan,
 }
 
 #[derive(Debug, Args)]
@@ -147,11 +180,27 @@ fn run() -> Result<()> {
         },
         Command::Probe(args) => match args.command {
             ProbeCommand::Host => write_json(&probe_host()),
+            ProbeCommand::Token => write_json(&collect_current_process_token()?),
+        },
+        Command::Provider(args) => match args.command {
+            ProviderCommand::Wsb { plan } => {
+                let plan: WindowsSandboxPlan = read_document(&plan, MAX_CONFIG_BYTES)?;
+                validate_host_mappings(&plan)?;
+                write_json(&render_config(&plan)?)
+            }
+            ProviderCommand::Mxc { plan } => {
+                let plan: MxcGoldenProbePlan = read_document(&plan, MAX_CONFIG_BYTES)?;
+                write_json(&plan_golden_probe(&plan)?)
+            }
+            ProviderCommand::MxcProbe { binary } => write_json(&plan_capability_probe(&binary)?),
         },
         Command::Schema(args) => match args.kind {
             SchemaKind::Project => write_json(&schema_for!(Project)),
             SchemaKind::ModelPack => write_json(&schema_for!(ModelPack)),
             SchemaKind::EvidenceRecord => write_json(&schema_for!(EvidenceRecord)),
+            SchemaKind::TokenEvidence => write_json(&schema_for!(TokenEvidence)),
+            SchemaKind::WindowsSandboxPlan => write_json(&schema_for!(WindowsSandboxPlan)),
+            SchemaKind::MxcGoldenProbePlan => write_json(&schema_for!(MxcGoldenProbePlan)),
         },
         Command::Compare(args) => {
             let left: RunSummary = read_document(&args.left, MAX_CONFIG_BYTES)?;

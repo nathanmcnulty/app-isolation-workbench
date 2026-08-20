@@ -1,6 +1,6 @@
 # Roadmap
 
-## Slice 0: deterministic contracts — in progress
+## Slice 0: deterministic contracts — complete foundation
 
 - Versioned project and model-pack schemas
 - Strict semantic validation and safe path rules
@@ -8,10 +8,13 @@
 - Read-only host probe
 - Run state machine and deterministic comparison
 - JSON CLI and PowerShell wrapper
+- Native target-token evidence and golden probe
+- Secure direct Windows Sandbox configuration renderer
+- Pinned MXC dry-run/execution planner
 
 ## Slice 1: reproducible runner
 
-- Pin and wrap MXC through a process adapter
+- Execute MXC through an approval-bound process adapter
 - Windows Sandbox one-shot and state-aware feasibility tests
 - Golden capability/denial probe
 - Token, process-tree, and effective-backend evidence

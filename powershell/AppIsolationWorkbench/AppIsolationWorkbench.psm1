@@ -85,8 +85,63 @@ function Get-AiwHostProbe {
     Invoke-Aiw -CliPath $CliPath -ArgumentList @('probe', 'host')
 }
 
+function Get-AiwTokenEvidence {
+    [CmdletBinding()]
+    param(
+        [Parameter()]
+        [string] $CliPath
+    )
+
+    Invoke-Aiw -CliPath $CliPath -ArgumentList @('probe', 'token')
+}
+
+function ConvertTo-AiwWindowsSandboxConfig {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $PlanPath,
+
+        [Parameter()]
+        [string] $CliPath
+    )
+
+    $resolvedPlan = (Resolve-Path -LiteralPath $PlanPath -ErrorAction Stop).Path
+    Invoke-Aiw -CliPath $CliPath -ArgumentList @('provider', 'wsb', '--plan', $resolvedPlan)
+}
+
+function Get-AiwMxcInvocationPlan {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $PlanPath,
+
+        [Parameter()]
+        [string] $CliPath
+    )
+
+    $resolvedPlan = (Resolve-Path -LiteralPath $PlanPath -ErrorAction Stop).Path
+    Invoke-Aiw -CliPath $CliPath -ArgumentList @('provider', 'mxc', '--plan', $resolvedPlan)
+}
+
+function Get-AiwMxcCapabilityProbePlan {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $BinaryPath,
+
+        [Parameter()]
+        [string] $CliPath
+    )
+
+    Invoke-Aiw -CliPath $CliPath -ArgumentList @('provider', 'mxc-probe', '--binary', $BinaryPath)
+}
+
 Export-ModuleMember -Function @(
+    'ConvertTo-AiwWindowsSandboxConfig',
     'Get-AiwHostProbe',
+    'Get-AiwMxcCapabilityProbePlan',
+    'Get-AiwMxcInvocationPlan',
+    'Get-AiwTokenEvidence',
     'Invoke-Aiw',
     'Test-AiwEvidence',
     'Test-AiwProject'
