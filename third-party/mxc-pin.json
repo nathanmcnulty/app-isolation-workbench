@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "aiw.dev/source-pin/v0alpha1",
+  "name": "microsoft/mxc",
+  "repository": "https://github.com/microsoft/mxc",
+  "commit": "c4a3ab668e85b221b2c77e5e43876ed4e40598ad",
+  "contractVersion": "0.8.0-alpha",
+  "developmentSchema": "schemas/dev/mxc-config.schema.0.8.0-dev.json",
+  "license": "MIT",
+  "inspectedOn": "2026-08-19",
+  "integrationMode": "external-binary-process-adapter"
+}

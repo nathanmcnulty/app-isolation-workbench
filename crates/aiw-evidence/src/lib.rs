@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod bundle;
+
 use std::collections::BTreeMap;
 
 use schemars::JsonSchema;
@@ -7,6 +9,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+
+pub use bundle::{
+    ASSESSMENT_BUNDLE_MANIFEST_SCHEMA_VERSION, ASSESSMENT_BUNDLE_SPEC_SCHEMA_VERSION,
+    ASSESSMENT_BUNDLE_VERIFICATION_SCHEMA_VERSION, ArtifactClass, ArtifactRole,
+    AssessmentBundleError, AssessmentBundleManifest, AssessmentBundleSpec, BundleArtifact,
+    BundleArtifactSpec, BundlePurpose, BundleVerification, ContentDeclaration, DataSensitivity,
+    build_assessment_bundle, verify_assessment_bundle,
+};
 
 pub const EVIDENCE_RECORD_SCHEMA_VERSION: &str = "aiw.dev/evidence-record/v0alpha1";
 pub const EVIDENCE_MANIFEST_SCHEMA_VERSION: &str = "aiw.dev/evidence-manifest/v0alpha1";

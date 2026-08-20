@@ -19,7 +19,19 @@
 
 ## Initial guarantees
 
-The current code provides strict project parsing, safe-relative-path validation, SHA-256 validation, duplicate-ID detection, legal run-state transitions, canonical integer-only JSON, and evidence chain verification. These are data-integrity mechanisms; they do not prove that an application ran inside any Windows isolation boundary.
+The current code provides strict project parsing, safe-relative-path validation, SHA-256 validation, duplicate-ID detection, legal run-state transitions, canonical integer-only JSON, evidence-chain verification, deterministic allowlisted assessment manifests, conservative denial-canary evaluation, evidence-cited advisory-report validation, in-process token evidence, hardened `.wsb` rendering, and a source-pinned MXC invocation plan. These mechanisms still do not prove that an application ran inside any Windows isolation boundary until the golden probe executes inside that boundary and its provenance/completeness checks pass.
+
+Assessment manifests reject traversal, Windows case collisions, symbolic links/reparse points, raw executable/package/archive/private-key classes, and oversized payloads. They do not scan content for secrets and do not establish authorship without a separate signature. Unlisted files are not part of the bundle. Construction must occur after artifact writers stop because a privileged same-host path-swap race remains possible until the exporter uses handle-based staging controls.
+
+Canary plans reference only opaque synthetic resource IDs. Imported projects cannot choose real host paths, registry keys, endpoints, clipboard contents, or process IDs through this contract. A denial passes only when a baseline control succeeds, the candidate returns explicit access denial, and both phases cite evidence. Missing, timed-out, unreachable, not-found, and generic-error outcomes remain indeterminate.
+
+Analyst output is untrusted plain text inside a strict envelope. Every statement must cite exact verified evidence records; model, runtime, prompt, and generation provenance is recorded; actions are fixed non-executing categories; and report authority is always advisory. Citation validity does not make model reasoning correct. The trusted host must eventually measure provenance rather than accept model-authored claims.
+
+The only current host-writable sandbox mapping is the required empty output directory beneath an explicit workspace root. Its contents are always untrusted. Root symlinks/reparse points, canonical workspace escapes, and canonical mapping overlap are rejected, but a launch-time revalidation is still required to reduce path-swap risk.
+
+The `wsb` CLI lifecycle plan deliberately excludes `exec` and dynamic `share`. `exec` currently has no process-I/O return channel, `ExistingLogin` needs an active connected session, and `System` would expand the guest trust boundary. Runtime folder sharing can also diverge from the reviewed pre-launch configuration. The expected golden-probe artifact proves neither clean completion nor host provenance; a separate run-bound completion receipt remains required before automated execution can make a complete-run claim.
+
+The completion verifier binds the receipt to trusted run, sandbox, rendered-config, request, and agent hashes; rejects unlisted output, unsafe paths, links/reparse points, oversized files, and artifact mismatches; and independently verifies the declared evidence-chain root. A verified receipt establishes consistency and correlation, not authenticity against an administrator inside the guest. The future executor must stop artifact writers and retain host-side provider/process evidence before treating the run as complete.
 
 ## Planned controls
 

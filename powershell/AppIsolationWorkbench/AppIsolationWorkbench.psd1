@@ -8,10 +8,20 @@
     Description = 'Thin PowerShell administration surface for the App Isolation Workbench CLI.'
     PowerShellVersion = '7.4'
     FunctionsToExport = @(
+        'ConvertTo-AiwWindowsSandboxConfig',
         'Get-AiwHostProbe',
+        'Get-AiwMxcCapabilityProbePlan',
+        'Get-AiwMxcInvocationPlan',
+        'Get-AiwTokenEvidence',
+        'Get-AiwWindowsSandboxCliLifecyclePlan',
         'Invoke-Aiw',
+        'Get-AiwAssessmentBundleManifest',
+        'Test-AiwAssessmentBundle',
+        'Test-AiwCanaryObservationSet',
+        'Test-AiwAnalystReport',
         'Test-AiwEvidence',
-        'Test-AiwProject'
+        'Test-AiwProject',
+        'Test-AiwWindowsSandboxCompletion'
     )
     CmdletsToExport = @()
     VariablesToExport = @()

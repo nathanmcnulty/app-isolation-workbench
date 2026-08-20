@@ -1,0 +1,79 @@
+{
+  "schemaVersion": "aiw.dev/analyst-report/v0alpha1",
+  "kind": "AIWAnalystReport",
+  "reportId": "fixture-report",
+  "runId": "fixture-run",
+  "candidateId": "process-container",
+  "authority": "advisoryOnly",
+  "evidenceRootHash": "0ed512eda3875848281633fc957871e5bdf4e91c11e9a9c4451007e0ac2ddd60",
+  "provenance": {
+    "provider": "foundryLocal",
+    "providerVersion": "1.0.0",
+    "modelPackId": "aiw-evidence-analyst-small",
+    "modelPackVersion": "1.0.0",
+    "modelAlias": "example-model-family",
+    "modelVariantId": "example-model-int4-cpu",
+    "modelPayloadRootHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "executionProvider": "cpu",
+    "runtimeArtifactRootAlgorithm": "sha256-merkle-v1",
+    "runtimeArtifactRootHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "promptTemplateSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "generationConfigSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "transport": "inProcess",
+    "externalNetworkAccess": "none",
+    "toolAccess": "none",
+    "inputClass": "normalizedEvidenceOnly"
+  },
+  "executiveSummary": {
+    "format": "plainText",
+    "text": "The fixture records Windows build and target-token observations. The report remains advisory.",
+    "citations": [
+      {
+        "sequence": 0,
+        "recordHash": "aaa0fa31f61f6be0dbacc398747b91ce94a64d887c31336fd798ef69f0d506a2"
+      },
+      {
+        "sequence": 1,
+        "recordHash": "0ed512eda3875848281633fc957871e5bdf4e91c11e9a9c4451007e0ac2ddd60"
+      }
+    ]
+  },
+  "findings": [
+    {
+      "id": "token-observed",
+      "severity": "informational",
+      "confidence": "high",
+      "category": "isolationBoundary",
+      "statement": {
+        "format": "plainText",
+        "text": "The recorded target token identifies AppContainer membership at medium integrity.",
+        "citations": [
+          {
+            "sequence": 1,
+            "recordHash": "0ed512eda3875848281633fc957871e5bdf4e91c11e9a9c4451007e0ac2ddd60"
+          }
+        ]
+      }
+    }
+  ],
+  "recommendations": [
+    {
+      "id": "collect-process-tree",
+      "priority": "medium",
+      "rationale": {
+        "format": "plainText",
+        "text": "The cited token record does not establish expected child-process coverage.",
+        "citations": [
+          {
+            "sequence": 1,
+            "recordHash": "0ed512eda3875848281633fc957871e5bdf4e91c11e9a9c4451007e0ac2ddd60"
+          }
+        ]
+      },
+      "action": {
+        "type": "collectMoreEvidence",
+        "evidenceKind": "processTree"
+      }
+    }
+  ]
+}

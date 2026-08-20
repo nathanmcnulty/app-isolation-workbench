@@ -21,11 +21,64 @@ try {
     cargo run --quiet --locked -p aiw-cli -- model-pack validate --path .\examples\model-pack.json | ConvertFrom-Json | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'example model-pack validation failed' }
 
+    cargo run --quiet --locked -p aiw-cli -- analyst validate --report .\examples\analyst-report.json --evidence-log .\examples\analyst-evidence.jsonl --model-pack .\examples\model-pack.json | ConvertFrom-Json | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'example analyst report validation failed' }
+
     cargo run --quiet --locked -p aiw-cli -- schema project | ConvertFrom-Json | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'project schema generation failed' }
 
     cargo run --quiet --locked -p aiw-cli -- probe host | ConvertFrom-Json | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'host probe failed' }
+
+    cargo run --quiet --locked -p aiw-cli -- probe token | ConvertFrom-Json | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'token probe failed' }
+
+    cargo run --quiet --locked -p aiw-cli -- provider mxc --plan .\examples\mxc-golden-probe-plan.json | ConvertFrom-Json | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'MXC plan generation failed' }
+
+    cargo run --quiet --locked -p aiw-cli -- provider mxc-probe --binary C:\AIW\MXC\wxc-exec.exe | ConvertFrom-Json | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'MXC probe plan generation failed' }
+
+    $bundleManifestPath = Join-Path ([IO.Path]::GetTempPath()) "aiw-bundle-$([guid]::NewGuid()).json"
+    try {
+        $bundleJson = cargo run --quiet --locked -p aiw-cli -- bundle build --root . --spec .\examples\assessment-bundle-spec.json
+        if ($LASTEXITCODE -ne 0) { throw 'assessment bundle build failed' }
+        $bundleJson | ConvertFrom-Json | Out-Null
+        [IO.File]::WriteAllText(
+            $bundleManifestPath,
+            ($bundleJson -join [Environment]::NewLine),
+            [Text.UTF8Encoding]::new($false)
+        )
+        cargo run --quiet --locked -p aiw-cli -- bundle verify --root . --manifest $bundleManifestPath | ConvertFrom-Json | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'assessment bundle verification failed' }
+    }
+    finally {
+        Remove-Item -LiteralPath $bundleManifestPath -Force -ErrorAction SilentlyContinue
+    }
+
+    cargo run --quiet --locked -p aiw-cli -- canary evaluate --plan .\examples\canary-plan.json --observations .\examples\canary-observations.json --evidence-log .\examples\canary-evidence.jsonl | ConvertFrom-Json | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'canary evaluation failed' }
+
+    foreach ($schemaKind in @(
+        'assessment-bundle-manifest',
+        'assessment-bundle-spec',
+        'assessment-bundle-verification',
+        'canary-observation-set',
+        'canary-plan',
+        'canary-report',
+        'analyst-report',
+        'analyst-report-validation',
+        'token-evidence',
+        'windows-sandbox-plan',
+        'windows-sandbox-cli-lifecycle-plan',
+        'windows-sandbox-completion-expectation',
+        'windows-sandbox-completion-receipt',
+        'windows-sandbox-completion-verification',
+        'mxc-golden-probe-plan'
+    )) {
+        cargo run --quiet --locked -p aiw-cli -- schema $schemaKind | ConvertFrom-Json | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "schema generation failed: $schemaKind" }
+    }
 
     Write-Host 'AIW local verification passed.' -ForegroundColor Green
 }

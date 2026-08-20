@@ -3,8 +3,13 @@ members = [
     "crates/aiw-cli",
     "crates/aiw-core",
     "crates/aiw-evidence",
+    "crates/aiw-golden-probe",
     "crates/aiw-probe",
+    "crates/aiw-provider-mxc",
+    "crates/aiw-provider-wsb",
     "crates/aiw-schema",
+    "crates/aiw-token",
+    "crates/aiw-windows-command-line",
 ]
 resolver = "3"
 
@@ -18,9 +23,14 @@ rust-version = "1.85"
 [workspace.dependencies]
 aiw-core = { path = "crates/aiw-core" }
 aiw-evidence = { path = "crates/aiw-evidence" }
+aiw-token = { path = "crates/aiw-token" }
 aiw-probe = { path = "crates/aiw-probe" }
+aiw-provider-mxc = { path = "crates/aiw-provider-mxc" }
+aiw-provider-wsb = { path = "crates/aiw-provider-wsb" }
 aiw-schema = { path = "crates/aiw-schema" }
+aiw-windows-command-line = { path = "crates/aiw-windows-command-line" }
 anyhow = "1.0"
+base64 = "0.22"
 clap = { version = "4.5", features = ["derive"] }
 hex = "0.4"
 schemars = { version = "1.0", features = ["derive"] }

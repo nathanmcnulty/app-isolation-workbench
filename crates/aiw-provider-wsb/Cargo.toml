@@ -1,6 +1,6 @@
 [package]
-name = "aiw-core"
-description = "Deterministic orchestration domain logic for App Isolation Workbench"
+name = "aiw-provider-wsb"
+description = "Secure-by-default Windows Sandbox configuration planner"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,12 +10,13 @@ rust-version.workspace = true
 [dependencies]
 aiw-evidence.workspace = true
 aiw-schema.workspace = true
+aiw-windows-command-line.workspace = true
+hex.workspace = true
 schemars.workspace = true
 serde.workspace = true
-thiserror.workspace = true
-
-[dev-dependencies]
 serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
 
 [lints]
 workspace = true

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "aiw.dev/mxc-golden-probe-plan/v0alpha1",
+  "workspaceRoot": "C:\\AIW",
+  "binary": "C:\\AIW\\MXC\\wxc-exec.exe",
+  "containerId": "aiw-golden-probe-001",
+  "backend": "processcontainer",
+  "probeExecutable": "C:\\AIW\\Tools\\aiw-golden-probe.exe",
+  "probeOutput": "C:\\AIW\\Output\\token.json",
+  "readonlyPaths": [
+    "C:\\AIW\\Tools"
+  ],
+  "readwritePaths": [
+    "C:\\AIW\\Output"
+  ],
+  "timeoutMs": 60000
+}

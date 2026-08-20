@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "aiw.dev/windows-sandbox-plan/v0alpha1",
+  "workspaceRoot": "C:\\AIW",
+  "mappings": [
+    {
+      "purpose": "tools",
+      "hostFolder": "C:\\AIW\\Tools",
+      "sandboxFolder": "C:\\AIW\\Tools"
+    },
+    {
+      "purpose": "output",
+      "hostFolder": "C:\\AIW\\Output",
+      "sandboxFolder": "C:\\AIW\\Output"
+    }
+  ],
+  "probe": {
+    "executable": "C:\\AIW\\Tools\\aiw-golden-probe.exe",
+    "output": "C:\\AIW\\Output\\token.json"
+  },
+  "memoryMb": 4096
+}
