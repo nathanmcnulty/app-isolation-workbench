@@ -14,11 +14,12 @@
 - Deterministic assessment-bundle manifest and verifier
 - Provider-neutral denial-canary plan, observation, and verdict contracts
 - Strict evidence-cited local-analyst report and provenance contract
+- Windows Sandbox CLI lifecycle planner with explicit no-I/O and mapped-output contract
 
 ## Slice 1: reproducible runner
 
 - Execute MXC through an approval-bound process adapter
-- Windows Sandbox one-shot and state-aware feasibility tests
+- Windows Sandbox one-shot execution, run-bound completion receipt, and state-aware feasibility tests
 - Golden capability/denial probe execution and synthetic-resource provisioner
 - Token, process-tree, and effective-backend evidence
 - Manual and command scenario runner

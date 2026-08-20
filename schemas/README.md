@@ -16,6 +16,7 @@ cargo run -p aiw-cli -- schema analyst-report
 cargo run -p aiw-cli -- schema analyst-report-validation
 cargo run -p aiw-cli -- schema token-evidence
 cargo run -p aiw-cli -- schema windows-sandbox-plan
+cargo run -p aiw-cli -- schema windows-sandbox-cli-lifecycle-plan
 cargo run -p aiw-cli -- schema mxc-golden-probe-plan
 ```
 

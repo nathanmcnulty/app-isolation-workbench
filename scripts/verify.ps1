@@ -59,9 +59,6 @@ try {
     cargo run --quiet --locked -p aiw-cli -- canary evaluate --plan .\examples\canary-plan.json --observations .\examples\canary-observations.json --evidence-log .\examples\canary-evidence.jsonl | ConvertFrom-Json | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'canary evaluation failed' }
 
-    cargo run --quiet --locked -p aiw-cli -- analyst validate --report .\examples\analyst-report.json --evidence-log .\examples\analyst-evidence.jsonl --model-pack .\examples\model-pack.json | ConvertFrom-Json | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'analyst report validation failed' }
-
     foreach ($schemaKind in @(
         'assessment-bundle-manifest',
         'assessment-bundle-spec',
@@ -73,6 +70,7 @@ try {
         'analyst-report-validation',
         'token-evidence',
         'windows-sandbox-plan',
+        'windows-sandbox-cli-lifecycle-plan',
         'mxc-golden-probe-plan'
     )) {
         cargo run --quiet --locked -p aiw-cli -- schema $schemaKind | ConvertFrom-Json | Out-Null

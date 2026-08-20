@@ -12,6 +12,9 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 pub const WINDOWS_SANDBOX_PLAN_SCHEMA_VERSION: &str = "aiw.dev/windows-sandbox-plan/v0alpha1";
+pub const WINDOWS_SANDBOX_CLI_LIFECYCLE_SCHEMA_VERSION: &str =
+    "aiw.dev/windows-sandbox-cli-lifecycle/v0alpha1";
+pub const WINDOWS_SANDBOX_CLI_INTERFACE: &str = "microsoft.windows-sandbox-cli/2025-01-24";
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -63,6 +66,52 @@ pub struct RenderedWindowsSandboxConfig {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WindowsSandboxCliLifecyclePlan {
+    pub schema_version: String,
+    pub interface: String,
+    pub sandbox_id: String,
+    pub rendered_config: RenderedWindowsSandboxConfig,
+    pub start: ProcessInvocation,
+    pub list: ProcessInvocation,
+    pub stop: ProcessInvocation,
+    pub guest_execution: GuestExecutionContract,
+    pub output_observation: OutputObservationContract,
+    pub requires_human_approval: bool,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProcessInvocation {
+    pub executable: String,
+    pub arguments: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GuestExecutionContract {
+    pub trigger: String,
+    pub account: String,
+    pub uses_exec_command: bool,
+    pub permits_system_context: bool,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OutputObservationContract {
+    pub channel: String,
+    pub host_folder: String,
+    pub sandbox_folder: String,
+    pub expected_host_artifact: String,
+    pub expected_guest_artifact: String,
+    pub guest_write_access: bool,
+    pub process_io_available: bool,
+    pub dynamic_share_required: bool,
+    pub artifact_is_completion_receipt: bool,
+}
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum WindowsSandboxPlanError {
     #[error("unsupported plan schema version: {0}")]
@@ -93,6 +142,105 @@ pub enum WindowsSandboxPlanError {
     OverlappingCanonicalHostFolders(String),
     #[error("could not inspect mapped host folder {path}: {message}")]
     HostInspection { path: String, message: String },
+    #[error("wsbCliPath must be an absolute drive path whose final component is wsb.exe")]
+    InvalidCliPath,
+    #[error("sandboxId must be a canonical UUID without braces")]
+    InvalidSandboxId,
+}
+
+pub fn plan_cli_lifecycle(
+    wsb_cli_path: &str,
+    sandbox_id: &str,
+    plan: &WindowsSandboxPlan,
+) -> Result<WindowsSandboxCliLifecyclePlan, WindowsSandboxPlanError> {
+    validate_absolute_drive_path("wsbCliPath", wsb_cli_path)
+        .map_err(|_| WindowsSandboxPlanError::InvalidCliPath)?;
+    if !wsb_cli_path
+        .rsplit('\\')
+        .next()
+        .is_some_and(|name| name.eq_ignore_ascii_case("wsb.exe"))
+    {
+        return Err(WindowsSandboxPlanError::InvalidCliPath);
+    }
+    if !is_canonical_uuid(sandbox_id) {
+        return Err(WindowsSandboxPlanError::InvalidSandboxId);
+    }
+
+    let rendered_config = render_config(plan)?;
+    let output = plan
+        .mappings
+        .iter()
+        .find(|mapping| mapping.purpose == MappingPurpose::Output)
+        .expect("render_config requires exactly one output mapping");
+    let guest_root = output.sandbox_folder.trim_end_matches('\\');
+    let relative_artifact = &plan.probe.output[guest_root.len() + 1..];
+    let expected_host_artifact = format!(
+        "{}\\{}",
+        output.host_folder.trim_end_matches('\\'),
+        relative_artifact
+    );
+    let sandbox_id = sandbox_id.to_ascii_lowercase();
+
+    Ok(WindowsSandboxCliLifecyclePlan {
+        schema_version: WINDOWS_SANDBOX_CLI_LIFECYCLE_SCHEMA_VERSION.to_owned(),
+        interface: WINDOWS_SANDBOX_CLI_INTERFACE.to_owned(),
+        sandbox_id: sandbox_id.clone(),
+        start: ProcessInvocation {
+            executable: wsb_cli_path.to_owned(),
+            arguments: vec![
+                "start".to_owned(),
+                "--raw".to_owned(),
+                "--id".to_owned(),
+                sandbox_id.clone(),
+                "--config".to_owned(),
+                rendered_config.xml.clone(),
+            ],
+        },
+        list: ProcessInvocation {
+            executable: wsb_cli_path.to_owned(),
+            arguments: vec!["list".to_owned(), "--raw".to_owned()],
+        },
+        stop: ProcessInvocation {
+            executable: wsb_cli_path.to_owned(),
+            arguments: vec![
+                "stop".to_owned(),
+                "--raw".to_owned(),
+                "--id".to_owned(),
+                sandbox_id,
+            ],
+        },
+        guest_execution: GuestExecutionContract {
+            trigger: "preconfiguredLogonCommand".to_owned(),
+            account: "WDAGUtilityAccount".to_owned(),
+            uses_exec_command: false,
+            permits_system_context: false,
+        },
+        output_observation: OutputObservationContract {
+            channel: "preconfiguredMappedFolder".to_owned(),
+            host_folder: output.host_folder.clone(),
+            sandbox_folder: output.sandbox_folder.clone(),
+            expected_host_artifact,
+            expected_guest_artifact: plan.probe.output.clone(),
+            guest_write_access: true,
+            process_io_available: false,
+            dynamic_share_required: false,
+            artifact_is_completion_receipt: false,
+        },
+        rendered_config,
+        requires_human_approval: true,
+        warnings: vec![
+            "This output is an inspectable plan only; it does not launch or stop Windows Sandbox."
+                .to_owned(),
+            "The Windows Sandbox CLI is an early interface delivered with the Store-updated app; record the resolved binary identity and app version at execution time."
+                .to_owned(),
+            "The CLI does not expose guest process I/O. The mapped output artifact is untrusted evidence, not a run-completion receipt."
+                .to_owned(),
+            "Do not add folders with wsb share or run the guest agent with wsb exec --run-as System; both would change the reviewed trust contract."
+                .to_owned(),
+            "Windows Sandbox supports one running instance per user session; orchestration must serialize runs and verify the returned sandbox ID."
+                .to_owned(),
+        ],
+    })
 }
 
 pub fn render_config(
@@ -415,6 +563,17 @@ fn is_path_below(path: &str, parent: &str) -> bool {
     path.starts_with(&prefix)
 }
 
+fn is_canonical_uuid(value: &str) -> bool {
+    value.len() == 36
+        && value.bytes().enumerate().all(|(index, byte)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
+}
+
 fn escape_xml(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len());
     for character in value.chars() {
@@ -492,6 +651,77 @@ mod tests {
         .join("\n");
         assert_eq!(rendered.xml, expected);
         assert_eq!(rendered.sha256.len(), 64);
+    }
+
+    #[test]
+    fn plans_cli_lifecycle_without_exec_or_dynamic_share() {
+        let lifecycle = plan_cli_lifecycle(
+            "C:\\AIW\\SystemTools\\wsb.exe",
+            "12345678-1234-ABCD-9876-1234567890AB",
+            &valid_plan(),
+        )
+        .expect("valid lifecycle should render");
+
+        assert_eq!(
+            lifecycle.schema_version,
+            WINDOWS_SANDBOX_CLI_LIFECYCLE_SCHEMA_VERSION
+        );
+        assert_eq!(lifecycle.interface, WINDOWS_SANDBOX_CLI_INTERFACE);
+        assert_eq!(lifecycle.sandbox_id, "12345678-1234-abcd-9876-1234567890ab");
+        assert_eq!(lifecycle.start.arguments[0], "start");
+        assert_eq!(lifecycle.list.arguments, ["list", "--raw"]);
+        assert_eq!(lifecycle.stop.arguments[0], "stop");
+        assert!(!lifecycle.guest_execution.uses_exec_command);
+        assert!(!lifecycle.guest_execution.permits_system_context);
+        assert!(!lifecycle.output_observation.dynamic_share_required);
+        assert!(!lifecycle.output_observation.process_io_available);
+        assert!(!lifecycle.output_observation.artifact_is_completion_receipt);
+        assert_eq!(
+            lifecycle.output_observation.expected_host_artifact,
+            "C:\\AIW Host\\Output\\token.json"
+        );
+        assert!(
+            lifecycle
+                .start
+                .arguments
+                .contains(&lifecycle.rendered_config.xml)
+        );
+        for invocation in [&lifecycle.start, &lifecycle.list, &lifecycle.stop] {
+            assert!(
+                !invocation
+                    .arguments
+                    .iter()
+                    .any(|argument| { matches!(argument.as_str(), "exec" | "share" | "System") })
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_ambiguous_cli_paths_and_sandbox_ids() {
+        assert_eq!(
+            plan_cli_lifecycle(
+                "wsb.exe",
+                "12345678-1234-abcd-9876-1234567890ab",
+                &valid_plan()
+            ),
+            Err(WindowsSandboxPlanError::InvalidCliPath)
+        );
+        assert_eq!(
+            plan_cli_lifecycle(
+                "C:\\AIW\\SystemTools\\other.exe",
+                "12345678-1234-abcd-9876-1234567890ab",
+                &valid_plan()
+            ),
+            Err(WindowsSandboxPlanError::InvalidCliPath)
+        );
+        assert_eq!(
+            plan_cli_lifecycle(
+                "C:\\AIW\\SystemTools\\wsb.exe",
+                "{12345678-1234-abcd-9876-1234567890ab}",
+                &valid_plan()
+            ),
+            Err(WindowsSandboxPlanError::InvalidSandboxId)
+        );
     }
 
     #[test]
