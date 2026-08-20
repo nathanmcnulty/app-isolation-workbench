@@ -5,7 +5,9 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use aiw_core::{RunSummary, compare_runs};
+use aiw_core::{
+    CanaryObservationSet, CanaryPlan, CanaryReport, RunSummary, compare_runs, evaluate_canaries,
+};
 use aiw_evidence::{
     AssessmentBundleManifest, AssessmentBundleSpec, BundleVerification, EvidenceRecord,
     build_assessment_bundle, verify_assessment_bundle, verify_records,
@@ -36,6 +38,7 @@ enum Command {
     ModelPack(ModelPackArgs),
     Evidence(EvidenceArgs),
     Bundle(BundleArgs),
+    Canary(CanaryArgs),
     Probe(ProbeArgs),
     Provider(ProviderArgs),
     Schema(SchemaArgs),
@@ -109,6 +112,25 @@ enum BundleCommand {
 }
 
 #[derive(Debug, Args)]
+struct CanaryArgs {
+    #[command(subcommand)]
+    command: CanaryCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum CanaryCommand {
+    /// Evaluate baseline and isolated observations without executing any canary.
+    Evaluate {
+        #[arg(long)]
+        plan: PathBuf,
+        #[arg(long)]
+        observations: PathBuf,
+        #[arg(long)]
+        evidence_log: PathBuf,
+    },
+}
+
+#[derive(Debug, Args)]
 struct ProbeArgs {
     #[command(subcommand)]
     command: ProbeCommand,
@@ -159,6 +181,9 @@ enum SchemaKind {
     AssessmentBundleSpec,
     AssessmentBundleManifest,
     AssessmentBundleVerification,
+    CanaryPlan,
+    CanaryObservationSet,
+    CanaryReport,
     TokenEvidence,
     WindowsSandboxPlan,
     MxcGoldenProbePlan,
@@ -220,6 +245,19 @@ fn run() -> Result<()> {
                 write_json(&verify_assessment_bundle(&root, &manifest)?)
             }
         },
+        Command::Canary(args) => match args.command {
+            CanaryCommand::Evaluate {
+                plan,
+                observations,
+                evidence_log,
+            } => {
+                let plan: CanaryPlan = read_document(&plan, MAX_CONFIG_BYTES)?;
+                let observations: CanaryObservationSet =
+                    read_document(&observations, MAX_CONFIG_BYTES)?;
+                let evidence_records = read_evidence_log(&evidence_log)?;
+                write_json(&evaluate_canaries(&plan, &observations, &evidence_records)?)
+            }
+        },
         Command::Probe(args) => match args.command {
             ProbeCommand::Host => write_json(&probe_host()),
             ProbeCommand::Token => write_json(&collect_current_process_token()?),
@@ -247,6 +285,9 @@ fn run() -> Result<()> {
             SchemaKind::AssessmentBundleVerification => {
                 write_json(&schema_for!(BundleVerification))
             }
+            SchemaKind::CanaryPlan => write_json(&schema_for!(CanaryPlan)),
+            SchemaKind::CanaryObservationSet => write_json(&schema_for!(CanaryObservationSet)),
+            SchemaKind::CanaryReport => write_json(&schema_for!(CanaryReport)),
             SchemaKind::TokenEvidence => write_json(&schema_for!(TokenEvidence)),
             SchemaKind::WindowsSandboxPlan => write_json(&schema_for!(WindowsSandboxPlan)),
             SchemaKind::MxcGoldenProbePlan => write_json(&schema_for!(MxcGoldenProbePlan)),

@@ -16,6 +16,7 @@
         'Invoke-Aiw',
         'Get-AiwAssessmentBundleManifest',
         'Test-AiwAssessmentBundle',
+        'Test-AiwCanaryObservationSet',
         'Test-AiwEvidence',
         'Test-AiwProject'
     )

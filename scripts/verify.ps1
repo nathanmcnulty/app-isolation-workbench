@@ -53,10 +53,16 @@ try {
         Remove-Item -LiteralPath $bundleManifestPath -Force -ErrorAction SilentlyContinue
     }
 
+    cargo run --quiet --locked -p aiw-cli -- canary evaluate --plan .\examples\canary-plan.json --observations .\examples\canary-observations.json --evidence-log .\examples\canary-evidence.jsonl | ConvertFrom-Json | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'canary evaluation failed' }
+
     foreach ($schemaKind in @(
         'assessment-bundle-manifest',
         'assessment-bundle-spec',
         'assessment-bundle-verification',
+        'canary-observation-set',
+        'canary-plan',
+        'canary-report',
         'token-evidence',
         'windows-sandbox-plan',
         'mxc-golden-probe-plan'

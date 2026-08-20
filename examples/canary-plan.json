@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "aiw.dev/canary-plan/v0alpha1",
+  "planId": "default-boundary-controls",
+  "assertions": [
+    {
+      "id": "host-file-read",
+      "boundary": "hostFileRead",
+      "resourceId": "host-file-read-control",
+      "required": true
+    },
+    {
+      "id": "host-registry-read",
+      "boundary": "hostRegistryRead",
+      "resourceId": "host-registry-read-control",
+      "required": true
+    },
+    {
+      "id": "tcp-connect",
+      "boundary": "tcpConnect",
+      "resourceId": "tcp-connect-control",
+      "required": true
+    },
+    {
+      "id": "clipboard-read",
+      "boundary": "clipboardRead",
+      "resourceId": "clipboard-read-control",
+      "required": true
+    }
+  ]
+}

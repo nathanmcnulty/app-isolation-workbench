@@ -2,7 +2,7 @@
 
 App Isolation Workbench (AIW) is an experimental, administrator-led laboratory for evaluating existing Windows applications under stronger isolation boundaries. The project aims to make AppContainer/app-silo and ProcessContainer experiments reproducible without pretending that an arbitrary legacy installer can be converted safely with one click.
 
-The repository is private and pre-alpha. It contains versioned project contracts, validation, an append-only hash-chained evidence format, deterministic assessment-bundle manifests, host and target-token probing, candidate comparison, secure Windows Sandbox configuration rendering, a pinned MXC invocation planner, and CLI/PowerShell surfaces. It does **not** yet install applications, elevate, launch Windows Sandbox/MXC, create or upload archives, author MSIX packages, or claim that an application ran inside a security boundary.
+The repository is private and pre-alpha. It contains versioned project contracts, validation, an append-only hash-chained evidence format, deterministic assessment-bundle manifests and boundary-canary evaluation, host and target-token probing, candidate comparison, secure Windows Sandbox configuration rendering, a pinned MXC invocation planner, and CLI/PowerShell surfaces. It does **not** yet install applications, elevate, launch Windows Sandbox/MXC, create or upload archives, provision or execute canaries, author MSIX packages, or claim that an application ran inside a security boundary.
 
 ## Product principles
 
@@ -27,6 +27,7 @@ cargo run -p aiw-cli -- schema project
 cargo run -p aiw-cli -- evidence verify --log .\run\evidence.jsonl
 cargo run -p aiw-cli -- bundle build --root . --spec .\examples\assessment-bundle-spec.json
 cargo run -p aiw-cli -- bundle verify --root . --manifest .\assessment-bundle-manifest.json
+cargo run -p aiw-cli -- canary evaluate --plan .\examples\canary-plan.json --observations .\examples\canary-observations.json --evidence-log .\examples\canary-evidence.jsonl
 cargo run -p aiw-cli -- compare --left .\baseline.json --right .\candidate.json
 ```
 
@@ -47,7 +48,7 @@ The verification script checks formatting, runs Clippy with warnings denied, run
 ```text
 crates/
   aiw-cli/       Stable command-line contract
-  aiw-core/      Run state machine and deterministic comparison
+  aiw-core/      Run state, comparison, and denial-canary evaluation
   aiw-evidence/  Canonical JSON, hash-chained evidence, and assessment manifests
   aiw-golden-probe/ In-target token evidence executable
   aiw-probe/     Read-only host/toolchain observations
@@ -70,3 +71,4 @@ This is research software, not a security boundary or production packaging produ
 See [Supply chain, bundling, and signing](docs/SUPPLY-CHAIN-AND-SIGNING.md) for the proposed Artifact Signing, per-binary verification, provider pinning, and separately signed model/knowledge-pack design. Current local release builds are intentionally unsigned development artifacts.
 
 See [Assessment bundles](docs/ASSESSMENT-BUNDLES.md) for the deterministic feedback manifest, strict allowlist, advisory-AI separation, and current export/signing limitations.
+See [Boundary denial canaries](docs/DENIAL-CANARIES.md) for the synthetic-resource contract, conservative verdict rules, and future provisioner requirements.

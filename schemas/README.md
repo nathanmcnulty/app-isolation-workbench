@@ -9,6 +9,9 @@ cargo run -p aiw-cli -- schema evidence-record
 cargo run -p aiw-cli -- schema assessment-bundle-spec
 cargo run -p aiw-cli -- schema assessment-bundle-manifest
 cargo run -p aiw-cli -- schema assessment-bundle-verification
+cargo run -p aiw-cli -- schema canary-plan
+cargo run -p aiw-cli -- schema canary-observation-set
+cargo run -p aiw-cli -- schema canary-report
 cargo run -p aiw-cli -- schema token-evidence
 cargo run -p aiw-cli -- schema windows-sandbox-plan
 cargo run -p aiw-cli -- schema mxc-golden-probe-plan

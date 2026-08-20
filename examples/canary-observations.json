@@ -1,0 +1,59 @@
+{
+  "schemaVersion": "aiw.dev/canary-observation-set/v0alpha1",
+  "planId": "default-boundary-controls",
+  "candidateId": "process-container",
+  "observations": [
+    {
+      "assertionId": "host-file-read",
+      "phase": "baselineControl",
+      "outcome": "succeeded",
+      "evidenceIds": ["9473cc89115b69408527a8269a9d79edac249fe394db71b3d5562b5728b92c2c"]
+    },
+    {
+      "assertionId": "host-file-read",
+      "phase": "isolatedCandidate",
+      "outcome": "accessDenied",
+      "nativeErrorCode": 5,
+      "evidenceIds": ["923ed2c30c92cd8ebd7d753bc25abd685d700bda1edd702f488bb985915d021d"]
+    },
+    {
+      "assertionId": "host-registry-read",
+      "phase": "baselineControl",
+      "outcome": "succeeded",
+      "evidenceIds": ["5637a920f75133b6765da54adccb852a9ac053506066e4d6eb1ead7578595ee0"]
+    },
+    {
+      "assertionId": "host-registry-read",
+      "phase": "isolatedCandidate",
+      "outcome": "accessDenied",
+      "nativeErrorCode": 5,
+      "evidenceIds": ["2dba115229183f732c38e3f29804e1e05a0ec139ee42f0bc92e34a4690256d08"]
+    },
+    {
+      "assertionId": "tcp-connect",
+      "phase": "baselineControl",
+      "outcome": "succeeded",
+      "evidenceIds": ["281a00d96bdf16b5cd073f55a8173b069d156138127f534453fccd96a0538791"]
+    },
+    {
+      "assertionId": "tcp-connect",
+      "phase": "isolatedCandidate",
+      "outcome": "accessDenied",
+      "nativeErrorCode": 10013,
+      "evidenceIds": ["212c3fed4a2a587b825fb9433f7df83de8dc3d4b85c6c924c6e74e11850a220d"]
+    },
+    {
+      "assertionId": "clipboard-read",
+      "phase": "baselineControl",
+      "outcome": "succeeded",
+      "evidenceIds": ["8bc64eeec6bda4b8fbf2099955f7ab187ab9b1aed51a0f4d9792fa72369caeec"]
+    },
+    {
+      "assertionId": "clipboard-read",
+      "phase": "isolatedCandidate",
+      "outcome": "accessDenied",
+      "nativeErrorCode": 5,
+      "evidenceIds": ["0633661b3ab43159352bade56af6c447497ea0c83ed0ca4e61d9335db6387366"]
+    }
+  ]
+}
