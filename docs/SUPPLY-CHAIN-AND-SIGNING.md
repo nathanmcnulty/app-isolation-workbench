@@ -52,6 +52,12 @@ Before a run, AIW should verify and record:
 
 The runner must pass absolute executable paths and must not load security-sensitive DLLs from the working directory. `processmodel.dll` must be resolved from System32 as documented by the Create Process in Sandbox API. Signature success does not replace a hash pin for experimental provider binaries.
 
+## Assessment-bundle signatures
+
+The current assessment-bundle manifest is deterministic and tamper-evident but unsigned. Its root hash proves that a payload matches a particular manifest; it does not prove who created or approved that manifest. A future exporter should apply a detached signature only after allowlisted files have been copied into a new host-side staging directory and re-hashed. The disposable worker and optional analyst must never hold the feedback-signing credential.
+
+Assessment signing should be a separate trust class from release code and model/knowledge packs. Verification policy should record the signer, certificate or key identifier, signature algorithm, timestamp, manifest hash, and revocation result. Organizations can then choose whether an unsigned internal bundle is acceptable while requiring a recognized assessment signer for external escalation.
+
 ## Model and local-AI boundary
 
 Foundry Local is a reasonable first provider, but it should not be fused into the trusted core:

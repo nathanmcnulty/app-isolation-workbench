@@ -19,7 +19,9 @@
 
 ## Initial guarantees
 
-The current code provides strict project parsing, safe-relative-path validation, SHA-256 validation, duplicate-ID detection, legal run-state transitions, canonical integer-only JSON, evidence-chain verification, in-process token evidence, hardened `.wsb` rendering, and a source-pinned MXC invocation plan. These mechanisms still do not prove that an application ran inside any Windows isolation boundary until the golden probe executes inside that boundary and its provenance/completeness checks pass.
+The current code provides strict project parsing, safe-relative-path validation, SHA-256 validation, duplicate-ID detection, legal run-state transitions, canonical integer-only JSON, evidence-chain verification, deterministic allowlisted assessment manifests, in-process token evidence, hardened `.wsb` rendering, and a source-pinned MXC invocation plan. These mechanisms still do not prove that an application ran inside any Windows isolation boundary until the golden probe executes inside that boundary and its provenance/completeness checks pass.
+
+Assessment manifests reject traversal, Windows case collisions, symbolic links/reparse points, raw executable/package/archive/private-key classes, and oversized payloads. They do not scan content for secrets and do not establish authorship without a separate signature. Unlisted files are not part of the bundle. Construction must occur after artifact writers stop because a privileged same-host path-swap race remains possible until the exporter uses handle-based staging controls.
 
 The only current host-writable sandbox mapping is the required empty output directory beneath an explicit workspace root. Its contents are always untrusted. Root symlinks/reparse points, canonical workspace escapes, and canonical mapping overlap are rejected, but a launch-time revalidation is still required to reduce path-swap risk.
 

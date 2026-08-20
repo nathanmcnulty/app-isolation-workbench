@@ -75,6 +75,46 @@ function Test-AiwEvidence {
     Invoke-Aiw -CliPath $CliPath -ArgumentList @('evidence', 'verify', '--log', $evidencePath)
 }
 
+function Get-AiwAssessmentBundleManifest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $RootPath,
+
+        [Parameter(Mandatory)]
+        [string] $SpecPath,
+
+        [Parameter()]
+        [string] $CliPath
+    )
+
+    $resolvedRoot = (Resolve-Path -LiteralPath $RootPath -ErrorAction Stop).Path
+    $resolvedSpec = (Resolve-Path -LiteralPath $SpecPath -ErrorAction Stop).Path
+    Invoke-Aiw -CliPath $CliPath -ArgumentList @(
+        'bundle', 'build', '--root', $resolvedRoot, '--spec', $resolvedSpec
+    )
+}
+
+function Test-AiwAssessmentBundle {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $RootPath,
+
+        [Parameter(Mandatory)]
+        [string] $ManifestPath,
+
+        [Parameter()]
+        [string] $CliPath
+    )
+
+    $resolvedRoot = (Resolve-Path -LiteralPath $RootPath -ErrorAction Stop).Path
+    $resolvedManifest = (Resolve-Path -LiteralPath $ManifestPath -ErrorAction Stop).Path
+    Invoke-Aiw -CliPath $CliPath -ArgumentList @(
+        'bundle', 'verify', '--root', $resolvedRoot, '--manifest', $resolvedManifest
+    )
+}
+
 function Get-AiwHostProbe {
     [CmdletBinding()]
     param(
@@ -143,6 +183,8 @@ Export-ModuleMember -Function @(
     'Get-AiwMxcInvocationPlan',
     'Get-AiwTokenEvidence',
     'Invoke-Aiw',
+    'Get-AiwAssessmentBundleManifest',
+    'Test-AiwAssessmentBundle',
     'Test-AiwEvidence',
     'Test-AiwProject'
 )

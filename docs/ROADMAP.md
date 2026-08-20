@@ -11,6 +11,7 @@
 - Native target-token evidence and golden probe
 - Secure direct Windows Sandbox configuration renderer
 - Pinned MXC dry-run/execution planner
+- Deterministic assessment-bundle manifest and verifier
 
 ## Slice 1: reproducible runner
 
@@ -19,7 +20,7 @@
 - Golden capability/denial probe
 - Token, process-tree, and effective-backend evidence
 - Manual and command scenario runner
-- Feedback-bundle exporter
+- Feedback-bundle staging, redaction, signing, and safe archive exporter
 
 ## Slice 2: package authoring
 

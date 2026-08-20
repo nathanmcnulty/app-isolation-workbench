@@ -6,7 +6,10 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use aiw_core::{RunSummary, compare_runs};
-use aiw_evidence::{EvidenceRecord, verify_records};
+use aiw_evidence::{
+    AssessmentBundleManifest, AssessmentBundleSpec, BundleVerification, EvidenceRecord,
+    build_assessment_bundle, verify_assessment_bundle, verify_records,
+};
 use aiw_probe::probe_host;
 use aiw_provider_mxc::{MxcGoldenProbePlan, plan_capability_probe, plan_golden_probe};
 use aiw_provider_wsb::{WindowsSandboxPlan, render_config, validate_host_mappings};
@@ -32,6 +35,7 @@ enum Command {
     Project(ProjectArgs),
     ModelPack(ModelPackArgs),
     Evidence(EvidenceArgs),
+    Bundle(BundleArgs),
     Probe(ProbeArgs),
     Provider(ProviderArgs),
     Schema(SchemaArgs),
@@ -77,6 +81,30 @@ enum EvidenceCommand {
     Verify {
         #[arg(long)]
         log: PathBuf,
+    },
+}
+
+#[derive(Debug, Args)]
+struct BundleArgs {
+    #[command(subcommand)]
+    command: BundleCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum BundleCommand {
+    /// Hash an explicit artifact set and emit a deterministic manifest without copying files.
+    Build {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        spec: PathBuf,
+    },
+    /// Re-hash an explicit artifact set and verify it exactly matches its manifest.
+    Verify {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        manifest: PathBuf,
     },
 }
 
@@ -128,6 +156,9 @@ enum SchemaKind {
     Project,
     ModelPack,
     EvidenceRecord,
+    AssessmentBundleSpec,
+    AssessmentBundleManifest,
+    AssessmentBundleVerification,
     TokenEvidence,
     WindowsSandboxPlan,
     MxcGoldenProbePlan,
@@ -178,6 +209,17 @@ fn run() -> Result<()> {
                 write_json(&verify_records(&records)?)
             }
         },
+        Command::Bundle(args) => match args.command {
+            BundleCommand::Build { root, spec } => {
+                let spec: AssessmentBundleSpec = read_document(&spec, MAX_CONFIG_BYTES)?;
+                write_json(&build_assessment_bundle(&root, &spec)?)
+            }
+            BundleCommand::Verify { root, manifest } => {
+                let manifest: AssessmentBundleManifest =
+                    read_document(&manifest, MAX_CONFIG_BYTES)?;
+                write_json(&verify_assessment_bundle(&root, &manifest)?)
+            }
+        },
         Command::Probe(args) => match args.command {
             ProbeCommand::Host => write_json(&probe_host()),
             ProbeCommand::Token => write_json(&collect_current_process_token()?),
@@ -198,6 +240,13 @@ fn run() -> Result<()> {
             SchemaKind::Project => write_json(&schema_for!(Project)),
             SchemaKind::ModelPack => write_json(&schema_for!(ModelPack)),
             SchemaKind::EvidenceRecord => write_json(&schema_for!(EvidenceRecord)),
+            SchemaKind::AssessmentBundleSpec => write_json(&schema_for!(AssessmentBundleSpec)),
+            SchemaKind::AssessmentBundleManifest => {
+                write_json(&schema_for!(AssessmentBundleManifest))
+            }
+            SchemaKind::AssessmentBundleVerification => {
+                write_json(&schema_for!(BundleVerification))
+            }
             SchemaKind::TokenEvidence => write_json(&schema_for!(TokenEvidence)),
             SchemaKind::WindowsSandboxPlan => write_json(&schema_for!(WindowsSandboxPlan)),
             SchemaKind::MxcGoldenProbePlan => write_json(&schema_for!(MxcGoldenProbePlan)),

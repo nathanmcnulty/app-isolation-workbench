@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "aiw.dev/assessment-bundle-spec/v0alpha1",
+  "bundleId": "contract-sample",
+  "purpose": "internalValidation",
+  "contentDeclaration": "noKnownSecrets",
+  "artifacts": [
+    {
+      "path": "examples/minimal.aiw.yaml",
+      "role": "projectDefinition",
+      "sensitivity": "internal",
+      "mediaType": "application/yaml"
+    },
+    {
+      "path": "examples/windows-sandbox-plan.json",
+      "role": "providerPlan",
+      "sensitivity": "internal",
+      "mediaType": "application/json"
+    },
+    {
+      "path": "docs/ASSESSMENT-BUNDLES.md",
+      "role": "readme",
+      "sensitivity": "internal",
+      "mediaType": "text/markdown"
+    }
+  ]
+}

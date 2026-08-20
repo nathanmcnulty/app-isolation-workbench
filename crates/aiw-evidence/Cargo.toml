@@ -8,6 +8,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+aiw-schema.workspace = true
 hex.workspace = true
 schemars.workspace = true
 serde.workspace = true

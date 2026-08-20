@@ -14,6 +14,8 @@
         'Get-AiwMxcInvocationPlan',
         'Get-AiwTokenEvidence',
         'Invoke-Aiw',
+        'Get-AiwAssessmentBundleManifest',
+        'Test-AiwAssessmentBundle',
         'Test-AiwEvidence',
         'Test-AiwProject'
     )
