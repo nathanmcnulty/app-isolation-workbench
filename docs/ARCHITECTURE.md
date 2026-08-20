@@ -20,7 +20,7 @@ The repository begins with contracts that do not require elevation. Direct Windo
 
 - `aiw-schema`: strict deserialization and semantic validation for projects and model packs.
 - `aiw-evidence`: an append-only JSON-lines record chain using deterministic, integer-only canonical JSON and SHA-256.
-- `aiw-core`: legal run-state transitions and deterministic scenario/assertion comparison.
+- `aiw-core`: legal run-state transitions, deterministic scenario comparison, and conservative boundary-canary evaluation.
 - `aiw-probe`: read-only environment and executable discovery. It does not execute discovered tools.
 - `aiw-token`: the isolated native Win32 boundary for querying the exact target process token.
 - `aiw-golden-probe`: a small in-target executable that emits versioned token evidence to stdout or a new output file.
@@ -57,3 +57,4 @@ Backend support is evidence, not configuration intent. A run records the request
 
 See [Runtime evidence foundation](RUNTIME-EVIDENCE.md) for the dated API/source snapshot and [Updating the MXC pin](MXC-PIN-UPDATE.md) for the required review process.
 The proposed distribution and local-model trust split is documented in [Supply chain, bundling, and signing](SUPPLY-CHAIN-AND-SIGNING.md).
+The provider-neutral negative-test contract is documented in [Boundary denial canaries](DENIAL-CANARIES.md).

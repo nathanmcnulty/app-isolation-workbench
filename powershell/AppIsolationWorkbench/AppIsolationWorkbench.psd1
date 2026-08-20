@@ -14,6 +14,7 @@
         'Get-AiwMxcInvocationPlan',
         'Get-AiwTokenEvidence',
         'Invoke-Aiw',
+        'Test-AiwCanaryObservationSet',
         'Test-AiwEvidence',
         'Test-AiwProject'
     )

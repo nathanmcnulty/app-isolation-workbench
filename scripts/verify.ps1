@@ -36,7 +36,17 @@ try {
     cargo run --quiet --locked -p aiw-cli -- provider mxc-probe --binary C:\AIW\MXC\wxc-exec.exe | ConvertFrom-Json | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'MXC probe plan generation failed' }
 
-    foreach ($schemaKind in @('token-evidence', 'windows-sandbox-plan', 'mxc-golden-probe-plan')) {
+    cargo run --quiet --locked -p aiw-cli -- canary evaluate --plan .\examples\canary-plan.json --observations .\examples\canary-observations.json --evidence-log .\examples\canary-evidence.jsonl | ConvertFrom-Json | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'canary evaluation failed' }
+
+    foreach ($schemaKind in @(
+        'canary-observation-set',
+        'canary-plan',
+        'canary-report',
+        'token-evidence',
+        'windows-sandbox-plan',
+        'mxc-golden-probe-plan'
+    )) {
         cargo run --quiet --locked -p aiw-cli -- schema $schemaKind | ConvertFrom-Json | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "schema generation failed: $schemaKind" }
     }

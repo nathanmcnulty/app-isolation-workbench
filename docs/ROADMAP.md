@@ -11,12 +11,13 @@
 - Native target-token evidence and golden probe
 - Secure direct Windows Sandbox configuration renderer
 - Pinned MXC dry-run/execution planner
+- Provider-neutral denial-canary plan, observation, and verdict contracts
 
 ## Slice 1: reproducible runner
 
 - Execute MXC through an approval-bound process adapter
 - Windows Sandbox one-shot and state-aware feasibility tests
-- Golden capability/denial probe
+- Golden capability/denial probe execution and synthetic-resource provisioner
 - Token, process-tree, and effective-backend evidence
 - Manual and command scenario runner
 - Feedback-bundle exporter

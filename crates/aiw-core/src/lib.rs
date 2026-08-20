@@ -1,10 +1,19 @@
 #![forbid(unsafe_code)]
 
+mod canary;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+pub use canary::{
+    CANARY_OBSERVATION_SET_SCHEMA_VERSION, CANARY_PLAN_SCHEMA_VERSION,
+    CANARY_REPORT_SCHEMA_VERSION, CanaryAssertion, CanaryAssertionResult, CanaryBoundary,
+    CanaryEvaluationError, CanaryObservation, CanaryObservationSet, CanaryOutcome, CanaryPhase,
+    CanaryPlan, CanaryReason, CanaryReport, CanaryVerdict, evaluate_canaries,
+};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

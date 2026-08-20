@@ -75,6 +75,33 @@ function Test-AiwEvidence {
     Invoke-Aiw -CliPath $CliPath -ArgumentList @('evidence', 'verify', '--log', $evidencePath)
 }
 
+function Test-AiwCanaryObservationSet {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $PlanPath,
+
+        [Parameter(Mandatory)]
+        [string] $ObservationsPath,
+
+        [Parameter(Mandatory)]
+        [string] $EvidenceLogPath,
+
+        [Parameter()]
+        [string] $CliPath
+    )
+
+    $resolvedPlan = (Resolve-Path -LiteralPath $PlanPath -ErrorAction Stop).Path
+    $resolvedObservations = (Resolve-Path -LiteralPath $ObservationsPath -ErrorAction Stop).Path
+    $resolvedEvidence = (Resolve-Path -LiteralPath $EvidenceLogPath -ErrorAction Stop).Path
+    Invoke-Aiw -CliPath $CliPath -ArgumentList @(
+        'canary', 'evaluate',
+        '--plan', $resolvedPlan,
+        '--observations', $resolvedObservations,
+        '--evidence-log', $resolvedEvidence
+    )
+}
+
 function Get-AiwHostProbe {
     [CmdletBinding()]
     param(
@@ -143,6 +170,7 @@ Export-ModuleMember -Function @(
     'Get-AiwMxcInvocationPlan',
     'Get-AiwTokenEvidence',
     'Invoke-Aiw',
+    'Test-AiwCanaryObservationSet',
     'Test-AiwEvidence',
     'Test-AiwProject'
 )
