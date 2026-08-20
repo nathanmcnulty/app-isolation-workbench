@@ -20,7 +20,8 @@
         'Test-AiwCanaryObservationSet',
         'Test-AiwAnalystReport',
         'Test-AiwEvidence',
-        'Test-AiwProject'
+        'Test-AiwProject',
+        'Test-AiwWindowsSandboxCompletion'
     )
     CmdletsToExport = @()
     VariablesToExport = @()

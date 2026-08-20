@@ -24,7 +24,7 @@ The repository begins with contracts that do not require elevation. Direct Windo
 - `aiw-probe`: read-only environment and executable discovery. It does not execute discovered tools.
 - `aiw-token`: the isolated native Win32 boundary for querying the exact target process token.
 - `aiw-golden-probe`: a small in-target executable that emits versioned token evidence to stdout or a new output file.
-- `aiw-provider-wsb`: validates mapped-folder intent, renders deterministic hardened `.wsb` XML, and produces inspectable `wsb` start/list/stop invocation plans.
+- `aiw-provider-wsb`: validates mapped-folder intent, renders deterministic hardened `.wsb` XML, produces inspectable `wsb` lifecycle plans, and verifies run-bound completion receipts without launching the sandbox.
 - `aiw-provider-mxc`: serializes the pinned MXC contract and returns inspectable dry-run/execution plans without running them.
 - `aiw-windows-command-line`: shared, shell-free Windows argument quoting.
 - `aiw-cli`: the stable JSON command surface consumed by PowerShell and the future desktop UI.
@@ -61,3 +61,4 @@ The product-feedback artifact boundary is documented in [Assessment bundles](ASS
 The provider-neutral negative-test contract is documented in [Boundary denial canaries](DENIAL-CANARIES.md).
 The provider-neutral inference output boundary is documented in [Local analyst report contract](LOCAL-ANALYST-CONTRACT.md).
 The Windows Sandbox lifecycle split and mapped-output limitations are documented in [Windows Sandbox automation](WINDOWS-SANDBOX-AUTOMATION.md).
+The guest-to-host terminal output contract is documented in [Windows Sandbox completion receipts](WINDOWS-SANDBOX-COMPLETION.md).

@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod completion;
+
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::fs;
@@ -10,6 +12,15 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+
+pub use completion::{
+    CompletionArtifact, CompletionArtifactExpectation, CompletionStatus,
+    WINDOWS_SANDBOX_COMPLETION_EXPECTATION_SCHEMA_VERSION,
+    WINDOWS_SANDBOX_COMPLETION_RECEIPT_SCHEMA_VERSION,
+    WINDOWS_SANDBOX_COMPLETION_VERIFICATION_SCHEMA_VERSION, WindowsSandboxCompletionError,
+    WindowsSandboxCompletionExpectation, WindowsSandboxCompletionReceipt,
+    WindowsSandboxCompletionVerification, verify_completion_receipt,
+};
 
 pub const WINDOWS_SANDBOX_PLAN_SCHEMA_VERSION: &str = "aiw.dev/windows-sandbox-plan/v0alpha1";
 pub const WINDOWS_SANDBOX_CLI_LIFECYCLE_SCHEMA_VERSION: &str =
@@ -110,6 +121,7 @@ pub struct OutputObservationContract {
     pub process_io_available: bool,
     pub dynamic_share_required: bool,
     pub artifact_is_completion_receipt: bool,
+    pub separate_completion_receipt_required: bool,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -225,6 +237,7 @@ pub fn plan_cli_lifecycle(
             process_io_available: false,
             dynamic_share_required: false,
             artifact_is_completion_receipt: false,
+            separate_completion_receipt_required: true,
         },
         rendered_config,
         requires_human_approval: true,
@@ -563,7 +576,7 @@ fn is_path_below(path: &str, parent: &str) -> bool {
     path.starts_with(&prefix)
 }
 
-fn is_canonical_uuid(value: &str) -> bool {
+pub(crate) fn is_canonical_uuid(value: &str) -> bool {
     value.len() == 36
         && value.bytes().enumerate().all(|(index, byte)| {
             if matches!(index, 8 | 13 | 18 | 23) {
@@ -676,6 +689,11 @@ mod tests {
         assert!(!lifecycle.output_observation.dynamic_share_required);
         assert!(!lifecycle.output_observation.process_io_available);
         assert!(!lifecycle.output_observation.artifact_is_completion_receipt);
+        assert!(
+            lifecycle
+                .output_observation
+                .separate_completion_receipt_required
+        );
         assert_eq!(
             lifecycle.output_observation.expected_host_artifact,
             "C:\\AIW Host\\Output\\token.json"

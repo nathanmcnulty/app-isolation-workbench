@@ -230,6 +230,29 @@ function Get-AiwWindowsSandboxCliLifecyclePlan {
     )
 }
 
+function Test-AiwWindowsSandboxCompletion {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $OutputRoot,
+
+        [Parameter(Mandatory)]
+        [string] $ExpectationPath,
+
+        [Parameter()]
+        [string] $CliPath
+    )
+
+    $resolvedOutput = (Resolve-Path -LiteralPath $OutputRoot -ErrorAction Stop).Path
+    $resolvedExpectation = (Resolve-Path -LiteralPath $ExpectationPath -ErrorAction Stop).Path
+    Invoke-Aiw -CliPath $CliPath -ArgumentList @(
+        'provider',
+        'wsb-receipt',
+        '--output-root', $resolvedOutput,
+        '--expectation', $resolvedExpectation
+    )
+}
+
 function Get-AiwMxcInvocationPlan {
     [CmdletBinding()]
     param(
@@ -270,5 +293,6 @@ Export-ModuleMember -Function @(
     'Test-AiwCanaryObservationSet',
     'Test-AiwAnalystReport',
     'Test-AiwEvidence',
-    'Test-AiwProject'
+    'Test-AiwProject',
+    'Test-AiwWindowsSandboxCompletion'
 )

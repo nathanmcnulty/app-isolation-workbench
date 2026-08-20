@@ -22,6 +22,7 @@ cargo run -p aiw-cli -- probe host
 cargo run -p aiw-cli -- probe token
 cargo run -p aiw-cli -- provider wsb --plan .\examples\windows-sandbox-plan.json
 cargo run -p aiw-cli -- provider wsb-cli --plan .\examples\windows-sandbox-plan.json --binary C:\AIW\SystemTools\wsb.exe --sandbox-id 12345678-1234-abcd-9876-1234567890ab
+cargo run -p aiw-cli -- provider wsb-receipt --output-root C:\AIW\Output --expectation .\run\wsb-completion-expectation.json
 cargo run -p aiw-cli -- provider mxc --plan .\examples\mxc-golden-probe-plan.json
 cargo run -p aiw-cli -- provider mxc-probe --binary C:\AIW\MXC\wxc-exec.exe
 cargo run -p aiw-cli -- schema project
@@ -55,7 +56,7 @@ crates/
   aiw-golden-probe/ In-target token evidence executable
   aiw-probe/     Read-only host/toolchain observations
   aiw-provider-mxc/ Pinned, non-executing MXC plan adapter
-  aiw-provider-wsb/ Hardened direct Windows Sandbox XML and CLI lifecycle planner
+  aiw-provider-wsb/ Hardened Windows Sandbox planning and completion verification
   aiw-schema/    Versioned project and model-pack domain contracts
   aiw-token/     Audited native Windows token evidence boundary
   aiw-windows-command-line/ Shared shell-free argument quoting
@@ -76,3 +77,4 @@ See [Assessment bundles](docs/ASSESSMENT-BUNDLES.md) for the deterministic feedb
 See [Boundary denial canaries](docs/DENIAL-CANARIES.md) for the synthetic-resource contract, conservative verdict rules, and future provisioner requirements.
 See [Local analyst report contract](docs/LOCAL-ANALYST-CONTRACT.md) for cited plain-text output, immutable inference provenance, typed non-executing recommendations, and the Foundry Local integration boundary.
 The Windows Sandbox automation research and lifecycle trust contract are documented in [Windows Sandbox automation](docs/WINDOWS-SANDBOX-AUTOMATION.md).
+The strict run-bound output and receipt verifier is documented in [Windows Sandbox completion receipts](docs/WINDOWS-SANDBOX-COMPLETION.md).

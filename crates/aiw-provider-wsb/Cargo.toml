@@ -8,10 +8,13 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+aiw-evidence.workspace = true
+aiw-schema.workspace = true
 aiw-windows-command-line.workspace = true
 hex.workspace = true
 schemars.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 

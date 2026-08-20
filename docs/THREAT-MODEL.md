@@ -31,6 +31,8 @@ The only current host-writable sandbox mapping is the required empty output dire
 
 The `wsb` CLI lifecycle plan deliberately excludes `exec` and dynamic `share`. `exec` currently has no process-I/O return channel, `ExistingLogin` needs an active connected session, and `System` would expand the guest trust boundary. Runtime folder sharing can also diverge from the reviewed pre-launch configuration. The expected golden-probe artifact proves neither clean completion nor host provenance; a separate run-bound completion receipt remains required before automated execution can make a complete-run claim.
 
+The completion verifier binds the receipt to trusted run, sandbox, rendered-config, request, and agent hashes; rejects unlisted output, unsafe paths, links/reparse points, oversized files, and artifact mismatches; and independently verifies the declared evidence-chain root. A verified receipt establishes consistency and correlation, not authenticity against an administrator inside the guest. The future executor must stop artifact writers and retain host-side provider/process evidence before treating the run as complete.
+
 ## Planned controls
 
 - Disposable workers with offline-by-default networking and read-only input mappings

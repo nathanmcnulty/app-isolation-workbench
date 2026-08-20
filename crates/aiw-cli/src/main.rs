@@ -16,8 +16,9 @@ use aiw_evidence::{
 use aiw_probe::probe_host;
 use aiw_provider_mxc::{MxcGoldenProbePlan, plan_capability_probe, plan_golden_probe};
 use aiw_provider_wsb::{
-    WindowsSandboxCliLifecyclePlan, WindowsSandboxPlan, plan_cli_lifecycle, render_config,
-    validate_host_mappings,
+    WindowsSandboxCliLifecyclePlan, WindowsSandboxCompletionExpectation,
+    WindowsSandboxCompletionReceipt, WindowsSandboxCompletionVerification, WindowsSandboxPlan,
+    plan_cli_lifecycle, render_config, validate_host_mappings, verify_completion_receipt,
 };
 use aiw_schema::{ModelPack, Project, ValidationIssue, validate_model_pack, validate_project};
 use aiw_token::{TokenEvidence, collect_current_process_token};
@@ -188,6 +189,13 @@ enum ProviderCommand {
         #[arg(long)]
         sandbox_id: String,
     },
+    /// Verify a run-bound Windows Sandbox receipt and its allowlisted output.
+    WsbReceipt {
+        #[arg(long)]
+        output_root: PathBuf,
+        #[arg(long)]
+        expectation: PathBuf,
+    },
     /// Render inspectable MXC dry-run and execution invocations without launching them.
     Mxc {
         #[arg(long)]
@@ -222,6 +230,9 @@ enum SchemaKind {
     TokenEvidence,
     WindowsSandboxPlan,
     WindowsSandboxCliLifecyclePlan,
+    WindowsSandboxCompletionExpectation,
+    WindowsSandboxCompletionReceipt,
+    WindowsSandboxCompletionVerification,
     MxcGoldenProbePlan,
 }
 
@@ -325,6 +336,14 @@ fn run() -> Result<()> {
                 validate_host_mappings(&plan)?;
                 write_json(&plan_cli_lifecycle(&binary, &sandbox_id, &plan)?)
             }
+            ProviderCommand::WsbReceipt {
+                output_root,
+                expectation,
+            } => {
+                let expectation: WindowsSandboxCompletionExpectation =
+                    read_document(&expectation, MAX_CONFIG_BYTES)?;
+                write_json(&verify_completion_receipt(&output_root, &expectation)?)
+            }
             ProviderCommand::Mxc { plan } => {
                 let plan: MxcGoldenProbePlan = read_document(&plan, MAX_CONFIG_BYTES)?;
                 write_json(&plan_golden_probe(&plan)?)
@@ -353,6 +372,15 @@ fn run() -> Result<()> {
             SchemaKind::WindowsSandboxPlan => write_json(&schema_for!(WindowsSandboxPlan)),
             SchemaKind::WindowsSandboxCliLifecyclePlan => {
                 write_json(&schema_for!(WindowsSandboxCliLifecyclePlan))
+            }
+            SchemaKind::WindowsSandboxCompletionExpectation => {
+                write_json(&schema_for!(WindowsSandboxCompletionExpectation))
+            }
+            SchemaKind::WindowsSandboxCompletionReceipt => {
+                write_json(&schema_for!(WindowsSandboxCompletionReceipt))
+            }
+            SchemaKind::WindowsSandboxCompletionVerification => {
+                write_json(&schema_for!(WindowsSandboxCompletionVerification))
             }
             SchemaKind::MxcGoldenProbePlan => write_json(&schema_for!(MxcGoldenProbePlan)),
         },

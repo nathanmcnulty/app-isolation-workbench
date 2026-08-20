@@ -51,7 +51,7 @@ The `start` plan carries the same XML object and SHA-256 value returned by the d
 3. `Approved`: show the exact start invocation and trust deltas. Revalidate canonical paths and file identities immediately before launch.
 4. `Starting`: invoke `wsb start` without a shell using the caller-generated UUID and inline XML. Parse only bounded JSON from standard output.
 5. `Running`: reconcile the returned ID with `wsb list`. Observe the mapped output directory without interpreting its contents.
-6. `Collecting`: after a future run-bound completion receipt appears, stop accepting writes, copy through a bounded allowlist, validate hashes/sizes/schemas, and append normalized host-side evidence.
+6. `Collecting`: after the run-bound completion receipt appears, stop accepting writes, validate the exact allowlisted tree, artifact hashes/sizes, and evidence chain, then append normalized host-side evidence.
 7. `Stopping`: invoke `wsb stop` for the exact ID and confirm the session is no longer running. Do not kill unrelated sandbox processes by name.
 8. `Finalized`: record cleanup status, residual files, trace completeness, provider drift, and whether conclusions are valid, incomplete, or invalidated.
 
@@ -67,7 +67,7 @@ The current golden probe writes one create-new JSON artifact into the initially 
 - an administrator inside the guest can tamper with in-guest collection;
 - file appearance does not prove that the intended sandbox ID, config, process tree, or cleanup completed.
 
-Before AIW executes assessments automatically, the guest agent needs a separate create-new receipt written last. The receipt should bind at least the run ID, sandbox ID, rendered-config hash, request hash, agent hash, ordered artifact allowlist, each artifact hash and size, terminal status, and evidence-chain root. The host must validate the receipt and every artifact as untrusted input. It must not accept paths, commands, URLs, policy fragments, or arbitrary glob patterns from the guest.
+AIW now defines and verifies a separate create-new receipt that is written last. It binds the run ID, sandbox ID, rendered-config hash, request hash, agent hash, exact artifact allowlist, each artifact hash and size, terminal status, and evidence-chain root. The host rejects unexpected files and validates every artifact as untrusted input. The schema has no command, URL, policy-fragment, or glob fields. The guest agent does not yet emit this receipt and no executor currently launches the sandbox.
 
 This is integrity and correlation, not a claim that a guest administrator cannot forge evidence. Higher-confidence assessment requires host-side observations and cross-checks: exact target token evidence, process-tree/ETW evidence, effective backend, boundary canaries, and lifecycle state from outside the guest.
 
@@ -83,4 +83,4 @@ The Store app can update separately from Windows, and the runtime UI can change 
 - evidence cannot show the requested hardened settings were effective;
 - the user changes runtime sharing/redirection in a way the collector cannot observe and bind.
 
-The present code is intentionally plan-only. It makes the lifecycle boundary reviewable without implying that Windows Sandbox was launched or that an isolation result was proven.
+The present code plans lifecycle calls and verifies terminal output but intentionally does not execute them. It makes the boundary reviewable without implying that Windows Sandbox was launched or that an isolation result was proven.

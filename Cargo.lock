@@ -82,10 +82,13 @@ dependencies = [
 name = "aiw-provider-wsb"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "aiw-evidence",
+ "aiw-schema",
  "aiw-windows-command-line",
  "hex",
  "schemars",
  "serde",
+ "serde_json",
  "sha2",
  "thiserror",
 ]
