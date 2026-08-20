@@ -19,7 +19,9 @@
 
 ## Initial guarantees
 
-The current code provides strict project parsing, safe-relative-path validation, SHA-256 validation, duplicate-ID detection, legal run-state transitions, canonical integer-only JSON, evidence-chain verification, in-process token evidence, hardened `.wsb` rendering, and a source-pinned MXC invocation plan. These mechanisms still do not prove that an application ran inside any Windows isolation boundary until the golden probe executes inside that boundary and its provenance/completeness checks pass.
+The current code provides strict project parsing, safe-relative-path validation, SHA-256 validation, duplicate-ID detection, legal run-state transitions, canonical integer-only JSON, evidence-chain verification, evidence-cited advisory-report validation, in-process token evidence, hardened `.wsb` rendering, and a source-pinned MXC invocation plan. These mechanisms still do not prove that an application ran inside any Windows isolation boundary until the golden probe executes inside that boundary and its provenance/completeness checks pass.
+
+Analyst output is untrusted plain text inside a strict envelope. Every statement must cite exact verified evidence records; model, runtime, prompt, and generation provenance is recorded; actions are fixed non-executing categories; and report authority is always advisory. Citation validity does not make model reasoning correct. The trusted host must eventually measure provenance rather than accept model-authored claims.
 
 The only current host-writable sandbox mapping is the required empty output directory beneath an explicit workspace root. Its contents are always untrusted. Root symlinks/reparse points, canonical workspace escapes, and canonical mapping overlap are rejected, but a launch-time revalidation is still required to reduce path-swap risk.
 

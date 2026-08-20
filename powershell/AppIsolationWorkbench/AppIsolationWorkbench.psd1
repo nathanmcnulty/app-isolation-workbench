@@ -14,6 +14,7 @@
         'Get-AiwMxcInvocationPlan',
         'Get-AiwTokenEvidence',
         'Invoke-Aiw',
+        'Test-AiwAnalystReport',
         'Test-AiwEvidence',
         'Test-AiwProject'
     )

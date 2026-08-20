@@ -11,6 +11,7 @@
 - Native target-token evidence and golden probe
 - Secure direct Windows Sandbox configuration renderer
 - Pinned MXC dry-run/execution planner
+- Strict evidence-cited local-analyst report and provenance contract
 
 ## Slice 1: reproducible runner
 

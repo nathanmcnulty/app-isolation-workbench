@@ -5,7 +5,9 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use aiw_core::{RunSummary, compare_runs};
+use aiw_core::{
+    AnalystReport, AnalystReportValidation, RunSummary, compare_runs, validate_analyst_report,
+};
 use aiw_evidence::{EvidenceRecord, verify_records};
 use aiw_probe::probe_host;
 use aiw_provider_mxc::{MxcGoldenProbePlan, plan_capability_probe, plan_golden_probe};
@@ -31,6 +33,7 @@ struct Cli {
 enum Command {
     Project(ProjectArgs),
     ModelPack(ModelPackArgs),
+    Analyst(AnalystArgs),
     Evidence(EvidenceArgs),
     Probe(ProbeArgs),
     Provider(ProviderArgs),
@@ -63,6 +66,25 @@ enum ModelPackCommand {
     Validate {
         #[arg(long)]
         path: PathBuf,
+    },
+}
+
+#[derive(Debug, Args)]
+struct AnalystArgs {
+    #[command(subcommand)]
+    command: AnalystCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum AnalystCommand {
+    /// Validate an advisory report against an evidence chain and model pack.
+    Validate {
+        #[arg(long)]
+        report: PathBuf,
+        #[arg(long)]
+        evidence_log: PathBuf,
+        #[arg(long)]
+        model_pack: PathBuf,
     },
 }
 
@@ -128,6 +150,8 @@ enum SchemaKind {
     Project,
     ModelPack,
     EvidenceRecord,
+    AnalystReport,
+    AnalystReportValidation,
     TokenEvidence,
     WindowsSandboxPlan,
     MxcGoldenProbePlan,
@@ -172,6 +196,18 @@ fn run() -> Result<()> {
                 emit_validation(validate_model_pack(&pack))
             }
         },
+        Command::Analyst(args) => match args.command {
+            AnalystCommand::Validate {
+                report,
+                evidence_log,
+                model_pack,
+            } => {
+                let report: AnalystReport = read_document(&report, MAX_CONFIG_BYTES)?;
+                let records = read_evidence_log(&evidence_log)?;
+                let model_pack: ModelPack = read_document(&model_pack, MAX_CONFIG_BYTES)?;
+                write_json(&validate_analyst_report(&report, &records, &model_pack)?)
+            }
+        },
         Command::Evidence(args) => match args.command {
             EvidenceCommand::Verify { log } => {
                 let records = read_evidence_log(&log)?;
@@ -198,6 +234,10 @@ fn run() -> Result<()> {
             SchemaKind::Project => write_json(&schema_for!(Project)),
             SchemaKind::ModelPack => write_json(&schema_for!(ModelPack)),
             SchemaKind::EvidenceRecord => write_json(&schema_for!(EvidenceRecord)),
+            SchemaKind::AnalystReport => write_json(&schema_for!(AnalystReport)),
+            SchemaKind::AnalystReportValidation => {
+                write_json(&schema_for!(AnalystReportValidation))
+            }
             SchemaKind::TokenEvidence => write_json(&schema_for!(TokenEvidence)),
             SchemaKind::WindowsSandboxPlan => write_json(&schema_for!(WindowsSandboxPlan)),
             SchemaKind::MxcGoldenProbePlan => write_json(&schema_for!(MxcGoldenProbePlan)),

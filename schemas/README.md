@@ -6,6 +6,8 @@ The Rust domain types are the canonical source during the v0alpha1 phase. Genera
 cargo run -p aiw-cli -- schema project
 cargo run -p aiw-cli -- schema model-pack
 cargo run -p aiw-cli -- schema evidence-record
+cargo run -p aiw-cli -- schema analyst-report
+cargo run -p aiw-cli -- schema analyst-report-validation
 cargo run -p aiw-cli -- schema token-evidence
 cargo run -p aiw-cli -- schema windows-sandbox-plan
 cargo run -p aiw-cli -- schema mxc-golden-probe-plan

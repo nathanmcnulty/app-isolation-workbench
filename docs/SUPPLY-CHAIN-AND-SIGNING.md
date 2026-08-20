@@ -61,6 +61,7 @@ Foundry Local is a reasonable first provider, but it should not be fused into th
 - Model packs remain content-only. Executables, scripts, DLLs, custom operators, and native plug-ins are forbidden.
 - Use a dedicated model-signing trust class. Code-signing authority must not automatically authorize a model, and a model-signing identity must not authorize executable code.
 - Record the model family, immutable source revision, resolved variant, quantization, tokenizer, runtime/provider versions, execution provider, license, payload root, and detached signature.
+- Record the requested alias separately from the selected model-variant ID because a local runtime may resolve hardware-specific variants dynamically. Measure the loaded runtime artifact root, prompt template, and generation configuration as separate hashes.
 - AI output stays advisory and evidence-cited. It cannot execute, relax policy, grant access, install, deploy, or sign.
 
 For enterprise/private distributions, model and knowledge manifests can use an organization-controlled private PKI or managed key service. The AIW verifier should pin the accepted trust roots or certificate identifiers by trust class and support revocation independently of the application release.
