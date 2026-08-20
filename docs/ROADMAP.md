@@ -11,11 +11,12 @@
 - Native target-token evidence and golden probe
 - Secure direct Windows Sandbox configuration renderer
 - Pinned MXC dry-run/execution planner
+- Windows Sandbox CLI lifecycle planner with explicit no-I/O and mapped-output contract
 
 ## Slice 1: reproducible runner
 
 - Execute MXC through an approval-bound process adapter
-- Windows Sandbox one-shot and state-aware feasibility tests
+- Windows Sandbox one-shot execution, run-bound completion receipt, and state-aware feasibility tests
 - Golden capability/denial probe
 - Token, process-tree, and effective-backend evidence
 - Manual and command scenario runner

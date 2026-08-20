@@ -36,7 +36,12 @@ try {
     cargo run --quiet --locked -p aiw-cli -- provider mxc-probe --binary C:\AIW\MXC\wxc-exec.exe | ConvertFrom-Json | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'MXC probe plan generation failed' }
 
-    foreach ($schemaKind in @('token-evidence', 'windows-sandbox-plan', 'mxc-golden-probe-plan')) {
+    foreach ($schemaKind in @(
+        'token-evidence',
+        'windows-sandbox-plan',
+        'windows-sandbox-cli-lifecycle-plan',
+        'mxc-golden-probe-plan'
+    )) {
         cargo run --quiet --locked -p aiw-cli -- schema $schemaKind | ConvertFrom-Json | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "schema generation failed: $schemaKind" }
     }

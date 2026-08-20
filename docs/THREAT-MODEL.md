@@ -23,6 +23,8 @@ The current code provides strict project parsing, safe-relative-path validation,
 
 The only current host-writable sandbox mapping is the required empty output directory beneath an explicit workspace root. Its contents are always untrusted. Root symlinks/reparse points, canonical workspace escapes, and canonical mapping overlap are rejected, but a launch-time revalidation is still required to reduce path-swap risk.
 
+The `wsb` CLI lifecycle plan deliberately excludes `exec` and dynamic `share`. `exec` currently has no process-I/O return channel, `ExistingLogin` needs an active connected session, and `System` would expand the guest trust boundary. Runtime folder sharing can also diverge from the reviewed pre-launch configuration. The expected golden-probe artifact proves neither clean completion nor host provenance; a separate run-bound completion receipt remains required before automated execution can make a complete-run claim.
+
 ## Planned controls
 
 - Disposable workers with offline-by-default networking and read-only input mappings

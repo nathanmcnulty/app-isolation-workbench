@@ -24,7 +24,7 @@ The repository begins with contracts that do not require elevation. Direct Windo
 - `aiw-probe`: read-only environment and executable discovery. It does not execute discovered tools.
 - `aiw-token`: the isolated native Win32 boundary for querying the exact target process token.
 - `aiw-golden-probe`: a small in-target executable that emits versioned token evidence to stdout or a new output file.
-- `aiw-provider-wsb`: validates mapped-folder intent and renders deterministic hardened `.wsb` XML.
+- `aiw-provider-wsb`: validates mapped-folder intent, renders deterministic hardened `.wsb` XML, and produces inspectable `wsb` start/list/stop invocation plans.
 - `aiw-provider-mxc`: serializes the pinned MXC contract and returns inspectable dry-run/execution plans without running them.
 - `aiw-windows-command-line`: shared, shell-free Windows argument quoting.
 - `aiw-cli`: the stable JSON command surface consumed by PowerShell and the future desktop UI.
@@ -57,3 +57,4 @@ Backend support is evidence, not configuration intent. A run records the request
 
 See [Runtime evidence foundation](RUNTIME-EVIDENCE.md) for the dated API/source snapshot and [Updating the MXC pin](MXC-PIN-UPDATE.md) for the required review process.
 The proposed distribution and local-model trust split is documented in [Supply chain, bundling, and signing](SUPPLY-CHAIN-AND-SIGNING.md).
+The Windows Sandbox lifecycle split and mapped-output limitations are documented in [Windows Sandbox automation](WINDOWS-SANDBOX-AUTOMATION.md).

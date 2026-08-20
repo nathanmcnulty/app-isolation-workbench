@@ -109,6 +109,33 @@ function ConvertTo-AiwWindowsSandboxConfig {
     Invoke-Aiw -CliPath $CliPath -ArgumentList @('provider', 'wsb', '--plan', $resolvedPlan)
 }
 
+function Get-AiwWindowsSandboxCliLifecyclePlan {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $PlanPath,
+
+        [Parameter(Mandatory)]
+        [string] $BinaryPath,
+
+        [Parameter(Mandatory)]
+        [guid] $SandboxId,
+
+        [Parameter()]
+        [string] $CliPath
+    )
+
+    $resolvedPlan = (Resolve-Path -LiteralPath $PlanPath -ErrorAction Stop).Path
+    $resolvedBinary = (Resolve-Path -LiteralPath $BinaryPath -ErrorAction Stop).Path
+    Invoke-Aiw -CliPath $CliPath -ArgumentList @(
+        'provider',
+        'wsb-cli',
+        '--plan', $resolvedPlan,
+        '--binary', $resolvedBinary,
+        '--sandbox-id', $SandboxId.ToString('D')
+    )
+}
+
 function Get-AiwMxcInvocationPlan {
     [CmdletBinding()]
     param(
@@ -142,6 +169,7 @@ Export-ModuleMember -Function @(
     'Get-AiwMxcCapabilityProbePlan',
     'Get-AiwMxcInvocationPlan',
     'Get-AiwTokenEvidence',
+    'Get-AiwWindowsSandboxCliLifecyclePlan',
     'Invoke-Aiw',
     'Test-AiwEvidence',
     'Test-AiwProject'

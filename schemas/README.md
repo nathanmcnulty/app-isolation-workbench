@@ -8,6 +8,7 @@ cargo run -p aiw-cli -- schema model-pack
 cargo run -p aiw-cli -- schema evidence-record
 cargo run -p aiw-cli -- schema token-evidence
 cargo run -p aiw-cli -- schema windows-sandbox-plan
+cargo run -p aiw-cli -- schema windows-sandbox-cli-lifecycle-plan
 cargo run -p aiw-cli -- schema mxc-golden-probe-plan
 ```
 

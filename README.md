@@ -21,6 +21,7 @@ cargo run -p aiw-cli -- project validate --path .\examples\minimal.aiw.yaml
 cargo run -p aiw-cli -- probe host
 cargo run -p aiw-cli -- probe token
 cargo run -p aiw-cli -- provider wsb --plan .\examples\windows-sandbox-plan.json
+cargo run -p aiw-cli -- provider wsb-cli --plan .\examples\windows-sandbox-plan.json --binary C:\AIW\SystemTools\wsb.exe --sandbox-id 12345678-1234-abcd-9876-1234567890ab
 cargo run -p aiw-cli -- provider mxc --plan .\examples\mxc-golden-probe-plan.json
 cargo run -p aiw-cli -- provider mxc-probe --binary C:\AIW\MXC\wxc-exec.exe
 cargo run -p aiw-cli -- schema project
@@ -29,7 +30,7 @@ cargo run -p aiw-cli -- compare --left .\baseline.json --right .\candidate.json
 ```
 
 All successful commands emit JSON. Diagnostics go to standard error and a nonzero exit code indicates failure.
-The direct Windows Sandbox example assumes `C:\AIW` is an ordinary workspace root, `C:\AIW\Tools` contains `aiw-golden-probe.exe`, and `C:\AIW\Output` exists and is empty; rendering intentionally fails otherwise. Provider commands return plans only and never start `WindowsSandbox.exe` or `wxc-exec.exe`.
+The direct Windows Sandbox examples assume `C:\AIW` is an ordinary workspace root, `C:\AIW\Tools` contains `aiw-golden-probe.exe`, and `C:\AIW\Output` exists and is empty; rendering intentionally fails otherwise. The CLI lifecycle command additionally requires an absolute path to the resolved `wsb.exe` interface and a caller-generated UUID. Provider commands return plans only and never start `WindowsSandbox.exe`, `wsb.exe`, or `wxc-exec.exe`.
 
 ## Local validation
 
@@ -50,7 +51,7 @@ crates/
   aiw-golden-probe/ In-target token evidence executable
   aiw-probe/     Read-only host/toolchain observations
   aiw-provider-mxc/ Pinned, non-executing MXC plan adapter
-  aiw-provider-wsb/ Hardened direct Windows Sandbox XML renderer
+  aiw-provider-wsb/ Hardened direct Windows Sandbox XML and CLI lifecycle planner
   aiw-schema/    Versioned project and model-pack domain contracts
   aiw-token/     Audited native Windows token evidence boundary
   aiw-windows-command-line/ Shared shell-free argument quoting
@@ -66,3 +67,5 @@ third-party/     Reviewed external source pins
 This is research software, not a security boundary or production packaging product. No redistribution license has been granted yet. Model/runtime licenses will be reviewed separately before any local-AI artifact is included.
 
 See [Supply chain, bundling, and signing](docs/SUPPLY-CHAIN-AND-SIGNING.md) for the proposed Artifact Signing, per-binary verification, provider pinning, and separately signed model/knowledge-pack design. Current local release builds are intentionally unsigned development artifacts.
+
+The Windows Sandbox automation research and lifecycle trust contract are documented in [Windows Sandbox automation](docs/WINDOWS-SANDBOX-AUTOMATION.md).

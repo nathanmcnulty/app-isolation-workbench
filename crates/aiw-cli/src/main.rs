@@ -9,7 +9,10 @@ use aiw_core::{RunSummary, compare_runs};
 use aiw_evidence::{EvidenceRecord, verify_records};
 use aiw_probe::probe_host;
 use aiw_provider_mxc::{MxcGoldenProbePlan, plan_capability_probe, plan_golden_probe};
-use aiw_provider_wsb::{WindowsSandboxPlan, render_config, validate_host_mappings};
+use aiw_provider_wsb::{
+    WindowsSandboxCliLifecyclePlan, WindowsSandboxPlan, plan_cli_lifecycle, render_config,
+    validate_host_mappings,
+};
 use aiw_schema::{ModelPack, Project, ValidationIssue, validate_model_pack, validate_project};
 use aiw_token::{TokenEvidence, collect_current_process_token};
 use anyhow::{Context, Result, anyhow, bail};
@@ -105,6 +108,15 @@ enum ProviderCommand {
         #[arg(long)]
         plan: PathBuf,
     },
+    /// Plan Windows Sandbox CLI start/list/stop calls without executing them.
+    WsbCli {
+        #[arg(long)]
+        plan: PathBuf,
+        #[arg(long)]
+        binary: String,
+        #[arg(long)]
+        sandbox_id: String,
+    },
     /// Render inspectable MXC dry-run and execution invocations without launching them.
     Mxc {
         #[arg(long)]
@@ -130,6 +142,7 @@ enum SchemaKind {
     EvidenceRecord,
     TokenEvidence,
     WindowsSandboxPlan,
+    WindowsSandboxCliLifecyclePlan,
     MxcGoldenProbePlan,
 }
 
@@ -188,6 +201,15 @@ fn run() -> Result<()> {
                 validate_host_mappings(&plan)?;
                 write_json(&render_config(&plan)?)
             }
+            ProviderCommand::WsbCli {
+                plan,
+                binary,
+                sandbox_id,
+            } => {
+                let plan: WindowsSandboxPlan = read_document(&plan, MAX_CONFIG_BYTES)?;
+                validate_host_mappings(&plan)?;
+                write_json(&plan_cli_lifecycle(&binary, &sandbox_id, &plan)?)
+            }
             ProviderCommand::Mxc { plan } => {
                 let plan: MxcGoldenProbePlan = read_document(&plan, MAX_CONFIG_BYTES)?;
                 write_json(&plan_golden_probe(&plan)?)
@@ -200,6 +222,9 @@ fn run() -> Result<()> {
             SchemaKind::EvidenceRecord => write_json(&schema_for!(EvidenceRecord)),
             SchemaKind::TokenEvidence => write_json(&schema_for!(TokenEvidence)),
             SchemaKind::WindowsSandboxPlan => write_json(&schema_for!(WindowsSandboxPlan)),
+            SchemaKind::WindowsSandboxCliLifecyclePlan => {
+                write_json(&schema_for!(WindowsSandboxCliLifecyclePlan))
+            }
             SchemaKind::MxcGoldenProbePlan => write_json(&schema_for!(MxcGoldenProbePlan)),
         },
         Command::Compare(args) => {

@@ -13,6 +13,7 @@
         'Get-AiwMxcCapabilityProbePlan',
         'Get-AiwMxcInvocationPlan',
         'Get-AiwTokenEvidence',
+        'Get-AiwWindowsSandboxCliLifecyclePlan',
         'Invoke-Aiw',
         'Test-AiwEvidence',
         'Test-AiwProject'
