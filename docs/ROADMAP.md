@@ -13,6 +13,7 @@
 - Pinned MXC dry-run/execution planner
 - Deterministic assessment-bundle manifest and verifier
 - Provider-neutral denial-canary plan, observation, and verdict contracts
+- Strict evidence-cited local-analyst report and provenance contract
 
 ## Slice 1: reproducible runner
 

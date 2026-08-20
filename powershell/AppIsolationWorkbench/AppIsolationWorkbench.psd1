@@ -17,6 +17,7 @@
         'Get-AiwAssessmentBundleManifest',
         'Test-AiwAssessmentBundle',
         'Test-AiwCanaryObservationSet',
+        'Test-AiwAnalystReport',
         'Test-AiwEvidence',
         'Test-AiwProject'
     )

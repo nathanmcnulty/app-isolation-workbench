@@ -20,7 +20,7 @@ The repository begins with contracts that do not require elevation. Direct Windo
 
 - `aiw-schema`: strict deserialization and semantic validation for projects and model packs.
 - `aiw-evidence`: an append-only JSON-lines record chain plus deterministic, allowlisted assessment manifests using integer-only canonical JSON and SHA-256.
-- `aiw-core`: legal run-state transitions, deterministic scenario comparison, and conservative boundary-canary evaluation.
+- `aiw-core`: legal run-state transitions, deterministic scenario comparison, conservative boundary-canary evaluation, and advisory-report validation against verified evidence.
 - `aiw-probe`: read-only environment and executable discovery. It does not execute discovered tools.
 - `aiw-token`: the isolated native Win32 boundary for querying the exact target process token.
 - `aiw-golden-probe`: a small in-target executable that emits versioned token evidence to stdout or a new output file.
@@ -59,3 +59,4 @@ See [Runtime evidence foundation](RUNTIME-EVIDENCE.md) for the dated API/source 
 The proposed distribution and local-model trust split is documented in [Supply chain, bundling, and signing](SUPPLY-CHAIN-AND-SIGNING.md).
 The product-feedback artifact boundary is documented in [Assessment bundles](ASSESSMENT-BUNDLES.md).
 The provider-neutral negative-test contract is documented in [Boundary denial canaries](DENIAL-CANARIES.md).
+The provider-neutral inference output boundary is documented in [Local analyst report contract](LOCAL-ANALYST-CONTRACT.md).

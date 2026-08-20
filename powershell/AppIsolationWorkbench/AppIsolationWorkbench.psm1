@@ -142,6 +142,33 @@ function Test-AiwCanaryObservationSet {
     )
 }
 
+function Test-AiwAnalystReport {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $ReportPath,
+
+        [Parameter(Mandatory)]
+        [string] $EvidencePath,
+
+        [Parameter(Mandatory)]
+        [string] $ModelPackPath,
+
+        [Parameter()]
+        [string] $CliPath
+    )
+
+    $resolvedReport = (Resolve-Path -LiteralPath $ReportPath -ErrorAction Stop).Path
+    $resolvedEvidence = (Resolve-Path -LiteralPath $EvidencePath -ErrorAction Stop).Path
+    $resolvedModelPack = (Resolve-Path -LiteralPath $ModelPackPath -ErrorAction Stop).Path
+    Invoke-Aiw -CliPath $CliPath -ArgumentList @(
+        'analyst', 'validate',
+        '--report', $resolvedReport,
+        '--evidence-log', $resolvedEvidence,
+        '--model-pack', $resolvedModelPack
+    )
+}
+
 function Get-AiwHostProbe {
     [CmdletBinding()]
     param(
@@ -213,6 +240,7 @@ Export-ModuleMember -Function @(
     'Get-AiwAssessmentBundleManifest',
     'Test-AiwAssessmentBundle',
     'Test-AiwCanaryObservationSet',
+    'Test-AiwAnalystReport',
     'Test-AiwEvidence',
     'Test-AiwProject'
 )

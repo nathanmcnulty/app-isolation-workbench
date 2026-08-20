@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod analyst;
 mod canary;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -8,6 +9,14 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub use analyst::{
+    ANALYST_REPORT_KIND, ANALYST_REPORT_SCHEMA_VERSION, ANALYST_VALIDATION_SCHEMA_VERSION,
+    AnalystAction, AnalystCategory, AnalystConfidence, AnalystFinding, AnalystInputClass,
+    AnalystNetworkAccess, AnalystPriority, AnalystProvenance, AnalystRecommendation, AnalystReport,
+    AnalystReportError, AnalystReportValidation, AnalystSeverity, AnalystTextFormat,
+    AnalystToolAccess, AnalystTransport, CitedStatement, EscalationTarget, EvidenceCitation,
+    EvidenceKind, RelaxationControl, validate_analyst_report,
+};
 pub use canary::{
     CANARY_OBSERVATION_SET_SCHEMA_VERSION, CANARY_PLAN_SCHEMA_VERSION,
     CANARY_REPORT_SCHEMA_VERSION, CanaryAssertion, CanaryAssertionResult, CanaryBoundary,

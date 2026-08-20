@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use aiw_core::{
-    CanaryObservationSet, CanaryPlan, CanaryReport, RunSummary, compare_runs, evaluate_canaries,
+    AnalystReport, AnalystReportValidation, CanaryObservationSet, CanaryPlan, CanaryReport,
+    RunSummary, compare_runs, evaluate_canaries, validate_analyst_report,
 };
 use aiw_evidence::{
     AssessmentBundleManifest, AssessmentBundleSpec, BundleVerification, EvidenceRecord,
@@ -36,6 +37,7 @@ struct Cli {
 enum Command {
     Project(ProjectArgs),
     ModelPack(ModelPackArgs),
+    Analyst(AnalystArgs),
     Evidence(EvidenceArgs),
     Bundle(BundleArgs),
     Canary(CanaryArgs),
@@ -70,6 +72,25 @@ enum ModelPackCommand {
     Validate {
         #[arg(long)]
         path: PathBuf,
+    },
+}
+
+#[derive(Debug, Args)]
+struct AnalystArgs {
+    #[command(subcommand)]
+    command: AnalystCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum AnalystCommand {
+    /// Validate an advisory report against an evidence chain and model pack.
+    Validate {
+        #[arg(long)]
+        report: PathBuf,
+        #[arg(long)]
+        evidence_log: PathBuf,
+        #[arg(long)]
+        model_pack: PathBuf,
     },
 }
 
@@ -184,6 +205,8 @@ enum SchemaKind {
     CanaryPlan,
     CanaryObservationSet,
     CanaryReport,
+    AnalystReport,
+    AnalystReportValidation,
     TokenEvidence,
     WindowsSandboxPlan,
     MxcGoldenProbePlan,
@@ -226,6 +249,18 @@ fn run() -> Result<()> {
             ModelPackCommand::Validate { path } => {
                 let pack: ModelPack = read_document(&path, MAX_CONFIG_BYTES)?;
                 emit_validation(validate_model_pack(&pack))
+            }
+        },
+        Command::Analyst(args) => match args.command {
+            AnalystCommand::Validate {
+                report,
+                evidence_log,
+                model_pack,
+            } => {
+                let report: AnalystReport = read_document(&report, MAX_CONFIG_BYTES)?;
+                let records = read_evidence_log(&evidence_log)?;
+                let model_pack: ModelPack = read_document(&model_pack, MAX_CONFIG_BYTES)?;
+                write_json(&validate_analyst_report(&report, &records, &model_pack)?)
             }
         },
         Command::Evidence(args) => match args.command {
@@ -288,6 +323,10 @@ fn run() -> Result<()> {
             SchemaKind::CanaryPlan => write_json(&schema_for!(CanaryPlan)),
             SchemaKind::CanaryObservationSet => write_json(&schema_for!(CanaryObservationSet)),
             SchemaKind::CanaryReport => write_json(&schema_for!(CanaryReport)),
+            SchemaKind::AnalystReport => write_json(&schema_for!(AnalystReport)),
+            SchemaKind::AnalystReportValidation => {
+                write_json(&schema_for!(AnalystReportValidation))
+            }
             SchemaKind::TokenEvidence => write_json(&schema_for!(TokenEvidence)),
             SchemaKind::WindowsSandboxPlan => write_json(&schema_for!(WindowsSandboxPlan)),
             SchemaKind::MxcGoldenProbePlan => write_json(&schema_for!(MxcGoldenProbePlan)),
