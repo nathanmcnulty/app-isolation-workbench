@@ -1,0 +1,27 @@
+[package]
+name = "aiw-cli"
+description = "Command-line interface for App Isolation Workbench"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "aiw"
+path = "src/main.rs"
+
+[dependencies]
+aiw-core.workspace = true
+aiw-evidence.workspace = true
+aiw-probe.workspace = true
+aiw-schema.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+
+[lints]
+workspace = true

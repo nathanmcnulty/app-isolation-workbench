@@ -1,0 +1,61 @@
+{
+  "schemaVersion": "aiw.dev/model-pack/v0alpha1",
+  "kind": "AIWModelPack",
+  "metadata": {
+    "id": "aiw-evidence-analyst-small",
+    "version": "1.0.0",
+    "artifactClass": "model"
+  },
+  "model": {
+    "family": "example-model-family",
+    "sourceRevision": "replace-with-immutable-upstream-revision",
+    "resolvedVariantId": "example-model-int4-cpu",
+    "format": "onnx-genai",
+    "quantization": "int4",
+    "tokenizer": "example-tokenizer@immutable-revision",
+    "tasks": [
+      "summarizeEvidence",
+      "classifyHypothesis",
+      "structuredProposal"
+    ]
+  },
+  "runtime": {
+    "provider": "foundryLocal",
+    "providerVersion": "1.0.0",
+    "minimumAiwCoreApi": "0.1.0",
+    "architectures": [
+      "x64",
+      "arm64"
+    ],
+    "approvedExecutionProviders": [
+      "cpu"
+    ]
+  },
+  "license": {
+    "identifier": "Example-License-Only",
+    "licenseFile": "licenses/model/LICENSE.txt",
+    "licenseSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "redistributionDecision": "approved",
+    "requiredNotices": [
+      "licenses/model/NOTICE.txt"
+    ]
+  },
+  "payload": {
+    "rootAlgorithm": "sha256-merkle-v1",
+    "rootHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "noExecutableContent": true,
+    "files": [
+      {
+        "path": "models/default/model.onnx",
+        "sizeBytes": 42,
+        "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+    ]
+  },
+  "signature": {
+    "canonicalization": "jcs-rfc8785",
+    "detachedSignature": "signature/model-pack.p7s",
+    "requiredTrustClass": "model",
+    "timestampRequired": true
+  }
+}

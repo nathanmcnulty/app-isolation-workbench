@@ -1,0 +1,15 @@
+[package]
+name = "aiw-probe"
+description = "Read-only host capability observations for App Isolation Workbench"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+schemars.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

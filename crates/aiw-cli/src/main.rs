@@ -1,0 +1,243 @@
+#![forbid(unsafe_code)]
+
+use std::fs::{self, File};
+use std::io::{self, BufRead, BufReader, Write};
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+
+use aiw_core::{RunSummary, compare_runs};
+use aiw_evidence::{EvidenceRecord, verify_records};
+use aiw_probe::probe_host;
+use aiw_schema::{ModelPack, Project, ValidationIssue, validate_model_pack, validate_project};
+use anyhow::{Context, Result, anyhow, bail};
+use clap::{Args, Parser, Subcommand, ValueEnum};
+use schemars::schema_for;
+use serde::Serialize;
+
+const MAX_CONFIG_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_EVIDENCE_BYTES: u64 = 256 * 1024 * 1024;
+
+#[derive(Debug, Parser)]
+#[command(name = "aiw", version, about = "App Isolation Workbench bootstrap CLI")]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    Project(ProjectArgs),
+    ModelPack(ModelPackArgs),
+    Evidence(EvidenceArgs),
+    Probe(ProbeArgs),
+    Schema(SchemaArgs),
+    Compare(CompareArgs),
+}
+
+#[derive(Debug, Args)]
+struct ProjectArgs {
+    #[command(subcommand)]
+    command: ProjectCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ProjectCommand {
+    Validate {
+        #[arg(long)]
+        path: PathBuf,
+    },
+}
+
+#[derive(Debug, Args)]
+struct ModelPackArgs {
+    #[command(subcommand)]
+    command: ModelPackCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ModelPackCommand {
+    Validate {
+        #[arg(long)]
+        path: PathBuf,
+    },
+}
+
+#[derive(Debug, Args)]
+struct EvidenceArgs {
+    #[command(subcommand)]
+    command: EvidenceCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum EvidenceCommand {
+    Verify {
+        #[arg(long)]
+        log: PathBuf,
+    },
+}
+
+#[derive(Debug, Args)]
+struct ProbeArgs {
+    #[command(subcommand)]
+    command: ProbeCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ProbeCommand {
+    Host,
+}
+
+#[derive(Debug, Args)]
+struct SchemaArgs {
+    #[arg(value_enum)]
+    kind: SchemaKind,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum SchemaKind {
+    Project,
+    ModelPack,
+    EvidenceRecord,
+}
+
+#[derive(Debug, Args)]
+struct CompareArgs {
+    #[arg(long)]
+    left: PathBuf,
+    #[arg(long)]
+    right: PathBuf,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ValidationResult {
+    valid: bool,
+    issues: Vec<ValidationIssue>,
+}
+
+fn main() -> ExitCode {
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("error: {error:#}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run() -> Result<()> {
+    match Cli::parse().command {
+        Command::Project(args) => match args.command {
+            ProjectCommand::Validate { path } => {
+                let project: Project = read_document(&path, MAX_CONFIG_BYTES)?;
+                emit_validation(validate_project(&project))
+            }
+        },
+        Command::ModelPack(args) => match args.command {
+            ModelPackCommand::Validate { path } => {
+                let pack: ModelPack = read_document(&path, MAX_CONFIG_BYTES)?;
+                emit_validation(validate_model_pack(&pack))
+            }
+        },
+        Command::Evidence(args) => match args.command {
+            EvidenceCommand::Verify { log } => {
+                let records = read_evidence_log(&log)?;
+                write_json(&verify_records(&records)?)
+            }
+        },
+        Command::Probe(args) => match args.command {
+            ProbeCommand::Host => write_json(&probe_host()),
+        },
+        Command::Schema(args) => match args.kind {
+            SchemaKind::Project => write_json(&schema_for!(Project)),
+            SchemaKind::ModelPack => write_json(&schema_for!(ModelPack)),
+            SchemaKind::EvidenceRecord => write_json(&schema_for!(EvidenceRecord)),
+        },
+        Command::Compare(args) => {
+            let left: RunSummary = read_document(&args.left, MAX_CONFIG_BYTES)?;
+            let right: RunSummary = read_document(&args.right, MAX_CONFIG_BYTES)?;
+            write_json(&compare_runs(&left, &right))
+        }
+    }
+}
+
+fn emit_validation(issues: Vec<ValidationIssue>) -> Result<()> {
+    let valid = issues.is_empty();
+    write_json(&ValidationResult { valid, issues })?;
+    if valid {
+        Ok(())
+    } else {
+        bail!("validation failed")
+    }
+}
+
+fn read_evidence_log(path: &Path) -> Result<Vec<EvidenceRecord>> {
+    enforce_size(path, MAX_EVIDENCE_BYTES)?;
+    let file = File::open(path).with_context(|| format!("could not open {}", path.display()))?;
+    let reader = BufReader::new(file);
+    let mut records = Vec::new();
+    for (index, line) in reader.lines().enumerate() {
+        let line =
+            line.with_context(|| format!("could not read {} line {}", path.display(), index + 1))?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let record = serde_json::from_str(&line).with_context(|| {
+            format!(
+                "invalid evidence JSON in {} line {}",
+                path.display(),
+                index + 1
+            )
+        })?;
+        records.push(record);
+    }
+    Ok(records)
+}
+
+fn read_document<T>(path: &Path, max_bytes: u64) -> Result<T>
+where
+    T: serde::de::DeserializeOwned,
+{
+    enforce_size(path, max_bytes)?;
+    let bytes = fs::read(path).with_context(|| format!("could not read {}", path.display()))?;
+    match path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("yaml" | "yml") => serde_yaml::from_slice(&bytes)
+            .with_context(|| format!("invalid YAML document: {}", path.display())),
+        Some("json") => serde_json::from_slice(&bytes)
+            .with_context(|| format!("invalid JSON document: {}", path.display())),
+        _ => Err(anyhow!(
+            "unsupported document extension for {}; use .json, .yaml, or .yml",
+            path.display()
+        )),
+    }
+}
+
+fn enforce_size(path: &Path, max_bytes: u64) -> Result<()> {
+    let metadata =
+        fs::metadata(path).with_context(|| format!("could not inspect {}", path.display()))?;
+    if !metadata.is_file() {
+        bail!("path is not a regular file: {}", path.display());
+    }
+    if metadata.len() > max_bytes {
+        bail!(
+            "{} is {} bytes; maximum accepted size is {} bytes",
+            path.display(),
+            metadata.len(),
+            max_bytes
+        );
+    }
+    Ok(())
+}
+
+fn write_json(value: &impl Serialize) -> Result<()> {
+    let stdout = io::stdout();
+    let mut lock = stdout.lock();
+    serde_json::to_writer_pretty(&mut lock, value)?;
+    lock.write_all(b"\n")?;
+    Ok(())
+}

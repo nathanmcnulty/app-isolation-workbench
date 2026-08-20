@@ -1,0 +1,74 @@
+schemaVersion: aiw.dev/v0alpha1
+kind: AppIsolationProject
+
+metadata:
+  name: contoso-editor
+  displayName: Contoso Editor isolation assessment
+  owner: endpoint-engineering
+  labels:
+    purpose: windows-product-feedback
+    dataClassification: test-only
+
+input:
+  installer:
+    path: inputs/ContosoEditorSetup.exe
+    sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expectedSigner: CN=Contoso Software, O=Contoso Software, C=US
+    arguments:
+      install:
+        - /quiet
+        - /norestart
+      uninstall:
+        - /uninstall
+        - /quiet
+        - /norestart
+    mayReboot: true
+  secrets: []
+
+candidates:
+  - id: win32-baseline
+    type: unpackagedBaseline
+  - id: processcontainer-minimal
+    type: processContainer
+    experimental: true
+    config:
+      policy: policies/minimal.json
+
+scenarios:
+  - id: first-run
+    description: Launch the primary entry point and confirm the expected process.
+    required: true
+    steps:
+      - type: launch
+        entrypoint: main
+      - type: expectProcess
+        image: ContosoEditor.exe
+      - type: manualCheckpoint
+        prompt: Confirm that the main window rendered and basic navigation works.
+
+assertions:
+  requireEffectiveBackendMatch: true
+  requireTargetTokenEvidence: true
+  requireExpectedChildCoverage: true
+  requireOfflineCanaryDenied: true
+  failOnEvidenceTruncation: true
+
+analyst:
+  enabled: false
+  authority: advisoryOnly
+  executionPlacement: host
+  provider:
+    id: foundryLocal
+    mode: inProcess
+    modelPack: aiw-evidence-analyst-small@1.0.0
+    requireSignedPack: true
+    allowCatalogDownload: false
+  permissions:
+    filesystem: none
+    processExecution: none
+    network: none
+    packageMutation: none
+    signing: none
+    deployment: none
+  requireEvidenceCitations: true
+  proposalRequiresHumanApproval: true

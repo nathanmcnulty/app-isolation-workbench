@@ -1,0 +1,37 @@
+[workspace]
+members = [
+    "crates/aiw-cli",
+    "crates/aiw-core",
+    "crates/aiw-evidence",
+    "crates/aiw-probe",
+    "crates/aiw-schema",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0-alpha.1"
+edition = "2024"
+license = "LicenseRef-Proprietary"
+repository = "https://github.com/nathanmcnulty/app-isolation-workbench"
+rust-version = "1.85"
+
+[workspace.dependencies]
+aiw-core = { path = "crates/aiw-core" }
+aiw-evidence = { path = "crates/aiw-evidence" }
+aiw-probe = { path = "crates/aiw-probe" }
+aiw-schema = { path = "crates/aiw-schema" }
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+hex = "0.4"
+schemars = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = { package = "serde_yaml_ng", version = "0.10" }
+sha2 = "0.10"
+thiserror = "2.0"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = "warn"
