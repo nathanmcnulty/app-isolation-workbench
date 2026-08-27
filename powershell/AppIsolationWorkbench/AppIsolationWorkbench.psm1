@@ -37,14 +37,69 @@ function Invoke-Aiw {
     )
 
     $executable = Resolve-AiwCli -CliPath $CliPath
-    $output = & $executable @ArgumentList
-    if ($LASTEXITCODE -ne 0) {
-        throw "AIW CLI failed with exit code $LASTEXITCODE."
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $executable
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in $ArgumentList) {
+        [void] $startInfo.ArgumentList.Add($argument)
+    }
+
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    try {
+        if (-not $process.Start()) {
+            throw 'The AIW CLI process could not be started.'
+        }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        $exitCode = $process.ExitCode
+    }
+    finally {
+        $process.Dispose()
+    }
+
+    if ($exitCode -ne 0) {
+        try {
+            $envelope = $stderr | ConvertFrom-Json -Depth 20 -ErrorAction Stop
+        }
+        catch {
+            $envelope = [pscustomobject] @{
+                code = 'AIW_CLI_PROTOCOL_ERROR'
+                summary = 'AIW CLI returned an invalid structured error'
+                stage = 'powershell'
+                runId = $null
+                retryable = $false
+                remediation = 'Run the CLI directly and inspect its installation.'
+                detail = 'The stderr response was empty or was not one JSON error envelope.'
+            }
+        }
+
+        $exception = [System.InvalidOperationException]::new([string] $envelope.summary)
+        $exception.Data['AiwError'] = $envelope
+        $exception.Data['ExitCode'] = $exitCode
+        $target = if ($envelope.runId) { [string] $envelope.runId } else { $executable }
+        $record = [System.Management.Automation.ErrorRecord]::new(
+            $exception,
+            [string] $envelope.code,
+            [System.Management.Automation.ErrorCategory]::InvalidOperation,
+            $target
+        )
+        throw $record
+    }
+
+    if ($stderr.Trim().Length -ne 0) {
+        throw 'AIW CLI wrote unexpected stderr while reporting success.'
     }
     if ($Raw) {
-        return $output
+        return $stdout
     }
-    return $output | ConvertFrom-Json -Depth 100
+    return $stdout | ConvertFrom-Json -Depth 100 -ErrorAction Stop
 }
 
 function Test-AiwProject {

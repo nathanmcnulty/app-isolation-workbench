@@ -52,8 +52,8 @@ candidates:
     experimental: true
     config:
       type: mxcProcessContainer
-      provider_id: mxc-process-container
-      requested_backend: appContainer
+      providerId: mxc-process-container
+      requestedBackend: appContainer
       network: blocked
 
 scenarios:
