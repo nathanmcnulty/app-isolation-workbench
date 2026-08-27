@@ -3,6 +3,7 @@ members = [
     "crates/aiw-cli",
     "crates/aiw-core",
     "crates/aiw-evidence",
+    "crates/aiw-orchestrator",
     "crates/aiw-golden-probe",
     "crates/aiw-probe",
     "crates/aiw-provider-mxc",
@@ -23,6 +24,7 @@ rust-version = "1.85"
 [workspace.dependencies]
 aiw-core = { path = "crates/aiw-core" }
 aiw-evidence = { path = "crates/aiw-evidence" }
+aiw-orchestrator = { path = "crates/aiw-orchestrator" }
 aiw-token = { path = "crates/aiw-token" }
 aiw-probe = { path = "crates/aiw-probe" }
 aiw-provider-mxc = { path = "crates/aiw-provider-mxc" }

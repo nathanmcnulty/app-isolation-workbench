@@ -1,0 +1,18 @@
+[package]
+name = "aiw-orchestrator"
+description = "File-backed run orchestration foundation for App Isolation Workbench"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+aiw-evidence.workspace = true
+hex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+
+[lints]
+workspace = true

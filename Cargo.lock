@@ -57,6 +57,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "aiw-orchestrator"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "aiw-evidence",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "aiw-probe"
 version = "0.1.0-alpha.1"
 dependencies = [
