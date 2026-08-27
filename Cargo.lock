@@ -8,6 +8,7 @@ version = "0.1.0-alpha.1"
 dependencies = [
  "aiw-core",
  "aiw-evidence",
+ "aiw-orchestrator",
  "aiw-probe",
  "aiw-provider-mxc",
  "aiw-provider-wsb",
