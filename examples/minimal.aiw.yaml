@@ -1,4 +1,4 @@
-schemaVersion: aiw.dev/v0alpha1
+schemaVersion: aiw.dev/v0alpha2
 kind: AppIsolationProject
 
 metadata:
@@ -9,42 +9,66 @@ metadata:
     purpose: windows-product-feedback
     dataClassification: test-only
 
-input:
-  installer:
-    path: inputs/ContosoEditorSetup.exe
-    sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-    expectedSigner: CN=Contoso Software, O=Contoso Software, C=US
-    arguments:
-      install:
-        - /quiet
-        - /norestart
-      uninstall:
-        - /uninstall
-        - /quiet
-        - /norestart
-    mayReboot: true
-  secrets: []
+application:
+  type: exe
+  path: inputs/ContosoEditorSetup.exe
+  sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  expectedSigner: CN=Contoso Software, O=Contoso Software, C=US
+  silentArguments:
+    - /quiet
+    - /norestart
+  entryPoints:
+    - id: main
+      path: app/ContosoEditor.exe
+  architecture: x64
+  mayReboot: true
+  updateUninstall:
+    supportsUpdate: true
+    supportsUninstall: true
+    requiresReboot: true
+
+isolationIntent:
+  runtimeBoundary: processContainer
+  network: blocked
+  allowClipboard: false
+  allowHostFileAccess: false
+  allowHostRegistryAccess: false
+  requireDescendantCoverage: true
+
+executionProviders:
+  - type: mxcProcessContainer
+    id: mxc-process-container
+    version: 0.1.0-preview
+    executableSha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    experimental: true
 
 candidates:
   - id: win32-baseline
     type: unpackagedBaseline
+    config:
+      type: baseline
   - id: processcontainer-minimal
     type: processContainer
     experimental: true
     config:
-      policy: policies/minimal.json
+      type: mxcProcessContainer
+      provider_id: mxc-process-container
+      requested_backend: appContainer
+      network: blocked
 
 scenarios:
   - id: first-run
     description: Launch the primary entry point and confirm the expected process.
     required: true
     steps:
+      - type: install
       - type: launch
         entrypoint: main
-      - type: expectProcess
+      - type: waitForProcess
         image: ContosoEditor.exe
-      - type: manualCheckpoint
+      - type: operatorCheckpoint
         prompt: Confirm that the main window rendered and basic navigation works.
+      - type: gracefulClose
 
 assertions:
   requireEffectiveBackendMatch: true

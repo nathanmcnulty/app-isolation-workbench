@@ -1,0 +1,18 @@
+{
+  "schema": "aiw.dev/run-plan/v0alpha1",
+  "runId": "example-assessment",
+  "projectId": "contoso-editor",
+  "lifecycle": "assessment",
+  "createdAt": "2026-08-27T00:00:00Z",
+  "actions": [
+    {
+      "kind": "assessHost"
+    },
+    {
+      "kind": "collectEvidence"
+    }
+  ],
+  "trustDeltas": [
+    "A future runner may create a disposable isolation workspace."
+  ]
+}

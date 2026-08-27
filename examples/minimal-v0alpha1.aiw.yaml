@@ -1,0 +1,37 @@
+schemaVersion: aiw.dev/v0alpha1
+kind: AppIsolationProject
+
+metadata:
+  name: contoso-editor
+  displayName: Contoso Editor legacy isolation assessment
+  owner: endpoint-engineering
+
+input:
+  installer:
+    path: inputs/ContosoEditorSetup.exe
+    sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    arguments:
+      silent:
+        - /quiet
+        - /norestart
+    mayReboot: true
+
+candidates:
+  - id: win32-baseline
+    type: unpackagedBaseline
+  - id: processcontainer-minimal
+    type: processContainer
+    experimental: true
+    config:
+      policy: policies/minimal.json
+
+scenarios:
+  - id: first-run
+    description: Launch the primary entry point and confirm the expected process.
+    steps:
+      - type: launch
+        entrypoint: main
+      - type: expectProcess
+        image: ContosoEditor.exe
+      - type: manualCheckpoint
+        prompt: Confirm that the main window rendered and basic navigation works.

@@ -13,6 +13,9 @@ use aiw_evidence::{
     AssessmentBundleManifest, AssessmentBundleSpec, BundleVerification, EvidenceRecord,
     build_assessment_bundle, verify_assessment_bundle, verify_records,
 };
+use aiw_orchestrator::{
+    AiwError, ApprovalRecord, CancellationRequest, RecoveryStatus, RunLayout, RunPlan, RunResult,
+};
 use aiw_probe::probe_host;
 use aiw_provider_mxc::{MxcGoldenProbePlan, plan_capability_probe, plan_golden_probe};
 use aiw_provider_wsb::{
@@ -20,12 +23,16 @@ use aiw_provider_wsb::{
     WindowsSandboxCompletionReceipt, WindowsSandboxCompletionVerification, WindowsSandboxPlan,
     plan_cli_lifecycle, render_config, validate_host_mappings, verify_completion_receipt,
 };
-use aiw_schema::{ModelPack, Project, ValidationIssue, validate_model_pack, validate_project};
+use aiw_schema::{
+    LEGACY_PROJECT_SCHEMA_VERSION, LegacyProjectV0Alpha1, ModelPack, PROJECT_SCHEMA_VERSION,
+    Project, ValidationIssue, migrate_v0alpha1, validate_model_pack, validate_project,
+};
 use aiw_token::{TokenEvidence, collect_current_process_token};
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use schemars::schema_for;
 use serde::Serialize;
+use serde_json::Value;
 
 const MAX_CONFIG_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_EVIDENCE_BYTES: u64 = 256 * 1024 * 1024;
@@ -45,7 +52,9 @@ enum Command {
     Evidence(EvidenceArgs),
     Bundle(BundleArgs),
     Canary(CanaryArgs),
+    Host(HostArgs),
     Probe(ProbeArgs),
+    Run(RunArgs),
     Provider(ProviderArgs),
     Schema(SchemaArgs),
     Compare(CompareArgs),
@@ -62,6 +71,13 @@ enum ProjectCommand {
     Validate {
         #[arg(long)]
         path: PathBuf,
+    },
+    /// Convert a v0alpha1 project to v0alpha2 without overwriting either file.
+    Migrate {
+        #[arg(long)]
+        path: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
     },
 }
 
@@ -168,6 +184,69 @@ enum ProbeCommand {
 }
 
 #[derive(Debug, Args)]
+struct HostArgs {
+    #[command(subcommand)]
+    command: HostCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum HostCommand {
+    /// Collect a non-mutating host readiness report.
+    Assess,
+}
+
+#[derive(Debug, Args)]
+struct RunArgs {
+    #[command(subcommand)]
+    command: RunCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum RunCommand {
+    /// Persist a supplied immutable plan and create its run journal. This does not execute it.
+    Plan {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        plan: PathBuf,
+    },
+    /// Persist a supplied approval for an existing plan. This does not execute it.
+    Approve {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        run_id: String,
+        #[arg(long)]
+        approval: PathBuf,
+    },
+    /// Read the verified persisted state of a run without executing it.
+    Status {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        run_id: String,
+    },
+    /// Reconcile and report persisted run state without starting a provider.
+    Recover {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        run_id: String,
+    },
+    /// Persist a write-once cancellation request. This does not terminate a provider.
+    Cancel {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        run_id: String,
+        #[arg(long)]
+        requested_by: String,
+        #[arg(long)]
+        requested_at: String,
+    },
+}
+
+#[derive(Debug, Args)]
 struct ProviderArgs {
     #[command(subcommand)]
     command: ProviderCommand,
@@ -251,11 +330,51 @@ struct ValidationResult {
     issues: Vec<ValidationIssue>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectMigrationResult {
+    output: PathBuf,
+    project: Project,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ErrorEnvelope<'a> {
+    code: &'a str,
+    summary: &'a str,
+    stage: &'a str,
+    run_id: Option<&'a str>,
+    retryable: bool,
+    remediation: &'a str,
+    detail: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "status", rename_all = "camelCase")]
+enum RunStatusResult {
+    PendingApproval {
+        plan_hash: String,
+        last_sequence: u64,
+    },
+    Ready {
+        approval: ApprovalRecord,
+        last_sequence: u64,
+    },
+    CancellationRequested {
+        request: CancellationRequest,
+        last_sequence: u64,
+    },
+    Terminal {
+        result: RunResult,
+        last_sequence: u64,
+    },
+}
+
 fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("error: {error:#}");
+            emit_error(&error);
             ExitCode::FAILURE
         }
     }
@@ -265,8 +384,17 @@ fn run() -> Result<()> {
     match Cli::parse().command {
         Command::Project(args) => match args.command {
             ProjectCommand::Validate { path } => {
-                let project: Project = read_document(&path, MAX_CONFIG_BYTES)?;
+                let project = read_project(&path)?;
                 emit_validation(validate_project(&project))
+            }
+            ProjectCommand::Migrate { path, output } => {
+                let legacy = read_legacy_project(&path)?;
+                if output.exists() {
+                    bail!("migration output already exists: {}", output.display());
+                }
+                let project = migrate_v0alpha1(&legacy);
+                write_document_new(&output, &project)?;
+                write_json(&ProjectMigrationResult { output, project })
             }
         },
         Command::ModelPack(args) => match args.command {
@@ -320,6 +448,41 @@ fn run() -> Result<()> {
         Command::Probe(args) => match args.command {
             ProbeCommand::Host => write_json(&probe_host()),
             ProbeCommand::Token => write_json(&collect_current_process_token()?),
+        },
+        Command::Host(args) => match args.command {
+            HostCommand::Assess => write_json(&probe_host()),
+        },
+        Command::Run(args) => match args.command {
+            RunCommand::Plan { root, plan } => {
+                let plan: RunPlan = read_document(&plan, MAX_CONFIG_BYTES)?;
+                let layout = RunLayout::new(&root, &plan.run_id)?;
+                layout.create(&plan)?;
+                write_json(&plan)
+            }
+            RunCommand::Approve {
+                root,
+                run_id,
+                approval,
+            } => {
+                let approval: ApprovalRecord = read_document(&approval, MAX_CONFIG_BYTES)?;
+                let layout = RunLayout::new(&root, run_id)?;
+                layout.write_approval(&approval)?;
+                write_json(&approval)
+            }
+            RunCommand::Status { root, run_id } | RunCommand::Recover { root, run_id } => {
+                let layout = RunLayout::new(&root, run_id)?;
+                write_json(&serialize_recovery_status(layout.recovery_status()?))
+            }
+            RunCommand::Cancel {
+                root,
+                run_id,
+                requested_by,
+                requested_at,
+            } => {
+                let layout = RunLayout::new(&root, run_id)?;
+                let cancellation = layout.request_cancellation(requested_by, requested_at)?;
+                write_json(&cancellation)
+            }
         },
         Command::Provider(args) => match args.command {
             ProviderCommand::Wsb { plan } => {
@@ -402,6 +565,72 @@ fn emit_validation(issues: Vec<ValidationIssue>) -> Result<()> {
     }
 }
 
+fn serialize_recovery_status(status: RecoveryStatus) -> RunStatusResult {
+    match status {
+        RecoveryStatus::PendingApproval {
+            plan_hash,
+            last_sequence,
+        } => RunStatusResult::PendingApproval {
+            plan_hash,
+            last_sequence,
+        },
+        RecoveryStatus::Ready {
+            approval,
+            last_sequence,
+        } => RunStatusResult::Ready {
+            approval,
+            last_sequence,
+        },
+        RecoveryStatus::CancellationRequested {
+            request,
+            last_sequence,
+        } => RunStatusResult::CancellationRequested {
+            request,
+            last_sequence,
+        },
+        RecoveryStatus::Terminal {
+            result,
+            last_sequence,
+        } => RunStatusResult::Terminal {
+            result,
+            last_sequence,
+        },
+    }
+}
+
+fn read_project(path: &Path) -> Result<Project> {
+    let value: Value = read_document(path, MAX_CONFIG_BYTES)?;
+    match project_schema_version(&value)? {
+        PROJECT_SCHEMA_VERSION => serde_json::from_value(value)
+            .with_context(|| format!("invalid v0alpha2 project document: {}", path.display())),
+        LEGACY_PROJECT_SCHEMA_VERSION => {
+            let legacy: LegacyProjectV0Alpha1 =
+                serde_json::from_value(value).with_context(|| {
+                    format!("invalid v0alpha1 project document: {}", path.display())
+                })?;
+            Ok(migrate_v0alpha1(&legacy))
+        }
+        version => bail!("unsupported project schema version: {version}"),
+    }
+}
+
+fn read_legacy_project(path: &Path) -> Result<LegacyProjectV0Alpha1> {
+    let value: Value = read_document(path, MAX_CONFIG_BYTES)?;
+    match project_schema_version(&value)? {
+        LEGACY_PROJECT_SCHEMA_VERSION => serde_json::from_value(value)
+            .with_context(|| format!("invalid v0alpha1 project document: {}", path.display())),
+        PROJECT_SCHEMA_VERSION => bail!("project is already at {PROJECT_SCHEMA_VERSION}"),
+        version => bail!("unsupported project schema version: {version}"),
+    }
+}
+
+fn project_schema_version(value: &Value) -> Result<&str> {
+    value
+        .get("schemaVersion")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("project document is missing string schemaVersion"))
+}
+
 fn read_evidence_log(path: &Path) -> Result<Vec<EvidenceRecord>> {
     enforce_size(path, MAX_EVIDENCE_BYTES)?;
     let file = File::open(path).with_context(|| format!("could not open {}", path.display()))?;
@@ -448,6 +677,38 @@ where
     }
 }
 
+fn write_document_new<T>(path: &Path, value: &T) -> Result<()>
+where
+    T: Serialize,
+{
+    let bytes = match path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("yaml" | "yml") => serde_yaml::to_string(value)
+            .context("could not serialize migration output as YAML")?
+            .into_bytes(),
+        Some("json") => serde_json::to_vec_pretty(value)
+            .context("could not serialize migration output as JSON")?,
+        _ => bail!(
+            "unsupported output document extension for {}; use .json, .yaml, or .yml",
+            path.display()
+        ),
+    };
+    let mut output = File::options()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .with_context(|| format!("could not create migration output {}", path.display()))?;
+    output
+        .write_all(&bytes)
+        .and_then(|_| output.write_all(b"\n"))
+        .and_then(|_| output.sync_all())
+        .with_context(|| format!("could not write migration output {}", path.display()))
+}
+
 fn enforce_size(path: &Path, max_bytes: u64) -> Result<()> {
     let metadata =
         fs::metadata(path).with_context(|| format!("could not inspect {}", path.display()))?;
@@ -471,4 +732,91 @@ fn write_json(value: &impl Serialize) -> Result<()> {
     serde_json::to_writer_pretty(&mut lock, value)?;
     lock.write_all(b"\n")?;
     Ok(())
+}
+
+fn emit_error(error: &anyhow::Error) {
+    let envelope = if let Some(error) = error.downcast_ref::<AiwError>() {
+        ErrorEnvelope {
+            code: &error.code,
+            summary: &error.summary,
+            stage: &error.stage,
+            run_id: error.run_id.as_deref(),
+            retryable: error.retryable,
+            remediation: &error.remediation,
+            detail: "See the persisted run state for bounded diagnostics.",
+        }
+    } else {
+        ErrorEnvelope {
+            code: "AIW_CLI_FAILED",
+            summary: "command could not be completed",
+            stage: "cli",
+            run_id: None,
+            retryable: false,
+            remediation: "Correct the supplied input or persisted state and retry.",
+            detail: "The command failed before completion; sensitive input is not included.",
+        }
+    };
+    let stderr = io::stderr();
+    let mut lock = stderr.lock();
+    let _ = serde_json::to_writer(&mut lock, &envelope);
+    let _ = lock.write_all(b"\n");
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        fs,
+        path::PathBuf,
+        sync::atomic::{AtomicU64, Ordering},
+    };
+
+    use super::*;
+
+    fn example_path(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("examples")
+            .join(name)
+    }
+
+    fn temp_output(name: &str) -> PathBuf {
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        std::env::temp_dir().join(format!(
+            "aiw-cli-test-{}-{}-{name}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
+
+    #[test]
+    fn current_example_validates() {
+        let project = read_project(&example_path("minimal.aiw.yaml")).unwrap();
+        assert!(validate_project(&project).is_empty());
+    }
+
+    #[test]
+    fn legacy_example_is_migrated_in_memory() {
+        let project = read_project(&example_path("minimal-v0alpha1.aiw.yaml")).unwrap();
+        assert_eq!(project.schema_version, PROJECT_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn migration_output_is_create_new_only() {
+        let output = temp_output("project.yaml");
+        let project = read_project(&example_path("minimal.aiw.yaml")).unwrap();
+        write_document_new(&output, &project).unwrap();
+        assert!(write_document_new(&output, &project).is_err());
+        fs::remove_file(output).unwrap();
+    }
+
+    #[test]
+    fn recovery_status_is_serializable_without_orchestrator_schema_support() {
+        let status = serialize_recovery_status(RecoveryStatus::PendingApproval {
+            plan_hash: "a".repeat(64),
+            last_sequence: 1,
+        });
+        let value = serde_json::to_value(status).unwrap();
+        assert_eq!(value["status"], "pendingApproval");
+    }
 }
