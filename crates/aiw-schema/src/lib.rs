@@ -362,16 +362,21 @@ pub struct Candidate {
 pub enum CandidateConfiguration {
     Baseline,
     WindowsSandbox {
+        #[serde(alias = "provider_id")]
         provider_id: String,
         network: NetworkIntent,
     },
     MxcProcessContainer {
+        #[serde(alias = "provider_id")]
         provider_id: String,
+        #[serde(alias = "requested_backend")]
         requested_backend: ProcessContainerBackend,
         network: NetworkIntent,
     },
     Msix {
+        #[serde(alias = "delivery_model")]
         delivery_model: DeliveryModel,
+        #[serde(alias = "runtime_boundary")]
         runtime_boundary: RuntimeBoundary,
         #[serde(default)]
         capabilities: Vec<String>,
@@ -432,12 +437,12 @@ pub enum ScenarioStep {
     },
     WaitForProcess {
         image: String,
-        #[serde(default = "default_wait_timeout_seconds")]
+        #[serde(default = "default_wait_timeout_seconds", alias = "timeout_seconds")]
         timeout_seconds: u32,
     },
     WaitForWindow {
         title: String,
-        #[serde(default = "default_wait_timeout_seconds")]
+        #[serde(default = "default_wait_timeout_seconds", alias = "timeout_seconds")]
         timeout_seconds: u32,
     },
     ObserveFile {
@@ -1882,6 +1887,43 @@ mod tests {
     #[test]
     fn minimal_project_is_valid() {
         assert!(validate_project(&minimal_project()).is_empty());
+    }
+
+    #[test]
+    fn reads_early_v0alpha2_snake_case_variant_fields_but_writes_camel_case() {
+        let candidate: CandidateConfiguration = serde_json::from_value(serde_json::json!({
+            "type": "mxcProcessContainer",
+            "provider_id": "mxc-pinned",
+            "requested_backend": "appContainer",
+            "network": "blocked"
+        }))
+        .expect("the original v0alpha2 provider field spellings must remain readable");
+        let candidate_wire = serde_json::to_value(candidate).unwrap();
+        assert_eq!(candidate_wire["providerId"], "mxc-pinned");
+        assert_eq!(candidate_wire["requestedBackend"], "appContainer");
+        assert!(candidate_wire.get("provider_id").is_none());
+        assert!(candidate_wire.get("requested_backend").is_none());
+
+        let package: CandidateConfiguration = serde_json::from_value(serde_json::json!({
+            "type": "msix",
+            "delivery_model": "containedMsix",
+            "runtime_boundary": "appContainer",
+            "capabilities": []
+        }))
+        .expect("the original v0alpha2 package field spellings must remain readable");
+        let package_wire = serde_json::to_value(package).unwrap();
+        assert_eq!(package_wire["deliveryModel"], "containedMsix");
+        assert_eq!(package_wire["runtimeBoundary"], "appContainer");
+
+        let step: ScenarioStep = serde_json::from_value(serde_json::json!({
+            "type": "waitForProcess",
+            "image": "editor.exe",
+            "timeout_seconds": 45
+        }))
+        .expect("the original v0alpha2 timeout spelling must remain readable");
+        let step_wire = serde_json::to_value(step).unwrap();
+        assert_eq!(step_wire["timeoutSeconds"], 45);
+        assert!(step_wire.get("timeout_seconds").is_none());
     }
 
     #[test]
