@@ -15,8 +15,8 @@ use aiw_evidence::{
     build_assessment_bundle, verify_assessment_bundle, verify_records,
 };
 use aiw_orchestrator::{
-    AiwError, ApprovalRecord, CancellationRequest, RecoveryStatus, RunEvent, RunLayout, RunPlan,
-    RunResult,
+    AiwError, ApprovalRecord, CancellationRequest, LegacyRunPlanV0Alpha1, RecoveryStatus, RunEvent,
+    RunLayout, RunPlan, RunResult, project_revision_hash,
 };
 use aiw_probe::probe_host;
 use aiw_provider_mxc::{MxcGoldenProbePlan, plan_capability_probe, plan_golden_probe};
@@ -219,6 +219,9 @@ enum RunCommand {
         root: PathBuf,
         #[arg(long)]
         plan: PathBuf,
+        /// Exact project revision the supplied plan is derived from.
+        #[arg(long)]
+        project: PathBuf,
     },
     /// Persist a supplied approval for an existing plan. This does not execute it.
     Approve {
@@ -312,6 +315,10 @@ enum SchemaKind {
     #[value(name = "project-v0alpha2")]
     ProjectV0Alpha2,
     RunPlan,
+    #[value(name = "run-plan-v0alpha1")]
+    RunPlanV0Alpha1,
+    #[value(name = "run-plan-v0alpha2")]
+    RunPlanV0Alpha2,
     ApprovalRecord,
     RunEvent,
     RunResult,
@@ -359,6 +366,7 @@ struct ProjectValidationResult {
     source_schema_version: String,
     effective_schema_version: &'static str,
     migration_review: MigrationReviewStatus,
+    project_revision_hash: String,
     issues: Vec<ValidationIssue>,
 }
 
@@ -376,6 +384,7 @@ struct ProjectMigrationResult {
     source_schema_version: &'static str,
     target_schema_version: &'static str,
     migration_review: MigrationReviewStatus,
+    project_revision_hash: String,
     planning_valid: bool,
     planning_issues: Vec<ValidationIssue>,
 }
@@ -436,6 +445,7 @@ fn run(command: Command) -> Result<()> {
                     source_schema_version: loaded.source_schema_version,
                     effective_schema_version: PROJECT_SCHEMA_VERSION,
                     migration_review: migration_review_status(&loaded.project),
+                    project_revision_hash: project_revision_hash(&loaded.project)?,
                     issues,
                 })
             }
@@ -449,6 +459,7 @@ fn run(command: Command) -> Result<()> {
                     source_schema_version: LEGACY_PROJECT_SCHEMA_VERSION,
                     target_schema_version: PROJECT_SCHEMA_VERSION,
                     migration_review: migration_review_status(&project),
+                    project_revision_hash: project_revision_hash(&project)?,
                     planning_valid: planning_issues.is_empty(),
                     planning_issues,
                 })
@@ -510,8 +521,22 @@ fn run(command: Command) -> Result<()> {
             HostCommand::Assess => write_json(&probe_host()),
         },
         Command::Run(args) => match args.command {
-            RunCommand::Plan { root, plan } => {
-                let plan: RunPlan = read_document(&plan, MAX_CONFIG_BYTES)?;
+            RunCommand::Plan {
+                root,
+                plan,
+                project,
+            } => {
+                let plan = RunPlan::from_value(read_document(&plan, MAX_CONFIG_BYTES)?)?;
+                let loaded = read_project(&project)?;
+                let issues = validate_project_for_planning(&loaded.project);
+                if !issues.is_empty() {
+                    bail!("project is not ready for planning");
+                }
+                let expected_id = &loaded.project.metadata.name;
+                let expected_hash = project_revision_hash(&loaded.project)?;
+                if plan.project_id != *expected_id || plan.project_revision_hash != expected_hash {
+                    bail!("run plan does not match the validated project revision");
+                }
                 let layout = RunLayout::new(&root, &plan.run_id)?;
                 layout.create(&plan)?;
                 write_json(&plan)
@@ -526,7 +551,11 @@ fn run(command: Command) -> Result<()> {
                 layout.write_approval(&approval)?;
                 write_json(&approval)
             }
-            RunCommand::Status { root, run_id } | RunCommand::Recover { root, run_id } => {
+            RunCommand::Status { root, run_id } => {
+                let layout = RunLayout::new(&root, run_id)?;
+                write_json(&layout.status()?)
+            }
+            RunCommand::Recover { root, run_id } => {
                 let layout = RunLayout::new(&root, run_id)?;
                 write_json(&layout.recovery_status()?)
             }
@@ -573,7 +602,8 @@ fn run(command: Command) -> Result<()> {
         Command::Schema(args) => match args.kind {
             SchemaKind::Project | SchemaKind::ProjectV0Alpha2 => write_json(&schema_for!(Project)),
             SchemaKind::ProjectV0Alpha1 => write_json(&schema_for!(LegacyProjectV0Alpha1)),
-            SchemaKind::RunPlan => write_json(&schema_for!(RunPlan)),
+            SchemaKind::RunPlan | SchemaKind::RunPlanV0Alpha2 => write_json(&schema_for!(RunPlan)),
+            SchemaKind::RunPlanV0Alpha1 => write_json(&schema_for!(LegacyRunPlanV0Alpha1)),
             SchemaKind::ApprovalRecord => write_json(&schema_for!(ApprovalRecord)),
             SchemaKind::RunEvent => write_json(&schema_for!(RunEvent)),
             SchemaKind::RunResult => write_json(&schema_for!(RunResult)),

@@ -16,12 +16,14 @@ use std::{
 };
 
 use aiw_evidence::canonical_json_bytes;
+use aiw_schema::Project;
 use fs4::FileExt;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-const RUN_PLAN_SCHEMA: &str = "aiw.dev/run-plan/v0alpha1";
+pub const RUN_PLAN_SCHEMA_VERSION: &str = "aiw.dev/run-plan/v0alpha2";
+pub const LEGACY_RUN_PLAN_SCHEMA_VERSION: &str = "aiw.dev/run-plan/v0alpha1";
 const APPROVAL_SCHEMA: &str = "aiw.dev/approval-record/v0alpha1";
 const EVENT_SCHEMA: &str = "aiw.dev/run-event/v0alpha1";
 const JOURNAL_SCHEMA: &str = "aiw.dev/run-journal/v0alpha1";
@@ -70,6 +72,7 @@ pub struct RunPlan {
     pub schema: String,
     pub run_id: String,
     pub project_id: String,
+    pub project_revision_hash: String,
     pub lifecycle: RunLifecycleKind,
     pub created_at: String,
     pub actions: Vec<PlannedAction>,
@@ -77,19 +80,34 @@ pub struct RunPlan {
     pub trust_deltas: Vec<String>,
 }
 
+/// The original unbound plan wire shape, retained for schema publication only.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LegacyRunPlanV0Alpha1 {
+    pub schema: String,
+    pub run_id: String,
+    pub project_id: String,
+    pub lifecycle: RunLifecycleKind,
+    pub created_at: String,
+    pub actions: Vec<PlannedAction>,
+    pub trust_deltas: Vec<String>,
+}
+
 impl RunPlan {
     pub fn new(
         run_id: impl Into<String>,
         project_id: impl Into<String>,
+        project_revision_hash: impl Into<String>,
         lifecycle: RunLifecycleKind,
         created_at: impl Into<String>,
         actions: Vec<PlannedAction>,
         trust_deltas: Vec<String>,
     ) -> Result<Self, AiwError> {
         let value = Self {
-            schema: RUN_PLAN_SCHEMA.into(),
+            schema: RUN_PLAN_SCHEMA_VERSION.into(),
             run_id: run_id.into(),
             project_id: project_id.into(),
+            project_revision_hash: project_revision_hash.into(),
             lifecycle,
             created_at: created_at.into(),
             actions,
@@ -102,6 +120,26 @@ impl RunPlan {
     pub fn hash(&self) -> Result<String, AiwError> {
         validate_plan(self)?;
         hash_value(self)
+    }
+
+    /// Parses only the bound current plan contract. Legacy unbound plans fail closed.
+    pub fn from_value(value: serde_json::Value) -> Result<Self, AiwError> {
+        let schema = value.get("schema").and_then(serde_json::Value::as_str);
+        if schema != Some(RUN_PLAN_SCHEMA_VERSION) {
+            return Err(run_error(
+                "AIW_PLAN_SCHEMA_UNSUPPORTED",
+                "run plan schema is unsupported or lacks a project revision binding",
+                "plan",
+                value
+                    .get("runId")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default(),
+            ));
+        }
+        let plan: Self = serde_json::from_value(value)
+            .map_err(|error| serialization_error("plan", "", error))?;
+        validate_plan(&plan)?;
+        Ok(plan)
     }
 }
 
@@ -479,8 +517,9 @@ impl RunLayout {
     }
 
     fn read_plan_locked(&self) -> Result<RunPlan, AiwError> {
-        let plan: RunPlan = read_json(&self.plan_path(), MAX_ARTIFACT, &self.run_id, "plan")?;
-        validate_plan(&plan)?;
+        let value: serde_json::Value =
+            read_json(&self.plan_path(), MAX_ARTIFACT, &self.run_id, "plan")?;
+        let plan = RunPlan::from_value(value)?;
         if plan.run_id != self.run_id {
             return Err(run_error(
                 "AIW_RUN_ID_MISMATCH",
@@ -710,6 +749,45 @@ impl RunLayout {
         let plan = self.read_plan_locked()?;
         let records = self.load_records(true)?;
         let last_sequence = records.last().map_or(0, |record| record.sequence);
+        if self.result_path().exists() {
+            return Ok(RecoveryStatus::Terminal {
+                result: self.read_result_locked()?,
+                last_sequence,
+            });
+        }
+        if self.cancellation_path().exists() {
+            return Ok(RecoveryStatus::CancellationRequested {
+                request: self.read_cancellation_locked()?,
+                last_sequence,
+            });
+        }
+        if self.approval_path().exists() {
+            return Ok(RecoveryStatus::Ready {
+                approval: self.read_approval_locked()?,
+                last_sequence,
+            });
+        }
+        Ok(RecoveryStatus::PendingApproval {
+            plan_hash: plan.hash()?,
+            last_sequence,
+        })
+    }
+
+    /// Observes persisted state without taking a lock, repairing a journal, or creating files.
+    pub fn status(&self) -> Result<RecoveryStatus, AiwError> {
+        self.validate_run_dir()?;
+        let plan = self.read_plan_locked()?;
+        let records = self.load_records(false)?;
+        self.verify_committed(&records)?;
+        let last_sequence = records.last().map_or(0, |record| record.sequence);
+        if let Some(last) = records.last()
+            && is_intent(last.event.kind)
+        {
+            return Ok(RecoveryStatus::RecoveryRequired {
+                pending_event: last.event.kind,
+                last_sequence,
+            });
+        }
         if self.result_path().exists() {
             return Ok(RecoveryStatus::Terminal {
                 result: self.read_result_locked()?,
@@ -1013,7 +1091,7 @@ impl RunLayout {
                 records.push(record);
             }
         }
-        self.verify_heads(&records)?;
+        self.verify_heads(&records, repair_tail)?;
         if records.is_empty() {
             return Err(journal_error(&self.run_id, "journal has no genesis record"));
         }
@@ -1030,7 +1108,7 @@ impl RunLayout {
         Ok(records)
     }
 
-    fn verify_heads(&self, records: &[JournalRecord]) -> Result<(), AiwError> {
+    fn verify_heads(&self, records: &[JournalRecord], repair: bool) -> Result<(), AiwError> {
         ensure_directory(&self.heads_dir(), &self.run_id, "journal")?;
         let mut heads = BTreeMap::new();
         for entry in fs::read_dir(self.heads_dir())
@@ -1045,9 +1123,15 @@ impl RunLayout {
                 .is_some_and(|value| value.ends_with(".pending"))
             {
                 ensure_file(&path, &self.run_id, "journal")?;
-                fs::remove_file(&path)
-                    .map_err(|error| storage_error("journal", &self.run_id, error))?;
-                continue;
+                if repair {
+                    fs::remove_file(&path)
+                        .map_err(|error| storage_error("journal", &self.run_id, error))?;
+                    continue;
+                }
+                return Err(journal_error(
+                    &self.run_id,
+                    "journal head recovery is required",
+                ));
             }
             if heads.len() >= MAX_RECORDS {
                 return Err(journal_error(&self.run_id, "too many journal heads"));
@@ -1088,8 +1172,16 @@ impl RunLayout {
                 ));
             }
         }
-        for record in records.iter().skip(highest as usize) {
-            write_head(&self.heads_dir(), record, &self.run_id)?;
+        if highest as usize != records.len() && !repair {
+            return Err(journal_error(
+                &self.run_id,
+                "journal head recovery is required",
+            ));
+        }
+        if repair {
+            for record in records.iter().skip(highest as usize) {
+                write_head(&self.heads_dir(), record, &self.run_id)?;
+            }
         }
         Ok(())
     }
@@ -1103,6 +1195,10 @@ impl RunLayout {
     deny_unknown_fields
 )]
 pub enum RecoveryStatus {
+    RecoveryRequired {
+        pending_event: RunEventKind,
+        last_sequence: u64,
+    },
     PendingApproval {
         plan_hash: String,
         last_sequence: u64,
@@ -1122,7 +1218,7 @@ pub enum RecoveryStatus {
 }
 
 fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
-    if plan.schema != RUN_PLAN_SCHEMA {
+    if plan.schema != RUN_PLAN_SCHEMA_VERSION {
         return Err(run_error(
             "AIW_PLAN_SCHEMA_UNSUPPORTED",
             "run plan schema is unsupported",
@@ -1132,6 +1228,11 @@ fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
     }
     validate_id("runId", &plan.run_id)?;
     validate_id("projectId", &plan.project_id)?;
+    validate_hash(
+        &plan.project_revision_hash,
+        "projectRevisionHash",
+        &plan.run_id,
+    )?;
     validate_text("createdAt", &plan.created_at, &plan.run_id)?;
     if plan.actions.is_empty() || plan.actions.len() > MAX_ITEMS {
         return Err(run_error(
@@ -1393,6 +1494,11 @@ fn hash_value<T: Serialize>(value: &T) -> Result<String, AiwError> {
         )
     })?;
     Ok(hex::encode(Sha256::digest(bytes)))
+}
+
+/// Hashes the canonical, validated project wire representation bound into a run plan.
+pub fn project_revision_hash(project: &Project) -> Result<String, AiwError> {
+    hash_value(project)
 }
 
 fn build_record(
@@ -1937,6 +2043,7 @@ mod tests {
         RunPlan::new(
             run_id,
             "project.one",
+            "f".repeat(64),
             RunLifecycleKind::Assessment,
             "2026-08-27T00:00:00Z",
             vec![
@@ -1975,12 +2082,13 @@ mod tests {
     #[test]
     fn golden_json_is_camel_case_and_hash_is_stable() {
         let value = serde_json::to_value(plan("run-one")).unwrap();
+        assert_eq!(value["projectRevisionHash"], "f".repeat(64));
         assert_eq!(value["actions"][1]["kind"], "executeScenario");
         assert_eq!(value["actions"][1]["scenarioId"], "install");
         assert!(value["actions"][1].get("scenario_id").is_none());
         assert_eq!(
             plan("run-one").hash().unwrap(),
-            "8042bf29b3d2a4e3390655fe37a29ced8a19eec2dffa9e070b31c35e48dcbccf"
+            "ff31dbb0fe78b89b13439c2cdadddad87a991ae5610f9fe09d4cbda5deb83953"
         );
     }
 
@@ -2013,6 +2121,7 @@ mod tests {
             RunPlan::new(
                 "run-one",
                 "project",
+                "f".repeat(64),
                 RunLifecycleKind::Assessment,
                 "now",
                 vec![PlannedAction::SignPackage],
@@ -2030,6 +2139,7 @@ mod tests {
             RunPlan::new(
                 run_id,
                 "project",
+                "f".repeat(64),
                 RunLifecycleKind::Assessment,
                 "now",
                 vec![PlannedAction::AssessHost],
@@ -2063,6 +2173,46 @@ mod tests {
                 ..
             }
         ));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn status_is_read_only_and_reports_pending_recovery() {
+        let root = root();
+        let missing = layout(&root, "missing");
+        assert!(missing.status().is_err());
+        assert!(!root.join("runs").exists());
+
+        let layout = layout(&root, "run-one");
+        let plan = plan("run-one");
+        layout.create(&plan).unwrap();
+        let before = fs::read(layout.journal_path()).unwrap();
+        assert!(matches!(
+            layout.status().unwrap(),
+            RecoveryStatus::PendingApproval { .. }
+        ));
+        assert_eq!(fs::read(layout.journal_path()).unwrap(), before);
+
+        let approval = ApprovalRecord::for_plan(&plan, "admin", "now").unwrap();
+        {
+            let _lock = layout.acquire_lock().unwrap();
+            let hash = hash_value(&approval).unwrap();
+            layout
+                .append_record(
+                    artifact_event(RunEventKind::ApprovalIntent, "now", "intent", &hash).unwrap(),
+                )
+                .unwrap();
+        }
+        let pending = fs::read(layout.journal_path()).unwrap();
+        assert!(matches!(
+            layout.status().unwrap(),
+            RecoveryStatus::RecoveryRequired {
+                pending_event: RunEventKind::ApprovalIntent,
+                ..
+            }
+        ));
+        assert_eq!(fs::read(layout.journal_path()).unwrap(), pending);
+        assert!(!layout.approval_path().exists());
         fs::remove_dir_all(root).unwrap();
     }
 

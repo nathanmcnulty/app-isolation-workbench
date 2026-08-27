@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use aiw_orchestrator::{PlannedAction, RunLifecycleKind, RunPlan, project_revision_hash};
+use aiw_schema::Project;
 use serde_json::Value;
 
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(1);
@@ -46,6 +48,22 @@ fn repo_path(path: &str) -> PathBuf {
 
 fn parse_one_json(bytes: &[u8]) -> Value {
     serde_json::from_slice(bytes).expect("expected exactly one JSON document")
+}
+
+fn write_plan(path: &Path, project_path: &Path, hash: Option<String>) {
+    let project: Project = serde_yaml::from_slice(&fs::read(project_path).unwrap()).unwrap();
+    let revision_hash = hash.unwrap_or_else(|| project_revision_hash(&project).unwrap());
+    let plan = RunPlan::new(
+        "run-one",
+        project.metadata.name,
+        revision_hash,
+        RunLifecycleKind::Assessment,
+        "2026-08-27T00:00:00Z",
+        vec![PlannedAction::AssessHost],
+        Vec::new(),
+    )
+    .unwrap();
+    fs::write(path, serde_json::to_vec_pretty(&plan).unwrap()).unwrap();
 }
 
 #[test]
@@ -123,6 +141,115 @@ fn migration_is_non_destructive_create_new_and_returns_bounded_receipt() {
 }
 
 #[test]
+fn run_plan_rejects_pending_migration_and_project_hash_drift_before_persisting() {
+    let temp = TempDir::new();
+    let root = temp.path().join("workspace");
+    fs::create_dir(&root).unwrap();
+    let plan = temp.path().join("plan.json");
+    let current = temp.path().join("project.yaml");
+    fs::copy(repo_path("examples/minimal.aiw.yaml"), &current).unwrap();
+    write_plan(&plan, &current, None);
+    let changed = fs::read_to_string(&current).unwrap().replace(
+        "Contoso Editor isolation assessment",
+        "Changed project revision",
+    );
+    fs::write(&current, changed).unwrap();
+
+    let mismatch = Command::new(aiw())
+        .args(["run", "plan", "--root"])
+        .arg(&root)
+        .arg("--plan")
+        .arg(&plan)
+        .arg("--project")
+        .arg(&current)
+        .output()
+        .unwrap();
+    assert!(!mismatch.status.success());
+    assert!(!root.join("runs").exists());
+
+    let legacy = repo_path("examples/minimal-v0alpha1.aiw.yaml");
+    let pending = Command::new(aiw())
+        .args(["run", "plan", "--root"])
+        .arg(&root)
+        .arg("--plan")
+        .arg(&plan)
+        .arg("--project")
+        .arg(&legacy)
+        .output()
+        .unwrap();
+    assert!(!pending.status.success());
+    assert!(!root.join("runs").exists());
+}
+
+#[test]
+fn legacy_unbound_run_plan_fails_with_stable_schema_error() {
+    let temp = TempDir::new();
+    let root = temp.path().join("workspace");
+    fs::create_dir(&root).unwrap();
+    let plan = temp.path().join("legacy-plan.json");
+    fs::write(
+        &plan,
+        br#"{"schema":"aiw.dev/run-plan/v0alpha1","runId":"run-one","projectId":"contoso-editor","lifecycle":"assessment","createdAt":"now","actions":[{"kind":"assessHost"}],"trustDeltas":[]}"#,
+    )
+    .unwrap();
+    let output = Command::new(aiw())
+        .args(["run", "plan", "--root"])
+        .arg(&root)
+        .arg("--plan")
+        .arg(&plan)
+        .arg("--project")
+        .arg(repo_path("examples/minimal.aiw.yaml"))
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(
+        parse_one_json(&output.stderr)["code"],
+        "AIW_PLAN_SCHEMA_UNSUPPORTED"
+    );
+    assert!(!root.join("runs").exists());
+}
+
+#[test]
+fn run_status_is_read_only_for_missing_and_existing_runs() {
+    let temp = TempDir::new();
+    let root = temp.path().join("workspace");
+    fs::create_dir(&root).unwrap();
+    let missing = Command::new(aiw())
+        .args(["run", "status", "--root"])
+        .arg(&root)
+        .args(["--run-id", "missing"])
+        .output()
+        .unwrap();
+    assert!(!missing.status.success());
+    assert!(!root.join("runs").exists());
+
+    let project = repo_path("examples/minimal.aiw.yaml");
+    let plan = temp.path().join("plan.json");
+    write_plan(&plan, &project, None);
+    let created = Command::new(aiw())
+        .args(["run", "plan", "--root"])
+        .arg(&root)
+        .arg("--plan")
+        .arg(&plan)
+        .arg("--project")
+        .arg(&project)
+        .output()
+        .unwrap();
+    assert!(created.status.success());
+    let journal = root.join("runs/run-one/events.jsonl");
+    let before = fs::read(&journal).unwrap();
+    let status = Command::new(aiw())
+        .args(["run", "status", "--root"])
+        .arg(&root)
+        .args(["--run-id", "run-one"])
+        .output()
+        .unwrap();
+    assert!(status.status.success());
+    assert_eq!(parse_one_json(&status.stdout)["status"], "pendingApproval");
+    assert_eq!(fs::read(journal).unwrap(), before);
+}
+
+#[test]
 fn duplicate_project_keys_are_rejected_before_version_dispatch() {
     let temp = TempDir::new();
     let project = temp.path().join("duplicate.json");
@@ -148,6 +275,8 @@ fn versioned_project_and_orchestrator_schemas_are_public() {
         ("project-v0alpha1", "LegacyProjectV0Alpha1"),
         ("project-v0alpha2", "Project"),
         ("run-plan", "RunPlan"),
+        ("run-plan-v0alpha1", "LegacyRunPlanV0Alpha1"),
+        ("run-plan-v0alpha2", "RunPlan"),
         ("approval-record", "ApprovalRecord"),
         ("run-event", "RunEvent"),
         ("run-result", "RunResult"),

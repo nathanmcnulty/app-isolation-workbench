@@ -9,6 +9,7 @@ rust-version.workspace = true
 
 [dependencies]
 aiw-evidence.workspace = true
+aiw-schema.workspace = true
 fs4.workspace = true
 hex.workspace = true
 schemars.workspace = true

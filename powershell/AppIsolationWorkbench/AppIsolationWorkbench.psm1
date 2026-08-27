@@ -263,13 +263,19 @@ function New-AiwRunPlan {
         [Parameter(Mandatory)]
         [string] $PlanPath,
 
+        [Parameter(Mandatory)]
+        [string] $ProjectPath,
+
         [Parameter()]
         [string] $CliPath
     )
 
     $root = [System.IO.Path]::GetFullPath($RootPath)
     $plan = (Resolve-Path -LiteralPath $PlanPath -ErrorAction Stop).Path
-    Invoke-Aiw -CliPath $CliPath -ArgumentList @('run', 'plan', '--root', $root, '--plan', $plan)
+    $project = (Resolve-Path -LiteralPath $ProjectPath -ErrorAction Stop).Path
+    Invoke-Aiw -CliPath $CliPath -ArgumentList @(
+        'run', 'plan', '--root', $root, '--plan', $plan, '--project', $project
+    )
 }
 
 function Approve-AiwRunPlan {
