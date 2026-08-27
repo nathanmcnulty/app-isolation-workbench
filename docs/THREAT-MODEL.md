@@ -1,54 +1,69 @@
 # Threat model
 
+This document describes the boundaries AIW must preserve while evolving from plan-only contracts into Workbench and Studio. A recommendation is not a claim that an application is safe; it is a deterministic statement about observed compatibility and evidence completeness under a named configuration.
+
 ## Protected assets
 
-- Host operating system, credentials, user data, network position, and administrative tokens
-- Signing identities and private keys
-- Integrity and provenance of project, package, policy, model, knowledge, and evidence artifacts
-- Accuracy of effective-backend, token, assertion, and cleanup claims
-- Customer and product-group evidence confidentiality
+- Host operating system, credentials, user data, network position, and administrative tokens.
+- Signing identities, certificate stores, and private keys.
+- Integrity and provenance of projects, plans, policies, packages, models, knowledge packs, and evidence.
+- Accuracy of effective-backend, token, scenario, canary, trace, and cleanup claims.
+- Customer and product evidence confidentiality.
 
 ## Untrusted inputs
 
-- Installers, installed applications, packages, plug-ins, child processes, and their output
-- Project YAML/JSON and imported run bundles
-- Paths, registry values, event text, command lines, window titles, URLs, and document content
-- Disposable-worker observations when the target can tamper with the in-guest collector
-- AI prompts, completions, tool arguments, retrieved knowledge, and rendered Markdown
-- Model and tokenizer files, even though they are nominally data
+- Installers, applications, packages, plug-ins, child processes, and worker output.
+- Project YAML/JSON, imported bundles, paths, registry values, command-line text, URLs, documents, and window titles.
+- Guest evidence when an in-guest target can tamper with the collector.
+- AI prompts/completions, retrieved knowledge, models, tokenizers, and rendered Markdown.
+- External packaging output, including manually authored Master Packager packages.
 
-## Initial guarantees
+## Current guarantees and limitations
 
-The current code provides strict project parsing, safe-relative-path validation, SHA-256 validation, duplicate-ID detection, legal run-state transitions, canonical integer-only JSON, evidence-chain verification, deterministic allowlisted assessment manifests, conservative denial-canary evaluation, evidence-cited advisory-report validation, in-process token evidence, hardened `.wsb` rendering, and a source-pinned MXC invocation plan. These mechanisms still do not prove that an application ran inside any Windows isolation boundary until the golden probe executes inside that boundary and its provenance/completeness checks pass.
+The current plan-only code provides strict schema/project parsing, safe-relative-path validation, SHA-256 checks, duplicate-ID detection, legal state transitions, canonical integer-only JSON, evidence-chain verification, deterministic allowlisted bundle manifests, conservative denial-canary evaluation, evidence-cited advisory reports, read-only probes, hardened `.wsb` rendering, pinned MXC planning, and run-bound completion-receipt verification.
 
-Assessment manifests reject traversal, Windows case collisions, symbolic links/reparse points, raw executable/package/archive/private-key classes, and oversized payloads. They do not scan content for secrets and do not establish authorship without a separate signature. Unlisted files are not part of the bundle. Construction must occur after artifact writers stop because a privileged same-host path-swap race remains possible until the exporter uses handle-based staging controls.
+It does not yet prove live application execution or isolation. Provider plans do not start Windows Sandbox or MXC; no runner, guest agent, desktop UI, package authoring, signing, or live canary provisioner exists. A future receipt is consistency evidence, not authenticity against an administrator inside the guest, so host-side process/token/provider observations remain mandatory.
 
-Canary plans reference only opaque synthetic resource IDs. Imported projects cannot choose real host paths, registry keys, endpoints, clipboard contents, or process IDs through this contract. A denial passes only when a baseline control succeeds, the candidate returns explicit access denial, and both phases cite evidence. Missing, timed-out, unreachable, not-found, and generic-error outcomes remain indeterminate.
+## Required controls
 
-Analyst output is untrusted plain text inside a strict envelope. Every statement must cite exact verified evidence records; model, runtime, prompt, and generation provenance is recorded; actions are fixed non-executing categories; and report authority is always advisory. Citation validity does not make model reasoning correct. The trusted host must eventually measure provenance rather than accept model-authored claims.
+### Intake and paths
 
-The only current host-writable sandbox mapping is the required empty output directory beneath an explicit workspace root. Its contents are always untrusted. Root symlinks/reparse points, canonical workspace escapes, and canonical mapping overlap are rejected, but a launch-time revalidation is still required to reduce path-swap risk.
+- Import MSI, EXE, and portable directories into ACL-restricted workspaces; hash the source and record signer, version, architecture, entry points, reboot behavior, persistence, and compatibility findings without executing it.
+- Reject traversal, Windows case collisions, symbolic links/reparse points, unsafe output classes, oversized payloads, canonical workspace escapes, and mapping overlap.
+- Revalidate canonical paths, provider identity, input hashes, plan hashes, and empty output directories immediately before a run. Use handle-based checks where a same-host path-swap race is possible.
 
-The `wsb` CLI lifecycle plan deliberately excludes `exec` and dynamic `share`. `exec` currently has no process-I/O return channel, `ExistingLogin` needs an active connected session, and `System` would expand the guest trust boundary. Runtime folder sharing can also diverge from the reviewed pre-launch configuration. The expected golden-probe artifact proves neither clean completion nor host provenance; a separate run-bound completion receipt remains required before automated execution can make a complete-run claim.
+### Execution and privilege
 
-The completion verifier binds the receipt to trusted run, sandbox, rendered-config, request, and agent hashes; rejects unlisted output, unsafe paths, links/reparse points, oversized files, and artifact mismatches; and independently verifies the declared evidence-chain root. A verified receipt establishes consistency and correlation, not authenticity against an administrator inside the guest. The future executor must stop artifact writers and retain host-side provider/process evidence before treating the run as complete.
+- Use fresh workspaces and provider leases, shell-free argument arrays, bounded typed scenarios, timeouts, cancellation, crash recovery, explicit reboot continuation, and idempotent cleanup.
+- Use only a short-lived elevated helper with owner-bound named-pipe IPC, caller/executable validation, canonical handle-based paths, bounded messages, and fixed verbs. Never expose arbitrary shell, script, process, registry, URL, query, or filesystem verbs and never run a persistent SYSTEM service.
+- Imported projects cannot grant permissions, choose real host resources, or encode free-form commands.
 
-## Planned controls
+### Isolation evidence
 
-- Disposable workers with offline-by-default networking and read-only input mappings
-- Streamed output over an authenticated, run-bound channel
-- Target-token and effective-backend verification rather than parent-process inference
-- Boundary canaries for host file, registry, network, clipboard, and sibling-process access
-- Fixed-verb, short-lived elevation with owner-bound IPC
-- Signing outside the untrusted worker
-- Separate trust policies for core, provider, model, and knowledge artifacts
-- Append-only evidence with completeness and cleanup assertions
-- Explicit human approval and a fresh run for every proposed relaxation
+- Record requested and effective backend, exact target and descendant tokens/capabilities/integrity/elevation, policy/configuration and provider hashes, process coverage, traces/dropped events, scenario results, run-bound canaries, terminal receipt, and cleanup.
+- A canary passes only with a successful baseline control, explicit native denial for the isolated attempt, evidence references for both phases, and verified ordering. Timeout, not-found, missing evidence, and generic errors are indeterminate.
+- Any fallback, unsupported API, provider drift, incomplete trace, missing descendant, forged/mismatched receipt, unexpected session/file, or failed cleanup invalidates the isolation conclusion and yields `insufficientEvidence`.
+
+### Packaging and signing
+
+- Use disposable checkpointed Hyper-V authoring workers with pinned tools and allowlisted export channels. Revert/destroy workers after every run and require repeatable captures.
+- Treat a full-trust converted MSIX as a compatibility baseline. AppContainer/App Silo, ACP capability proposals, and narrow PSF remediation require explicit approval and complete Workbench revalidation.
+- Sign outside the worker from a newly validated staging directory. Never place PFX passwords, access tokens, or private-key material in recipes, command lines, workers, logs, or evidence. Bind the final signed package hash to final install/launch/update/uninstall/canary/cleanup receipts.
+- Master Packager is manual export/import only; its output is untrusted and receives the same inspection and validation.
+
+### Evidence, AI, and privacy
+
+- Keep authoritative state inspectable and append-only: immutable project revisions, per-run event/evidence JSONL, content-addressed artifacts, approvals, and terminal receipts.
+- Export only allowlisted artifacts through a sanitized diagnostic/bundle path. No automatic telemetry or hidden network reporting.
+- The optional local Analyst receives bounded verified evidence, emits cited plain text, and has no tools, credentials, network, execution, signing, deployment, or verdict authority. Model/runtime/knowledge artifacts are separate trust classes.
+
+## Trust-boundary failure policy
+
+AIW fails closed. Unsupported or degraded behavior is not converted into a successful recommendation. A model cannot override deterministic findings; a package cannot inherit a Workbench verdict after mutation; and a launch profile expires or becomes invalid when its application, provider, OS, policy, or evidence binding drifts.
 
 ## Explicit non-goals
 
-- Automatically declaring an application safe
-- Automatically converting every legacy installer
-- Learning and applying broad allow rules without review
-- Treating Windows Sandbox telemetry as tamper-proof against an elevated in-guest adversary
-- Providing a general-purpose privileged automation or local-AI tool host
+- Automatically declaring an application safe or automatically converting every legacy installer.
+- Learning or applying broad allow rules without review.
+- Treating guest telemetry or a guest-authored receipt as tamper-proof.
+- General-purpose privileged automation, arbitrary local-AI tool hosting, fleet management, enterprise compliance certification, or background application management.

@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify and audit
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Select stable Rust
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+
+      - name: Install cargo-audit
+        shell: pwsh
+        run: cargo install cargo-audit --locked
+
+      - name: Run repository verification
+        shell: pwsh
+        run: .\scripts\verify.ps1
+
+      - name: Audit dependencies
+        shell: pwsh
+        run: .\scripts\audit-dependencies.ps1
+
+      - name: Validate repository governance files
+        shell: pwsh
+        run: .\scripts\verify.ps1 -GovernanceOnly

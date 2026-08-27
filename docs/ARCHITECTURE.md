@@ -1,64 +1,76 @@
 # Architecture
 
-## Objective
+## Product shape
 
-AIW is a controlled comparison laboratory. It runs the same application and scenarios across an ordinary Win32 baseline and one or more isolation candidates, then produces normalized evidence and a product-feedback-ready comparison.
+AIW is an administrator-led comparison laboratory. Workbench will run the same application and typed scenarios across an ordinary baseline and one or more isolation candidates, then produce normalized evidence and a deterministic recommendation. Studio will consume an accepted assessment and author, inspect, sign, and revalidate an MSIX candidate.
 
 ```text
-CLI / PowerShell / future UI (ordinary user)
-                    |
-          deterministic orchestrator
-          /          |            \
- read-only probe  evidence log   provider adapters
-                                  |
-                        disposable worker boundary
+CLI / PowerShell / future Tauri UI (ordinary user)
+                         |
+                 aiw-orchestrator
+          /          |          |           \
+   read-only probe  evidence  approvals   provider adapters
+                                             |
+                                  disposable worker boundary
+                                             |
+                              measured guest agent + untrusted app
 ```
 
-The repository begins with contracts that do not require elevation. Direct Windows Sandbox and MXC plan adapters now sit behind narrow typed interfaces; neither adapter launches a process. Hyper-V, MSIX Packaging Tool, ACP, PSF, and signing remain future providers.
+The shared `aiw-orchestrator` application-service crate is the boundary used by both the current CLI and future Tauri backend. The UI will call services directly rather than automate the CLI as a subprocess. The current repository has not implemented this live runner or UI yet.
+
+## Lifecycles and contracts
+
+The current code has foundational state and evidence contracts. W0/W1 will separate the planned workflows into three explicit lifecycles:
+
+- `AssessmentRun`: intake, baseline, isolated candidate, scenarios, canaries, evidence, comparison, and recommendation.
+- `LaunchRun`: replay of a previously validated profile after application, provider, OS, and policy drift checks.
+- `AuthoringRun`: Studio recipe approval, disposable capture, adaptation, package inspection, signing, and final validation.
+
+The `aiw.dev/v0alpha2` project contract will add typed `ApplicationSource` (`msi`, `exe`, `portableDirectory`), `IsolationIntent`, versioned `ExecutionProvider`, typed `Scenario`, immutable hash-bound `RunPlan`, `ApprovalRecord`, append-only `RunEvent`, `RunResult`, `AssessmentReport`, `ValidatedLaunchProfile`, and Studio recipe/receipt types. Existing `v0alpha1` projects remain readable through a non-destructive migrator that writes a new revision. Candidate configuration is typed; namespaced extensions cannot control privileged or executable behavior.
+
+Authoritative state is file-based and inspectable: immutable project revisions, one directory per run, hash-bound plan/approval files, append-only event/evidence JSONL, content-addressed artifacts, and terminal receipts/reports. A disposable local index may accelerate the UI but is never authoritative.
 
 ## Current components
 
-- `aiw-schema`: strict deserialization and semantic validation for projects and model packs.
-- `aiw-evidence`: an append-only JSON-lines record chain plus deterministic, allowlisted assessment manifests using integer-only canonical JSON and SHA-256.
-- `aiw-core`: legal run-state transitions, deterministic scenario comparison, conservative boundary-canary evaluation, and advisory-report validation against verified evidence.
-- `aiw-probe`: read-only environment and executable discovery. It does not execute discovered tools.
-- `aiw-token`: the isolated native Win32 boundary for querying the exact target process token.
-- `aiw-golden-probe`: a small in-target executable that emits versioned token evidence to stdout or a new output file.
-- `aiw-provider-wsb`: validates mapped-folder intent, renders deterministic hardened `.wsb` XML, produces inspectable `wsb` lifecycle plans, and verifies run-bound completion receipts without launching the sandbox.
-- `aiw-provider-mxc`: serializes the pinned MXC contract and returns inspectable dry-run/execution plans without running them.
-- `aiw-windows-command-line`: shared, shell-free Windows argument quoting.
-- `aiw-cli`: the stable JSON command surface consumed by PowerShell and the future desktop UI.
+- `aiw-schema`: strict project/model-pack parsing and semantic validation.
+- `aiw-evidence`: canonical JSON, append-only hash chains, and deterministic allowlisted assessment manifests.
+- `aiw-core`: legal state transitions, deterministic comparison, conservative canary evaluation, and advisory-report validation.
+- `aiw-probe`: read-only environment and executable discovery; it does not execute discovered tools.
+- `aiw-token`: audited native Win32 target-token evidence boundary.
+- `aiw-golden-probe`: planned in-target token evidence executable contract; it is not yet a guest runner.
+- `aiw-provider-wsb`: hardened `.wsb` rendering, lifecycle planning, and completion-receipt verification; it does not launch a sandbox.
+- `aiw-provider-mxc`: pinned non-executing MXC dry-run/execution plans; it does not run MXC.
+- `aiw-windows-command-line`: shell-free Windows argument quoting.
+- `aiw-cli`: stable JSON command surface consumed by PowerShell and future UI.
 
-## Planned boundaries
+## Planned execution boundary
 
 ```text
 ordinary-user orchestrator
         |
-        +-- short-lived elevated helper
-        |      fixed verbs: worker setup, trace control, package deployment
+        +-- short-lived elevated helper (fixed typed verbs only)
+        |      owner-bound IPC, caller validation, canonical handles
         |
-        +-- MXC process adapter (plan-only today)
-        |
-        +-- Windows Sandbox or checkpointed Hyper-V worker
+        +-- Windows Sandbox provider or checkpointed Hyper-V authoring worker
                  |
-                 +-- native guest agent
+                 +-- fixed-function guest agent
                  +-- untrusted installer/application
 ```
 
-No first-release component will run as a persistent SYSTEM service. The elevated helper will use owner-bound IPC, caller validation, canonical paths, bounded messages, and fixed operation schemas.
+The helper will be launched only for an approved fixed operation, use bounded messages, and exit after the operation. There will be no persistent SYSTEM service, arbitrary shell/script/path/registry/query verb, or automatic Windows feature/provider installation. A fresh workspace and provider lease are required for every mutating run; cancellation, crash recovery, reboot continuation (when declared), and idempotent cleanup are first-class states.
 
-## Local AI
+## Evidence and provider rules
 
-An optional host-side AIW Analyst will consume only bounded normalized evidence. Inference providers, models, and knowledge corpora are separate trust classes. AI output is a cited hypothesis and cannot mutate project state. Model/knowledge packs are content-only, signed, hashed, versioned, and independently revocable.
+Provider configuration is intent, not proof. A complete result must correlate host observations with guest evidence and record requested/effective backend, provider and OS provenance, target and descendant process tokens, policy/configuration hash, trace completeness, scenario results, boundary canaries, terminal receipt, and cleanup. Missing evidence, fallback, timeout, drift, or incomplete cleanup invalidates an isolation conclusion.
 
-## Compatibility posture
+Provider order is Windows Sandbox, then experimental MXC ProcessContainer, with CreateProcessInSandbox research outside the Workbench release gate. Workbench v1 requires live end-to-end proof for Windows Sandbox and MXC; current adapters are plans only.
 
-Backend support is evidence, not configuration intent. A run records the requested backend, effective backend, target token, process descendants, policy hash, worker/OS provenance, trace completeness, and cleanup outcome. Unsupported or silently degraded execution invalidates isolation conclusions.
+## Studio boundary
 
-See [Runtime evidence foundation](RUNTIME-EVIDENCE.md) for the dated API/source snapshot and [Updating the MXC pin](MXC-PIN-UPDATE.md) for the required review process.
-The proposed distribution and local-model trust split is documented in [Supply chain, bundling, and signing](SUPPLY-CHAIN-AND-SIGNING.md).
-The product-feedback artifact boundary is documented in [Assessment bundles](ASSESSMENT-BUNDLES.md).
-The provider-neutral negative-test contract is documented in [Boundary denial canaries](DENIAL-CANARIES.md).
-The provider-neutral inference output boundary is documented in [Local analyst report contract](LOCAL-ANALYST-CONTRACT.md).
-The Windows Sandbox lifecycle split and mapped-output limitations are documented in [Windows Sandbox automation](WINDOWS-SANDBOX-AUTOMATION.md).
-The guest-to-host terminal output contract is documented in [Windows Sandbox completion receipts](WINDOWS-SANDBOX-COMPLETION.md).
+Studio uses disposable, checkpointed Hyper-V workers and pinned Microsoft packaging tooling. It keeps `deliveryModel: containedMsix` separate from `runtimeBoundary: mediumIlFullTrust | appContainer | appSiloPreview`. A converted full-trust MSIX is a compatibility baseline, not an isolation verdict. Capability Profiler output and narrowly scoped PSF remediation are proposals requiring explicit review and a complete Workbench revalidation. Signing occurs outside the untrusted worker, never exposes private-key material, and binds the final package hash to the final validation receipt. Master Packager is manual export/import only.
+
+## Local AI and telemetry
+
+An optional host-side Analyst consumes bounded verified evidence and returns cited plain text. It has no tools, credentials, network, execution, signing, deployment, or authority to alter deterministic findings. Model, runtime, and knowledge artifacts are separate trust classes, signed/hashed/versioned when introduced, and independently revocable. AIW has no automatic telemetry.
+
+The initial supported host target is Windows 11 24H2/build 26100+ x64. Windows 10, ARM64, enterprise compliance certification, fleet management, and background application management are outside the first release.

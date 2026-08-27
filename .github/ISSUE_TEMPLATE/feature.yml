@@ -1,0 +1,36 @@
+name: Feature or roadmap slice
+description: Propose a focused vertical slice for Workbench or Studio.
+title: ""
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: "Keep proposals bounded to one user outcome and identify every trust boundary involved."
+  - type: textarea
+    id: outcome
+    attributes:
+      label: User outcome
+      description: What should an administrator be able to do or understand?
+    validations:
+      required: true
+  - type: textarea
+    id: slice
+    attributes:
+      label: Roadmap slice
+      description: Identify the W0-W5 or S0-S4 slice and the exit gate.
+    validations:
+      required: true
+  - type: textarea
+    id: boundaries
+    attributes:
+      label: Trust boundaries and inputs
+      description: List providers, privileges, files, IPC, evidence, signing, and untrusted inputs.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance tests and live proof
+      description: Include automated tests and any required Windows 11 24H2 x64 evidence.
+    validations:
+      required: true
