@@ -81,11 +81,65 @@ macro_rules! lifecycle_machine {
             pub reason: String,
         }
 
-        #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+        #[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
         #[serde(rename_all = "camelCase", deny_unknown_fields)]
         pub struct $machine {
             state: $state,
             transitions: Vec<$transition>,
+        }
+
+        impl<'de> Deserialize<'de> for $machine {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase", deny_unknown_fields)]
+                struct LifecycleSnapshot {
+                    state: $state,
+                    transitions: Vec<$transition>,
+                }
+
+                let snapshot = LifecycleSnapshot::deserialize(deserializer)?;
+                let mut expected_state = $state::$initial;
+                for (index, transition) in snapshot.transitions.iter().enumerate() {
+                    let expected_sequence = index as u64;
+                    if transition.sequence != expected_sequence {
+                        return Err(serde::de::Error::custom(format!(
+                            "lifecycle transition sequence {} must be {}",
+                            transition.sequence, expected_sequence
+                        )));
+                    }
+                    if transition.from != expected_state {
+                        return Err(serde::de::Error::custom(format!(
+                            "lifecycle transition {} starts at {:?}, expected {:?}",
+                            transition.sequence, transition.from, expected_state
+                        )));
+                    }
+                    if !$can_transition(transition.from, transition.to) {
+                        return Err(serde::de::Error::custom(format!(
+                            "illegal lifecycle transition from {:?} to {:?}",
+                            transition.from, transition.to
+                        )));
+                    }
+                    if transition.reason.trim().is_empty() {
+                        return Err(serde::de::Error::custom(
+                            "lifecycle transitions require a non-empty reason",
+                        ));
+                    }
+                    expected_state = transition.to;
+                }
+                if snapshot.state != expected_state {
+                    return Err(serde::de::Error::custom(format!(
+                        "lifecycle state {:?} does not match transition history ending at {:?}",
+                        snapshot.state, expected_state
+                    )));
+                }
+                Ok(Self {
+                    state: snapshot.state,
+                    transitions: snapshot.transitions,
+                })
+            }
         }
 
         impl $machine {
@@ -481,6 +535,87 @@ mod tests {
                 .transition(AssessmentRunState::Planned, "retry")
                 .is_err()
         );
+    }
+
+    #[test]
+    fn lifecycle_round_trip_preserves_validated_history() {
+        let mut machine = AssessmentRunStateMachine::new();
+        machine
+            .transition(AssessmentRunState::Planned, "plan assessment")
+            .unwrap();
+        machine
+            .transition(AssessmentRunState::Approved, "approval recorded")
+            .unwrap();
+        let encoded = serde_json::to_value(&machine).unwrap();
+        let decoded: AssessmentRunStateMachine = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded, machine);
+    }
+
+    #[test]
+    fn lifecycle_deserialization_rejects_forged_or_corrupt_history() {
+        let invalid = [
+            serde_json::json!({"state": "approved", "transitions": []}),
+            serde_json::json!({
+                "state": "planned",
+                "transitions": [{
+                    "sequence": 1,
+                    "from": "created",
+                    "to": "planned",
+                    "reason": "plan"
+                }]
+            }),
+            serde_json::json!({
+                "state": "approved",
+                "transitions": [{
+                    "sequence": 0,
+                    "from": "created",
+                    "to": "approved",
+                    "reason": "skip plan"
+                }]
+            }),
+            serde_json::json!({
+                "state": "planned",
+                "transitions": [{
+                    "sequence": 0,
+                    "from": "created",
+                    "to": "planned",
+                    "reason": "  "
+                }]
+            }),
+            serde_json::json!({
+                "state": "created",
+                "transitions": [{
+                    "sequence": 0,
+                    "from": "created",
+                    "to": "planned",
+                    "reason": "plan"
+                }]
+            }),
+            serde_json::json!({
+                "state": "planned",
+                "transitions": [
+                    {
+                        "sequence": 0,
+                        "from": "created",
+                        "to": "failed",
+                        "reason": "failed"
+                    },
+                    {
+                        "sequence": 1,
+                        "from": "failed",
+                        "to": "planned",
+                        "reason": "resume terminal run"
+                    }
+                ]
+            }),
+        ];
+
+        for snapshot in invalid {
+            assert!(
+                serde_json::from_value::<AssessmentRunStateMachine>(snapshot).is_err(),
+                "invalid lifecycle snapshot was accepted"
+            );
+        }
     }
 
     #[test]

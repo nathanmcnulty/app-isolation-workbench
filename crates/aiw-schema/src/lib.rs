@@ -11,8 +11,15 @@ pub const LEGACY_PROJECT_SCHEMA_VERSION: &str = "aiw.dev/v0alpha1";
 pub const PROJECT_KIND: &str = "AppIsolationProject";
 pub const MODEL_PACK_SCHEMA_VERSION: &str = "aiw.dev/model-pack/v0alpha1";
 pub const MODEL_PACK_KIND: &str = "AIWModelPack";
+pub const MAX_SCENARIO_TIMEOUT_SECONDS: u32 = 3_600;
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+const FIRST_PARTY_EXTENSION_KEYS: &[&str] = &[
+    "aiw.dev/legacy-v0alpha1-config",
+    "aiw.dev/legacy-v0alpha1-input",
+    "aiw.dev/legacy-v0alpha1-extensions",
+];
+
+#[derive(Debug, Clone, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Project {
     pub schema_version: String,
@@ -30,8 +37,72 @@ pub struct Project {
     pub assertions: Assertions,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub analyst: Option<Analyst>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub migration_review: Option<MigrationReview>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub extensions: BTreeMap<String, Value>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProjectV0Alpha2Wire {
+    schema_version: String,
+    kind: String,
+    metadata: ProjectMetadata,
+    application: ApplicationSource,
+    isolation_intent: IsolationIntent,
+    #[serde(default)]
+    execution_providers: Vec<ExecutionProvider>,
+    #[serde(default)]
+    secrets: Vec<SecretReference>,
+    candidates: Vec<Candidate>,
+    scenarios: Vec<Scenario>,
+    #[serde(default)]
+    assertions: Assertions,
+    #[serde(default)]
+    analyst: Option<Analyst>,
+    #[serde(default)]
+    migration_review: Option<MigrationReview>,
+    #[serde(default)]
+    extensions: BTreeMap<String, Value>,
+}
+
+impl From<ProjectV0Alpha2Wire> for Project {
+    fn from(wire: ProjectV0Alpha2Wire) -> Self {
+        Self {
+            schema_version: wire.schema_version,
+            kind: wire.kind,
+            metadata: wire.metadata,
+            application: wire.application,
+            isolation_intent: wire.isolation_intent,
+            execution_providers: wire.execution_providers,
+            secrets: wire.secrets,
+            candidates: wire.candidates,
+            scenarios: wire.scenarios,
+            assertions: wire.assertions,
+            analyst: wire.analyst,
+            migration_review: wire.migration_review,
+            extensions: wire.extensions,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Project {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        let schema_version = value.get("schemaVersion").and_then(Value::as_str);
+        if schema_version == Some(LEGACY_PROJECT_SCHEMA_VERSION) {
+            let legacy: LegacyProjectV0Alpha1 =
+                serde_json::from_value(value).map_err(serde::de::Error::custom)?;
+            return Ok(migrate_v0alpha1(&legacy));
+        }
+        let wire: ProjectV0Alpha2Wire =
+            serde_json::from_value(value).map_err(serde::de::Error::custom)?;
+        Ok(wire.into())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -85,11 +156,29 @@ pub struct SecretReference {
 
 /// A source application that can be assessed without accepting arbitrary commands.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 pub enum ApplicationSource {
     Msi(FileApplicationSource),
     Exe(FileApplicationSource),
     PortableDirectory(PortableDirectoryApplicationSource),
+    MigrationPending(MigrationPendingApplicationSource),
+}
+
+/// Non-executable source identity retained until a legacy migration is reviewed.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MigrationPendingApplicationSource {
+    pub path: String,
+    pub sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_signer: Option<String>,
+    #[serde(default)]
+    pub may_reboot: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -199,7 +288,12 @@ pub enum NetworkIntent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 pub enum ExecutionProvider {
     WindowsSandbox(WindowsSandboxProvider),
     MxcProcessContainer(MxcProcessContainerProvider),
@@ -259,7 +353,12 @@ pub struct Candidate {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 pub enum CandidateConfiguration {
     Baseline,
     WindowsSandbox {
@@ -276,6 +375,10 @@ pub enum CandidateConfiguration {
         runtime_boundary: RuntimeBoundary,
         #[serde(default)]
         capabilities: Vec<String>,
+    },
+    /// Preserves a legacy candidate without selecting a provider or executable policy.
+    MigrationPending {
+        legacy_candidate_type: CandidateType,
     },
 }
 
@@ -314,7 +417,12 @@ pub struct Scenario {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 pub enum ScenarioStep {
     Install,
     Launch {
@@ -407,6 +515,27 @@ pub enum LegacyScenarioStepV0Alpha1 {
     ExpectExitCode {
         value: i32,
     },
+}
+
+/// A fail-closed migration record. It must be removed after all legacy intent is reviewed and
+/// represented by executable v0alpha2 fields.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(tag = "status", rename_all = "camelCase", deny_unknown_fields)]
+pub enum MigrationReview {
+    Pending(PendingMigrationReview),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PendingMigrationReview {
+    pub source_schema_version: String,
+    pub installer: LegacyInstaller,
+    #[serde(default)]
+    pub candidates: Vec<LegacyCandidateV0Alpha1>,
+    #[serde(default)]
+    pub unresolved_entry_points: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub legacy_extensions: BTreeMap<String, Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -605,11 +734,12 @@ pub struct ValidationIssue {
 
 /// Converts a parsed legacy project into the current schema without touching the source file.
 ///
-/// Legacy free-form candidate settings are retained as data under a reserved extension key;
-/// they are never interpreted as executable or privileged configuration by v0alpha2.
+/// Legacy executable intent is retained only inside a pending review record and is never
+/// interpreted as executable or privileged v0alpha2 configuration.
 #[must_use]
 pub fn migrate_v0alpha1(legacy: &LegacyProjectV0Alpha1) -> Project {
-    let mut extensions = legacy.extensions.clone();
+    let mut extensions = BTreeMap::new();
+    let legacy_extensions = legacy.extensions.clone();
     let legacy_input = serde_json::json!({
         "arguments": legacy.input.installer.arguments,
         "secrets": legacy.input.secrets,
@@ -620,21 +750,11 @@ pub fn migrate_v0alpha1(legacy: &LegacyProjectV0Alpha1) -> Project {
         schema_version: PROJECT_SCHEMA_VERSION.to_owned(),
         kind: legacy.kind.clone(),
         metadata: legacy.metadata.clone(),
-        application: ApplicationSource::Exe(FileApplicationSource {
+        application: ApplicationSource::MigrationPending(MigrationPendingApplicationSource {
             path: legacy.input.installer.path.clone(),
             sha256: legacy.input.installer.sha256.clone(),
             expected_signer: legacy.input.installer.expected_signer.clone(),
-            silent_arguments: legacy
-                .input
-                .installer
-                .arguments
-                .get("silent")
-                .cloned()
-                .unwrap_or_default(),
-            entry_points: Vec::new(),
-            architecture: ApplicationArchitecture::Unknown,
             may_reboot: legacy.input.installer.may_reboot,
-            update_uninstall: None,
         }),
         isolation_intent: IsolationIntent::default(),
         execution_providers: Vec::new(),
@@ -651,52 +771,40 @@ pub fn migrate_v0alpha1(legacy: &LegacyProjectV0Alpha1) -> Project {
             .collect(),
         assertions: legacy.assertions.clone(),
         analyst: legacy.analyst.clone(),
+        migration_review: Some(MigrationReview::Pending(PendingMigrationReview {
+            source_schema_version: legacy.schema_version.clone(),
+            installer: legacy.input.installer.clone(),
+            candidates: legacy.candidates.clone(),
+            unresolved_entry_points: legacy_entrypoint_references(legacy),
+            legacy_extensions,
+        })),
         extensions,
     }
 }
 
 fn migrate_legacy_candidate(candidate: &LegacyCandidateV0Alpha1) -> Candidate {
-    let config = match candidate.candidate_type {
-        CandidateType::UnpackagedBaseline => CandidateConfiguration::Baseline,
-        CandidateType::IsolationSession => CandidateConfiguration::WindowsSandbox {
-            provider_id: "windows-sandbox".to_owned(),
-            network: NetworkIntent::Blocked,
-        },
-        CandidateType::ProcessContainer => CandidateConfiguration::MxcProcessContainer {
-            provider_id: "mxc-process-container".to_owned(),
-            requested_backend: ProcessContainerBackend::AppContainer,
-            network: NetworkIntent::Blocked,
-        },
-        CandidateType::FullMsix => CandidateConfiguration::Msix {
-            delivery_model: DeliveryModel::ContainedMsix,
-            runtime_boundary: RuntimeBoundary::MediumIlFullTrust,
-            capabilities: Vec::new(),
-        },
-        CandidateType::AppSiloMsix => CandidateConfiguration::Msix {
-            delivery_model: DeliveryModel::ContainedMsix,
-            runtime_boundary: RuntimeBoundary::AppSiloPreview,
-            capabilities: Vec::new(),
-        },
-        CandidateType::ClassicAppContainer => CandidateConfiguration::Msix {
-            delivery_model: DeliveryModel::ContainedMsix,
-            runtime_boundary: RuntimeBoundary::AppContainer,
-            capabilities: Vec::new(),
-        },
+    let config = CandidateConfiguration::MigrationPending {
+        legacy_candidate_type: candidate.candidate_type.clone(),
     };
-    let mut extensions = BTreeMap::new();
-    if !candidate.config.is_empty() {
-        extensions.insert(
-            "aiw.dev/legacy-v0alpha1-config".to_owned(),
-            Value::Object(candidate.config.clone().into_iter().collect()),
-        );
-    }
     Candidate {
         id: candidate.id.clone(),
         candidate_type: candidate.candidate_type.clone(),
         experimental: candidate.experimental,
         config,
-        extensions,
+        extensions: BTreeMap::new(),
     }
+}
+
+fn legacy_entrypoint_references(legacy: &LegacyProjectV0Alpha1) -> Vec<String> {
+    let mut references = BTreeSet::new();
+    for scenario in &legacy.scenarios {
+        for step in &scenario.steps {
+            if let LegacyScenarioStepV0Alpha1::Launch { entrypoint, .. } = step {
+                references.insert(entrypoint.clone());
+            }
+        }
+    }
+    references.into_iter().collect()
 }
 
 fn migrate_legacy_scenario(scenario: &LegacyScenarioV0Alpha1) -> Scenario {
@@ -753,6 +861,7 @@ pub fn validate_project(project: &Project) -> Vec<ValidationIssue> {
     );
     validate_id(&mut issues, "$.metadata.name", &project.metadata.name);
     validate_application_source(&mut issues, &project.application);
+    validate_migration_review(&mut issues, project);
     validate_extensions(&mut issues, "$.extensions", &project.extensions);
     validate_unique_ids(
         &mut issues,
@@ -821,7 +930,13 @@ pub fn validate_project(project: &Project) -> Vec<ValidationIssue> {
                 "a scenario must contain at least one step",
             );
         }
-        validate_scenario_steps(&mut issues, index, &scenario.steps);
+        validate_scenario_steps(
+            &mut issues,
+            index,
+            &scenario.steps,
+            application_entry_point_ids(&project.application),
+            project_requires_migration_review(project),
+        );
     }
 
     if let Some(analyst) = &project.analyst
@@ -862,6 +977,35 @@ pub fn validate_project(project: &Project) -> Vec<ValidationIssue> {
     }
 
     issues
+}
+
+/// Returns structural issues plus a fail-closed blocker while migrated intent awaits review.
+/// Future planners and runners must use this validator rather than structural validation alone.
+#[must_use]
+pub fn validate_project_for_planning(project: &Project) -> Vec<ValidationIssue> {
+    let mut issues = validate_project(project);
+    if project_requires_migration_review(project) {
+        issue(
+            &mut issues,
+            "$.migrationReview",
+            "migrationReviewPending",
+            "legacy intent must be reviewed and replaced with executable v0alpha2 configuration",
+        );
+    }
+    issues
+}
+
+/// Indicates that a project contains non-executable migration placeholders or a pending review.
+#[must_use]
+pub fn project_requires_migration_review(project: &Project) -> bool {
+    project.migration_review.is_some()
+        || matches!(&project.application, ApplicationSource::MigrationPending(_))
+        || project.candidates.iter().any(|candidate| {
+            matches!(
+                &candidate.config,
+                CandidateConfiguration::MigrationPending { .. }
+            )
+        })
 }
 
 pub fn validate_model_pack(pack: &ModelPack) -> Vec<ValidationIssue> {
@@ -1026,10 +1170,12 @@ pub fn is_sha256(value: &str) -> bool {
 fn validate_application_source(issues: &mut Vec<ValidationIssue>, source: &ApplicationSource) {
     match source {
         ApplicationSource::Msi(source) => {
-            validate_file_application_source(issues, "$.application", source)
+            validate_file_application_source(issues, "$.application", source);
+            validate_source_extension(issues, "$.application.path", &source.path, "msi");
         }
         ApplicationSource::Exe(source) => {
-            validate_file_application_source(issues, "$.application", source)
+            validate_file_application_source(issues, "$.application", source);
+            validate_source_extension(issues, "$.application.path", &source.path, "exe");
         }
         ApplicationSource::PortableDirectory(source) => {
             validate_safe_relative_path(issues, "$.application.path", &source.path);
@@ -1040,6 +1186,107 @@ fn validate_application_source(issues: &mut Vec<ValidationIssue>, source: &Appli
             );
             validate_entry_points(issues, "$.application.entryPoints", &source.entry_points);
         }
+        ApplicationSource::MigrationPending(source) => {
+            validate_safe_relative_path(issues, "$.application.path", &source.path);
+            validate_sha256(issues, "$.application.sha256", &source.sha256);
+        }
+    }
+}
+
+fn validate_source_extension(
+    issues: &mut Vec<ValidationIssue>,
+    path: &str,
+    source_path: &str,
+    expected_extension: &str,
+) {
+    let extension = source_path
+        .rsplit(['/', '\\'])
+        .next()
+        .and_then(|file_name| file_name.rsplit_once('.'))
+        .map_or("", |(_, extension)| extension);
+    if !extension.eq_ignore_ascii_case(expected_extension) {
+        issue(
+            issues,
+            path,
+            "applicationTypeMismatch",
+            &format!("application type requires a .{expected_extension} source"),
+        );
+    }
+}
+
+fn application_entry_point_ids(source: &ApplicationSource) -> &[EntryPoint] {
+    match source {
+        ApplicationSource::Msi(source) | ApplicationSource::Exe(source) => &source.entry_points,
+        ApplicationSource::PortableDirectory(source) => &source.entry_points,
+        ApplicationSource::MigrationPending(_) => &[],
+    }
+}
+
+fn validate_migration_review(issues: &mut Vec<ValidationIssue>, project: &Project) {
+    let has_pending_source = matches!(&project.application, ApplicationSource::MigrationPending(_));
+    let has_pending_candidate = project.candidates.iter().any(|candidate| {
+        matches!(
+            &candidate.config,
+            CandidateConfiguration::MigrationPending { .. }
+        )
+    });
+
+    let Some(MigrationReview::Pending(review)) = &project.migration_review else {
+        if has_pending_source || has_pending_candidate {
+            issue(
+                issues,
+                "$.migrationReview",
+                "missingMigrationReview",
+                "migration placeholders require a pending migration review",
+            );
+        }
+        return;
+    };
+
+    require_equal(
+        issues,
+        "$.migrationReview.sourceSchemaVersion",
+        "unsupportedLegacySchemaVersion",
+        &review.source_schema_version,
+        LEGACY_PROJECT_SCHEMA_VERSION,
+    );
+    validate_safe_relative_path(
+        issues,
+        "$.migrationReview.installer.path",
+        &review.installer.path,
+    );
+    validate_sha256(
+        issues,
+        "$.migrationReview.installer.sha256",
+        &review.installer.sha256,
+    );
+    validate_unique_ids(
+        issues,
+        "$.migrationReview.candidates",
+        review
+            .candidates
+            .iter()
+            .map(|candidate| candidate.id.as_str()),
+    );
+    validate_unique_ids(
+        issues,
+        "$.migrationReview.unresolvedEntryPoints",
+        review.unresolved_entry_points.iter().map(String::as_str),
+    );
+    for (index, entrypoint) in review.unresolved_entry_points.iter().enumerate() {
+        validate_id(
+            issues,
+            &format!("$.migrationReview.unresolvedEntryPoints[{index}]"),
+            entrypoint,
+        );
+    }
+    if !has_pending_source && !has_pending_candidate {
+        issue(
+            issues,
+            "$.migrationReview",
+            "staleMigrationReview",
+            "remove migrationReview after all executable fields have been resolved",
+        );
     }
 }
 
@@ -1100,6 +1347,15 @@ fn validate_execution_provider(
         &format!("{path}.executableSha256"),
         executable_sha256,
     );
+    if matches!(provider, ExecutionProvider::MxcProcessContainer(provider) if !provider.experimental)
+    {
+        issue(
+            issues,
+            &format!("{path}.experimental"),
+            "experimentalProviderNotMarked",
+            "MXC ProcessContainer providers must be marked experimental",
+        );
+    }
 }
 
 fn validate_candidate(
@@ -1148,6 +1404,14 @@ fn validate_candidate(
                 providers,
                 "mxcProcessContainer",
             );
+            if !candidate.experimental {
+                issue(
+                    issues,
+                    &format!("{path}.experimental"),
+                    "experimentalCandidateNotMarked",
+                    "MXC ProcessContainer candidates must be marked experimental",
+                );
+            }
         }
         CandidateConfiguration::Msix {
             runtime_boundary,
@@ -1176,6 +1440,16 @@ fn validate_candidate(
                     "MSIX configuration must match the declared candidate type",
                 );
             }
+            if matches!(runtime_boundary, RuntimeBoundary::AppSiloPreview)
+                && !candidate.experimental
+            {
+                issue(
+                    issues,
+                    &format!("{path}.experimental"),
+                    "experimentalCandidateNotMarked",
+                    "App Silo candidates must be marked experimental",
+                );
+            }
             if capabilities
                 .iter()
                 .any(|capability| capability.trim().is_empty())
@@ -1185,6 +1459,18 @@ fn validate_candidate(
                     &format!("{path}.config.capabilities"),
                     "invalidCapability",
                     "capabilities must be non-empty identifiers",
+                );
+            }
+        }
+        CandidateConfiguration::MigrationPending {
+            legacy_candidate_type,
+        } => {
+            if &candidate.candidate_type != legacy_candidate_type {
+                issue(
+                    issues,
+                    &format!("{path}.config.legacyCandidateType"),
+                    "candidateConfigurationMismatch",
+                    "migration placeholder must preserve the legacy candidate type",
                 );
             }
         }
@@ -1223,18 +1509,35 @@ fn validate_scenario_steps(
     issues: &mut Vec<ValidationIssue>,
     index: usize,
     steps: &[ScenarioStep],
+    entry_points: &[EntryPoint],
+    migration_pending: bool,
 ) {
     for (step_index, step) in steps.iter().enumerate() {
         let path = format!("$.scenarios[{index}].steps[{step_index}]");
         match step {
             ScenarioStep::Launch { entrypoint, .. } => {
-                validate_id(issues, &format!("{path}.entrypoint"), entrypoint)
+                validate_id(issues, &format!("{path}.entrypoint"), entrypoint);
+                if !migration_pending
+                    && !entry_points
+                        .iter()
+                        .any(|declared| declared.id.eq_ignore_ascii_case(entrypoint))
+                {
+                    issue(
+                        issues,
+                        &format!("{path}.entrypoint"),
+                        "unknownEntryPoint",
+                        "launch steps must reference a declared application entry point",
+                    );
+                }
             }
             ScenarioStep::WaitForProcess {
                 image,
                 timeout_seconds,
             } => {
-                if image.trim().is_empty() || *timeout_seconds == 0 {
+                if image.trim().is_empty()
+                    || *timeout_seconds == 0
+                    || *timeout_seconds > MAX_SCENARIO_TIMEOUT_SECONDS
+                {
                     issue(
                         issues,
                         &path,
@@ -1247,7 +1550,10 @@ fn validate_scenario_steps(
                 title,
                 timeout_seconds,
             } => {
-                if title.trim().is_empty() || *timeout_seconds == 0 {
+                if title.trim().is_empty()
+                    || *timeout_seconds == 0
+                    || *timeout_seconds > MAX_SCENARIO_TIMEOUT_SECONDS
+                {
                     issue(
                         issues,
                         &path,
@@ -1295,15 +1601,42 @@ fn validate_extensions(
     extensions: &BTreeMap<String, Value>,
 ) {
     for key in extensions.keys() {
-        if !key.starts_with("aiw.dev/") {
+        if !is_allowed_extension_key(key) {
             issue(
                 issues,
                 path,
-                "unnamespacedExtension",
-                "extensions must use an aiw.dev/ namespaced key",
+                "invalidExtensionNamespace",
+                "extensions must use an allowlisted aiw.dev key or a third-party reverse-DNS namespace",
             );
         }
     }
+}
+
+fn is_allowed_extension_key(key: &str) -> bool {
+    if key.starts_with("aiw.dev/") {
+        return FIRST_PARTY_EXTENSION_KEYS.contains(&key);
+    }
+    let Some((namespace, name)) = key.split_once('/') else {
+        return false;
+    };
+    !name.is_empty()
+        && !name
+            .split('/')
+            .any(|segment| segment.is_empty() || segment == "." || segment == "..")
+        && is_reverse_dns_namespace(namespace)
+}
+
+fn is_reverse_dns_namespace(namespace: &str) -> bool {
+    let labels: Vec<_> = namespace.split('.').collect();
+    labels.len() >= 2
+        && labels.iter().all(|label| {
+            !label.is_empty()
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        })
 }
 
 fn validate_unique_ids<'a>(
@@ -1490,6 +1823,7 @@ mod tests {
             }],
             assertions: Assertions::default(),
             analyst: None,
+            migration_review: None,
             extensions: BTreeMap::new(),
         }
     }
@@ -1602,7 +1936,7 @@ mod tests {
     }
 
     #[test]
-    fn migration_is_pure_and_preserves_legacy_configuration_as_extension_data() {
+    fn migration_is_pure_preserves_intent_and_blocks_planning() {
         let legacy = LegacyProjectV0Alpha1 {
             schema_version: LEGACY_PROJECT_SCHEMA_VERSION.to_owned(),
             kind: PROJECT_KIND.to_owned(),
@@ -1612,24 +1946,39 @@ mod tests {
                     path: "inputs/setup.exe".to_owned(),
                     sha256: "a".repeat(64),
                     expected_signer: Some("Contoso".to_owned()),
-                    arguments: BTreeMap::from([("silent".to_owned(), vec!["/quiet".to_owned()])]),
+                    arguments: BTreeMap::from([
+                        ("install".to_owned(), vec!["/quiet".to_owned()]),
+                        (
+                            "uninstall".to_owned(),
+                            vec!["/uninstall".to_owned(), "/quiet".to_owned()],
+                        ),
+                    ]),
                     may_reboot: false,
                 },
                 secrets: Vec::new(),
             },
             candidates: vec![LegacyCandidateV0Alpha1 {
                 id: "baseline".to_owned(),
-                candidate_type: CandidateType::UnpackagedBaseline,
-                experimental: false,
-                config: BTreeMap::from([("legacyKey".to_owned(), Value::Bool(true))]),
+                candidate_type: CandidateType::ProcessContainer,
+                experimental: true,
+                config: BTreeMap::from([(
+                    "policy".to_owned(),
+                    Value::String("policies/minimal.json".to_owned()),
+                )]),
             }],
             scenarios: vec![LegacyScenarioV0Alpha1 {
                 id: "first-run".to_owned(),
                 description: "Launch the app".to_owned(),
                 required: true,
-                steps: vec![LegacyScenarioStepV0Alpha1::ExpectProcess {
-                    image: "editor.exe".to_owned(),
-                }],
+                steps: vec![
+                    LegacyScenarioStepV0Alpha1::Launch {
+                        entrypoint: "main".to_owned(),
+                        arguments: vec!["--first-run".to_owned()],
+                    },
+                    LegacyScenarioStepV0Alpha1::ExpectProcess {
+                        image: "editor.exe".to_owned(),
+                    },
+                ],
             }],
             assertions: Assertions::default(),
             analyst: None,
@@ -1642,21 +1991,55 @@ mod tests {
         let migrated = migrate_v0alpha1(&legacy);
         assert_eq!(legacy.schema_version, LEGACY_PROJECT_SCHEMA_VERSION);
         assert_eq!(migrated.schema_version, PROJECT_SCHEMA_VERSION);
-        assert!(migrated.extensions.contains_key("aiw.dev/custom"));
+        assert!(!migrated.extensions.contains_key("aiw.dev/custom"));
         assert!(
             migrated
                 .extensions
                 .contains_key("aiw.dev/legacy-v0alpha1-input")
         );
-        assert!(
-            migrated.candidates[0]
-                .extensions
-                .contains_key("aiw.dev/legacy-v0alpha1-config")
-        );
         assert!(matches!(
-            migrated.scenarios[0].steps[0],
+            migrated.application,
+            ApplicationSource::MigrationPending(_)
+        ));
+        assert!(matches!(
+            migrated.candidates[0].config,
+            CandidateConfiguration::MigrationPending {
+                legacy_candidate_type: CandidateType::ProcessContainer
+            }
+        ));
+        assert!(migrated.execution_providers.is_empty());
+        assert!(matches!(
+            migrated.scenarios[0].steps[1],
             ScenarioStep::WaitForProcess { .. }
         ));
+        let Some(MigrationReview::Pending(review)) = &migrated.migration_review else {
+            panic!("migration must create a pending review");
+        };
+        assert_eq!(review.installer.arguments, legacy.input.installer.arguments);
+        assert_eq!(review.candidates, legacy.candidates);
+        assert_eq!(review.unresolved_entry_points, vec!["main"]);
+        assert_eq!(review.legacy_extensions, legacy.extensions);
+        assert!(validate_project(&migrated).is_empty());
+        assert!(
+            validate_project_for_planning(&migrated)
+                .iter()
+                .any(|issue| issue.code == "migrationReviewPending")
+        );
+        let wire = serde_json::to_value(&migrated).unwrap();
+        assert_eq!(wire["migrationReview"]["status"], "pending");
+        assert_eq!(
+            wire["migrationReview"]["sourceSchemaVersion"],
+            LEGACY_PROJECT_SCHEMA_VERSION
+        );
+        assert_eq!(
+            wire["candidates"][0]["config"]["legacyCandidateType"],
+            "processContainer"
+        );
+        let round_trip: Project = serde_json::from_value(wire).unwrap();
+        assert_eq!(round_trip, migrated);
+        let legacy_wire = serde_json::to_value(&legacy).unwrap();
+        let directly_read: Project = serde_json::from_value(legacy_wire).unwrap();
+        assert_eq!(directly_read, migrated);
     }
 
     #[test]
@@ -1675,17 +2058,177 @@ mod tests {
     }
 
     #[test]
-    fn extensions_must_be_namespaced() {
+    fn extensions_require_allowlisted_or_third_party_namespaces() {
         let mut project = minimal_project();
-        project.candidates[0].extensions.insert(
-            "exec".to_owned(),
+        project.extensions.insert(
+            "aiw.dev/exec".to_owned(),
             Value::String("not interpreted".to_owned()),
         );
+        project
+            .extensions
+            .insert("com.contoso/assessment-data".to_owned(), Value::Bool(true));
         let issues = validate_project(&project);
         assert!(
             issues
                 .iter()
-                .any(|issue| issue.code == "unnamespacedExtension")
+                .any(|issue| issue.code == "invalidExtensionNamespace")
+        );
+        project.extensions.remove("aiw.dev/exec");
+        assert!(validate_project(&project).is_empty());
+    }
+
+    #[test]
+    fn tagged_enum_fields_are_camel_case_in_serde_and_schema() {
+        let config = CandidateConfiguration::MxcProcessContainer {
+            provider_id: "mxc".to_owned(),
+            requested_backend: ProcessContainerBackend::AppContainer,
+            network: NetworkIntent::Blocked,
+        };
+        let value = serde_json::to_value(config).unwrap();
+        assert_eq!(value["providerId"], "mxc");
+        assert_eq!(value["requestedBackend"], "appContainer");
+        assert!(value.get("provider_id").is_none());
+
+        let step = serde_json::to_value(ScenarioStep::WaitForProcess {
+            image: "editor.exe".to_owned(),
+            timeout_seconds: 30,
+        })
+        .unwrap();
+        assert_eq!(step["timeoutSeconds"], 30);
+        assert!(step.get("timeout_seconds").is_none());
+
+        let schema = serde_json::to_string(&schemars::schema_for!(Project)).unwrap();
+        assert!(schema.contains("providerId"));
+        assert!(schema.contains("requestedBackend"));
+        assert!(schema.contains("runtimeBoundary"));
+        assert!(schema.contains("timeoutSeconds"));
+        assert!(!schema.contains("provider_id"));
+        assert!(!schema.contains("timeout_seconds"));
+    }
+
+    #[test]
+    fn launch_requires_declared_entrypoint_outside_migration() {
+        let mut project = minimal_project();
+        let ScenarioStep::Launch { entrypoint, .. } = &mut project.scenarios[0].steps[0] else {
+            unreachable!();
+        };
+        *entrypoint = "missing".to_owned();
+        assert!(
+            validate_project(&project)
+                .iter()
+                .any(|issue| issue.code == "unknownEntryPoint")
+        );
+    }
+
+    #[test]
+    fn application_type_must_match_source_extension() {
+        let mut project = minimal_project();
+        {
+            let ApplicationSource::Exe(source) = &mut project.application else {
+                unreachable!();
+            };
+            source.path = "inputs/setup.msi".to_owned();
+        }
+        assert!(
+            validate_project(&project)
+                .iter()
+                .any(|issue| issue.code == "applicationTypeMismatch")
+        );
+        let ApplicationSource::Exe(mut source) = project.application.clone() else {
+            unreachable!();
+        };
+        source.path = "inputs/setup.exe".to_owned();
+        project.application = ApplicationSource::Msi(source);
+        assert!(
+            validate_project(&project)
+                .iter()
+                .any(|issue| issue.code == "applicationTypeMismatch")
+        );
+    }
+
+    #[test]
+    fn scenario_waits_have_an_upper_bound() {
+        let mut project = minimal_project();
+        project.scenarios[0]
+            .steps
+            .push(ScenarioStep::WaitForWindow {
+                title: "Editor".to_owned(),
+                timeout_seconds: MAX_SCENARIO_TIMEOUT_SECONDS + 1,
+            });
+        project.scenarios[0]
+            .steps
+            .push(ScenarioStep::WaitForProcess {
+                image: "editor.exe".to_owned(),
+                timeout_seconds: MAX_SCENARIO_TIMEOUT_SECONDS + 1,
+            });
+        assert_eq!(
+            validate_project(&project)
+                .iter()
+                .filter(|issue| issue.code == "invalidWait")
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn preview_candidates_and_mxc_provider_must_be_marked_experimental() {
+        let mut project = minimal_project();
+        project
+            .execution_providers
+            .push(ExecutionProvider::MxcProcessContainer(
+                MxcProcessContainerProvider {
+                    id: "mxc".to_owned(),
+                    version: "1.0".to_owned(),
+                    executable_sha256: "b".repeat(64),
+                    experimental: false,
+                },
+            ));
+        project.candidates.push(Candidate {
+            id: "mxc".to_owned(),
+            candidate_type: CandidateType::ProcessContainer,
+            experimental: false,
+            config: CandidateConfiguration::MxcProcessContainer {
+                provider_id: "mxc".to_owned(),
+                requested_backend: ProcessContainerBackend::AppContainer,
+                network: NetworkIntent::Blocked,
+            },
+            extensions: BTreeMap::new(),
+        });
+        project.candidates.push(Candidate {
+            id: "app-silo".to_owned(),
+            candidate_type: CandidateType::AppSiloMsix,
+            experimental: false,
+            config: CandidateConfiguration::Msix {
+                delivery_model: DeliveryModel::ContainedMsix,
+                runtime_boundary: RuntimeBoundary::AppSiloPreview,
+                capabilities: Vec::new(),
+            },
+            extensions: BTreeMap::new(),
+        });
+        assert_eq!(
+            validate_project(&project)
+                .iter()
+                .filter(|issue| issue.code == "experimentalProviderNotMarked"
+                    || issue.code == "experimentalCandidateNotMarked")
+                .count(),
+            3
+        );
+    }
+
+    #[test]
+    fn migration_placeholders_require_review_record() {
+        let mut project = minimal_project();
+        project.application =
+            ApplicationSource::MigrationPending(MigrationPendingApplicationSource {
+                path: "inputs/setup.exe".to_owned(),
+                sha256: "a".repeat(64),
+                expected_signer: None,
+                may_reboot: false,
+            });
+        assert!(
+            validate_project(&project)
+                .iter()
+                .any(|issue| issue.code == "missingMigrationReview")
         );
     }
 
