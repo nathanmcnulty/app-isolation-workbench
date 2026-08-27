@@ -1,12 +1,12 @@
 # Roadmap
 
-AIW is delivered as two milestones with vertical, evidence-gated slices. The current repository is at **W0**: contracts and plans exist, but no runner, desktop UI, package authoring, or live provider execution exists.
+AIW is delivered as two milestones with vertical, evidence-gated slices. The current repository has an implemented **W0 candidate** under final validation: contracts and non-executing plans exist, but no provider runner, desktop UI, package authoring, or live provider execution exists.
 
 ## Workbench v1
 
-### W0 — foundation (current)
+### W0 — foundation (implementation candidate)
 
-- Revise contracts toward `aiw.dev/v0alpha2` and preserve readable `v0alpha1` migration.
+- Implement `aiw.dev/v0alpha2` and preserve readable, non-destructive `v0alpha1` migration with an explicit review gate.
 - Separate `AssessmentRun`, `LaunchRun`, and `AuthoringRun` lifecycles.
 - Establish the shared `aiw-orchestrator` service boundary.
 - Add Apache-2.0 licensing, governance, Windows CI, issue/PR gates, and security documentation.

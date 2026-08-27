@@ -9,7 +9,7 @@ The delivery sequence is `contracts -> live runner -> evidence/scenarios -> reco
 
 ## Current status
 
-The repository is at the W0 contract-and-governance foundation. It currently validates the `v0alpha1` project contract and is preparing the non-destructive migration path toward `aiw.dev/v0alpha2`. It contains versioned schemas, strict validation, hash-chained evidence, deterministic comparison and canary contracts, read-only host/token probes, secure Windows Sandbox and MXC **plan** adapters, completion-receipt verification, and JSON CLI/PowerShell surfaces. It does **not** yet run a model, install or launch applications, elevate, execute Windows Sandbox/MXC, provision canaries, create archives, provide the Tauri UI, author MSIX packages, sign packages, or prove that an application ran inside an isolation boundary.
+The repository implements the W0 contract-and-governance foundation. It validates the typed `aiw.dev/v0alpha2` project contract, reads `v0alpha1`, and migrates legacy projects to a new file with an explicit review gate. It contains three validated run lifecycles, a shared file-backed orchestrator, hash-bound plans and approvals, append-only run journals, versioned schemas, hash-chained evidence, deterministic comparison and canary contracts, read-only host/token probes, secure Windows Sandbox and MXC **plan** adapters, completion-receipt verification, and JSON CLI/PowerShell surfaces. It does **not** yet run a model, install or launch applications, elevate, execute Windows Sandbox/MXC, provision canaries, create archives, provide the Tauri UI, author MSIX packages, sign packages, or prove that an application ran inside an isolation boundary.
 
 The initial live target is Windows 11 24H2 (build 26100+) x64. Provider support is capability-gated and must be established by live evidence; hosted CI validates contracts and code only. Windows 10 and ARM64 are deferred. There is no automatic telemetry, persistent privileged service, automatic feature enablement, or model authority over verdicts.
 
@@ -17,7 +17,7 @@ The initial live target is Windows 11 24H2 (build 26100+) x64. Provider support 
 
 - Evidence is authoritative; optional local-AI prose is cited, advisory, and non-executing.
 - Raw installers, project fields, worker output, provider output, and model content are untrusted.
-- Every mutating operation will use a typed, hash-bound plan, explicit approval, append-only run journal, and idempotent cleanup.
+- Every mutating operation uses the shared run boundary: a typed hash-bound plan, exact approval, append-only journal, fail-closed recovery, and terminal cleanup evidence. Provider execution remains disabled until its later slice proves the same invariants live.
 - Unsupported, degraded, incomplete, or ambiguous isolation remains `insufficientEvidence`, never success.
 - Workbench launches validated applications on demand; it is not a background application-management service.
 - Studio keeps delivery (`containedMsix`) separate from runtime boundary (`mediumIlFullTrust`, `appContainer`, or preview `appSiloPreview`). A converted full-trust MSIX is not an isolation claim.
@@ -53,7 +53,7 @@ All successful commands emit JSON. Diagnostics go to standard error and a nonzer
 
 ## Architecture and roadmap
 
-The shared `aiw-orchestrator` service boundary will be called directly by the CLI and future Tauri backend; the desktop application will not automate the CLI as a subprocess. The three planned lifecycles are `AssessmentRun`, `LaunchRun`, and `AuthoringRun`. Authoritative state remains inspectable on disk: immutable project revisions, per-run journals and evidence JSONL, content-addressed artifacts, approvals, and terminal receipts.
+The shared `aiw-orchestrator` service boundary is called directly by the CLI and will also be called by the future Tauri backend; the desktop application will not automate the CLI as a subprocess. The implemented lifecycles are `AssessmentRun`, `LaunchRun`, and `AuthoringRun`. Authoritative state remains inspectable on disk: immutable plans, per-run journals and evidence JSONL, content-addressed artifacts, approvals, and terminal receipts.
 
 See [Architecture](docs/ARCHITECTURE.md), [Roadmap](docs/ROADMAP.md), and [Threat model](docs/THREAT-MODEL.md) for the detailed contracts and release gates. Supporting contracts are documented in [Assessment bundles](docs/ASSESSMENT-BUNDLES.md), [Boundary denial canaries](docs/DENIAL-CANARIES.md), [Local analyst report contract](docs/LOCAL-ANALYST-CONTRACT.md), [Windows Sandbox automation](docs/WINDOWS-SANDBOX-AUTOMATION.md), and [Windows Sandbox completion receipts](docs/WINDOWS-SANDBOX-COMPLETION.md).
 

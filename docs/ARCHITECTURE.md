@@ -16,17 +16,17 @@ CLI / PowerShell / future Tauri UI (ordinary user)
                               measured guest agent + untrusted app
 ```
 
-The shared `aiw-orchestrator` application-service crate is the boundary used by both the current CLI and future Tauri backend. The UI will call services directly rather than automate the CLI as a subprocess. The current repository has not implemented this live runner or UI yet.
+The shared `aiw-orchestrator` application-service crate is the boundary used by both the current CLI and future Tauri backend. It currently owns strict file-backed run creation, approval, cancellation, recovery, lifecycle/event journaling, terminal results, and cross-file validation. The UI will call services directly rather than automate the CLI as a subprocess. Provider execution and the UI are not implemented yet.
 
 ## Lifecycles and contracts
 
-The current code has foundational state and evidence contracts. W0/W1 will separate the planned workflows into three explicit lifecycles:
+The current code separates the product into three explicit lifecycles:
 
 - `AssessmentRun`: intake, baseline, isolated candidate, scenarios, canaries, evidence, comparison, and recommendation.
 - `LaunchRun`: replay of a previously validated profile after application, provider, OS, and policy drift checks.
 - `AuthoringRun`: Studio recipe approval, disposable capture, adaptation, package inspection, signing, and final validation.
 
-The `aiw.dev/v0alpha2` project contract will add typed `ApplicationSource` (`msi`, `exe`, `portableDirectory`), `IsolationIntent`, versioned `ExecutionProvider`, typed `Scenario`, immutable hash-bound `RunPlan`, `ApprovalRecord`, append-only `RunEvent`, `RunResult`, `AssessmentReport`, `ValidatedLaunchProfile`, and Studio recipe/receipt types. Existing `v0alpha1` projects remain readable through a non-destructive migrator that writes a new revision. Candidate configuration is typed; namespaced extensions cannot control privileged or executable behavior.
+The `aiw.dev/v0alpha2` project contract implements typed `ApplicationSource` (`msi`, `exe`, `portableDirectory`), `IsolationIntent`, versioned `ExecutionProvider`, typed `Scenario`, immutable hash-bound `RunPlan`, `ApprovalRecord`, append-only `RunEvent`, and `RunResult`. Existing `v0alpha1` projects remain readable through a non-destructive migrator that writes a new revision and requires review before planning. Candidate configuration is typed; namespaced extensions cannot control privileged or executable behavior. `AssessmentReport`, `ValidatedLaunchProfile`, and the complete Studio recipe/receipt family remain later-slice contracts.
 
 Authoritative state is file-based and inspectable: immutable project revisions, one directory per run, hash-bound plan/approval files, append-only event/evidence JSONL, content-addressed artifacts, and terminal receipts/reports. A disposable local index may accelerate the UI but is never authoritative.
 
@@ -40,6 +40,7 @@ Authoritative state is file-based and inspectable: immutable project revisions, 
 - `aiw-golden-probe`: planned in-target token evidence executable contract; it is not yet a guest runner.
 - `aiw-provider-wsb`: hardened `.wsb` rendering, lifecycle planning, and completion-receipt verification; it does not launch a sandbox.
 - `aiw-provider-mxc`: pinned non-executing MXC dry-run/execution plans; it does not run MXC.
+- `aiw-orchestrator`: strict run-plan, approval, journal, cancellation, recovery, result, and on-disk transaction boundary; it does not execute provider actions.
 - `aiw-windows-command-line`: shell-free Windows argument quoting.
 - `aiw-cli`: stable JSON command surface consumed by PowerShell and future UI.
 
