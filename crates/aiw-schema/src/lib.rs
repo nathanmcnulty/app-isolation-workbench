@@ -6,7 +6,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const PROJECT_SCHEMA_VERSION: &str = "aiw.dev/v0alpha1";
+pub const PROJECT_SCHEMA_VERSION: &str = "aiw.dev/v0alpha2";
+pub const LEGACY_PROJECT_SCHEMA_VERSION: &str = "aiw.dev/v0alpha1";
 pub const PROJECT_KIND: &str = "AppIsolationProject";
 pub const MODEL_PACK_SCHEMA_VERSION: &str = "aiw.dev/model-pack/v0alpha1";
 pub const MODEL_PACK_KIND: &str = "AIWModelPack";
@@ -17,7 +18,12 @@ pub struct Project {
     pub schema_version: String,
     pub kind: String,
     pub metadata: ProjectMetadata,
-    pub input: ProjectInput,
+    pub application: ApplicationSource,
+    pub isolation_intent: IsolationIntent,
+    #[serde(default)]
+    pub execution_providers: Vec<ExecutionProvider>,
+    #[serde(default)]
+    pub secrets: Vec<SecretReference>,
     pub candidates: Vec<Candidate>,
     pub scenarios: Vec<Scenario>,
     #[serde(default)]
@@ -40,15 +46,15 @@ pub struct ProjectMetadata {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ProjectInput {
-    pub installer: Installer,
+pub struct LegacyProjectInput {
+    pub installer: LegacyInstaller,
     #[serde(default)]
     pub secrets: Vec<SecretReference>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct Installer {
+pub struct LegacyInstaller {
     pub path: String,
     pub sha256: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -59,12 +65,184 @@ pub struct Installer {
     pub may_reboot: bool,
 }
 
+#[deprecated(
+    note = "v0alpha2 projects use ApplicationSource; parse v0alpha1 with LegacyProjectV0Alpha1"
+)]
+pub type ProjectInput = LegacyProjectInput;
+
+#[deprecated(
+    note = "v0alpha2 projects use ApplicationSource; parse v0alpha1 with LegacyProjectV0Alpha1"
+)]
+pub type Installer = LegacyInstaller;
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SecretReference {
     pub id: String,
     pub provider: String,
     pub reference: String,
+}
+
+/// A source application that can be assessed without accepting arbitrary commands.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
+pub enum ApplicationSource {
+    Msi(FileApplicationSource),
+    Exe(FileApplicationSource),
+    PortableDirectory(PortableDirectoryApplicationSource),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FileApplicationSource {
+    pub path: String,
+    pub sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_signer: Option<String>,
+    #[serde(default)]
+    pub silent_arguments: Vec<String>,
+    #[serde(default)]
+    pub entry_points: Vec<EntryPoint>,
+    #[serde(default)]
+    pub architecture: ApplicationArchitecture,
+    #[serde(default)]
+    pub may_reboot: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_uninstall: Option<UpdateUninstallMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PortableDirectoryApplicationSource {
+    pub path: String,
+    pub content_manifest_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_signer: Option<String>,
+    #[serde(default)]
+    pub entry_points: Vec<EntryPoint>,
+    #[serde(default)]
+    pub architecture: ApplicationArchitecture,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_uninstall: Option<UpdateUninstallMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EntryPoint {
+    pub id: String,
+    pub path: String,
+    #[serde(default)]
+    pub arguments: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum ApplicationArchitecture {
+    X64,
+    X86,
+    Arm64,
+    #[default]
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateUninstallMetadata {
+    #[serde(default)]
+    pub supports_update: bool,
+    #[serde(default)]
+    pub supports_uninstall: bool,
+    #[serde(default)]
+    pub requires_reboot: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields, default)]
+pub struct IsolationIntent {
+    pub runtime_boundary: RuntimeBoundary,
+    pub network: NetworkIntent,
+    pub allow_clipboard: bool,
+    pub allow_host_file_access: bool,
+    pub allow_host_registry_access: bool,
+    pub require_descendant_coverage: bool,
+}
+
+impl Default for IsolationIntent {
+    fn default() -> Self {
+        Self {
+            runtime_boundary: RuntimeBoundary::AppContainer,
+            network: NetworkIntent::Blocked,
+            allow_clipboard: false,
+            allow_host_file_access: false,
+            allow_host_registry_access: false,
+            require_descendant_coverage: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum RuntimeBoundary {
+    MediumIlFullTrust,
+    AppContainer,
+    AppSiloPreview,
+    ProcessContainer,
+    WindowsSandbox,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum NetworkIntent {
+    Blocked,
+    Restricted,
+    Allowed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
+pub enum ExecutionProvider {
+    WindowsSandbox(WindowsSandboxProvider),
+    MxcProcessContainer(MxcProcessContainerProvider),
+    Other(OtherExecutionProvider),
+}
+
+impl ExecutionProvider {
+    #[must_use]
+    pub fn id(&self) -> &str {
+        match self {
+            Self::WindowsSandbox(provider) => &provider.id,
+            Self::MxcProcessContainer(provider) => &provider.id,
+            Self::Other(provider) => &provider.id,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WindowsSandboxProvider {
+    pub id: String,
+    pub version: String,
+    pub executable_sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MxcProcessContainerProvider {
+    pub id: String,
+    pub version: String,
+    pub executable_sha256: String,
+    #[serde(default)]
+    pub experimental: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OtherExecutionProvider {
+    pub id: String,
+    pub version: String,
+    pub executable_sha256: String,
+    #[serde(default)]
+    pub experimental: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -75,8 +253,43 @@ pub struct Candidate {
     pub candidate_type: CandidateType,
     #[serde(default)]
     pub experimental: bool,
+    pub config: CandidateConfiguration,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub config: BTreeMap<String, Value>,
+    pub extensions: BTreeMap<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
+pub enum CandidateConfiguration {
+    Baseline,
+    WindowsSandbox {
+        provider_id: String,
+        network: NetworkIntent,
+    },
+    MxcProcessContainer {
+        provider_id: String,
+        requested_backend: ProcessContainerBackend,
+        network: NetworkIntent,
+    },
+    Msix {
+        delivery_model: DeliveryModel,
+        runtime_boundary: RuntimeBoundary,
+        #[serde(default)]
+        capabilities: Vec<String>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ProcessContainerBackend {
+    AppContainer,
+    BaseContainer,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum DeliveryModel {
+    ContainedMsix,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -103,6 +316,83 @@ pub struct Scenario {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
 pub enum ScenarioStep {
+    Install,
+    Launch {
+        entrypoint: String,
+        #[serde(default)]
+        arguments: Vec<String>,
+    },
+    WaitForProcess {
+        image: String,
+        #[serde(default = "default_wait_timeout_seconds")]
+        timeout_seconds: u32,
+    },
+    WaitForWindow {
+        title: String,
+        #[serde(default = "default_wait_timeout_seconds")]
+        timeout_seconds: u32,
+    },
+    ObserveFile {
+        path: String,
+    },
+    ObserveRegistry {
+        key: String,
+    },
+    OperatorCheckpoint {
+        prompt: String,
+    },
+    GracefulClose,
+    Update,
+    Uninstall,
+    RebootContinuation,
+    ExpectExitCode {
+        value: i32,
+    },
+}
+
+/// The exact v0alpha1 wire contract. It is retained solely for read/migrate flows.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LegacyProjectV0Alpha1 {
+    pub schema_version: String,
+    pub kind: String,
+    pub metadata: ProjectMetadata,
+    pub input: LegacyProjectInput,
+    pub candidates: Vec<LegacyCandidateV0Alpha1>,
+    pub scenarios: Vec<LegacyScenarioV0Alpha1>,
+    #[serde(default)]
+    pub assertions: Assertions,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub analyst: Option<Analyst>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extensions: BTreeMap<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LegacyCandidateV0Alpha1 {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub candidate_type: CandidateType,
+    #[serde(default)]
+    pub experimental: bool,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub config: BTreeMap<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LegacyScenarioV0Alpha1 {
+    pub id: String,
+    pub description: String,
+    #[serde(default = "default_true")]
+    pub required: bool,
+    pub steps: Vec<LegacyScenarioStepV0Alpha1>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
+pub enum LegacyScenarioStepV0Alpha1 {
     Launch {
         entrypoint: String,
         #[serde(default)]
@@ -313,6 +603,137 @@ pub struct ValidationIssue {
     pub message: String,
 }
 
+/// Converts a parsed legacy project into the current schema without touching the source file.
+///
+/// Legacy free-form candidate settings are retained as data under a reserved extension key;
+/// they are never interpreted as executable or privileged configuration by v0alpha2.
+#[must_use]
+pub fn migrate_v0alpha1(legacy: &LegacyProjectV0Alpha1) -> Project {
+    let mut extensions = legacy.extensions.clone();
+    let legacy_input = serde_json::json!({
+        "arguments": legacy.input.installer.arguments,
+        "secrets": legacy.input.secrets,
+    });
+    extensions.insert("aiw.dev/legacy-v0alpha1-input".to_owned(), legacy_input);
+
+    Project {
+        schema_version: PROJECT_SCHEMA_VERSION.to_owned(),
+        kind: legacy.kind.clone(),
+        metadata: legacy.metadata.clone(),
+        application: ApplicationSource::Exe(FileApplicationSource {
+            path: legacy.input.installer.path.clone(),
+            sha256: legacy.input.installer.sha256.clone(),
+            expected_signer: legacy.input.installer.expected_signer.clone(),
+            silent_arguments: legacy
+                .input
+                .installer
+                .arguments
+                .get("silent")
+                .cloned()
+                .unwrap_or_default(),
+            entry_points: Vec::new(),
+            architecture: ApplicationArchitecture::Unknown,
+            may_reboot: legacy.input.installer.may_reboot,
+            update_uninstall: None,
+        }),
+        isolation_intent: IsolationIntent::default(),
+        execution_providers: Vec::new(),
+        secrets: legacy.input.secrets.clone(),
+        candidates: legacy
+            .candidates
+            .iter()
+            .map(migrate_legacy_candidate)
+            .collect(),
+        scenarios: legacy
+            .scenarios
+            .iter()
+            .map(migrate_legacy_scenario)
+            .collect(),
+        assertions: legacy.assertions.clone(),
+        analyst: legacy.analyst.clone(),
+        extensions,
+    }
+}
+
+fn migrate_legacy_candidate(candidate: &LegacyCandidateV0Alpha1) -> Candidate {
+    let config = match candidate.candidate_type {
+        CandidateType::UnpackagedBaseline => CandidateConfiguration::Baseline,
+        CandidateType::IsolationSession => CandidateConfiguration::WindowsSandbox {
+            provider_id: "windows-sandbox".to_owned(),
+            network: NetworkIntent::Blocked,
+        },
+        CandidateType::ProcessContainer => CandidateConfiguration::MxcProcessContainer {
+            provider_id: "mxc-process-container".to_owned(),
+            requested_backend: ProcessContainerBackend::AppContainer,
+            network: NetworkIntent::Blocked,
+        },
+        CandidateType::FullMsix => CandidateConfiguration::Msix {
+            delivery_model: DeliveryModel::ContainedMsix,
+            runtime_boundary: RuntimeBoundary::MediumIlFullTrust,
+            capabilities: Vec::new(),
+        },
+        CandidateType::AppSiloMsix => CandidateConfiguration::Msix {
+            delivery_model: DeliveryModel::ContainedMsix,
+            runtime_boundary: RuntimeBoundary::AppSiloPreview,
+            capabilities: Vec::new(),
+        },
+        CandidateType::ClassicAppContainer => CandidateConfiguration::Msix {
+            delivery_model: DeliveryModel::ContainedMsix,
+            runtime_boundary: RuntimeBoundary::AppContainer,
+            capabilities: Vec::new(),
+        },
+    };
+    let mut extensions = BTreeMap::new();
+    if !candidate.config.is_empty() {
+        extensions.insert(
+            "aiw.dev/legacy-v0alpha1-config".to_owned(),
+            Value::Object(candidate.config.clone().into_iter().collect()),
+        );
+    }
+    Candidate {
+        id: candidate.id.clone(),
+        candidate_type: candidate.candidate_type.clone(),
+        experimental: candidate.experimental,
+        config,
+        extensions,
+    }
+}
+
+fn migrate_legacy_scenario(scenario: &LegacyScenarioV0Alpha1) -> Scenario {
+    Scenario {
+        id: scenario.id.clone(),
+        description: scenario.description.clone(),
+        required: scenario.required,
+        steps: scenario
+            .steps
+            .iter()
+            .map(|step| match step {
+                LegacyScenarioStepV0Alpha1::Launch {
+                    entrypoint,
+                    arguments,
+                } => ScenarioStep::Launch {
+                    entrypoint: entrypoint.clone(),
+                    arguments: arguments.clone(),
+                },
+                LegacyScenarioStepV0Alpha1::ManualCheckpoint { prompt } => {
+                    ScenarioStep::OperatorCheckpoint {
+                        prompt: prompt.clone(),
+                    }
+                }
+                LegacyScenarioStepV0Alpha1::ExpectProcess { image } => {
+                    ScenarioStep::WaitForProcess {
+                        image: image.clone(),
+                        timeout_seconds: default_wait_timeout_seconds(),
+                    }
+                }
+                LegacyScenarioStepV0Alpha1::ExpectExitCode { value } => {
+                    ScenarioStep::ExpectExitCode { value: *value }
+                }
+            })
+            .collect(),
+    }
+}
+
 pub fn validate_project(project: &Project) -> Vec<ValidationIssue> {
     let mut issues = Vec::new();
 
@@ -331,16 +752,19 @@ pub fn validate_project(project: &Project) -> Vec<ValidationIssue> {
         PROJECT_KIND,
     );
     validate_id(&mut issues, "$.metadata.name", &project.metadata.name);
-    validate_safe_relative_path(
+    validate_application_source(&mut issues, &project.application);
+    validate_extensions(&mut issues, "$.extensions", &project.extensions);
+    validate_unique_ids(
         &mut issues,
-        "$.input.installer.path",
-        &project.input.installer.path,
+        "$.executionProviders",
+        project
+            .execution_providers
+            .iter()
+            .map(|provider| provider.id()),
     );
-    validate_sha256(
-        &mut issues,
-        "$.input.installer.sha256",
-        &project.input.installer.sha256,
-    );
+    for (index, provider) in project.execution_providers.iter().enumerate() {
+        validate_execution_provider(&mut issues, index, provider);
+    }
 
     if project.candidates.is_empty() {
         issue(
@@ -364,6 +788,7 @@ pub fn validate_project(project: &Project) -> Vec<ValidationIssue> {
             &format!("$.candidates[{index}].id"),
             &candidate.id,
         );
+        validate_candidate(&mut issues, index, candidate, &project.execution_providers);
     }
 
     if project.scenarios.is_empty() {
@@ -396,6 +821,7 @@ pub fn validate_project(project: &Project) -> Vec<ValidationIssue> {
                 "a scenario must contain at least one step",
             );
         }
+        validate_scenario_steps(&mut issues, index, &scenario.steps);
     }
 
     if let Some(analyst) = &project.analyst
@@ -597,6 +1023,289 @@ pub fn is_sha256(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
+fn validate_application_source(issues: &mut Vec<ValidationIssue>, source: &ApplicationSource) {
+    match source {
+        ApplicationSource::Msi(source) => {
+            validate_file_application_source(issues, "$.application", source)
+        }
+        ApplicationSource::Exe(source) => {
+            validate_file_application_source(issues, "$.application", source)
+        }
+        ApplicationSource::PortableDirectory(source) => {
+            validate_safe_relative_path(issues, "$.application.path", &source.path);
+            validate_sha256(
+                issues,
+                "$.application.contentManifestSha256",
+                &source.content_manifest_sha256,
+            );
+            validate_entry_points(issues, "$.application.entryPoints", &source.entry_points);
+        }
+    }
+}
+
+fn validate_file_application_source(
+    issues: &mut Vec<ValidationIssue>,
+    path: &str,
+    source: &FileApplicationSource,
+) {
+    validate_safe_relative_path(issues, &format!("{path}.path"), &source.path);
+    validate_sha256(issues, &format!("{path}.sha256"), &source.sha256);
+    validate_entry_points(issues, &format!("{path}.entryPoints"), &source.entry_points);
+}
+
+fn validate_entry_points(
+    issues: &mut Vec<ValidationIssue>,
+    path: &str,
+    entry_points: &[EntryPoint],
+) {
+    validate_unique_ids(
+        issues,
+        path,
+        entry_points
+            .iter()
+            .map(|entry_point| entry_point.id.as_str()),
+    );
+    for (index, entry_point) in entry_points.iter().enumerate() {
+        validate_id(issues, &format!("{path}[{index}].id"), &entry_point.id);
+        validate_safe_relative_path(issues, &format!("{path}[{index}].path"), &entry_point.path);
+    }
+}
+
+fn validate_execution_provider(
+    issues: &mut Vec<ValidationIssue>,
+    index: usize,
+    provider: &ExecutionProvider,
+) {
+    let path = format!("$.executionProviders[{index}]");
+    validate_id(issues, &format!("{path}.id"), provider.id());
+    let (version, executable_sha256) = match provider {
+        ExecutionProvider::WindowsSandbox(provider) => {
+            (&provider.version, &provider.executable_sha256)
+        }
+        ExecutionProvider::MxcProcessContainer(provider) => {
+            (&provider.version, &provider.executable_sha256)
+        }
+        ExecutionProvider::Other(provider) => (&provider.version, &provider.executable_sha256),
+    };
+    if version.trim().is_empty() {
+        issue(
+            issues,
+            &format!("{path}.version"),
+            "missingVersion",
+            "providers must be version pinned",
+        );
+    }
+    validate_sha256(
+        issues,
+        &format!("{path}.executableSha256"),
+        executable_sha256,
+    );
+}
+
+fn validate_candidate(
+    issues: &mut Vec<ValidationIssue>,
+    index: usize,
+    candidate: &Candidate,
+    providers: &[ExecutionProvider],
+) {
+    let path = format!("$.candidates[{index}]");
+    validate_extensions(issues, &format!("{path}.extensions"), &candidate.extensions);
+    match &candidate.config {
+        CandidateConfiguration::Baseline => {
+            if candidate.candidate_type != CandidateType::UnpackagedBaseline {
+                issue(
+                    issues,
+                    &format!("{path}.config"),
+                    "candidateConfigurationMismatch",
+                    "baseline configuration requires the unpackagedBaseline candidate type",
+                );
+            }
+        }
+        CandidateConfiguration::WindowsSandbox { provider_id, .. } => {
+            if candidate.candidate_type != CandidateType::IsolationSession {
+                issue(
+                    issues,
+                    &format!("{path}.config"),
+                    "candidateConfigurationMismatch",
+                    "windowsSandbox configuration requires the isolationSession candidate type",
+                );
+            }
+            validate_provider_reference(issues, &path, provider_id, providers, "windowsSandbox");
+        }
+        CandidateConfiguration::MxcProcessContainer { provider_id, .. } => {
+            if candidate.candidate_type != CandidateType::ProcessContainer {
+                issue(
+                    issues,
+                    &format!("{path}.config"),
+                    "candidateConfigurationMismatch",
+                    "mxcProcessContainer configuration requires the processContainer candidate type",
+                );
+            }
+            validate_provider_reference(
+                issues,
+                &path,
+                provider_id,
+                providers,
+                "mxcProcessContainer",
+            );
+        }
+        CandidateConfiguration::Msix {
+            runtime_boundary,
+            capabilities,
+            ..
+        } => {
+            let expected_type = match runtime_boundary {
+                RuntimeBoundary::MediumIlFullTrust => CandidateType::FullMsix,
+                RuntimeBoundary::AppContainer => CandidateType::ClassicAppContainer,
+                RuntimeBoundary::AppSiloPreview => CandidateType::AppSiloMsix,
+                RuntimeBoundary::ProcessContainer | RuntimeBoundary::WindowsSandbox => {
+                    issue(
+                        issues,
+                        &format!("{path}.config.runtimeBoundary"),
+                        "invalidMsixBoundary",
+                        "MSIX candidates may only use full trust, AppContainer, or App Silo runtime boundaries",
+                    );
+                    return;
+                }
+            };
+            if candidate.candidate_type != expected_type {
+                issue(
+                    issues,
+                    &format!("{path}.config"),
+                    "candidateConfigurationMismatch",
+                    "MSIX configuration must match the declared candidate type",
+                );
+            }
+            if capabilities
+                .iter()
+                .any(|capability| capability.trim().is_empty())
+            {
+                issue(
+                    issues,
+                    &format!("{path}.config.capabilities"),
+                    "invalidCapability",
+                    "capabilities must be non-empty identifiers",
+                );
+            }
+        }
+    }
+}
+
+fn validate_provider_reference(
+    issues: &mut Vec<ValidationIssue>,
+    path: &str,
+    provider_id: &str,
+    providers: &[ExecutionProvider],
+    expected_type: &str,
+) {
+    let matching = providers
+        .iter()
+        .find(|provider| provider.id() == provider_id);
+    let valid = matches!(
+        (matching, expected_type),
+        (Some(ExecutionProvider::WindowsSandbox(_)), "windowsSandbox")
+            | (
+                Some(ExecutionProvider::MxcProcessContainer(_)),
+                "mxcProcessContainer"
+            )
+    );
+    if !valid {
+        issue(
+            issues,
+            &format!("{path}.config.providerId"),
+            "invalidProviderReference",
+            "candidate configuration must reference a declared provider of the required type",
+        );
+    }
+}
+
+fn validate_scenario_steps(
+    issues: &mut Vec<ValidationIssue>,
+    index: usize,
+    steps: &[ScenarioStep],
+) {
+    for (step_index, step) in steps.iter().enumerate() {
+        let path = format!("$.scenarios[{index}].steps[{step_index}]");
+        match step {
+            ScenarioStep::Launch { entrypoint, .. } => {
+                validate_id(issues, &format!("{path}.entrypoint"), entrypoint)
+            }
+            ScenarioStep::WaitForProcess {
+                image,
+                timeout_seconds,
+            } => {
+                if image.trim().is_empty() || *timeout_seconds == 0 {
+                    issue(
+                        issues,
+                        &path,
+                        "invalidWait",
+                        "process waits require a non-empty image and bounded timeout",
+                    );
+                }
+            }
+            ScenarioStep::WaitForWindow {
+                title,
+                timeout_seconds,
+            } => {
+                if title.trim().is_empty() || *timeout_seconds == 0 {
+                    issue(
+                        issues,
+                        &path,
+                        "invalidWait",
+                        "window waits require a non-empty title and bounded timeout",
+                    );
+                }
+            }
+            ScenarioStep::ObserveFile { path: file_path } => {
+                validate_safe_relative_path(issues, &format!("{path}.path"), file_path)
+            }
+            ScenarioStep::ObserveRegistry { key } => {
+                if key.trim().is_empty() {
+                    issue(
+                        issues,
+                        &format!("{path}.key"),
+                        "invalidRegistryKey",
+                        "registry observations require a non-empty key",
+                    );
+                }
+            }
+            ScenarioStep::OperatorCheckpoint { prompt } => {
+                if prompt.trim().is_empty() {
+                    issue(
+                        issues,
+                        &format!("{path}.prompt"),
+                        "emptyPrompt",
+                        "operator checkpoints require a prompt",
+                    );
+                }
+            }
+            ScenarioStep::Install
+            | ScenarioStep::GracefulClose
+            | ScenarioStep::Update
+            | ScenarioStep::Uninstall
+            | ScenarioStep::RebootContinuation
+            | ScenarioStep::ExpectExitCode { .. } => {}
+        }
+    }
+}
+
+fn validate_extensions(
+    issues: &mut Vec<ValidationIssue>,
+    path: &str,
+    extensions: &BTreeMap<String, Value>,
+) {
+    for key in extensions.keys() {
+        if !key.starts_with("aiw.dev/") {
+            issue(
+                issues,
+                path,
+                "unnamespacedExtension",
+                "extensions must use an aiw.dev/ namespaced key",
+            );
+        }
+    }
+}
+
 fn validate_unique_ids<'a>(
     issues: &mut Vec<ValidationIssue>,
     path: &str,
@@ -724,6 +1433,10 @@ const fn default_true() -> bool {
     true
 }
 
+const fn default_wait_timeout_seconds() -> u32 {
+    30
+}
+
 fn default_in_process() -> String {
     "inProcess".to_owned()
 }
@@ -742,21 +1455,29 @@ mod tests {
                 owner: "endpoint-engineering".to_owned(),
                 labels: BTreeMap::new(),
             },
-            input: ProjectInput {
-                installer: Installer {
-                    path: "inputs/setup.exe".to_owned(),
-                    sha256: "a".repeat(64),
-                    expected_signer: None,
-                    arguments: BTreeMap::new(),
-                    may_reboot: false,
-                },
-                secrets: Vec::new(),
-            },
+            application: ApplicationSource::Exe(FileApplicationSource {
+                path: "inputs/setup.exe".to_owned(),
+                sha256: "a".repeat(64),
+                expected_signer: None,
+                silent_arguments: Vec::new(),
+                entry_points: vec![EntryPoint {
+                    id: "main".to_owned(),
+                    path: "app/editor.exe".to_owned(),
+                    arguments: Vec::new(),
+                }],
+                architecture: ApplicationArchitecture::X64,
+                may_reboot: false,
+                update_uninstall: None,
+            }),
+            isolation_intent: IsolationIntent::default(),
+            execution_providers: Vec::new(),
+            secrets: Vec::new(),
             candidates: vec![Candidate {
                 id: "baseline".to_owned(),
                 candidate_type: CandidateType::UnpackagedBaseline,
                 experimental: false,
-                config: BTreeMap::new(),
+                config: CandidateConfiguration::Baseline,
+                extensions: BTreeMap::new(),
             }],
             scenarios: vec![Scenario {
                 id: "first-run".to_owned(),
@@ -847,7 +1568,12 @@ mod tests {
             id: "BASELINE".to_owned(),
             candidate_type: CandidateType::ProcessContainer,
             experimental: true,
-            config: BTreeMap::new(),
+            config: CandidateConfiguration::MxcProcessContainer {
+                provider_id: "missing-provider".to_owned(),
+                requested_backend: ProcessContainerBackend::AppContainer,
+                network: NetworkIntent::Blocked,
+            },
+            extensions: BTreeMap::new(),
         });
         let issues = validate_project(&project);
         assert!(issues.iter().any(|issue| issue.code == "duplicateId"));
@@ -873,6 +1599,94 @@ mod tests {
         });
         let issues = validate_project(&project);
         assert_eq!(issues.len(), 4);
+    }
+
+    #[test]
+    fn migration_is_pure_and_preserves_legacy_configuration_as_extension_data() {
+        let legacy = LegacyProjectV0Alpha1 {
+            schema_version: LEGACY_PROJECT_SCHEMA_VERSION.to_owned(),
+            kind: PROJECT_KIND.to_owned(),
+            metadata: minimal_project().metadata,
+            input: LegacyProjectInput {
+                installer: LegacyInstaller {
+                    path: "inputs/setup.exe".to_owned(),
+                    sha256: "a".repeat(64),
+                    expected_signer: Some("Contoso".to_owned()),
+                    arguments: BTreeMap::from([("silent".to_owned(), vec!["/quiet".to_owned()])]),
+                    may_reboot: false,
+                },
+                secrets: Vec::new(),
+            },
+            candidates: vec![LegacyCandidateV0Alpha1 {
+                id: "baseline".to_owned(),
+                candidate_type: CandidateType::UnpackagedBaseline,
+                experimental: false,
+                config: BTreeMap::from([("legacyKey".to_owned(), Value::Bool(true))]),
+            }],
+            scenarios: vec![LegacyScenarioV0Alpha1 {
+                id: "first-run".to_owned(),
+                description: "Launch the app".to_owned(),
+                required: true,
+                steps: vec![LegacyScenarioStepV0Alpha1::ExpectProcess {
+                    image: "editor.exe".to_owned(),
+                }],
+            }],
+            assertions: Assertions::default(),
+            analyst: None,
+            extensions: BTreeMap::from([(
+                "aiw.dev/custom".to_owned(),
+                Value::String("kept".to_owned()),
+            )]),
+        };
+
+        let migrated = migrate_v0alpha1(&legacy);
+        assert_eq!(legacy.schema_version, LEGACY_PROJECT_SCHEMA_VERSION);
+        assert_eq!(migrated.schema_version, PROJECT_SCHEMA_VERSION);
+        assert!(migrated.extensions.contains_key("aiw.dev/custom"));
+        assert!(
+            migrated
+                .extensions
+                .contains_key("aiw.dev/legacy-v0alpha1-input")
+        );
+        assert!(
+            migrated.candidates[0]
+                .extensions
+                .contains_key("aiw.dev/legacy-v0alpha1-config")
+        );
+        assert!(matches!(
+            migrated.scenarios[0].steps[0],
+            ScenarioStep::WaitForProcess { .. }
+        ));
+    }
+
+    #[test]
+    fn candidate_configuration_cannot_reference_an_undeclared_provider() {
+        let mut project = minimal_project();
+        project.candidates[0].config = CandidateConfiguration::WindowsSandbox {
+            provider_id: "windows-sandbox".to_owned(),
+            network: NetworkIntent::Blocked,
+        };
+        let issues = validate_project(&project);
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.code == "invalidProviderReference")
+        );
+    }
+
+    #[test]
+    fn extensions_must_be_namespaced() {
+        let mut project = minimal_project();
+        project.candidates[0].extensions.insert(
+            "exec".to_owned(),
+            Value::String("not interpreted".to_owned()),
+        );
+        let issues = validate_project(&project);
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.code == "unnamespacedExtension")
+        );
     }
 
     #[test]

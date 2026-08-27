@@ -24,101 +24,159 @@ pub use canary::{
     CanaryPlan, CanaryReason, CanaryReport, CanaryVerdict, evaluate_canaries,
 };
 
+/// Lifecycle for an evidence-producing baseline/candidate assessment.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub enum RunState {
+pub enum AssessmentRunState {
     Created,
-    Probed,
-    WorkerPrepared,
-    BaselineCaptured,
-    InstallerExecuted,
-    PackageCaptured,
-    CandidatesBuilt,
-    ScenariosRunning,
-    EvidenceCollected,
+    Planned,
+    Approved,
+    BaselineRunning,
+    CandidateRunning,
+    EvidenceCollecting,
     Compared,
     Finalized,
     Failed,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct RunTransition {
-    pub sequence: u64,
-    pub from: RunState,
-    pub to: RunState,
-    pub reason: String,
+/// Lifecycle for replaying a validated launch profile; it is intentionally separate from assessment.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum LaunchRunState {
+    Created,
+    DriftChecking,
+    Launching,
+    EvidenceCollecting,
+    Finalized,
+    Failed,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct RunStateMachine {
-    state: RunState,
-    transitions: Vec<RunTransition>,
+/// Lifecycle for Studio authoring, from reviewed capture through final-package validation.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AuthoringRunState {
+    Created,
+    Planned,
+    Approved,
+    Capturing,
+    Adapting,
+    Packaging,
+    Inspecting,
+    TestSigning,
+    Validating,
+    FinalSigning,
+    FinalValidating,
+    Finalized,
+    Failed,
 }
 
-impl RunStateMachine {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            state: RunState::Created,
-            transitions: Vec::new(),
+macro_rules! lifecycle_machine {
+    ($state:ident, $transition:ident, $machine:ident, $error:ident, $initial:ident, $can_transition:ident) => {
+        #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        pub struct $transition {
+            pub sequence: u64,
+            pub from: $state,
+            pub to: $state,
+            pub reason: String,
         }
-    }
 
-    #[must_use]
-    pub const fn state(&self) -> RunState {
-        self.state
-    }
-
-    #[must_use]
-    pub fn transitions(&self) -> &[RunTransition] {
-        &self.transitions
-    }
-
-    pub fn transition(
-        &mut self,
-        to: RunState,
-        reason: impl Into<String>,
-    ) -> Result<&RunTransition, StateError> {
-        if !can_transition(self.state, to) {
-            return Err(StateError::IllegalTransition {
-                from: self.state,
-                to,
-            });
+        #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        pub struct $machine {
+            state: $state,
+            transitions: Vec<$transition>,
         }
-        let reason = reason.into();
-        if reason.trim().is_empty() {
-            return Err(StateError::EmptyReason);
+
+        impl $machine {
+            #[must_use]
+            pub fn new() -> Self {
+                Self {
+                    state: $state::$initial,
+                    transitions: Vec::new(),
+                }
+            }
+
+            #[must_use]
+            pub const fn state(&self) -> $state {
+                self.state
+            }
+
+            #[must_use]
+            pub fn transitions(&self) -> &[$transition] {
+                &self.transitions
+            }
+
+            pub fn transition(
+                &mut self,
+                to: $state,
+                reason: impl Into<String>,
+            ) -> Result<&$transition, $error> {
+                if !$can_transition(self.state, to) {
+                    return Err($error::IllegalTransition {
+                        from: self.state,
+                        to,
+                    });
+                }
+                let reason = reason.into();
+                if reason.trim().is_empty() {
+                    return Err($error::EmptyReason);
+                }
+                let transition = $transition {
+                    sequence: self.transitions.len() as u64,
+                    from: self.state,
+                    to,
+                    reason,
+                };
+                self.state = to;
+                self.transitions.push(transition);
+                Ok(self
+                    .transitions
+                    .last()
+                    .expect("transition was just appended"))
+            }
         }
-        let transition = RunTransition {
-            sequence: self.transitions.len() as u64,
-            from: self.state,
-            to,
-            reason,
-        };
-        self.state = to;
-        self.transitions.push(transition);
-        Ok(self
-            .transitions
-            .last()
-            .expect("transition was just appended"))
-    }
+
+        impl Default for $machine {
+            fn default() -> Self {
+                Self::new()
+            }
+        }
+
+        #[derive(Debug, Error, PartialEq, Eq)]
+        pub enum $error {
+            #[error("illegal lifecycle transition from {from:?} to {to:?}")]
+            IllegalTransition { from: $state, to: $state },
+            #[error("lifecycle transitions require a non-empty reason")]
+            EmptyReason,
+        }
+    };
 }
 
-impl Default for RunStateMachine {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[derive(Debug, Error, PartialEq, Eq)]
-pub enum StateError {
-    #[error("illegal run-state transition from {from:?} to {to:?}")]
-    IllegalTransition { from: RunState, to: RunState },
-    #[error("run-state transitions require a non-empty reason")]
-    EmptyReason,
-}
+lifecycle_machine!(
+    AssessmentRunState,
+    AssessmentRunTransition,
+    AssessmentRunStateMachine,
+    AssessmentRunStateError,
+    Created,
+    can_transition_assessment
+);
+lifecycle_machine!(
+    LaunchRunState,
+    LaunchRunTransition,
+    LaunchRunStateMachine,
+    LaunchRunStateError,
+    Created,
+    can_transition_launch
+);
+lifecycle_machine!(
+    AuthoringRunState,
+    AuthoringRunTransition,
+    AuthoringRunStateMachine,
+    AuthoringRunStateError,
+    Created,
+    can_transition_authoring
+);
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -267,22 +325,91 @@ pub fn compare_runs(left: &RunSummary, right: &RunSummary) -> ComparisonReport {
     }
 }
 
-const fn can_transition(from: RunState, to: RunState) -> bool {
-    if matches!(to, RunState::Failed) {
-        return !matches!(from, RunState::Finalized | RunState::Failed);
+const fn can_transition_assessment(from: AssessmentRunState, to: AssessmentRunState) -> bool {
+    if matches!(to, AssessmentRunState::Failed) {
+        return !matches!(
+            from,
+            AssessmentRunState::Finalized | AssessmentRunState::Failed
+        );
     }
     matches!(
         (from, to),
-        (RunState::Created, RunState::Probed)
-            | (RunState::Probed, RunState::WorkerPrepared)
-            | (RunState::WorkerPrepared, RunState::BaselineCaptured)
-            | (RunState::BaselineCaptured, RunState::InstallerExecuted)
-            | (RunState::InstallerExecuted, RunState::PackageCaptured)
-            | (RunState::PackageCaptured, RunState::CandidatesBuilt)
-            | (RunState::CandidatesBuilt, RunState::ScenariosRunning)
-            | (RunState::ScenariosRunning, RunState::EvidenceCollected)
-            | (RunState::EvidenceCollected, RunState::Compared)
-            | (RunState::Compared, RunState::Finalized)
+        (AssessmentRunState::Created, AssessmentRunState::Planned)
+            | (AssessmentRunState::Planned, AssessmentRunState::Approved)
+            | (
+                AssessmentRunState::Approved,
+                AssessmentRunState::BaselineRunning
+            )
+            | (
+                AssessmentRunState::BaselineRunning,
+                AssessmentRunState::CandidateRunning
+            )
+            | (
+                AssessmentRunState::CandidateRunning,
+                AssessmentRunState::EvidenceCollecting
+            )
+            | (
+                AssessmentRunState::EvidenceCollecting,
+                AssessmentRunState::Compared
+            )
+            | (AssessmentRunState::Compared, AssessmentRunState::Finalized)
+    )
+}
+
+const fn can_transition_launch(from: LaunchRunState, to: LaunchRunState) -> bool {
+    if matches!(to, LaunchRunState::Failed) {
+        return !matches!(from, LaunchRunState::Finalized | LaunchRunState::Failed);
+    }
+    matches!(
+        (from, to),
+        (LaunchRunState::Created, LaunchRunState::DriftChecking)
+            | (LaunchRunState::DriftChecking, LaunchRunState::Launching)
+            | (
+                LaunchRunState::Launching,
+                LaunchRunState::EvidenceCollecting
+            )
+            | (
+                LaunchRunState::EvidenceCollecting,
+                LaunchRunState::Finalized
+            )
+    )
+}
+
+const fn can_transition_authoring(from: AuthoringRunState, to: AuthoringRunState) -> bool {
+    if matches!(to, AuthoringRunState::Failed) {
+        return !matches!(
+            from,
+            AuthoringRunState::Finalized | AuthoringRunState::Failed
+        );
+    }
+    matches!(
+        (from, to),
+        (AuthoringRunState::Created, AuthoringRunState::Planned)
+            | (AuthoringRunState::Planned, AuthoringRunState::Approved)
+            | (AuthoringRunState::Approved, AuthoringRunState::Capturing)
+            | (AuthoringRunState::Capturing, AuthoringRunState::Adapting)
+            | (AuthoringRunState::Adapting, AuthoringRunState::Packaging)
+            | (AuthoringRunState::Packaging, AuthoringRunState::Inspecting)
+            | (
+                AuthoringRunState::Inspecting,
+                AuthoringRunState::TestSigning
+            )
+            | (
+                AuthoringRunState::TestSigning,
+                AuthoringRunState::Validating
+            )
+            | (
+                AuthoringRunState::Validating,
+                AuthoringRunState::FinalSigning
+            )
+            | (
+                AuthoringRunState::FinalSigning,
+                AuthoringRunState::FinalValidating
+            )
+            | (
+                AuthoringRunState::FinalValidating,
+                AuthoringRunState::Finalized
+            )
     )
 }
 
@@ -329,27 +456,77 @@ mod tests {
     use super::*;
 
     #[test]
-    fn state_machine_rejects_skipped_steps() {
-        let mut machine = RunStateMachine::new();
+    fn assessment_lifecycle_rejects_skipped_approval() {
+        let mut machine = AssessmentRunStateMachine::new();
         let error = machine
-            .transition(RunState::WorkerPrepared, "skip probe")
+            .transition(AssessmentRunState::Approved, "skip plan")
             .unwrap_err();
         assert_eq!(
             error,
-            StateError::IllegalTransition {
-                from: RunState::Created,
-                to: RunState::WorkerPrepared,
+            AssessmentRunStateError::IllegalTransition {
+                from: AssessmentRunState::Created,
+                to: AssessmentRunState::Approved,
             }
         );
     }
 
     #[test]
-    fn failure_is_terminal() {
-        let mut machine = RunStateMachine::new();
+    fn assessment_failure_is_terminal() {
+        let mut machine = AssessmentRunStateMachine::new();
         machine
-            .transition(RunState::Failed, "worker unavailable")
+            .transition(AssessmentRunState::Failed, "worker unavailable")
             .unwrap();
-        assert!(machine.transition(RunState::Probed, "retry").is_err());
+        assert!(
+            machine
+                .transition(AssessmentRunState::Planned, "retry")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn launch_lifecycle_requires_drift_check_before_launch() {
+        let mut machine = LaunchRunStateMachine::new();
+        assert!(matches!(
+            machine.transition(LaunchRunState::Launching, "skip drift"),
+            Err(LaunchRunStateError::IllegalTransition { .. })
+        ));
+        machine
+            .transition(LaunchRunState::DriftChecking, "validate profile")
+            .unwrap();
+        machine
+            .transition(LaunchRunState::Launching, "profile current")
+            .unwrap();
+    }
+
+    #[test]
+    fn authoring_lifecycle_requires_final_validation_after_final_signing() {
+        let mut machine = AuthoringRunStateMachine::new();
+        for state in [
+            AuthoringRunState::Planned,
+            AuthoringRunState::Approved,
+            AuthoringRunState::Capturing,
+            AuthoringRunState::Adapting,
+            AuthoringRunState::Packaging,
+            AuthoringRunState::Inspecting,
+            AuthoringRunState::TestSigning,
+            AuthoringRunState::Validating,
+            AuthoringRunState::FinalSigning,
+        ] {
+            machine.transition(state, "advance authoring").unwrap();
+        }
+        assert!(matches!(
+            machine.transition(AuthoringRunState::Finalized, "skip final validation"),
+            Err(AuthoringRunStateError::IllegalTransition { .. })
+        ));
+        machine
+            .transition(
+                AuthoringRunState::FinalValidating,
+                "validate signed artifact",
+            )
+            .unwrap();
+        machine
+            .transition(AuthoringRunState::Finalized, "complete")
+            .unwrap();
     }
 
     #[test]
