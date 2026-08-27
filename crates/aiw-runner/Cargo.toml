@@ -1,36 +1,25 @@
 [package]
-name = "aiw-cli"
-description = "Command-line interface for App Isolation Workbench"
+name = "aiw-runner"
+description = "Capability-gated fixed-function Windows Sandbox golden-probe runner"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
-[[bin]]
-name = "aiw"
-path = "src/main.rs"
-
 [dependencies]
-aiw-core.workspace = true
 aiw-evidence.workspace = true
 aiw-orchestrator.workspace = true
 aiw-probe.workspace = true
-aiw-provider-mxc.workspace = true
 aiw-provider-wsb.workspace = true
-aiw-runner.workspace = true
 aiw-schema.workspace = true
-aiw-token.workspace = true
-anyhow.workspace = true
-clap.workspace = true
+hex.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
-
-[dev-dependencies]
-hex.workspace = true
 sha2.workspace = true
+thiserror.workspace = true
 
 [lints]
 workspace = true

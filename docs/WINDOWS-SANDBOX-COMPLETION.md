@@ -2,7 +2,7 @@
 
 The Windows Sandbox CLI can identify, list, and stop a sandbox, but it does not return guest process output. AIW therefore uses the preconfigured writable output mapping as an untrusted one-way return channel. A terminal receipt written last lets the host correlate that output with the exact run it approved without turning `wsb exec` into a command channel.
 
-The current implementation verifies completed output. It does not launch Windows Sandbox, wait for a receipt, freeze writers, or generate the receipt inside the guest.
+The current implementation includes a fixed-function guest agent and a private, fake-provider-tested runner kernel. The kernel models durable start intent, exact-session reconciliation, receipt waiting, stop/absence confirmation, output verification, and crash recovery under one provider lease. Production `aiw run start` and provider recovery remain deliberately unavailable until a native Windows identity/process boundary exists, so this is not evidence of live Windows Sandbox support.
 
 ## Trusted expectation
 
@@ -18,7 +18,7 @@ All paths are portable ASCII relative paths using `/`. There are no globs, comma
 
 ## Guest receipt
 
-The guest writes its allowlisted artifacts using create-new semantics, closes them, and writes `completion.json` last. The receipt repeats the run, sandbox, configuration, request, and agent bindings; reports a terminal status and exit code; and lists every artifact's path, role, media type, byte count, and SHA-256 value. It also declares the root of the JSONL evidence chain.
+The guest atomically publishes its allowlisted artifacts using create-new staging plus same-directory hard links, closes them, and publishes `completion.json` last. Bounded ordinary staging files from an interrupted publication can be removed on a retry; existing final artifacts are never overwritten. The receipt repeats the run, sandbox, configuration, request, and agent bindings; reports a terminal status and exit code; and lists every artifact's path, role, media type, byte count, and SHA-256 value. It also declares the root of the JSONL evidence chain.
 
 `succeeded` requires exit code zero. `failed` requires a nonzero exit code. A structurally valid failed receipt is still useful evidence, so verification succeeds while the returned `successful` field remains false.
 
@@ -44,6 +44,6 @@ The output tree is exact: the receipt and approved artifacts are the only permit
 
 ## Trust limit
 
-This contract provides integrity checking, bounded parsing, and run correlation. It is not remote attestation and cannot prevent an administrator inside the guest from forging internally consistent output. The future executor must add host-side evidence for the resolved Windows Sandbox package and CLI, returned sandbox ID, lifecycle state, effective configuration, process identity/tree, target token, trace completeness, and cleanup.
+This contract and the private kernel provide integrity checking, bounded parsing, run correlation, and fake-tested lifecycle/recovery behavior. They are not remote attestation and cannot prevent an administrator inside the guest from forging internally consistent output. Production enablement still requires host-side evidence for the resolved Windows Sandbox package and CLI, returned sandbox ID, lifecycle state, effective configuration, process identity/tree, target token, trace completeness, and cleanup, followed by live supported-host proof.
 
 Verification also assumes guest writers have stopped. The verifier checks paths before use and measures artifacts twice, but a privileged same-host actor can still race path-based filesystem operations. A production exporter should freeze the worker/output channel and use handle-relative anti-reparse access before copying artifacts into an ACL-restricted staging directory.

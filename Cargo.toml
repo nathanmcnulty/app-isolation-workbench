@@ -5,9 +5,11 @@ members = [
     "crates/aiw-evidence",
     "crates/aiw-orchestrator",
     "crates/aiw-golden-probe",
+    "crates/aiw-guest-agent",
     "crates/aiw-probe",
     "crates/aiw-provider-mxc",
     "crates/aiw-provider-wsb",
+    "crates/aiw-runner",
     "crates/aiw-schema",
     "crates/aiw-token",
     "crates/aiw-windows-command-line",
@@ -29,6 +31,7 @@ aiw-token = { path = "crates/aiw-token" }
 aiw-probe = { path = "crates/aiw-probe" }
 aiw-provider-mxc = { path = "crates/aiw-provider-mxc" }
 aiw-provider-wsb = { path = "crates/aiw-provider-wsb" }
+aiw-runner = { path = "crates/aiw-runner" }
 aiw-schema = { path = "crates/aiw-schema" }
 aiw-windows-command-line = { path = "crates/aiw-windows-command-line" }
 anyhow = "1.0"

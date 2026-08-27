@@ -8,8 +8,10 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+hex.workspace = true
 schemars.workspace = true
 serde.workspace = true
+sha2.workspace = true
 
 [lints]
 workspace = true

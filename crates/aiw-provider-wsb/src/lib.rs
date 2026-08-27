@@ -64,6 +64,11 @@ impl MappingPurpose {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GoldenProbe {
     pub executable: String,
+    /// The immutable fixed-function guest-agent request.  Legacy planner use
+    /// can omit it, but W1 execution requires it and never falls back to an
+    /// arbitrary logon command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request: Option<String>,
     pub output: String,
 }
 
@@ -294,11 +299,14 @@ pub fn render_config(
     }
     xml.push_str("  </MappedFolders>\n");
     xml.push_str("  <LogonCommand>\n");
-    let command = join_arguments([
-        plan.probe.executable.as_str(),
-        "--output",
-        plan.probe.output.as_str(),
-    ]);
+    let command = match &plan.probe.request {
+        Some(request) => join_arguments([plan.probe.executable.as_str(), "--request", request]),
+        None => join_arguments([
+            plan.probe.executable.as_str(),
+            "--output",
+            plan.probe.output.as_str(),
+        ]),
+    };
     let _ = writeln!(xml, "    <Command>{}</Command>", escape_xml(&command));
     xml.push_str("  </LogonCommand>\n");
     xml.push_str("</Configuration>\n");
@@ -469,6 +477,9 @@ pub fn validate_plan(plan: &WindowsSandboxPlan) -> Result<(), WindowsSandboxPlan
         return Err(WindowsSandboxPlanError::InsufficientMemory);
     }
     validate_guest_path("probe.executable", &plan.probe.executable)?;
+    if let Some(request) = &plan.probe.request {
+        validate_guest_path("probe.request", request)?;
+    }
     validate_guest_path("probe.output", &plan.probe.output)?;
     if !plan.probe.executable.to_ascii_lowercase().ends_with(".exe")
         || !plan.probe.output.to_ascii_lowercase().ends_with(".json")
@@ -520,6 +531,13 @@ pub fn validate_plan(plan: &WindowsSandboxPlan) -> Result<(), WindowsSandboxPlan
     }
     if !is_path_below(&plan.probe.executable, &tools[0].sandbox_folder) {
         return Err(WindowsSandboxPlanError::ProbeOutsideTools);
+    }
+    if let Some(request) = &plan.probe.request {
+        if !is_path_below(request, &tools[0].sandbox_folder)
+            || !request.to_ascii_lowercase().ends_with(".json")
+        {
+            return Err(WindowsSandboxPlanError::ProbeOutsideTools);
+        }
     }
     if !is_path_below(&plan.probe.output, &outputs[0].sandbox_folder) {
         return Err(WindowsSandboxPlanError::OutputOutsideMapping);
@@ -624,6 +642,7 @@ mod tests {
             ],
             probe: GoldenProbe {
                 executable: "C:\\AIW\\Tools\\aiw-golden-probe.exe".to_owned(),
+                request: None,
                 output: "C:\\AIW\\Output\\token.json".to_owned(),
             },
             memory_mb: Some(4096),

@@ -124,6 +124,7 @@ try {
         'windows-sandbox-completion-expectation',
         'windows-sandbox-completion-receipt',
         'windows-sandbox-completion-verification',
+        'wsb-session-transaction',
         'mxc-golden-probe-plan'
     )) {
         cargo run --quiet --locked -p aiw-cli -- schema $schemaKind | ConvertFrom-Json | Out-Null

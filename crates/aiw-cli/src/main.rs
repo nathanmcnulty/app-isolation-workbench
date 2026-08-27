@@ -18,12 +18,16 @@ use aiw_orchestrator::{
     AiwError, ApprovalRecord, CancellationRequest, LegacyRunPlanV0Alpha1, RecoveryStatus, RunEvent,
     RunLayout, RunPlan, RunResult, project_revision_hash,
 };
-use aiw_probe::probe_host;
+use aiw_probe::{WindowsSandboxReadiness, assess_windows_sandbox, probe_host};
 use aiw_provider_mxc::{MxcGoldenProbePlan, plan_capability_probe, plan_golden_probe};
 use aiw_provider_wsb::{
     WindowsSandboxCliLifecyclePlan, WindowsSandboxCompletionExpectation,
     WindowsSandboxCompletionReceipt, WindowsSandboxCompletionVerification, WindowsSandboxPlan,
     plan_cli_lifecycle, render_config, validate_host_mappings, verify_completion_receipt,
+};
+use aiw_runner::{
+    RunnerError, SessionTransaction, WsbGoldenProbeExecution, WsbGoldenProbeStart,
+    WsbSessionDisposition, WsbSessionStatus, observe_wsb_session_status,
 };
 use aiw_schema::{
     LEGACY_PROJECT_SCHEMA_VERSION, LegacyProjectV0Alpha1, ModelPack, PROJECT_SCHEMA_VERSION,
@@ -34,7 +38,7 @@ use aiw_token::{TokenEvidence, collect_current_process_token};
 use anyhow::{Context, Result, anyhow, bail};
 use clap::error::ErrorKind;
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use schemars::schema_for;
+use schemars::{JsonSchema, schema_for};
 use serde::de::{MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Number, Value};
@@ -257,6 +261,19 @@ enum RunCommand {
         #[arg(long)]
         requested_at: String,
     },
+    /// Start only an already-approved, hash-bound Windows Sandbox golden probe.
+    /// No arbitrary command, script, policy fragment, or provider verb is accepted.
+    Start {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        run_id: String,
+        /// Exact validated project revision. It is rehashed immediately before start.
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        wsb_plan: PathBuf,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -324,6 +341,7 @@ enum SchemaKind {
     RunResult,
     CancellationRequest,
     RecoveryStatus,
+    RunStatus,
     ErrorEnvelope,
     ModelPack,
     EvidenceRecord,
@@ -336,6 +354,11 @@ enum SchemaKind {
     AnalystReport,
     AnalystReportValidation,
     TokenEvidence,
+    WindowsSandboxReadiness,
+    WsbGoldenProbeStart,
+    WsbGoldenProbeExecution,
+    WsbSessionTransaction,
+    WsbSessionStatus,
     WindowsSandboxPlan,
     WindowsSandboxCliLifecyclePlan,
     WindowsSandboxCompletionExpectation,
@@ -400,6 +423,46 @@ struct ErrorEnvelope {
     remediation: String,
     detail: String,
 }
+
+const RUN_STATUS_SCHEMA_VERSION: &str = "aiw.dev/run-status/v0alpha1";
+
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RunStatusEnvelope {
+    schema_version: String,
+    run_id: String,
+    core: RecoveryStatus,
+    windows_sandbox: WsbSessionStatus,
+}
+
+#[derive(Debug)]
+struct RunOperationUnavailable {
+    code: &'static str,
+    summary: &'static str,
+    run_id: String,
+}
+
+impl std::fmt::Display for RunOperationUnavailable {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.summary)
+    }
+}
+
+impl std::error::Error for RunOperationUnavailable {}
+
+#[derive(Debug)]
+struct WsbSessionStatusInvalid {
+    run_id: String,
+    detail: String,
+}
+
+impl std::fmt::Display for WsbSessionStatusInvalid {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("persisted Windows Sandbox session status is invalid")
+    }
+}
+
+impl std::error::Error for WsbSessionStatusInvalid {}
 
 #[derive(Debug)]
 struct LoadedProject {
@@ -518,7 +581,7 @@ fn run(command: Command) -> Result<()> {
             ProbeCommand::Token => write_json(&collect_current_process_token()?),
         },
         Command::Host(args) => match args.command {
-            HostCommand::Assess => write_json(&probe_host()),
+            HostCommand::Assess => write_json(&assess_windows_sandbox()),
         },
         Command::Run(args) => match args.command {
             RunCommand::Plan {
@@ -553,10 +616,36 @@ fn run(command: Command) -> Result<()> {
             }
             RunCommand::Status { root, run_id } => {
                 let layout = RunLayout::new(&root, run_id)?;
-                write_json(&layout.status()?)
+                let core = layout.status()?;
+                let windows_sandbox = observe_wsb_status(&layout)?;
+                write_json(&RunStatusEnvelope {
+                    schema_version: RUN_STATUS_SCHEMA_VERSION.to_owned(),
+                    run_id: layout.run_id().to_owned(),
+                    core,
+                    windows_sandbox,
+                })
             }
             RunCommand::Recover { root, run_id } => {
                 let layout = RunLayout::new(&root, run_id)?;
+                let provider_status = observe_wsb_status(&layout)?;
+                if provider_status.status == WsbSessionDisposition::RecoveryRequired {
+                    return Err(anyhow!(RunOperationUnavailable {
+                        code: "AIW_WSB_RECOVERY_UNAVAILABLE",
+                        summary: "Windows Sandbox provider cleanup requires recovery, but the native execution boundary is unavailable",
+                        run_id: layout.run_id().to_owned(),
+                    }));
+                }
+                if provider_status.status == WsbSessionDisposition::Clean {
+                    let core = layout.status()?;
+                    if matches!(core, RecoveryStatus::Terminal { .. }) {
+                        return write_json(&core);
+                    }
+                    return Err(anyhow!(RunOperationUnavailable {
+                        code: "AIW_WSB_FINALIZATION_UNAVAILABLE",
+                        summary: "Windows Sandbox cleanup is verified, but run finalization requires the unavailable native execution boundary",
+                        run_id: layout.run_id().to_owned(),
+                    }));
+                }
                 write_json(&layout.recovery_status()?)
             }
             RunCommand::Cancel {
@@ -568,6 +657,19 @@ fn run(command: Command) -> Result<()> {
                 let layout = RunLayout::new(&root, run_id)?;
                 let cancellation = layout.request_cancellation(requested_by, requested_at)?;
                 write_json(&cancellation)
+            }
+            RunCommand::Start {
+                root,
+                run_id,
+                project,
+                wsb_plan,
+            } => {
+                let _ = (root, project, wsb_plan);
+                Err(anyhow!(RunOperationUnavailable {
+                    code: "AIW_WSB_EXECUTION_UNAVAILABLE",
+                    summary: "trusted native Windows Sandbox verification and process execution are unavailable",
+                    run_id,
+                }))
             }
         },
         Command::Provider(args) => match args.command {
@@ -609,6 +711,7 @@ fn run(command: Command) -> Result<()> {
             SchemaKind::RunResult => write_json(&schema_for!(RunResult)),
             SchemaKind::CancellationRequest => write_json(&schema_for!(CancellationRequest)),
             SchemaKind::RecoveryStatus => write_json(&schema_for!(RecoveryStatus)),
+            SchemaKind::RunStatus => write_json(&schema_for!(RunStatusEnvelope)),
             SchemaKind::ErrorEnvelope => write_json(&schema_for!(AiwError)),
             SchemaKind::ModelPack => write_json(&schema_for!(ModelPack)),
             SchemaKind::EvidenceRecord => write_json(&schema_for!(EvidenceRecord)),
@@ -627,6 +730,15 @@ fn run(command: Command) -> Result<()> {
                 write_json(&schema_for!(AnalystReportValidation))
             }
             SchemaKind::TokenEvidence => write_json(&schema_for!(TokenEvidence)),
+            SchemaKind::WindowsSandboxReadiness => {
+                write_json(&schema_for!(WindowsSandboxReadiness))
+            }
+            SchemaKind::WsbGoldenProbeStart => write_json(&schema_for!(WsbGoldenProbeStart)),
+            SchemaKind::WsbGoldenProbeExecution => {
+                write_json(&schema_for!(WsbGoldenProbeExecution))
+            }
+            SchemaKind::WsbSessionTransaction => write_json(&schema_for!(SessionTransaction)),
+            SchemaKind::WsbSessionStatus => write_json(&schema_for!(WsbSessionStatus)),
             SchemaKind::WindowsSandboxPlan => write_json(&schema_for!(WindowsSandboxPlan)),
             SchemaKind::WindowsSandboxCliLifecyclePlan => {
                 write_json(&schema_for!(WindowsSandboxCliLifecyclePlan))
@@ -1075,9 +1187,48 @@ fn generic_error_envelope() -> ErrorEnvelope {
     }
 }
 
+fn observe_wsb_status(layout: &RunLayout) -> Result<WsbSessionStatus> {
+    observe_wsb_session_status(layout).map_err(|error| {
+        anyhow!(WsbSessionStatusInvalid {
+            run_id: layout.run_id().to_owned(),
+            detail: error.to_string().chars().take(512).collect(),
+        })
+    })
+}
+
 fn emit_anyhow_error(error: &anyhow::Error) {
     if let Some(error) = error.downcast_ref::<AiwError>() {
         emit_error(error);
+    } else if let Some(error) = error.downcast_ref::<RunOperationUnavailable>() {
+        emit_error(&ErrorEnvelope {
+            code: error.code.to_owned(),
+            summary: error.summary.to_owned(),
+            stage: "wsbRunner".to_owned(),
+            run_id: Some(error.run_id.clone()),
+            retryable: false,
+            remediation: "Wait for the native Windows Sandbox execution boundary to be implemented; do not bypass provider cleanup state.".to_owned(),
+            detail: "Production Windows Sandbox execution and recovery remain fail-closed.".to_owned(),
+        });
+    } else if let Some(error) = error.downcast_ref::<WsbSessionStatusInvalid>() {
+        emit_error(&ErrorEnvelope {
+            code: "AIW_WSB_SESSION_STATUS_INVALID".to_owned(),
+            summary: "persisted Windows Sandbox session status could not be validated".to_owned(),
+            stage: "wsbSessionStatus".to_owned(),
+            run_id: Some(error.run_id.clone()),
+            retryable: false,
+            remediation: "Do not start or recover the provider. Inspect or restore the run-bound session transaction from trusted evidence.".to_owned(),
+            detail: error.detail.clone(),
+        });
+    } else if let Some(error) = error.downcast_ref::<RunnerError>() {
+        emit_error(&ErrorEnvelope {
+            code: "AIW_WSB_RUNNER_FAILED".to_owned(),
+            summary: "Windows Sandbox golden-probe run was not completed".to_owned(),
+            stage: "wsbRunner".to_owned(),
+            run_id: None,
+            retryable: false,
+            remediation: "Inspect readiness, the approved plan, provider state, and run journal before retrying.".to_owned(),
+            detail: error.to_string().chars().take(512).collect(),
+        });
     } else {
         emit_error(&generic_error_envelope());
     }

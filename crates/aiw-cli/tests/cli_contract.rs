@@ -5,9 +5,14 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use aiw_orchestrator::{PlannedAction, RunLifecycleKind, RunPlan, project_revision_hash};
+use aiw_evidence::canonical_json_bytes;
+use aiw_orchestrator::{
+    ApprovalRecord, PlannedAction, RunLayout, RunLifecycleKind, RunOutcome, RunPlan, RunResult,
+    project_revision_hash,
+};
 use aiw_schema::Project;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(1);
 
@@ -64,6 +69,91 @@ fn write_plan(path: &Path, project_path: &Path, hash: Option<String>) {
     )
     .unwrap();
     fs::write(path, serde_json::to_vec_pretty(&plan).unwrap()).unwrap();
+}
+
+fn write_wsb_plan(path: &Path, project_path: &Path) -> RunPlan {
+    let project: Project = serde_yaml::from_slice(&fs::read(project_path).unwrap()).unwrap();
+    let revision_hash = project_revision_hash(&project).unwrap();
+    let plan = RunPlan::new(
+        "run-one",
+        project.metadata.name,
+        revision_hash,
+        RunLifecycleKind::Assessment,
+        "2026-08-27T00:00:00Z",
+        vec![
+            PlannedAction::AssessHost,
+            PlannedAction::PrepareWorkspace,
+            PlannedAction::ExecuteWindowsSandboxGoldenProbe {
+                sandbox_plan_sha256: "b".repeat(64),
+                provider_sha256: "a".repeat(64),
+                guest_agent_sha256: "c".repeat(64),
+            },
+            PlannedAction::CollectEvidence,
+        ],
+        vec!["starts an approved Windows Sandbox golden probe".to_owned()],
+    )
+    .unwrap();
+    fs::write(path, serde_json::to_vec_pretty(&plan).unwrap()).unwrap();
+    plan
+}
+
+fn write_clean_wsb_transaction(run_dir: &Path, plan: &RunPlan) {
+    let directory = run_dir.join("wsb-session-transaction");
+    fs::create_dir(&directory).unwrap();
+    let plan_hash = plan.hash().unwrap();
+    let zero_hash = "0".repeat(64);
+    let mut previous_hash = zero_hash;
+    let mut transitions = Vec::new();
+    for (index, (state, reason_code)) in [
+        ("startIntent", "approved-start"),
+        ("active", "start-confirmed"),
+        ("cleanupIntent", "cleanup-attempt"),
+        ("cleanupVerified", "cleanup-verified"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let sequence = index + 1;
+        let hash_input = serde_json::json!({
+            "schemaVersion": "aiw.dev/wsb-session-transaction/v0alpha1",
+            "runId": "run-one",
+            "planHash": plan_hash,
+            "projectRevisionHash": plan.project_revision_hash,
+            "providerSha256": "a".repeat(64),
+            "configSha256": "d".repeat(64),
+            "sessionId": "11111111-1111-1111-1111-111111111111",
+            "requestSha256": "e".repeat(64),
+            "sequence": sequence,
+            "state": state,
+            "reasonCode": reason_code,
+            "previousHash": previous_hash,
+        });
+        let hash = hex::encode(Sha256::digest(canonical_json_bytes(&hash_input).unwrap()));
+        transitions.push(serde_json::json!({
+            "sequence": sequence,
+            "state": state,
+            "reasonCode": reason_code,
+            "previousHash": previous_hash,
+            "hash": hash,
+        }));
+        previous_hash = hash;
+        let transaction = serde_json::json!({
+            "schemaVersion": "aiw.dev/wsb-session-transaction/v0alpha1",
+            "runId": "run-one",
+            "planHash": plan_hash,
+            "projectRevisionHash": plan.project_revision_hash,
+            "providerSha256": "a".repeat(64),
+            "configSha256": "d".repeat(64),
+            "sessionId": "11111111-1111-1111-1111-111111111111",
+            "requestSha256": "e".repeat(64),
+            "transitions": transitions,
+        });
+        fs::write(
+            directory.join(format!("{sequence:020}.json")),
+            serde_json::to_vec_pretty(&transaction).unwrap(),
+        )
+        .unwrap();
+    }
 }
 
 #[test]
@@ -245,8 +335,182 @@ fn run_status_is_read_only_for_missing_and_existing_runs() {
         .output()
         .unwrap();
     assert!(status.status.success());
-    assert_eq!(parse_one_json(&status.stdout)["status"], "pendingApproval");
+    let status_json = parse_one_json(&status.stdout);
+    assert_eq!(status_json["schemaVersion"], "aiw.dev/run-status/v0alpha1");
+    assert_eq!(status_json["runId"], "run-one");
+    assert_eq!(status_json["core"]["status"], "pendingApproval");
+    assert_eq!(status_json["windowsSandbox"]["status"], "none");
     assert_eq!(fs::read(journal).unwrap(), before);
+}
+
+#[test]
+fn corrupt_wsb_transaction_errors_preserve_run_identity() {
+    let temp = TempDir::new();
+    let root = temp.path().join("workspace");
+    fs::create_dir(&root).unwrap();
+    let project = repo_path("examples/minimal.aiw.yaml");
+    let plan = temp.path().join("plan.json");
+    write_plan(&plan, &project, None);
+    let created = Command::new(aiw())
+        .args(["run", "plan", "--root"])
+        .arg(&root)
+        .arg("--plan")
+        .arg(&plan)
+        .arg("--project")
+        .arg(&project)
+        .output()
+        .unwrap();
+    assert!(created.status.success());
+    let transaction_dir = root.join("runs/run-one/wsb-session-transaction");
+    fs::create_dir(&transaction_dir).unwrap();
+    fs::write(transaction_dir.join("00000000000000000001.json"), b"{}").unwrap();
+
+    for command in ["status", "recover"] {
+        let output = Command::new(aiw())
+            .args(["run", command, "--root"])
+            .arg(&root)
+            .args(["--run-id", "run-one"])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        let error = parse_one_json(&output.stderr);
+        assert_eq!(error["code"], "AIW_WSB_SESSION_STATUS_INVALID");
+        assert_eq!(error["stage"], "wsbSessionStatus");
+        assert_eq!(error["runId"], "run-one");
+        assert_eq!(error["retryable"], false);
+        assert!(error["detail"].as_str().unwrap().chars().count() <= 512);
+    }
+}
+
+#[test]
+fn clean_wsb_transaction_without_terminal_result_fails_closed() {
+    let temp = TempDir::new();
+    let root = temp.path().join("workspace");
+    fs::create_dir(&root).unwrap();
+    let project = repo_path("examples/minimal.aiw.yaml");
+    let plan_path = temp.path().join("wsb-plan.json");
+    let plan = write_wsb_plan(&plan_path, &project);
+    let created = Command::new(aiw())
+        .args(["run", "plan", "--root"])
+        .arg(&root)
+        .arg("--plan")
+        .arg(&plan_path)
+        .arg("--project")
+        .arg(&project)
+        .output()
+        .unwrap();
+    assert!(created.status.success());
+    let layout = RunLayout::new(&root, "run-one").unwrap();
+    layout
+        .write_approval(&ApprovalRecord::for_plan(&plan, "admin", "now").unwrap())
+        .unwrap();
+    write_clean_wsb_transaction(&layout.run_dir(), &plan);
+    let journal = layout.journal_path();
+    let before = fs::read(&journal).unwrap();
+
+    let status = Command::new(aiw())
+        .args(["run", "status", "--root"])
+        .arg(&root)
+        .args(["--run-id", "run-one"])
+        .output()
+        .unwrap();
+    assert!(status.status.success());
+    let status_json = parse_one_json(&status.stdout);
+    assert_eq!(status_json["core"]["status"], "ready");
+    assert_eq!(status_json["windowsSandbox"]["status"], "clean");
+    assert_eq!(fs::read(&journal).unwrap(), before);
+
+    let recovery = Command::new(aiw())
+        .args(["run", "recover", "--root"])
+        .arg(&root)
+        .args(["--run-id", "run-one"])
+        .output()
+        .unwrap();
+    assert!(!recovery.status.success());
+    assert!(recovery.stdout.is_empty());
+    let error = parse_one_json(&recovery.stderr);
+    assert_eq!(error["code"], "AIW_WSB_FINALIZATION_UNAVAILABLE");
+    assert_eq!(error["stage"], "wsbRunner");
+    assert_eq!(error["runId"], "run-one");
+    assert_eq!(fs::read(journal).unwrap(), before);
+
+    layout
+        .write_result(
+            &RunResult::new(
+                "run-one",
+                RunOutcome::InsufficientEvidence,
+                "now",
+                None,
+                true,
+                "provider cleanup was previously verified",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let terminal = Command::new(aiw())
+        .args(["run", "recover", "--root"])
+        .arg(&root)
+        .args(["--run-id", "run-one"])
+        .output()
+        .unwrap();
+    assert!(terminal.status.success());
+    assert_eq!(parse_one_json(&terminal.stdout)["status"], "terminal");
+}
+
+#[test]
+fn unavailable_start_and_provider_recovery_preserve_run_identity() {
+    let temp = TempDir::new();
+    let root = temp.path().join("workspace");
+    fs::create_dir(&root).unwrap();
+    let start = Command::new(aiw())
+        .args(["run", "start", "--root"])
+        .arg(&root)
+        .args([
+            "--run-id",
+            "exact-run-id",
+            "--project",
+            "unused-project",
+            "--wsb-plan",
+            "unused-plan",
+        ])
+        .output()
+        .unwrap();
+    assert!(!start.status.success());
+    let start_error = parse_one_json(&start.stderr);
+    assert_eq!(start_error["code"], "AIW_WSB_EXECUTION_UNAVAILABLE");
+    assert_eq!(start_error["runId"], "exact-run-id");
+
+    let project = repo_path("examples/minimal.aiw.yaml");
+    let plan = temp.path().join("plan.json");
+    write_plan(&plan, &project, None);
+    let created = Command::new(aiw())
+        .args(["run", "plan", "--root"])
+        .arg(&root)
+        .arg("--plan")
+        .arg(&plan)
+        .arg("--project")
+        .arg(&project)
+        .output()
+        .unwrap();
+    assert!(created.status.success());
+    let run_dir = root.join("runs/run-one");
+    let transaction_dir = run_dir.join("wsb-session-transaction");
+    fs::create_dir(&transaction_dir).unwrap();
+    let journal = run_dir.join("events.jsonl");
+    let before = fs::read(&journal).unwrap();
+    let recovery = Command::new(aiw())
+        .args(["run", "recover", "--root"])
+        .arg(&root)
+        .args(["--run-id", "run-one"])
+        .output()
+        .unwrap();
+    assert!(!recovery.status.success());
+    let recovery_error = parse_one_json(&recovery.stderr);
+    assert_eq!(recovery_error["code"], "AIW_WSB_RECOVERY_UNAVAILABLE");
+    assert_eq!(recovery_error["runId"], "run-one");
+    assert_eq!(fs::read(journal).unwrap(), before);
+    assert!(transaction_dir.is_dir());
 }
 
 #[test]
@@ -282,6 +546,9 @@ fn versioned_project_and_orchestrator_schemas_are_public() {
         ("run-result", "RunResult"),
         ("cancellation-request", "CancellationRequest"),
         ("recovery-status", "RecoveryStatus"),
+        ("run-status", "RunStatusEnvelope"),
+        ("wsb-session-transaction", "SessionTransaction"),
+        ("wsb-session-status", "WsbSessionStatus"),
         ("error-envelope", "AiwError"),
     ] {
         let output = Command::new(aiw()).args(["schema", kind]).output().unwrap();
