@@ -20,9 +20,9 @@ This document describes the boundaries AIW must preserve while evolving from pla
 
 ## Current guarantees and limitations
 
-The current plan-only code provides strict schema/project parsing, safe-relative-path validation, SHA-256 checks, duplicate-ID detection, legal state transitions, canonical integer-only JSON, evidence-chain verification, deterministic allowlisted bundle manifests, conservative denial-canary evaluation, evidence-cited advisory reports, read-only probes, hardened `.wsb` rendering, pinned MXC planning, and run-bound completion-receipt verification.
+The current code provides strict schema/project parsing, safe-relative-path validation, SHA-256 checks, duplicate-ID detection, legal state transitions, canonical integer-only JSON, evidence-chain verification, deterministic allowlisted bundle manifests, conservative denial-canary evaluation, evidence-cited advisory reports, read-only probes, hardened `.wsb` rendering, pinned MXC planning, and run-bound completion-receipt verification. It also contains a fixed-function guest agent and a private fake-provider-tested Windows Sandbox transaction kernel covering durable intent, an exclusive lease, exact-session cleanup, bounded receipt waiting, and recovery.
 
-It does not yet prove live application execution or isolation. Provider plans do not start Windows Sandbox or MXC; no runner, guest agent, desktop UI, package authoring, signing, or live canary provisioner exists. A future receipt is consistency evidence, not authenticity against an administrator inside the guest, so host-side process/token/provider observations remain mandatory.
+It does not yet prove live application execution or isolation. Production `aiw run start` and Windows Sandbox recovery fail closed because no native provider identity/process boundary is implemented; MXC remains planning-only. There is no desktop UI, package authoring, signing, or live canary provisioner. A guest receipt is consistency evidence, not authenticity against an administrator inside the guest, so host-side process/token/provider observations and live supported-host validation remain mandatory.
 
 ## Required controls
 

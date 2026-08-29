@@ -36,13 +36,13 @@ validated plan
     |
     +-- plan shell-free wsb start/list/stop argument vectors
     |
-    +-- future executor records resolved binary/app/OS identity
+    +-- W1 executor revalidates resolved binary/app/OS identity
             and observes only the preconfigured output mapping
 ```
 
 The planner never emits `wsb exec`, `wsb share`, or a `System` execution request. Those operations would bypass or expand the reviewed guest contract. An execution layer must pass the argument vector directly to a process API without a command shell.
 
-The `start` plan carries the same XML object and SHA-256 value returned by the direct renderer. The caller supplies a canonical UUID so the intended session identity is known before launch. The future executor must compare that ID with raw CLI output and `list` state instead of trusting process ancestry or window discovery.
+The `start` plan carries the same XML object and SHA-256 value returned by the direct renderer. The caller supplies a canonical UUID so the intended session identity is known before launch. The W1 executor compares that ID with raw CLI output and `list` state instead of trusting process ancestry or window discovery.
 
 ## Proposed one-shot state machine
 
@@ -67,7 +67,7 @@ The current golden probe writes one create-new JSON artifact into the initially 
 - an administrator inside the guest can tamper with in-guest collection;
 - file appearance does not prove that the intended sandbox ID, config, process tree, or cleanup completed.
 
-AIW now defines and verifies a separate create-new receipt that is written last. It binds the run ID, sandbox ID, rendered-config hash, request hash, agent hash, exact artifact allowlist, each artifact hash and size, terminal status, and evidence-chain root. The host rejects unexpected files and validates every artifact as untrusted input. The schema has no command, URL, policy-fragment, or glob fields. The guest agent does not yet emit this receipt and no executor currently launches the sandbox.
+AIW now defines and verifies a separate create-new receipt that is written last. It binds the run ID, sandbox ID, rendered-config hash, request hash, agent hash, exact artifact allowlist, each artifact hash and size, terminal status, and evidence-chain root. The host rejects unexpected files and validates every artifact as untrusted input. The schema has no command, URL, policy-fragment, or glob fields. The W1 fixed-function guest agent emits this receipt and the capability-gated executor can launch only its hash-bound golden-probe plan.
 
 This is integrity and correlation, not a claim that a guest administrator cannot forge evidence. Higher-confidence assessment requires host-side observations and cross-checks: exact target token evidence, process-tree/ETW evidence, effective backend, boundary canaries, and lifecycle state from outside the guest.
 
@@ -83,4 +83,12 @@ The Store app can update separately from Windows, and the runtime UI can change 
 - evidence cannot show the requested hardened settings were effective;
 - the user changes runtime sharing/redirection in a way the collector cannot observe and bind.
 
-The present code plans lifecycle calls and verifies terminal output but intentionally does not execute them. It makes the boundary reviewable without implying that Windows Sandbox was launched or that an isolation result was proven.
+## W1 implementation status
+
+The W1 execution kernel is an implementation candidate only. Production `aiw run start` is deliberately unavailable until a narrowly audited `aiw-windows-platform` boundary can establish Windows build/edition/CPU/feature readiness, Store package identity, Appx alias resolution, held executable identity, WinVerifyTrust, and a leased `wsb --version`/empty `wsb list --raw` observation. It does not trust PATH, environment variables, PowerShell, DISM, registry utilities, or an arbitrary `--provider` path as execution authority.
+
+The private test kernel now persists strict, hash-linked `aiw.dev/wsb-session-transaction/v0alpha1` snapshots before and after provider mutation. The transaction binds the approved run, plan and project revision, provider and configuration hashes, preselected session UUID, and guest request hash. Its only legal lifecycle is `startIntent -> active|unknown -> cleanupIntent -> cleanupVerified|recoveryRequired`; recovery may retry cleanup but may stop only that bound UUID. An injected global lease is held from the initial empty-session observation through exact-session absence and final receipt verification. Required recovery deliberately prevents a terminal run result until cleanup is independently reconciled. These local hashes provide integrity and correlation, not administrator-proof attestation.
+
+`aiw host assess` is read-only and deliberately reports unverified virtualization, feature, signature, and session state as blockers. It will not enable Windows Sandbox, install a provider, request elevation, or turn a discoverable binary into a support claim. The current development host has no live W1 proof, so a successful containment claim is intentionally impossible here.
+
+The guest agent accepts only the fixed golden-token request and emits `token.json`, `evidence.jsonl`, and a create-new `completion.json` receipt written last. Guest output is untrusted until host receipt validation and is still insufficient evidence for containment: target/descendant tokens, host trace coverage, effective backend, canaries, and cleanup evidence remain W2/W3 gates.

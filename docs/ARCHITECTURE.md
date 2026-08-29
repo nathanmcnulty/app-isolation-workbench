@@ -16,7 +16,7 @@ CLI / PowerShell / future Tauri UI (ordinary user)
                               measured guest agent + untrusted app
 ```
 
-The shared `aiw-orchestrator` application-service crate is the boundary used by both the current CLI and future Tauri backend. It currently owns strict file-backed run creation, approval, cancellation, recovery, lifecycle/event journaling, terminal results, and cross-file validation. The UI will call services directly rather than automate the CLI as a subprocess. Provider execution and the UI are not implemented yet.
+The shared `aiw-orchestrator` application-service crate is the boundary used by both the current CLI and future Tauri backend. It currently owns strict file-backed run creation, approval, cancellation, recovery, lifecycle/event journaling, terminal results, and cross-file validation. The UI will call services directly rather than automate the CLI as a subprocess. The W1 Windows Sandbox golden-probe executor is capability-gated; UI work and all other provider execution remain unimplemented.
 
 ## Lifecycles and contracts
 
@@ -35,10 +35,12 @@ Authoritative state is file-based and inspectable: immutable project revisions, 
 - `aiw-schema`: strict project/model-pack parsing and semantic validation.
 - `aiw-evidence`: canonical JSON, append-only hash chains, and deterministic allowlisted assessment manifests.
 - `aiw-core`: legal state transitions, deterministic comparison, conservative canary evaluation, and advisory-report validation.
-- `aiw-probe`: read-only environment and executable discovery; it does not execute discovered tools.
+- `aiw-probe`: read-only environment and executable discovery, plus a conservative Windows Sandbox readiness report. Unknown feature, virtualization, signature, or session state is a blocker; it never enables a feature or elevates.
 - `aiw-token`: audited native Win32 target-token evidence boundary.
 - `aiw-golden-probe`: planned in-target token evidence executable contract; it is not yet a guest runner.
-- `aiw-provider-wsb`: hardened `.wsb` rendering, lifecycle planning, and completion-receipt verification; it does not launch a sandbox.
+- `aiw-provider-wsb`: hardened `.wsb` rendering, lifecycle planning, and completion-receipt verification.
+- `aiw-guest-agent`: fixed-function token collector for the W1 golden probe. Its strict request has no command, script, URL, glob, or policy fields and it writes the completion receipt last.
+- `aiw-runner`: fail-closed W1 lifecycle kernel with a strict persisted provider-session transaction, exact-ID recovery, and private test-only process and lease seams. Production provider invocation remains unavailable pending the native Windows platform boundary. A verified W1 receipt remains insufficient evidence for a containment verdict.
 - `aiw-provider-mxc`: pinned non-executing MXC dry-run/execution plans; it does not run MXC.
 - `aiw-orchestrator`: strict run-plan, approval, journal, cancellation, recovery, result, and on-disk transaction boundary; it does not execute provider actions.
 - `aiw-windows-command-line`: shell-free Windows argument quoting.

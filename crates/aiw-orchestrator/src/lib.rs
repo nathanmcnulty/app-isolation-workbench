@@ -57,9 +57,21 @@ pub enum RunLifecycleKind {
 pub enum PlannedAction {
     AssessHost,
     PrepareWorkspace,
-    ExecuteScenario { scenario_id: String },
+    ExecuteScenario {
+        scenario_id: String,
+    },
+    /// The only W1 mutating provider action. All executable and configuration
+    /// identities are SHA-256 bound into the immutable, separately approved
+    /// run plan; callers cannot attach arbitrary commands or policy text.
+    ExecuteWindowsSandboxGoldenProbe {
+        sandbox_plan_sha256: String,
+        provider_sha256: String,
+        guest_agent_sha256: String,
+    },
     CollectEvidence,
-    LaunchValidatedProfile { profile_id: String },
+    LaunchValidatedProfile {
+        profile_id: String,
+    },
     AuthorPackage,
     InspectPackage,
     SignPackage,
@@ -1255,6 +1267,26 @@ fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
             PlannedAction::ExecuteScenario { scenario_id } => {
                 validate_id("scenarioId", scenario_id)?
             }
+            PlannedAction::ExecuteWindowsSandboxGoldenProbe {
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+            } => {
+                for (field, hash) in [
+                    ("sandboxPlanSha256", sandbox_plan_sha256),
+                    ("providerSha256", provider_sha256),
+                    ("guestAgentSha256", guest_agent_sha256),
+                ] {
+                    if !is_hash(hash) {
+                        return Err(run_error(
+                            "AIW_PLAN_BINDING_INVALID",
+                            "Windows Sandbox golden-probe binding is invalid",
+                            field,
+                            &plan.run_id,
+                        ));
+                    }
+                }
+            }
             PlannedAction::LaunchValidatedProfile { profile_id } => {
                 validate_id("profileId", profile_id)?
             }
@@ -1282,6 +1314,7 @@ fn action_allowed(lifecycle: RunLifecycleKind, action: &PlannedAction) -> bool {
             PlannedAction::AssessHost
                 | PlannedAction::PrepareWorkspace
                 | PlannedAction::ExecuteScenario { .. }
+                | PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. }
                 | PlannedAction::CollectEvidence
         ),
         RunLifecycleKind::Launch => matches!(
@@ -1313,6 +1346,13 @@ fn validate_approval(value: &ApprovalRecord, plan: &RunPlan) -> Result<(), AiwEr
     }
     validate_text("approvedBy", &value.approved_by, &plan.run_id)?;
     validate_text("approvedAt", &value.approved_at, &plan.run_id)
+}
+
+fn is_hash(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
 }
 
 fn validate_event(value: &RunEvent) -> Result<(), AiwError> {

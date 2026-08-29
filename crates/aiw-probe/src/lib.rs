@@ -2,14 +2,18 @@
 
 use std::collections::BTreeMap;
 use std::env;
+use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 const PROBED_TOOLS: &[&str] = &[
     "wsl.exe",
     "WindowsSandbox.exe",
+    "wsb.exe",
     "MakeAppx.exe",
     "SignTool.exe",
     "wpr.exe",
@@ -29,6 +33,42 @@ pub struct HostProbe {
     pub environment_architecture: BTreeMap<String, String>,
     pub discovered_tools: BTreeMap<String, Option<String>>,
     pub limitations: Vec<String>,
+}
+
+/// A deliberately conservative state.  `Unknown` and `NeedsElevation` are
+/// blockers for provider execution; neither is interpreted as support.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ReadinessState {
+    Available,
+    Missing,
+    Unknown,
+    NeedsElevation,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BinaryIdentity {
+    pub canonical_path: String,
+    pub sha256: String,
+    pub size_bytes: u64,
+    pub version: Option<String>,
+    pub signature_status: ReadinessState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WindowsSandboxReadiness {
+    pub schema_version: String,
+    pub supported: bool,
+    pub os_build: Option<u32>,
+    pub process_architecture: String,
+    pub virtualization: ReadinessState,
+    pub sandbox_feature: ReadinessState,
+    pub provider_binary: Option<BinaryIdentity>,
+    pub current_sessions: ReadinessState,
+    pub blockers: Vec<String>,
+    pub warnings: Vec<String>,
 }
 
 #[must_use]
@@ -59,6 +99,72 @@ pub fn probe_host() -> HostProbe {
                 .to_owned(),
         ],
     }
+}
+
+/// Read-only readiness assessment for the W1 Windows Sandbox provider.
+///
+/// It intentionally does not enable features, start providers, elevate, or
+/// infer success from a binary being discoverable.  Feature and session state
+/// require provider-specific inspection and remain a hard blocker until a
+/// later approved capability probe can establish them.
+#[must_use]
+pub fn assess_windows_sandbox() -> WindowsSandboxReadiness {
+    WindowsSandboxReadiness {
+        schema_version: "aiw.dev/windows-sandbox-readiness/v0alpha1".to_owned(),
+        supported: false,
+        os_build: None,
+        process_architecture: "unknown".to_owned(),
+        virtualization: ReadinessState::Unknown,
+        sandbox_feature: ReadinessState::Unknown,
+        provider_binary: None,
+        current_sessions: ReadinessState::Unknown,
+        blockers: vec!["AIW_WINDOWS_PLATFORM_UNAVAILABLE: trusted Windows platform/package verification is not implemented.".to_owned()],
+        warnings: vec![
+            "This assessment is read-only and never trusts PATH, environment state, shell utilities, or App Execution Aliases as execution authority."
+                .to_owned(),
+            "A discovered provider binary is not a signature, feature, session, or containment proof."
+                .to_owned(),
+        ],
+    }
+}
+
+#[must_use]
+pub fn measure_binary_identity(path: &Path) -> Option<BinaryIdentity> {
+    let canonical_path = path.canonicalize().ok()?;
+    let metadata = canonical_path.metadata().ok()?;
+    if !metadata.is_file() {
+        return None;
+    }
+    let mut file = File::open(&canonical_path).ok()?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let count = file.read(&mut buffer).ok()?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    let canonical_display = canonical_path.to_string_lossy();
+    let canonical_path = canonical_display
+        .strip_prefix("\\\\?\\")
+        .unwrap_or(&canonical_display)
+        .to_owned();
+    Some(BinaryIdentity {
+        canonical_path,
+        sha256: hex::encode(digest.finalize()),
+        size_bytes: metadata.len(),
+        version: None,
+        signature_status: ReadinessState::Unknown,
+    })
+}
+
+/// Production package/alias/handle/signature verification belongs to the
+/// future native platform boundary. This placeholder deliberately grants no
+/// executable identity authority.
+#[must_use]
+pub fn measure_windows_sandbox_binary(_path: &Path) -> Option<BinaryIdentity> {
+    None
 }
 
 #[must_use]
@@ -111,5 +217,17 @@ mod tests {
     #[test]
     fn impossible_tool_is_not_found() {
         assert!(find_command("aiw-this-tool-does-not-exist-8f197f32").is_none());
+    }
+
+    #[test]
+    fn sandbox_assessment_fails_closed_when_capabilities_are_unverified() {
+        let readiness = assess_windows_sandbox();
+        assert_eq!(
+            readiness.schema_version,
+            "aiw.dev/windows-sandbox-readiness/v0alpha1"
+        );
+        assert!(!readiness.supported);
+        assert!(!readiness.blockers.is_empty());
+        assert_eq!(readiness.sandbox_feature, ReadinessState::Unknown);
     }
 }

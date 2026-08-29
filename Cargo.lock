@@ -12,14 +12,17 @@ dependencies = [
  "aiw-probe",
  "aiw-provider-mxc",
  "aiw-provider-wsb",
+ "aiw-runner",
  "aiw-schema",
  "aiw-token",
  "anyhow",
  "clap",
+ "hex",
  "schemars",
  "serde",
  "serde_json",
  "serde_yaml_ng",
+ "sha2",
 ]
 
 [[package]]
@@ -58,6 +61,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "aiw-guest-agent"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "aiw-evidence",
+ "aiw-provider-wsb",
+ "aiw-token",
+ "anyhow",
+ "clap",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "aiw-orchestrator"
 version = "0.1.0-alpha.1"
 dependencies = [
@@ -75,8 +93,10 @@ dependencies = [
 name = "aiw-probe"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "hex",
  "schemars",
  "serde",
+ "sha2",
 ]
 
 [[package]]
@@ -104,6 +124,24 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
+name = "aiw-runner"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "aiw-evidence",
+ "aiw-orchestrator",
+ "aiw-probe",
+ "aiw-provider-wsb",
+ "aiw-schema",
+ "hex",
+ "schemars",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
  "sha2",
  "thiserror",
 ]
