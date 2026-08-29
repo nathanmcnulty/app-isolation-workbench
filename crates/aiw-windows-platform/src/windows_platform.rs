@@ -11,26 +11,33 @@ use aiw_probe::{
     BinaryIdentity, CatalogTrustIdentity, ReadinessState, WindowsFileIdentity,
     WindowsPackageIdentity, WindowsSandboxCliProtocol, WindowsSandboxReadiness,
 };
-use serde_json::Value;
+use aiw_provider_wsb::RenderedWindowsSandboxConfig;
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
+use thiserror::Error;
 use windows::ApplicationModel::{Package, PackageSignatureKind};
 use windows::Management::Deployment::PackageManager;
 use windows::System::ProcessorArchitecture;
 use windows::System::Profile::AnalyticsInfo;
+use windows::Win32::Foundation::{CloseHandle, WAIT_ABANDONED, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::Foundation::{HANDLE, HWND};
 use windows::Win32::Security::Cryptography::Catalog::{
     CryptCATAdminAcquireContext2, CryptCATAdminCalcHashFromFileHandle2, CryptCATAdminReleaseContext,
 };
 use windows::Win32::Security::WinTrust::{
     WINTRUST_ACTION_GENERIC_VERIFY_V2, WINTRUST_CATALOG_INFO, WINTRUST_DATA, WINTRUST_DATA_0,
-    WTD_CACHE_ONLY_URL_RETRIEVAL, WTD_CHOICE_CATALOG, WTD_REVOKE_NONE, WTD_STATEACTION_CLOSE,
+    WINTRUST_DATA_PROVIDER_FLAGS, WTD_CACHE_ONLY_URL_RETRIEVAL, WTD_CHOICE_CATALOG,
+    WTD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT, WTD_REVOKE_WHOLECHAIN, WTD_STATEACTION_CLOSE,
     WTD_STATEACTION_VERIFY, WTD_UI_NONE, WTD_UICONTEXT_EXECUTE, WinVerifyTrust,
 };
 use windows::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, FILE_NAME_NORMALIZED, FILE_SHARE_READ, GetFileInformationByHandle,
     GetFinalPathNameByHandleW,
 };
-use windows::Win32::System::Threading::{IsProcessorFeaturePresent, PF_VIRT_FIRMWARE_ENABLED};
+use windows::Win32::System::Threading::{
+    CreateMutexW, IsProcessorFeaturePresent, PF_VIRT_FIRMWARE_ENABLED, ReleaseMutex,
+    WaitForSingleObject,
+};
 use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize, RoUninitialize};
 use windows::core::{HSTRING, PCWSTR, w};
 
@@ -43,6 +50,235 @@ const PROVIDER_FILE: &str = "wsb.exe";
 const CATALOG_FILE: &str = "AppxMetadata\\CodeIntegrity.cat";
 const SUPPORTED_CLI_VERSION: &str = "0.8.107.0";
 const STREAM_LIMIT: u64 = 64 * 1024;
+const PROVIDER_MUTEX_NAME: PCWSTR = w!("Local\\AIW.WindowsSandbox.Provider.v1");
+
+#[derive(Debug, Error)]
+pub enum WindowsSandboxInvocationError {
+    #[error("Windows Sandbox provider authority could not be established: {0}")]
+    Authority(String),
+    #[error("Windows Sandbox provider lease is held by another operation")]
+    LeaseUnavailable,
+    #[error("Windows Sandbox CLI invocation failed: {0}")]
+    Process(String),
+    #[error("Windows Sandbox CLI protocol response was rejected: {0}")]
+    Protocol(String),
+    #[error("Windows Sandbox configuration was rejected: {0}")]
+    Configuration(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanonicalSandboxId(String);
+
+impl CanonicalSandboxId {
+    pub fn parse(value: &str) -> Result<Self, WindowsSandboxInvocationError> {
+        if !is_uuid(value) || value.bytes().any(|byte| byte.is_ascii_uppercase()) {
+            return Err(WindowsSandboxInvocationError::Protocol(
+                "sandbox ID must be a lowercase canonical UUID".to_owned(),
+            ));
+        }
+        Ok(Self(value.to_owned()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+pub struct BoundedWsbConfig {
+    xml: String,
+    sha256: String,
+}
+
+impl BoundedWsbConfig {
+    pub fn from_rendered(
+        rendered: &RenderedWindowsSandboxConfig,
+    ) -> Result<Self, WindowsSandboxInvocationError> {
+        if rendered.xml.is_empty() || rendered.xml.encode_utf16().count() > 24_000 {
+            return Err(WindowsSandboxInvocationError::Configuration(
+                "rendered configuration exceeds the fixed command-line budget".to_owned(),
+            ));
+        }
+        let sha256 = hex::encode(Sha256::digest(rendered.xml.as_bytes()));
+        if sha256 != rendered.sha256 {
+            return Err(WindowsSandboxInvocationError::Configuration(
+                "rendered configuration hash is inconsistent".to_owned(),
+            ));
+        }
+        Ok(Self {
+            xml: rendered.xml.clone(),
+            sha256,
+        })
+    }
+
+    pub fn sha256(&self) -> &str {
+        &self.sha256
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WsbListObservation {
+    pub session_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WsbStartObservation {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WsbStopObservation {
+    pub session_id: String,
+    pub output_was_empty: bool,
+}
+
+pub struct WindowsSandboxExecutionLease {
+    readiness: WindowsSandboxReadiness,
+    provider_path: PathBuf,
+    _provider: File,
+    _catalog: File,
+    _mutex: ProviderMutex,
+}
+
+impl WindowsSandboxExecutionLease {
+    pub fn readiness(&self) -> &WindowsSandboxReadiness {
+        &self.readiness
+    }
+
+    pub fn list(&self) -> Result<WsbListObservation, WindowsSandboxInvocationError> {
+        let output = invoke_read_only(
+            &self.provider_path,
+            &["list", "--raw"],
+            Duration::from_secs(15),
+        )
+        .map_err(WindowsSandboxInvocationError::Process)?;
+        let session_ids = parse_list_ids_v0_8_107_0(&output.stdout)
+            .map_err(WindowsSandboxInvocationError::Protocol)?;
+        Ok(WsbListObservation { session_ids })
+    }
+
+    pub fn start(
+        &self,
+        sandbox_id: &CanonicalSandboxId,
+        config: BoundedWsbConfig,
+    ) -> Result<WsbStartObservation, WindowsSandboxInvocationError> {
+        let output = invoke_read_only(
+            &self.provider_path,
+            &[
+                "start",
+                "--raw",
+                "--id",
+                sandbox_id.as_str(),
+                "--config",
+                &config.xml,
+            ],
+            Duration::from_secs(120),
+        )
+        .map_err(WindowsSandboxInvocationError::Process)?;
+        let observed = parse_start_v0_8_107_0(&output.stdout)
+            .map_err(WindowsSandboxInvocationError::Protocol)?;
+        if observed != sandbox_id.as_str() {
+            return Err(WindowsSandboxInvocationError::Protocol(
+                "start response did not match the preselected sandbox ID".to_owned(),
+            ));
+        }
+        Ok(WsbStartObservation {
+            session_id: observed,
+        })
+    }
+
+    pub fn stop(
+        &self,
+        sandbox_id: &CanonicalSandboxId,
+    ) -> Result<WsbStopObservation, WindowsSandboxInvocationError> {
+        let output = invoke_read_only(
+            &self.provider_path,
+            &["stop", "--raw", "--id", sandbox_id.as_str()],
+            Duration::from_secs(120),
+        )
+        .map_err(WindowsSandboxInvocationError::Process)?;
+        if !output.stdout.is_empty() {
+            return Err(WindowsSandboxInvocationError::Protocol(
+                "stop response must be empty for CLI protocol 0.8.107.0".to_owned(),
+            ));
+        }
+        Ok(WsbStopObservation {
+            session_id: sandbox_id.as_str().to_owned(),
+            output_was_empty: true,
+        })
+    }
+}
+
+pub fn acquire_windows_sandbox(
+    expected_provider_sha256: &str,
+) -> Result<WindowsSandboxExecutionLease, WindowsSandboxInvocationError> {
+    if expected_provider_sha256.len() != 64
+        || !expected_provider_sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err(WindowsSandboxInvocationError::Authority(
+            "expected provider SHA-256 must be lowercase hexadecimal".to_owned(),
+        ));
+    }
+    let mutex = ProviderMutex::try_acquire()?;
+    let readiness = assess_windows_sandbox();
+    if !readiness.supported {
+        return Err(WindowsSandboxInvocationError::Authority(
+            readiness.blockers.join(" "),
+        ));
+    }
+    let provider_identity = readiness.provider_binary.as_ref().ok_or_else(|| {
+        WindowsSandboxInvocationError::Authority("provider identity is absent".to_owned())
+    })?;
+    if provider_identity.sha256 != expected_provider_sha256 {
+        return Err(WindowsSandboxInvocationError::Authority(
+            "provider hash differs from the approved identity".to_owned(),
+        ));
+    }
+    let provider_path = PathBuf::from(&provider_identity.canonical_path);
+    let mut provider =
+        open_held_file(&provider_path).map_err(WindowsSandboxInvocationError::Authority)?;
+    let observed_path = final_path(&provider).map_err(WindowsSandboxInvocationError::Authority)?;
+    let (observed_hash, observed_size) =
+        hash_held_file(&mut provider).map_err(WindowsSandboxInvocationError::Authority)?;
+    if !observed_path
+        .to_string_lossy()
+        .eq_ignore_ascii_case(&provider_identity.canonical_path)
+        || observed_hash != provider_identity.sha256
+        || observed_size != provider_identity.size_bytes
+    {
+        return Err(WindowsSandboxInvocationError::Authority(
+            "held provider identity drifted after readiness".to_owned(),
+        ));
+    }
+    let trust = readiness.catalog_trust.as_ref().ok_or_else(|| {
+        WindowsSandboxInvocationError::Authority("catalog trust identity is absent".to_owned())
+    })?;
+    let catalog_path = PathBuf::from(&trust.catalog_path);
+    let catalog =
+        open_held_file(&catalog_path).map_err(WindowsSandboxInvocationError::Authority)?;
+    let package = readiness.provider_package.as_ref().ok_or_else(|| {
+        WindowsSandboxInvocationError::Authority("package identity is absent".to_owned())
+    })?;
+    let verified = verify_catalog_member(
+        &provider,
+        &observed_path,
+        &PathBuf::from(&package.install_location).join(CATALOG_FILE),
+    )
+    .map_err(WindowsSandboxInvocationError::Authority)?;
+    if verified != *trust {
+        return Err(WindowsSandboxInvocationError::Authority(
+            "catalog trust identity drifted after readiness".to_owned(),
+        ));
+    }
+    Ok(WindowsSandboxExecutionLease {
+        readiness,
+        provider_path: observed_path,
+        _provider: provider,
+        _catalog: catalog,
+        _mutex: mutex,
+    })
+}
 
 pub(super) fn assess_windows_sandbox() -> WindowsSandboxReadiness {
     let mut result = empty_readiness();
@@ -97,6 +333,7 @@ fn empty_readiness() -> WindowsSandboxReadiness {
         cli_protocol: None,
         app_execution_alias: None,
         current_sessions: ReadinessState::Unknown,
+        current_session_ids: Vec::new(),
         blockers: Vec::new(),
         warnings: vec![
             "Assessment is read-only and never enables Windows features, installs providers, or uses PATH/App Execution Aliases as execution authority.".to_owned(),
@@ -130,6 +367,7 @@ fn assess_provider(result: &mut WindowsSandboxReadiness) -> Result<(), String> {
 
     result.sandbox_feature = ReadinessState::Available;
     result.current_sessions = ReadinessState::Available;
+    result.current_session_ids = parse_list_ids_v0_8_107_0(&list_output.stdout)?;
     if session_count > 0 {
         result.warnings.push(format!(
             "AIW_WSB_EXISTING_SESSIONS: observed {session_count} current Windows Sandbox session(s); execution preflight must require an empty provider."
@@ -274,8 +512,11 @@ fn file_identity(file: &File, final_path: &Path) -> Result<WindowsFileIdentity, 
         .map_err(|error| format!("AIW_WSB_PROVIDER_FILE_ID_FAILED: {error}"))?;
     Ok(WindowsFileIdentity {
         final_path: final_path.to_string_lossy().into_owned(),
-        volume_serial_number: info.dwVolumeSerialNumber,
-        file_id: (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
+        volume_serial_number: format!("{:08x}", info.dwVolumeSerialNumber),
+        file_id: format!(
+            "{:016x}",
+            (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow)
+        ),
     })
 }
 
@@ -305,6 +546,16 @@ fn verify_catalog_member(
 ) -> Result<CatalogTrustIdentity, String> {
     let mut catalog = open_held_file(catalog_path)?;
     let catalog_final_path = final_path(&catalog)?;
+    if !catalog_final_path
+        .to_string_lossy()
+        .eq_ignore_ascii_case(&catalog_path.to_string_lossy())
+    {
+        return Err(
+            "AIW_WSB_CATALOG_PATH_REJECTED: opened catalog is not the exact package catalog child."
+                .to_owned(),
+        );
+    }
+    let catalog_file_identity = file_identity(&catalog, &catalog_final_path)?;
     let (catalog_sha256, _) = hash_held_file(&mut catalog)?;
     let mut context = 0_isize;
     unsafe { CryptCATAdminAcquireContext2(&mut context, None, w!("SHA256"), None, None) }
@@ -357,13 +608,15 @@ fn verify_catalog_member(
     let mut trust_data = WINTRUST_DATA {
         cbStruct: size_of::<WINTRUST_DATA>() as u32,
         dwUIChoice: WTD_UI_NONE,
-        fdwRevocationChecks: WTD_REVOKE_NONE,
+        fdwRevocationChecks: WTD_REVOKE_WHOLECHAIN,
         dwUnionChoice: WTD_CHOICE_CATALOG,
         Anonymous: WINTRUST_DATA_0 {
             pCatalog: &mut catalog_info,
         },
         dwStateAction: WTD_STATEACTION_VERIFY,
-        dwProvFlags: WTD_CACHE_ONLY_URL_RETRIEVAL,
+        dwProvFlags: WINTRUST_DATA_PROVIDER_FLAGS(
+            WTD_CACHE_ONLY_URL_RETRIEVAL.0 | WTD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT.0,
+        ),
         dwUIContext: WTD_UICONTEXT_EXECUTE,
         ..Default::default()
     };
@@ -393,7 +646,9 @@ fn verify_catalog_member(
         trust_kind: "catalogMember".to_owned(),
         catalog_path: catalog_final_path.to_string_lossy().into_owned(),
         catalog_sha256,
+        catalog_file_identity,
         member_tag,
+        trust_policy: "cacheOnlyWholeChainExcludeRoot".to_owned(),
         verification_status: ReadinessState::Available,
     })
 }
@@ -417,11 +672,37 @@ fn invoke_read_only(
     arguments: &[&str],
     timeout: Duration,
 ) -> Result<ProcessOutput, String> {
-    let mut child = Command::new(path)
+    let provider_root = path.parent().ok_or_else(|| {
+        "AIW_WSB_CLI_PATH_REJECTED: provider has no protected package parent.".to_owned()
+    })?;
+    let mut command = Command::new(path);
+    command
         .args(arguments)
+        .current_dir(provider_root)
+        .env_clear()
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    for name in [
+        "APPDATA",
+        "LOCALAPPDATA",
+        "ProgramData",
+        "SystemRoot",
+        "TEMP",
+        "TMP",
+        "USERDOMAIN",
+        "USERNAME",
+        "USERPROFILE",
+        "WINDIR",
+    ] {
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, value);
+        }
+    }
+    if let Some(system_root) = std::env::var_os("SystemRoot") {
+        command.env("PATH", PathBuf::from(system_root).join("System32"));
+    }
+    let mut child = command
         .spawn()
         .map_err(|error| format!("AIW_WSB_CLI_START_FAILED: {error}"))?;
     let stdout = child
@@ -505,38 +786,58 @@ fn parse_version(bytes: &[u8]) -> Result<String, String> {
 }
 
 fn parse_list_v0_8_107_0(bytes: &[u8]) -> Result<usize, String> {
-    let value: Value = serde_json::from_slice(bytes)
+    parse_list_ids_v0_8_107_0(bytes).map(|sessions| sessions.len())
+}
+
+fn parse_list_ids_v0_8_107_0(bytes: &[u8]) -> Result<Vec<String>, String> {
+    let value: CliListResponse = serde_json::from_slice(bytes)
         .map_err(|error| format!("AIW_WSB_CLI_LIST_INVALID: {error}"))?;
-    let object = value
-        .as_object()
-        .ok_or_else(|| "AIW_WSB_CLI_LIST_INVALID: root must be an object.".to_owned())?;
-    if object.len() != 1 || !object.contains_key("WindowsSandboxEnvironments") {
-        return Err(
-            "AIW_WSB_CLI_LIST_SCHEMA_DRIFT: expected only WindowsSandboxEnvironments.".to_owned(),
-        );
+    if value.environments.len() > 16 {
+        return Err("AIW_WSB_CLI_LIST_INVALID: session count exceeded 16.".to_owned());
     }
-    let sessions = object["WindowsSandboxEnvironments"]
-        .as_array()
-        .ok_or_else(|| {
-            "AIW_WSB_CLI_LIST_INVALID: WindowsSandboxEnvironments must be an array.".to_owned()
-        })?;
-    for session in sessions {
-        let session = session
-            .as_object()
-            .ok_or_else(|| "AIW_WSB_CLI_LIST_INVALID: session must be an object.".to_owned())?;
-        if session.len() != 1 || !session.contains_key("Id") {
-            return Err(
-                "AIW_WSB_CLI_LIST_SCHEMA_DRIFT: expected only Id in each session.".to_owned(),
-            );
-        }
-        let id = session["Id"]
-            .as_str()
-            .ok_or_else(|| "AIW_WSB_CLI_LIST_INVALID: Id must be a string.".to_owned())?;
-        if !is_uuid(id) {
+    let mut ids = Vec::with_capacity(value.environments.len());
+    for session in value.environments {
+        let id = session.id;
+        if !is_uuid(&id) {
             return Err("AIW_WSB_CLI_LIST_INVALID: Id was not a canonical UUID.".to_owned());
         }
+        let id = id.to_ascii_lowercase();
+        if ids.contains(&id) {
+            return Err("AIW_WSB_CLI_LIST_INVALID: duplicate Id was observed.".to_owned());
+        }
+        ids.push(id);
     }
-    Ok(sessions.len())
+    Ok(ids)
+}
+
+fn parse_start_v0_8_107_0(bytes: &[u8]) -> Result<String, String> {
+    let value: CliStartResponse = serde_json::from_slice(bytes)
+        .map_err(|error| format!("AIW_WSB_CLI_START_INVALID: {error}"))?;
+    if !is_uuid(&value.id) {
+        return Err("AIW_WSB_CLI_START_INVALID: Id was not a canonical UUID.".to_owned());
+    }
+    Ok(value.id.to_ascii_lowercase())
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CliStartResponse {
+    #[serde(rename = "Id")]
+    id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CliListResponse {
+    #[serde(rename = "WindowsSandboxEnvironments")]
+    environments: Vec<CliSessionResponse>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CliSessionResponse {
+    #[serde(rename = "Id")]
+    id: String,
 }
 
 fn is_uuid(value: &str) -> bool {
@@ -590,9 +891,40 @@ impl Drop for WinRtApartment {
     }
 }
 
+struct ProviderMutex(HANDLE);
+
+impl ProviderMutex {
+    fn try_acquire() -> Result<Self, WindowsSandboxInvocationError> {
+        let handle = unsafe { CreateMutexW(None, false, PROVIDER_MUTEX_NAME) }
+            .map_err(|error| WindowsSandboxInvocationError::Authority(error.to_string()))?;
+        let wait = unsafe { WaitForSingleObject(handle, 0) };
+        if wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED {
+            Ok(Self(handle))
+        } else {
+            let _ = unsafe { CloseHandle(handle) };
+            if wait == WAIT_TIMEOUT {
+                Err(WindowsSandboxInvocationError::LeaseUnavailable)
+            } else {
+                Err(WindowsSandboxInvocationError::Authority(format!(
+                    "provider mutex wait failed with status 0x{:08x}",
+                    wait.0
+                )))
+            }
+        }
+    }
+}
+
+impl Drop for ProviderMutex {
+    fn drop(&mut self) {
+        let _ = unsafe { ReleaseMutex(self.0) };
+        let _ = unsafe { CloseHandle(self.0) };
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn version_parser_is_exact() {
@@ -612,5 +944,73 @@ mod tests {
         assert!(
             parse_list_v0_8_107_0(br#"{"WindowsSandboxEnvironments":[],"extra":true}"#).is_err()
         );
+        assert!(
+            parse_list_v0_8_107_0(
+                br#"{"WindowsSandboxEnvironments":[],"WindowsSandboxEnvironments":[]}"#
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn start_parser_matches_captured_protocol_and_rejects_drift() {
+        let id = "1782a9f3-4e9a-45ac-abe1-afc8ecf78666";
+        assert_eq!(
+            parse_start_v0_8_107_0(format!(r#"{{"Id":"{id}"}}"#).as_bytes()).unwrap(),
+            id
+        );
+        assert!(parse_start_v0_8_107_0(format!(r#"{{"id":"{id}"}}"#).as_bytes()).is_err());
+        assert!(
+            parse_start_v0_8_107_0(format!(r#"{{"Id":"{id}","extra":true}}"#).as_bytes()).is_err()
+        );
+        assert!(
+            parse_start_v0_8_107_0(format!(r#"{{"Id":"{id}","Id":"{id}"}}"#).as_bytes()).is_err()
+        );
+    }
+
+    #[test]
+    #[ignore = "starts a real Windows Sandbox session; set AIW_RUN_LIVE_WSB_TEST=1 and run explicitly"]
+    fn live_exact_session_lifecycle() {
+        if std::env::var("AIW_RUN_LIVE_WSB_TEST").as_deref() != Ok("1") {
+            return;
+        }
+        let readiness = assess_windows_sandbox();
+        assert!(readiness.supported, "{:?}", readiness.blockers);
+        let provider_hash = readiness.provider_binary.unwrap().sha256;
+        let lease = acquire_windows_sandbox(&provider_hash).unwrap();
+        assert!(lease.list().unwrap().session_ids.is_empty());
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let digest = hex::encode(Sha256::digest(
+            format!("aiw-live-wsb:{}:{nonce}", std::process::id()).as_bytes(),
+        ));
+        let id = CanonicalSandboxId::parse(&format!(
+            "{}-{}-{}-{}-{}",
+            &digest[0..8],
+            &digest[8..12],
+            &digest[12..16],
+            &digest[16..20],
+            &digest[20..32]
+        ))
+        .unwrap();
+        let xml = "<Configuration></Configuration>".to_owned();
+        let config = BoundedWsbConfig {
+            sha256: hex::encode(Sha256::digest(xml.as_bytes())),
+            xml,
+        };
+        let started = lease.start(&id, config);
+        let observed_after_start = lease.list();
+        let stop = lease.stop(&id);
+        let observed_after_stop = lease.list();
+        assert_eq!(started.unwrap().session_id, id.as_str());
+        assert_eq!(
+            observed_after_start.unwrap().session_ids,
+            vec![id.as_str().to_owned()]
+        );
+        assert!(stop.unwrap().output_was_empty);
+        assert!(observed_after_stop.unwrap().session_ids.is_empty());
     }
 }

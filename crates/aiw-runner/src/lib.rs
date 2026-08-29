@@ -41,10 +41,10 @@ use thiserror::Error;
 
 use session::{SessionBinding, TransactionStore};
 
-const MAX_PROVIDER_OUTPUT: usize = 1024 * 1024;
+const MAX_PROVIDER_OUTPUT: usize = 64 * 1024;
 const MAX_PROVIDER_ERROR: usize = 64 * 1024;
 const GUEST_REQUEST_SCHEMA: &str = "aiw.dev/wsb-golden-probe-request/v0alpha1";
-const READINESS_SCHEMA: &str = "aiw.dev/windows-sandbox-readiness/v0alpha1";
+const READINESS_SCHEMA: &str = "aiw.dev/windows-sandbox-readiness/v0alpha2";
 pub const WSB_SESSION_STATUS_SCHEMA_VERSION: &str = "aiw.dev/wsb-session-status/v0alpha1";
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -488,13 +488,7 @@ fn run_attempt(
         &context.lifecycle,
         request.timeout_seconds,
     )?;
-    if current.len() != 1
-        || current[0].id != context.binding.session_id
-        || !matches!(
-            current[0].state,
-            ProviderSessionState::Running | ProviderSessionState::Starting
-        )
-    {
+    if current.len() != 1 || current[0].id != context.binding.session_id {
         return Err(RunnerError::SessionConflict);
     }
     if cancellation_requested(layout)? {
@@ -699,13 +693,8 @@ fn stop_exact_session(
     if result.stdout.len() > MAX_PROVIDER_OUTPUT {
         return Err(RunnerError::ProviderOutputTooLarge);
     }
-    let response: StopResponse =
-        serde_json::from_slice(&result.stdout).map_err(|_| RunnerError::ProviderJson)?;
-    if !valid_uuid(&response.id)
-        || !response.id.eq_ignore_ascii_case(expected_id)
-        || !response.stopped
-    {
-        return Err(RunnerError::SessionConflict);
+    if !result.stdout.is_empty() || !result.stderr.is_empty() || !valid_uuid(expected_id) {
+        return Err(RunnerError::ProviderJson);
     }
     Ok(())
 }
@@ -996,16 +985,34 @@ fn validate_start(
             "provider identity, signature, or basename is not approved".to_owned(),
         ));
     }
-    #[cfg(not(test))]
-    let fresh =
-        aiw_probe::measure_windows_sandbox_binary(Path::new(&request.provider.canonical_path))
-            .ok_or_else(|| {
-                RunnerError::Readiness("provider could not be freshly remeasured".to_owned())
-            })?;
-    #[cfg(not(test))]
-    if fresh != *reported || fresh != request.provider {
+    let package = readiness.provider_package.as_ref();
+    let catalog = readiness.catalog_trust.as_ref();
+    let file = readiness.provider_file_identity.as_ref();
+    let protocol = readiness.cli_protocol.as_ref();
+    if package.is_none_or(|value| {
+        value.name != "MicrosoftWindows.WindowsSandbox"
+            || value.family_name != "MicrosoftWindows.WindowsSandbox_cw5n1h2txyewy"
+            || value.publisher_id != "cw5n1h2txyewy"
+            || value.architecture != "x64"
+            || value.signature_kind != "store"
+            || !value.status_ok
+    }) || catalog.is_none_or(|value| {
+        value.trust_kind != "catalogMember"
+            || value.verification_status != aiw_probe::ReadinessState::Available
+            || value.trust_policy != "cacheOnlyWholeChainExcludeRoot"
+    }) || file.is_none_or(|value| {
+        !value
+            .final_path
+            .eq_ignore_ascii_case(&reported.canonical_path)
+            || value.volume_serial_number.len() != 8
+            || value.file_id.len() != 16
+    }) || protocol.is_none_or(|value| {
+        value.cli_version != "0.8.107.0"
+            || value.protocol != "windowsSandboxCli/v0.8.107.0"
+            || value.list_schema != "WindowsSandboxEnvironments/Id"
+    }) {
         return Err(RunnerError::Readiness(
-            "fresh provider identity differs from readiness evidence".to_owned(),
+            "required package, catalog, file, or CLI protocol authority is absent".to_owned(),
         ));
     }
     Ok(())
@@ -1175,39 +1182,26 @@ fn ensure_success(result: &ProcessResult) -> Result<(), RunnerError> {
     }
 }
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 struct StartResponse {
+    #[serde(rename = "Id")]
     id: String,
 }
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct StopResponse {
-    id: String,
-    stopped: bool,
-}
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 struct ListResponse {
+    #[serde(rename = "WindowsSandboxEnvironments")]
     sessions: Vec<SessionResponse>,
 }
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 struct SessionResponse {
+    #[serde(rename = "Id")]
     id: String,
-    state: ProviderSessionState,
-}
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-enum ProviderSessionState {
-    Running,
-    Starting,
-    Stopping,
-    Stopped,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ObservedSession {
     id: String,
-    state: ProviderSessionState,
 }
 fn valid_uuid(value: &str) -> bool {
     value.len() == 36
@@ -1252,10 +1246,7 @@ fn sessions(bytes: ProcessResult) -> Result<Vec<ObservedSession>, RunnerError> {
             if !ids.insert(id.clone()) {
                 return Err(RunnerError::ProviderJson);
             }
-            Ok(ObservedSession {
-                id,
-                state: session.state,
-            })
+            Ok(ObservedSession { id })
         })
         .collect()
 }
@@ -1409,19 +1400,23 @@ mod tests {
     }
 
     fn empty_list() -> Result<ProcessResult, RunnerError> {
-        successful_json(serde_json::json!({"sessions":[]}))
+        successful_json(serde_json::json!({"WindowsSandboxEnvironments":[]}))
     }
 
-    fn list_with(id: &str, state: &str) -> Result<ProcessResult, RunnerError> {
-        successful_json(serde_json::json!({"sessions":[{"id":id,"state":state}]}))
+    fn list_with(id: &str, _state: &str) -> Result<ProcessResult, RunnerError> {
+        successful_json(serde_json::json!({"WindowsSandboxEnvironments":[{"Id":id}]}))
     }
 
     fn started(id: &str) -> Result<ProcessResult, RunnerError> {
-        successful_json(serde_json::json!({"id":id}))
+        successful_json(serde_json::json!({"Id":id}))
     }
 
-    fn stopped(id: &str) -> Result<ProcessResult, RunnerError> {
-        successful_json(serde_json::json!({"id":id,"stopped":true}))
+    fn stopped(_id: &str) -> Result<ProcessResult, RunnerError> {
+        Ok(ProcessResult {
+            exit_code: 0,
+            stdout: vec![],
+            stderr: vec![],
+        })
     }
     fn identity(path: &Path) -> BinaryIdentity {
         aiw_probe::measure_binary_identity(path).unwrap()
@@ -1514,12 +1509,55 @@ mod tests {
             virtualization: aiw_probe::ReadinessState::Available,
             sandbox_feature: aiw_probe::ReadinessState::Available,
             provider_binary: Some(start.provider.clone()),
-            provider_package: None,
-            catalog_trust: None,
-            provider_file_identity: None,
-            cli_protocol: None,
+            provider_package: Some(aiw_probe::WindowsPackageIdentity {
+                name: "MicrosoftWindows.WindowsSandbox".to_owned(),
+                full_name: "MicrosoftWindows.WindowsSandbox_0.8.107.0_x64__cw5n1h2txyewy"
+                    .to_owned(),
+                family_name: "MicrosoftWindows.WindowsSandbox_cw5n1h2txyewy".to_owned(),
+                publisher:
+                    "CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"
+                        .to_owned(),
+                publisher_id: "cw5n1h2txyewy".to_owned(),
+                version: "0.8.107.0".to_owned(),
+                architecture: "x64".to_owned(),
+                signature_kind: "store".to_owned(),
+                status_ok: true,
+                install_location: root.0.to_string_lossy().into_owned(),
+            }),
+            catalog_trust: Some(aiw_probe::CatalogTrustIdentity {
+                trust_kind: "catalogMember".to_owned(),
+                catalog_path: root
+                    .0
+                    .join("CodeIntegrity.cat")
+                    .to_string_lossy()
+                    .into_owned(),
+                catalog_sha256: "0".repeat(64),
+                catalog_file_identity: aiw_probe::WindowsFileIdentity {
+                    final_path: root
+                        .0
+                        .join("CodeIntegrity.cat")
+                        .to_string_lossy()
+                        .into_owned(),
+                    volume_serial_number: "00000000".to_owned(),
+                    file_id: "0000000000000000".to_owned(),
+                },
+                member_tag: "0".repeat(64),
+                trust_policy: "cacheOnlyWholeChainExcludeRoot".to_owned(),
+                verification_status: aiw_probe::ReadinessState::Available,
+            }),
+            provider_file_identity: Some(aiw_probe::WindowsFileIdentity {
+                final_path: start.provider.canonical_path.clone(),
+                volume_serial_number: "00000000".to_owned(),
+                file_id: "0000000000000000".to_owned(),
+            }),
+            cli_protocol: Some(aiw_probe::WindowsSandboxCliProtocol {
+                cli_version: "0.8.107.0".to_owned(),
+                protocol: "windowsSandboxCli/v0.8.107.0".to_owned(),
+                list_schema: "WindowsSandboxEnvironments/Id".to_owned(),
+            }),
             app_execution_alias: None,
             current_sessions: aiw_probe::ReadinessState::Available,
+            current_session_ids: vec![],
             blockers: vec![],
             warnings: vec![],
         };
@@ -1733,8 +1771,8 @@ mod tests {
 
         let id = deterministic_sandbox_id("w1-run");
         let duplicate = sessions(
-            successful_json(serde_json::json!({"sessions":[
-                {"id":id,"state":"running"},{"id":id,"state":"running"}
+            successful_json(serde_json::json!({"WindowsSandboxEnvironments":[
+                {"Id":id},{"Id":id}
             ]}))
             .unwrap(),
         );
@@ -1747,7 +1785,7 @@ mod tests {
         let id = deterministic_sandbox_id("w1-run");
         let fake = FakeProcess::new(vec![
             empty_list(),
-            successful_json(serde_json::json!({"id":id,"unexpected":true})),
+            successful_json(serde_json::json!({"Id":id,"unexpected":true})),
             list_with(&id, "running"),
             stopped(&id),
             empty_list(),

@@ -3,11 +3,24 @@
 use aiw_probe::WindowsSandboxReadiness;
 
 #[cfg(windows)]
+pub use windows_platform::{
+    BoundedWsbConfig, CanonicalSandboxId, WindowsSandboxExecutionLease,
+    WindowsSandboxInvocationError, WsbListObservation, WsbStartObservation, WsbStopObservation,
+};
+
+#[cfg(windows)]
 mod windows_platform;
 
 #[must_use]
 pub fn assess_windows_sandbox() -> WindowsSandboxReadiness {
     platform::assess_windows_sandbox()
+}
+
+#[cfg(windows)]
+pub fn acquire_windows_sandbox(
+    expected_provider_sha256: &str,
+) -> Result<WindowsSandboxExecutionLease, WindowsSandboxInvocationError> {
+    windows_platform::acquire_windows_sandbox(expected_provider_sha256)
 }
 
 #[cfg(windows)]
@@ -34,6 +47,7 @@ mod platform {
             cli_protocol: None,
             app_execution_alias: None,
             current_sessions: ReadinessState::Unknown,
+            current_session_ids: Vec::new(),
             blockers: vec![
                 "AIW_WINDOWS_REQUIRED: Windows Sandbox assessment is only available on Windows."
                     .to_owned(),

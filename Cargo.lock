@@ -175,7 +175,9 @@ name = "aiw-windows-platform"
 version = "0.1.0-alpha.1"
 dependencies = [
  "aiw-probe",
+ "aiw-provider-wsb",
  "hex",
+ "serde",
  "serde_json",
  "sha2",
  "thiserror",
