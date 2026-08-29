@@ -1,0 +1,29 @@
+name: Bug report
+description: Report a reproducible defect or incorrect evidence/result.
+title: ""
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "Do not attach installers, customer evidence, credentials, private keys, or unredacted traces. Use the private security channel for vulnerabilities."
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+      description: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Include safe commands, project/schema version, OS build, and provider version.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Validation evidence
+      description: Include error codes, run IDs, and redacted evidence references.
+    validations:
+      required: true

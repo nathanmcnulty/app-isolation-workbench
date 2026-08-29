@@ -1,11 +1,61 @@
 [CmdletBinding()]
-param()
+param(
+    [switch]$GovernanceOnly
+)
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Push-Location -LiteralPath $repoRoot
 
 try {
+    $requiredFiles = @(
+        'LICENSE',
+        'CONTRIBUTING.md',
+        'SECURITY.md',
+        'README.md',
+        'docs\ARCHITECTURE.md',
+        'docs\ROADMAP.md',
+        'docs\THREAT-MODEL.md',
+        '.github\workflows\ci.yml',
+        '.github\pull_request_template.md',
+        '.github\ISSUE_TEMPLATE\config.yml'
+    )
+
+    foreach ($relativePath in $requiredFiles) {
+        $path = Join-Path $repoRoot $relativePath
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "Required governance file is missing: $relativePath"
+        }
+    }
+
+    $licenseText = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'LICENSE')
+    if ($licenseText -notmatch 'Apache License' -or $licenseText -notmatch 'Version 2\.0') {
+        throw 'LICENSE does not contain the Apache License 2.0 text'
+    }
+
+    $readmeText = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'README.md')
+    foreach ($requiredTerm in @('Workbench', 'Studio', 'v0alpha2', 'Windows 11 24H2', 'no automatic telemetry')) {
+        if ($readmeText -notmatch [regex]::Escape($requiredTerm)) {
+            throw "README.md is missing required product-status term: $requiredTerm"
+        }
+    }
+
+    $workflowText = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.github\workflows\ci.yml')
+    $workflowUses = [regex]::Matches($workflowText, '(?m)^\s*uses:\s*([^\s#]+)')
+    foreach ($match in $workflowUses) {
+        if ($match.Groups[1].Value -notmatch '@[0-9a-fA-F]{40}$') {
+            throw "GitHub Actions must be pinned to a full commit SHA: $($match.Groups[1].Value)"
+        }
+    }
+    if ($workflowUses.Count -eq 0) {
+        throw 'CI workflow does not declare an action'
+    }
+
+    if ($GovernanceOnly) {
+        Write-Host 'AIW governance-file verification passed.' -ForegroundColor Green
+        return
+    }
+
     cargo fmt --all --check
     if ($LASTEXITCODE -ne 0) { throw 'cargo fmt failed' }
 

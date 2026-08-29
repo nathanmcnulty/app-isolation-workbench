@@ -37,14 +37,69 @@ function Invoke-Aiw {
     )
 
     $executable = Resolve-AiwCli -CliPath $CliPath
-    $output = & $executable @ArgumentList
-    if ($LASTEXITCODE -ne 0) {
-        throw "AIW CLI failed with exit code $LASTEXITCODE."
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $executable
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in $ArgumentList) {
+        [void] $startInfo.ArgumentList.Add($argument)
+    }
+
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    try {
+        if (-not $process.Start()) {
+            throw 'The AIW CLI process could not be started.'
+        }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        $exitCode = $process.ExitCode
+    }
+    finally {
+        $process.Dispose()
+    }
+
+    if ($exitCode -ne 0) {
+        try {
+            $envelope = $stderr | ConvertFrom-Json -Depth 20 -ErrorAction Stop
+        }
+        catch {
+            $envelope = [pscustomobject] @{
+                code = 'AIW_CLI_PROTOCOL_ERROR'
+                summary = 'AIW CLI returned an invalid structured error'
+                stage = 'powershell'
+                runId = $null
+                retryable = $false
+                remediation = 'Run the CLI directly and inspect its installation.'
+                detail = 'The stderr response was empty or was not one JSON error envelope.'
+            }
+        }
+
+        $exception = [System.InvalidOperationException]::new([string] $envelope.summary)
+        $exception.Data['AiwError'] = $envelope
+        $exception.Data['ExitCode'] = $exitCode
+        $target = if ($envelope.runId) { [string] $envelope.runId } else { $executable }
+        $record = [System.Management.Automation.ErrorRecord]::new(
+            $exception,
+            [string] $envelope.code,
+            [System.Management.Automation.ErrorCategory]::InvalidOperation,
+            $target
+        )
+        throw $record
+    }
+
+    if ($stderr.Trim().Length -ne 0) {
+        throw 'AIW CLI wrote unexpected stderr while reporting success.'
     }
     if ($Raw) {
-        return $output
+        return $stdout
     }
-    return $output | ConvertFrom-Json -Depth 100
+    return $stdout | ConvertFrom-Json -Depth 100 -ErrorAction Stop
 }
 
 function Test-AiwProject {
@@ -59,6 +114,26 @@ function Test-AiwProject {
 
     $projectPath = (Resolve-Path -LiteralPath $Path -ErrorAction Stop).Path
     Invoke-Aiw -CliPath $CliPath -ArgumentList @('project', 'validate', '--path', $projectPath)
+}
+
+function Convert-AiwProject {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $Path,
+
+        [Parameter(Mandatory)]
+        [string] $OutputPath,
+
+        [Parameter()]
+        [string] $CliPath
+    )
+
+    $projectPath = (Resolve-Path -LiteralPath $Path -ErrorAction Stop).Path
+    $output = [System.IO.Path]::GetFullPath($OutputPath)
+    Invoke-Aiw -CliPath $CliPath -ArgumentList @(
+        'project', 'migrate', '--path', $projectPath, '--output', $output
+    )
 }
 
 function Test-AiwEvidence {
@@ -176,7 +251,106 @@ function Get-AiwHostProbe {
         [string] $CliPath
     )
 
-    Invoke-Aiw -CliPath $CliPath -ArgumentList @('probe', 'host')
+    Invoke-Aiw -CliPath $CliPath -ArgumentList @('host', 'assess')
+}
+
+function New-AiwRunPlan {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $RootPath,
+
+        [Parameter(Mandatory)]
+        [string] $PlanPath,
+
+        [Parameter(Mandatory)]
+        [string] $ProjectPath,
+
+        [Parameter()]
+        [string] $CliPath
+    )
+
+    $root = [System.IO.Path]::GetFullPath($RootPath)
+    $plan = (Resolve-Path -LiteralPath $PlanPath -ErrorAction Stop).Path
+    $project = (Resolve-Path -LiteralPath $ProjectPath -ErrorAction Stop).Path
+    Invoke-Aiw -CliPath $CliPath -ArgumentList @(
+        'run', 'plan', '--root', $root, '--plan', $plan, '--project', $project
+    )
+}
+
+function Approve-AiwRunPlan {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $RootPath,
+
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string] $RunId,
+
+        [Parameter(Mandatory)]
+        [string] $ApprovalPath,
+
+        [Parameter()]
+        [string] $CliPath
+    )
+
+    $root = [System.IO.Path]::GetFullPath($RootPath)
+    $approval = (Resolve-Path -LiteralPath $ApprovalPath -ErrorAction Stop).Path
+    Invoke-Aiw -CliPath $CliPath -ArgumentList @(
+        'run', 'approve', '--root', $root, '--run-id', $RunId, '--approval', $approval
+    )
+}
+
+function Get-AiwRunStatus {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $RootPath,
+
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string] $RunId,
+
+        [Parameter()]
+        [switch] $Recover,
+
+        [Parameter()]
+        [string] $CliPath
+    )
+
+    $root = [System.IO.Path]::GetFullPath($RootPath)
+    $action = if ($Recover) { 'recover' } else { 'status' }
+    Invoke-Aiw -CliPath $CliPath -ArgumentList @('run', $action, '--root', $root, '--run-id', $RunId)
+}
+
+function Request-AiwRunCancellation {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $RootPath,
+
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string] $RunId,
+
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string] $RequestedBy,
+
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string] $RequestedAt,
+
+        [Parameter()]
+        [string] $CliPath
+    )
+
+    $root = [System.IO.Path]::GetFullPath($RootPath)
+    Invoke-Aiw -CliPath $CliPath -ArgumentList @(
+        'run', 'cancel', '--root', $root, '--run-id', $RunId,
+        '--requested-by', $RequestedBy, '--requested-at', $RequestedAt
+    )
 }
 
 function Get-AiwTokenEvidence {
@@ -281,13 +455,18 @@ function Get-AiwMxcCapabilityProbePlan {
 }
 
 Export-ModuleMember -Function @(
+    'Approve-AiwRunPlan',
+    'Convert-AiwProject',
     'ConvertTo-AiwWindowsSandboxConfig',
     'Get-AiwHostProbe',
+    'Get-AiwRunStatus',
     'Get-AiwMxcCapabilityProbePlan',
     'Get-AiwMxcInvocationPlan',
     'Get-AiwTokenEvidence',
     'Get-AiwWindowsSandboxCliLifecyclePlan',
     'Invoke-Aiw',
+    'New-AiwRunPlan',
+    'Request-AiwRunCancellation',
     'Get-AiwAssessmentBundleManifest',
     'Test-AiwAssessmentBundle',
     'Test-AiwCanaryObservationSet',

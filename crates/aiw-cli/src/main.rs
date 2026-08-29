@@ -1,9 +1,10 @@
 #![forbid(unsafe_code)]
 
 use std::fs::{self, File};
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use aiw_core::{
     AnalystReport, AnalystReportValidation, CanaryObservationSet, CanaryPlan, CanaryReport,
@@ -13,6 +14,10 @@ use aiw_evidence::{
     AssessmentBundleManifest, AssessmentBundleSpec, BundleVerification, EvidenceRecord,
     build_assessment_bundle, verify_assessment_bundle, verify_records,
 };
+use aiw_orchestrator::{
+    AiwError, ApprovalRecord, CancellationRequest, LegacyRunPlanV0Alpha1, RecoveryStatus, RunEvent,
+    RunLayout, RunPlan, RunResult, project_revision_hash,
+};
 use aiw_probe::probe_host;
 use aiw_provider_mxc::{MxcGoldenProbePlan, plan_capability_probe, plan_golden_probe};
 use aiw_provider_wsb::{
@@ -20,15 +25,25 @@ use aiw_provider_wsb::{
     WindowsSandboxCompletionReceipt, WindowsSandboxCompletionVerification, WindowsSandboxPlan,
     plan_cli_lifecycle, render_config, validate_host_mappings, verify_completion_receipt,
 };
-use aiw_schema::{ModelPack, Project, ValidationIssue, validate_model_pack, validate_project};
+use aiw_schema::{
+    LEGACY_PROJECT_SCHEMA_VERSION, LegacyProjectV0Alpha1, ModelPack, PROJECT_SCHEMA_VERSION,
+    Project, ValidationIssue, migrate_v0alpha1, project_requires_migration_review,
+    validate_model_pack, validate_project_for_planning,
+};
 use aiw_token::{TokenEvidence, collect_current_process_token};
 use anyhow::{Context, Result, anyhow, bail};
+use clap::error::ErrorKind;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use schemars::schema_for;
-use serde::Serialize;
+use serde::de::{MapAccess, SeqAccess, Visitor};
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Number, Value};
 
 const MAX_CONFIG_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_EVIDENCE_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_EVIDENCE_LINE_BYTES: usize = 4 * 1024 * 1024;
+const MAX_STAGING_ATTEMPTS: u64 = 32;
+static NEXT_STAGING_FILE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Parser)]
 #[command(name = "aiw", version, about = "App Isolation Workbench bootstrap CLI")]
@@ -45,7 +60,9 @@ enum Command {
     Evidence(EvidenceArgs),
     Bundle(BundleArgs),
     Canary(CanaryArgs),
+    Host(HostArgs),
     Probe(ProbeArgs),
+    Run(RunArgs),
     Provider(ProviderArgs),
     Schema(SchemaArgs),
     Compare(CompareArgs),
@@ -59,9 +76,17 @@ struct ProjectArgs {
 
 #[derive(Debug, Subcommand)]
 enum ProjectCommand {
+    /// Validate planning readiness. Findings are returned in one JSON result with valid=false.
     Validate {
         #[arg(long)]
         path: PathBuf,
+    },
+    /// Convert a v0alpha1 project to v0alpha2 without overwriting either file.
+    Migrate {
+        #[arg(long)]
+        path: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
     },
 }
 
@@ -73,6 +98,7 @@ struct ModelPackArgs {
 
 #[derive(Debug, Subcommand)]
 enum ModelPackCommand {
+    /// Validate a model pack. Findings are returned in one JSON result with valid=false.
     Validate {
         #[arg(long)]
         path: PathBuf,
@@ -168,6 +194,72 @@ enum ProbeCommand {
 }
 
 #[derive(Debug, Args)]
+struct HostArgs {
+    #[command(subcommand)]
+    command: HostCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum HostCommand {
+    /// Collect a non-mutating host readiness report.
+    Assess,
+}
+
+#[derive(Debug, Args)]
+struct RunArgs {
+    #[command(subcommand)]
+    command: RunCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum RunCommand {
+    /// Persist a supplied immutable plan and create its run journal. This does not execute it.
+    Plan {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        plan: PathBuf,
+        /// Exact project revision the supplied plan is derived from.
+        #[arg(long)]
+        project: PathBuf,
+    },
+    /// Persist a supplied approval for an existing plan. This does not execute it.
+    Approve {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        run_id: String,
+        #[arg(long)]
+        approval: PathBuf,
+    },
+    /// Read the verified persisted state of a run without executing it.
+    Status {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        run_id: String,
+    },
+    /// Reconcile and report persisted run state without starting a provider.
+    Recover {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        run_id: String,
+    },
+    /// Persist a write-once cancellation request. This does not terminate a provider.
+    Cancel {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        run_id: String,
+        #[arg(long)]
+        requested_by: String,
+        #[arg(long)]
+        requested_at: String,
+    },
+}
+
+#[derive(Debug, Args)]
 struct ProviderArgs {
     #[command(subcommand)]
     command: ProviderCommand,
@@ -216,7 +308,23 @@ struct SchemaArgs {
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum SchemaKind {
+    /// Current project schema. Retained as the stable alias for project-v0alpha2.
     Project,
+    #[value(name = "project-v0alpha1")]
+    ProjectV0Alpha1,
+    #[value(name = "project-v0alpha2")]
+    ProjectV0Alpha2,
+    RunPlan,
+    #[value(name = "run-plan-v0alpha1")]
+    RunPlanV0Alpha1,
+    #[value(name = "run-plan-v0alpha2")]
+    RunPlanV0Alpha2,
+    ApprovalRecord,
+    RunEvent,
+    RunResult,
+    CancellationRequest,
+    RecoveryStatus,
+    ErrorEnvelope,
     ModelPack,
     EvidenceRecord,
     AssessmentBundleSpec,
@@ -251,22 +359,110 @@ struct ValidationResult {
     issues: Vec<ValidationIssue>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectValidationResult {
+    valid: bool,
+    source_schema_version: String,
+    effective_schema_version: &'static str,
+    migration_review: MigrationReviewStatus,
+    project_revision_hash: String,
+    issues: Vec<ValidationIssue>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum MigrationReviewStatus {
+    NotRequired,
+    Pending,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectMigrationResult {
+    output: PathBuf,
+    source_schema_version: &'static str,
+    target_schema_version: &'static str,
+    migration_review: MigrationReviewStatus,
+    project_revision_hash: String,
+    planning_valid: bool,
+    planning_issues: Vec<ValidationIssue>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ErrorEnvelope {
+    code: String,
+    summary: String,
+    stage: String,
+    run_id: Option<String>,
+    retryable: bool,
+    remediation: String,
+    detail: String,
+}
+
+#[derive(Debug)]
+struct LoadedProject {
+    source_schema_version: String,
+    project: Project,
+}
+
 fn main() -> ExitCode {
-    match run() {
+    let command = match Cli::try_parse() {
+        Ok(cli) => cli.command,
+        Err(error)
+            if matches!(
+                error.kind(),
+                ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+            ) =>
+        {
+            let _ = error.print();
+            return ExitCode::SUCCESS;
+        }
+        Err(error) => {
+            emit_error(&clap_error_envelope());
+            return ExitCode::from(u8::try_from(error.exit_code()).unwrap_or(1));
+        }
+    };
+
+    match run(command) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("error: {error:#}");
+            emit_anyhow_error(&error);
             ExitCode::FAILURE
         }
     }
 }
 
-fn run() -> Result<()> {
-    match Cli::parse().command {
+fn run(command: Command) -> Result<()> {
+    match command {
         Command::Project(args) => match args.command {
             ProjectCommand::Validate { path } => {
-                let project: Project = read_document(&path, MAX_CONFIG_BYTES)?;
-                emit_validation(validate_project(&project))
+                let loaded = read_project(&path)?;
+                let issues = validate_project_for_planning(&loaded.project);
+                write_json(&ProjectValidationResult {
+                    valid: issues.is_empty(),
+                    source_schema_version: loaded.source_schema_version,
+                    effective_schema_version: PROJECT_SCHEMA_VERSION,
+                    migration_review: migration_review_status(&loaded.project),
+                    project_revision_hash: project_revision_hash(&loaded.project)?,
+                    issues,
+                })
+            }
+            ProjectCommand::Migrate { path, output } => {
+                let legacy = read_legacy_project(&path)?;
+                let project = migrate_v0alpha1(&legacy);
+                write_document_new(&output, &project)?;
+                let planning_issues = validate_project_for_planning(&project);
+                write_json(&ProjectMigrationResult {
+                    output,
+                    source_schema_version: LEGACY_PROJECT_SCHEMA_VERSION,
+                    target_schema_version: PROJECT_SCHEMA_VERSION,
+                    migration_review: migration_review_status(&project),
+                    project_revision_hash: project_revision_hash(&project)?,
+                    planning_valid: planning_issues.is_empty(),
+                    planning_issues,
+                })
             }
         },
         Command::ModelPack(args) => match args.command {
@@ -321,6 +517,59 @@ fn run() -> Result<()> {
             ProbeCommand::Host => write_json(&probe_host()),
             ProbeCommand::Token => write_json(&collect_current_process_token()?),
         },
+        Command::Host(args) => match args.command {
+            HostCommand::Assess => write_json(&probe_host()),
+        },
+        Command::Run(args) => match args.command {
+            RunCommand::Plan {
+                root,
+                plan,
+                project,
+            } => {
+                let plan = RunPlan::from_value(read_document(&plan, MAX_CONFIG_BYTES)?)?;
+                let loaded = read_project(&project)?;
+                let issues = validate_project_for_planning(&loaded.project);
+                if !issues.is_empty() {
+                    bail!("project is not ready for planning");
+                }
+                let expected_id = &loaded.project.metadata.name;
+                let expected_hash = project_revision_hash(&loaded.project)?;
+                if plan.project_id != *expected_id || plan.project_revision_hash != expected_hash {
+                    bail!("run plan does not match the validated project revision");
+                }
+                let layout = RunLayout::new(&root, &plan.run_id)?;
+                layout.create(&plan)?;
+                write_json(&plan)
+            }
+            RunCommand::Approve {
+                root,
+                run_id,
+                approval,
+            } => {
+                let approval: ApprovalRecord = read_document(&approval, MAX_CONFIG_BYTES)?;
+                let layout = RunLayout::new(&root, run_id)?;
+                layout.write_approval(&approval)?;
+                write_json(&approval)
+            }
+            RunCommand::Status { root, run_id } => {
+                let layout = RunLayout::new(&root, run_id)?;
+                write_json(&layout.status()?)
+            }
+            RunCommand::Recover { root, run_id } => {
+                let layout = RunLayout::new(&root, run_id)?;
+                write_json(&layout.recovery_status()?)
+            }
+            RunCommand::Cancel {
+                root,
+                run_id,
+                requested_by,
+                requested_at,
+            } => {
+                let layout = RunLayout::new(&root, run_id)?;
+                let cancellation = layout.request_cancellation(requested_by, requested_at)?;
+                write_json(&cancellation)
+            }
+        },
         Command::Provider(args) => match args.command {
             ProviderCommand::Wsb { plan } => {
                 let plan: WindowsSandboxPlan = read_document(&plan, MAX_CONFIG_BYTES)?;
@@ -351,7 +600,16 @@ fn run() -> Result<()> {
             ProviderCommand::MxcProbe { binary } => write_json(&plan_capability_probe(&binary)?),
         },
         Command::Schema(args) => match args.kind {
-            SchemaKind::Project => write_json(&schema_for!(Project)),
+            SchemaKind::Project | SchemaKind::ProjectV0Alpha2 => write_json(&schema_for!(Project)),
+            SchemaKind::ProjectV0Alpha1 => write_json(&schema_for!(LegacyProjectV0Alpha1)),
+            SchemaKind::RunPlan | SchemaKind::RunPlanV0Alpha2 => write_json(&schema_for!(RunPlan)),
+            SchemaKind::RunPlanV0Alpha1 => write_json(&schema_for!(LegacyRunPlanV0Alpha1)),
+            SchemaKind::ApprovalRecord => write_json(&schema_for!(ApprovalRecord)),
+            SchemaKind::RunEvent => write_json(&schema_for!(RunEvent)),
+            SchemaKind::RunResult => write_json(&schema_for!(RunResult)),
+            SchemaKind::CancellationRequest => write_json(&schema_for!(CancellationRequest)),
+            SchemaKind::RecoveryStatus => write_json(&schema_for!(RecoveryStatus)),
+            SchemaKind::ErrorEnvelope => write_json(&schema_for!(AiwError)),
             SchemaKind::ModelPack => write_json(&schema_for!(ModelPack)),
             SchemaKind::EvidenceRecord => write_json(&schema_for!(EvidenceRecord)),
             SchemaKind::AssessmentBundleSpec => write_json(&schema_for!(AssessmentBundleSpec)),
@@ -394,28 +652,82 @@ fn run() -> Result<()> {
 
 fn emit_validation(issues: Vec<ValidationIssue>) -> Result<()> {
     let valid = issues.is_empty();
-    write_json(&ValidationResult { valid, issues })?;
-    if valid {
-        Ok(())
+    write_json(&ValidationResult { valid, issues })
+}
+
+fn migration_review_status(project: &Project) -> MigrationReviewStatus {
+    if project_requires_migration_review(project) {
+        MigrationReviewStatus::Pending
     } else {
-        bail!("validation failed")
+        MigrationReviewStatus::NotRequired
     }
 }
 
+fn read_project(path: &Path) -> Result<LoadedProject> {
+    let value: Value = read_document(path, MAX_CONFIG_BYTES)?;
+    let source_schema_version = project_schema_version(&value)?.to_owned();
+    let project = match source_schema_version.as_str() {
+        PROJECT_SCHEMA_VERSION => serde_json::from_value(value)
+            .with_context(|| format!("invalid v0alpha2 project document: {}", path.display()))?,
+        LEGACY_PROJECT_SCHEMA_VERSION => {
+            let legacy: LegacyProjectV0Alpha1 =
+                serde_json::from_value(value).with_context(|| {
+                    format!("invalid v0alpha1 project document: {}", path.display())
+                })?;
+            migrate_v0alpha1(&legacy)
+        }
+        version => bail!("unsupported project schema version: {version}"),
+    };
+    Ok(LoadedProject {
+        source_schema_version,
+        project,
+    })
+}
+
+fn read_legacy_project(path: &Path) -> Result<LegacyProjectV0Alpha1> {
+    let value: Value = read_document(path, MAX_CONFIG_BYTES)?;
+    match project_schema_version(&value)? {
+        LEGACY_PROJECT_SCHEMA_VERSION => serde_json::from_value(value)
+            .with_context(|| format!("invalid v0alpha1 project document: {}", path.display())),
+        PROJECT_SCHEMA_VERSION => bail!("project is already at {PROJECT_SCHEMA_VERSION}"),
+        version => bail!("unsupported project schema version: {version}"),
+    }
+}
+
+fn project_schema_version(value: &Value) -> Result<&str> {
+    value
+        .get("schemaVersion")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("project document is missing string schemaVersion"))
+}
+
 fn read_evidence_log(path: &Path) -> Result<Vec<EvidenceRecord>> {
-    enforce_size(path, MAX_EVIDENCE_BYTES)?;
-    let file = File::open(path).with_context(|| format!("could not open {}", path.display()))?;
-    let reader = BufReader::new(file);
+    let bytes = read_file_bounded(path, MAX_EVIDENCE_BYTES)?;
     let mut records = Vec::new();
-    for (index, line) in reader.lines().enumerate() {
-        let line =
-            line.with_context(|| format!("could not read {} line {}", path.display(), index + 1))?;
-        if line.trim().is_empty() {
+    for (index, raw_line) in bytes.split(|byte| *byte == b'\n').enumerate() {
+        let line = raw_line.strip_suffix(b"\r").unwrap_or(raw_line);
+        if line.len() > MAX_EVIDENCE_LINE_BYTES {
+            bail!(
+                "{} line {} is {} bytes; maximum accepted line size is {} bytes",
+                path.display(),
+                index + 1,
+                line.len(),
+                MAX_EVIDENCE_LINE_BYTES
+            );
+        }
+        if line.iter().all(u8::is_ascii_whitespace) {
             continue;
         }
-        let record = serde_json::from_str(&line).with_context(|| {
+        let value = parse_unique_value(line, DocumentFormat::Json).with_context(|| {
             format!(
                 "invalid evidence JSON in {} line {}",
+                path.display(),
+                index + 1
+            )
+        })?;
+        let record = serde_json::from_value(value).with_context(|| {
+            format!(
+                "invalid evidence record in {} line {}",
                 path.display(),
                 index + 1
             )
@@ -429,40 +741,306 @@ fn read_document<T>(path: &Path, max_bytes: u64) -> Result<T>
 where
     T: serde::de::DeserializeOwned,
 {
-    enforce_size(path, max_bytes)?;
-    let bytes = fs::read(path).with_context(|| format!("could not read {}", path.display()))?;
+    let format = document_format(path)?;
+    let bytes = read_file_bounded(path, max_bytes)?;
+    let value = parse_unique_value(&bytes, format)
+        .with_context(|| format!("invalid {} document: {}", format.name(), path.display()))?;
+    serde_json::from_value(value)
+        .with_context(|| format!("invalid {} document: {}", format.name(), path.display()))
+}
+
+#[derive(Clone, Copy, Debug)]
+enum DocumentFormat {
+    Json,
+    Yaml,
+}
+
+impl DocumentFormat {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Json => "JSON",
+            Self::Yaml => "YAML",
+        }
+    }
+}
+
+fn document_format(path: &Path) -> Result<DocumentFormat> {
     match path
         .extension()
         .and_then(|extension| extension.to_str())
         .map(str::to_ascii_lowercase)
         .as_deref()
     {
-        Some("yaml" | "yml") => serde_yaml::from_slice(&bytes)
-            .with_context(|| format!("invalid YAML document: {}", path.display())),
-        Some("json") => serde_json::from_slice(&bytes)
-            .with_context(|| format!("invalid JSON document: {}", path.display())),
-        _ => Err(anyhow!(
+        Some("json") => Ok(DocumentFormat::Json),
+        Some("yaml" | "yml") => Ok(DocumentFormat::Yaml),
+        _ => bail!(
             "unsupported document extension for {}; use .json, .yaml, or .yml",
             path.display()
-        )),
+        ),
     }
 }
 
-fn enforce_size(path: &Path, max_bytes: u64) -> Result<()> {
-    let metadata =
-        fs::metadata(path).with_context(|| format!("could not inspect {}", path.display()))?;
+fn parse_unique_value(bytes: &[u8], format: DocumentFormat) -> Result<Value> {
+    match format {
+        DocumentFormat::Json => {
+            let mut deserializer = serde_json::Deserializer::from_slice(bytes);
+            let value = UniqueValue::deserialize(&mut deserializer)?.0;
+            deserializer.end()?;
+            Ok(value)
+        }
+        DocumentFormat::Yaml => {
+            let value: UniqueValue = serde_yaml::from_slice(bytes)?;
+            Ok(value.0)
+        }
+    }
+}
+
+struct UniqueValue(Value);
+
+impl<'de> Deserialize<'de> for UniqueValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(UniqueValueVisitor)
+    }
+}
+
+struct UniqueValueVisitor;
+
+impl<'de> Visitor<'de> for UniqueValueVisitor {
+    type Value = UniqueValue;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("a JSON-compatible value without duplicate object keys")
+    }
+
+    fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E> {
+        Ok(UniqueValue(Value::Bool(value)))
+    }
+
+    fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E> {
+        Ok(UniqueValue(Value::Number(value.into())))
+    }
+
+    fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
+        Ok(UniqueValue(Value::Number(value.into())))
+    }
+
+    fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Number::from_f64(value)
+            .map(Value::Number)
+            .map(UniqueValue)
+            .ok_or_else(|| E::custom("non-finite numbers are not supported"))
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        self.visit_string(value.to_owned())
+    }
+
+    fn visit_string<E>(self, value: String) -> Result<Self::Value, E> {
+        Ok(UniqueValue(Value::String(value)))
+    }
+
+    fn visit_none<E>(self) -> Result<Self::Value, E> {
+        Ok(UniqueValue(Value::Null))
+    }
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E> {
+        Ok(UniqueValue(Value::Null))
+    }
+
+    fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        UniqueValue::deserialize(deserializer)
+    }
+
+    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        let mut values = Vec::new();
+        while let Some(value) = sequence.next_element::<UniqueValue>()? {
+            values.push(value.0);
+        }
+        Ok(UniqueValue(Value::Array(values)))
+    }
+
+    fn visit_map<A>(self, mut object: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let mut values = Map::new();
+        while let Some(key) = object.next_key::<String>()? {
+            if values.contains_key(&key) {
+                return Err(serde::de::Error::custom(format!(
+                    "duplicate object key: {key}"
+                )));
+            }
+            let value = object.next_value::<UniqueValue>()?;
+            values.insert(key, value.0);
+        }
+        Ok(UniqueValue(Value::Object(values)))
+    }
+}
+
+fn write_document_new<T>(path: &Path, value: &T) -> Result<()>
+where
+    T: Serialize,
+{
+    let format = document_format(path)?;
+    let mut bytes = match format {
+        DocumentFormat::Yaml => serde_yaml::to_string(value)
+            .context("could not serialize migration output as YAML")?
+            .into_bytes(),
+        DocumentFormat::Json => serde_json::to_vec_pretty(value)
+            .context("could not serialize migration output as JSON")?,
+    };
+    bytes.push(b'\n');
+    publish_bytes_new(path, &bytes)
+}
+
+fn publish_bytes_new(path: &Path, bytes: &[u8]) -> Result<()> {
+    publish_bytes_new_with(path, bytes, |_| Ok(()))
+}
+
+fn publish_bytes_new_with(
+    path: &Path,
+    bytes: &[u8],
+    before_publish: impl FnOnce(&Path) -> Result<()>,
+) -> Result<()> {
+    if path.exists() {
+        bail!("migration output already exists: {}", path.display());
+    }
+
+    let (staging_path, mut output) = create_staging_file(path)?;
+    let staging = StagingFile::new(staging_path);
+    output
+        .write_all(bytes)
+        .and_then(|_| output.sync_all())
+        .with_context(|| format!("could not stage migration output {}", path.display()))?;
+    drop(output);
+
+    before_publish(path)?;
+    publish_staged_new(staging.path(), path)
+        .with_context(|| format!("could not publish migration output {}", path.display()))?;
+    Ok(())
+}
+
+fn create_staging_file(path: &Path) -> Result<(PathBuf, File)> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            anyhow!(
+                "migration output must have a valid file name: {}",
+                path.display()
+            )
+        })?;
+
+    for _ in 0..MAX_STAGING_ATTEMPTS {
+        let sequence = NEXT_STAGING_FILE.fetch_add(1, Ordering::Relaxed);
+        let staging_path = parent.join(format!(
+            ".{file_name}.aiw-stage-{}-{sequence}",
+            std::process::id()
+        ));
+        match File::options()
+            .write(true)
+            .create_new(true)
+            .open(&staging_path)
+        {
+            Ok(file) => return Ok((staging_path, file)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!(
+                        "could not create migration staging file in {}",
+                        parent.display()
+                    )
+                });
+            }
+        }
+    }
+    bail!(
+        "could not allocate a unique migration staging file in {}",
+        parent.display()
+    )
+}
+
+fn publish_staged_new(staging_path: &Path, output_path: &Path) -> io::Result<()> {
+    fs::hard_link(staging_path, output_path)
+}
+
+struct StagingFile {
+    path: PathBuf,
+}
+
+impl StagingFile {
+    fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for StagingFile {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+fn read_file_bounded(path: &Path, max_bytes: u64) -> Result<Vec<u8>> {
+    read_file_bounded_with(path, max_bytes, || Ok(()))
+}
+
+fn read_file_bounded_with(
+    path: &Path,
+    max_bytes: u64,
+    after_open: impl FnOnce() -> Result<()>,
+) -> Result<Vec<u8>> {
+    let file = File::open(path).with_context(|| format!("could not open {}", path.display()))?;
+    let metadata = file
+        .metadata()
+        .with_context(|| format!("could not inspect {}", path.display()))?;
     if !metadata.is_file() {
         bail!("path is not a regular file: {}", path.display());
     }
-    if metadata.len() > max_bytes {
+    after_open()?;
+    read_bounded(file, max_bytes, path)
+}
+
+fn read_bounded(reader: impl Read, max_bytes: u64, path: &Path) -> Result<Vec<u8>> {
+    let read_limit = max_bytes
+        .checked_add(1)
+        .ok_or_else(|| anyhow!("maximum input size is too large"))?;
+    let initial_capacity = usize::try_from(max_bytes.min(1024 * 1024)).unwrap_or(1024 * 1024);
+    let mut bytes = Vec::with_capacity(initial_capacity);
+    reader
+        .take(read_limit)
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("could not read {}", path.display()))?;
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > max_bytes {
         bail!(
-            "{} is {} bytes; maximum accepted size is {} bytes",
+            "{} exceeds the maximum accepted size of {} bytes",
             path.display(),
-            metadata.len(),
             max_bytes
         );
     }
-    Ok(())
+    Ok(bytes)
 }
 
 fn write_json(value: &impl Serialize) -> Result<()> {
@@ -471,4 +1049,187 @@ fn write_json(value: &impl Serialize) -> Result<()> {
     serde_json::to_writer_pretty(&mut lock, value)?;
     lock.write_all(b"\n")?;
     Ok(())
+}
+
+fn clap_error_envelope() -> ErrorEnvelope {
+    ErrorEnvelope {
+        code: "AIW_CLI_ARGUMENT_INVALID".to_owned(),
+        summary: "command-line arguments are invalid".to_owned(),
+        stage: "cliParse".to_owned(),
+        run_id: None,
+        retryable: false,
+        remediation: "Use --help and provide the required supported arguments.".to_owned(),
+        detail: "Argument values are omitted from diagnostics.".to_owned(),
+    }
+}
+
+fn generic_error_envelope() -> ErrorEnvelope {
+    ErrorEnvelope {
+        code: "AIW_CLI_FAILED".to_owned(),
+        summary: "command could not be completed".to_owned(),
+        stage: "cli".to_owned(),
+        run_id: None,
+        retryable: false,
+        remediation: "Correct the supplied input or persisted state and retry.".to_owned(),
+        detail: "The command failed before completion; sensitive input is not included.".to_owned(),
+    }
+}
+
+fn emit_anyhow_error(error: &anyhow::Error) {
+    if let Some(error) = error.downcast_ref::<AiwError>() {
+        emit_error(error);
+    } else {
+        emit_error(&generic_error_envelope());
+    }
+}
+
+fn emit_error(envelope: &impl Serialize) {
+    let stderr = io::stderr();
+    let mut lock = stderr.lock();
+    let _ = serde_json::to_writer(&mut lock, envelope);
+    let _ = lock.write_all(b"\n");
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        fs,
+        path::PathBuf,
+        sync::atomic::{AtomicU64, Ordering},
+    };
+
+    use super::*;
+
+    fn example_path(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("examples")
+            .join(name)
+    }
+
+    fn temp_output(name: &str) -> PathBuf {
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        std::env::temp_dir().join(format!(
+            "aiw-cli-test-{}-{}-{name}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
+
+    #[test]
+    fn current_example_validates() {
+        let loaded = read_project(&example_path("minimal.aiw.yaml")).unwrap();
+        assert_eq!(loaded.source_schema_version, PROJECT_SCHEMA_VERSION);
+        assert!(validate_project_for_planning(&loaded.project).is_empty());
+        assert!(!project_requires_migration_review(&loaded.project));
+    }
+
+    #[test]
+    fn legacy_example_is_migrated_to_pending_review() {
+        let loaded = read_project(&example_path("minimal-v0alpha1.aiw.yaml")).unwrap();
+        assert_eq!(loaded.source_schema_version, LEGACY_PROJECT_SCHEMA_VERSION);
+        assert_eq!(loaded.project.schema_version, PROJECT_SCHEMA_VERSION);
+        assert!(project_requires_migration_review(&loaded.project));
+        assert!(
+            validate_project_for_planning(&loaded.project)
+                .iter()
+                .any(|issue| issue.code == "migrationReviewPending")
+        );
+    }
+
+    #[test]
+    fn migration_output_is_create_new_only() {
+        let output = temp_output("project.yaml");
+        let loaded = read_project(&example_path("minimal.aiw.yaml")).unwrap();
+        write_document_new(&output, &loaded.project).unwrap();
+        assert!(write_document_new(&output, &loaded.project).is_err());
+        fs::remove_file(output).unwrap();
+    }
+
+    #[test]
+    fn failed_no_replace_publish_cleans_staging_file() {
+        let output = temp_output("publish-race.yaml");
+        let file_name = output.file_name().unwrap().to_string_lossy();
+        let stage_prefix = format!(".{file_name}.aiw-stage-");
+        let result = publish_bytes_new_with(&output, b"test\n", |path| {
+            fs::write(path, b"competitor")?;
+            Ok(())
+        });
+        assert!(result.is_err());
+        let parent = output.parent().unwrap();
+        let staging_files = fs::read_dir(parent)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(&stage_prefix)
+            })
+            .count();
+        assert_eq!(staging_files, 0);
+        assert_eq!(fs::read(&output).unwrap(), b"competitor");
+        fs::remove_file(output).unwrap();
+    }
+
+    #[test]
+    fn unique_json_loader_rejects_duplicate_keys() {
+        let error = parse_unique_value(
+            br#"{"schemaVersion":"aiw.dev/v0alpha1","schemaVersion":"aiw.dev/v0alpha2"}"#,
+            DocumentFormat::Json,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("duplicate object key"));
+    }
+
+    #[test]
+    fn bounded_reader_checks_actual_bytes_read() {
+        let input = io::Cursor::new(vec![0_u8; 9]);
+        let error = read_bounded(input, 8, Path::new("growing.json")).unwrap_err();
+        assert!(error.to_string().contains("maximum accepted size"));
+    }
+
+    #[test]
+    fn bounded_file_reader_rejects_growth_after_open() {
+        let path = temp_output("growing.json");
+        fs::write(&path, vec![0_u8; 8]).unwrap();
+        let error = read_file_bounded_with(&path, 8, || {
+            let mut writer = File::options().append(true).open(&path)?;
+            writer.write_all(&[0])?;
+            writer.sync_all()?;
+            Ok(())
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("maximum accepted size"));
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn evidence_log_rejects_oversized_individual_line() {
+        let path = temp_output("evidence.jsonl");
+        fs::write(&path, vec![b'a'; MAX_EVIDENCE_LINE_BYTES + 1]).unwrap();
+        let error = read_evidence_log(&path).unwrap_err();
+        assert!(error.to_string().contains("maximum accepted line size"));
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn clap_argument_failure_maps_to_one_safe_envelope() {
+        let error = Cli::try_parse_from(["aiw", "run", "status", "--root", "."]).unwrap_err();
+        assert_eq!(error.exit_code(), 2);
+        let envelope = clap_error_envelope();
+        assert_eq!(envelope.code, "AIW_CLI_ARGUMENT_INVALID");
+        assert!(!envelope.detail.contains("--root"));
+    }
+
+    #[test]
+    fn orchestrator_recovery_status_is_serializable() {
+        let status = RecoveryStatus::PendingApproval {
+            plan_hash: "a".repeat(64),
+            last_sequence: 1,
+        };
+        let value = serde_json::to_value(status).unwrap();
+        assert_eq!(value["status"], "pendingApproval");
+    }
 }

@@ -8,13 +8,18 @@
     Description = 'Thin PowerShell administration surface for the App Isolation Workbench CLI.'
     PowerShellVersion = '7.4'
     FunctionsToExport = @(
+        'Approve-AiwRunPlan',
+        'Convert-AiwProject',
         'ConvertTo-AiwWindowsSandboxConfig',
         'Get-AiwHostProbe',
         'Get-AiwMxcCapabilityProbePlan',
         'Get-AiwMxcInvocationPlan',
         'Get-AiwTokenEvidence',
+        'Get-AiwRunStatus',
         'Get-AiwWindowsSandboxCliLifecyclePlan',
         'Invoke-Aiw',
+        'New-AiwRunPlan',
+        'Request-AiwRunCancellation',
         'Get-AiwAssessmentBundleManifest',
         'Test-AiwAssessmentBundle',
         'Test-AiwCanaryObservationSet',
