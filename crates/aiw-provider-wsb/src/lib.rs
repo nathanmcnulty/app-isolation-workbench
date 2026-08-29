@@ -24,7 +24,7 @@ pub use completion::{
 
 pub const WINDOWS_SANDBOX_PLAN_SCHEMA_VERSION: &str = "aiw.dev/windows-sandbox-plan/v0alpha1";
 pub const WINDOWS_SANDBOX_CLI_LIFECYCLE_SCHEMA_VERSION: &str =
-    "aiw.dev/windows-sandbox-cli-lifecycle/v0alpha1";
+    "aiw.dev/windows-sandbox-cli-lifecycle/v0alpha2";
 pub const WINDOWS_SANDBOX_CLI_INTERFACE: &str = "microsoft.windows-sandbox-cli/2025-01-24";
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]

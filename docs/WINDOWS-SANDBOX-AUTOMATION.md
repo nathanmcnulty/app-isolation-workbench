@@ -44,6 +44,8 @@ The planner never emits `wsb exec`, `wsb share`, or a `System` execution request
 
 The `start` plan carries the same XML object and SHA-256 value returned by the direct renderer. The caller supplies a canonical UUID so the intended session identity is known before launch. The W1 executor compares that ID with raw CLI output and `list` state instead of trusting process ancestry or window discovery.
 
+The lifecycle contract is `aiw.dev/windows-sandbox-cli-lifecycle/v0alpha2`. It supersedes the plan-only `v0alpha1` shape by adding the exact `connect` invocation required to establish the guest user logon; callers must not silently synthesize that transition when reading an older plan.
+
 ## Proposed one-shot state machine
 
 1. `Preflight`: record OS build, Windows Sandbox app/package version, resolved `wsb.exe` identity and signature, feature state, current sessions, and provider interface snapshot.
