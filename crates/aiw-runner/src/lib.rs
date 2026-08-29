@@ -43,6 +43,7 @@ use session::{SessionBinding, TransactionStore};
 
 const MAX_PROVIDER_OUTPUT: usize = 64 * 1024;
 const MAX_PROVIDER_ERROR: usize = 64 * 1024;
+const MAX_GUEST_FAILURE_DIAGNOSTIC: u64 = 16 * 1024;
 const GUEST_REQUEST_SCHEMA: &str = "aiw.dev/wsb-golden-probe-request/v0alpha1";
 const READINESS_SCHEMA: &str = "aiw.dev/windows-sandbox-readiness/v0alpha2";
 pub const WSB_SESSION_STATUS_SCHEMA_VERSION: &str = "aiw.dev/wsb-session-status/v0alpha1";
@@ -907,6 +908,14 @@ struct GuestRequest {
     receipt_path: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct GuestFailureDiagnostic {
+    schema_version: String,
+    code: String,
+    summary: String,
+}
+
 impl GuestRequest {
     fn new(
         run_id: &str,
@@ -1308,10 +1317,8 @@ fn wait_for_receipt(
             return Ok(());
         }
         if failure.exists() {
-            let detail = fs::read_to_string(&failure)
-                .ok()
-                .map(|value| value.chars().take(2048).collect::<String>())
-                .unwrap_or_else(|| "guest failure diagnostic was unreadable".to_owned());
+            let detail = read_guest_failure_diagnostic(&failure)
+                .unwrap_or_else(|_| "guest failure diagnostic was rejected".to_owned());
             return Err(RunnerError::Receipt(detail));
         }
         if Instant::now() >= deadline {
@@ -1319,6 +1326,22 @@ fn wait_for_receipt(
         }
         std::thread::sleep(Duration::from_millis(100));
     }
+}
+
+fn read_guest_failure_diagnostic(path: &Path) -> Result<String, RunnerError> {
+    let diagnostic: GuestFailureDiagnostic = read_bounded_json(path, MAX_GUEST_FAILURE_DIAGNOSTIC)?;
+    if diagnostic.schema_version != "aiw.dev/wsb-guest-failure/v0alpha1"
+        || diagnostic.code != "AIW_GUEST_AGENT_FAILED"
+        || diagnostic.summary.is_empty()
+        || diagnostic.summary.chars().count() > 2048
+    {
+        return Err(RunnerError::Drift);
+    }
+    Ok(diagnostic
+        .summary
+        .chars()
+        .map(|value| if value.is_control() { ' ' } else { value })
+        .collect())
 }
 fn deterministic_sandbox_id(run_id: &str) -> String {
     let hash = Sha256::digest(format!("aiw-wsb-v1:{run_id}").as_bytes());
@@ -1412,11 +1435,15 @@ mod tests {
                     }
                     let id = aiw_windows_platform::CanonicalSandboxId::parse(id)
                         .map_err(|error| RunnerError::Process(error.to_string()))?;
+                    // Bind the preselected identity before the mutating call.
+                    // The platform lease does the same internally, so a lost
+                    // or malformed start response can still be reconciled and
+                    // stopped through the exact persisted UUID.
+                    state.started_id = Some(id.as_str().to_owned());
                     let observed = state
                         .lease
                         .start(&id, &self.plan)
                         .map_err(|error| RunnerError::Process(error.to_string()))?;
-                    state.started_id = Some(observed.session_id.clone());
                     successful_json(serde_json::json!({"Id": observed.session_id}))
                 }
                 [stop, raw, id_flag, id]
@@ -1463,7 +1490,7 @@ mod tests {
         }
     }
 
-    struct Root(PathBuf);
+    struct Root(PathBuf, bool);
     impl Root {
         fn new() -> Self {
             let path = std::env::temp_dir().join(format!(
@@ -1474,14 +1501,25 @@ mod tests {
             fs::create_dir(&path).unwrap();
             let canonical = fs::canonicalize(path).unwrap();
             let display = canonical.to_string_lossy();
-            Self(PathBuf::from(
-                display.strip_prefix("\\\\?\\").unwrap_or(&display),
-            ))
+            Self(
+                PathBuf::from(display.strip_prefix("\\\\?\\").unwrap_or(&display)),
+                false,
+            )
+        }
+
+        fn preserve_on_drop(&mut self) {
+            self.1 = true;
+        }
+
+        fn allow_cleanup(&mut self) {
+            self.1 = false;
         }
     }
     impl Drop for Root {
         fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
+            if !self.1 {
+                let _ = fs::remove_dir_all(&self.0);
+            }
         }
     }
 
@@ -1863,6 +1901,41 @@ mod tests {
         assert!(matches!(
             bounded_json(&vec![b' '; MAX_PROVIDER_OUTPUT + 1]),
             Err(RunnerError::ProviderOutputTooLarge)
+        ));
+    }
+
+    #[test]
+    fn guest_failure_diagnostic_is_bounded_strict_and_sanitized() {
+        let (_root, layout, start, _readiness) = setup();
+        let output = PathBuf::from(
+            &mapping(&start.wsb_plan, MappingPurpose::Output)
+                .unwrap()
+                .host_folder,
+        );
+        let failure = output.join("guest-failure.json");
+        fs::write(
+            &failure,
+            vec![b'a'; (MAX_GUEST_FAILURE_DIAGNOSTIC + 1) as usize],
+        )
+        .unwrap();
+        assert!(matches!(
+            wait_for_receipt(&layout, &output, 0),
+            Err(RunnerError::Receipt(detail)) if detail == "guest failure diagnostic was rejected"
+        ));
+        fs::remove_file(&failure).unwrap();
+        fs::write(
+            &failure,
+            serde_json::to_vec(&serde_json::json!({
+                "schemaVersion": "aiw.dev/wsb-guest-failure/v0alpha1",
+                "code": "AIW_GUEST_AGENT_FAILED",
+                "summary": "bounded\r\ndetail"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            wait_for_receipt(&layout, &output, 0),
+            Err(RunnerError::Receipt(detail)) if detail == "bounded  detail"
         ));
     }
     #[test]
@@ -2494,7 +2567,8 @@ mod tests {
         assert!(readiness.supported, "{:?}", readiness.blockers);
         assert!(readiness.current_session_ids.is_empty());
         let provider = readiness.provider_binary.clone().unwrap();
-        let root = Root::new();
+        let mut root = Root::new();
+        root.preserve_on_drop();
         let tools = root.0.join("tools");
         let output = root.0.join("output");
         fs::create_dir(&tools).unwrap();
@@ -2517,6 +2591,11 @@ mod tests {
             .unwrap()
             .as_nanos();
         let run_id = format!("w1-live-{}-{nonce}", std::process::id());
+        eprintln!(
+            "AIW live recovery state: workspace={} sandboxId={}",
+            root.0.display(),
+            deterministic_sandbox_id(&run_id)
+        );
         let wsb_plan = WindowsSandboxPlan {
             schema_version: aiw_provider_wsb::WINDOWS_SANDBOX_PLAN_SCHEMA_VERSION.to_owned(),
             workspace_root: root.0.to_string_lossy().into_owned(),
@@ -2606,5 +2685,6 @@ mod tests {
                 .session_ids
                 .is_empty()
         );
+        root.allow_cleanup();
     }
 }

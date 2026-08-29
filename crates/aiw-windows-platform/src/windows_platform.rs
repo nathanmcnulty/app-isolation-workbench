@@ -11,7 +11,7 @@ use aiw_probe::{
     BinaryIdentity, CatalogTrustIdentity, ReadinessState, WindowsFileIdentity,
     WindowsPackageIdentity, WindowsSandboxCliProtocol, WindowsSandboxReadiness,
 };
-use aiw_provider_wsb::{WindowsSandboxPlan, render_config};
+use aiw_provider_wsb::{WindowsSandboxPlan, render_config, validate_host_mappings};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -117,6 +117,7 @@ pub struct WindowsSandboxExecutionLease {
     _catalog: File,
     _mutex: ProviderMutex,
     owned_session: Option<CanonicalSandboxId>,
+    connection_attempted: bool,
 }
 
 impl WindowsSandboxExecutionLease {
@@ -146,11 +147,18 @@ impl WindowsSandboxExecutionLease {
                 "this lease already owns or may own a sandbox session".to_owned(),
             ));
         }
+        if self.connection_attempted {
+            return Err(WindowsSandboxInvocationError::Protocol(
+                "this lease has an unresolved prior connection attempt".to_owned(),
+            ));
+        }
         if !self.list()?.session_ids.is_empty() {
             return Err(WindowsSandboxInvocationError::Protocol(
                 "start requires an empty provider under the held lease".to_owned(),
             ));
         }
+        validate_host_mappings(plan)
+            .map_err(|error| WindowsSandboxInvocationError::Configuration(error.to_string()))?;
         let rendered = render_config(plan)
             .map_err(|error| WindowsSandboxInvocationError::Configuration(error.to_string()))?;
         if rendered.xml.encode_utf16().count() > 24_000 {
@@ -187,7 +195,14 @@ impl WindowsSandboxExecutionLease {
         })
     }
 
-    pub fn connect_owned(&self) -> Result<WsbConnectObservation, WindowsSandboxInvocationError> {
+    pub fn connect_owned(
+        &mut self,
+    ) -> Result<WsbConnectObservation, WindowsSandboxInvocationError> {
+        if self.connection_attempted {
+            return Err(WindowsSandboxInvocationError::Protocol(
+                "the owned sandbox connection is one-shot".to_owned(),
+            ));
+        }
         let sandbox_id = self.owned_session.clone().ok_or_else(|| {
             WindowsSandboxInvocationError::Protocol(
                 "this lease has no bound sandbox session".to_owned(),
@@ -199,6 +214,10 @@ impl WindowsSandboxExecutionLease {
                 "connect requires the exact owned sandbox session and no other session".to_owned(),
             ));
         }
+        // Record the one-shot transition before mutation. A failed direct
+        // response can still have established the remote-session descendant;
+        // cleanup must stop the owned sandbox rather than retrying connect.
+        self.connection_attempted = true;
         invoke_without_output(
             &self.provider_path,
             &["connect", "--raw", "--id", sandbox_id.as_str()],
@@ -245,6 +264,7 @@ impl WindowsSandboxExecutionLease {
             ));
         }
         self.owned_session = None;
+        self.connection_attempted = false;
         Ok(WsbStopObservation {
             session_id: sandbox_id.as_str().to_owned(),
             output_was_empty: true,
@@ -325,6 +345,7 @@ pub fn acquire_windows_sandbox(
         _catalog: catalog,
         _mutex: mutex,
         owned_session: None,
+        connection_attempted: false,
     })
 }
 
@@ -1122,11 +1143,15 @@ mod tests {
             },
             memory_mb: Some(2048),
         };
+        eprintln!(
+            "AIW live recovery state: workspace={} sandboxId={}",
+            workspace.display(),
+            id.as_str()
+        );
         let started = lease.start(&id, &plan);
         let observed_after_start = lease.list();
         let stop = lease.stop_owned();
         let observed_after_stop = lease.list();
-        std::fs::remove_dir_all(workspace).unwrap();
         assert_eq!(started.unwrap().session_id, id.as_str());
         assert_eq!(
             observed_after_start.unwrap().session_ids,
@@ -1134,6 +1159,7 @@ mod tests {
         );
         assert!(stop.unwrap().output_was_empty);
         assert!(observed_after_stop.unwrap().session_ids.is_empty());
+        std::fs::remove_dir_all(workspace).unwrap();
     }
 
     #[test]
@@ -1182,6 +1208,11 @@ mod tests {
             memory_mb: Some(2048),
         };
 
+        eprintln!(
+            "AIW live recovery state: workspace={} sandboxId={}",
+            workspace.display(),
+            id.as_str()
+        );
         let started = lease.start(&id, &plan);
         let connected = if started.is_ok() {
             lease.connect_owned()
@@ -1198,7 +1229,6 @@ mod tests {
         let stop = lease.stop_owned();
         let final_sessions = lease.list();
         let token_bytes = std::fs::read(&token);
-        std::fs::remove_dir_all(workspace).unwrap();
 
         assert_eq!(started.unwrap().session_id, id.as_str());
         assert_eq!(connected.unwrap().session_id, id.as_str());
@@ -1206,5 +1236,6 @@ mod tests {
         assert!(final_sessions.unwrap().session_ids.is_empty());
         let token: serde_json::Value = serde_json::from_slice(&token_bytes.unwrap()).unwrap();
         assert_eq!(token["schemaVersion"], "aiw.dev/token-evidence/v0alpha1");
+        std::fs::remove_dir_all(workspace).unwrap();
     }
 }
