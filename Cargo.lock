@@ -15,6 +15,7 @@ dependencies = [
  "aiw-runner",
  "aiw-schema",
  "aiw-token",
+ "aiw-windows-platform",
  "anyhow",
  "clap",
  "hex",
@@ -137,6 +138,7 @@ dependencies = [
  "aiw-probe",
  "aiw-provider-wsb",
  "aiw-schema",
+ "aiw-windows-platform",
  "hex",
  "schemars",
  "serde",
@@ -168,6 +170,20 @@ dependencies = [
 [[package]]
 name = "aiw-windows-command-line"
 version = "0.1.0-alpha.1"
+
+[[package]]
+name = "aiw-windows-platform"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "aiw-probe",
+ "aiw-provider-wsb",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+ "windows",
+]
 
 [[package]]
 name = "anstream"

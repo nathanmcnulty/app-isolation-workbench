@@ -67,6 +67,16 @@ fn run() -> Result<()> {
     if request.request_sha256 != request_hash(&request)? {
         bail!("guest request hash does not match its approved binding")
     }
+    match execute_request(&request) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let _ = write_failure_diagnostic(&request, &error);
+            Err(error)
+        }
+    }
+}
+
+fn execute_request(request: &GoldenProbeRequest) -> Result<()> {
     let actual_agent_hash = hash_file(&std::env::current_exe().context("resolve agent identity")?)?;
     if actual_agent_hash != request.agent_sha256 {
         bail!("guest agent identity does not match the approved request")
@@ -97,11 +107,11 @@ fn run() -> Result<()> {
     // closed and remeasured before it is create-new published.
     let receipt = WindowsSandboxCompletionReceipt {
         schema_version: WINDOWS_SANDBOX_COMPLETION_RECEIPT_SCHEMA_VERSION.to_owned(),
-        run_id: request.run_id,
-        sandbox_id: request.sandbox_id,
-        config_sha256: request.config_sha256,
-        request_sha256: request.request_sha256,
-        agent_sha256: request.agent_sha256,
+        run_id: request.run_id.clone(),
+        sandbox_id: request.sandbox_id.clone(),
+        config_sha256: request.config_sha256.clone(),
+        request_sha256: request.request_sha256.clone(),
+        agent_sha256: request.agent_sha256.clone(),
         status: CompletionStatus::Succeeded,
         exit_code: 0,
         evidence_root_hash: evidence.manifest()?.root_hash,
@@ -121,6 +131,27 @@ fn run() -> Result<()> {
         ],
     };
     write_receipt_last(&receipt_path, &receipt)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GuestFailureDiagnostic {
+    schema_version: &'static str,
+    code: &'static str,
+    summary: String,
+}
+
+fn write_failure_diagnostic(request: &GoldenProbeRequest, error: &anyhow::Error) -> Result<()> {
+    let root = PathBuf::from(&request.output_root);
+    let summary: String = format!("{error:#}").chars().take(2048).collect();
+    write_new_json(
+        &root.join("guest-failure.json"),
+        &GuestFailureDiagnostic {
+            schema_version: "aiw.dev/wsb-guest-failure/v0alpha1",
+            code: "AIW_GUEST_AGENT_FAILED",
+            summary,
+        },
+    )
 }
 
 fn read_request(path: &Path) -> Result<GoldenProbeRequest> {

@@ -24,7 +24,7 @@ pub use completion::{
 
 pub const WINDOWS_SANDBOX_PLAN_SCHEMA_VERSION: &str = "aiw.dev/windows-sandbox-plan/v0alpha1";
 pub const WINDOWS_SANDBOX_CLI_LIFECYCLE_SCHEMA_VERSION: &str =
-    "aiw.dev/windows-sandbox-cli-lifecycle/v0alpha1";
+    "aiw.dev/windows-sandbox-cli-lifecycle/v0alpha2";
 pub const WINDOWS_SANDBOX_CLI_INTERFACE: &str = "microsoft.windows-sandbox-cli/2025-01-24";
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -91,6 +91,7 @@ pub struct WindowsSandboxCliLifecyclePlan {
     pub rendered_config: RenderedWindowsSandboxConfig,
     pub start: ProcessInvocation,
     pub list: ProcessInvocation,
+    pub connect: ProcessInvocation,
     pub stop: ProcessInvocation,
     pub guest_execution: GuestExecutionContract,
     pub output_observation: OutputObservationContract,
@@ -217,6 +218,15 @@ pub fn plan_cli_lifecycle(
             executable: wsb_cli_path.to_owned(),
             arguments: vec!["list".to_owned(), "--raw".to_owned()],
         },
+        connect: ProcessInvocation {
+            executable: wsb_cli_path.to_owned(),
+            arguments: vec![
+                "connect".to_owned(),
+                "--raw".to_owned(),
+                "--id".to_owned(),
+                sandbox_id.clone(),
+            ],
+        },
         stop: ProcessInvocation {
             executable: wsb_cli_path.to_owned(),
             arguments: vec![
@@ -247,7 +257,7 @@ pub fn plan_cli_lifecycle(
         rendered_config,
         requires_human_approval: true,
         warnings: vec![
-            "This output is an inspectable plan only; it does not launch or stop Windows Sandbox."
+            "This output is an inspectable plan only; it does not launch, connect, or stop Windows Sandbox."
                 .to_owned(),
             "The Windows Sandbox CLI is an early interface delivered with the Store-updated app; record the resolved binary identity and app version at execution time."
                 .to_owned(),
@@ -256,6 +266,8 @@ pub fn plan_cli_lifecycle(
             "Do not add folders with wsb share or run the guest agent with wsb exec --run-as System; both would change the reviewed trust contract."
                 .to_owned(),
             "Windows Sandbox supports one running instance per user session; orchestration must serialize runs and verify the returned sandbox ID."
+                .to_owned(),
+            "The CLI-created environment is explicitly connected so the configured user logon and LogonCommand occur before receipt observation."
                 .to_owned(),
         ],
     })

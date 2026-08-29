@@ -2,7 +2,7 @@
 
 The Windows Sandbox CLI can identify, list, and stop a sandbox, but it does not return guest process output. AIW therefore uses the preconfigured writable output mapping as an untrusted one-way return channel. A terminal receipt written last lets the host correlate that output with the exact run it approved without turning `wsb exec` into a command channel.
 
-The current implementation includes a fixed-function guest agent and a private, fake-provider-tested runner kernel. The kernel models durable start intent, exact-session reconciliation, receipt waiting, stop/absence confirmation, output verification, and crash recovery under one provider lease. Production `aiw run start` and provider recovery remain deliberately unavailable until a native Windows identity/process boundary exists, so this is not evidence of live Windows Sandbox support.
+The current implementation includes a fixed-function guest agent and a private, fake-provider-tested runner kernel. The kernel models durable start intent, exact-session reconciliation, explicit connection for user logon, receipt waiting, stop/absence confirmation, output verification, and crash recovery under one provider lease. An opt-in supported-host test has completed that full flow against the pinned native Store provider. Production `aiw run start` and provider recovery remain deliberately unavailable until owner-only workspaces, durable recovery, and kill-on-close process-tree deadlines exist, so this is not evidence that imported applications are contained.
 
 ## Trusted expectation
 
@@ -44,6 +44,6 @@ The output tree is exact: the receipt and approved artifacts are the only permit
 
 ## Trust limit
 
-This contract and the private kernel provide integrity checking, bounded parsing, run correlation, and fake-tested lifecycle/recovery behavior. They are not remote attestation and cannot prevent an administrator inside the guest from forging internally consistent output. Production enablement still requires host-side evidence for the resolved Windows Sandbox package and CLI, returned sandbox ID, lifecycle state, effective configuration, process identity/tree, target token, trace completeness, and cleanup, followed by live supported-host proof.
+This contract and the private kernel provide integrity checking, bounded parsing, run correlation, and fake-tested lifecycle/recovery behavior. The supported-host golden proof also establishes that the fixed guest agent can return a verified receipt through the configured mapping. These are not remote attestation and cannot prevent an administrator inside the guest from forging internally consistent output. Production enablement still requires host-side target process/tree, target-token, effective-configuration/backend, trace-completeness, and canary evidence.
 
 Verification also assumes guest writers have stopped. The verifier checks paths before use and measures artifacts twice, but a privileged same-host actor can still race path-based filesystem operations. A production exporter should freeze the worker/output channel and use handle-relative anti-reparse access before copying artifacts into an ACL-restricted staging directory.

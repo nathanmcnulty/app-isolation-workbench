@@ -18,7 +18,7 @@ use aiw_orchestrator::{
     AiwError, ApprovalRecord, CancellationRequest, LegacyRunPlanV0Alpha1, RecoveryStatus, RunEvent,
     RunLayout, RunPlan, RunResult, project_revision_hash,
 };
-use aiw_probe::{WindowsSandboxReadiness, assess_windows_sandbox, probe_host};
+use aiw_probe::{WindowsSandboxReadiness, probe_host};
 use aiw_provider_mxc::{MxcGoldenProbePlan, plan_capability_probe, plan_golden_probe};
 use aiw_provider_wsb::{
     WindowsSandboxCliLifecyclePlan, WindowsSandboxCompletionExpectation,
@@ -35,6 +35,7 @@ use aiw_schema::{
     validate_model_pack, validate_project_for_planning,
 };
 use aiw_token::{TokenEvidence, collect_current_process_token};
+use aiw_windows_platform::assess_windows_sandbox;
 use anyhow::{Context, Result, anyhow, bail};
 use clap::error::ErrorKind;
 use clap::{Args, Parser, Subcommand, ValueEnum};

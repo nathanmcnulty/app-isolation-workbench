@@ -58,6 +58,49 @@ pub struct BinaryIdentity {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WindowsPackageIdentity {
+    pub name: String,
+    pub full_name: String,
+    pub family_name: String,
+    pub publisher: String,
+    pub publisher_id: String,
+    pub version: String,
+    pub architecture: String,
+    pub signature_kind: String,
+    pub status_ok: bool,
+    pub install_location: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CatalogTrustIdentity {
+    pub trust_kind: String,
+    pub catalog_path: String,
+    pub catalog_sha256: String,
+    pub catalog_file_identity: WindowsFileIdentity,
+    pub member_tag: String,
+    pub trust_policy: String,
+    pub verification_status: ReadinessState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WindowsFileIdentity {
+    pub final_path: String,
+    pub volume_serial_number: String,
+    pub file_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WindowsSandboxCliProtocol {
+    pub cli_version: String,
+    pub protocol: String,
+    pub list_schema: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WindowsSandboxReadiness {
     pub schema_version: String,
     pub supported: bool,
@@ -66,7 +109,19 @@ pub struct WindowsSandboxReadiness {
     pub virtualization: ReadinessState,
     pub sandbox_feature: ReadinessState,
     pub provider_binary: Option<BinaryIdentity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_package: Option<WindowsPackageIdentity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_trust: Option<CatalogTrustIdentity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_file_identity: Option<WindowsFileIdentity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cli_protocol: Option<WindowsSandboxCliProtocol>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_execution_alias: Option<String>,
     pub current_sessions: ReadinessState,
+    #[serde(default)]
+    pub current_session_ids: Vec<String>,
     pub blockers: Vec<String>,
     pub warnings: Vec<String>,
 }
@@ -117,7 +172,13 @@ pub fn assess_windows_sandbox() -> WindowsSandboxReadiness {
         virtualization: ReadinessState::Unknown,
         sandbox_feature: ReadinessState::Unknown,
         provider_binary: None,
+        provider_package: None,
+        catalog_trust: None,
+        provider_file_identity: None,
+        cli_protocol: None,
+        app_execution_alias: None,
         current_sessions: ReadinessState::Unknown,
+        current_session_ids: Vec::new(),
         blockers: vec!["AIW_WINDOWS_PLATFORM_UNAVAILABLE: trusted Windows platform/package verification is not implemented.".to_owned()],
         warnings: vec![
             "This assessment is read-only and never trusts PATH, environment state, shell utilities, or App Execution Aliases as execution authority."
