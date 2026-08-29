@@ -51,7 +51,7 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw 'guest-agent PE dependency inspection failed'
     }
-    if ($dependencyText -match '(?im)^\s+(VCRUNTIME\d*\.dll|MSVCP\d*\.dll|UCRTBASE\.dll|api-ms-win-crt-[^\s]+\.dll)\s*$') {
+    if ($dependencyText -match '(?im)^\s+((?:VCRUNTIME|MSVCP|MSVCR)[^\s]*\.dll|UCRTBASE\.dll|api-ms-win-crt-[^\s]+\.dll)\s*$') {
         throw 'guest-agent artifact still imports a dynamic Visual C++ runtime'
     }
 
