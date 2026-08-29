@@ -9,7 +9,15 @@ pub use windows_platform::{
 };
 
 #[cfg(windows)]
+pub use workspace::{
+    HeldRunWorkspace, WorkspaceBindingEvidence, WorkspaceDirectoryIdentity, WorkspaceError,
+};
+
+#[cfg(windows)]
 mod windows_platform;
+
+#[cfg(windows)]
+mod workspace;
 
 #[must_use]
 pub fn assess_windows_sandbox() -> WindowsSandboxReadiness {
