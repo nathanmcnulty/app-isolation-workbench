@@ -11,7 +11,7 @@ use aiw_probe::{
     BinaryIdentity, CatalogTrustIdentity, ReadinessState, WindowsFileIdentity,
     WindowsPackageIdentity, WindowsSandboxCliProtocol, WindowsSandboxReadiness,
 };
-use aiw_provider_wsb::RenderedWindowsSandboxConfig;
+use aiw_provider_wsb::{WindowsSandboxPlan, render_config};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -58,6 +58,10 @@ pub enum WindowsSandboxInvocationError {
     Authority(String),
     #[error("Windows Sandbox provider lease is held by another operation")]
     LeaseUnavailable,
+    #[error(
+        "Windows Sandbox provider lease was abandoned; durable session reconciliation is required"
+    )]
+    RecoveryRequired,
     #[error("Windows Sandbox CLI invocation failed: {0}")]
     Process(String),
     #[error("Windows Sandbox CLI protocol response was rejected: {0}")]
@@ -84,37 +88,6 @@ impl CanonicalSandboxId {
     }
 }
 
-pub struct BoundedWsbConfig {
-    xml: String,
-    sha256: String,
-}
-
-impl BoundedWsbConfig {
-    pub fn from_rendered(
-        rendered: &RenderedWindowsSandboxConfig,
-    ) -> Result<Self, WindowsSandboxInvocationError> {
-        if rendered.xml.is_empty() || rendered.xml.encode_utf16().count() > 24_000 {
-            return Err(WindowsSandboxInvocationError::Configuration(
-                "rendered configuration exceeds the fixed command-line budget".to_owned(),
-            ));
-        }
-        let sha256 = hex::encode(Sha256::digest(rendered.xml.as_bytes()));
-        if sha256 != rendered.sha256 {
-            return Err(WindowsSandboxInvocationError::Configuration(
-                "rendered configuration hash is inconsistent".to_owned(),
-            ));
-        }
-        Ok(Self {
-            xml: rendered.xml.clone(),
-            sha256,
-        })
-    }
-
-    pub fn sha256(&self) -> &str {
-        &self.sha256
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WsbListObservation {
     pub session_ids: Vec<String>,
@@ -123,6 +96,12 @@ pub struct WsbListObservation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WsbStartObservation {
     pub session_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WsbConnectObservation {
+    pub session_id: String,
+    pub output_was_discarded: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -137,6 +116,7 @@ pub struct WindowsSandboxExecutionLease {
     _provider: File,
     _catalog: File,
     _mutex: ProviderMutex,
+    owned_session: Option<CanonicalSandboxId>,
 }
 
 impl WindowsSandboxExecutionLease {
@@ -157,10 +137,31 @@ impl WindowsSandboxExecutionLease {
     }
 
     pub fn start(
-        &self,
+        &mut self,
         sandbox_id: &CanonicalSandboxId,
-        config: BoundedWsbConfig,
+        plan: &WindowsSandboxPlan,
     ) -> Result<WsbStartObservation, WindowsSandboxInvocationError> {
+        if self.owned_session.is_some() {
+            return Err(WindowsSandboxInvocationError::Protocol(
+                "this lease already owns or may own a sandbox session".to_owned(),
+            ));
+        }
+        if !self.list()?.session_ids.is_empty() {
+            return Err(WindowsSandboxInvocationError::Protocol(
+                "start requires an empty provider under the held lease".to_owned(),
+            ));
+        }
+        let rendered = render_config(plan)
+            .map_err(|error| WindowsSandboxInvocationError::Configuration(error.to_string()))?;
+        if rendered.xml.encode_utf16().count() > 24_000 {
+            return Err(WindowsSandboxInvocationError::Configuration(
+                "rendered configuration exceeds the fixed command-line budget".to_owned(),
+            ));
+        }
+        // Persist the exact preselected identity in memory before invoking the
+        // mutating provider. A production caller must additionally persist its
+        // durable transaction before calling this method.
+        self.owned_session = Some(sandbox_id.clone());
         let output = invoke_read_only(
             &self.provider_path,
             &[
@@ -169,7 +170,7 @@ impl WindowsSandboxExecutionLease {
                 "--id",
                 sandbox_id.as_str(),
                 "--config",
-                &config.xml,
+                &rendered.xml,
             ],
             Duration::from_secs(120),
         )
@@ -186,10 +187,46 @@ impl WindowsSandboxExecutionLease {
         })
     }
 
-    pub fn stop(
-        &self,
-        sandbox_id: &CanonicalSandboxId,
-    ) -> Result<WsbStopObservation, WindowsSandboxInvocationError> {
+    pub fn connect_owned(&self) -> Result<WsbConnectObservation, WindowsSandboxInvocationError> {
+        let sandbox_id = self.owned_session.clone().ok_or_else(|| {
+            WindowsSandboxInvocationError::Protocol(
+                "this lease has no bound sandbox session".to_owned(),
+            )
+        })?;
+        let current = self.list()?;
+        if current.session_ids != [sandbox_id.as_str()] {
+            return Err(WindowsSandboxInvocationError::Protocol(
+                "connect requires the exact owned sandbox session and no other session".to_owned(),
+            ));
+        }
+        invoke_without_output(
+            &self.provider_path,
+            &["connect", "--raw", "--id", sandbox_id.as_str()],
+            Duration::from_secs(120),
+        )
+        .map_err(WindowsSandboxInvocationError::Process)?;
+        let current = self.list()?;
+        if current.session_ids != [sandbox_id.as_str()] {
+            return Err(WindowsSandboxInvocationError::Protocol(
+                "owned sandbox session drifted while establishing the user connection".to_owned(),
+            ));
+        }
+        Ok(WsbConnectObservation {
+            session_id: sandbox_id.as_str().to_owned(),
+            // WindowsSandboxRemoteSession inherits captured pipe handles from
+            // `wsb connect`, preventing EOF until the UI closes. The fixed
+            // connect verb therefore uses null standard handles and relies on
+            // its exit status plus exact-session reconciliation.
+            output_was_discarded: true,
+        })
+    }
+
+    pub fn stop_owned(&mut self) -> Result<WsbStopObservation, WindowsSandboxInvocationError> {
+        let sandbox_id = self.owned_session.clone().ok_or_else(|| {
+            WindowsSandboxInvocationError::Protocol(
+                "this lease has no bound sandbox session".to_owned(),
+            )
+        })?;
         let output = invoke_read_only(
             &self.provider_path,
             &["stop", "--raw", "--id", sandbox_id.as_str()],
@@ -201,6 +238,13 @@ impl WindowsSandboxExecutionLease {
                 "stop response must be empty for CLI protocol 0.8.107.0".to_owned(),
             ));
         }
+        let remaining = self.list()?;
+        if !remaining.session_ids.is_empty() {
+            return Err(WindowsSandboxInvocationError::Protocol(
+                "exact stop did not establish an empty provider".to_owned(),
+            ));
+        }
+        self.owned_session = None;
         Ok(WsbStopObservation {
             session_id: sandbox_id.as_str().to_owned(),
             output_was_empty: true,
@@ -239,6 +283,8 @@ pub fn acquire_windows_sandbox(
     let mut provider =
         open_held_file(&provider_path).map_err(WindowsSandboxInvocationError::Authority)?;
     let observed_path = final_path(&provider).map_err(WindowsSandboxInvocationError::Authority)?;
+    let observed_file_identity = file_identity(&provider, &observed_path)
+        .map_err(WindowsSandboxInvocationError::Authority)?;
     let (observed_hash, observed_size) =
         hash_held_file(&mut provider).map_err(WindowsSandboxInvocationError::Authority)?;
     if !observed_path
@@ -246,6 +292,7 @@ pub fn acquire_windows_sandbox(
         .eq_ignore_ascii_case(&provider_identity.canonical_path)
         || observed_hash != provider_identity.sha256
         || observed_size != provider_identity.size_bytes
+        || readiness.provider_file_identity.as_ref() != Some(&observed_file_identity)
     {
         return Err(WindowsSandboxInvocationError::Authority(
             "held provider identity drifted after readiness".to_owned(),
@@ -277,6 +324,7 @@ pub fn acquire_windows_sandbox(
         _provider: provider,
         _catalog: catalog,
         _mutex: mutex,
+        owned_session: None,
     })
 }
 
@@ -667,22 +715,12 @@ struct ProcessOutput {
     stdout: Vec<u8>,
 }
 
-fn invoke_read_only(
-    path: &Path,
-    arguments: &[&str],
-    timeout: Duration,
-) -> Result<ProcessOutput, String> {
+fn provider_command(path: &Path) -> Result<Command, String> {
     let provider_root = path.parent().ok_or_else(|| {
         "AIW_WSB_CLI_PATH_REJECTED: provider has no protected package parent.".to_owned()
     })?;
     let mut command = Command::new(path);
-    command
-        .args(arguments)
-        .current_dir(provider_root)
-        .env_clear()
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    command.current_dir(provider_root).env_clear();
     for name in [
         "APPDATA",
         "LOCALAPPDATA",
@@ -702,6 +740,56 @@ fn invoke_read_only(
     if let Some(system_root) = std::env::var_os("SystemRoot") {
         command.env("PATH", PathBuf::from(system_root).join("System32"));
     }
+    Ok(command)
+}
+
+fn invoke_without_output(path: &Path, arguments: &[&str], timeout: Duration) -> Result<(), String> {
+    let mut command = provider_command(path)?;
+    command
+        .args(arguments)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("AIW_WSB_CLI_START_FAILED: {error}"))?;
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| format!("AIW_WSB_CLI_WAIT_FAILED: {error}"))?
+        {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(
+                "AIW_WSB_CLI_TIMEOUT: fixed provider operation exceeded its deadline.".to_owned(),
+            );
+        }
+        thread::sleep(Duration::from_millis(20));
+    };
+    if !status.success() {
+        return Err(format!(
+            "AIW_WSB_CLI_FAILED: provider exited with {:?}.",
+            status.code()
+        ));
+    }
+    Ok(())
+}
+
+fn invoke_read_only(
+    path: &Path,
+    arguments: &[&str],
+    timeout: Duration,
+) -> Result<ProcessOutput, String> {
+    let mut command = provider_command(path)?;
+    command
+        .args(arguments)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     let mut child = command
         .spawn()
         .map_err(|error| format!("AIW_WSB_CLI_START_FAILED: {error}"))?;
@@ -898,11 +986,13 @@ impl ProviderMutex {
         let handle = unsafe { CreateMutexW(None, false, PROVIDER_MUTEX_NAME) }
             .map_err(|error| WindowsSandboxInvocationError::Authority(error.to_string()))?;
         let wait = unsafe { WaitForSingleObject(handle, 0) };
-        if wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED {
+        if wait == WAIT_OBJECT_0 {
             Ok(Self(handle))
         } else {
             let _ = unsafe { CloseHandle(handle) };
-            if wait == WAIT_TIMEOUT {
+            if wait == WAIT_ABANDONED {
+                Err(WindowsSandboxInvocationError::RecoveryRequired)
+            } else if wait == WAIT_TIMEOUT {
                 Err(WindowsSandboxInvocationError::LeaseUnavailable)
             } else {
                 Err(WindowsSandboxInvocationError::Authority(format!(
@@ -924,7 +1014,26 @@ impl Drop for ProviderMutex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+    fn live_id(label: &str) -> CanonicalSandboxId {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let digest = hex::encode(Sha256::digest(
+            format!("{label}:{}:{nonce}", std::process::id()).as_bytes(),
+        ));
+        CanonicalSandboxId::parse(&format!(
+            "{}-{}-{}-{}-{}",
+            &digest[0..8],
+            &digest[8..12],
+            &digest[12..16],
+            &digest[16..20],
+            &digest[20..32]
+        ))
+        .unwrap()
+    }
 
     #[test]
     fn version_parser_is_exact() {
@@ -977,34 +1086,47 @@ mod tests {
         let readiness = assess_windows_sandbox();
         assert!(readiness.supported, "{:?}", readiness.blockers);
         let provider_hash = readiness.provider_binary.unwrap().sha256;
-        let lease = acquire_windows_sandbox(&provider_hash).unwrap();
+        let mut lease = acquire_windows_sandbox(&provider_hash).unwrap();
         assert!(lease.list().unwrap().session_ids.is_empty());
 
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let digest = hex::encode(Sha256::digest(
-            format!("aiw-live-wsb:{}:{nonce}", std::process::id()).as_bytes(),
-        ));
-        let id = CanonicalSandboxId::parse(&format!(
-            "{}-{}-{}-{}-{}",
-            &digest[0..8],
-            &digest[8..12],
-            &digest[12..16],
-            &digest[16..20],
-            &digest[20..32]
-        ))
+        let id = live_id("aiw-live-wsb");
+        let workspace = std::env::temp_dir().join(format!("aiw-live-{}", id.as_str()));
+        let tools = workspace.join("tools");
+        let output = workspace.join("output");
+        std::fs::create_dir_all(&tools).unwrap();
+        std::fs::create_dir(&output).unwrap();
+        std::fs::write(
+            tools.join("agent.exe"),
+            b"not-executed-by-this-lifecycle-test",
+        )
         .unwrap();
-        let xml = "<Configuration></Configuration>".to_owned();
-        let config = BoundedWsbConfig {
-            sha256: hex::encode(Sha256::digest(xml.as_bytes())),
-            xml,
+        let plan = WindowsSandboxPlan {
+            schema_version: aiw_provider_wsb::WINDOWS_SANDBOX_PLAN_SCHEMA_VERSION.to_owned(),
+            workspace_root: workspace.to_string_lossy().into_owned(),
+            mappings: vec![
+                aiw_provider_wsb::MappedFolder {
+                    purpose: aiw_provider_wsb::MappingPurpose::Tools,
+                    host_folder: tools.to_string_lossy().into_owned(),
+                    sandbox_folder: "C:\\AIW\\Tools".to_owned(),
+                },
+                aiw_provider_wsb::MappedFolder {
+                    purpose: aiw_provider_wsb::MappingPurpose::Output,
+                    host_folder: output.to_string_lossy().into_owned(),
+                    sandbox_folder: "C:\\AIW\\Output".to_owned(),
+                },
+            ],
+            probe: aiw_provider_wsb::GoldenProbe {
+                executable: "C:\\AIW\\Tools\\agent.exe".to_owned(),
+                request: None,
+                output: "C:\\AIW\\Output\\token.json".to_owned(),
+            },
+            memory_mb: Some(2048),
         };
-        let started = lease.start(&id, config);
+        let started = lease.start(&id, &plan);
         let observed_after_start = lease.list();
-        let stop = lease.stop(&id);
+        let stop = lease.stop_owned();
         let observed_after_stop = lease.list();
+        std::fs::remove_dir_all(workspace).unwrap();
         assert_eq!(started.unwrap().session_id, id.as_str());
         assert_eq!(
             observed_after_start.unwrap().session_ids,
@@ -1012,5 +1134,77 @@ mod tests {
         );
         assert!(stop.unwrap().output_was_empty);
         assert!(observed_after_stop.unwrap().session_ids.is_empty());
+    }
+
+    #[test]
+    #[ignore = "executes the fixed golden probe in a real Windows Sandbox; set AIW_RUN_LIVE_WSB_PROBE=1 and AIW_LIVE_GOLDEN_PROBE"]
+    fn live_mapped_golden_probe() {
+        if std::env::var("AIW_RUN_LIVE_WSB_PROBE").as_deref() != Ok("1") {
+            return;
+        }
+        let probe_source = std::path::PathBuf::from(
+            std::env::var_os("AIW_LIVE_GOLDEN_PROBE")
+                .expect("AIW_LIVE_GOLDEN_PROBE must name the statically linked probe"),
+        );
+        let readiness = assess_windows_sandbox();
+        assert!(readiness.supported, "{:?}", readiness.blockers);
+        let provider_hash = readiness.provider_binary.unwrap().sha256;
+        let mut lease = acquire_windows_sandbox(&provider_hash).unwrap();
+        assert!(lease.list().unwrap().session_ids.is_empty());
+
+        let id = live_id("aiw-live-wsb-probe");
+        let workspace = std::env::temp_dir().join(format!("aiw-live-probe-{}", id.as_str()));
+        let tools = workspace.join("tools");
+        let output = workspace.join("output");
+        std::fs::create_dir_all(&tools).unwrap();
+        std::fs::create_dir(&output).unwrap();
+        std::fs::copy(&probe_source, tools.join("aiw-golden-probe.exe")).unwrap();
+        let plan = WindowsSandboxPlan {
+            schema_version: aiw_provider_wsb::WINDOWS_SANDBOX_PLAN_SCHEMA_VERSION.to_owned(),
+            workspace_root: workspace.to_string_lossy().into_owned(),
+            mappings: vec![
+                aiw_provider_wsb::MappedFolder {
+                    purpose: aiw_provider_wsb::MappingPurpose::Tools,
+                    host_folder: tools.to_string_lossy().into_owned(),
+                    sandbox_folder: "C:\\AIW\\Tools".to_owned(),
+                },
+                aiw_provider_wsb::MappedFolder {
+                    purpose: aiw_provider_wsb::MappingPurpose::Output,
+                    host_folder: output.to_string_lossy().into_owned(),
+                    sandbox_folder: "C:\\AIW\\Output".to_owned(),
+                },
+            ],
+            probe: aiw_provider_wsb::GoldenProbe {
+                executable: "C:\\AIW\\Tools\\aiw-golden-probe.exe".to_owned(),
+                request: None,
+                output: "C:\\AIW\\Output\\token.json".to_owned(),
+            },
+            memory_mb: Some(2048),
+        };
+
+        let started = lease.start(&id, &plan);
+        let connected = if started.is_ok() {
+            lease.connect_owned()
+        } else {
+            Err(WindowsSandboxInvocationError::Protocol(
+                "start failed before connect".to_owned(),
+            ))
+        };
+        let deadline = Instant::now() + Duration::from_secs(120);
+        let token = output.join("token.json");
+        while started.is_ok() && !token.is_file() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(250));
+        }
+        let stop = lease.stop_owned();
+        let final_sessions = lease.list();
+        let token_bytes = std::fs::read(&token);
+        std::fs::remove_dir_all(workspace).unwrap();
+
+        assert_eq!(started.unwrap().session_id, id.as_str());
+        assert_eq!(connected.unwrap().session_id, id.as_str());
+        assert!(stop.unwrap().output_was_empty);
+        assert!(final_sessions.unwrap().session_ids.is_empty());
+        let token: serde_json::Value = serde_json::from_slice(&token_bytes.unwrap()).unwrap();
+        assert_eq!(token["schemaVersion"], "aiw.dev/token-evidence/v0alpha1");
     }
 }

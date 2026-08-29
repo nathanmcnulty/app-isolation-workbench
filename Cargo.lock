@@ -138,6 +138,7 @@ dependencies = [
  "aiw-probe",
  "aiw-provider-wsb",
  "aiw-schema",
+ "aiw-windows-platform",
  "hex",
  "schemars",
  "serde",

@@ -5,8 +5,8 @@
 //!
 //! This module does not expose a process launcher for callers. Its private
 //! test kernel accepts a previously approved typed action, validates current
-//! identities again, then invokes only preconstructed `wsb list`, `start`, and
-//! exact-ID `stop` argument arrays. It has no shell, elevation, command,
+//! identities again, then invokes only preconstructed `wsb list`, `start`,
+//! exact-ID `connect`, and exact-ID `stop` argument arrays. It has no shell, elevation, command,
 //! script, URL, or arbitrary policy API.
 
 mod session;
@@ -494,7 +494,17 @@ fn run_attempt(
     if cancellation_requested(layout)? {
         return Err(RunnerError::Cancelled);
     }
-    progress(layout, "W1 Windows Sandbox session identity reconciled")?;
+    connect_exact_session(
+        process,
+        provider,
+        &context.lifecycle,
+        &context.binding.session_id,
+        request.timeout_seconds,
+    )?;
+    progress(
+        layout,
+        "W1 Windows Sandbox session identity reconciled and user logon connected",
+    )?;
     wait_for_receipt(layout, &context.output_root, request.timeout_seconds)
 }
 
@@ -694,6 +704,24 @@ fn stop_exact_session(
         return Err(RunnerError::ProviderOutputTooLarge);
     }
     if !result.stdout.is_empty() || !result.stderr.is_empty() || !valid_uuid(expected_id) {
+        return Err(RunnerError::ProviderJson);
+    }
+    Ok(())
+}
+
+fn connect_exact_session(
+    process: &impl ProcessBoundary,
+    provider: &Path,
+    lifecycle: &WindowsSandboxCliLifecyclePlan,
+    expected_id: &str,
+    timeout_seconds: u32,
+) -> Result<(), RunnerError> {
+    if lifecycle.sandbox_id != expected_id || !valid_uuid(expected_id) {
+        return Err(RunnerError::SessionConflict);
+    }
+    let result = process.invoke(provider, &lifecycle.connect.arguments, timeout_seconds)?;
+    ensure_success(&result)?;
+    if !result.stdout.is_empty() || !result.stderr.is_empty() {
         return Err(RunnerError::ProviderJson);
     }
     Ok(())
@@ -1004,8 +1032,8 @@ fn validate_start(
         !value
             .final_path
             .eq_ignore_ascii_case(&reported.canonical_path)
-            || value.volume_serial_number.len() != 8
-            || value.file_id.len() != 16
+            || !fixed_lower_hex(&value.volume_serial_number, 8)
+            || !fixed_lower_hex(&value.file_id, 16)
     }) || protocol.is_none_or(|value| {
         value.cli_version != "0.8.107.0"
             || value.protocol != "windowsSandboxCli/v0.8.107.0"
@@ -1016,6 +1044,13 @@ fn validate_start(
         ));
     }
     Ok(())
+}
+
+fn fixed_lower_hex(value: &str, length: usize) -> bool {
+    value.len() == length
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
 }
 
 fn cancellation_requested(layout: &RunLayout) -> Result<bool, RunnerError> {
@@ -1175,7 +1210,7 @@ fn bounded_process_result(result: ProcessResult) -> Result<ProcessResult, Runner
 }
 fn ensure_success(result: &ProcessResult) -> Result<(), RunnerError> {
     bounded_process_result(result.clone())?;
-    if result.exit_code == 0 {
+    if result.exit_code == 0 && result.stderr.is_empty() {
         Ok(())
     } else {
         Err(RunnerError::ProviderFailure)
@@ -1263,6 +1298,7 @@ fn wait_for_receipt(
     timeout_seconds: u32,
 ) -> Result<(), RunnerError> {
     let receipt = output_root.join("completion.json");
+    let failure = output_root.join("guest-failure.json");
     let deadline = Instant::now() + Duration::from_secs(u64::from(timeout_seconds));
     loop {
         if cancellation_requested(layout)? {
@@ -1270,6 +1306,13 @@ fn wait_for_receipt(
         }
         if receipt.exists() {
             return Ok(());
+        }
+        if failure.exists() {
+            let detail = fs::read_to_string(&failure)
+                .ok()
+                .map(|value| value.chars().take(2048).collect::<String>())
+                .unwrap_or_else(|| "guest failure diagnostic was unreadable".to_owned());
+            return Err(RunnerError::Receipt(detail));
         }
         if Instant::now() >= deadline {
             return Err(RunnerError::ProviderFailure);
@@ -1306,6 +1349,120 @@ mod tests {
 
     static NEXT: AtomicU64 = AtomicU64::new(1);
 
+    #[cfg(windows)]
+    struct NativeWsbProcess {
+        state: Mutex<NativeWsbState>,
+        plan: WindowsSandboxPlan,
+    }
+
+    #[cfg(windows)]
+    struct NativeWsbState {
+        lease: aiw_windows_platform::WindowsSandboxExecutionLease,
+        started_id: Option<String>,
+    }
+
+    #[cfg(windows)]
+    impl ProcessBoundary for NativeWsbProcess {
+        fn invoke(
+            &self,
+            executable: &Path,
+            arguments: &[String],
+            _timeout_seconds: u32,
+        ) -> Result<ProcessResult, RunnerError> {
+            let mut state = self.state.lock().unwrap();
+            let expected = state
+                .lease
+                .readiness()
+                .provider_binary
+                .as_ref()
+                .ok_or_else(|| {
+                    RunnerError::Process("native provider identity absent".to_owned())
+                })?;
+            if !executable
+                .to_string_lossy()
+                .eq_ignore_ascii_case(&expected.canonical_path)
+            {
+                return Err(RunnerError::Process(
+                    "runner executable did not match native authority".to_owned(),
+                ));
+            }
+            match arguments {
+                [list, raw] if list == "list" && raw == "--raw" => {
+                    let observed = state
+                        .lease
+                        .list()
+                        .map_err(|error| RunnerError::Process(error.to_string()))?;
+                    successful_json(serde_json::json!({
+                        "WindowsSandboxEnvironments": observed.session_ids.into_iter().map(|id| serde_json::json!({"Id": id})).collect::<Vec<_>>()
+                    }))
+                }
+                [start, raw, id_flag, id, config_flag, xml]
+                    if start == "start"
+                        && raw == "--raw"
+                        && id_flag == "--id"
+                        && config_flag == "--config" =>
+                {
+                    let rendered = render_config(&self.plan)
+                        .map_err(|error| RunnerError::Process(error.to_string()))?;
+                    if rendered.xml != *xml {
+                        return Err(RunnerError::Process(
+                            "runner XML did not match the internally rendered typed plan"
+                                .to_owned(),
+                        ));
+                    }
+                    let id = aiw_windows_platform::CanonicalSandboxId::parse(id)
+                        .map_err(|error| RunnerError::Process(error.to_string()))?;
+                    let observed = state
+                        .lease
+                        .start(&id, &self.plan)
+                        .map_err(|error| RunnerError::Process(error.to_string()))?;
+                    state.started_id = Some(observed.session_id.clone());
+                    successful_json(serde_json::json!({"Id": observed.session_id}))
+                }
+                [stop, raw, id_flag, id]
+                    if stop == "stop" && raw == "--raw" && id_flag == "--id" =>
+                {
+                    let id = aiw_windows_platform::CanonicalSandboxId::parse(id)
+                        .map_err(|error| RunnerError::Process(error.to_string()))?;
+                    if state.started_id.as_deref() != Some(id.as_str()) {
+                        return Err(RunnerError::SessionConflict);
+                    }
+                    state
+                        .lease
+                        .stop_owned()
+                        .map_err(|error| RunnerError::Process(error.to_string()))?;
+                    state.started_id = None;
+                    Ok(ProcessResult {
+                        exit_code: 0,
+                        stdout: vec![],
+                        stderr: vec![],
+                    })
+                }
+                [connect, raw, id_flag, id]
+                    if connect == "connect" && raw == "--raw" && id_flag == "--id" =>
+                {
+                    let id = aiw_windows_platform::CanonicalSandboxId::parse(id)
+                        .map_err(|error| RunnerError::Process(error.to_string()))?;
+                    if state.started_id.as_deref() != Some(id.as_str()) {
+                        return Err(RunnerError::SessionConflict);
+                    }
+                    state
+                        .lease
+                        .connect_owned()
+                        .map_err(|error| RunnerError::Process(error.to_string()))?;
+                    Ok(ProcessResult {
+                        exit_code: 0,
+                        stdout: vec![],
+                        stderr: vec![],
+                    })
+                }
+                _ => Err(RunnerError::Process(
+                    "native adapter rejected an unexpected provider operation".to_owned(),
+                )),
+            }
+        }
+    }
+
     struct Root(PathBuf);
     impl Root {
         fn new() -> Self {
@@ -1334,6 +1491,7 @@ mod tests {
         results: Mutex<VecDeque<Result<ProcessResult, RunnerError>>>,
         start_action: Mutex<Option<StartAction>>,
         call_actions: Mutex<BTreeMap<u64, StartAction>>,
+        connect_result: Mutex<Option<Result<ProcessResult, RunnerError>>>,
         calls: AtomicU64,
     }
     impl FakeProcess {
@@ -1342,6 +1500,7 @@ mod tests {
                 results: Mutex::new(results.into()),
                 start_action: Mutex::new(None),
                 call_actions: Mutex::new(BTreeMap::new()),
+                connect_result: Mutex::new(None),
                 calls: AtomicU64::new(0),
             }
         }
@@ -1353,6 +1512,11 @@ mod tests {
 
         fn with_call_action(self, call: u64, action: StartAction) -> Self {
             self.call_actions.lock().unwrap().insert(call, action);
+            self
+        }
+
+        fn with_connect_result(self, result: Result<ProcessResult, RunnerError>) -> Self {
+            *self.connect_result.lock().unwrap() = Some(result);
             self
         }
     }
@@ -1371,6 +1535,18 @@ mod tests {
                 if let Some(action) = self.start_action.lock().unwrap().take() {
                     action();
                 }
+            }
+            if arguments.first().is_some_and(|value| value == "connect") {
+                return self
+                    .connect_result
+                    .lock()
+                    .unwrap()
+                    .take()
+                    .unwrap_or(Ok(ProcessResult {
+                        exit_code: 0,
+                        stdout: vec![],
+                        stderr: vec![],
+                    }));
             }
             self.results
                 .lock()
@@ -1863,7 +2039,7 @@ mod tests {
             execute_wsb_golden_probe(&start, &readiness, &layout, &fake, &TestLease::default())
                 .unwrap_err();
         assert!(matches!(error, RunnerError::ProviderFailure));
-        assert_eq!(fake.calls.load(Ordering::SeqCst), 6);
+        assert_eq!(fake.calls.load(Ordering::SeqCst), 7);
         assert_eq!(
             observe_wsb_session_status(&layout).unwrap().status,
             WsbSessionDisposition::Clean
@@ -1888,6 +2064,31 @@ mod tests {
                 .unwrap_err();
         assert!(matches!(error, RunnerError::ProviderFailure));
         assert_eq!(fake.calls.load(Ordering::SeqCst), 6);
+        assert_eq!(
+            observe_wsb_session_status(&layout).unwrap().status,
+            WsbSessionDisposition::Clean
+        );
+        assert!(layout.result_path().exists());
+    }
+
+    #[test]
+    fn connect_failure_is_cleaned_before_result() {
+        let (_root, layout, start, readiness) = setup();
+        let id = deterministic_sandbox_id("w1-run");
+        let fake = FakeProcess::new(vec![
+            empty_list(),
+            started(&id),
+            list_with(&id, "running"),
+            list_with(&id, "running"),
+            stopped(&id),
+            empty_list(),
+        ])
+        .with_connect_result(Err(RunnerError::ProviderFailure));
+        let error =
+            execute_wsb_golden_probe(&start, &readiness, &layout, &fake, &TestLease::default())
+                .unwrap_err();
+        assert!(matches!(error, RunnerError::ProviderFailure));
+        assert_eq!(fake.calls.load(Ordering::SeqCst), 7);
         assert_eq!(
             observe_wsb_session_status(&layout).unwrap().status,
             WsbSessionDisposition::Clean
@@ -1986,11 +2187,11 @@ mod tests {
             publish_test_file(&gate_for_start, b"blocks-early-verification");
         }))
         .with_call_action(
-            4,
+            5,
             Box::new(move || assert!(!result_at_stop.exists(), "result preceded exact stop")),
         )
         .with_call_action(
-            5,
+            6,
             Box::new(move || {
                 assert!(!result_at_absence.exists(), "result preceded final absence");
                 fs::remove_file(&gate).unwrap();
@@ -2276,5 +2477,134 @@ mod tests {
             execute_wsb_golden_probe(&start, &readiness, &layout, &none, &TestLease::default()),
             Err(RunnerError::Drift)
         ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "starts a real hardened Windows Sandbox golden probe; set AIW_RUN_LIVE_WSB_GOLDEN=1 and AIW_LIVE_GUEST_AGENT"]
+    fn live_native_golden_probe_receipt_and_cleanup() {
+        if std::env::var("AIW_RUN_LIVE_WSB_GOLDEN").as_deref() != Ok("1") {
+            return;
+        }
+        let agent_source = PathBuf::from(
+            std::env::var_os("AIW_LIVE_GUEST_AGENT")
+                .expect("AIW_LIVE_GUEST_AGENT must name the built guest agent"),
+        );
+        let readiness = aiw_windows_platform::assess_windows_sandbox();
+        assert!(readiness.supported, "{:?}", readiness.blockers);
+        assert!(readiness.current_session_ids.is_empty());
+        let provider = readiness.provider_binary.clone().unwrap();
+        let root = Root::new();
+        let tools = root.0.join("tools");
+        let output = root.0.join("output");
+        fs::create_dir(&tools).unwrap();
+        fs::create_dir(&output).unwrap();
+        let agent = tools.join("aiw-guest-agent.exe");
+        fs::copy(&agent_source, &agent).unwrap();
+        let project_path = root.0.join("project.yaml");
+        fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join("..")
+                .join("examples")
+                .join("minimal.aiw.yaml"),
+            &project_path,
+        )
+        .unwrap();
+        let project: Project = serde_yaml::from_slice(&fs::read(&project_path).unwrap()).unwrap();
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let run_id = format!("w1-live-{}-{nonce}", std::process::id());
+        let wsb_plan = WindowsSandboxPlan {
+            schema_version: aiw_provider_wsb::WINDOWS_SANDBOX_PLAN_SCHEMA_VERSION.to_owned(),
+            workspace_root: root.0.to_string_lossy().into_owned(),
+            mappings: vec![
+                aiw_provider_wsb::MappedFolder {
+                    purpose: MappingPurpose::Tools,
+                    host_folder: tools.to_string_lossy().into_owned(),
+                    sandbox_folder: "C:\\AIW\\Tools".to_owned(),
+                },
+                aiw_provider_wsb::MappedFolder {
+                    purpose: MappingPurpose::Output,
+                    host_folder: output.to_string_lossy().into_owned(),
+                    sandbox_folder: "C:\\AIW\\Output".to_owned(),
+                },
+            ],
+            probe: aiw_provider_wsb::GoldenProbe {
+                executable: "C:\\AIW\\Tools\\aiw-guest-agent.exe".to_owned(),
+                request: Some("C:\\AIW\\Tools\\request.json".to_owned()),
+                output: "C:\\AIW\\Output\\token.json".to_owned(),
+            },
+            memory_mb: Some(2048),
+        };
+        let start = WsbGoldenProbeStart {
+            schema_version: "aiw.dev/wsb-golden-probe-start/v0alpha1".to_owned(),
+            run_root: wsb_plan.workspace_root.clone(),
+            project_path: project_path.to_string_lossy().into_owned(),
+            wsb_plan,
+            provider,
+            guest_agent: identity(&agent),
+            timeout_seconds: 180,
+        };
+        let native = NativeWsbProcess {
+            state: Mutex::new(NativeWsbState {
+                lease: aiw_windows_platform::acquire_windows_sandbox(&start.provider.sha256)
+                    .unwrap(),
+                started_id: None,
+            }),
+            plan: start.wsb_plan.clone(),
+        };
+        let plan = RunPlan::new(
+            &run_id,
+            project.metadata.name.clone(),
+            project_revision_hash(&project).unwrap(),
+            aiw_orchestrator::RunLifecycleKind::Assessment,
+            "host-time-not-trusted",
+            vec![
+                PlannedAction::AssessHost,
+                PlannedAction::PrepareWorkspace,
+                PlannedAction::ExecuteWindowsSandboxGoldenProbe {
+                    sandbox_plan_sha256: canonical_hash(&start.wsb_plan).unwrap(),
+                    provider_sha256: start.provider.sha256.clone(),
+                    guest_agent_sha256: start.guest_agent.sha256.clone(),
+                },
+                PlannedAction::CollectEvidence,
+            ],
+            vec!["starts an approved Windows Sandbox golden probe".to_owned()],
+        )
+        .unwrap();
+        let layout = RunLayout::new(&root.0, &run_id).unwrap();
+        layout.create(&plan).unwrap();
+        layout
+            .write_approval(
+                &ApprovalRecord::for_plan(&plan, "live-test-user", "host-time-not-trusted")
+                    .unwrap(),
+            )
+            .unwrap();
+
+        let execution =
+            execute_wsb_golden_probe(&start, &readiness, &layout, &native, &TestLease::default())
+                .unwrap();
+        assert!(execution.cleanup_complete);
+        assert!(output.join("token.json").is_file());
+        assert!(output.join("evidence.jsonl").is_file());
+        assert!(output.join("completion.json").is_file());
+        assert_eq!(
+            layout.read_result().unwrap().outcome,
+            RunOutcome::InsufficientEvidence
+        );
+        assert!(
+            native
+                .state
+                .lock()
+                .unwrap()
+                .lease
+                .list()
+                .unwrap()
+                .session_ids
+                .is_empty()
+        );
     }
 }

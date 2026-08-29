@@ -4,8 +4,8 @@ use aiw_probe::WindowsSandboxReadiness;
 
 #[cfg(windows)]
 pub use windows_platform::{
-    BoundedWsbConfig, CanonicalSandboxId, WindowsSandboxExecutionLease,
-    WindowsSandboxInvocationError, WsbListObservation, WsbStartObservation, WsbStopObservation,
+    CanonicalSandboxId, WindowsSandboxExecutionLease, WindowsSandboxInvocationError,
+    WsbConnectObservation, WsbListObservation, WsbStartObservation, WsbStopObservation,
 };
 
 #[cfg(windows)]
