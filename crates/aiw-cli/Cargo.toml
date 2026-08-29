@@ -21,6 +21,7 @@ aiw-provider-wsb.workspace = true
 aiw-runner.workspace = true
 aiw-schema.workspace = true
 aiw-token.workspace = true
+aiw-windows-platform.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 schemars.workspace = true
