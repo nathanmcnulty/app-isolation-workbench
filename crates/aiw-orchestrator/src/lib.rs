@@ -16,13 +16,14 @@ use std::{
 };
 
 use aiw_evidence::canonical_json_bytes;
+use aiw_probe::WorkspaceBindingEvidence;
 use aiw_schema::Project;
 use fs4::FileExt;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub const RUN_PLAN_SCHEMA_VERSION: &str = "aiw.dev/run-plan/v0alpha2";
+pub const RUN_PLAN_SCHEMA_VERSION: &str = "aiw.dev/run-plan/v0alpha3";
 pub const LEGACY_RUN_PLAN_SCHEMA_VERSION: &str = "aiw.dev/run-plan/v0alpha1";
 const APPROVAL_SCHEMA: &str = "aiw.dev/approval-record/v0alpha1";
 const EVENT_SCHEMA: &str = "aiw.dev/run-event/v0alpha1";
@@ -67,6 +68,8 @@ pub enum PlannedAction {
         sandbox_plan_sha256: String,
         provider_sha256: String,
         guest_agent_sha256: String,
+        workspace: Box<WorkspaceBindingEvidence>,
+        workspace_identity_sha256: String,
     },
     CollectEvidence,
     LaunchValidatedProfile {
@@ -101,8 +104,53 @@ pub struct LegacyRunPlanV0Alpha1 {
     pub project_id: String,
     pub lifecycle: RunLifecycleKind,
     pub created_at: String,
-    pub actions: Vec<PlannedAction>,
+    pub actions: Vec<LegacyPlannedActionV0Alpha2>,
     pub trust_deltas: Vec<String>,
+}
+
+/// The first project-revision-bound plan contract. It remains available for
+/// offline inspection, but provider mutation requires a newly approved v0alpha3
+/// plan containing the complete workspace identity document.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LegacyRunPlanV0Alpha2 {
+    pub schema: String,
+    pub run_id: String,
+    pub project_id: String,
+    pub project_revision_hash: String,
+    pub lifecycle: RunLifecycleKind,
+    pub created_at: String,
+    pub actions: Vec<LegacyPlannedActionV0Alpha2>,
+    #[serde(default)]
+    pub trust_deltas: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum LegacyPlannedActionV0Alpha2 {
+    AssessHost,
+    PrepareWorkspace,
+    ExecuteScenario {
+        scenario_id: String,
+    },
+    ExecuteWindowsSandboxGoldenProbe {
+        sandbox_plan_sha256: String,
+        provider_sha256: String,
+        guest_agent_sha256: String,
+    },
+    CollectEvidence,
+    LaunchValidatedProfile {
+        profile_id: String,
+    },
+    AuthorPackage,
+    InspectPackage,
+    SignPackage,
+    ValidatePackage,
 }
 
 impl RunPlan {
@@ -134,13 +182,14 @@ impl RunPlan {
         hash_value(self)
     }
 
-    /// Parses only the bound current plan contract. Legacy unbound plans fail closed.
+    /// Parses only the current mutation-capable plan contract. Legacy plans
+    /// remain separately readable for inspection and fail closed here.
     pub fn from_value(value: serde_json::Value) -> Result<Self, AiwError> {
         let schema = value.get("schema").and_then(serde_json::Value::as_str);
         if schema != Some(RUN_PLAN_SCHEMA_VERSION) {
             return Err(run_error(
                 "AIW_PLAN_SCHEMA_UNSUPPORTED",
-                "run plan schema is unsupported or lacks a project revision binding",
+                "run plan schema is unsupported for mutation and must be replanned",
                 "plan",
                 value
                     .get("runId")
@@ -1271,11 +1320,14 @@ fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
                 sandbox_plan_sha256,
                 provider_sha256,
                 guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
             } => {
                 for (field, hash) in [
                     ("sandboxPlanSha256", sandbox_plan_sha256),
                     ("providerSha256", provider_sha256),
                     ("guestAgentSha256", guest_agent_sha256),
+                    ("workspaceIdentitySha256", workspace_identity_sha256),
                 ] {
                     if !is_hash(hash) {
                         return Err(run_error(
@@ -1285,6 +1337,16 @@ fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
                             &plan.run_id,
                         ));
                     }
+                }
+                if workspace.validate().is_err()
+                    || hash_value(workspace)? != *workspace_identity_sha256
+                {
+                    return Err(run_error(
+                        "AIW_PLAN_BINDING_INVALID",
+                        "Windows Sandbox workspace evidence is invalid or does not match its hash",
+                        "workspace",
+                        &plan.run_id,
+                    ));
                 }
             }
             PlannedAction::LaunchValidatedProfile { profile_id } => {
@@ -2128,7 +2190,7 @@ mod tests {
         assert!(value["actions"][1].get("scenario_id").is_none());
         assert_eq!(
             plan("run-one").hash().unwrap(),
-            "ff31dbb0fe78b89b13439c2cdadddad87a991ae5610f9fe09d4cbda5deb83953"
+            "f707923f123bf13e044e5ab10ceedb53e6ae65cf21c68391f620938bd355546d"
         );
     }
 
@@ -2148,6 +2210,98 @@ mod tests {
             }))
             .is_err()
         );
+
+        let legacy = serde_json::json!({
+            "schema": "aiw.dev/run-plan/v0alpha2",
+            "runId": "old-wsb",
+            "projectId": "project.one",
+            "projectRevisionHash": "f".repeat(64),
+            "lifecycle": "assessment",
+            "createdAt": "2026-08-27T00:00:00Z",
+            "actions": [{
+                "kind": "executeWindowsSandboxGoldenProbe",
+                "sandboxPlanSha256": "a".repeat(64),
+                "providerSha256": "b".repeat(64),
+                "guestAgentSha256": "c".repeat(64)
+            }],
+            "trustDeltas": []
+        });
+        assert!(
+            serde_json::from_value::<LegacyRunPlanV0Alpha2>(legacy.clone()).is_ok(),
+            "the exact legacy v0alpha2 plan remains readable for inspection"
+        );
+        assert!(RunPlan::from_value(legacy).is_err());
+    }
+
+    #[test]
+    fn workspace_identity_is_approval_bound_and_malformed_hashes_fail_closed() {
+        let workspace = WorkspaceBindingEvidence {
+            schema_version: aiw_probe::WINDOWS_WORKSPACE_SCHEMA_VERSION.to_owned(),
+            policy: aiw_probe::WINDOWS_WORKSPACE_SECURITY_POLICY.to_owned(),
+            security_policy_sha256: aiw_probe::workspace_policy_hash("S-1-5-21-1"),
+            owner_sid: "S-1-5-21-1".to_owned(),
+            dacl_protected: true,
+            allowed_sids: vec!["S-1-5-18".to_owned(), "S-1-5-21-1".to_owned()],
+            parent: aiw_probe::WindowsFileIdentity {
+                final_path: r"C:\AIW".to_owned(),
+                volume_serial_number: "1".repeat(16),
+                file_id: "1".repeat(32),
+            },
+            root: aiw_probe::WindowsFileIdentity {
+                final_path: r"C:\AIW\run".to_owned(),
+                volume_serial_number: "1".repeat(16),
+                file_id: "2".repeat(32),
+            },
+            tools: aiw_probe::WindowsFileIdentity {
+                final_path: r"C:\AIW\run\tools".to_owned(),
+                volume_serial_number: "1".repeat(16),
+                file_id: "3".repeat(32),
+            },
+            output: aiw_probe::WindowsFileIdentity {
+                final_path: r"C:\AIW\run\output".to_owned(),
+                volume_serial_number: "1".repeat(16),
+                file_id: "4".repeat(32),
+            },
+        };
+        let action =
+            |workspace_identity_sha256: String| PlannedAction::ExecuteWindowsSandboxGoldenProbe {
+                sandbox_plan_sha256: "a".repeat(64),
+                provider_sha256: "b".repeat(64),
+                guest_agent_sha256: "c".repeat(64),
+                workspace: Box::new(workspace.clone()),
+                workspace_identity_sha256,
+            };
+        let build = |workspace_identity_sha256: String| {
+            RunPlan::new(
+                "run-wsb",
+                "project.one",
+                "f".repeat(64),
+                RunLifecycleKind::Assessment,
+                "2026-08-29T00:00:00Z",
+                vec![action(workspace_identity_sha256)],
+                vec!["starts one exact Windows Sandbox session".into()],
+            )
+        };
+
+        assert!(build("not-a-sha256".into()).is_err());
+
+        let original = build(hash_value(&workspace).unwrap()).unwrap();
+        let mut replacement = original.clone();
+        let PlannedAction::ExecuteWindowsSandboxGoldenProbe {
+            workspace,
+            workspace_identity_sha256,
+            ..
+        } = &mut replacement.actions[0]
+        else {
+            unreachable!();
+        };
+        workspace.output.file_id = "5".repeat(32);
+        *workspace_identity_sha256 = hash_value(workspace).unwrap();
+        assert_ne!(original.hash().unwrap(), replacement.hash().unwrap());
+
+        let approval =
+            ApprovalRecord::for_plan(&original, "admin", "2026-08-29T00:01:00Z").unwrap();
+        assert!(validate_approval(&approval, &replacement).is_err());
     }
 
     #[test]

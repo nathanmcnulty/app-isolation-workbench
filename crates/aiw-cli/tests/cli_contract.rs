@@ -11,6 +11,7 @@ use aiw_orchestrator::{
     project_revision_hash,
 };
 use aiw_schema::Project;
+use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -55,6 +56,11 @@ fn parse_one_json(bytes: &[u8]) -> Value {
     serde_json::from_slice(bytes).expect("expected exactly one JSON document")
 }
 
+fn canonical_hash<T: Serialize>(value: &T) -> String {
+    let value = serde_json::to_value(value).unwrap();
+    hex::encode(Sha256::digest(canonical_json_bytes(&value).unwrap()))
+}
+
 fn write_plan(path: &Path, project_path: &Path, hash: Option<String>) {
     let project: Project = serde_yaml::from_slice(&fs::read(project_path).unwrap()).unwrap();
     let revision_hash = hash.unwrap_or_else(|| project_revision_hash(&project).unwrap());
@@ -74,6 +80,25 @@ fn write_plan(path: &Path, project_path: &Path, hash: Option<String>) {
 fn write_wsb_plan(path: &Path, project_path: &Path) -> RunPlan {
     let project: Project = serde_yaml::from_slice(&fs::read(project_path).unwrap()).unwrap();
     let revision_hash = project_revision_hash(&project).unwrap();
+    let owner = "S-1-5-21-1".to_owned();
+    let identity = |path: &str, marker: u8| aiw_probe::WindowsFileIdentity {
+        final_path: path.to_owned(),
+        volume_serial_number: "1".repeat(16),
+        file_id: format!("{marker:032x}"),
+    };
+    let workspace = aiw_probe::WorkspaceBindingEvidence {
+        schema_version: aiw_probe::WINDOWS_WORKSPACE_SCHEMA_VERSION.to_owned(),
+        policy: aiw_probe::WINDOWS_WORKSPACE_SECURITY_POLICY.to_owned(),
+        security_policy_sha256: aiw_probe::workspace_policy_hash(&owner),
+        owner_sid: owner.clone(),
+        dacl_protected: true,
+        allowed_sids: vec![aiw_probe::WINDOWS_SYSTEM_SID.to_owned(), owner],
+        parent: identity(r"C:\AIW", 1),
+        root: identity(r"C:\AIW\run-one", 2),
+        tools: identity(r"C:\AIW\run-one\tools", 3),
+        output: identity(r"C:\AIW\run-one\output", 4),
+    };
+    let workspace_identity_sha256 = canonical_hash(&workspace);
     let plan = RunPlan::new(
         "run-one",
         project.metadata.name,
@@ -87,6 +112,8 @@ fn write_wsb_plan(path: &Path, project_path: &Path) -> RunPlan {
                 sandbox_plan_sha256: "b".repeat(64),
                 provider_sha256: "a".repeat(64),
                 guest_agent_sha256: "c".repeat(64),
+                workspace: Box::new(workspace),
+                workspace_identity_sha256,
             },
             PlannedAction::CollectEvidence,
         ],
@@ -101,6 +128,17 @@ fn write_clean_wsb_transaction(run_dir: &Path, plan: &RunPlan) {
     let directory = run_dir.join("wsb-session-transaction");
     fs::create_dir(&directory).unwrap();
     let plan_hash = plan.hash().unwrap();
+    let workspace_identity_sha256 = plan
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            PlannedAction::ExecuteWindowsSandboxGoldenProbe {
+                workspace_identity_sha256,
+                ..
+            } => Some(workspace_identity_sha256.clone()),
+            _ => None,
+        })
+        .unwrap();
     let zero_hash = "0".repeat(64);
     let mut previous_hash = zero_hash;
     let mut transitions = Vec::new();
@@ -115,7 +153,7 @@ fn write_clean_wsb_transaction(run_dir: &Path, plan: &RunPlan) {
     {
         let sequence = index + 1;
         let hash_input = serde_json::json!({
-            "schemaVersion": "aiw.dev/wsb-session-transaction/v0alpha1",
+            "schemaVersion": "aiw.dev/wsb-session-transaction/v0alpha2",
             "runId": "run-one",
             "planHash": plan_hash,
             "projectRevisionHash": plan.project_revision_hash,
@@ -123,6 +161,7 @@ fn write_clean_wsb_transaction(run_dir: &Path, plan: &RunPlan) {
             "configSha256": "d".repeat(64),
             "sessionId": "11111111-1111-1111-1111-111111111111",
             "requestSha256": "e".repeat(64),
+            "workspaceIdentitySha256": workspace_identity_sha256,
             "sequence": sequence,
             "state": state,
             "reasonCode": reason_code,
@@ -138,7 +177,7 @@ fn write_clean_wsb_transaction(run_dir: &Path, plan: &RunPlan) {
         }));
         previous_hash = hash;
         let transaction = serde_json::json!({
-            "schemaVersion": "aiw.dev/wsb-session-transaction/v0alpha1",
+            "schemaVersion": "aiw.dev/wsb-session-transaction/v0alpha2",
             "runId": "run-one",
             "planHash": plan_hash,
             "projectRevisionHash": plan.project_revision_hash,
@@ -146,6 +185,7 @@ fn write_clean_wsb_transaction(run_dir: &Path, plan: &RunPlan) {
             "configSha256": "d".repeat(64),
             "sessionId": "11111111-1111-1111-1111-111111111111",
             "requestSha256": "e".repeat(64),
+            "workspaceIdentitySha256": workspace_identity_sha256,
             "transitions": transitions,
         });
         fs::write(
@@ -540,7 +580,8 @@ fn versioned_project_and_orchestrator_schemas_are_public() {
         ("project-v0alpha2", "Project"),
         ("run-plan", "RunPlan"),
         ("run-plan-v0alpha1", "LegacyRunPlanV0Alpha1"),
-        ("run-plan-v0alpha2", "RunPlan"),
+        ("run-plan-v0alpha2", "LegacyRunPlanV0Alpha2"),
+        ("run-plan-v0alpha3", "RunPlan"),
         ("approval-record", "ApprovalRecord"),
         ("run-event", "RunEvent"),
         ("run-result", "RunResult"),

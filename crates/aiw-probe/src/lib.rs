@@ -91,6 +91,99 @@ pub struct WindowsFileIdentity {
     pub file_id: String,
 }
 
+pub const WINDOWS_WORKSPACE_SCHEMA_VERSION: &str = "aiw.dev/workspace-binding-evidence/v0alpha1";
+pub const WINDOWS_WORKSPACE_SECURITY_POLICY: &str = "owner-system-full-control-protected-v1";
+pub const WINDOWS_SYSTEM_SID: &str = "S-1-5-18";
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceBindingEvidence {
+    pub schema_version: String,
+    pub policy: String,
+    pub security_policy_sha256: String,
+    pub owner_sid: String,
+    pub dacl_protected: bool,
+    pub allowed_sids: Vec<String>,
+    pub parent: WindowsFileIdentity,
+    pub root: WindowsFileIdentity,
+    pub tools: WindowsFileIdentity,
+    pub output: WindowsFileIdentity,
+}
+
+impl WorkspaceBindingEvidence {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.schema_version != WINDOWS_WORKSPACE_SCHEMA_VERSION
+            || self.policy != WINDOWS_WORKSPACE_SECURITY_POLICY
+            || !self.dacl_protected
+            || !valid_sid_text(&self.owner_sid)
+            || self.owner_sid == WINDOWS_SYSTEM_SID
+            || self.security_policy_sha256 != workspace_policy_hash(&self.owner_sid)
+        {
+            return Err("workspace policy binding is invalid");
+        }
+        if self.allowed_sids.len() != 2
+            || !self
+                .allowed_sids
+                .iter()
+                .any(|sid| sid == WINDOWS_SYSTEM_SID)
+            || !self.allowed_sids.iter().any(|sid| sid == &self.owner_sid)
+        {
+            return Err("workspace allowlist is not owner-and-SYSTEM only");
+        }
+        for identity in [&self.parent, &self.root, &self.tools, &self.output] {
+            if identity.final_path.is_empty()
+                || identity.final_path.len() > 32_767
+                || !fixed_hex(&identity.volume_serial_number, 16)
+                || !fixed_hex(&identity.file_id, 32)
+            {
+                return Err("workspace file identity is invalid");
+            }
+        }
+        let identities = [&self.parent, &self.root, &self.tools, &self.output];
+        for (index, left) in identities.iter().enumerate() {
+            if identities[index + 1..].iter().any(|right| {
+                left.volume_serial_number == right.volume_serial_number
+                    && left.file_id == right.file_id
+            }) {
+                return Err("workspace directory identities are not distinct");
+            }
+        }
+        Ok(())
+    }
+}
+
+#[must_use]
+pub fn workspace_policy_hash(owner_sid: &str) -> String {
+    let semantic = format!(
+        "policy={WINDOWS_WORKSPACE_SECURITY_POLICY}\nowner={owner_sid}\nallow={owner_sid}:full:object-container-inherit\nallow={WINDOWS_SYSTEM_SID}:full:object-container-inherit\n"
+    );
+    hex::encode(Sha256::digest(semantic.as_bytes()))
+}
+
+fn fixed_hex(value: &str, length: usize) -> bool {
+    value.len() == length
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+}
+
+fn valid_sid_text(value: &str) -> bool {
+    if value.len() < 7 || value.len() > 184 {
+        return false;
+    }
+    let Some(components) = value.strip_prefix("S-1-") else {
+        return false;
+    };
+    let components = components.split('-').collect::<Vec<_>>();
+    !components.is_empty()
+        && components.len() <= 17
+        && components.iter().all(|component| {
+            !component.is_empty()
+                && component.bytes().all(|byte| byte.is_ascii_digit())
+                && component.parse::<u64>().is_ok()
+        })
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WindowsSandboxCliProtocol {
@@ -278,6 +371,40 @@ mod tests {
     #[test]
     fn impossible_tool_is_not_found() {
         assert!(find_command("aiw-this-tool-does-not-exist-8f197f32").is_none());
+    }
+
+    #[test]
+    fn workspace_binding_contract_rejects_policy_and_identity_tampering() {
+        let owner = "S-1-5-21-1".to_owned();
+        let identity = |path: &str, marker: u8| WindowsFileIdentity {
+            final_path: path.to_owned(),
+            volume_serial_number: "0".repeat(16),
+            file_id: format!("{marker:032x}"),
+        };
+        let evidence = WorkspaceBindingEvidence {
+            schema_version: WINDOWS_WORKSPACE_SCHEMA_VERSION.to_owned(),
+            policy: WINDOWS_WORKSPACE_SECURITY_POLICY.to_owned(),
+            security_policy_sha256: workspace_policy_hash(&owner),
+            owner_sid: owner.clone(),
+            dacl_protected: true,
+            allowed_sids: vec![WINDOWS_SYSTEM_SID.to_owned(), owner],
+            parent: identity("C:\\AIW", 1),
+            root: identity("C:\\AIW\\run", 2),
+            tools: identity("C:\\AIW\\run\\tools", 3),
+            output: identity("C:\\AIW\\run\\output", 4),
+        };
+        evidence.validate().unwrap();
+        assert_eq!(evidence.security_policy_sha256.len(), 64);
+
+        let mut tampered = evidence.clone();
+        tampered.dacl_protected = false;
+        assert!(tampered.validate().is_err());
+        let mut tampered = evidence.clone();
+        tampered.output.file_id = tampered.root.file_id.clone();
+        assert!(tampered.validate().is_err());
+        let mut tampered = evidence;
+        tampered.allowed_sids.push("S-1-5-32-544".to_owned());
+        assert!(tampered.validate().is_err());
     }
 
     #[test]

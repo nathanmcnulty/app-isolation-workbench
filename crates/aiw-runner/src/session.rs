@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{RunnerError, valid_uuid};
 
-pub const SESSION_TRANSACTION_SCHEMA_VERSION: &str = "aiw.dev/wsb-session-transaction/v0alpha1";
+pub const SESSION_TRANSACTION_SCHEMA_VERSION: &str = "aiw.dev/wsb-session-transaction/v0alpha2";
 const MAX_TRANSACTION_BYTES: u64 = 64 * 1024;
 const MAX_TRANSITIONS: usize = 16;
 const ZERO_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
@@ -49,6 +49,7 @@ pub struct SessionTransaction {
     pub config_sha256: String,
     pub session_id: String,
     pub request_sha256: String,
+    pub workspace_identity_sha256: String,
     pub transitions: Vec<SessionTransition>,
 }
 
@@ -63,6 +64,7 @@ struct SessionTransactionWire {
     config_sha256: String,
     session_id: String,
     request_sha256: String,
+    workspace_identity_sha256: String,
     transitions: Vec<SessionTransition>,
 }
 
@@ -81,6 +83,7 @@ impl<'de> Deserialize<'de> for SessionTransaction {
             config_sha256: wire.config_sha256,
             session_id: wire.session_id,
             request_sha256: wire.request_sha256,
+            workspace_identity_sha256: wire.workspace_identity_sha256,
             transitions: wire.transitions,
         };
         validate_transaction(&transaction).map_err(serde::de::Error::custom)?;
@@ -122,6 +125,7 @@ pub(crate) struct SessionBinding {
     pub config_sha256: String,
     pub session_id: String,
     pub request_sha256: String,
+    pub workspace_identity_sha256: String,
 }
 
 impl SessionBinding {
@@ -135,6 +139,7 @@ impl SessionBinding {
             config_sha256: self.config_sha256.clone(),
             session_id: self.session_id.clone(),
             request_sha256: self.request_sha256.clone(),
+            workspace_identity_sha256: self.workspace_identity_sha256.clone(),
             transitions: Vec::new(),
         };
         transaction.push(SessionTransactionState::StartIntent, reason_code)?;
@@ -149,6 +154,7 @@ impl SessionBinding {
             && transaction.config_sha256 == self.config_sha256
             && transaction.session_id == self.session_id
             && transaction.request_sha256 == self.request_sha256
+            && transaction.workspace_identity_sha256 == self.workspace_identity_sha256
     }
 }
 
@@ -412,6 +418,7 @@ fn validate_transaction(transaction: &SessionTransaction) -> Result<(), RunnerEr
         &transaction.provider_sha256,
         &transaction.config_sha256,
         &transaction.request_sha256,
+        &transaction.workspace_identity_sha256,
     ] {
         validate_hash(value)?;
     }
@@ -500,6 +507,7 @@ struct TransitionHashInput<'a> {
     config_sha256: &'a str,
     session_id: &'a str,
     request_sha256: &'a str,
+    workspace_identity_sha256: &'a str,
     sequence: u32,
     state: SessionTransactionState,
     reason_code: &'a str,
@@ -522,6 +530,7 @@ fn transition_hash(
         config_sha256: &transaction.config_sha256,
         session_id: &transaction.session_id,
         request_sha256: &transaction.request_sha256,
+        workspace_identity_sha256: &transaction.workspace_identity_sha256,
         sequence,
         state,
         reason_code,
@@ -569,6 +578,7 @@ fn same_binding(left: &SessionTransaction, right: &SessionTransaction) -> bool {
         && left.config_sha256 == right.config_sha256
         && left.session_id == right.session_id
         && left.request_sha256 == right.request_sha256
+        && left.workspace_identity_sha256 == right.workspace_identity_sha256
 }
 
 fn parse_snapshot_name(name: &str) -> Result<u32, RunnerError> {
@@ -685,6 +695,7 @@ mod tests {
             config_sha256: "4".repeat(64),
             session_id: "11111111-1111-1111-1111-111111111111".to_owned(),
             request_sha256: "5".repeat(64),
+            workspace_identity_sha256: "6".repeat(64),
         };
         let mut transaction = binding.transaction("approved-start").unwrap();
         transaction
@@ -710,6 +721,7 @@ mod tests {
             config_sha256: "4".repeat(64),
             session_id: "11111111-1111-1111-1111-111111111111".to_owned(),
             request_sha256: "5".repeat(64),
+            workspace_identity_sha256: "6".repeat(64),
         };
         let valid = binding.transaction("approved-start").unwrap();
         assert!(
@@ -724,6 +736,14 @@ mod tests {
         let mut empty = serde_json::to_value(&valid).unwrap();
         empty["transitions"] = serde_json::json!([]);
         assert!(serde_json::from_value::<SessionTransaction>(empty).is_err());
+
+        let mut legacy = serde_json::to_value(&valid).unwrap();
+        legacy["schemaVersion"] = serde_json::json!("aiw.dev/wsb-session-transaction/v0alpha1");
+        assert!(serde_json::from_value::<SessionTransaction>(legacy).is_err());
+
+        let mut workspace_tamper = serde_json::to_value(&valid).unwrap();
+        workspace_tamper["workspaceIdentitySha256"] = serde_json::json!("7".repeat(64));
+        assert!(serde_json::from_value::<SessionTransaction>(workspace_tamper).is_err());
 
         let mut reserved = serde_json::to_value(&valid).unwrap();
         reserved["runId"] = serde_json::json!("con");

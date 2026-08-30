@@ -15,10 +15,10 @@ use aiw_evidence::{
     build_assessment_bundle, verify_assessment_bundle, verify_records,
 };
 use aiw_orchestrator::{
-    AiwError, ApprovalRecord, CancellationRequest, LegacyRunPlanV0Alpha1, RecoveryStatus, RunEvent,
-    RunLayout, RunPlan, RunResult, project_revision_hash,
+    AiwError, ApprovalRecord, CancellationRequest, LegacyRunPlanV0Alpha1, LegacyRunPlanV0Alpha2,
+    RecoveryStatus, RunEvent, RunLayout, RunPlan, RunResult, project_revision_hash,
 };
-use aiw_probe::{WindowsSandboxReadiness, probe_host};
+use aiw_probe::{WindowsSandboxReadiness, WorkspaceBindingEvidence, probe_host};
 use aiw_provider_mxc::{MxcGoldenProbePlan, plan_capability_probe, plan_golden_probe};
 use aiw_provider_wsb::{
     WindowsSandboxCliLifecyclePlan, WindowsSandboxCompletionExpectation,
@@ -337,6 +337,8 @@ enum SchemaKind {
     RunPlanV0Alpha1,
     #[value(name = "run-plan-v0alpha2")]
     RunPlanV0Alpha2,
+    #[value(name = "run-plan-v0alpha3")]
+    RunPlanV0Alpha3,
     ApprovalRecord,
     RunEvent,
     RunResult,
@@ -356,6 +358,7 @@ enum SchemaKind {
     AnalystReportValidation,
     TokenEvidence,
     WindowsSandboxReadiness,
+    WorkspaceBindingEvidence,
     WsbGoldenProbeStart,
     WsbGoldenProbeExecution,
     WsbSessionTransaction,
@@ -705,8 +708,9 @@ fn run(command: Command) -> Result<()> {
         Command::Schema(args) => match args.kind {
             SchemaKind::Project | SchemaKind::ProjectV0Alpha2 => write_json(&schema_for!(Project)),
             SchemaKind::ProjectV0Alpha1 => write_json(&schema_for!(LegacyProjectV0Alpha1)),
-            SchemaKind::RunPlan | SchemaKind::RunPlanV0Alpha2 => write_json(&schema_for!(RunPlan)),
+            SchemaKind::RunPlan | SchemaKind::RunPlanV0Alpha3 => write_json(&schema_for!(RunPlan)),
             SchemaKind::RunPlanV0Alpha1 => write_json(&schema_for!(LegacyRunPlanV0Alpha1)),
+            SchemaKind::RunPlanV0Alpha2 => write_json(&schema_for!(LegacyRunPlanV0Alpha2)),
             SchemaKind::ApprovalRecord => write_json(&schema_for!(ApprovalRecord)),
             SchemaKind::RunEvent => write_json(&schema_for!(RunEvent)),
             SchemaKind::RunResult => write_json(&schema_for!(RunResult)),
@@ -733,6 +737,9 @@ fn run(command: Command) -> Result<()> {
             SchemaKind::TokenEvidence => write_json(&schema_for!(TokenEvidence)),
             SchemaKind::WindowsSandboxReadiness => {
                 write_json(&schema_for!(WindowsSandboxReadiness))
+            }
+            SchemaKind::WorkspaceBindingEvidence => {
+                write_json(&schema_for!(WorkspaceBindingEvidence))
             }
             SchemaKind::WsbGoldenProbeStart => write_json(&schema_for!(WsbGoldenProbeStart)),
             SchemaKind::WsbGoldenProbeExecution => {
