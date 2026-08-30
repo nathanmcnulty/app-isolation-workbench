@@ -28,6 +28,7 @@ windows = { version = "0.62.2", features = [
     "System_Profile",
     "Wdk_Storage_FileSystem",
     "Win32_Foundation",
+    "Win32_Globalization",
     "Win32_Security",
     "Win32_Security_Authorization",
     "Win32_Security_Cryptography",
