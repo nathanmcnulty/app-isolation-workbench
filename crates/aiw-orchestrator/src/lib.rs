@@ -14,10 +14,20 @@ use std::{
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
+#[cfg(windows)]
+use std::{
+    thread,
+    time::{Duration, Instant},
+};
 
 use aiw_evidence::canonical_json_bytes;
 use aiw_probe::WorkspaceBindingEvidence;
 use aiw_schema::Project;
+#[cfg(windows)]
+use aiw_windows_platform::{
+    RunCoordinationError, RunCoordinationKey, RunCoordinationLease, RunCoordinationMode,
+    try_acquire_run_coordination,
+};
 use fs4::FileExt;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -43,6 +53,10 @@ const MAX_LINE: usize = 16 * 1024;
 const MAX_ITEMS: usize = 256;
 const MAX_RECORDS: usize = 100_000;
 const MAX_CREATE_STAGE_ATTEMPTS: usize = 32;
+#[cfg(windows)]
+const RUN_COORDINATION_DEADLINE: Duration = Duration::from_secs(30);
+#[cfg(windows)]
+const RUN_COORDINATION_POLL: Duration = Duration::from_millis(10);
 static NEXT_STAGE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -419,6 +433,8 @@ impl std::error::Error for AiwError {}
 pub struct RunLayout {
     root: PathBuf,
     run_id: String,
+    #[cfg(windows)]
+    coordination_key: RunCoordinationKey,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -463,7 +479,15 @@ impl WsbPlanningImportReceipt {
 }
 
 struct RunLock {
-    _file: File,
+    #[cfg(windows)]
+    _coordination: RunCoordinationLease,
+    _inner_file: Option<File>,
+}
+
+#[derive(Clone, Copy)]
+enum RunLockPurpose {
+    Ordinary,
+    InspectDiscardState,
 }
 
 /// Opaque authority that keeps the run lock held across external discard-
@@ -493,6 +517,11 @@ impl WsbRevocationGuard<'_> {
         self.layout
             .write_wsb_revocation_locked(&self.plan, &self.import, revocation)
     }
+
+    #[cfg(all(test, windows))]
+    fn release_inner_lock_for_test(&mut self) {
+        self._lock._inner_file.take();
+    }
 }
 
 impl RunLayout {
@@ -518,7 +547,15 @@ impl RunLayout {
             ));
         }
         ensure_directory(&root, &run_id, "layout")?;
-        Ok(Self { root, run_id })
+        #[cfg(windows)]
+        let coordination_key = RunCoordinationKey::from_existing_root(&root, &run_id)
+            .map_err(|error| coordination_error("layout", &run_id, error))?;
+        Ok(Self {
+            root,
+            run_id,
+            #[cfg(windows)]
+            coordination_key,
+        })
     }
 
     pub fn run_dir(&self) -> PathBuf {
@@ -583,7 +620,27 @@ impl RunLayout {
         ))
     }
 
-    fn acquire_lock(&self) -> Result<RunLock, AiwError> {
+    fn acquire_lock(&self, stage: &'static str) -> Result<RunLock, AiwError> {
+        self.acquire_lock_for(RunLockPurpose::Ordinary, stage)
+    }
+
+    fn acquire_discard_inspection_lock(&self, stage: &'static str) -> Result<RunLock, AiwError> {
+        self.acquire_lock_for(RunLockPurpose::InspectDiscardState, stage)
+    }
+
+    fn acquire_lock_for(
+        &self,
+        purpose: RunLockPurpose,
+        stage: &'static str,
+    ) -> Result<RunLock, AiwError> {
+        #[cfg(windows)]
+        let coordination = self.acquire_outer_coordination(stage)?;
+        if matches!(purpose, RunLockPurpose::Ordinary) {
+            // This check is authoritative because the outer mutex is already
+            // held. A waiter awakened after depublish must reject from the
+            // external gate before it touches the now-missing workspace.
+            self.reject_if_discard_control_present(stage)?;
+        }
         self.revalidate_root()?;
         let runs = self.root.join("runs");
         fs::create_dir_all(&runs).map_err(|error| storage_error("lock", &self.run_id, error))?;
@@ -605,7 +662,33 @@ impl RunLayout {
         ensure_file(&path, &self.run_id, "lock")?;
         FileExt::lock(&file).map_err(|error| storage_error("lock", &self.run_id, error))?;
         self.revalidate_root()?;
-        Ok(RunLock { _file: file })
+        Ok(RunLock {
+            #[cfg(windows)]
+            _coordination: coordination,
+            _inner_file: Some(file),
+        })
+    }
+
+    #[cfg(windows)]
+    fn acquire_outer_coordination(
+        &self,
+        stage: &'static str,
+    ) -> Result<RunCoordinationLease, AiwError> {
+        let deadline = Instant::now() + RUN_COORDINATION_DEADLINE;
+        loop {
+            // No orchestrator path has durable abandoned-owner recovery
+            // authority yet. InspectDiscardState only bypasses the external
+            // control gate so it can report or complete logical revocation;
+            // it must still fail closed if this wait observes abandonment.
+            match try_acquire_run_coordination(&self.coordination_key, RunCoordinationMode::Normal)
+            {
+                Ok(lease) => return Ok(lease),
+                Err(RunCoordinationError::LeaseUnavailable) if Instant::now() < deadline => {
+                    thread::sleep(RUN_COORDINATION_POLL);
+                }
+                Err(error) => return Err(coordination_error(stage, &self.run_id, error)),
+            }
+        }
     }
 
     fn revalidate_root(&self) -> Result<(), AiwError> {
@@ -657,9 +740,7 @@ impl RunLayout {
                 &self.run_id,
             ));
         }
-        self.reject_if_discard_control_present("create")?;
-        let _lock = self.acquire_lock()?;
-        self.reject_if_discard_control_present("create")?;
+        let _lock = self.acquire_lock("create")?;
         if self.run_dir().exists() {
             return Err(run_error(
                 "AIW_RUN_ALREADY_EXISTS",
@@ -697,9 +778,7 @@ impl RunLayout {
             ));
         }
         validate_wsb_import(receipt, plan)?;
-        self.reject_if_discard_control_present("create")?;
-        let _lock = self.acquire_lock()?;
-        self.reject_if_discard_control_present("create")?;
+        let _lock = self.acquire_lock("create")?;
         self.reject_if_wsb_discard_started_locked(plan, "create")?;
         let disposition =
             if optional_non_reparse_directory(&self.run_dir(), &self.run_id, "create")? {
@@ -1215,7 +1294,7 @@ impl RunLayout {
     }
 
     pub fn read_plan(&self) -> Result<RunPlan, AiwError> {
-        let _lock = self.acquire_lock()?;
+        let _lock = self.acquire_lock("plan")?;
         self.validate_run_dir()?;
         self.read_plan_locked()
     }
@@ -1236,7 +1315,7 @@ impl RunLayout {
     }
 
     pub fn write_approval(&self, approval: &ApprovalRecord) -> Result<(), AiwError> {
-        let _lock = self.acquire_lock()?;
+        let _lock = self.acquire_lock("approval")?;
         self.validate_run_dir()?;
         let plan = self.read_plan_locked()?;
         self.validate_wsb_import_provenance_locked(&plan, "approval")?;
@@ -1265,7 +1344,7 @@ impl RunLayout {
     }
 
     pub fn read_approval(&self) -> Result<ApprovalRecord, AiwError> {
-        let _lock = self.acquire_lock()?;
+        let _lock = self.acquire_lock("approval")?;
         self.validate_run_dir()?;
         let plan = self.read_plan_locked()?;
         self.reject_if_wsb_discard_started_locked(&plan, "approval")?;
@@ -1296,7 +1375,7 @@ impl RunLayout {
                 &self.run_id,
             ));
         }
-        let _lock = self.acquire_lock()?;
+        let _lock = self.acquire_lock("journal")?;
         self.validate_run_dir()?;
         let plan = self.read_plan_locked()?;
         self.reject_if_wsb_discard_started_locked(&plan, "journal")?;
@@ -1316,7 +1395,7 @@ impl RunLayout {
     }
 
     pub fn replay_journal(&self) -> Result<Vec<JournalRecord>, AiwError> {
-        let _lock = self.acquire_lock()?;
+        let _lock = self.acquire_lock("journal")?;
         self.validate_run_dir()?;
         let plan = self.read_plan_locked()?;
         self.reject_if_wsb_discard_started_locked(&plan, "journal")?;
@@ -1336,7 +1415,7 @@ impl RunLayout {
             requested_by: requested_by.into(),
         };
         validate_cancellation(&value)?;
-        let _lock = self.acquire_lock()?;
+        let _lock = self.acquire_lock("cancel")?;
         self.validate_run_dir()?;
         let plan = self.read_plan_locked()?;
         self.reject_if_wsb_discard_started_locked(&plan, "cancel")?;
@@ -1378,7 +1457,7 @@ impl RunLayout {
                 &self.run_id,
             ));
         }
-        let _lock = self.acquire_lock()?;
+        let _lock = self.acquire_lock("result")?;
         self.validate_run_dir()?;
         self.recover_locked()?;
         if !self.approval_path().exists() {
@@ -1417,7 +1496,7 @@ impl RunLayout {
     }
 
     pub fn read_result(&self) -> Result<RunResult, AiwError> {
-        let _lock = self.acquire_lock()?;
+        let _lock = self.acquire_lock("result")?;
         self.validate_run_dir()?;
         let plan = self.read_plan_locked()?;
         self.reject_if_wsb_discard_started_locked(&plan, "result")?;
@@ -1460,7 +1539,7 @@ impl RunLayout {
     }
 
     pub fn recovery_status(&self) -> Result<RecoveryStatus, AiwError> {
-        let _lock = self.acquire_lock()?;
+        let _lock = self.acquire_discard_inspection_lock("recovery")?;
         self.validate_run_dir()?;
         let plan = self.read_plan_locked()?;
         if self.wsb_discard_started_locked(&plan)? {
@@ -1541,7 +1620,7 @@ impl RunLayout {
     /// revocation. The returned guard exposes no ordinary lifecycle mutation.
     #[doc(hidden)]
     pub fn begin_wsb_revocation(&self) -> Result<WsbRevocationGuard<'_>, AiwError> {
-        let lock = self.acquire_lock()?;
+        let lock = self.acquire_discard_inspection_lock("revocation")?;
         self.validate_run_dir()?;
         let plan = self.read_plan_locked()?;
         self.validate_wsb_import_provenance_locked(&plan, "revocation")?;
@@ -3435,6 +3514,41 @@ fn storage_error(stage: &str, run_id: &str, error: io::Error) -> AiwError {
     )
 }
 
+#[cfg(windows)]
+fn coordination_error(stage: &str, run_id: &str, error: RunCoordinationError) -> AiwError {
+    match error {
+        RunCoordinationError::LeaseUnavailable => AiwError::new(
+            "AIW_RUN_COORDINATION_TIMEOUT",
+            "timed out waiting for another run operation",
+            stage,
+            Some(run_id),
+            true,
+            "Wait for the active operation to finish, then retry.",
+            error.to_string(),
+        ),
+        RunCoordinationError::RecoveryRequired => AiwError::new(
+            "AIW_RUN_RECOVERY_REQUIRED",
+            "an abandoned run operation requires durable recovery",
+            stage,
+            Some(run_id),
+            false,
+            "Inspect persisted state and use the bounded recovery workflow before retrying.",
+            error.to_string(),
+        ),
+        RunCoordinationError::InvalidBinding(_) | RunCoordinationError::Authority(_) => {
+            AiwError::new(
+                "AIW_RUN_COORDINATION_FAILED",
+                "run coordination authority could not be established",
+                stage,
+                Some(run_id),
+                false,
+                "Do not mutate the run; inspect the canonical workspace identity and mutex security.",
+                error.to_string(),
+            )
+        }
+    }
+}
+
 fn io_error(code: &str, summary: &str, stage: &str, run_id: &str, error: io::Error) -> AiwError {
     AiwError::new(
         code,
@@ -3489,6 +3603,8 @@ fn limit_detail(mut detail: String) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
+    use std::sync::mpsc;
     use std::{panic, sync::Arc, thread};
 
     fn root() -> PathBuf {
@@ -3608,7 +3724,7 @@ mod tests {
         plan: &RunPlan,
         receipt: &WsbPlanningImportReceipt,
     ) -> PathBuf {
-        let _lock = layout.acquire_lock().unwrap();
+        let _lock = layout.acquire_lock("test").unwrap();
         let stage = layout.wsb_import_stage_path(plan).unwrap();
         fs::create_dir(&stage).unwrap();
         fs::create_dir(stage.join("journal-heads")).unwrap();
@@ -4003,7 +4119,7 @@ mod tests {
             let expected = wsb_plan("run-one");
             let receipt = wsb_import(&expected);
             {
-                let _lock = layout.acquire_lock().unwrap();
+                let _lock = layout.acquire_lock("test").unwrap();
                 let stage = layout.wsb_import_stage_path(&expected).unwrap();
                 fs::create_dir(&stage).unwrap();
                 if step >= 1 {
@@ -4093,7 +4209,7 @@ mod tests {
             };
             let head_bytes = json_file_bytes(&head, layout.run_id()).unwrap();
             {
-                let _lock = layout.acquire_lock().unwrap();
+                let _lock = layout.acquire_lock("test").unwrap();
                 let stage = layout.wsb_import_stage_path(&expected).unwrap();
                 fs::create_dir(&stage).unwrap();
                 let heads = stage.join("journal-heads");
@@ -4172,7 +4288,7 @@ mod tests {
             let layout = layout(&root, "run-one");
             let expected = wsb_plan("run-one");
             let receipt = wsb_import(&expected);
-            let _lock = layout.acquire_lock().unwrap();
+            let _lock = layout.acquire_lock("test").unwrap();
             let stage = layout.wsb_import_stage_path(&expected).unwrap();
             fs::create_dir(&stage).unwrap();
             fs::write(stage.join("unexpected.txt"), b"preserve").unwrap();
@@ -4192,7 +4308,7 @@ mod tests {
         let receipt = wsb_import(&expected);
         let pending;
         {
-            let _lock = layout.acquire_lock().unwrap();
+            let _lock = layout.acquire_lock("test").unwrap();
             let stage = layout.wsb_import_stage_path(&expected).unwrap();
             fs::create_dir(&stage).unwrap();
             pending = layout.pending_path(&stage.join("plan.json"));
@@ -4223,7 +4339,7 @@ mod tests {
         let layout = layout(&root, "run-one");
         let expected = wsb_plan("run-one");
         {
-            let _lock = layout.acquire_lock().unwrap();
+            let _lock = layout.acquire_lock("test").unwrap();
             layout.create_locked(&expected).unwrap();
         }
         let approval = ApprovalRecord::for_plan(&expected, "admin", "now").unwrap();
@@ -4239,12 +4355,12 @@ mod tests {
             let layout = layout(&root, "run-one");
             let expected = wsb_plan("run-one");
             {
-                let _lock = layout.acquire_lock().unwrap();
+                let _lock = layout.acquire_lock("test").unwrap();
                 layout.create_locked(&expected).unwrap();
             }
             let approval = ApprovalRecord::for_plan(&expected, "admin", "now").unwrap();
             {
-                let _lock = layout.acquire_lock().unwrap();
+                let _lock = layout.acquire_lock("test").unwrap();
                 let hash = hash_value(&approval).unwrap();
                 append_unimported_wsb_test_event(
                     &layout,
@@ -4286,7 +4402,7 @@ mod tests {
             let layout = layout(&root, "run-one");
             let expected = wsb_plan("run-one");
             {
-                let _lock = layout.acquire_lock().unwrap();
+                let _lock = layout.acquire_lock("test").unwrap();
                 layout.create_locked(&expected).unwrap();
                 if approved {
                     let approval = ApprovalRecord::for_plan(&expected, "admin", "now").unwrap();
@@ -4796,8 +4912,9 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    #[cfg(windows)]
     #[test]
-    fn run_lock_serializes_approval_against_revocation() {
+    fn outer_coordination_keeps_waiter_out_of_tree_during_revoke_and_rename() {
         let root = root();
         let layout = Arc::new(layout(&root, "run-one"));
         let plan = wsb_plan("run-one");
@@ -4806,16 +4923,44 @@ mod tests {
         layout
             .create_or_verify_pending_wsb_import(&plan, &import)
             .unwrap();
-        let guard = layout.begin_wsb_revocation().unwrap();
+        let mut guard = layout.begin_wsb_revocation().unwrap();
         let control = guard.control_path().unwrap();
         let approval_layout = Arc::clone(&layout);
         let approval_plan = plan.clone();
+        let (busy_sender, busy_receiver) = mpsc::channel();
         let approval = thread::spawn(move || {
+            assert!(matches!(
+                try_acquire_run_coordination(
+                    &approval_layout.coordination_key,
+                    RunCoordinationMode::Normal,
+                ),
+                Err(RunCoordinationError::LeaseUnavailable)
+            ));
+            busy_sender.send(()).unwrap();
             approval_layout
                 .write_approval(&ApprovalRecord::for_plan(&approval_plan, "admin", "now").unwrap())
         });
+        busy_receiver.recv().unwrap();
+        thread::sleep(Duration::from_millis(100));
+        assert!(
+            !approval.is_finished(),
+            "approval must wait on outer coordination rather than returning busy"
+        );
         fs::create_dir(&control).unwrap();
         guard.commit(&revocation).unwrap();
+        guard.release_inner_lock_for_test();
+
+        let renamed = root.with_file_name(format!(
+            "{}-renamed",
+            root.file_name().unwrap().to_string_lossy()
+        ));
+        fs::rename(&root, &renamed).unwrap();
+        assert!(!root.exists());
+        assert!(renamed.is_dir());
+        assert!(
+            !approval.is_finished(),
+            "waiter must not enter the workspace while outer coordination is held"
+        );
         drop(guard);
         assert_eq!(
             approval.join().unwrap().unwrap_err().code.as_ref(),
@@ -4823,7 +4968,20 @@ mod tests {
         );
         assert!(!layout.approval_path().exists());
         fs::remove_dir_all(&control).unwrap();
-        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(renamed).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn coordination_failures_have_stable_retry_semantics() {
+        let timeout = coordination_error("lock", "run-one", RunCoordinationError::LeaseUnavailable);
+        assert_eq!(timeout.code.as_ref(), "AIW_RUN_COORDINATION_TIMEOUT");
+        assert!(timeout.retryable);
+
+        let abandoned =
+            coordination_error("lock", "run-one", RunCoordinationError::RecoveryRequired);
+        assert_eq!(abandoned.code.as_ref(), "AIW_RUN_RECOVERY_REQUIRED");
+        assert!(!abandoned.retryable);
     }
 
     #[test]
@@ -4845,7 +5003,7 @@ mod tests {
 
         let approval = ApprovalRecord::for_plan(&plan, "admin", "now").unwrap();
         {
-            let _lock = layout.acquire_lock().unwrap();
+            let _lock = layout.acquire_lock("test").unwrap();
             let hash = hash_value(&approval).unwrap();
             layout
                 .append_record(
@@ -4937,7 +5095,7 @@ mod tests {
         layout.create(&plan).unwrap();
         let approval = ApprovalRecord::for_plan(&plan, "admin", "now").unwrap();
         {
-            let _lock = layout.acquire_lock().unwrap();
+            let _lock = layout.acquire_lock("test").unwrap();
             let hash = hash_value(&approval).unwrap();
             layout
                 .append_record(
@@ -4970,7 +5128,7 @@ mod tests {
         layout.create(&plan).unwrap();
         let approval = ApprovalRecord::for_plan(&plan, "admin", "now").unwrap();
         {
-            let _lock = layout.acquire_lock().unwrap();
+            let _lock = layout.acquire_lock("test").unwrap();
             let hash = hash_value(&approval).unwrap();
             layout
                 .append_record(
@@ -5051,7 +5209,7 @@ mod tests {
             requested_by: "admin".into(),
         };
         {
-            let _lock = fourth.acquire_lock().unwrap();
+            let _lock = fourth.acquire_lock("test").unwrap();
             let hash = hash_value(&foreign).unwrap();
             fourth
                 .append_record(
@@ -5097,7 +5255,7 @@ mod tests {
         let stage;
         let link;
         {
-            let _lock = layout.acquire_lock().unwrap();
+            let _lock = layout.acquire_lock("test").unwrap();
             stage = layout.wsb_import_stage_path(&expected).unwrap();
             fs::create_dir(&stage).unwrap();
             link = stage.join("plan.json");
@@ -5142,7 +5300,7 @@ mod tests {
             fs::write(&external, &external_bytes).unwrap();
             let staged;
             {
-                let _lock = layout.acquire_lock().unwrap();
+                let _lock = layout.acquire_lock("test").unwrap();
                 let stage = layout.wsb_import_stage_path(&expected).unwrap();
                 fs::create_dir(&stage).unwrap();
                 let target = stage.join("plan.json");

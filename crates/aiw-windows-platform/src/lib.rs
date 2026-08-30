@@ -17,8 +17,17 @@ pub use windows_platform::{
 #[cfg(windows)]
 pub use workspace::{HeldRunWorkspace, WorkspaceError};
 
+#[cfg(windows)]
+pub use coordination::{
+    RunCoordinationError, RunCoordinationKey, RunCoordinationLease, RunCoordinationMode,
+    try_acquire_run_coordination,
+};
+
 pub use aiw_probe::WindowsFileIdentity as WorkspaceDirectoryIdentity;
 pub use aiw_probe::WorkspaceBindingEvidence;
+
+#[cfg(windows)]
+mod coordination;
 
 #[cfg(windows)]
 #[allow(dead_code)]

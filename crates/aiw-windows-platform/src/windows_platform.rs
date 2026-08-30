@@ -22,29 +22,27 @@ use windows::ApplicationModel::{Package, PackageSignatureKind};
 use windows::Management::Deployment::PackageManager;
 use windows::System::ProcessorArchitecture;
 use windows::System::Profile::AnalyticsInfo;
+#[cfg(test)]
+use windows::Win32::Foundation::{CloseHandle, HLOCAL, LocalFree};
 use windows::Win32::Foundation::{
-    CloseHandle, HANDLE, HANDLE_FLAG_INHERIT, HANDLE_FLAGS, HLOCAL, HWND, LocalFree,
-    SetHandleInformation, WAIT_ABANDONED, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
+    HANDLE, HANDLE_FLAG_INHERIT, HANDLE_FLAGS, HWND, SetHandleInformation, WAIT_FAILED,
+    WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
+#[cfg(test)]
 use windows::Win32::Security::Authorization::{
-    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
-    ConvertStringSidToSidW, GetSecurityInfo, SDDL_REVISION_1, SE_KERNEL_OBJECT,
+    ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
 };
 use windows::Win32::Security::Cryptography::Catalog::{
     CryptCATAdminAcquireContext2, CryptCATAdminCalcHashFromFileHandle2, CryptCATAdminReleaseContext,
 };
+#[cfg(test)]
+use windows::Win32::Security::PSECURITY_DESCRIPTOR;
+use windows::Win32::Security::SECURITY_ATTRIBUTES;
 use windows::Win32::Security::WinTrust::{
     WINTRUST_ACTION_GENERIC_VERIFY_V2, WINTRUST_CATALOG_INFO, WINTRUST_DATA, WINTRUST_DATA_0,
     WINTRUST_DATA_PROVIDER_FLAGS, WTD_CACHE_ONLY_URL_RETRIEVAL, WTD_CHOICE_CATALOG,
     WTD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT, WTD_REVOKE_WHOLECHAIN, WTD_STATEACTION_CLOSE,
     WTD_STATEACTION_VERIFY, WTD_UI_NONE, WTD_UICONTEXT_EXECUTE, WinVerifyTrust,
-};
-use windows::Win32::Security::{
-    ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_SIZE_INFORMATION, AclSizeInformation,
-    DACL_SECURITY_INFORMATION, EqualSid, GetAce, GetAclInformation, GetLengthSid,
-    GetSecurityDescriptorControl, GetTokenInformation, IsValidAcl, IsValidSecurityDescriptor,
-    IsValidSid, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SE_DACL_DEFAULTED,
-    SE_DACL_PRESENT, SE_DACL_PROTECTED, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
 };
 use windows::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, FILE_NAME_NORMALIZED, FILE_SHARE_READ, GetFileInformationByHandle,
@@ -57,18 +55,15 @@ use windows::Win32::System::JobObjects::{
     QueryInformationJobObject, SetInformationJobObject, TerminateJobObject,
 };
 use windows::Win32::System::Pipes::CreatePipe;
-use windows::Win32::System::SystemServices::ACCESS_ALLOWED_ACE_TYPE;
 use windows::Win32::System::Threading::{
-    CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateMutexW, CreateProcessW,
-    DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetCurrentProcess,
-    GetExitCodeProcess, InitializeProcThreadAttributeList, IsProcessorFeaturePresent,
-    LPPROC_THREAD_ATTRIBUTE_LIST, MUTEX_ALL_ACCESS, OpenProcessToken, PF_VIRT_FIRMWARE_ENABLED,
-    PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROCESS_INFORMATION, ReleaseMutex, ResumeThread,
-    STARTF_USESTDHANDLES, STARTUPINFOEXW, TerminateProcess, UpdateProcThreadAttribute,
-    WaitForSingleObject,
+    CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, DeleteProcThreadAttributeList,
+    EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, InitializeProcThreadAttributeList,
+    IsProcessorFeaturePresent, LPPROC_THREAD_ATTRIBUTE_LIST, PF_VIRT_FIRMWARE_ENABLED,
+    PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROCESS_INFORMATION, ResumeThread, STARTF_USESTDHANDLES,
+    STARTUPINFOEXW, TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
 };
 #[cfg(test)]
-use windows::Win32::System::Threading::{CreateEventW, SetEvent};
+use windows::Win32::System::Threading::{CreateEventW, CreateMutexW, SetEvent};
 use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize, RoUninitialize};
 use windows::core::{HSTRING, PCWSTR, PWSTR, w};
 
@@ -1880,7 +1875,16 @@ impl Drop for WinRtApartment {
     }
 }
 
-struct ProviderMutex(HANDLE);
+struct ProviderMutex {
+    _lease: crate::coordination::OwnerSystemMutexLease,
+}
+
+#[cfg(test)]
+impl ProviderMutex {
+    fn raw_handle(&self) -> HANDLE {
+        self._lease.raw_handle()
+    }
+}
 
 #[derive(Clone, Copy)]
 enum MutexAcquisitionMode {
@@ -1897,7 +1901,7 @@ impl ProviderMutex {
     fn try_acquire(
         mode: MutexAcquisitionMode,
     ) -> Result<ProviderMutexAcquisition, WindowsSandboxInvocationError> {
-        let owner_sid = current_user_sid()?;
+        let owner_sid = crate::coordination::current_user_sid().map_err(provider_mutex_error)?;
         let owner_scope = hex::encode(Sha256::digest(owner_sid.as_bytes()));
         let name = format!("{PROVIDER_MUTEX_PREFIX}.{}", &owner_scope[..32]);
         Self::try_acquire_owner_scoped(mode, &name, &owner_sid)
@@ -1917,263 +1921,33 @@ impl ProviderMutex {
         name: &str,
         owner_sid: &str,
     ) -> Result<ProviderMutexAcquisition, WindowsSandboxInvocationError> {
-        let name = wide(name);
-        let descriptor = MutexSecurityDescriptor::owner_system_only(owner_sid)?;
-        let attributes = SECURITY_ATTRIBUTES {
-            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
-            lpSecurityDescriptor: descriptor.0.0,
-            bInheritHandle: false.into(),
-        };
-        let handle = unsafe { CreateMutexW(Some(&attributes), false, PCWSTR(name.as_ptr())) }
-            .map_err(|error| WindowsSandboxInvocationError::Authority(error.to_string()))?;
-        if let Err(error) = verify_owner_system_mutex(handle, owner_sid) {
-            let _ = unsafe { CloseHandle(handle) };
-            return Err(error);
-        }
-        let wait = unsafe { WaitForSingleObject(handle, 0) };
-        match interpret_mutex_wait(wait, mode) {
-            Ok(was_abandoned) => Ok(ProviderMutexAcquisition {
-                mutex: Self(handle),
-                was_abandoned,
-            }),
-            Err(error) => {
-                // WAIT_ABANDONED is a one-shot observation which grants
-                // ownership. Normal execution records only that signal and
-                // rejects; durable recovery authority lives in the persisted
-                // transaction layer, not in the kernel bit.
-                if wait == WAIT_ABANDONED {
-                    let _ = unsafe { ReleaseMutex(handle) };
-                }
-                let _ = unsafe { CloseHandle(handle) };
-                Err(error)
-            }
-        }
-    }
-}
-
-fn verify_owner_system_mutex(
-    handle: HANDLE,
-    expected_owner_sid: &str,
-) -> Result<(), WindowsSandboxInvocationError> {
-    let expected_owner = MutexSid::from_string(expected_owner_sid)?;
-    let system = MutexSid::from_string("S-1-5-18")?;
-    let mut owner = PSID::default();
-    let mut dacl: *mut ACL = std::ptr::null_mut();
-    let mut descriptor = PSECURITY_DESCRIPTOR::default();
-    let result = unsafe {
-        GetSecurityInfo(
-            handle,
-            SE_KERNEL_OBJECT,
-            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
-            Some(&mut owner),
-            None,
-            Some(&mut dacl),
-            None,
-            Some(&mut descriptor),
+        let mutex = crate::coordination::OwnerSystemMutexLease::try_acquire(
+            name,
+            owner_sid,
+            matches!(mode, MutexAcquisitionMode::Recovery),
         )
-    };
-    if result.0 != 0 {
-        return Err(WindowsSandboxInvocationError::Authority(format!(
-            "provider mutex security query failed with win32={}",
-            result.0
-        )));
+        .map_err(provider_mutex_error)?;
+        let was_abandoned = mutex.was_abandoned();
+        Ok(ProviderMutexAcquisition {
+            mutex: Self { _lease: mutex },
+            was_abandoned,
+        })
     }
-    let descriptor = MutexSecurityDescriptor(descriptor);
-    if !unsafe { IsValidSecurityDescriptor(descriptor.0) }.as_bool()
-        || !unsafe { IsValidSid(owner) }.as_bool()
-        || unsafe { EqualSid(owner, expected_owner.0) }.is_err()
-        || dacl.is_null()
-        || !unsafe { IsValidAcl(dacl) }.as_bool()
-    {
-        return Err(rejected_mutex_security());
-    }
+}
 
-    let mut control = 0_u16;
-    let mut revision = 0_u32;
-    unsafe { GetSecurityDescriptorControl(descriptor.0, &mut control, &mut revision) }
-        .map_err(|error| WindowsSandboxInvocationError::Authority(error.to_string()))?;
-    if control & SE_DACL_PROTECTED.0 == 0
-        || control & SE_DACL_PRESENT.0 == 0
-        || control & SE_DACL_DEFAULTED.0 != 0
-    {
-        return Err(rejected_mutex_security());
-    }
-
-    let mut information = ACL_SIZE_INFORMATION::default();
-    unsafe {
-        GetAclInformation(
-            dacl,
-            (&mut information as *mut ACL_SIZE_INFORMATION).cast(),
-            std::mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
-            AclSizeInformation,
-        )
-    }
-    .map_err(|error| WindowsSandboxInvocationError::Authority(error.to_string()))?;
-    if information.AceCount != 2 {
-        return Err(rejected_mutex_security());
-    }
-
-    let mut owner_seen = false;
-    let mut system_seen = false;
-    for index in 0..information.AceCount {
-        let mut raw_ace: *mut std::ffi::c_void = std::ptr::null_mut();
-        unsafe { GetAce(dacl, index, &mut raw_ace) }
-            .map_err(|error| WindowsSandboxInvocationError::Authority(error.to_string()))?;
-        if raw_ace.is_null() {
-            return Err(rejected_mutex_security());
+fn provider_mutex_error(
+    error: crate::coordination::OwnerSystemMutexError,
+) -> WindowsSandboxInvocationError {
+    match error {
+        crate::coordination::OwnerSystemMutexError::Busy => {
+            WindowsSandboxInvocationError::LeaseUnavailable
         }
-        let header = unsafe { &*raw_ace.cast::<ACE_HEADER>() };
-        let sid_offset = std::mem::offset_of!(ACCESS_ALLOWED_ACE, SidStart);
-        if u32::from(header.AceType) != ACCESS_ALLOWED_ACE_TYPE
-            || header.AceFlags != 0
-            || usize::from(header.AceSize) < sid_offset + 8
-        {
-            return Err(rejected_mutex_security());
+        crate::coordination::OwnerSystemMutexError::Abandoned => {
+            WindowsSandboxInvocationError::RecoveryRequired
         }
-        let ace = unsafe { &*raw_ace.cast::<ACCESS_ALLOWED_ACE>() };
-        if ace.Mask != MUTEX_ALL_ACCESS.0 {
-            return Err(rejected_mutex_security());
+        crate::coordination::OwnerSystemMutexError::Authority(detail) => {
+            WindowsSandboxInvocationError::Authority(detail)
         }
-        let sid = PSID((&ace.SidStart as *const u32).cast_mut().cast());
-        let sid_bytes = unsafe {
-            std::slice::from_raw_parts(
-                (&ace.SidStart as *const u32).cast::<u8>(),
-                usize::from(header.AceSize) - sid_offset,
-            )
-        };
-        let sid_size = 8_usize + 4_usize * usize::from(sid_bytes[1]);
-        if sid_size > sid_bytes.len()
-            || !unsafe { IsValidSid(sid) }.as_bool()
-            || unsafe { GetLengthSid(sid) } as usize != sid_size
-        {
-            return Err(rejected_mutex_security());
-        }
-        if unsafe { EqualSid(sid, expected_owner.0) }.is_ok() {
-            owner_seen = true;
-        } else if unsafe { EqualSid(sid, system.0) }.is_ok() {
-            system_seen = true;
-        } else {
-            return Err(rejected_mutex_security());
-        }
-    }
-    if !owner_seen || !system_seen {
-        return Err(rejected_mutex_security());
-    }
-    Ok(())
-}
-
-fn rejected_mutex_security() -> WindowsSandboxInvocationError {
-    WindowsSandboxInvocationError::Authority(
-        "provider mutex security is not protected current-owner-and-SYSTEM-only full control"
-            .to_owned(),
-    )
-}
-
-struct MutexSecurityDescriptor(PSECURITY_DESCRIPTOR);
-
-impl MutexSecurityDescriptor {
-    fn owner_system_only(owner_sid: &str) -> Result<Self, WindowsSandboxInvocationError> {
-        let sddl = wide(&format!(
-            "O:{owner_sid}D:P(A;;0x001f0001;;;{owner_sid})(A;;0x001f0001;;;SY)"
-        ));
-        let mut descriptor = PSECURITY_DESCRIPTOR::default();
-        unsafe {
-            ConvertStringSecurityDescriptorToSecurityDescriptorW(
-                PCWSTR(sddl.as_ptr()),
-                SDDL_REVISION_1,
-                &mut descriptor,
-                None,
-            )
-        }
-        .map_err(|error| WindowsSandboxInvocationError::Authority(error.to_string()))?;
-        Ok(Self(descriptor))
-    }
-}
-
-struct MutexSid(PSID);
-
-impl MutexSid {
-    fn from_string(value: &str) -> Result<Self, WindowsSandboxInvocationError> {
-        let value = wide(value);
-        let mut sid = PSID::default();
-        unsafe { ConvertStringSidToSidW(PCWSTR(value.as_ptr()), &mut sid) }
-            .map_err(|error| WindowsSandboxInvocationError::Authority(error.to_string()))?;
-        Ok(Self(sid))
-    }
-}
-
-impl Drop for MutexSid {
-    fn drop(&mut self) {
-        let _ = unsafe { LocalFree(Some(HLOCAL(self.0.0.cast()))) };
-    }
-}
-
-impl Drop for MutexSecurityDescriptor {
-    fn drop(&mut self) {
-        let _ = unsafe { LocalFree(Some(HLOCAL(self.0.0.cast()))) };
-    }
-}
-
-fn current_user_sid() -> Result<String, WindowsSandboxInvocationError> {
-    let mut token = HANDLE::default();
-    unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) }
-        .map_err(|error| WindowsSandboxInvocationError::Authority(error.to_string()))?;
-    let token = unsafe { OwnedHandle::from_raw_handle(token.0) };
-    let mut required = 0_u32;
-    let first =
-        unsafe { GetTokenInformation(owned_handle(&token), TokenUser, None, 0, &mut required) };
-    if first.is_ok() || required < std::mem::size_of::<TOKEN_USER>() as u32 {
-        return Err(WindowsSandboxInvocationError::Authority(
-            "current user token SID size could not be established".to_owned(),
-        ));
-    }
-    let mut buffer = vec![0_usize; (required as usize).div_ceil(std::mem::size_of::<usize>())];
-    unsafe {
-        GetTokenInformation(
-            owned_handle(&token),
-            TokenUser,
-            Some(buffer.as_mut_ptr().cast()),
-            required,
-            &mut required,
-        )
-    }
-    .map_err(|error| WindowsSandboxInvocationError::Authority(error.to_string()))?;
-    let token_user = unsafe { &*buffer.as_ptr().cast::<TOKEN_USER>() };
-    let mut sid = PWSTR::null();
-    unsafe { ConvertSidToStringSidW(token_user.User.Sid, &mut sid) }
-        .map_err(|error| WindowsSandboxInvocationError::Authority(error.to_string()))?;
-    let value = unsafe { sid.to_string() };
-    let _ = unsafe { LocalFree(Some(HLOCAL(sid.0.cast()))) };
-    value.map_err(|error| WindowsSandboxInvocationError::Authority(error.to_string()))
-}
-
-fn interpret_mutex_wait(
-    wait: windows::Win32::Foundation::WAIT_EVENT,
-    mode: MutexAcquisitionMode,
-) -> Result<bool, WindowsSandboxInvocationError> {
-    if wait == WAIT_OBJECT_0 {
-        Ok(false)
-    } else if wait == WAIT_ABANDONED {
-        match mode {
-            MutexAcquisitionMode::NormalExecution => {
-                Err(WindowsSandboxInvocationError::RecoveryRequired)
-            }
-            MutexAcquisitionMode::Recovery => Ok(true),
-        }
-    } else if wait == WAIT_TIMEOUT {
-        Err(WindowsSandboxInvocationError::LeaseUnavailable)
-    } else {
-        Err(WindowsSandboxInvocationError::Authority(format!(
-            "provider mutex wait failed with status 0x{:08x}",
-            wait.0
-        )))
-    }
-}
-
-impl Drop for ProviderMutex {
-    fn drop(&mut self) {
-        let _ = unsafe { ReleaseMutex(self.0) };
-        let _ = unsafe { CloseHandle(self.0) };
     }
 }
 
@@ -2211,7 +1985,13 @@ mod tests {
             )
         }
         .unwrap();
-        let descriptor = MutexSecurityDescriptor(descriptor);
+        struct TestSecurityDescriptor(PSECURITY_DESCRIPTOR);
+        impl Drop for TestSecurityDescriptor {
+            fn drop(&mut self) {
+                let _ = unsafe { LocalFree(Some(HLOCAL(self.0.0.cast()))) };
+            }
+        }
+        let descriptor = TestSecurityDescriptor(descriptor);
         let attributes = SECURITY_ATTRIBUTES {
             nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
             lpSecurityDescriptor: descriptor.0.0,
@@ -2232,7 +2012,9 @@ mod tests {
                 &owner_sid,
             )
             .expect("test thread acquires uniquely named mutex");
-            sender.send(acquisition.mutex.0.0 as usize).unwrap();
+            sender
+                .send(acquisition.mutex.raw_handle().0 as usize)
+                .unwrap();
             std::mem::forget(acquisition);
         })
         .join()
@@ -2512,14 +2294,12 @@ mod tests {
     #[test]
     fn abandoned_mutex_signal_is_rejected_normally_and_recorded_for_recovery() {
         assert!(matches!(
-            interpret_mutex_wait(WAIT_ABANDONED, MutexAcquisitionMode::NormalExecution),
-            Err(WindowsSandboxInvocationError::RecoveryRequired)
+            provider_mutex_error(crate::coordination::OwnerSystemMutexError::Abandoned),
+            WindowsSandboxInvocationError::RecoveryRequired
         ));
-        assert!(interpret_mutex_wait(WAIT_ABANDONED, MutexAcquisitionMode::Recovery).unwrap());
-        assert!(!interpret_mutex_wait(WAIT_OBJECT_0, MutexAcquisitionMode::Recovery).unwrap());
         assert!(matches!(
-            interpret_mutex_wait(WAIT_TIMEOUT, MutexAcquisitionMode::Recovery),
-            Err(WindowsSandboxInvocationError::LeaseUnavailable)
+            provider_mutex_error(crate::coordination::OwnerSystemMutexError::Busy),
+            WindowsSandboxInvocationError::LeaseUnavailable
         ));
     }
 
@@ -2546,7 +2326,7 @@ mod tests {
 
     #[test]
     fn mutex_rejects_a_permissive_preexisting_security_descriptor_before_waiting() {
-        let owner_sid = current_user_sid().unwrap();
+        let owner_sid = crate::coordination::current_user_sid().unwrap();
         let name = unique_mutex_name("permissive");
         let _precreated = create_named_mutex(
             &name,
@@ -2562,7 +2342,7 @@ mod tests {
 
     #[test]
     fn mutex_accepts_a_correct_preexisting_security_descriptor() {
-        let owner_sid = current_user_sid().unwrap();
+        let owner_sid = crate::coordination::current_user_sid().unwrap();
         let name = unique_mutex_name("correct");
         let _precreated = create_named_mutex(
             &name,
@@ -2579,7 +2359,7 @@ mod tests {
 
     #[test]
     fn unique_native_mutexes_record_the_one_shot_abandonment_signal() {
-        let owner_sid = current_user_sid().unwrap();
+        let owner_sid = crate::coordination::current_user_sid().unwrap();
         let normal_name = unique_mutex_name("normal-abandoned");
         let leaked_handle = abandon_named_mutex(normal_name.clone(), owner_sid.clone());
 

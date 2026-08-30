@@ -83,6 +83,7 @@ dependencies = [
  "aiw-evidence",
  "aiw-probe",
  "aiw-schema",
+ "aiw-windows-platform",
  "fs4",
  "hex",
  "schemars",
