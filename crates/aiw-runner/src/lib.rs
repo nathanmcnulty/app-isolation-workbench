@@ -13,12 +13,17 @@ mod preparation;
 mod session;
 
 pub use preparation::{
-    PreparedWsbArtifacts, WSB_PREPARATION_RECEIPT_SCHEMA_VERSION, WsbPreparationError,
-    WsbPreparationReceipt, WsbPreparationStatus, build_wsb_preparation,
+    PreparedWsbArtifacts, WSB_PLANNING_IMPORT_RESULT_SCHEMA_VERSION,
+    WSB_PREPARATION_RECEIPT_SCHEMA_VERSION, WsbPlanningImportDisposition, WsbPlanningImportReceipt,
+    WsbPlanningImportResult, WsbPreparationError, WsbPreparationReceipt, WsbPreparationStatus,
+    build_wsb_preparation,
 };
 
 #[cfg(windows)]
-pub use preparation::{prepare_windows_sandbox_bundle, verify_windows_sandbox_preparation};
+pub use preparation::{
+    import_windows_sandbox_preparation, prepare_windows_sandbox_bundle,
+    verify_windows_sandbox_preparation,
+};
 
 pub use session::{
     SESSION_TRANSACTION_SCHEMA_VERSION, SessionRecoveryBinding, SessionTransaction,
@@ -2223,7 +2228,28 @@ mod tests {
         )
         .unwrap();
         let layout = RunLayout::new(&root.0, "w1-run").unwrap();
-        layout.create(&plan).unwrap();
+        let receipt = aiw_orchestrator::WsbPlanningImportReceipt {
+            schema_version: aiw_orchestrator::WSB_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION.to_owned(),
+            run_id: plan.run_id.clone(),
+            imported_at: "now".to_owned(),
+            status: aiw_orchestrator::WsbPlanningImportStatus::PendingApproval,
+            project_revision_sha256: plan.project_revision_hash.clone(),
+            workspace_root: start.workspace.root.final_path.clone(),
+            workspace_identity_sha256: start.workspace_identity_sha256.clone(),
+            preparation_receipt_sha256: "d".repeat(64),
+            run_plan_sha256: plan.hash().unwrap(),
+            windows_sandbox_plan_sha256: canonical_hash(&start.wsb_plan).unwrap(),
+            guest_agent_sha256: start.guest_agent.sha256.clone(),
+            provider_sha256: start.provider.sha256.clone(),
+            run_root: start.workspace.root.final_path.clone(),
+            journal_sequence: 1,
+            approval_present: false,
+            provider_acquired: false,
+            provider_mutated: false,
+        };
+        layout
+            .create_or_verify_pending_wsb_import(&plan, &receipt)
+            .unwrap();
         layout
             .write_approval(&ApprovalRecord::for_plan(&plan, "admin", "now").unwrap())
             .unwrap();

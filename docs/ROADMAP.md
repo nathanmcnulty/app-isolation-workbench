@@ -1,6 +1,6 @@
 # Roadmap
 
-AIW is delivered as two milestones with vertical, evidence-gated slices. The current repository has completed the W0 foundation and has a private, live-proven W1 Windows Sandbox kernel. Fresh protected preparation and process-exit verification are exposed without provider acquisition, and drift-independent exact-session cleanup is exposed through the narrow production `run recover` command. Production start remains unavailable until its exact approved-start/crash/recovery path passes the public live gate. Application assessment, the desktop UI, and package authoring remain later slices.
+AIW is delivered as two milestones with vertical, evidence-gated slices. The current repository has completed the W0 foundation and has a private, live-proven W1 Windows Sandbox kernel. Fresh protected preparation, process-exit verification, and atomic import into provenance-bound `PendingApproval` state are exposed without provider acquisition; drift-independent exact-session cleanup is exposed through the narrow production `run recover` command. Production start remains unavailable until its exact approved-start/crash/recovery path passes the public live gate. Application assessment, the desktop UI, and package authoring remain later slices.
 
 ## Workbench v1
 
@@ -18,7 +18,7 @@ AIW is delivered as two milestones with vertical, evidence-gated slices. The cur
 - Implement the runner kernel, workspace/journal, fixed-function guest agent, short-lived helper boundary, and full Windows Sandbox lifecycle.
 - Revalidate plan hashes, provider identity, paths, inputs, output emptiness, and leases immediately before execution.
 - Capture host/provider state, process trees, target tokens, completion receipt, and idempotent cleanup.
-- Prepare a hash-bound fixed-agent workspace and plans without provider mutation; reopen and verify the exact preparation after process exit before separate planning and approval.
+- Prepare a hash-bound fixed-agent workspace and plans without provider mutation; reopen and verify the exact preparation after process exit; atomically import its plan, provenance receipt, and genesis journal before separate approval.
 
 **Exit gate:** a real supported host completes the golden probe in an exact sandbox session and verifies receipt, evidence correlation, and cleanup.
 
