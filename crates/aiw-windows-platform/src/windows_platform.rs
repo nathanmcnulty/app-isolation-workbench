@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom};
@@ -22,18 +23,28 @@ use windows::Management::Deployment::PackageManager;
 use windows::System::ProcessorArchitecture;
 use windows::System::Profile::AnalyticsInfo;
 use windows::Win32::Foundation::{
-    CloseHandle, HANDLE, HANDLE_FLAG_INHERIT, HANDLE_FLAGS, HWND, SetHandleInformation,
-    WAIT_ABANDONED, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
+    CloseHandle, HANDLE, HANDLE_FLAG_INHERIT, HANDLE_FLAGS, HLOCAL, HWND, LocalFree,
+    SetHandleInformation, WAIT_ABANDONED, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
+};
+use windows::Win32::Security::Authorization::{
+    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
+    ConvertStringSidToSidW, GetSecurityInfo, SDDL_REVISION_1, SE_KERNEL_OBJECT,
 };
 use windows::Win32::Security::Cryptography::Catalog::{
     CryptCATAdminAcquireContext2, CryptCATAdminCalcHashFromFileHandle2, CryptCATAdminReleaseContext,
 };
-use windows::Win32::Security::SECURITY_ATTRIBUTES;
 use windows::Win32::Security::WinTrust::{
     WINTRUST_ACTION_GENERIC_VERIFY_V2, WINTRUST_CATALOG_INFO, WINTRUST_DATA, WINTRUST_DATA_0,
     WINTRUST_DATA_PROVIDER_FLAGS, WTD_CACHE_ONLY_URL_RETRIEVAL, WTD_CHOICE_CATALOG,
     WTD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT, WTD_REVOKE_WHOLECHAIN, WTD_STATEACTION_CLOSE,
     WTD_STATEACTION_VERIFY, WTD_UI_NONE, WTD_UICONTEXT_EXECUTE, WinVerifyTrust,
+};
+use windows::Win32::Security::{
+    ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_SIZE_INFORMATION, AclSizeInformation,
+    DACL_SECURITY_INFORMATION, EqualSid, GetAce, GetAclInformation, GetLengthSid,
+    GetSecurityDescriptorControl, GetTokenInformation, IsValidAcl, IsValidSecurityDescriptor,
+    IsValidSid, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SE_DACL_DEFAULTED,
+    SE_DACL_PRESENT, SE_DACL_PROTECTED, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
 };
 use windows::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, FILE_NAME_NORMALIZED, FILE_SHARE_READ, GetFileInformationByHandle,
@@ -46,13 +57,15 @@ use windows::Win32::System::JobObjects::{
     QueryInformationJobObject, SetInformationJobObject, TerminateJobObject,
 };
 use windows::Win32::System::Pipes::CreatePipe;
+use windows::Win32::System::SystemServices::ACCESS_ALLOWED_ACE_TYPE;
 use windows::Win32::System::Threading::{
     CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateMutexW, CreateProcessW,
-    DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess,
-    InitializeProcThreadAttributeList, IsProcessorFeaturePresent, LPPROC_THREAD_ATTRIBUTE_LIST,
-    PF_VIRT_FIRMWARE_ENABLED, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROCESS_INFORMATION, ReleaseMutex,
-    ResumeThread, STARTF_USESTDHANDLES, STARTUPINFOEXW, TerminateProcess,
-    UpdateProcThreadAttribute, WaitForSingleObject,
+    DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetCurrentProcess,
+    GetExitCodeProcess, InitializeProcThreadAttributeList, IsProcessorFeaturePresent,
+    LPPROC_THREAD_ATTRIBUTE_LIST, MUTEX_ALL_ACCESS, OpenProcessToken, PF_VIRT_FIRMWARE_ENABLED,
+    PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROCESS_INFORMATION, ReleaseMutex, ResumeThread,
+    STARTF_USESTDHANDLES, STARTUPINFOEXW, TerminateProcess, UpdateProcThreadAttribute,
+    WaitForSingleObject,
 };
 #[cfg(test)]
 use windows::Win32::System::Threading::{CreateEventW, SetEvent};
@@ -72,7 +85,7 @@ const READ_ONLY_TIMEOUT: Duration = Duration::from_secs(15);
 const MUTATING_TIMEOUT: Duration = Duration::from_secs(120);
 const MAX_INVOCATION_TIMEOUT: Duration = Duration::from_secs(3_600);
 const PROCESS_TREE_CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
-const PROVIDER_MUTEX_NAME: PCWSTR = w!("Local\\AIW.WindowsSandbox.Provider.v1");
+const PROVIDER_MUTEX_PREFIX: &str = "Local\\AIW.WindowsSandbox.Provider.v1";
 
 #[derive(Debug, Error)]
 pub enum WindowsSandboxInvocationError {
@@ -81,7 +94,7 @@ pub enum WindowsSandboxInvocationError {
     #[error("Windows Sandbox provider lease is held by another operation")]
     LeaseUnavailable,
     #[error(
-        "Windows Sandbox provider lease was abandoned; durable session reconciliation is required"
+        "Windows Sandbox provider lease abandonment was observed; authoritative transaction recovery is required before another normal start"
     )]
     RecoveryRequired,
     #[error("Windows Sandbox CLI invocation failed: {0}")]
@@ -132,6 +145,24 @@ pub struct WsbStopObservation {
     pub output_was_empty: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WsbRecoveryDisposition {
+    AlreadyAbsent,
+    Stopped,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WsbRecoveryObservation {
+    pub session_id: String,
+    pub disposition: WsbRecoveryDisposition,
+    pub mutex_was_abandoned: bool,
+    pub start_provider_sha256: String,
+    pub recovery_provider_sha256: String,
+    pub provider_drifted: bool,
+    pub session_ids_before: Vec<String>,
+    pub session_ids_after: Vec<String>,
+}
+
 pub struct WindowsSandboxExecutionLease {
     readiness: WindowsSandboxReadiness,
     provider_path: PathBuf,
@@ -140,6 +171,77 @@ pub struct WindowsSandboxExecutionLease {
     _mutex: ProviderMutex,
     owned_session: Option<CanonicalSandboxId>,
     connection_attempted: bool,
+}
+
+/// Recovery-only authority for one exact persisted Sandbox UUID. This type has
+/// no start or connect surface and never accepts a provider path or command.
+pub struct WindowsSandboxRecoveryLease {
+    readiness: WindowsSandboxReadiness,
+    provider_path: PathBuf,
+    _provider: File,
+    _catalog: File,
+    _mutex: ProviderMutex,
+    bound_session: CanonicalSandboxId,
+    mutex_was_abandoned: bool,
+    start_provider_sha256: String,
+    recovery_provider_sha256: String,
+    provider_drifted: bool,
+    completed: bool,
+}
+
+impl WindowsSandboxRecoveryLease {
+    pub fn readiness(&self) -> &WindowsSandboxReadiness {
+        &self.readiness
+    }
+
+    pub fn bound_session(&self) -> &CanonicalSandboxId {
+        &self.bound_session
+    }
+
+    pub fn mutex_was_abandoned(&self) -> bool {
+        self.mutex_was_abandoned
+    }
+
+    pub fn start_provider_sha256(&self) -> &str {
+        &self.start_provider_sha256
+    }
+
+    pub fn recovery_provider_sha256(&self) -> &str {
+        &self.recovery_provider_sha256
+    }
+
+    pub fn provider_drifted(&self) -> bool {
+        self.provider_drifted
+    }
+
+    pub fn reconcile(&mut self) -> Result<WsbRecoveryObservation, WindowsSandboxInvocationError> {
+        self.reconcile_with_timeout(MUTATING_TIMEOUT)
+    }
+
+    pub fn reconcile_with_timeout(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<WsbRecoveryObservation, WindowsSandboxInvocationError> {
+        if self.completed {
+            return Err(WindowsSandboxInvocationError::Protocol(
+                "this recovery lease has already reconciled its bound session".to_owned(),
+            ));
+        }
+        let deadline = invocation_deadline(timeout)?;
+        let mut provider = NativeRecoveryProvider {
+            provider_path: &self.provider_path,
+        };
+        let observation = reconcile_bound_session(
+            &self.bound_session,
+            self.mutex_was_abandoned,
+            &self.start_provider_sha256,
+            &self.recovery_provider_sha256,
+            &mut provider,
+            deadline,
+        )?;
+        self.completed = true;
+        Ok(observation)
+    }
 }
 
 impl WindowsSandboxExecutionLease {
@@ -340,16 +442,69 @@ impl WindowsSandboxExecutionLease {
 pub fn acquire_windows_sandbox(
     expected_provider_sha256: &str,
 ) -> Result<WindowsSandboxExecutionLease, WindowsSandboxInvocationError> {
-    if expected_provider_sha256.len() != 64
-        || !expected_provider_sha256
-            .bytes()
-            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-    {
+    let authority = acquire_verified_provider(
+        expected_provider_sha256,
+        MutexAcquisitionMode::NormalExecution,
+    )?;
+    Ok(WindowsSandboxExecutionLease {
+        readiness: authority.readiness,
+        provider_path: authority.provider_path,
+        _provider: authority.provider,
+        _catalog: authority.catalog,
+        _mutex: authority.mutex,
+        owned_session: None,
+        connection_attempted: false,
+    })
+}
+
+pub fn acquire_windows_sandbox_recovery(
+    start_provider_sha256: &str,
+    persisted_session: CanonicalSandboxId,
+) -> Result<WindowsSandboxRecoveryLease, WindowsSandboxInvocationError> {
+    let authority =
+        acquire_verified_provider(start_provider_sha256, MutexAcquisitionMode::Recovery)?;
+    Ok(WindowsSandboxRecoveryLease {
+        readiness: authority.readiness,
+        provider_path: authority.provider_path,
+        _provider: authority.provider,
+        _catalog: authority.catalog,
+        _mutex: authority.mutex,
+        bound_session: persisted_session,
+        mutex_was_abandoned: authority.mutex_was_abandoned,
+        start_provider_sha256: authority.provider_hash_binding.start_sha256,
+        recovery_provider_sha256: authority.provider_hash_binding.current_sha256,
+        provider_drifted: authority.provider_hash_binding.drifted,
+        completed: false,
+    })
+}
+
+struct VerifiedProviderAuthority {
+    readiness: WindowsSandboxReadiness,
+    provider_path: PathBuf,
+    provider: File,
+    catalog: File,
+    mutex: ProviderMutex,
+    mutex_was_abandoned: bool,
+    provider_hash_binding: ProviderHashBinding,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProviderHashBinding {
+    start_sha256: String,
+    current_sha256: String,
+    drifted: bool,
+}
+
+fn acquire_verified_provider(
+    expected_provider_sha256: &str,
+    mode: MutexAcquisitionMode,
+) -> Result<VerifiedProviderAuthority, WindowsSandboxInvocationError> {
+    if !is_lowercase_sha256(expected_provider_sha256) {
         return Err(WindowsSandboxInvocationError::Authority(
             "expected provider SHA-256 must be lowercase hexadecimal".to_owned(),
         ));
     }
-    let mutex = ProviderMutex::try_acquire()?;
+    let mutex_acquisition = ProviderMutex::try_acquire(mode)?;
     let readiness = assess_windows_sandbox();
     if !readiness.supported {
         return Err(WindowsSandboxInvocationError::Authority(
@@ -359,11 +514,11 @@ pub fn acquire_windows_sandbox(
     let provider_identity = readiness.provider_binary.as_ref().ok_or_else(|| {
         WindowsSandboxInvocationError::Authority("provider identity is absent".to_owned())
     })?;
-    if provider_identity.sha256 != expected_provider_sha256 {
-        return Err(WindowsSandboxInvocationError::Authority(
-            "provider hash differs from the approved identity".to_owned(),
-        ));
-    }
+    // Readiness has independently established the current Store package,
+    // catalog member, held file identity, and pinned CLI protocol before
+    // recovery may treat a changed hash as trusted servicing drift.
+    let provider_hash_binding =
+        bind_verified_provider_hash(mode, expected_provider_sha256, &provider_identity.sha256)?;
     let provider_path = PathBuf::from(&provider_identity.canonical_path);
     let mut provider =
         open_held_file(&provider_path).map_err(WindowsSandboxInvocationError::Authority)?;
@@ -403,14 +558,144 @@ pub fn acquire_windows_sandbox(
             "catalog trust identity drifted after readiness".to_owned(),
         ));
     }
-    Ok(WindowsSandboxExecutionLease {
+    Ok(VerifiedProviderAuthority {
         readiness,
         provider_path: observed_path,
-        _provider: provider,
-        _catalog: catalog,
-        _mutex: mutex,
-        owned_session: None,
-        connection_attempted: false,
+        provider,
+        catalog,
+        mutex: mutex_acquisition.mutex,
+        mutex_was_abandoned: mutex_acquisition.was_abandoned,
+        provider_hash_binding,
+    })
+}
+
+fn is_lowercase_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+fn bind_verified_provider_hash(
+    mode: MutexAcquisitionMode,
+    start_sha256: &str,
+    current_sha256: &str,
+) -> Result<ProviderHashBinding, WindowsSandboxInvocationError> {
+    if !is_lowercase_sha256(start_sha256) || !is_lowercase_sha256(current_sha256) {
+        return Err(WindowsSandboxInvocationError::Authority(
+            "provider SHA-256 identity must be lowercase hexadecimal".to_owned(),
+        ));
+    }
+    let drifted = start_sha256 != current_sha256;
+    if drifted && matches!(mode, MutexAcquisitionMode::NormalExecution) {
+        return Err(WindowsSandboxInvocationError::Authority(
+            "provider hash differs from the approved identity".to_owned(),
+        ));
+    }
+    Ok(ProviderHashBinding {
+        start_sha256: start_sha256.to_owned(),
+        current_sha256: current_sha256.to_owned(),
+        drifted,
+    })
+}
+
+trait RecoveryProvider {
+    fn list(&mut self, deadline: Instant) -> Result<Vec<String>, WindowsSandboxInvocationError>;
+
+    fn stop(
+        &mut self,
+        session: &CanonicalSandboxId,
+        deadline: Instant,
+    ) -> Result<(), WindowsSandboxInvocationError>;
+}
+
+struct NativeRecoveryProvider<'a> {
+    provider_path: &'a Path,
+}
+
+impl RecoveryProvider for NativeRecoveryProvider<'_> {
+    fn list(&mut self, deadline: Instant) -> Result<Vec<String>, WindowsSandboxInvocationError> {
+        let output = invoke_read_only(
+            self.provider_path,
+            &["list", "--raw"],
+            deadline,
+            DescendantPolicy::ProviderManaged,
+        )
+        .map_err(WindowsSandboxInvocationError::Process)?;
+        parse_list_ids_v0_8_107_0(&output.stdout).map_err(WindowsSandboxInvocationError::Protocol)
+    }
+
+    fn stop(
+        &mut self,
+        session: &CanonicalSandboxId,
+        deadline: Instant,
+    ) -> Result<(), WindowsSandboxInvocationError> {
+        let output = invoke_read_only(
+            self.provider_path,
+            &["stop", "--raw", "--id", session.as_str()],
+            deadline,
+            DescendantPolicy::ProviderManaged,
+        )
+        .map_err(WindowsSandboxInvocationError::Process)?;
+        if !output.stdout.is_empty() {
+            return Err(WindowsSandboxInvocationError::Protocol(
+                "recovery stop response must be empty for CLI protocol 0.8.107.0".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn reconcile_bound_session(
+    bound_session: &CanonicalSandboxId,
+    mutex_was_abandoned: bool,
+    start_provider_sha256: &str,
+    recovery_provider_sha256: &str,
+    provider: &mut impl RecoveryProvider,
+    deadline: Instant,
+) -> Result<WsbRecoveryObservation, WindowsSandboxInvocationError> {
+    let session_ids_before = provider.list(deadline)?;
+    let was_present = session_ids_before
+        .iter()
+        .any(|session| session == bound_session.as_str());
+    if was_present {
+        provider.stop(bound_session, deadline)?;
+    }
+    let session_ids_after = provider.list(deadline)?;
+    if session_ids_after
+        .iter()
+        .any(|session| session == bound_session.as_str())
+    {
+        return Err(WindowsSandboxInvocationError::Protocol(
+            "recovery did not establish absence of the exact bound sandbox session".to_owned(),
+        ));
+    }
+
+    let unrelated_before = session_ids_before
+        .iter()
+        .filter(|session| session.as_str() != bound_session.as_str())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let unrelated_after = session_ids_after.iter().cloned().collect::<BTreeSet<_>>();
+    if unrelated_before != unrelated_after {
+        return Err(WindowsSandboxInvocationError::Protocol(
+            "unrelated sandbox sessions drifted during exact-session recovery".to_owned(),
+        ));
+    }
+
+    Ok(WsbRecoveryObservation {
+        session_id: bound_session.as_str().to_owned(),
+        disposition: if was_present {
+            WsbRecoveryDisposition::Stopped
+        } else {
+            WsbRecoveryDisposition::AlreadyAbsent
+        },
+        mutex_was_abandoned,
+        start_provider_sha256: start_provider_sha256.to_owned(),
+        recovery_provider_sha256: recovery_provider_sha256.to_owned(),
+        provider_drifted: start_provider_sha256 != recovery_provider_sha256,
+        session_ids_before,
+        session_ids_after,
     })
 }
 
@@ -1573,26 +1858,291 @@ impl Drop for WinRtApartment {
 
 struct ProviderMutex(HANDLE);
 
+#[derive(Clone, Copy)]
+enum MutexAcquisitionMode {
+    NormalExecution,
+    Recovery,
+}
+
+struct ProviderMutexAcquisition {
+    mutex: ProviderMutex,
+    was_abandoned: bool,
+}
+
 impl ProviderMutex {
-    fn try_acquire() -> Result<Self, WindowsSandboxInvocationError> {
-        let handle = unsafe { CreateMutexW(None, false, PROVIDER_MUTEX_NAME) }
+    fn try_acquire(
+        mode: MutexAcquisitionMode,
+    ) -> Result<ProviderMutexAcquisition, WindowsSandboxInvocationError> {
+        let owner_sid = current_user_sid()?;
+        let owner_scope = hex::encode(Sha256::digest(owner_sid.as_bytes()));
+        let name = format!("{PROVIDER_MUTEX_PREFIX}.{}", &owner_scope[..32]);
+        Self::try_acquire_owner_scoped(mode, &name, &owner_sid)
+    }
+
+    #[cfg(test)]
+    fn try_acquire_named(
+        mode: MutexAcquisitionMode,
+        name: &str,
+        owner_sid: &str,
+    ) -> Result<ProviderMutexAcquisition, WindowsSandboxInvocationError> {
+        Self::try_acquire_owner_scoped(mode, name, owner_sid)
+    }
+
+    fn try_acquire_owner_scoped(
+        mode: MutexAcquisitionMode,
+        name: &str,
+        owner_sid: &str,
+    ) -> Result<ProviderMutexAcquisition, WindowsSandboxInvocationError> {
+        let name = wide(name);
+        let descriptor = MutexSecurityDescriptor::owner_system_only(owner_sid)?;
+        let attributes = SECURITY_ATTRIBUTES {
+            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: descriptor.0.0,
+            bInheritHandle: false.into(),
+        };
+        let handle = unsafe { CreateMutexW(Some(&attributes), false, PCWSTR(name.as_ptr())) }
             .map_err(|error| WindowsSandboxInvocationError::Authority(error.to_string()))?;
-        let wait = unsafe { WaitForSingleObject(handle, 0) };
-        if wait == WAIT_OBJECT_0 {
-            Ok(Self(handle))
-        } else {
+        if let Err(error) = verify_owner_system_mutex(handle, owner_sid) {
             let _ = unsafe { CloseHandle(handle) };
-            if wait == WAIT_ABANDONED {
-                Err(WindowsSandboxInvocationError::RecoveryRequired)
-            } else if wait == WAIT_TIMEOUT {
-                Err(WindowsSandboxInvocationError::LeaseUnavailable)
-            } else {
-                Err(WindowsSandboxInvocationError::Authority(format!(
-                    "provider mutex wait failed with status 0x{:08x}",
-                    wait.0
-                )))
+            return Err(error);
+        }
+        let wait = unsafe { WaitForSingleObject(handle, 0) };
+        match interpret_mutex_wait(wait, mode) {
+            Ok(was_abandoned) => Ok(ProviderMutexAcquisition {
+                mutex: Self(handle),
+                was_abandoned,
+            }),
+            Err(error) => {
+                // WAIT_ABANDONED is a one-shot observation which grants
+                // ownership. Normal execution records only that signal and
+                // rejects; durable recovery authority lives in the persisted
+                // transaction layer, not in the kernel bit.
+                if wait == WAIT_ABANDONED {
+                    let _ = unsafe { ReleaseMutex(handle) };
+                }
+                let _ = unsafe { CloseHandle(handle) };
+                Err(error)
             }
         }
+    }
+}
+
+fn verify_owner_system_mutex(
+    handle: HANDLE,
+    expected_owner_sid: &str,
+) -> Result<(), WindowsSandboxInvocationError> {
+    let expected_owner = MutexSid::from_string(expected_owner_sid)?;
+    let system = MutexSid::from_string("S-1-5-18")?;
+    let mut owner = PSID::default();
+    let mut dacl: *mut ACL = std::ptr::null_mut();
+    let mut descriptor = PSECURITY_DESCRIPTOR::default();
+    let result = unsafe {
+        GetSecurityInfo(
+            handle,
+            SE_KERNEL_OBJECT,
+            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+            Some(&mut owner),
+            None,
+            Some(&mut dacl),
+            None,
+            Some(&mut descriptor),
+        )
+    };
+    if result.0 != 0 {
+        return Err(WindowsSandboxInvocationError::Authority(format!(
+            "provider mutex security query failed with win32={}",
+            result.0
+        )));
+    }
+    let descriptor = MutexSecurityDescriptor(descriptor);
+    if !unsafe { IsValidSecurityDescriptor(descriptor.0) }.as_bool()
+        || !unsafe { IsValidSid(owner) }.as_bool()
+        || unsafe { EqualSid(owner, expected_owner.0) }.is_err()
+        || dacl.is_null()
+        || !unsafe { IsValidAcl(dacl) }.as_bool()
+    {
+        return Err(rejected_mutex_security());
+    }
+
+    let mut control = 0_u16;
+    let mut revision = 0_u32;
+    unsafe { GetSecurityDescriptorControl(descriptor.0, &mut control, &mut revision) }
+        .map_err(|error| WindowsSandboxInvocationError::Authority(error.to_string()))?;
+    if control & SE_DACL_PROTECTED.0 == 0
+        || control & SE_DACL_PRESENT.0 == 0
+        || control & SE_DACL_DEFAULTED.0 != 0
+    {
+        return Err(rejected_mutex_security());
+    }
+
+    let mut information = ACL_SIZE_INFORMATION::default();
+    unsafe {
+        GetAclInformation(
+            dacl,
+            (&mut information as *mut ACL_SIZE_INFORMATION).cast(),
+            std::mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
+            AclSizeInformation,
+        )
+    }
+    .map_err(|error| WindowsSandboxInvocationError::Authority(error.to_string()))?;
+    if information.AceCount != 2 {
+        return Err(rejected_mutex_security());
+    }
+
+    let mut owner_seen = false;
+    let mut system_seen = false;
+    for index in 0..information.AceCount {
+        let mut raw_ace: *mut std::ffi::c_void = std::ptr::null_mut();
+        unsafe { GetAce(dacl, index, &mut raw_ace) }
+            .map_err(|error| WindowsSandboxInvocationError::Authority(error.to_string()))?;
+        if raw_ace.is_null() {
+            return Err(rejected_mutex_security());
+        }
+        let header = unsafe { &*raw_ace.cast::<ACE_HEADER>() };
+        let sid_offset = std::mem::offset_of!(ACCESS_ALLOWED_ACE, SidStart);
+        if u32::from(header.AceType) != ACCESS_ALLOWED_ACE_TYPE
+            || header.AceFlags != 0
+            || usize::from(header.AceSize) < sid_offset + 8
+        {
+            return Err(rejected_mutex_security());
+        }
+        let ace = unsafe { &*raw_ace.cast::<ACCESS_ALLOWED_ACE>() };
+        if ace.Mask != MUTEX_ALL_ACCESS.0 {
+            return Err(rejected_mutex_security());
+        }
+        let sid = PSID((&ace.SidStart as *const u32).cast_mut().cast());
+        let sid_bytes = unsafe {
+            std::slice::from_raw_parts(
+                (&ace.SidStart as *const u32).cast::<u8>(),
+                usize::from(header.AceSize) - sid_offset,
+            )
+        };
+        let sid_size = 8_usize + 4_usize * usize::from(sid_bytes[1]);
+        if sid_size > sid_bytes.len()
+            || !unsafe { IsValidSid(sid) }.as_bool()
+            || unsafe { GetLengthSid(sid) } as usize != sid_size
+        {
+            return Err(rejected_mutex_security());
+        }
+        if unsafe { EqualSid(sid, expected_owner.0) }.is_ok() {
+            owner_seen = true;
+        } else if unsafe { EqualSid(sid, system.0) }.is_ok() {
+            system_seen = true;
+        } else {
+            return Err(rejected_mutex_security());
+        }
+    }
+    if !owner_seen || !system_seen {
+        return Err(rejected_mutex_security());
+    }
+    Ok(())
+}
+
+fn rejected_mutex_security() -> WindowsSandboxInvocationError {
+    WindowsSandboxInvocationError::Authority(
+        "provider mutex security is not protected current-owner-and-SYSTEM-only full control"
+            .to_owned(),
+    )
+}
+
+struct MutexSecurityDescriptor(PSECURITY_DESCRIPTOR);
+
+impl MutexSecurityDescriptor {
+    fn owner_system_only(owner_sid: &str) -> Result<Self, WindowsSandboxInvocationError> {
+        let sddl = wide(&format!(
+            "O:{owner_sid}D:P(A;;0x001f0001;;;{owner_sid})(A;;0x001f0001;;;SY)"
+        ));
+        let mut descriptor = PSECURITY_DESCRIPTOR::default();
+        unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                PCWSTR(sddl.as_ptr()),
+                SDDL_REVISION_1,
+                &mut descriptor,
+                None,
+            )
+        }
+        .map_err(|error| WindowsSandboxInvocationError::Authority(error.to_string()))?;
+        Ok(Self(descriptor))
+    }
+}
+
+struct MutexSid(PSID);
+
+impl MutexSid {
+    fn from_string(value: &str) -> Result<Self, WindowsSandboxInvocationError> {
+        let value = wide(value);
+        let mut sid = PSID::default();
+        unsafe { ConvertStringSidToSidW(PCWSTR(value.as_ptr()), &mut sid) }
+            .map_err(|error| WindowsSandboxInvocationError::Authority(error.to_string()))?;
+        Ok(Self(sid))
+    }
+}
+
+impl Drop for MutexSid {
+    fn drop(&mut self) {
+        let _ = unsafe { LocalFree(Some(HLOCAL(self.0.0.cast()))) };
+    }
+}
+
+impl Drop for MutexSecurityDescriptor {
+    fn drop(&mut self) {
+        let _ = unsafe { LocalFree(Some(HLOCAL(self.0.0.cast()))) };
+    }
+}
+
+fn current_user_sid() -> Result<String, WindowsSandboxInvocationError> {
+    let mut token = HANDLE::default();
+    unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) }
+        .map_err(|error| WindowsSandboxInvocationError::Authority(error.to_string()))?;
+    let token = unsafe { OwnedHandle::from_raw_handle(token.0) };
+    let mut required = 0_u32;
+    let first =
+        unsafe { GetTokenInformation(owned_handle(&token), TokenUser, None, 0, &mut required) };
+    if first.is_ok() || required < std::mem::size_of::<TOKEN_USER>() as u32 {
+        return Err(WindowsSandboxInvocationError::Authority(
+            "current user token SID size could not be established".to_owned(),
+        ));
+    }
+    let mut buffer = vec![0_usize; (required as usize).div_ceil(std::mem::size_of::<usize>())];
+    unsafe {
+        GetTokenInformation(
+            owned_handle(&token),
+            TokenUser,
+            Some(buffer.as_mut_ptr().cast()),
+            required,
+            &mut required,
+        )
+    }
+    .map_err(|error| WindowsSandboxInvocationError::Authority(error.to_string()))?;
+    let token_user = unsafe { &*buffer.as_ptr().cast::<TOKEN_USER>() };
+    let mut sid = PWSTR::null();
+    unsafe { ConvertSidToStringSidW(token_user.User.Sid, &mut sid) }
+        .map_err(|error| WindowsSandboxInvocationError::Authority(error.to_string()))?;
+    let value = unsafe { sid.to_string() };
+    let _ = unsafe { LocalFree(Some(HLOCAL(sid.0.cast()))) };
+    value.map_err(|error| WindowsSandboxInvocationError::Authority(error.to_string()))
+}
+
+fn interpret_mutex_wait(
+    wait: windows::Win32::Foundation::WAIT_EVENT,
+    mode: MutexAcquisitionMode,
+) -> Result<bool, WindowsSandboxInvocationError> {
+    if wait == WAIT_OBJECT_0 {
+        Ok(false)
+    } else if wait == WAIT_ABANDONED {
+        match mode {
+            MutexAcquisitionMode::NormalExecution => {
+                Err(WindowsSandboxInvocationError::RecoveryRequired)
+            }
+            MutexAcquisitionMode::Recovery => Ok(true),
+        }
+    } else if wait == WAIT_TIMEOUT {
+        Err(WindowsSandboxInvocationError::LeaseUnavailable)
+    } else {
+        Err(WindowsSandboxInvocationError::Authority(format!(
+            "provider mutex wait failed with status 0x{:08x}",
+            wait.0
+        )))
     }
 }
 
@@ -1606,7 +2156,101 @@ impl Drop for ProviderMutex {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+    const START_PROVIDER_HASH: &str =
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const RECOVERY_PROVIDER_HASH: &str =
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+    fn unique_mutex_name(label: &str) -> String {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        format!(
+            "Local\\AIW.WindowsSandbox.Provider.test.{}.{label}.{nonce}",
+            std::process::id()
+        )
+    }
+
+    fn create_named_mutex(name: &str, sddl: &str) -> OwnedHandle {
+        let sddl = wide(sddl);
+        let mut descriptor = PSECURITY_DESCRIPTOR::default();
+        unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                PCWSTR(sddl.as_ptr()),
+                SDDL_REVISION_1,
+                &mut descriptor,
+                None,
+            )
+        }
+        .unwrap();
+        let descriptor = MutexSecurityDescriptor(descriptor);
+        let attributes = SECURITY_ATTRIBUTES {
+            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: descriptor.0.0,
+            bInheritHandle: false.into(),
+        };
+        let name = wide(name);
+        unsafe { CreateMutexW(Some(&attributes), false, PCWSTR(name.as_ptr())) }
+            .map(|handle| unsafe { OwnedHandle::from_raw_handle(handle.0) })
+            .unwrap()
+    }
+
+    fn abandon_named_mutex(name: String, owner_sid: String) -> usize {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let acquisition = ProviderMutex::try_acquire_named(
+                MutexAcquisitionMode::NormalExecution,
+                &name,
+                &owner_sid,
+            )
+            .expect("test thread acquires uniquely named mutex");
+            sender.send(acquisition.mutex.0.0 as usize).unwrap();
+            std::mem::forget(acquisition);
+        })
+        .join()
+        .unwrap();
+        receiver.recv().unwrap()
+    }
+
+    struct FakeRecoveryProvider {
+        lists: VecDeque<Vec<String>>,
+        stopped: Vec<String>,
+    }
+
+    impl FakeRecoveryProvider {
+        fn new(lists: impl IntoIterator<Item = Vec<String>>) -> Self {
+            Self {
+                lists: lists.into_iter().collect(),
+                stopped: Vec::new(),
+            }
+        }
+    }
+
+    impl RecoveryProvider for FakeRecoveryProvider {
+        fn list(
+            &mut self,
+            _deadline: Instant,
+        ) -> Result<Vec<String>, WindowsSandboxInvocationError> {
+            self.lists.pop_front().ok_or_else(|| {
+                WindowsSandboxInvocationError::Protocol(
+                    "fake recovery list observation exhausted".to_owned(),
+                )
+            })
+        }
+
+        fn stop(
+            &mut self,
+            session: &CanonicalSandboxId,
+            _deadline: Instant,
+        ) -> Result<(), WindowsSandboxInvocationError> {
+            self.stopped.push(session.as_str().to_owned());
+            Ok(())
+        }
+    }
 
     fn helper_arguments(name: &str) -> Vec<String> {
         vec![
@@ -1839,6 +2483,195 @@ mod tests {
         assert!(invocation_deadline(Duration::ZERO).is_err());
         assert!(invocation_deadline(MAX_INVOCATION_TIMEOUT + Duration::from_nanos(1)).is_err());
         assert!(invocation_deadline(Duration::from_nanos(1)).is_ok());
+    }
+
+    #[test]
+    fn abandoned_mutex_signal_is_rejected_normally_and_recorded_for_recovery() {
+        assert!(matches!(
+            interpret_mutex_wait(WAIT_ABANDONED, MutexAcquisitionMode::NormalExecution),
+            Err(WindowsSandboxInvocationError::RecoveryRequired)
+        ));
+        assert!(interpret_mutex_wait(WAIT_ABANDONED, MutexAcquisitionMode::Recovery).unwrap());
+        assert!(!interpret_mutex_wait(WAIT_OBJECT_0, MutexAcquisitionMode::Recovery).unwrap());
+        assert!(matches!(
+            interpret_mutex_wait(WAIT_TIMEOUT, MutexAcquisitionMode::Recovery),
+            Err(WindowsSandboxInvocationError::LeaseUnavailable)
+        ));
+    }
+
+    #[test]
+    fn provider_hash_policy_rejects_normal_drift_and_records_trusted_recovery_drift() {
+        assert!(matches!(
+            bind_verified_provider_hash(
+                MutexAcquisitionMode::NormalExecution,
+                START_PROVIDER_HASH,
+                RECOVERY_PROVIDER_HASH,
+            ),
+            Err(WindowsSandboxInvocationError::Authority(_))
+        ));
+        let recovery = bind_verified_provider_hash(
+            MutexAcquisitionMode::Recovery,
+            START_PROVIDER_HASH,
+            RECOVERY_PROVIDER_HASH,
+        )
+        .unwrap();
+        assert_eq!(recovery.start_sha256, START_PROVIDER_HASH);
+        assert_eq!(recovery.current_sha256, RECOVERY_PROVIDER_HASH);
+        assert!(recovery.drifted);
+    }
+
+    #[test]
+    fn mutex_rejects_a_permissive_preexisting_security_descriptor_before_waiting() {
+        let owner_sid = current_user_sid().unwrap();
+        let name = unique_mutex_name("permissive");
+        let _precreated = create_named_mutex(
+            &name,
+            &format!(
+                "O:{owner_sid}D:P(A;;0x001f0001;;;{owner_sid})(A;;0x001f0001;;;SY)(A;;0x001f0001;;;WD)"
+            ),
+        );
+        assert!(matches!(
+            ProviderMutex::try_acquire_named(MutexAcquisitionMode::Recovery, &name, &owner_sid,),
+            Err(WindowsSandboxInvocationError::Authority(_))
+        ));
+    }
+
+    #[test]
+    fn mutex_accepts_a_correct_preexisting_security_descriptor() {
+        let owner_sid = current_user_sid().unwrap();
+        let name = unique_mutex_name("correct");
+        let _precreated = create_named_mutex(
+            &name,
+            &format!("O:{owner_sid}D:P(A;;0x001f0001;;;{owner_sid})(A;;0x001f0001;;;SY)"),
+        );
+        let acquisition = ProviderMutex::try_acquire_named(
+            MutexAcquisitionMode::NormalExecution,
+            &name,
+            &owner_sid,
+        )
+        .unwrap();
+        assert!(!acquisition.was_abandoned);
+    }
+
+    #[test]
+    fn unique_native_mutexes_record_the_one_shot_abandonment_signal() {
+        let owner_sid = current_user_sid().unwrap();
+        let normal_name = unique_mutex_name("normal-abandoned");
+        let leaked_handle = abandon_named_mutex(normal_name.clone(), owner_sid.clone());
+
+        assert!(matches!(
+            ProviderMutex::try_acquire_named(
+                MutexAcquisitionMode::NormalExecution,
+                &normal_name,
+                &owner_sid,
+            ),
+            Err(WindowsSandboxInvocationError::RecoveryRequired)
+        ));
+
+        let recovery_name = unique_mutex_name("recovery-abandoned");
+        let second_leaked_handle = abandon_named_mutex(recovery_name.clone(), owner_sid.clone());
+        let recovery = ProviderMutex::try_acquire_named(
+            MutexAcquisitionMode::Recovery,
+            &recovery_name,
+            &owner_sid,
+        )
+        .unwrap();
+        assert!(recovery.was_abandoned);
+        drop(recovery);
+
+        let _ = unsafe { CloseHandle(HANDLE(leaked_handle as *mut std::ffi::c_void)) };
+        let _ = unsafe { CloseHandle(HANDLE(second_leaked_handle as *mut std::ffi::c_void)) };
+    }
+
+    #[test]
+    fn recovery_stops_only_the_exact_bound_session_and_preserves_unrelated_sessions() {
+        let bound = CanonicalSandboxId::parse("1782a9f3-4e9a-45ac-abe1-afc8ecf78666").unwrap();
+        let unrelated = "7be1e7db-8340-45ac-97ce-3b1a7fd58e10".to_owned();
+        let mut provider = FakeRecoveryProvider::new([
+            vec![unrelated.clone(), bound.as_str().to_owned()],
+            vec![unrelated.clone()],
+        ]);
+
+        let observation = reconcile_bound_session(
+            &bound,
+            true,
+            START_PROVIDER_HASH,
+            RECOVERY_PROVIDER_HASH,
+            &mut provider,
+            Instant::now() + Duration::from_secs(1),
+        )
+        .unwrap();
+
+        assert_eq!(provider.stopped, vec![bound.as_str()]);
+        assert_eq!(observation.disposition, WsbRecoveryDisposition::Stopped);
+        assert!(observation.mutex_was_abandoned);
+        assert!(observation.provider_drifted);
+        assert_eq!(observation.start_provider_sha256, START_PROVIDER_HASH);
+        assert_eq!(observation.recovery_provider_sha256, RECOVERY_PROVIDER_HASH);
+        assert_eq!(observation.session_ids_after, vec![unrelated]);
+    }
+
+    #[test]
+    fn recovery_proves_already_absent_without_issuing_stop() {
+        let bound = CanonicalSandboxId::parse("1782a9f3-4e9a-45ac-abe1-afc8ecf78666").unwrap();
+        let unrelated = "7be1e7db-8340-45ac-97ce-3b1a7fd58e10".to_owned();
+        let mut provider =
+            FakeRecoveryProvider::new([vec![unrelated.clone()], vec![unrelated.clone()]]);
+
+        let observation = reconcile_bound_session(
+            &bound,
+            false,
+            START_PROVIDER_HASH,
+            START_PROVIDER_HASH,
+            &mut provider,
+            Instant::now() + Duration::from_secs(1),
+        )
+        .unwrap();
+
+        assert!(provider.stopped.is_empty());
+        assert_eq!(
+            observation.disposition,
+            WsbRecoveryDisposition::AlreadyAbsent
+        );
+        assert_eq!(observation.session_ids_before, vec![unrelated]);
+    }
+
+    #[test]
+    fn recovery_fails_closed_on_bound_or_unrelated_session_drift() {
+        let bound = CanonicalSandboxId::parse("1782a9f3-4e9a-45ac-abe1-afc8ecf78666").unwrap();
+        let unrelated = "7be1e7db-8340-45ac-97ce-3b1a7fd58e10".to_owned();
+        let deadline = Instant::now() + Duration::from_secs(1);
+
+        let mut still_present = FakeRecoveryProvider::new([
+            vec![bound.as_str().to_owned()],
+            vec![bound.as_str().to_owned()],
+        ]);
+        assert!(matches!(
+            reconcile_bound_session(
+                &bound,
+                false,
+                START_PROVIDER_HASH,
+                START_PROVIDER_HASH,
+                &mut still_present,
+                deadline,
+            ),
+            Err(WindowsSandboxInvocationError::Protocol(_))
+        ));
+
+        let mut unrelated_drift =
+            FakeRecoveryProvider::new([vec![unrelated, bound.as_str().to_owned()], Vec::new()]);
+        assert!(matches!(
+            reconcile_bound_session(
+                &bound,
+                false,
+                START_PROVIDER_HASH,
+                START_PROVIDER_HASH,
+                &mut unrelated_drift,
+                deadline,
+            ),
+            Err(WindowsSandboxInvocationError::Protocol(_))
+        ));
+        assert_eq!(unrelated_drift.stopped, vec![bound.as_str()]);
     }
 
     fn live_id(label: &str) -> CanonicalSandboxId {

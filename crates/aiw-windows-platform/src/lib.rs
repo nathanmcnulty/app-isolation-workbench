@@ -9,6 +9,12 @@ pub use windows_platform::{
 };
 
 #[cfg(windows)]
+#[doc(hidden)]
+pub use windows_platform::{
+    WindowsSandboxRecoveryLease, WsbRecoveryDisposition, WsbRecoveryObservation,
+};
+
+#[cfg(windows)]
 pub use workspace::{HeldRunWorkspace, WorkspaceError};
 
 pub use aiw_probe::WindowsFileIdentity as WorkspaceDirectoryIdentity;
@@ -30,6 +36,15 @@ pub fn acquire_windows_sandbox(
     expected_provider_sha256: &str,
 ) -> Result<WindowsSandboxExecutionLease, WindowsSandboxInvocationError> {
     windows_platform::acquire_windows_sandbox(expected_provider_sha256)
+}
+
+#[cfg(windows)]
+#[doc(hidden)]
+pub fn acquire_windows_sandbox_recovery(
+    start_provider_sha256: &str,
+    persisted_session: CanonicalSandboxId,
+) -> Result<WindowsSandboxRecoveryLease, WindowsSandboxInvocationError> {
+    windows_platform::acquire_windows_sandbox_recovery(start_provider_sha256, persisted_session)
 }
 
 #[cfg(windows)]

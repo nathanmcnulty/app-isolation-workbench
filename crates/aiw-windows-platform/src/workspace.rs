@@ -169,6 +169,79 @@ impl HeldRunWorkspace {
         })
     }
 
+    /// Reopens an already-created workspace only when every persisted binding
+    /// still names the current owner and the exact same protected directories.
+    /// This recovery path is read-only: it never creates, deletes, adopts, or
+    /// repairs a directory and never changes ownership or an ACL.
+    pub fn reopen_bound(expected: &WorkspaceBindingEvidence) -> Result<Self, WorkspaceError> {
+        expected
+            .validate()
+            .map_err(|_| WorkspaceError::IdentityRejected)?;
+
+        let owner = CurrentUser::query()?;
+        if expected.owner_sid != owner.sid_string
+            || expected.security_policy_sha256 != workspace_policy_hash(&owner.sid_string)
+            || expected.allowed_sids.len() != 2
+            || !expected
+                .allowed_sids
+                .iter()
+                .any(|sid| sid == &owner.sid_string)
+            || !expected
+                .allowed_sids
+                .iter()
+                .any(|sid| sid == WINDOWS_SYSTEM_SID)
+        {
+            return Err(WorkspaceError::AclRejected);
+        }
+
+        let parent_path = PathBuf::from(&expected.parent.final_path);
+        let root_path = PathBuf::from(&expected.root.final_path);
+        let tools_path = PathBuf::from(&expected.tools.final_path);
+        let output_path = PathBuf::from(&expected.output.final_path);
+        if !parent_path.is_absolute()
+            || !root_path.is_absolute()
+            || !tools_path.is_absolute()
+            || !output_path.is_absolute()
+            || root_path
+                .parent()
+                .is_none_or(|path| !same_path(path, &parent_path))
+            || !same_path(&tools_path, root_path.join("tools"))
+            || !same_path(&output_path, root_path.join("output"))
+        {
+            return Err(WorkspaceError::IdentityRejected);
+        }
+
+        let parent = open_held_directory(&parent_path)?;
+        verify_local_acl_volume(&parent)?;
+        if !is_fixed_volume(&parent_path)? || directory_identity(&parent)? != expected.parent {
+            return Err(WorkspaceError::IdentityRejected);
+        }
+
+        let root = open_held_directory(&root_path)?;
+        let tools = open_held_directory(&tools_path)?;
+        let output = open_held_directory(&output_path)?;
+        if verify_owner_system_directory(&root, &owner.sid)? != expected.root
+            || verify_owner_system_directory(&tools, &owner.sid)? != expected.tools
+            || verify_owner_system_directory(&output, &owner.sid)? != expected.output
+            || expected.root.volume_serial_number != expected.parent.volume_serial_number
+            || expected.tools.volume_serial_number != expected.parent.volume_serial_number
+            || expected.output.volume_serial_number != expected.parent.volume_serial_number
+        {
+            return Err(WorkspaceError::IdentityRejected);
+        }
+
+        let workspace = Self {
+            parent,
+            root,
+            tools,
+            output,
+            root_path,
+            evidence: expected.clone(),
+        };
+        workspace.revalidate()?;
+        Ok(workspace)
+    }
+
     pub fn root_path(&self) -> &Path {
         &self.root_path
     }
@@ -215,7 +288,7 @@ impl HeldRunWorkspace {
             .parent()
             .ok_or(WorkspaceError::IdentityRejected)?;
         let current_parent =
-            open_held_parent(current_parent_path).and_then(|file| directory_identity(&file))?;
+            open_held_directory(current_parent_path).and_then(|file| directory_identity(&file))?;
         let current_tools = open_held_directory(&self.tools_path())
             .and_then(|file| verify_owner_system_directory(&file, &owner.sid))?;
         let current_output = open_held_directory(&self.output_path())
@@ -762,6 +835,112 @@ mod tests {
         workspace.revalidate().unwrap();
         remove_test_workspace(workspace);
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn reopens_only_the_exact_persisted_workspace_binding() {
+        let name = leaf("reopen");
+        let path = parent().join(&name);
+        let _ = std::fs::remove_dir_all(&path);
+        let workspace = HeldRunWorkspace::create(&parent(), &name).unwrap();
+        let evidence = workspace.evidence().clone();
+        drop(workspace);
+
+        let reopened = HeldRunWorkspace::reopen_bound(&evidence).unwrap();
+        assert_eq!(reopened.evidence(), &evidence);
+        reopened.revalidate().unwrap();
+        remove_test_workspace(reopened);
+    }
+
+    #[test]
+    fn recovery_rejects_persisted_identity_or_owner_drift() {
+        let name = leaf("binding-drift");
+        let path = parent().join(&name);
+        let _ = std::fs::remove_dir_all(&path);
+        let workspace = HeldRunWorkspace::create(&parent(), &name).unwrap();
+        let evidence = workspace.evidence().clone();
+        drop(workspace);
+
+        let mut identity_drift = evidence.clone();
+        identity_drift.root.file_id = "0".repeat(32);
+        assert!(matches!(
+            HeldRunWorkspace::reopen_bound(&identity_drift),
+            Err(WorkspaceError::IdentityRejected)
+        ));
+
+        let mut owner_drift = evidence.clone();
+        owner_drift.owner_sid = "S-1-5-19".to_owned();
+        owner_drift.allowed_sids = vec![WINDOWS_SYSTEM_SID.to_owned(), "S-1-5-19".to_owned()];
+        owner_drift.security_policy_sha256 = workspace_policy_hash("S-1-5-19");
+        assert!(matches!(
+            HeldRunWorkspace::reopen_bound(&owner_drift),
+            Err(WorkspaceError::AclRejected)
+        ));
+
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn recovery_rejects_acl_drift_without_repairing_it() {
+        let name = leaf("acl-drift");
+        let path = parent().join(&name);
+        let _ = std::fs::remove_dir_all(&path);
+        let workspace = HeldRunWorkspace::create(&parent(), &name).unwrap();
+        let evidence = workspace.evidence().clone();
+        drop(workspace);
+
+        let handle = OpenOptions::new()
+            .access_mode(READ_CONTROL.0 | windows::Win32::Storage::FileSystem::WRITE_DAC.0)
+            .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0)
+            .open(&path)
+            .unwrap();
+        let result = unsafe {
+            windows::Win32::Security::Authorization::SetSecurityInfo(
+                raw_handle(&handle),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION
+                    | windows::Win32::Security::PROTECTED_DACL_SECURITY_INFORMATION,
+                None,
+                None,
+                Some(std::ptr::null()),
+                None,
+            )
+        };
+        assert_eq!(result.0, 0);
+        drop(handle);
+
+        assert!(matches!(
+            HeldRunWorkspace::reopen_bound(&evidence),
+            Err(WorkspaceError::AclRejected)
+        ));
+        // Recovery is deliberately non-repairing; the drift remains observable.
+        let reopened = open_held_directory(&path).unwrap();
+        assert!(matches!(
+            verify_owner_system_directory(&reopened, &CurrentUser::query().unwrap().sid),
+            Err(WorkspaceError::AclRejected)
+        ));
+        drop(reopened);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn recovery_rejects_path_replacement() {
+        let name = leaf("replacement");
+        let path = parent().join(&name);
+        let moved = parent().join(format!("{name}-original"));
+        let _ = std::fs::remove_dir_all(&path);
+        let _ = std::fs::remove_dir_all(&moved);
+        let workspace = HeldRunWorkspace::create(&parent(), &name).unwrap();
+        let evidence = workspace.evidence().clone();
+        drop(workspace);
+
+        std::fs::rename(&path, &moved).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        assert!(HeldRunWorkspace::reopen_bound(&evidence).is_err());
+
+        std::fs::remove_dir(&path).unwrap();
+        std::fs::remove_dir_all(&moved).unwrap();
     }
 
     #[test]
