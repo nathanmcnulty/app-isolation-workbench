@@ -8,6 +8,9 @@
 use std::path::Path;
 
 use aiw_evidence::canonical_json_bytes;
+pub use aiw_orchestrator::WsbPlanningImportReceipt;
+#[cfg(windows)]
+use aiw_orchestrator::{PendingRunDisposition, RecoveryStatus, RunLayout, WsbPlanningImportStatus};
 use aiw_orchestrator::{PlannedAction, RunLifecycleKind, RunPlan, project_revision_hash};
 use aiw_probe::{
     BinaryIdentity, CatalogTrustIdentity, ReadinessState, WindowsFileIdentity,
@@ -25,6 +28,8 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 pub const WSB_PREPARATION_RECEIPT_SCHEMA_VERSION: &str = "aiw.dev/wsb-preparation-receipt/v0alpha1";
+pub const WSB_PLANNING_IMPORT_RESULT_SCHEMA_VERSION: &str =
+    "aiw.dev/wsb-planning-import-result/v0alpha1";
 
 const READINESS_SCHEMA: &str = "aiw.dev/windows-sandbox-readiness/v0alpha2";
 const PINNED_CLI_VERSION: &str = "0.8.107.0";
@@ -48,6 +53,35 @@ const TRUST_DELTA_MAPPINGS: &str =
 #[serde(rename_all = "camelCase")]
 pub enum WsbPreparationStatus {
     PendingApproval,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WsbPlanningImportDisposition {
+    Imported,
+    AlreadyImported,
+}
+
+#[derive(Debug, Clone, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WsbPlanningImportResult {
+    pub schema_version: String,
+    pub run_id: String,
+    pub disposition: WsbPlanningImportDisposition,
+    pub receipt: WsbPlanningImportReceipt,
+}
+
+impl WsbPlanningImportResult {
+    pub fn validate(&self) -> Result<(), WsbPreparationError> {
+        if self.schema_version != WSB_PLANNING_IMPORT_RESULT_SCHEMA_VERSION
+            || self.run_id != self.receipt.run_id
+        {
+            return Err(WsbPreparationError::Contract(
+                "planning import result is invalid".to_owned(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -617,7 +651,7 @@ pub fn prepare_windows_sandbox_bundle(
             .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?;
         ensure_empty_directory(&workspace.output_path())?;
         require_tools_allowlist(&workspace.tools_path())?;
-        require_workspace_allowlist(workspace.root_path(), false)?;
+        require_workspace_allowlist(workspace.root_path(), PreparationWorkspaceState::Building)?;
         complete_bundle(workspace.root_path(), &artifacts, staged)?;
         Ok(artifacts)
     })();
@@ -628,11 +662,54 @@ pub fn prepare_windows_sandbox_bundle(
 }
 
 #[cfg(windows)]
-pub fn verify_windows_sandbox_preparation(
+#[derive(Clone, Copy)]
+enum PreparationWorkspaceState {
+    Building,
+    Prepared,
+    Imported,
+}
+
+#[cfg(windows)]
+struct HeldVerifiedWsbPreparation {
+    artifacts: PreparedWsbArtifacts,
+    receipt_file: std::fs::File,
+    run_plan_file: std::fs::File,
+    wsb_plan_file: std::fs::File,
+    _held_agent: HeldGuestAgentSource,
+    workspace: aiw_windows_platform::HeldRunWorkspace,
+}
+
+#[cfg(windows)]
+impl HeldVerifiedWsbPreparation {
+    fn revalidate(&mut self, state: PreparationWorkspaceState) -> Result<(), WsbPreparationError> {
+        self.workspace
+            .revalidate()
+            .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?;
+        ensure_empty_directory(&self.workspace.output_path())?;
+        require_tools_allowlist(&self.workspace.tools_path())?;
+        require_workspace_allowlist(self.workspace.root_path(), state)?;
+        let receipt: WsbPreparationReceipt = read_json_bounded(&mut self.receipt_file)?;
+        let run_plan: RunPlan = read_json_bounded(&mut self.run_plan_file)?;
+        let wsb_plan: WindowsSandboxPlan = read_json_bounded(&mut self.wsb_plan_file)?;
+        if receipt != self.artifacts.receipt
+            || run_plan != self.artifacts.run_plan
+            || wsb_plan != self.artifacts.wsb_plan
+        {
+            return Err(WsbPreparationError::Persistence(
+                "held preparation artifacts changed during verification".to_owned(),
+            ));
+        }
+        self.artifacts.validate()
+    }
+}
+
+#[cfg(windows)]
+fn open_verified_windows_sandbox_preparation(
     workspace_root: &Path,
     project: &Project,
     expected_guest_agent_sha256: &str,
-) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
+    allow_imported: bool,
+) -> Result<HeldVerifiedWsbPreparation, WsbPreparationError> {
     use aiw_windows_platform::{HeldRunWorkspace, assess_windows_sandbox};
 
     let mut receipt_file = open_bundle_file(&workspace_root.join(RECEIPT_FILE))?;
@@ -676,7 +753,17 @@ pub fn verify_windows_sandbox_preparation(
         .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?;
     ensure_empty_directory(&workspace.output_path())?;
     require_tools_allowlist(&workspace.tools_path())?;
-    require_workspace_allowlist(workspace.root_path(), true)?;
+    let state = if workspace.root_path().join("runs").exists() {
+        if !allow_imported {
+            return Err(WsbPreparationError::Contract(
+                "preparation has already entered authoritative run state".to_owned(),
+            ));
+        }
+        PreparationWorkspaceState::Imported
+    } else {
+        PreparationWorkspaceState::Prepared
+    };
+    require_workspace_allowlist(workspace.root_path(), state)?;
 
     let mut run_plan_file = open_bundle_file(&workspace.root_path().join(RUN_PLAN_FILE))?;
     let mut wsb_plan_file = open_bundle_file(&workspace.root_path().join(WSB_PLAN_FILE))?;
@@ -695,6 +782,13 @@ pub fn verify_windows_sandbox_preparation(
         receipt,
     };
     observed.validate()?;
+    if matches!(state, PreparationWorkspaceState::Imported) {
+        require_importable_runs_allowlist(
+            workspace.root_path(),
+            &observed.receipt.run_id,
+            &observed.receipt.run_plan_sha256,
+        )?;
+    }
 
     let readiness = assess_windows_sandbox();
     let trusted = require_readiness(&readiness)?;
@@ -708,13 +802,115 @@ pub fn verify_windows_sandbox_preparation(
             "provider identity drifted since preparation".to_owned(),
         ));
     }
-    workspace
-        .revalidate()
-        .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?;
-    ensure_empty_directory(&workspace.output_path())?;
-    require_tools_allowlist(&workspace.tools_path())?;
-    require_workspace_allowlist(workspace.root_path(), true)?;
-    Ok(observed)
+    let mut held = HeldVerifiedWsbPreparation {
+        artifacts: observed,
+        receipt_file,
+        run_plan_file,
+        wsb_plan_file,
+        _held_agent: held_agent,
+        workspace,
+    };
+    held.revalidate(state)?;
+    Ok(held)
+}
+
+#[cfg(windows)]
+pub fn verify_windows_sandbox_preparation(
+    workspace_root: &Path,
+    project: &Project,
+    expected_guest_agent_sha256: &str,
+) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
+    Ok(open_verified_windows_sandbox_preparation(
+        workspace_root,
+        project,
+        expected_guest_agent_sha256,
+        false,
+    )?
+    .artifacts)
+}
+
+#[cfg(windows)]
+pub fn import_windows_sandbox_preparation(
+    workspace_root: &Path,
+    project: &Project,
+    expected_guest_agent_sha256: &str,
+    imported_at: &str,
+) -> Result<WsbPlanningImportResult, WsbPreparationError> {
+    if imported_at.is_empty() {
+        return Err(WsbPreparationError::Contract(
+            "planning import timestamp must not be empty".to_owned(),
+        ));
+    }
+    let mut held = open_verified_windows_sandbox_preparation(
+        workspace_root,
+        project,
+        expected_guest_agent_sha256,
+        true,
+    )?;
+    let run_id = held.artifacts.receipt.run_id.clone();
+    let receipt = WsbPlanningImportReceipt {
+        schema_version: aiw_orchestrator::WSB_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION.to_owned(),
+        run_id: run_id.clone(),
+        imported_at: imported_at.to_owned(),
+        status: WsbPlanningImportStatus::PendingApproval,
+        project_revision_sha256: held.artifacts.receipt.project_revision_sha256.clone(),
+        workspace_root: held.artifacts.receipt.workspace.root.final_path.clone(),
+        workspace_identity_sha256: held.artifacts.receipt.workspace_identity_sha256.clone(),
+        preparation_receipt_sha256: canonical_hash(&held.artifacts.receipt)?,
+        run_plan_sha256: held.artifacts.receipt.run_plan_sha256.clone(),
+        windows_sandbox_plan_sha256: held.artifacts.receipt.wsb_plan_sha256.clone(),
+        guest_agent_sha256: held.artifacts.receipt.guest_agent.sha256.clone(),
+        provider_sha256: held.artifacts.receipt.provider.sha256.clone(),
+        run_root: held.artifacts.receipt.workspace.root.final_path.clone(),
+        journal_sequence: 1,
+        approval_present: false,
+        provider_acquired: false,
+        provider_mutated: false,
+    };
+    receipt
+        .validate_for_plan(&held.artifacts.run_plan)
+        .map_err(|error| WsbPreparationError::Contract(error.to_string()))?;
+    let layout = RunLayout::new(held.workspace.root_path(), &run_id)
+        .map_err(|error| WsbPreparationError::Persistence(error.to_string()))?;
+    let disposition = layout
+        .create_or_verify_pending_wsb_import(&held.artifacts.run_plan, &receipt)
+        .map_err(|error| WsbPreparationError::Persistence(error.to_string()))?;
+    require_imported_runs_allowlist(held.workspace.root_path(), &run_id)?;
+    held.revalidate(PreparationWorkspaceState::Imported)?;
+    if layout
+        .read_plan()
+        .map_err(|error| WsbPreparationError::Persistence(error.to_string()))?
+        != held.artifacts.run_plan
+        || !matches!(
+            layout
+                .status()
+                .map_err(|error| WsbPreparationError::Persistence(error.to_string()))?,
+            RecoveryStatus::PendingApproval {
+                last_sequence: 1,
+                ..
+            }
+        )
+        || layout.approval_path().exists()
+        || layout.cancellation_path().exists()
+        || layout.result_path().exists()
+        || layout.run_dir().join("wsb-session-transaction").exists()
+    {
+        return Err(WsbPreparationError::Contract(
+            "imported run is not the pristine pending-approval state".to_owned(),
+        ));
+    }
+    let result = WsbPlanningImportResult {
+        schema_version: WSB_PLANNING_IMPORT_RESULT_SCHEMA_VERSION.to_owned(),
+        run_id,
+        disposition: match disposition {
+            PendingRunDisposition::Created => WsbPlanningImportDisposition::Imported,
+            PendingRunDisposition::AlreadyPresent => WsbPlanningImportDisposition::AlreadyImported,
+        },
+        receipt,
+    };
+    result.validate()?;
+    held.revalidate(PreparationWorkspaceState::Imported)?;
+    Ok(result)
 }
 
 #[cfg(windows)]
@@ -982,7 +1178,7 @@ fn complete_bundle(
     artifacts: &PreparedWsbArtifacts,
     staged: StagedPreparationFiles,
 ) -> Result<(), WsbPreparationError> {
-    require_workspace_allowlist(workspace_root, false)?;
+    require_workspace_allowlist(workspace_root, PreparationWorkspaceState::Building)?;
     let _held_plans = staged;
     // This create-new, synced receipt is the final fallible publication step.
     // Any earlier error leaves no completeness marker; an interrupted final
@@ -1085,11 +1281,17 @@ fn write_json_new(
 #[cfg(windows)]
 fn require_workspace_allowlist(
     root: &Path,
-    receipt_present: bool,
+    state: PreparationWorkspaceState,
 ) -> Result<(), WsbPreparationError> {
     let mut expected = vec!["output", "plan.json", "tools", "wsb-plan.json"];
-    if receipt_present {
+    if matches!(
+        state,
+        PreparationWorkspaceState::Prepared | PreparationWorkspaceState::Imported
+    ) {
         expected.push("preparation.json");
+    }
+    if matches!(state, PreparationWorkspaceState::Imported) {
+        expected.push("runs");
     }
     expected.sort();
     let mut observed = std::fs::read_dir(root)
@@ -1110,6 +1312,141 @@ fn require_workspace_allowlist(
     if observed != expected {
         return Err(WsbPreparationError::Persistence(
             "workspace contains entries outside the fixed preparation allowlist".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn require_imported_runs_allowlist(root: &Path, run_id: &str) -> Result<(), WsbPreparationError> {
+    let runs = root.join("runs");
+    require_non_reparse_directory(&runs)?;
+    let mut entries = std::fs::read_dir(&runs)
+        .map_err(|error| WsbPreparationError::Persistence(error.to_string()))?
+        .map(|entry| {
+            entry
+                .map_err(|error| WsbPreparationError::Persistence(error.to_string()))?
+                .file_name()
+                .into_string()
+                .map_err(|_| {
+                    WsbPreparationError::Persistence(
+                        "run storage entry name is not Unicode".to_owned(),
+                    )
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    entries.sort();
+    let mut expected = vec![".locks".to_owned(), run_id.to_owned()];
+    expected.sort();
+    if entries != expected {
+        return Err(WsbPreparationError::Persistence(
+            "run storage contains entries outside the exact imported-run allowlist".to_owned(),
+        ));
+    }
+    require_non_reparse_directory(&runs.join(".locks"))?;
+    require_non_reparse_directory(&runs.join(run_id))?;
+    require_run_locks_allowlist(&runs, run_id)
+}
+
+#[cfg(windows)]
+fn require_importable_runs_allowlist(
+    root: &Path,
+    run_id: &str,
+    plan_sha256: &str,
+) -> Result<(), WsbPreparationError> {
+    let runs = root.join("runs");
+    require_non_reparse_directory(&runs)?;
+    let mut entries = std::fs::read_dir(&runs)
+        .map_err(|error| WsbPreparationError::Persistence(error.to_string()))?
+        .map(|entry| {
+            entry
+                .map_err(|error| WsbPreparationError::Persistence(error.to_string()))?
+                .file_name()
+                .into_string()
+                .map_err(|_| {
+                    WsbPreparationError::Persistence(
+                        "run storage entry name is not Unicode".to_owned(),
+                    )
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    entries.sort();
+    let stage = format!(".import-{run_id}-{plan_sha256}");
+    let mut allowed = [
+        vec![".locks".to_owned()],
+        vec![".locks".to_owned(), run_id.to_owned()],
+        vec![".locks".to_owned(), stage],
+    ];
+    for expected in &mut allowed {
+        expected.sort();
+    }
+    if !allowed.iter().any(|expected| expected == &entries) {
+        return Err(WsbPreparationError::Persistence(
+            "run storage is neither pristine, exactly staged, nor exactly imported".to_owned(),
+        ));
+    }
+    require_non_reparse_directory(&runs.join(".locks"))?;
+    if let Some(entry) = entries.iter().find(|entry| entry.as_str() != ".locks") {
+        require_non_reparse_directory(&runs.join(entry))?;
+    }
+    require_run_locks_allowlist(&runs, run_id)
+}
+
+#[cfg(windows)]
+fn require_run_locks_allowlist(runs: &Path, run_id: &str) -> Result<(), WsbPreparationError> {
+    let mut locks = std::fs::read_dir(runs.join(".locks"))
+        .map_err(|error| WsbPreparationError::Persistence(error.to_string()))?
+        .map(|entry| {
+            entry
+                .map_err(|error| WsbPreparationError::Persistence(error.to_string()))?
+                .file_name()
+                .into_string()
+                .map_err(|_| {
+                    WsbPreparationError::Persistence(
+                        "run lock entry name is not Unicode".to_owned(),
+                    )
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    locks.sort();
+    if locks != [format!("{run_id}.lock")] {
+        return Err(WsbPreparationError::Persistence(
+            "run lock storage differs from the exact imported-run allowlist".to_owned(),
+        ));
+    }
+    require_non_reparse_file(&runs.join(".locks").join(format!("{run_id}.lock")))?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn require_non_reparse_directory(path: &Path) -> Result<(), WsbPreparationError> {
+    use std::os::windows::fs::MetadataExt;
+
+    let metadata = std::fs::symlink_metadata(path)
+        .map_err(|error| WsbPreparationError::Persistence(error.to_string()))?;
+    if !metadata.is_dir()
+        || metadata.file_type().is_symlink()
+        || metadata.file_attributes() & 0x0400 != 0
+    {
+        return Err(WsbPreparationError::Persistence(
+            "run storage contains a non-directory or reparse entry".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn require_non_reparse_file(path: &Path) -> Result<(), WsbPreparationError> {
+    use std::os::windows::fs::MetadataExt;
+
+    let metadata = std::fs::symlink_metadata(path)
+        .map_err(|error| WsbPreparationError::Persistence(error.to_string()))?;
+    if !metadata.is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.file_attributes() & 0x0400 != 0
+    {
+        return Err(WsbPreparationError::Persistence(
+            "run lock storage contains a non-file or reparse entry".to_owned(),
         ));
     }
     Ok(())
@@ -1375,6 +1712,49 @@ mod tests {
     }
 
     #[test]
+    fn planning_import_result_is_strict_and_plan_bound() {
+        let artifacts = build_wsb_preparation(
+            "run-one",
+            &project(),
+            &readiness(),
+            &workspace(),
+            &guest(),
+            "now",
+        )
+        .unwrap();
+        let receipt = WsbPlanningImportReceipt {
+            schema_version: aiw_orchestrator::WSB_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION.to_owned(),
+            run_id: artifacts.run_plan.run_id.clone(),
+            imported_at: "later".to_owned(),
+            status: aiw_orchestrator::WsbPlanningImportStatus::PendingApproval,
+            project_revision_sha256: artifacts.run_plan.project_revision_hash.clone(),
+            workspace_root: artifacts.receipt.workspace.root.final_path.clone(),
+            workspace_identity_sha256: artifacts.receipt.workspace_identity_sha256.clone(),
+            preparation_receipt_sha256: canonical_hash(&artifacts.receipt).unwrap(),
+            run_plan_sha256: artifacts.receipt.run_plan_sha256.clone(),
+            windows_sandbox_plan_sha256: artifacts.receipt.wsb_plan_sha256.clone(),
+            guest_agent_sha256: artifacts.receipt.guest_agent.sha256.clone(),
+            provider_sha256: artifacts.receipt.provider.sha256.clone(),
+            run_root: artifacts.receipt.workspace.root.final_path.clone(),
+            journal_sequence: 1,
+            approval_present: false,
+            provider_acquired: false,
+            provider_mutated: false,
+        };
+        receipt.validate_for_plan(&artifacts.run_plan).unwrap();
+        let result = WsbPlanningImportResult {
+            schema_version: WSB_PLANNING_IMPORT_RESULT_SCHEMA_VERSION.to_owned(),
+            run_id: artifacts.run_plan.run_id.clone(),
+            disposition: WsbPlanningImportDisposition::Imported,
+            receipt,
+        };
+        result.validate().unwrap();
+        let mut value = serde_json::to_value(result).unwrap();
+        value["providerStarted"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<WsbPlanningImportResult>(value).is_err());
+    }
+
+    #[test]
     fn rejects_provider_protocol_sessions_workspace_and_agent_drift() {
         let mut active = readiness();
         active.current_session_ids.push("foreign".to_owned());
@@ -1474,7 +1854,7 @@ mod tests {
         assert!(!accepted.0.join(RECEIPT_FILE).exists());
         complete_bundle(&accepted.0, &artifacts, staged).unwrap();
         assert!(accepted.0.join(RECEIPT_FILE).is_file());
-        require_workspace_allowlist(&accepted.0, true).unwrap();
+        require_workspace_allowlist(&accepted.0, PreparationWorkspaceState::Prepared).unwrap();
     }
 
     #[cfg(windows)]
@@ -1486,5 +1866,23 @@ mod tests {
         require_tools_allowlist(&temp.0).unwrap();
         std::fs::write(temp.0.join("side-loaded.dll"), b"extra").unwrap();
         assert!(require_tools_allowlist(&temp.0).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn importable_run_storage_accepts_only_exact_recovery_shapes() {
+        let temp = TempDir::new("importable-runs");
+        let runs = temp.0.join("runs");
+        std::fs::create_dir(&runs).unwrap();
+        std::fs::create_dir(runs.join(".locks")).unwrap();
+        std::fs::write(runs.join(".locks/run-one.lock"), b"").unwrap();
+        require_importable_runs_allowlist(&temp.0, "run-one", &"a".repeat(64)).unwrap();
+
+        let stage = runs.join(format!(".import-run-one-{}", "a".repeat(64)));
+        std::fs::create_dir(&stage).unwrap();
+        require_importable_runs_allowlist(&temp.0, "run-one", &"a".repeat(64)).unwrap();
+        std::fs::write(runs.join("unrelated"), b"preserve").unwrap();
+        assert!(require_importable_runs_allowlist(&temp.0, "run-one", &"a".repeat(64)).is_err());
+        assert_eq!(std::fs::read(runs.join("unrelated")).unwrap(), b"preserve");
     }
 }

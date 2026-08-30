@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use aiw_evidence::canonical_json_bytes;
 use aiw_orchestrator::{
     ApprovalRecord, PlannedAction, RunLayout, RunLifecycleKind, RunOutcome, RunPlan, RunResult,
+    WSB_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION, WsbPlanningImportReceipt, WsbPlanningImportStatus,
     project_revision_hash,
 };
 use aiw_schema::Project;
@@ -197,6 +198,43 @@ fn write_clean_wsb_transaction(run_dir: &Path, plan: &RunPlan) {
     }
 }
 
+fn persist_test_wsb_import(root: &Path, plan: &RunPlan) -> RunLayout {
+    let PlannedAction::ExecuteWindowsSandboxGoldenProbe {
+        sandbox_plan_sha256,
+        provider_sha256,
+        guest_agent_sha256,
+        workspace,
+        workspace_identity_sha256,
+    } = &plan.actions[2]
+    else {
+        unreachable!();
+    };
+    let receipt = WsbPlanningImportReceipt {
+        schema_version: WSB_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION.to_owned(),
+        run_id: plan.run_id.clone(),
+        imported_at: "2026-08-29T00:01:00Z".to_owned(),
+        status: WsbPlanningImportStatus::PendingApproval,
+        project_revision_sha256: plan.project_revision_hash.clone(),
+        workspace_root: workspace.root.final_path.clone(),
+        workspace_identity_sha256: workspace_identity_sha256.clone(),
+        preparation_receipt_sha256: "d".repeat(64),
+        run_plan_sha256: plan.hash().unwrap(),
+        windows_sandbox_plan_sha256: sandbox_plan_sha256.clone(),
+        guest_agent_sha256: guest_agent_sha256.clone(),
+        provider_sha256: provider_sha256.clone(),
+        run_root: workspace.root.final_path.clone(),
+        journal_sequence: 1,
+        approval_present: false,
+        provider_acquired: false,
+        provider_mutated: false,
+    };
+    let layout = RunLayout::new(root, &plan.run_id).unwrap();
+    layout
+        .create_or_verify_pending_wsb_import(plan, &receipt)
+        .unwrap();
+    layout
+}
+
 #[test]
 fn clap_failures_emit_one_json_envelope_and_no_stdout() {
     let output = Command::new(aiw())
@@ -341,6 +379,31 @@ fn legacy_unbound_run_plan_fails_with_stable_schema_error() {
 }
 
 #[test]
+fn generic_run_plan_rejects_wsb_before_creating_storage() {
+    let temp = TempDir::new();
+    let root = temp.path().join("workspace");
+    fs::create_dir(&root).unwrap();
+    let project = repo_path("examples/minimal.aiw.yaml");
+    let plan_path = temp.path().join("wsb-plan.json");
+    write_wsb_plan(&plan_path, &project);
+    let output = Command::new(aiw())
+        .args(["run", "plan", "--root"])
+        .arg(&root)
+        .arg("--plan")
+        .arg(&plan_path)
+        .arg("--project")
+        .arg(&project)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let error = parse_one_json(&output.stderr);
+    assert_eq!(error["code"], "AIW_WSB_IMPORT_REQUIRED");
+    assert_eq!(error["runId"], "run-one");
+    assert!(!root.join("runs").exists());
+}
+
+#[test]
 fn run_status_is_read_only_for_missing_and_existing_runs() {
     let temp = TempDir::new();
     let root = temp.path().join("workspace");
@@ -432,17 +495,7 @@ fn clean_wsb_transaction_without_terminal_result_fails_closed() {
     let project = repo_path("examples/minimal.aiw.yaml");
     let plan_path = temp.path().join("wsb-plan.json");
     let plan = write_wsb_plan(&plan_path, &project);
-    let created = Command::new(aiw())
-        .args(["run", "plan", "--root"])
-        .arg(&root)
-        .arg("--plan")
-        .arg(&plan_path)
-        .arg("--project")
-        .arg(&project)
-        .output()
-        .unwrap();
-    assert!(created.status.success());
-    let layout = RunLayout::new(&root, "run-one").unwrap();
+    let layout = persist_test_wsb_import(&root, &plan);
     layout
         .write_approval(&ApprovalRecord::for_plan(&plan, "admin", "now").unwrap())
         .unwrap();
@@ -509,17 +562,7 @@ fn recover_repairs_interrupted_core_journal_before_provider_reconciliation() {
     let project = repo_path("examples/minimal.aiw.yaml");
     let plan_path = temp.path().join("wsb-plan.json");
     let plan = write_wsb_plan(&plan_path, &project);
-    let created = Command::new(aiw())
-        .args(["run", "plan", "--root"])
-        .arg(&root)
-        .arg("--plan")
-        .arg(&plan_path)
-        .arg("--project")
-        .arg(&project)
-        .output()
-        .unwrap();
-    assert!(created.status.success());
-    let layout = RunLayout::new(&root, "run-one").unwrap();
+    let layout = persist_test_wsb_import(&root, &plan);
     layout
         .write_approval(&ApprovalRecord::for_plan(&plan, "admin", "now").unwrap())
         .unwrap();
@@ -644,6 +687,8 @@ fn versioned_project_and_orchestrator_schemas_are_public() {
         ("wsb-session-status", "WsbSessionStatus"),
         ("wsb-preparation-receipt", "WsbPreparationReceipt"),
         ("wsb-preparation-result", "WsbPreparationResult"),
+        ("wsb-planning-import-receipt", "WsbPlanningImportReceipt"),
+        ("wsb-planning-import-result", "WsbPlanningImportResult"),
         ("error-envelope", "AiwError"),
     ] {
         let output = Command::new(aiw()).args(["schema", kind]).output().unwrap();

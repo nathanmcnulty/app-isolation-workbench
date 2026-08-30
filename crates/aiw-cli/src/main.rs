@@ -27,12 +27,13 @@ use aiw_provider_wsb::{
 };
 use aiw_runner::{
     RunnerError, SessionTransaction, WsbGoldenProbeExecution, WsbGoldenProbeStart,
-    WsbPreparationError, WsbPreparationReceipt, WsbRecoveryResult, WsbSessionDisposition,
-    WsbSessionStatus, observe_wsb_session_status,
+    WsbPlanningImportReceipt, WsbPlanningImportResult, WsbPreparationError, WsbPreparationReceipt,
+    WsbRecoveryResult, WsbSessionDisposition, WsbSessionStatus, observe_wsb_session_status,
 };
 #[cfg(windows)]
 use aiw_runner::{
-    prepare_windows_sandbox_bundle, recover_windows_sandbox, verify_windows_sandbox_preparation,
+    import_windows_sandbox_preparation, prepare_windows_sandbox_bundle, recover_windows_sandbox,
+    verify_windows_sandbox_preparation,
 };
 use aiw_schema::{
     LEGACY_PROJECT_SCHEMA_VERSION, LegacyProjectV0Alpha1, ModelPack, PROJECT_SCHEMA_VERSION,
@@ -254,6 +255,22 @@ enum RunCommand {
         #[arg(long)]
         guest_agent_sha256: String,
     },
+    /// Atomically publish a verified preparation as an authoritative pending-approval run.
+    /// This does not approve, acquire, start, connect, stop, or recover a provider.
+    ImportPreparedWsb {
+        /// Exact protected workspace returned by `run prepare-wsb`.
+        #[arg(long)]
+        workspace: PathBuf,
+        /// Project revision used to create the preparation.
+        #[arg(long)]
+        project: PathBuf,
+        /// Independently obtained lowercase SHA-256 expected for the guest agent.
+        #[arg(long)]
+        guest_agent_sha256: String,
+        /// Operator-supplied import timestamp; reuse the exact value for an idempotent retry.
+        #[arg(long)]
+        imported_at: String,
+    },
     /// Persist a supplied immutable plan and create its run journal. This does not execute it.
     Plan {
         #[arg(long)]
@@ -401,6 +418,8 @@ enum SchemaKind {
     WsbSessionStatus,
     WsbPreparationReceipt,
     WsbPreparationResult,
+    WsbPlanningImportReceipt,
+    WsbPlanningImportResult,
     WindowsSandboxPlan,
     WindowsSandboxCliLifecyclePlan,
     WindowsSandboxCompletionExpectation,
@@ -561,6 +580,20 @@ impl std::fmt::Display for RunPreparationFailed {
 }
 
 impl std::error::Error for RunPreparationFailed {}
+
+#[derive(Debug)]
+struct RunPreparationImportFailed {
+    run_id: String,
+    source: WsbPreparationError,
+}
+
+impl std::fmt::Display for RunPreparationImportFailed {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.source.fmt(formatter)
+    }
+}
+
+impl std::error::Error for RunPreparationImportFailed {}
 
 #[derive(Debug)]
 struct WsbSessionStatusInvalid {
@@ -782,6 +815,47 @@ fn run(command: Command) -> Result<()> {
                     }))
                 }
             }
+            RunCommand::ImportPreparedWsb {
+                workspace,
+                project,
+                guest_agent_sha256,
+                imported_at,
+            } => {
+                let loaded = read_project(&project)?;
+                let fallback_run_id = workspace
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("unknown")
+                    .to_owned();
+                #[cfg(windows)]
+                {
+                    let result = import_windows_sandbox_preparation(
+                        &workspace,
+                        &loaded.project,
+                        &guest_agent_sha256,
+                        &imported_at,
+                    )
+                    .map_err(|source| {
+                        anyhow!(RunPreparationImportFailed {
+                            run_id: fallback_run_id,
+                            source,
+                        })
+                    })?;
+                    write_json(&result)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (loaded, guest_agent_sha256, imported_at);
+                    Err(anyhow!(RunOperationUnavailable {
+                        code: "AIW_WINDOWS_REQUIRED",
+                        summary: "Windows Sandbox preparation import requires Windows",
+                        stage: "wsbPreparationImport",
+                        remediation: "Import this verified workspace on its original supported Windows host.",
+                        detail: "No run state was created and no provider was acquired.",
+                        run_id: fallback_run_id,
+                    }))
+                }
+            }
             RunCommand::Plan {
                 root,
                 plan,
@@ -966,6 +1040,12 @@ fn run(command: Command) -> Result<()> {
             SchemaKind::WsbSessionStatus => write_json(&schema_for!(WsbSessionStatus)),
             SchemaKind::WsbPreparationReceipt => write_json(&schema_for!(WsbPreparationReceipt)),
             SchemaKind::WsbPreparationResult => write_json(&schema_for!(WsbPreparationResult)),
+            SchemaKind::WsbPlanningImportReceipt => {
+                write_json(&schema_for!(WsbPlanningImportReceipt))
+            }
+            SchemaKind::WsbPlanningImportResult => {
+                write_json(&schema_for!(WsbPlanningImportResult))
+            }
             SchemaKind::WindowsSandboxPlan => write_json(&schema_for!(WindowsSandboxPlan)),
             SchemaKind::WindowsSandboxCliLifecyclePlan => {
                 write_json(&schema_for!(WindowsSandboxCliLifecyclePlan))
@@ -1479,6 +1559,18 @@ fn preparation_error_envelope(error: &RunPreparationFailed) -> ErrorEnvelope {
     }
 }
 
+fn preparation_import_error_envelope(error: &RunPreparationImportFailed) -> ErrorEnvelope {
+    ErrorEnvelope {
+        code: "AIW_WSB_PREPARATION_IMPORT_REJECTED".to_owned(),
+        summary: "verified Windows Sandbox preparation could not be imported".to_owned(),
+        stage: "wsbPreparationImport".to_owned(),
+        run_id: Some(error.run_id.clone()),
+        retryable: false,
+        remediation: "Preserve the preparation and authoritative run artifacts; inspect the exact reported drift or conflict before retrying.".to_owned(),
+        detail: error.source.to_string().chars().take(512).collect(),
+    }
+}
+
 fn emit_anyhow_error(error: &anyhow::Error) {
     if let Some(error) = error.downcast_ref::<AiwError>() {
         emit_error(error);
@@ -1517,6 +1609,8 @@ fn emit_anyhow_error(error: &anyhow::Error) {
         });
     } else if let Some(error) = error.downcast_ref::<RunPreparationFailed>() {
         emit_error(&preparation_error_envelope(error));
+    } else if let Some(error) = error.downcast_ref::<RunPreparationImportFailed>() {
+        emit_error(&preparation_import_error_envelope(error));
     } else if let Some(error) = error.downcast_ref::<RunnerError>() {
         emit_error(&ErrorEnvelope {
             code: "AIW_WSB_RUNNER_FAILED".to_owned(),
