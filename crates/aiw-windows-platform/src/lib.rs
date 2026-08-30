@@ -9,9 +9,10 @@ pub use windows_platform::{
 };
 
 #[cfg(windows)]
-pub use workspace::{
-    HeldRunWorkspace, WorkspaceBindingEvidence, WorkspaceDirectoryIdentity, WorkspaceError,
-};
+pub use workspace::{HeldRunWorkspace, WorkspaceError};
+
+pub use aiw_probe::WindowsFileIdentity as WorkspaceDirectoryIdentity;
+pub use aiw_probe::WorkspaceBindingEvidence;
 
 #[cfg(windows)]
 mod windows_platform;

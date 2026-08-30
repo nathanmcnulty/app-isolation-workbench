@@ -27,7 +27,7 @@ use aiw_orchestrator::{
     ApprovalRecord, PlannedAction, RunEvent, RunEventKind, RunLayout, RunOutcome, RunPlan,
     RunResult, project_revision_hash,
 };
-use aiw_probe::{BinaryIdentity, WindowsSandboxReadiness};
+use aiw_probe::{BinaryIdentity, WindowsSandboxReadiness, WorkspaceBindingEvidence};
 use aiw_provider_wsb::{
     CompletionArtifactExpectation, MappingPurpose, WindowsSandboxCliLifecyclePlan,
     WindowsSandboxCompletionExpectation, WindowsSandboxPlan, plan_cli_lifecycle, render_config,
@@ -57,6 +57,8 @@ pub struct WsbGoldenProbeStart {
     pub wsb_plan: WindowsSandboxPlan,
     pub provider: BinaryIdentity,
     pub guest_agent: BinaryIdentity,
+    pub workspace: WorkspaceBindingEvidence,
+    pub workspace_identity_sha256: String,
     pub timeout_seconds: u32,
 }
 
@@ -71,6 +73,8 @@ pub struct WsbGoldenProbeExecution {
     pub request_sha256: String,
     pub receipt_sha256: String,
     pub evidence_root_hash: String,
+    pub workspace: WorkspaceBindingEvidence,
+    pub workspace_identity_sha256: String,
     pub cleanup_complete: bool,
 }
 
@@ -167,21 +171,47 @@ pub fn observe_wsb_session_status(layout: &RunLayout) -> Result<WsbSessionStatus
             "session transaction belongs to a different run".to_owned(),
         ));
     }
+    let core_status = layout.status().map_err(journal_error)?;
+    if matches!(
+        core_status,
+        aiw_orchestrator::RecoveryStatus::PendingApproval { .. }
+            | aiw_orchestrator::RecoveryStatus::RecoveryRequired { .. }
+    ) {
+        return Err(RunnerError::Transaction(
+            "session transaction is not covered by committed approved run state".to_owned(),
+        ));
+    }
     let plan = layout.read_plan().map_err(journal_error)?;
     let plan_hash = plan.hash().map_err(journal_error)?;
-    let provider_hashes: Vec<&str> = plan
+    let provider_bindings: Vec<(&str, &WorkspaceBindingEvidence, &str)> = plan
         .actions
         .iter()
         .filter_map(|action| match action {
             PlannedAction::ExecuteWindowsSandboxGoldenProbe {
-                provider_sha256, ..
-            } => Some(provider_sha256.as_str()),
+                provider_sha256,
+                workspace,
+                workspace_identity_sha256,
+                ..
+            } => Some((
+                provider_sha256.as_str(),
+                workspace.as_ref(),
+                workspace_identity_sha256.as_str(),
+            )),
             _ => None,
         })
         .collect();
+    let binding_matches = match provider_bindings.as_slice() {
+        [(provider_sha256, workspace, workspace_identity_sha256)] => canonical_hash(workspace)
+            .is_ok_and(|computed| {
+                computed == *workspace_identity_sha256
+                    && *provider_sha256 == transaction.provider_sha256
+                    && *workspace_identity_sha256 == transaction.workspace_identity_sha256
+            }),
+        _ => false,
+    };
     if transaction.plan_hash != plan_hash
         || transaction.project_revision_hash != plan.project_revision_hash
-        || provider_hashes.as_slice() != [transaction.provider_sha256.as_str()]
+        || !binding_matches
     {
         return Err(RunnerError::Transaction(
             "session transaction does not match the persisted approved plan".to_owned(),
@@ -217,6 +247,22 @@ trait LeaseBoundary {
     fn try_acquire(&self) -> Result<Box<dyn LeaseGuard + '_>, RunnerError>;
 }
 
+trait WorkspaceBoundary {
+    fn evidence(&self) -> &WorkspaceBindingEvidence;
+    fn revalidate(&self) -> Result<(), RunnerError>;
+}
+
+#[cfg(all(test, windows))]
+impl WorkspaceBoundary for aiw_windows_platform::HeldRunWorkspace {
+    fn evidence(&self) -> &WorkspaceBindingEvidence {
+        self.evidence()
+    }
+
+    fn revalidate(&self) -> Result<(), RunnerError> {
+        self.revalidate().map_err(|_| RunnerError::Drift)
+    }
+}
+
 /// Execute the one approved W1 provider operation.  A success means lifecycle
 /// and receipt correlation succeeded, not that containment has been proven.
 #[cfg(test)]
@@ -226,6 +272,7 @@ pub(crate) fn execute_wsb_golden_probe(
     layout: &RunLayout,
     process: &impl ProcessBoundary,
     lease: &impl LeaseBoundary,
+    workspace: &impl WorkspaceBoundary,
 ) -> Result<WsbGoldenProbeExecution, RunnerError> {
     let _lease = lease.try_acquire()?;
     if cancellation_requested(layout)? {
@@ -233,6 +280,7 @@ pub(crate) fn execute_wsb_golden_probe(
         return Err(RunnerError::Cancelled);
     }
     let context = prepare_execution(request, readiness, layout, true)?;
+    revalidate_workspace(request, workspace)?;
     let store = TransactionStore::new(layout, context.binding.clone());
     if store.load_current()?.is_some() {
         return Err(RunnerError::RecoveryRequired(
@@ -258,6 +306,11 @@ pub(crate) fn execute_wsb_golden_probe(
 
     // The intent is durable before the call. A crash or lost start response
     // therefore means "may have started" and is recoverable by exact ID.
+    if let Err(error) = revalidate_workspace(request, workspace) {
+        remove_owned_request(&context.request_path, &context.guest_request)?;
+        record_terminal_failure(layout, error.clone())?;
+        return Err(error);
+    }
     store.create("approved-start")?;
     let operation = run_attempt(request, layout, process, &context, &store);
     let cleanup = finalize_attempt(
@@ -282,6 +335,10 @@ pub(crate) fn execute_wsb_golden_probe(
 
     // Guest artifacts are interpreted only after exact-session absence and
     // provider quiescence have been established under the held lease.
+    if let Err(error) = revalidate_workspace(request, workspace) {
+        record_terminal_failure(layout, error.clone())?;
+        return Err(error);
+    }
     let verification = verify_completion_receipt(&context.output_root, &context.completion)
         .map_err(|error| RunnerError::Receipt(error.to_string()));
     let verification = match verification {
@@ -311,7 +368,7 @@ pub(crate) fn execute_wsb_golden_probe(
     .map_err(journal_error)?;
     layout.write_result(&result).map_err(journal_error)?;
     Ok(WsbGoldenProbeExecution {
-        schema_version: "aiw.dev/wsb-golden-probe-execution/v0alpha1".to_owned(),
+        schema_version: "aiw.dev/wsb-golden-probe-execution/v0alpha2".to_owned(),
         run_id: context.plan.run_id,
         sandbox_id: context.binding.session_id,
         provider_sha256: request.provider.sha256.clone(),
@@ -319,6 +376,8 @@ pub(crate) fn execute_wsb_golden_probe(
         request_sha256: context.guest_request.request_sha256,
         receipt_sha256: verification.receipt_sha256,
         evidence_root_hash: verification.evidence_root_hash,
+        workspace: request.workspace.clone(),
+        workspace_identity_sha256: request.workspace_identity_sha256.clone(),
         cleanup_complete: true,
     })
 }
@@ -408,6 +467,7 @@ fn prepare_execution(
     }
     let output = mapping(&request.wsb_plan, MappingPurpose::Output).ok_or(RunnerError::Drift)?;
     let tools = mapping(&request.wsb_plan, MappingPurpose::Tools).ok_or(RunnerError::Drift)?;
+    validate_workspace_paths(request, tools, output)?;
     let agent_path =
         guest_to_host(tools, &request.wsb_plan.probe.executable).ok_or(RunnerError::Drift)?;
     revalidate_mapped_identity(&agent_path, &request.guest_agent)?;
@@ -440,6 +500,7 @@ fn prepare_execution(
         config_sha256: rendered.sha256,
         session_id,
         request_sha256: guest_request.request_sha256.clone(),
+        workspace_identity_sha256: request.workspace_identity_sha256.clone(),
     };
     Ok(ExecutionContext {
         plan,
@@ -968,6 +1029,7 @@ fn ensure_approval(
         return Err(RunnerError::ApprovalBinding);
     }
     let wsb_hash = canonical_hash(&request.wsb_plan)?;
+    let workspace_hash = canonical_hash(&request.workspace)?;
     let exact = plan
         .actions
         .iter()
@@ -976,7 +1038,15 @@ fn ensure_approval(
                 sandbox_plan_sha256,
                 provider_sha256,
                 guest_agent_sha256,
-            } => Some((sandbox_plan_sha256, provider_sha256, guest_agent_sha256)),
+                workspace,
+                workspace_identity_sha256,
+            } => Some((
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+            )),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -984,6 +1054,9 @@ fn ensure_approval(
         || exact[0].0 != &wsb_hash
         || exact[0].1 != &request.provider.sha256
         || exact[0].2 != &request.guest_agent.sha256
+        || exact[0].3.as_ref() != &request.workspace
+        || exact[0].4 != &workspace_hash
+        || request.workspace_identity_sha256 != workspace_hash
     {
         return Err(RunnerError::ApprovalBinding);
     }
@@ -994,7 +1067,11 @@ fn validate_start(
     request: &WsbGoldenProbeStart,
     readiness: &WindowsSandboxReadiness,
 ) -> Result<(), RunnerError> {
-    if request.schema_version != "aiw.dev/wsb-golden-probe-start/v0alpha1"
+    if request.schema_version != "aiw.dev/wsb-golden-probe-start/v0alpha2"
+        || request.workspace.validate().is_err()
+        || !fixed_lower_hex(&request.workspace_identity_sha256, 64)
+        || canonical_hash(&request.workspace).ok().as_ref()
+            != Some(&request.workspace_identity_sha256)
         || readiness.schema_version != READINESS_SCHEMA
         || !readiness.supported
         || readiness.os_build.is_none_or(|build| build < 26_100)
@@ -1053,6 +1130,52 @@ fn validate_start(
         ));
     }
     Ok(())
+}
+
+fn revalidate_workspace(
+    request: &WsbGoldenProbeStart,
+    workspace: &impl WorkspaceBoundary,
+) -> Result<(), RunnerError> {
+    if workspace.evidence() != &request.workspace {
+        return Err(RunnerError::Drift);
+    }
+    workspace.revalidate()
+}
+
+fn validate_workspace_paths(
+    request: &WsbGoldenProbeStart,
+    tools: &aiw_provider_wsb::MappedFolder,
+    output: &aiw_provider_wsb::MappedFolder,
+) -> Result<(), RunnerError> {
+    let evidence = &request.workspace;
+    if !same_windows_path(&request.run_root, &evidence.root.final_path)
+        || !same_windows_path(&tools.host_folder, &evidence.tools.final_path)
+        || !same_windows_path(&output.host_folder, &evidence.output.final_path)
+        || !Path::new(&evidence.root.final_path)
+            .parent()
+            .is_some_and(|path| same_windows_path(path, &evidence.parent.final_path))
+        || !Path::new(&evidence.tools.final_path)
+            .parent()
+            .is_some_and(|path| same_windows_path(path, &evidence.root.final_path))
+        || !Path::new(&evidence.output.final_path)
+            .parent()
+            .is_some_and(|path| same_windows_path(path, &evidence.root.final_path))
+    {
+        return Err(RunnerError::Drift);
+    }
+    Ok(())
+}
+
+fn same_windows_path(left: impl AsRef<Path>, right: impl AsRef<Path>) -> bool {
+    fn normalize(path: &Path) -> String {
+        let value = path.to_string_lossy();
+        value
+            .strip_prefix("\\\\?\\")
+            .unwrap_or(&value)
+            .trim_end_matches(['\\', '/'])
+            .to_owned()
+    }
+    normalize(left.as_ref()).eq_ignore_ascii_case(&normalize(right.as_ref()))
 }
 
 fn fixed_lower_hex(value: &str, length: usize) -> bool {
@@ -1605,6 +1728,48 @@ mod tests {
         }
     }
 
+    struct TestWorkspace {
+        evidence: WorkspaceBindingEvidence,
+        calls: AtomicU64,
+        fail_on_call: Option<u64>,
+    }
+
+    impl TestWorkspace {
+        fn for_start(start: &WsbGoldenProbeStart) -> Self {
+            Self {
+                evidence: start.workspace.clone(),
+                calls: AtomicU64::new(0),
+                fail_on_call: None,
+            }
+        }
+    }
+
+    impl WorkspaceBoundary for TestWorkspace {
+        fn evidence(&self) -> &WorkspaceBindingEvidence {
+            &self.evidence
+        }
+
+        fn revalidate(&self) -> Result<(), RunnerError> {
+            let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+            if self.fail_on_call == Some(call) {
+                Err(RunnerError::Drift)
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    fn execute_wsb_golden_probe(
+        request: &WsbGoldenProbeStart,
+        readiness: &WindowsSandboxReadiness,
+        layout: &RunLayout,
+        process: &impl ProcessBoundary,
+        lease: &impl LeaseBoundary,
+    ) -> Result<WsbGoldenProbeExecution, RunnerError> {
+        let workspace = TestWorkspace::for_start(request);
+        super::execute_wsb_golden_probe(request, readiness, layout, process, lease, &workspace)
+    }
+
     fn successful_json(value: serde_json::Value) -> Result<ProcessResult, RunnerError> {
         Ok(ProcessResult {
             exit_code: 0,
@@ -1634,6 +1799,29 @@ mod tests {
     }
     fn identity(path: &Path) -> BinaryIdentity {
         aiw_probe::measure_binary_identity(path).unwrap()
+    }
+
+    fn workspace_evidence(root: &Path, tools: &Path, output: &Path) -> WorkspaceBindingEvidence {
+        let owner = "S-1-5-21-1".to_owned();
+        let identity = |path: &Path, marker: u8| aiw_probe::WindowsFileIdentity {
+            final_path: path.to_string_lossy().into_owned(),
+            volume_serial_number: "0".repeat(16),
+            file_id: format!("{marker:032x}"),
+        };
+        let evidence = WorkspaceBindingEvidence {
+            schema_version: aiw_probe::WINDOWS_WORKSPACE_SCHEMA_VERSION.to_owned(),
+            policy: aiw_probe::WINDOWS_WORKSPACE_SECURITY_POLICY.to_owned(),
+            security_policy_sha256: aiw_probe::workspace_policy_hash(&owner),
+            owner_sid: owner.clone(),
+            dacl_protected: true,
+            allowed_sids: vec![aiw_probe::WINDOWS_SYSTEM_SID.to_owned(), owner],
+            parent: identity(root.parent().unwrap(), 1),
+            root: identity(root, 2),
+            tools: identity(tools, 3),
+            output: identity(output, 4),
+        };
+        evidence.validate().unwrap();
+        evidence
     }
     fn setup() -> (
         Root,
@@ -1682,12 +1870,16 @@ mod tests {
         };
         let mut provider_identity = identity(&provider);
         provider_identity.signature_status = aiw_probe::ReadinessState::Available;
+        let workspace = workspace_evidence(&root.0, &tools, &output);
+        let workspace_identity_sha256 = canonical_hash(&workspace).unwrap();
         let start = WsbGoldenProbeStart {
-            schema_version: "aiw.dev/wsb-golden-probe-start/v0alpha1".to_owned(),
+            schema_version: "aiw.dev/wsb-golden-probe-start/v0alpha2".to_owned(),
             run_root: wsb_plan.workspace_root.clone(),
             project_path: project_path.to_string_lossy().into_owned(),
             provider: provider_identity,
             guest_agent: identity(&agent),
+            workspace,
+            workspace_identity_sha256,
             wsb_plan,
             timeout_seconds: 1,
         };
@@ -1704,6 +1896,8 @@ mod tests {
                     sandbox_plan_sha256: canonical_hash(&start.wsb_plan).unwrap(),
                     provider_sha256: start.provider.sha256.clone(),
                     guest_agent_sha256: start.guest_agent.sha256.clone(),
+                    workspace: Box::new(start.workspace.clone()),
+                    workspace_identity_sha256: canonical_hash(&start.workspace).unwrap(),
                 },
                 PlannedAction::CollectEvidence,
             ],
@@ -1979,6 +2173,12 @@ mod tests {
         let recovery = observe_wsb_session_status(&layout).unwrap();
         assert_eq!(recovery.status, WsbSessionDisposition::RecoveryRequired);
         assert_eq!(fs::read(pending).unwrap(), before);
+
+        fs::remove_file(layout.approval_path()).unwrap();
+        assert!(matches!(
+            observe_wsb_session_status(&layout),
+            Err(RunnerError::Journal(_))
+        ));
     }
     #[test]
     fn guest_mapping_cannot_escape_tools_root() {
@@ -2081,6 +2281,11 @@ mod tests {
             execute_wsb_golden_probe(&start, &readiness, &layout, &fake, &TestLease::default())
                 .unwrap();
         assert!(execution.cleanup_complete);
+        assert_eq!(execution.workspace, start.workspace);
+        assert_eq!(
+            execution.workspace_identity_sha256,
+            start.workspace_identity_sha256
+        );
         assert!(!request_path(&start).exists());
         let store = TransactionStore::new(
             &layout,
@@ -2092,6 +2297,83 @@ mod tests {
         assert_eq!(
             transaction.current_state(),
             SessionTransactionState::CleanupVerified
+        );
+        assert!(layout.result_path().exists());
+    }
+
+    #[test]
+    fn workspace_approval_and_live_guard_drift_fail_before_provider_start() {
+        let (_root, layout, mut start, readiness) = setup();
+        start.workspace.output.file_id = "9".repeat(32);
+        start.workspace_identity_sha256 = canonical_hash(&start.workspace).unwrap();
+        let none = FakeProcess::new(vec![]);
+        let error =
+            execute_wsb_golden_probe(&start, &readiness, &layout, &none, &TestLease::default())
+                .unwrap_err();
+        assert!(matches!(error, RunnerError::ApprovalBinding));
+        assert_eq!(none.calls.load(Ordering::SeqCst), 0);
+
+        let (_root, layout, start, readiness) = setup();
+        let none = FakeProcess::new(vec![]);
+        let workspace = TestWorkspace {
+            evidence: start.workspace.clone(),
+            calls: AtomicU64::new(0),
+            fail_on_call: Some(1),
+        };
+        let error = super::execute_wsb_golden_probe(
+            &start,
+            &readiness,
+            &layout,
+            &none,
+            &TestLease::default(),
+            &workspace,
+        )
+        .unwrap_err();
+        assert!(matches!(error, RunnerError::Drift));
+        assert_eq!(none.calls.load(Ordering::SeqCst), 0);
+        assert!(!layout.run_dir().join("wsb-session-transaction").exists());
+
+        let (_root, layout, start, readiness) = setup();
+        let none = FakeProcess::new(vec![empty_list()]);
+        let workspace = TestWorkspace {
+            evidence: start.workspace.clone(),
+            calls: AtomicU64::new(0),
+            fail_on_call: Some(2),
+        };
+        let error = super::execute_wsb_golden_probe(
+            &start,
+            &readiness,
+            &layout,
+            &none,
+            &TestLease::default(),
+            &workspace,
+        )
+        .unwrap_err();
+        assert!(matches!(error, RunnerError::Drift));
+        assert_eq!(none.calls.load(Ordering::SeqCst), 1);
+        assert!(!request_path(&start).exists());
+        assert!(!layout.run_dir().join("wsb-session-transaction").exists());
+
+        let (_root, layout, start, readiness) = setup();
+        let fake = success_process(&start);
+        let workspace = TestWorkspace {
+            evidence: start.workspace.clone(),
+            calls: AtomicU64::new(0),
+            fail_on_call: Some(3),
+        };
+        let error = super::execute_wsb_golden_probe(
+            &start,
+            &readiness,
+            &layout,
+            &fake,
+            &TestLease::default(),
+            &workspace,
+        )
+        .unwrap_err();
+        assert!(matches!(error, RunnerError::Drift));
+        assert_eq!(
+            observe_wsb_session_status(&layout).unwrap().status,
+            WsbSessionDisposition::Clean
         );
         assert!(layout.result_path().exists());
     }
@@ -2567,15 +2849,30 @@ mod tests {
         assert!(readiness.supported, "{:?}", readiness.blockers);
         assert!(readiness.current_session_ids.is_empty());
         let provider = readiness.provider_binary.clone().unwrap();
-        let mut root = Root::new();
-        root.preserve_on_drop();
-        let tools = root.0.join("tools");
-        let output = root.0.join("output");
-        fs::create_dir(&tools).unwrap();
-        fs::create_dir(&output).unwrap();
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let run_id = format!("w1-live-{}-{nonce}", std::process::id());
+        let workspace_parent = std::env::temp_dir().canonicalize().unwrap();
+        let workspace = aiw_windows_platform::HeldRunWorkspace::create(
+            &workspace_parent,
+            &format!("aiw-w1-live-{}-{nonce}", std::process::id()),
+        )
+        .unwrap();
+        let root_path = workspace.root_path().to_path_buf();
+        let tools = workspace.tools_path();
+        let output = workspace.output_path();
+        let provider_path = |path: &Path| {
+            let value = path.to_string_lossy();
+            PathBuf::from(value.strip_prefix(r"\\?\").unwrap_or(&value))
+        };
+        let provider_root = provider_path(&root_path);
+        let provider_tools = provider_path(&tools);
+        let provider_output = provider_path(&output);
         let agent = tools.join("aiw-guest-agent.exe");
         fs::copy(&agent_source, &agent).unwrap();
-        let project_path = root.0.join("project.yaml");
+        let project_path = root_path.join("project.yaml");
         fs::copy(
             Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("..")
@@ -2586,28 +2883,23 @@ mod tests {
         )
         .unwrap();
         let project: Project = serde_yaml::from_slice(&fs::read(&project_path).unwrap()).unwrap();
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let run_id = format!("w1-live-{}-{nonce}", std::process::id());
         eprintln!(
             "AIW live recovery state: workspace={} sandboxId={}",
-            root.0.display(),
+            root_path.display(),
             deterministic_sandbox_id(&run_id)
         );
         let wsb_plan = WindowsSandboxPlan {
             schema_version: aiw_provider_wsb::WINDOWS_SANDBOX_PLAN_SCHEMA_VERSION.to_owned(),
-            workspace_root: root.0.to_string_lossy().into_owned(),
+            workspace_root: provider_root.to_string_lossy().into_owned(),
             mappings: vec![
                 aiw_provider_wsb::MappedFolder {
                     purpose: MappingPurpose::Tools,
-                    host_folder: tools.to_string_lossy().into_owned(),
+                    host_folder: provider_tools.to_string_lossy().into_owned(),
                     sandbox_folder: "C:\\AIW\\Tools".to_owned(),
                 },
                 aiw_provider_wsb::MappedFolder {
                     purpose: MappingPurpose::Output,
-                    host_folder: output.to_string_lossy().into_owned(),
+                    host_folder: provider_output.to_string_lossy().into_owned(),
                     sandbox_folder: "C:\\AIW\\Output".to_owned(),
                 },
             ],
@@ -2618,13 +2910,17 @@ mod tests {
             },
             memory_mb: Some(2048),
         };
+        let workspace_evidence = workspace.evidence().clone();
+        let workspace_identity_sha256 = canonical_hash(&workspace_evidence).unwrap();
         let start = WsbGoldenProbeStart {
-            schema_version: "aiw.dev/wsb-golden-probe-start/v0alpha1".to_owned(),
+            schema_version: "aiw.dev/wsb-golden-probe-start/v0alpha2".to_owned(),
             run_root: wsb_plan.workspace_root.clone(),
             project_path: project_path.to_string_lossy().into_owned(),
             wsb_plan,
             provider,
             guest_agent: identity(&agent),
+            workspace: workspace_evidence,
+            workspace_identity_sha256,
             timeout_seconds: 180,
         };
         let native = NativeWsbProcess {
@@ -2648,13 +2944,15 @@ mod tests {
                     sandbox_plan_sha256: canonical_hash(&start.wsb_plan).unwrap(),
                     provider_sha256: start.provider.sha256.clone(),
                     guest_agent_sha256: start.guest_agent.sha256.clone(),
+                    workspace: Box::new(start.workspace.clone()),
+                    workspace_identity_sha256: start.workspace_identity_sha256.clone(),
                 },
                 PlannedAction::CollectEvidence,
             ],
             vec!["starts an approved Windows Sandbox golden probe".to_owned()],
         )
         .unwrap();
-        let layout = RunLayout::new(&root.0, &run_id).unwrap();
+        let layout = RunLayout::new(&root_path, &run_id).unwrap();
         layout.create(&plan).unwrap();
         layout
             .write_approval(
@@ -2662,11 +2960,50 @@ mod tests {
                     .unwrap(),
             )
             .unwrap();
+        validate_start(&start, &readiness).expect("live start contract must validate");
+        ensure_approval(&plan, &layout.read_approval().unwrap(), &start)
+            .expect("live approval must bind every input");
+        revalidate_project_revision(&plan, &project_path)
+            .expect("live project revision must remain stable");
+        revalidate_identity(&start.provider).expect("live provider identity must remain stable");
+        revalidate_identity(&start.guest_agent)
+            .expect("live guest-agent identity must remain stable");
+        validate_host_mappings(&start.wsb_plan).expect("live host mappings must remain valid");
+        let rendered = render_config(&start.wsb_plan).expect("live config must render");
+        let lifecycle = plan_cli_lifecycle(
+            &start.provider.canonical_path,
+            &deterministic_sandbox_id(&run_id),
+            &start.wsb_plan,
+        )
+        .expect("live CLI lifecycle must remain valid");
+        assert_eq!(lifecycle.rendered_config.sha256, rendered.sha256);
+        let tools_mapping = mapping(&start.wsb_plan, MappingPurpose::Tools).unwrap();
+        let output_mapping = mapping(&start.wsb_plan, MappingPurpose::Output).unwrap();
+        validate_workspace_paths(&start, tools_mapping, output_mapping)
+            .expect("live mapping paths must match held workspace evidence");
+        let mapped_agent = guest_to_host(tools_mapping, &start.wsb_plan.probe.executable).unwrap();
+        revalidate_mapped_identity(&mapped_agent, &start.guest_agent)
+            .expect("live mapped agent must match its approved identity");
+        prepare_execution(&start, &readiness, &layout, true)
+            .expect("live bound request must pass immutable preflight");
+        workspace
+            .revalidate()
+            .expect("live held workspace must pass native revalidation after staging");
 
-        let execution =
-            execute_wsb_golden_probe(&start, &readiness, &layout, &native, &TestLease::default())
-                .unwrap();
+        let execution = super::execute_wsb_golden_probe(
+            &start,
+            &readiness,
+            &layout,
+            &native,
+            &TestLease::default(),
+            &workspace,
+        )
+        .unwrap();
         assert!(execution.cleanup_complete);
+        assert_eq!(
+            execution.workspace_identity_sha256,
+            start.workspace_identity_sha256
+        );
         assert!(output.join("token.json").is_file());
         assert!(output.join("evidence.jsonl").is_file());
         assert!(output.join("completion.json").is_file());
@@ -2685,6 +3022,9 @@ mod tests {
                 .session_ids
                 .is_empty()
         );
-        root.allow_cleanup();
+        drop(native);
+        drop(layout);
+        drop(workspace);
+        fs::remove_dir_all(root_path).unwrap();
     }
 }

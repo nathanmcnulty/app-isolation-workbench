@@ -81,6 +81,7 @@ name = "aiw-orchestrator"
 version = "0.1.0-alpha.1"
 dependencies = [
  "aiw-evidence",
+ "aiw-probe",
  "aiw-schema",
  "fs4",
  "hex",

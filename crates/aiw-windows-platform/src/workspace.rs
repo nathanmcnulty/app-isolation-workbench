@@ -6,8 +6,10 @@ use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::io::AsRawHandle;
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use aiw_probe::{
+    WINDOWS_SYSTEM_SID, WINDOWS_WORKSPACE_SCHEMA_VERSION, WINDOWS_WORKSPACE_SECURITY_POLICY,
+    WindowsFileIdentity, WorkspaceBindingEvidence, workspace_policy_hash,
+};
 use thiserror::Error;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HLOCAL, LocalFree};
 use windows::Win32::Security::Authorization::{
@@ -37,9 +39,6 @@ use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use windows::Win32::System::WindowsProgramming::DRIVE_FIXED;
 use windows::core::{PCWSTR, PWSTR};
 
-const WORKSPACE_SCHEMA: &str = "aiw.dev/workspace-binding-evidence/v0alpha1";
-const WORKSPACE_POLICY: &str = "owner-system-full-control-protected-v1";
-const SYSTEM_SID: &str = "S-1-5-18";
 const MAX_FINAL_PATH: usize = 32_768;
 
 #[derive(Debug, Error)]
@@ -61,29 +60,6 @@ pub enum WorkspaceError {
     },
     #[error("new workspace requires explicit recovery at {path}: {detail}")]
     PartialWorkspace { path: String, detail: String },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct WorkspaceDirectoryIdentity {
-    pub final_path: String,
-    pub volume_serial_number: String,
-    pub file_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct WorkspaceBindingEvidence {
-    pub schema_version: String,
-    pub policy: String,
-    pub security_policy_sha256: String,
-    pub owner_sid: String,
-    pub dacl_protected: bool,
-    pub allowed_sids: Vec<String>,
-    pub parent: WorkspaceDirectoryIdentity,
-    pub root: WorkspaceDirectoryIdentity,
-    pub tools: WorkspaceDirectoryIdentity,
-    pub output: WorkspaceDirectoryIdentity,
 }
 
 /// A newly-created workspace whose parent, root, tools, and output directory
@@ -170,12 +146,12 @@ impl HeldRunWorkspace {
                 output: output_handle,
                 root_path: root_path.clone(),
                 evidence: WorkspaceBindingEvidence {
-                    schema_version: WORKSPACE_SCHEMA.to_owned(),
-                    policy: WORKSPACE_POLICY.to_owned(),
-                    security_policy_sha256: policy_hash(&owner.sid_string),
+                    schema_version: WINDOWS_WORKSPACE_SCHEMA_VERSION.to_owned(),
+                    policy: WINDOWS_WORKSPACE_SECURITY_POLICY.to_owned(),
+                    security_policy_sha256: workspace_policy_hash(&owner.sid_string),
                     owner_sid: owner.sid_string.clone(),
                     dacl_protected: true,
-                    allowed_sids: vec![SYSTEM_SID.to_owned(), owner.sid_string.clone()],
+                    allowed_sids: vec![WINDOWS_SYSTEM_SID.to_owned(), owner.sid_string.clone()],
                     parent: parent_identity,
                     root: root_identity,
                     tools: tools_identity,
@@ -366,7 +342,7 @@ fn verify_local_acl_volume(file: &File) -> Result<(), WorkspaceError> {
     Ok(())
 }
 
-fn directory_identity(file: &File) -> Result<WorkspaceDirectoryIdentity, WorkspaceError> {
+fn directory_identity(file: &File) -> Result<WindowsFileIdentity, WorkspaceError> {
     let mut info = BY_HANDLE_FILE_INFORMATION::default();
     // SAFETY: the file owns a valid held handle and `info` is writable.
     unsafe { GetFileInformationByHandle(raw_handle(file), &mut info) }
@@ -388,7 +364,7 @@ fn directory_identity(file: &File) -> Result<WorkspaceDirectoryIdentity, Workspa
         )
     }
     .map_err(|error| native("GetFileInformationByHandleEx(FileIdInfo)", error))?;
-    Ok(WorkspaceDirectoryIdentity {
+    Ok(WindowsFileIdentity {
         final_path: final_path(file)?.to_string_lossy().into_owned(),
         volume_serial_number: format!("{:016x}", file_id.VolumeSerialNumber),
         file_id: hex::encode(file_id.FileId.Identifier),
@@ -398,7 +374,7 @@ fn directory_identity(file: &File) -> Result<WorkspaceDirectoryIdentity, Workspa
 fn verify_owner_system_directory(
     file: &File,
     expected_owner: &OwnedSid,
-) -> Result<WorkspaceDirectoryIdentity, WorkspaceError> {
+) -> Result<WindowsFileIdentity, WorkspaceError> {
     let mut owner = PSID::default();
     let mut dacl: *mut ACL = std::ptr::null_mut();
     let mut descriptor = PSECURITY_DESCRIPTOR::default();
@@ -475,7 +451,7 @@ fn verify_acl(
     if info.AceCount != 2 {
         return Err(WorkspaceError::AclRejected);
     }
-    let system = OwnedSid::from_string(SYSTEM_SID)?;
+    let system = OwnedSid::from_string(WINDOWS_SYSTEM_SID)?;
     let mut owner_seen = false;
     let mut system_seen = false;
     for index in 0..info.AceCount {
@@ -601,13 +577,6 @@ fn native(operation: &'static str, error: windows::core::Error) -> WorkspaceErro
         operation,
         detail: error.to_string(),
     }
-}
-
-fn policy_hash(owner_sid: &str) -> String {
-    let semantic = format!(
-        "policy={WORKSPACE_POLICY}\nowner={owner_sid}\nallow={owner_sid}:full:object-container-inherit\nallow={SYSTEM_SID}:full:object-container-inherit\n"
-    );
-    hex::encode(Sha256::digest(semantic.as_bytes()))
 }
 
 struct CurrentUser {
@@ -761,8 +730,15 @@ mod tests {
         let path = parent().join(&name);
         let _ = std::fs::remove_dir_all(&path);
         let workspace = HeldRunWorkspace::create(&parent(), &name).unwrap();
-        assert_eq!(workspace.evidence().schema_version, WORKSPACE_SCHEMA);
-        assert_eq!(workspace.evidence().policy, WORKSPACE_POLICY);
+        assert_eq!(
+            workspace.evidence().schema_version,
+            WINDOWS_WORKSPACE_SCHEMA_VERSION
+        );
+        assert_eq!(
+            workspace.evidence().policy,
+            WINDOWS_WORKSPACE_SECURITY_POLICY
+        );
+        workspace.evidence().validate().unwrap();
         assert_eq!(workspace.evidence().security_policy_sha256.len(), 64);
         assert!(workspace.evidence().dacl_protected);
         assert_eq!(workspace.evidence().allowed_sids.len(), 2);
