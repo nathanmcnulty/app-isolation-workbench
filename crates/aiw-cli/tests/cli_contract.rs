@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -470,8 +471,8 @@ fn clean_wsb_transaction_without_terminal_result_fails_closed() {
     assert!(!recovery.status.success());
     assert!(recovery.stdout.is_empty());
     let error = parse_one_json(&recovery.stderr);
-    assert_eq!(error["code"], "AIW_WSB_FINALIZATION_UNAVAILABLE");
-    assert_eq!(error["stage"], "wsbRunner");
+    assert_eq!(error["code"], "AIW_WSB_RECOVERY_FAILED");
+    assert_eq!(error["stage"], "wsbRecovery");
     assert_eq!(error["runId"], "run-one");
     assert_eq!(fs::read(journal).unwrap(), before);
 
@@ -494,8 +495,58 @@ fn clean_wsb_transaction_without_terminal_result_fails_closed() {
         .args(["--run-id", "run-one"])
         .output()
         .unwrap();
-    assert!(terminal.status.success());
-    assert_eq!(parse_one_json(&terminal.stdout)["status"], "terminal");
+    assert!(!terminal.status.success());
+    let terminal_error = parse_one_json(&terminal.stderr);
+    assert_eq!(terminal_error["code"], "AIW_WSB_RECOVERY_FAILED");
+    assert_eq!(terminal_error["runId"], "run-one");
+}
+
+#[test]
+fn recover_repairs_interrupted_core_journal_before_provider_reconciliation() {
+    let temp = TempDir::new();
+    let root = temp.path().join("workspace");
+    fs::create_dir(&root).unwrap();
+    let project = repo_path("examples/minimal.aiw.yaml");
+    let plan_path = temp.path().join("wsb-plan.json");
+    let plan = write_wsb_plan(&plan_path, &project);
+    let created = Command::new(aiw())
+        .args(["run", "plan", "--root"])
+        .arg(&root)
+        .arg("--plan")
+        .arg(&plan_path)
+        .arg("--project")
+        .arg(&project)
+        .output()
+        .unwrap();
+    assert!(created.status.success());
+    let layout = RunLayout::new(&root, "run-one").unwrap();
+    layout
+        .write_approval(&ApprovalRecord::for_plan(&plan, "admin", "now").unwrap())
+        .unwrap();
+    write_clean_wsb_transaction(&layout.run_dir(), &plan);
+    let mut journal = OpenOptions::new()
+        .append(true)
+        .open(layout.journal_path())
+        .unwrap();
+    journal.write_all(b"interrupted-tail").unwrap();
+    journal.sync_all().unwrap();
+    drop(journal);
+
+    let recovery = Command::new(aiw())
+        .args(["run", "recover", "--root"])
+        .arg(&root)
+        .args(["--run-id", "run-one"])
+        .output()
+        .unwrap();
+    assert!(!recovery.status.success());
+    let error = parse_one_json(&recovery.stderr);
+    assert_eq!(error["code"], "AIW_WSB_RECOVERY_FAILED");
+    assert_eq!(error["stage"], "wsbRecovery");
+    assert_eq!(error["runId"], "run-one");
+    assert!(
+        layout.status().is_ok(),
+        "core recovery did not repair the tail"
+    );
 }
 
 #[test]
@@ -547,7 +598,8 @@ fn unavailable_start_and_provider_recovery_preserve_run_identity() {
         .unwrap();
     assert!(!recovery.status.success());
     let recovery_error = parse_one_json(&recovery.stderr);
-    assert_eq!(recovery_error["code"], "AIW_WSB_RECOVERY_UNAVAILABLE");
+    assert_eq!(recovery_error["code"], "AIW_WSB_RECOVERY_FAILED");
+    assert_eq!(recovery_error["stage"], "wsbRecovery");
     assert_eq!(recovery_error["runId"], "run-one");
     assert_eq!(fs::read(journal).unwrap(), before);
     assert!(transaction_dir.is_dir());

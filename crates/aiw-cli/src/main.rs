@@ -25,9 +25,11 @@ use aiw_provider_wsb::{
     WindowsSandboxCompletionReceipt, WindowsSandboxCompletionVerification, WindowsSandboxPlan,
     plan_cli_lifecycle, render_config, validate_host_mappings, verify_completion_receipt,
 };
+#[cfg(windows)]
+use aiw_runner::recover_windows_sandbox;
 use aiw_runner::{
     RunnerError, SessionTransaction, WsbGoldenProbeExecution, WsbGoldenProbeStart,
-    WsbSessionDisposition, WsbSessionStatus, observe_wsb_session_status,
+    WsbRecoveryResult, WsbSessionDisposition, WsbSessionStatus, observe_wsb_session_status,
 };
 use aiw_schema::{
     LEGACY_PROJECT_SCHEMA_VERSION, LegacyProjectV0Alpha1, ModelPack, PROJECT_SCHEMA_VERSION,
@@ -429,6 +431,7 @@ struct ErrorEnvelope {
 }
 
 const RUN_STATUS_SCHEMA_VERSION: &str = "aiw.dev/run-status/v0alpha1";
+const RUN_RECOVERY_SCHEMA_VERSION: &str = "aiw.dev/run-recovery/v0alpha1";
 
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -437,6 +440,16 @@ struct RunStatusEnvelope {
     run_id: String,
     core: RecoveryStatus,
     windows_sandbox: WsbSessionStatus,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RunRecoveryEnvelope {
+    schema_version: String,
+    run_id: String,
+    core: RecoveryStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    windows_sandbox: Option<WsbRecoveryResult>,
 }
 
 #[derive(Debug)]
@@ -453,6 +466,20 @@ impl std::fmt::Display for RunOperationUnavailable {
 }
 
 impl std::error::Error for RunOperationUnavailable {}
+
+#[derive(Debug)]
+struct RunRecoveryFailed {
+    run_id: String,
+    source: RunnerError,
+}
+
+impl std::fmt::Display for RunRecoveryFailed {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.source.fmt(formatter)
+    }
+}
+
+impl std::error::Error for RunRecoveryFailed {}
 
 #[derive(Debug)]
 struct WsbSessionStatusInvalid {
@@ -631,26 +658,43 @@ fn run(command: Command) -> Result<()> {
             }
             RunCommand::Recover { root, run_id } => {
                 let layout = RunLayout::new(&root, run_id)?;
+                let core = layout.recovery_status()?;
                 let provider_status = observe_wsb_status(&layout)?;
-                if provider_status.status == WsbSessionDisposition::RecoveryRequired {
-                    return Err(anyhow!(RunOperationUnavailable {
-                        code: "AIW_WSB_RECOVERY_UNAVAILABLE",
-                        summary: "Windows Sandbox provider cleanup requires recovery, but the native execution boundary is unavailable",
-                        run_id: layout.run_id().to_owned(),
-                    }));
-                }
-                if provider_status.status == WsbSessionDisposition::Clean {
-                    let core = layout.status()?;
-                    if matches!(core, RecoveryStatus::Terminal { .. }) {
-                        return write_json(&core);
+                if matches!(
+                    provider_status.status,
+                    WsbSessionDisposition::RecoveryRequired | WsbSessionDisposition::Clean
+                ) {
+                    #[cfg(windows)]
+                    {
+                        let windows_sandbox =
+                            recover_windows_sandbox(&layout).map_err(|source| {
+                                anyhow!(RunRecoveryFailed {
+                                    run_id: layout.run_id().to_owned(),
+                                    source,
+                                })
+                            })?;
+                        return write_json(&RunRecoveryEnvelope {
+                            schema_version: RUN_RECOVERY_SCHEMA_VERSION.to_owned(),
+                            run_id: layout.run_id().to_owned(),
+                            core,
+                            windows_sandbox: Some(windows_sandbox),
+                        });
                     }
-                    return Err(anyhow!(RunOperationUnavailable {
-                        code: "AIW_WSB_FINALIZATION_UNAVAILABLE",
-                        summary: "Windows Sandbox cleanup is verified, but run finalization requires the unavailable native execution boundary",
-                        run_id: layout.run_id().to_owned(),
-                    }));
+                    #[cfg(not(windows))]
+                    {
+                        return Err(anyhow!(RunOperationUnavailable {
+                            code: "AIW_WINDOWS_REQUIRED",
+                            summary: "Windows Sandbox recovery requires Windows",
+                            run_id: layout.run_id().to_owned(),
+                        }));
+                    }
                 }
-                write_json(&layout.recovery_status()?)
+                write_json(&RunRecoveryEnvelope {
+                    schema_version: RUN_RECOVERY_SCHEMA_VERSION.to_owned(),
+                    run_id: layout.run_id().to_owned(),
+                    core,
+                    windows_sandbox: None,
+                })
             }
             RunCommand::Cancel {
                 root,
@@ -1226,6 +1270,19 @@ fn emit_anyhow_error(error: &anyhow::Error) {
             retryable: false,
             remediation: "Do not start or recover the provider. Inspect or restore the run-bound session transaction from trusted evidence.".to_owned(),
             detail: error.detail.clone(),
+        });
+    } else if let Some(error) = error.downcast_ref::<RunRecoveryFailed>() {
+        emit_error(&ErrorEnvelope {
+            code: "AIW_WSB_RECOVERY_FAILED".to_owned(),
+            summary: "Windows Sandbox recovery could not be safely completed".to_owned(),
+            stage: "wsbRecovery".to_owned(),
+            run_id: Some(error.run_id.clone()),
+            retryable: matches!(
+                error.source,
+                RunnerError::LeaseUnavailable | RunnerError::RecoveryRequired(_)
+            ),
+            remediation: "Preserve the run directory and provider state, resolve the reported authority or drift condition, and retry the same run recovery command.".to_owned(),
+            detail: error.source.to_string().chars().take(512).collect(),
         });
     } else if let Some(error) = error.downcast_ref::<RunnerError>() {
         emit_error(&ErrorEnvelope {

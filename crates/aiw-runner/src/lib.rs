@@ -12,8 +12,8 @@
 mod session;
 
 pub use session::{
-    SESSION_TRANSACTION_SCHEMA_VERSION, SessionTransaction, SessionTransactionState,
-    SessionTransition,
+    SESSION_TRANSACTION_SCHEMA_VERSION, SessionRecoveryBinding, SessionTransaction,
+    SessionTransactionState, SessionTransition,
 };
 
 use std::{
@@ -47,6 +47,7 @@ const MAX_GUEST_FAILURE_DIAGNOSTIC: u64 = 16 * 1024;
 const GUEST_REQUEST_SCHEMA: &str = "aiw.dev/wsb-golden-probe-request/v0alpha1";
 const READINESS_SCHEMA: &str = "aiw.dev/windows-sandbox-readiness/v0alpha2";
 pub const WSB_SESSION_STATUS_SCHEMA_VERSION: &str = "aiw.dev/wsb-session-status/v0alpha1";
+pub const WSB_RECOVERY_RESULT_SCHEMA_VERSION: &str = "aiw.dev/wsb-recovery-result/v0alpha1";
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -145,6 +146,25 @@ pub struct WsbSessionStatus {
     pub current_state: Option<SessionTransactionState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason_code: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WsbRecoveryResult {
+    pub schema_version: String,
+    pub run_id: String,
+    pub session_id: String,
+    pub state: SessionTransactionState,
+    pub provider_cleanup_verified: bool,
+    pub workspace_cleanup_verified: bool,
+    pub terminalizable: bool,
+    pub mutex_was_abandoned: bool,
+    pub start_provider_sha256: String,
+    pub recovery_provider_sha256: String,
+    pub provider_drifted: bool,
+    pub session_ids_before: Vec<String>,
+    pub session_ids_after: Vec<String>,
+    pub reason_code: String,
 }
 
 /// Observe persisted Windows Sandbox provider state without creating, deleting,
@@ -382,6 +402,262 @@ pub(crate) fn execute_wsb_golden_probe(
     })
 }
 
+/// Reconciles one persisted Windows Sandbox transaction. The caller supplies
+/// only the run layout; every mutable target is recovered from hash-bound local
+/// state and revalidated while the exact workspace handles are held.
+#[cfg(windows)]
+pub fn recover_windows_sandbox(layout: &RunLayout) -> Result<WsbRecoveryResult, RunnerError> {
+    use aiw_windows_platform::{
+        CanonicalSandboxId, HeldRunWorkspace, WsbRecoveryDisposition,
+        acquire_windows_sandbox_recovery,
+    };
+
+    let inspection = session::inspect_for_recovery(layout)?;
+    let transaction = inspection.transaction.clone().ok_or_else(|| {
+        RunnerError::Transaction("no provider session transaction exists".to_owned())
+    })?;
+    if transaction.run_id != layout.run_id() {
+        return Err(RunnerError::Transaction(
+            "session transaction belongs to a different run".to_owned(),
+        ));
+    }
+    let workspace_evidence = recovery_workspace(layout, &transaction)?;
+    let workspace = HeldRunWorkspace::reopen_bound(&workspace_evidence)
+        .map_err(|error| RunnerError::RecoveryRequired(error.to_string()))?;
+    workspace
+        .revalidate()
+        .map_err(|error| RunnerError::RecoveryRequired(error.to_string()))?;
+
+    let repeated = session::inspect_for_recovery(layout)?;
+    if repeated != inspection {
+        return Err(RunnerError::RecoveryRequired(
+            "session transaction changed while workspace authority was acquired".to_owned(),
+        ));
+    }
+    let store = TransactionStore::resume_from(layout, &transaction)?;
+    store.verify_inspection(&inspection)?;
+
+    let session_id =
+        CanonicalSandboxId::parse(&transaction.session_id).map_err(native_recovery_error)?;
+    let mut provider = acquire_windows_sandbox_recovery(&transaction.provider_sha256, session_id)
+        .map_err(native_recovery_error)?;
+    store.discard_pending_after_authority(&inspection)?;
+
+    if transaction.current_state() == SessionTransactionState::CleanupVerified {
+        let observed = provider
+            .verify_bound_absent()
+            .map_err(native_recovery_error)?;
+        workspace
+            .revalidate()
+            .map_err(|error| RunnerError::RecoveryRequired(error.to_string()))?;
+        return Ok(WsbRecoveryResult {
+            schema_version: WSB_RECOVERY_RESULT_SCHEMA_VERSION.to_owned(),
+            run_id: transaction.run_id,
+            session_id: transaction.session_id,
+            state: SessionTransactionState::CleanupVerified,
+            provider_cleanup_verified: true,
+            workspace_cleanup_verified: true,
+            terminalizable: true,
+            mutex_was_abandoned: provider.mutex_was_abandoned(),
+            start_provider_sha256: provider.start_provider_sha256().to_owned(),
+            recovery_provider_sha256: provider.recovery_provider_sha256().to_owned(),
+            provider_drifted: provider.provider_drifted(),
+            session_ids_before: observed.session_ids.clone(),
+            session_ids_after: observed.session_ids,
+            reason_code: "already-clean".to_owned(),
+        });
+    }
+
+    if transaction.current_state() == SessionTransactionState::StartIntent {
+        store.transition(SessionTransactionState::Unknown, "start-outcome-unknown")?;
+    }
+    let state = store
+        .load_current()?
+        .ok_or_else(|| RunnerError::Transaction("session transaction disappeared".to_owned()))?
+        .current_state();
+    if matches!(
+        state,
+        SessionTransactionState::Active
+            | SessionTransactionState::Unknown
+            | SessionTransactionState::RecoveryRequired
+    ) {
+        store.transition(
+            SessionTransactionState::CleanupIntent,
+            "recovery-cleanup-attempt",
+        )?;
+    }
+
+    let observed = provider.reconcile().map_err(native_recovery_error)?;
+    workspace
+        .revalidate()
+        .map_err(|error| RunnerError::RecoveryRequired(error.to_string()))?;
+    let legacy = transaction.recovery.is_none();
+    if legacy {
+        store.transition(
+            SessionTransactionState::RecoveryRequired,
+            "legacy-request-location-unavailable",
+        )?;
+    } else if let Err(error) = remove_recovery_request(&workspace, &transaction) {
+        let _ = store.transition(
+            SessionTransactionState::RecoveryRequired,
+            "request-cleanup-unverified",
+        );
+        return Err(RunnerError::RecoveryRequired(error.to_string()));
+    } else {
+        workspace
+            .revalidate()
+            .map_err(|error| RunnerError::RecoveryRequired(error.to_string()))?;
+        store.transition(
+            SessionTransactionState::CleanupVerified,
+            "recovery-cleanup-verified",
+        )?;
+    }
+    let final_transaction = store
+        .load_current()?
+        .ok_or_else(|| RunnerError::Transaction("session transaction disappeared".to_owned()))?;
+    let final_state = final_transaction.current_state();
+    Ok(WsbRecoveryResult {
+        schema_version: WSB_RECOVERY_RESULT_SCHEMA_VERSION.to_owned(),
+        run_id: final_transaction.run_id,
+        session_id: final_transaction.session_id,
+        state: final_state,
+        provider_cleanup_verified: true,
+        workspace_cleanup_verified: !legacy,
+        terminalizable: !legacy,
+        mutex_was_abandoned: observed.mutex_was_abandoned,
+        start_provider_sha256: observed.start_provider_sha256,
+        recovery_provider_sha256: observed.recovery_provider_sha256,
+        provider_drifted: observed.provider_drifted,
+        session_ids_before: observed.session_ids_before,
+        session_ids_after: observed.session_ids_after,
+        reason_code: if legacy {
+            "legacy-request-location-unavailable".to_owned()
+        } else {
+            match observed.disposition {
+                WsbRecoveryDisposition::AlreadyAbsent => "exact-session-already-absent".to_owned(),
+                WsbRecoveryDisposition::Stopped => "exact-session-stopped".to_owned(),
+            }
+        },
+    })
+}
+
+#[cfg(windows)]
+fn recovery_workspace(
+    layout: &RunLayout,
+    transaction: &SessionTransaction,
+) -> Result<WorkspaceBindingEvidence, RunnerError> {
+    let plan = layout.read_plan().map_err(journal_error)?;
+    if plan.hash().map_err(journal_error)? != transaction.plan_hash
+        || plan.run_id != transaction.run_id
+        || plan.project_revision_hash != transaction.project_revision_hash
+    {
+        return Err(RunnerError::Transaction(
+            "session transaction does not match the persisted run plan".to_owned(),
+        ));
+    }
+    let bindings: Vec<(&str, &WorkspaceBindingEvidence, &str)> = plan
+        .actions
+        .iter()
+        .filter_map(|action| match action {
+            PlannedAction::ExecuteWindowsSandboxGoldenProbe {
+                provider_sha256,
+                workspace,
+                workspace_identity_sha256,
+                ..
+            } => Some((
+                provider_sha256.as_str(),
+                workspace.as_ref(),
+                workspace_identity_sha256.as_str(),
+            )),
+            _ => None,
+        })
+        .collect();
+    let [(provider_sha256, workspace, workspace_hash)] = bindings.as_slice() else {
+        return Err(RunnerError::Transaction(
+            "persisted run plan does not contain one recovery binding".to_owned(),
+        ));
+    };
+    if *provider_sha256 != transaction.provider_sha256
+        || *workspace_hash != transaction.workspace_identity_sha256
+        || canonical_hash(workspace)? != transaction.workspace_identity_sha256
+        || transaction
+            .recovery
+            .as_ref()
+            .is_some_and(|recovery| &recovery.workspace != *workspace)
+    {
+        return Err(RunnerError::Transaction(
+            "session transaction recovery binding differs from the run plan".to_owned(),
+        ));
+    }
+    Ok((*workspace).clone())
+}
+
+#[cfg(windows)]
+fn remove_recovery_request(
+    workspace: &aiw_windows_platform::HeldRunWorkspace,
+    transaction: &SessionTransaction,
+) -> Result<(), RunnerError> {
+    let recovery = transaction
+        .recovery
+        .as_ref()
+        .ok_or_else(|| RunnerError::Transaction("session recovery binding is absent".to_owned()))?;
+    let path = workspace.tools_path().join(&recovery.request_relative_path);
+    if path
+        .parent()
+        .is_none_or(|parent| parent != workspace.tools_path())
+    {
+        return Err(RunnerError::Drift);
+    }
+    if !recovery_request_present(&path)? {
+        return Ok(());
+    }
+    ensure_ordinary_file(&path)?;
+    let current: GuestRequest = read_bounded_json(&path, 64 * 1024)?;
+    if current.request_sha256 != transaction.request_sha256
+        || request_hash(&current)? != transaction.request_sha256
+        || current.run_id != transaction.run_id
+        || current.sandbox_id != transaction.session_id
+        || current.config_sha256 != transaction.config_sha256
+    {
+        return Err(RunnerError::Drift);
+    }
+    fs::remove_file(path).map_err(|_| RunnerError::Drift)
+}
+
+fn recovery_request_present(path: &Path) -> Result<bool, RunnerError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata)
+            if metadata.is_file()
+                && !metadata.file_type().is_symlink()
+                && !has_reparse_point(&metadata) =>
+        {
+            Ok(true)
+        }
+        Ok(_) => Err(RunnerError::Drift),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(_) => Err(RunnerError::Drift),
+    }
+}
+
+#[cfg(windows)]
+fn native_recovery_error(
+    error: aiw_windows_platform::WindowsSandboxInvocationError,
+) -> RunnerError {
+    use aiw_windows_platform::WindowsSandboxInvocationError;
+    match error {
+        WindowsSandboxInvocationError::LeaseUnavailable => RunnerError::LeaseUnavailable,
+        WindowsSandboxInvocationError::RecoveryRequired => {
+            RunnerError::RecoveryRequired(error.to_string())
+        }
+        WindowsSandboxInvocationError::Protocol(detail)
+            if detail.contains("cleaned transaction UUID is present again") =>
+        {
+            RunnerError::SessionConflict
+        }
+        other => RunnerError::RecoveryRequired(other.to_string()),
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn recover_wsb_session(
     request: &WsbGoldenProbeStart,
@@ -478,6 +754,19 @@ fn prepare_execution(
         .as_ref()
         .ok_or(RunnerError::ApprovalBinding)?;
     let request_path = guest_to_host(tools, guest_request_path).ok_or(RunnerError::Drift)?;
+    let request_relative_path = request_path
+        .strip_prefix(Path::new(&tools.host_folder))
+        .map_err(|_| RunnerError::Drift)?
+        .components()
+        .map(|component| component.as_os_str().to_str().ok_or(RunnerError::Drift))
+        .collect::<Result<Vec<_>, _>>()?
+        .join("/");
+    if !request_relative_path.is_ascii()
+        || request_relative_path.contains('\\')
+        || !aiw_schema::is_safe_relative_path(&request_relative_path)
+    {
+        return Err(RunnerError::Drift);
+    }
     let guest_request = GuestRequest::new(
         &plan.run_id,
         &session_id,
@@ -501,6 +790,14 @@ fn prepare_execution(
         session_id,
         request_sha256: guest_request.request_sha256.clone(),
         workspace_identity_sha256: request.workspace_identity_sha256.clone(),
+        recovery: Some(SessionRecoveryBinding {
+            workspace: request.workspace.clone(),
+            request_relative_path,
+            provider_protocol: readiness
+                .cli_protocol
+                .clone()
+                .ok_or_else(|| RunnerError::Readiness("CLI protocol is unavailable".to_owned()))?,
+        }),
     };
     Ok(ExecutionContext {
         plan,
@@ -620,6 +917,13 @@ fn finalize_attempt(
             .as_ref()
             .is_ok_and(|sessions| sessions.is_empty());
     if physically_verified {
+        if let Err(error) = remove_owned_request(&context.request_path, &context.guest_request) {
+            let _ = store.transition(
+                SessionTransactionState::RecoveryRequired,
+                "request-cleanup-unverified",
+            );
+            return Err(RunnerError::RecoveryRequired(error.to_string()));
+        }
         if let Err(error) = store.transition(
             SessionTransactionState::CleanupVerified,
             if recovering {
@@ -631,9 +935,6 @@ fn finalize_attempt(
             state_error.get_or_insert(error);
         }
         if let Some(error) = state_error {
-            return Err(RunnerError::RecoveryRequired(error.to_string()));
-        }
-        if let Err(error) = remove_owned_request(&context.request_path, &context.guest_request) {
             return Err(RunnerError::RecoveryRequired(error.to_string()));
         }
         if recovering {
@@ -2200,6 +2501,37 @@ mod tests {
     }
 
     #[test]
+    fn recovery_request_absence_requires_exact_not_found() {
+        let root = Root::new();
+        let missing = root.0.join("missing-request.json");
+        assert!(!recovery_request_present(&missing).unwrap());
+
+        let directory = root.0.join("request-directory");
+        fs::create_dir(&directory).unwrap();
+        assert!(matches!(
+            recovery_request_present(&directory),
+            Err(RunnerError::Drift)
+        ));
+
+        let dangling = root.0.join("dangling-request.json");
+        #[cfg(windows)]
+        let link_created =
+            std::os::windows::fs::symlink_file(root.0.join("absent-target.json"), &dangling)
+                .is_ok();
+        #[cfg(unix)]
+        let link_created = {
+            std::os::unix::fs::symlink(root.0.join("absent-target.json"), &dangling).unwrap();
+            true
+        };
+        if link_created {
+            assert!(matches!(
+                recovery_request_present(&dangling),
+                Err(RunnerError::Drift)
+            ));
+        }
+    }
+
+    #[test]
     fn refuses_preexisting_unknown_session_before_start() {
         let (_root, layout, start, readiness) = setup();
         let other = "11111111-1111-1111-1111-111111111111";
@@ -2759,11 +3091,14 @@ mod tests {
             store.load_current(),
             Err(RunnerError::RecoveryRequired(_))
         ));
-        let recovered = store.load_for_recovery().unwrap().unwrap();
+        let inspection = store.inspect_for_recovery().unwrap();
+        let recovered = store.verify_inspection(&inspection).unwrap();
         assert_eq!(
             recovered.current_state(),
             SessionTransactionState::StartIntent
         );
+        assert!(pending.exists());
+        store.discard_pending_after_authority(&inspection).unwrap();
         assert!(!pending.exists());
     }
 
@@ -3031,6 +3366,12 @@ mod tests {
                 .is_empty()
         );
         drop(native);
+        let recovered = super::recover_windows_sandbox(&layout).unwrap();
+        assert_eq!(recovered.state, SessionTransactionState::CleanupVerified);
+        assert!(recovered.provider_cleanup_verified);
+        assert!(recovered.workspace_cleanup_verified);
+        assert!(recovered.terminalizable);
+        assert_eq!(recovered.reason_code, "already-clean");
         drop(layout);
         drop(workspace);
         fs::remove_dir_all(root_path).unwrap();
