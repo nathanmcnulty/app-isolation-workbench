@@ -9,7 +9,16 @@
 //! exact-ID `connect`, and exact-ID `stop` argument arrays. It has no shell, elevation, command,
 //! script, URL, or arbitrary policy API.
 
+mod preparation;
 mod session;
+
+pub use preparation::{
+    PreparedWsbArtifacts, WSB_PREPARATION_RECEIPT_SCHEMA_VERSION, WsbPreparationError,
+    WsbPreparationReceipt, WsbPreparationStatus, build_wsb_preparation,
+};
+
+#[cfg(windows)]
+pub use preparation::{prepare_windows_sandbox_bundle, verify_windows_sandbox_preparation};
 
 pub use session::{
     SESSION_TRANSACTION_SCHEMA_VERSION, SessionRecoveryBinding, SessionTransaction,

@@ -25,11 +25,14 @@ use aiw_provider_wsb::{
     WindowsSandboxCompletionReceipt, WindowsSandboxCompletionVerification, WindowsSandboxPlan,
     plan_cli_lifecycle, render_config, validate_host_mappings, verify_completion_receipt,
 };
-#[cfg(windows)]
-use aiw_runner::recover_windows_sandbox;
 use aiw_runner::{
     RunnerError, SessionTransaction, WsbGoldenProbeExecution, WsbGoldenProbeStart,
-    WsbRecoveryResult, WsbSessionDisposition, WsbSessionStatus, observe_wsb_session_status,
+    WsbPreparationError, WsbPreparationReceipt, WsbRecoveryResult, WsbSessionDisposition,
+    WsbSessionStatus, observe_wsb_session_status,
+};
+#[cfg(windows)]
+use aiw_runner::{
+    prepare_windows_sandbox_bundle, recover_windows_sandbox, verify_windows_sandbox_preparation,
 };
 use aiw_schema::{
     LEGACY_PROJECT_SCHEMA_VERSION, LegacyProjectV0Alpha1, ModelPack, PROJECT_SCHEMA_VERSION,
@@ -220,6 +223,37 @@ struct RunArgs {
 
 #[derive(Debug, Subcommand)]
 enum RunCommand {
+    /// Create and verify a fresh Windows Sandbox workspace and approvable plan bundle.
+    /// This does not approve, acquire, start, connect, stop, or recover a provider.
+    PrepareWsb {
+        #[arg(long)]
+        run_id: String,
+        /// Exact project revision from which the immutable plan is derived.
+        #[arg(long)]
+        project: PathBuf,
+        /// Absolute canonical path to the fixed-function guest agent to stage.
+        #[arg(long)]
+        guest_agent: PathBuf,
+        /// Independently obtained lowercase SHA-256 expected for the guest agent.
+        #[arg(long)]
+        guest_agent_sha256: String,
+        /// Existing absolute canonical local directory that will hold the protected workspace.
+        #[arg(long)]
+        workspace_parent: PathBuf,
+        #[arg(long)]
+        created_at: String,
+    },
+    /// Reopen and verify a preparation after its creating process exited.
+    /// This observes readiness but never acquires or mutates the provider.
+    VerifyPreparedWsb {
+        #[arg(long)]
+        workspace: PathBuf,
+        #[arg(long)]
+        project: PathBuf,
+        /// Independently obtained lowercase SHA-256 expected for the guest agent.
+        #[arg(long)]
+        guest_agent_sha256: String,
+    },
     /// Persist a supplied immutable plan and create its run journal. This does not execute it.
     Plan {
         #[arg(long)]
@@ -365,6 +399,8 @@ enum SchemaKind {
     WsbGoldenProbeExecution,
     WsbSessionTransaction,
     WsbSessionStatus,
+    WsbPreparationReceipt,
+    WsbPreparationResult,
     WindowsSandboxPlan,
     WindowsSandboxCliLifecyclePlan,
     WindowsSandboxCompletionExpectation,
@@ -432,6 +468,34 @@ struct ErrorEnvelope {
 
 const RUN_STATUS_SCHEMA_VERSION: &str = "aiw.dev/run-status/v0alpha1";
 const RUN_RECOVERY_SCHEMA_VERSION: &str = "aiw.dev/run-recovery/v0alpha1";
+const WSB_PREPARATION_RESULT_SCHEMA_VERSION: &str = "aiw.dev/wsb-preparation-result/v0alpha1";
+
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WsbPreparationResult {
+    schema_version: String,
+    run_id: String,
+    status: aiw_runner::WsbPreparationStatus,
+    workspace_root: String,
+    run_plan_path: String,
+    windows_sandbox_plan_path: String,
+    preparation_receipt_path: String,
+    receipt: WsbPreparationReceipt,
+}
+
+fn preparation_result(prepared: aiw_runner::PreparedWsbArtifacts) -> WsbPreparationResult {
+    let workspace_root = prepared.receipt.workspace.root.final_path.clone();
+    WsbPreparationResult {
+        schema_version: WSB_PREPARATION_RESULT_SCHEMA_VERSION.to_owned(),
+        run_id: prepared.receipt.run_id.clone(),
+        status: prepared.receipt.status,
+        run_plan_path: format!(r"{}\plan.json", workspace_root),
+        windows_sandbox_plan_path: format!(r"{}\wsb-plan.json", workspace_root),
+        preparation_receipt_path: format!(r"{}\preparation.json", workspace_root),
+        workspace_root,
+        receipt: prepared.receipt,
+    }
+}
 
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -456,6 +520,9 @@ struct RunRecoveryEnvelope {
 struct RunOperationUnavailable {
     code: &'static str,
     summary: &'static str,
+    stage: &'static str,
+    remediation: &'static str,
+    detail: &'static str,
     run_id: String,
 }
 
@@ -480,6 +547,20 @@ impl std::fmt::Display for RunRecoveryFailed {
 }
 
 impl std::error::Error for RunRecoveryFailed {}
+
+#[derive(Debug)]
+struct RunPreparationFailed {
+    run_id: String,
+    source: WsbPreparationError,
+}
+
+impl std::fmt::Display for RunPreparationFailed {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.source.fmt(formatter)
+    }
+}
+
+impl std::error::Error for RunPreparationFailed {}
 
 #[derive(Debug)]
 struct WsbSessionStatusInvalid {
@@ -615,6 +696,92 @@ fn run(command: Command) -> Result<()> {
             HostCommand::Assess => write_json(&assess_windows_sandbox()),
         },
         Command::Run(args) => match args.command {
+            RunCommand::PrepareWsb {
+                run_id,
+                project,
+                guest_agent,
+                guest_agent_sha256,
+                workspace_parent,
+                created_at,
+            } => {
+                let loaded = read_project(&project)?;
+                #[cfg(windows)]
+                {
+                    let prepared = prepare_windows_sandbox_bundle(
+                        &run_id,
+                        &loaded.project,
+                        &guest_agent,
+                        &guest_agent_sha256,
+                        &workspace_parent,
+                        &run_id,
+                        &created_at,
+                    )
+                    .map_err(|source| {
+                        anyhow!(RunPreparationFailed {
+                            run_id: run_id.clone(),
+                            source,
+                        })
+                    })?;
+                    write_json(&preparation_result(prepared))
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (
+                        loaded,
+                        guest_agent,
+                        guest_agent_sha256,
+                        workspace_parent,
+                        created_at,
+                    );
+                    Err(anyhow!(RunOperationUnavailable {
+                        code: "AIW_WINDOWS_REQUIRED",
+                        summary: "Windows Sandbox preparation requires Windows",
+                        stage: "wsbPreparation",
+                        remediation: "Run preparation on a supported Windows host after completing the non-mutating readiness assessment.",
+                        detail: "No workspace was created and no provider was acquired.",
+                        run_id,
+                    }))
+                }
+            }
+            RunCommand::VerifyPreparedWsb {
+                workspace,
+                project,
+                guest_agent_sha256,
+            } => {
+                let loaded = read_project(&project)?;
+                let fallback_run_id = workspace
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("unknown")
+                    .to_owned();
+                #[cfg(windows)]
+                {
+                    let prepared = verify_windows_sandbox_preparation(
+                        &workspace,
+                        &loaded.project,
+                        &guest_agent_sha256,
+                    )
+                    .map_err(|source| {
+                        anyhow!(RunPreparationFailed {
+                            run_id: fallback_run_id,
+                            source,
+                        })
+                    })?;
+                    write_json(&preparation_result(prepared))
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (loaded, guest_agent_sha256);
+                    Err(anyhow!(RunOperationUnavailable {
+                        code: "AIW_WINDOWS_REQUIRED",
+                        summary: "Windows Sandbox preparation verification requires Windows",
+                        stage: "wsbPreparation",
+                        remediation: "Verify this workspace on its original supported Windows host.",
+                        detail: "No provider was acquired and no workspace state was changed.",
+                        run_id: fallback_run_id,
+                    }))
+                }
+            }
             RunCommand::Plan {
                 root,
                 plan,
@@ -685,6 +852,9 @@ fn run(command: Command) -> Result<()> {
                         return Err(anyhow!(RunOperationUnavailable {
                             code: "AIW_WINDOWS_REQUIRED",
                             summary: "Windows Sandbox recovery requires Windows",
+                            stage: "wsbRecovery",
+                            remediation: "Recover this exact run on its original supported Windows host; do not modify provider or transaction state manually.",
+                            detail: "The persisted run was not changed.",
                             run_id: layout.run_id().to_owned(),
                         }));
                     }
@@ -716,6 +886,9 @@ fn run(command: Command) -> Result<()> {
                 Err(anyhow!(RunOperationUnavailable {
                     code: "AIW_WSB_EXECUTION_UNAVAILABLE",
                     summary: "trusted native Windows Sandbox verification and process execution are unavailable",
+                    stage: "wsbRunner",
+                    remediation: "Wait for the native Windows Sandbox execution boundary to be implemented; do not bypass provider cleanup state.",
+                    detail: "Production Windows Sandbox execution remains fail-closed.",
                     run_id,
                 }))
             }
@@ -791,6 +964,8 @@ fn run(command: Command) -> Result<()> {
             }
             SchemaKind::WsbSessionTransaction => write_json(&schema_for!(SessionTransaction)),
             SchemaKind::WsbSessionStatus => write_json(&schema_for!(WsbSessionStatus)),
+            SchemaKind::WsbPreparationReceipt => write_json(&schema_for!(WsbPreparationReceipt)),
+            SchemaKind::WsbPreparationResult => write_json(&schema_for!(WsbPreparationResult)),
             SchemaKind::WindowsSandboxPlan => write_json(&schema_for!(WindowsSandboxPlan)),
             SchemaKind::WindowsSandboxCliLifecyclePlan => {
                 write_json(&schema_for!(WindowsSandboxCliLifecyclePlan))
@@ -1248,6 +1423,62 @@ fn observe_wsb_status(layout: &RunLayout) -> Result<WsbSessionStatus> {
     })
 }
 
+fn preparation_error_envelope(error: &RunPreparationFailed) -> ErrorEnvelope {
+    let (code, summary, stage, remediation) = match &error.source {
+        WsbPreparationError::Project(_) => (
+            "AIW_WSB_PREPARATION_PROJECT_INVALID",
+            "project is not valid for Windows Sandbox preparation",
+            "wsbPreparationPreflight",
+            "Correct the project validation findings and retry before creating a workspace.",
+        ),
+        WsbPreparationError::Readiness(_) => (
+            "AIW_WSB_PREPARATION_READINESS_BLOCKED",
+            "Windows Sandbox readiness blocks preparation",
+            "wsbPreparationPreflight",
+            "Resolve the reported readiness or active-session blocker and rerun the non-mutating host assessment.",
+        ),
+        WsbPreparationError::Workspace(_) => (
+            "AIW_WSB_PREPARATION_WORKSPACE_REJECTED",
+            "protected Windows Sandbox workspace could not be created",
+            "wsbWorkspace",
+            "Use a canonical existing local fixed-volume parent and a fresh run ID; never adopt or repair an existing leaf.",
+        ),
+        WsbPreparationError::GuestAgent(_) => (
+            "AIW_WSB_PREPARATION_GUEST_AGENT_REJECTED",
+            "fixed-function guest agent could not be staged",
+            "guestAgentStaging",
+            "Supply the canonical ordinary file and its independently obtained lowercase SHA-256; use a fresh run ID if a workspace was created.",
+        ),
+        WsbPreparationError::Contract(_) => (
+            "AIW_WSB_PREPARATION_CONTRACT_INVALID",
+            "Windows Sandbox preparation contract is invalid",
+            "wsbPreparationPlan",
+            "Correct the bounded run metadata or contract drift before retrying.",
+        ),
+        WsbPreparationError::Persistence(_) => (
+            "AIW_WSB_PREPARATION_PUBLISH_FAILED",
+            "Windows Sandbox preparation artifacts could not be published",
+            "wsbPreparationPublish",
+            "Preserve the incomplete workspace for inspection; do not treat it as complete without a valid final receipt.",
+        ),
+        WsbPreparationError::WorkspacePreserved { .. } => (
+            "AIW_WSB_PREPARATION_INCOMPLETE",
+            "Windows Sandbox preparation stopped and preserved its fresh workspace",
+            "wsbPreparation",
+            "Preserve and inspect the exact reported workspace. Never adopt, repair, or blindly delete it; retry with a new run ID after correcting the cause.",
+        ),
+    };
+    ErrorEnvelope {
+        code: code.to_owned(),
+        summary: summary.to_owned(),
+        stage: stage.to_owned(),
+        run_id: Some(error.run_id.clone()),
+        retryable: false,
+        remediation: remediation.to_owned(),
+        detail: error.source.to_string().chars().take(512).collect(),
+    }
+}
+
 fn emit_anyhow_error(error: &anyhow::Error) {
     if let Some(error) = error.downcast_ref::<AiwError>() {
         emit_error(error);
@@ -1255,11 +1486,11 @@ fn emit_anyhow_error(error: &anyhow::Error) {
         emit_error(&ErrorEnvelope {
             code: error.code.to_owned(),
             summary: error.summary.to_owned(),
-            stage: "wsbRunner".to_owned(),
+            stage: error.stage.to_owned(),
             run_id: Some(error.run_id.clone()),
             retryable: false,
-            remediation: "Wait for the native Windows Sandbox execution boundary to be implemented; do not bypass provider cleanup state.".to_owned(),
-            detail: "Production Windows Sandbox execution and recovery remain fail-closed.".to_owned(),
+            remediation: error.remediation.to_owned(),
+            detail: error.detail.to_owned(),
         });
     } else if let Some(error) = error.downcast_ref::<WsbSessionStatusInvalid>() {
         emit_error(&ErrorEnvelope {
@@ -1284,6 +1515,8 @@ fn emit_anyhow_error(error: &anyhow::Error) {
             remediation: "Preserve the run directory and provider state, resolve the reported authority or drift condition, and retry the same run recovery command.".to_owned(),
             detail: error.source.to_string().chars().take(512).collect(),
         });
+    } else if let Some(error) = error.downcast_ref::<RunPreparationFailed>() {
+        emit_error(&preparation_error_envelope(error));
     } else if let Some(error) = error.downcast_ref::<RunnerError>() {
         emit_error(&ErrorEnvelope {
             code: "AIW_WSB_RUNNER_FAILED".to_owned(),
@@ -1447,5 +1680,49 @@ mod tests {
         };
         let value = serde_json::to_value(status).unwrap();
         assert_eq!(value["status"], "pendingApproval");
+    }
+
+    #[test]
+    fn preparation_failures_have_stage_specific_stable_envelopes() {
+        let cases = [
+            (
+                WsbPreparationError::Project("detail".to_owned()),
+                "AIW_WSB_PREPARATION_PROJECT_INVALID",
+                "wsbPreparationPreflight",
+            ),
+            (
+                WsbPreparationError::Readiness("detail".to_owned()),
+                "AIW_WSB_PREPARATION_READINESS_BLOCKED",
+                "wsbPreparationPreflight",
+            ),
+            (
+                WsbPreparationError::GuestAgent("detail".to_owned()),
+                "AIW_WSB_PREPARATION_GUEST_AGENT_REJECTED",
+                "guestAgentStaging",
+            ),
+            (
+                WsbPreparationError::Persistence("detail".to_owned()),
+                "AIW_WSB_PREPARATION_PUBLISH_FAILED",
+                "wsbPreparationPublish",
+            ),
+            (
+                WsbPreparationError::WorkspacePreserved {
+                    workspace_path: "C:\\held".to_owned(),
+                    detail: "detail".to_owned(),
+                },
+                "AIW_WSB_PREPARATION_INCOMPLETE",
+                "wsbPreparation",
+            ),
+        ];
+        for (source, code, stage) in cases {
+            let envelope = preparation_error_envelope(&RunPreparationFailed {
+                run_id: "run-one".to_owned(),
+                source,
+            });
+            assert_eq!(envelope.code, code);
+            assert_eq!(envelope.stage, stage);
+            assert_eq!(envelope.run_id.as_deref(), Some("run-one"));
+            assert!(envelope.detail.len() <= 512);
+        }
     }
 }

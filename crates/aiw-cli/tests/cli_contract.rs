@@ -642,6 +642,8 @@ fn versioned_project_and_orchestrator_schemas_are_public() {
         ("run-status", "RunStatusEnvelope"),
         ("wsb-session-transaction", "SessionTransaction"),
         ("wsb-session-status", "WsbSessionStatus"),
+        ("wsb-preparation-receipt", "WsbPreparationReceipt"),
+        ("wsb-preparation-result", "WsbPreparationResult"),
         ("error-envelope", "AiwError"),
     ] {
         let output = Command::new(aiw()).args(["schema", kind]).output().unwrap();
@@ -652,6 +654,31 @@ fn versioned_project_and_orchestrator_schemas_are_public() {
         );
         assert_eq!(parse_one_json(&output.stdout)["title"], expected_title);
     }
+}
+
+#[cfg(windows)]
+#[test]
+fn preparation_rejects_pending_migration_before_creating_workspace() {
+    let temp = TempDir::new();
+    let run_id = "invalid-preparation";
+    let workspace = temp.path().join(run_id);
+    let output = Command::new(aiw())
+        .args(["run", "prepare-wsb", "--run-id", run_id, "--project"])
+        .arg(repo_path("examples/minimal-v0alpha1.aiw.yaml"))
+        .args(["--guest-agent", "C:\\missing-agent.exe"])
+        .args(["--guest-agent-sha256", &"0".repeat(64)])
+        .arg("--workspace-parent")
+        .arg(temp.path())
+        .args(["--created-at", "2026-08-29T00:00:00Z"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let error = parse_one_json(&output.stderr);
+    assert_eq!(error["code"], "AIW_WSB_PREPARATION_PROJECT_INVALID");
+    assert_eq!(error["stage"], "wsbPreparationPreflight");
+    assert_eq!(error["runId"], run_id);
+    assert!(!workspace.exists());
 }
 
 #[cfg(windows)]
