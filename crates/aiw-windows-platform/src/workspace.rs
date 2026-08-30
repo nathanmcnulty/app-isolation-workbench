@@ -19,10 +19,10 @@ use windows::Win32::Security::Authorization::{
 use windows::Win32::Security::{
     ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_SIZE_INFORMATION, AclSizeInformation,
     CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION, EqualSid, GetAce, GetAclInformation,
-    GetLengthSid, GetSecurityDescriptorControl, GetTokenInformation, IsValidAcl,
+    GetLengthSid, GetSecurityDescriptorControl, GetTokenInformation, INHERITED_ACE, IsValidAcl,
     IsValidSecurityDescriptor, IsValidSid, OBJECT_INHERIT_ACE, OWNER_SECURITY_INFORMATION,
     PSECURITY_DESCRIPTOR, PSID, SE_DACL_DEFAULTED, SE_DACL_PRESENT, SE_DACL_PROTECTED,
-    SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
+    SE_OWNER_DEFAULTED, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
 };
 use windows::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, CreateDirectoryW, FILE_ADD_SUBDIRECTORY, FILE_ALL_ACCESS,
@@ -444,10 +444,20 @@ fn directory_identity(file: &File) -> Result<WindowsFileIdentity, WorkspaceError
     })
 }
 
-fn verify_owner_system_directory(
+pub(crate) fn verify_owner_system_directory(
     file: &File,
     expected_owner: &OwnedSid,
 ) -> Result<WindowsFileIdentity, WorkspaceError> {
+    verify_owner_system_acl(file, expected_owner, true, true)?;
+    directory_identity(file)
+}
+
+pub(crate) fn verify_owner_system_acl(
+    file: &File,
+    expected_owner: &OwnedSid,
+    require_protected: bool,
+    directory: bool,
+) -> Result<(), WorkspaceError> {
     let mut owner = PSID::default();
     let mut dacl: *mut ACL = std::ptr::null_mut();
     let mut descriptor = PSECURITY_DESCRIPTOR::default();
@@ -483,14 +493,21 @@ fn verify_owner_system_directory(
     if unsafe { EqualSid(owner, expected_owner.0) }.is_err() {
         return Err(WorkspaceError::AclRejected);
     }
-    verify_acl(descriptor.0, dacl, expected_owner)?;
-    directory_identity(file)
+    verify_acl(
+        descriptor.0,
+        dacl,
+        expected_owner,
+        require_protected,
+        directory,
+    )
 }
 
 fn verify_acl(
     descriptor: PSECURITY_DESCRIPTOR,
     dacl: *mut ACL,
     expected_owner: &OwnedSid,
+    require_protected: bool,
+    directory: bool,
 ) -> Result<(), WorkspaceError> {
     if dacl.is_null() {
         return Err(WorkspaceError::AclRejected);
@@ -504,9 +521,10 @@ fn verify_acl(
     // SAFETY: descriptor is valid and both outputs are writable.
     unsafe { GetSecurityDescriptorControl(descriptor, &mut control, &mut revision) }
         .map_err(|error| native("GetSecurityDescriptorControl", error))?;
-    if control & SE_DACL_PROTECTED.0 == 0
+    if (require_protected != (control & SE_DACL_PROTECTED.0 != 0))
         || control & SE_DACL_PRESENT.0 == 0
         || control & SE_DACL_DEFAULTED.0 != 0
+        || control & SE_OWNER_DEFAULTED.0 != 0
     {
         return Err(WorkspaceError::AclRejected);
     }
@@ -546,9 +564,19 @@ fn verify_acl(
         // SAFETY: the type and IsValidAcl-backed size checks above establish
         // that the fixed ACCESS_ALLOWED_ACE fields are present.
         let ace = unsafe { &*raw_ace.cast::<ACCESS_ALLOWED_ACE>() };
-        if u32::from(ace.Header.AceFlags) != (OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE).0
-            || ace.Mask != FILE_ALL_ACCESS.0
-        {
+        let flags = u32::from(ace.Header.AceFlags);
+        let inheritance = if directory {
+            (OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE).0
+        } else {
+            0
+        };
+        let flags_valid = flags
+            == if require_protected {
+                inheritance
+            } else {
+                inheritance | INHERITED_ACE.0
+            };
+        if !flags_valid || ace.Mask != FILE_ALL_ACCESS.0 {
             return Err(WorkspaceError::AclRejected);
         }
         let sid = PSID((&ace.SidStart as *const u32).cast_mut().cast());
@@ -597,7 +625,7 @@ fn is_fixed_volume(path: &Path) -> Result<bool, WorkspaceError> {
     Ok(unsafe { GetDriveTypeW(PCWSTR(volume.as_ptr())) } == DRIVE_FIXED)
 }
 
-fn final_path(file: &File) -> Result<PathBuf, WorkspaceError> {
+pub(crate) fn final_path(file: &File) -> Result<PathBuf, WorkspaceError> {
     let mut buffer = vec![0_u16; MAX_FINAL_PATH];
     // SAFETY: the handle is valid and buffer is writable for its full length.
     let count =
@@ -612,7 +640,7 @@ fn final_path(file: &File) -> Result<PathBuf, WorkspaceError> {
     ))
 }
 
-fn same_path(left: impl AsRef<Path>, right: impl AsRef<Path>) -> bool {
+pub(crate) fn same_path(left: impl AsRef<Path>, right: impl AsRef<Path>) -> bool {
     normalized_path(left.as_ref()).eq_ignore_ascii_case(&normalized_path(right.as_ref()))
 }
 
@@ -641,7 +669,7 @@ fn wide_string(value: &str) -> Result<Vec<u16>, WorkspaceError> {
     Ok(value.encode_utf16().chain(std::iter::once(0)).collect())
 }
 
-fn raw_handle(file: &File) -> HANDLE {
+pub(crate) fn raw_handle(file: &File) -> HANDLE {
     HANDLE(file.as_raw_handle())
 }
 
@@ -713,10 +741,10 @@ impl Drop for OwnedHandle {
     }
 }
 
-struct OwnedSid(PSID);
+pub(crate) struct OwnedSid(PSID);
 
 impl OwnedSid {
-    fn from_string(value: &str) -> Result<Self, WorkspaceError> {
+    pub(crate) fn from_string(value: &str) -> Result<Self, WorkspaceError> {
         let wide = wide_string(value)?;
         let mut sid = PSID::default();
         // SAFETY: input is NUL-terminated and output pointer is valid.
