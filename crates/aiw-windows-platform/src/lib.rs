@@ -21,6 +21,12 @@ pub use aiw_probe::WindowsFileIdentity as WorkspaceDirectoryIdentity;
 pub use aiw_probe::WorkspaceBindingEvidence;
 
 #[cfg(windows)]
+#[allow(dead_code)]
+// Private issue #30 benchmark; issue #28 will add the first authority-bearing
+// in-crate consumer after its durable intent/checkpoint contract is reviewed.
+mod exact_dispose;
+
+#[cfg(windows)]
 mod windows_platform;
 
 #[cfg(windows)]
