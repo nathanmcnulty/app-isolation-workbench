@@ -16,7 +16,8 @@ use aiw_evidence::{
 };
 use aiw_orchestrator::{
     AiwError, ApprovalRecord, CancellationRequest, LegacyRunPlanV0Alpha1, LegacyRunPlanV0Alpha2,
-    RecoveryStatus, RunEvent, RunLayout, RunPlan, RunResult, project_revision_hash,
+    RecoveryStatus, RunEvent, RunLayout, RunPlan, RunResult, WsbRevocationRecord,
+    project_revision_hash,
 };
 use aiw_probe::{WindowsSandboxReadiness, WorkspaceBindingEvidence, probe_host};
 use aiw_provider_mxc::{MxcGoldenProbePlan, plan_capability_probe, plan_golden_probe};
@@ -420,6 +421,7 @@ enum SchemaKind {
     WsbPreparationResult,
     WsbPlanningImportReceipt,
     WsbPlanningImportResult,
+    WsbRevocationRecord,
     WindowsSandboxPlan,
     WindowsSandboxCliLifecyclePlan,
     WindowsSandboxCompletionExpectation,
@@ -1046,6 +1048,7 @@ fn run(command: Command) -> Result<()> {
             SchemaKind::WsbPlanningImportResult => {
                 write_json(&schema_for!(WsbPlanningImportResult))
             }
+            SchemaKind::WsbRevocationRecord => write_json(&schema_for!(WsbRevocationRecord)),
             SchemaKind::WindowsSandboxPlan => write_json(&schema_for!(WindowsSandboxPlan)),
             SchemaKind::WindowsSandboxCliLifecyclePlan => {
                 write_json(&schema_for!(WindowsSandboxCliLifecyclePlan))

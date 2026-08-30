@@ -129,6 +129,7 @@ try {
         'wsb-preparation-result',
         'wsb-planning-import-receipt',
         'wsb-planning-import-result',
+        'wsb-revocation-record',
         'windows-sandbox-plan',
         'windows-sandbox-cli-lifecycle-plan',
         'windows-sandbox-completion-expectation',
