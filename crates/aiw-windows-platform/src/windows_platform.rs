@@ -218,6 +218,30 @@ impl WindowsSandboxRecoveryLease {
         self.reconcile_with_timeout(MUTATING_TIMEOUT)
     }
 
+    /// Proves that the already-cleaned transaction UUID is still absent without
+    /// issuing a stop. A later session reusing the same UUID is a conflict, not
+    /// recovery authority for a second mutation.
+    pub fn verify_bound_absent(
+        &mut self,
+    ) -> Result<WsbListObservation, WindowsSandboxInvocationError> {
+        let deadline = invocation_deadline(READ_ONLY_TIMEOUT)?;
+        let mut provider = NativeRecoveryProvider {
+            provider_path: &self.provider_path,
+        };
+        let session_ids = provider.list(deadline)?;
+        if session_ids
+            .iter()
+            .any(|session| session == self.bound_session.as_str())
+        {
+            return Err(WindowsSandboxInvocationError::Protocol(
+                "a cleaned transaction UUID is present again; refusing recovery mutation"
+                    .to_owned(),
+            ));
+        }
+        self.completed = true;
+        Ok(WsbListObservation { session_ids })
+    }
+
     pub fn reconcile_with_timeout(
         &mut self,
         timeout: Duration,
@@ -2796,6 +2820,22 @@ mod tests {
         );
         assert!(stop.unwrap().output_was_empty);
         assert!(observed_after_stop.unwrap().session_ids.is_empty());
+        drop(lease);
+
+        let recovery_id = live_id("aiw-live-wsb-recovery");
+        let mut interrupted = acquire_windows_sandbox(&provider_hash).unwrap();
+        interrupted.start(&recovery_id, &plan).unwrap();
+        assert_eq!(
+            interrupted.list().unwrap().session_ids,
+            vec![recovery_id.as_str().to_owned()]
+        );
+        drop(interrupted);
+        let mut recovery =
+            acquire_windows_sandbox_recovery(&provider_hash, recovery_id.clone()).unwrap();
+        let recovered = recovery.reconcile().unwrap();
+        assert_eq!(recovered.session_id, recovery_id.as_str());
+        assert_eq!(recovered.disposition, WsbRecoveryDisposition::Stopped);
+        assert!(recovered.session_ids_after.is_empty());
         std::fs::remove_dir_all(workspace).unwrap();
     }
 

@@ -470,8 +470,8 @@ fn clean_wsb_transaction_without_terminal_result_fails_closed() {
     assert!(!recovery.status.success());
     assert!(recovery.stdout.is_empty());
     let error = parse_one_json(&recovery.stderr);
-    assert_eq!(error["code"], "AIW_WSB_FINALIZATION_UNAVAILABLE");
-    assert_eq!(error["stage"], "wsbRunner");
+    assert_eq!(error["code"], "AIW_WSB_RECOVERY_FAILED");
+    assert_eq!(error["stage"], "wsbRecovery");
     assert_eq!(error["runId"], "run-one");
     assert_eq!(fs::read(journal).unwrap(), before);
 
@@ -494,8 +494,10 @@ fn clean_wsb_transaction_without_terminal_result_fails_closed() {
         .args(["--run-id", "run-one"])
         .output()
         .unwrap();
-    assert!(terminal.status.success());
-    assert_eq!(parse_one_json(&terminal.stdout)["status"], "terminal");
+    assert!(!terminal.status.success());
+    let terminal_error = parse_one_json(&terminal.stderr);
+    assert_eq!(terminal_error["code"], "AIW_WSB_RECOVERY_FAILED");
+    assert_eq!(terminal_error["runId"], "run-one");
 }
 
 #[test]
@@ -547,7 +549,8 @@ fn unavailable_start_and_provider_recovery_preserve_run_identity() {
         .unwrap();
     assert!(!recovery.status.success());
     let recovery_error = parse_one_json(&recovery.stderr);
-    assert_eq!(recovery_error["code"], "AIW_WSB_RECOVERY_UNAVAILABLE");
+    assert_eq!(recovery_error["code"], "AIW_WSB_RECOVERY_FAILED");
+    assert_eq!(recovery_error["stage"], "wsbRecovery");
     assert_eq!(recovery_error["runId"], "run-one");
     assert_eq!(fs::read(journal).unwrap(), before);
     assert!(transaction_dir.is_dir());

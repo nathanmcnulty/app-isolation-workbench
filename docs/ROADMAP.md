@@ -1,6 +1,6 @@
 # Roadmap
 
-AIW is delivered as two milestones with vertical, evidence-gated slices. The current repository has completed the W0 foundation and has a private, live-proven W1 Windows Sandbox kernel. Production provider commands remain unavailable until drift-independent recovery is complete; application assessment, the desktop UI, and package authoring remain later slices.
+AIW is delivered as two milestones with vertical, evidence-gated slices. The current repository has completed the W0 foundation and has a private, live-proven W1 Windows Sandbox kernel. Drift-independent exact-session cleanup is exposed through the narrow production `run recover` command; production start remains unavailable until the complete crash/recovery path passes its live gate. Application assessment, the desktop UI, and package authoring remain later slices.
 
 ## Workbench v1
 
@@ -13,7 +13,7 @@ AIW is delivered as two milestones with vertical, evidence-gated slices. The cur
 
 **Exit gate:** old examples migrate without overwriting their source; schemas/CI are stable; no behavior bypasses approval.
 
-### W1 — live Windows Sandbox proof (private kernel implemented; recovery gate remains)
+### W1 — live Windows Sandbox proof (recovery exposed; start gate remains)
 
 - Implement the runner kernel, workspace/journal, fixed-function guest agent, short-lived helper boundary, and full Windows Sandbox lifecycle.
 - Revalidate plan hashes, provider identity, paths, inputs, output emptiness, and leases immediately before execution.

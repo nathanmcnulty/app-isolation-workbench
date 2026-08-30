@@ -21,7 +21,7 @@ serde_yaml.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 
-[dev-dependencies]
+[target.'cfg(windows)'.dependencies]
 aiw-windows-platform.workspace = true
 
 [lints]

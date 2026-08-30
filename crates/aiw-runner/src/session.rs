@@ -6,13 +6,16 @@ use std::{
 
 use aiw_evidence::canonical_json_bytes;
 use aiw_orchestrator::RunLayout;
+use aiw_probe::{WindowsSandboxCliProtocol, WorkspaceBindingEvidence};
+use aiw_schema::is_safe_relative_path;
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{RunnerError, valid_uuid};
 
-pub const SESSION_TRANSACTION_SCHEMA_VERSION: &str = "aiw.dev/wsb-session-transaction/v0alpha2";
+pub const SESSION_TRANSACTION_SCHEMA_VERSION: &str = "aiw.dev/wsb-session-transaction/v0alpha3";
+const LEGACY_SESSION_TRANSACTION_SCHEMA_VERSION: &str = "aiw.dev/wsb-session-transaction/v0alpha2";
 const MAX_TRANSACTION_BYTES: u64 = 64 * 1024;
 const MAX_TRANSITIONS: usize = 16;
 const ZERO_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
@@ -38,6 +41,14 @@ pub struct SessionTransition {
     pub hash: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionRecoveryBinding {
+    pub workspace: WorkspaceBindingEvidence,
+    pub request_relative_path: String,
+    pub provider_protocol: WindowsSandboxCliProtocol,
+}
+
 #[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SessionTransaction {
@@ -50,6 +61,8 @@ pub struct SessionTransaction {
     pub session_id: String,
     pub request_sha256: String,
     pub workspace_identity_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery: Option<SessionRecoveryBinding>,
     pub transitions: Vec<SessionTransition>,
 }
 
@@ -65,6 +78,8 @@ struct SessionTransactionWire {
     session_id: String,
     request_sha256: String,
     workspace_identity_sha256: String,
+    #[serde(default)]
+    recovery: Option<SessionRecoveryBinding>,
     transitions: Vec<SessionTransition>,
 }
 
@@ -84,6 +99,7 @@ impl<'de> Deserialize<'de> for SessionTransaction {
             session_id: wire.session_id,
             request_sha256: wire.request_sha256,
             workspace_identity_sha256: wire.workspace_identity_sha256,
+            recovery: wire.recovery,
             transitions: wire.transitions,
         };
         validate_transaction(&transaction).map_err(serde::de::Error::custom)?;
@@ -97,6 +113,31 @@ pub(crate) struct TransactionObservation {
     pub transaction: Option<SessionTransaction>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingPublication {
+    file_name: String,
+    size_bytes: u64,
+    sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SessionRecoveryInspection {
+    pub transaction: Option<SessionTransaction>,
+    pending: Vec<PendingPublication>,
+}
+
+impl SessionRecoveryInspection {
+    pub(crate) fn pending_present(&self) -> bool {
+        !self.pending.is_empty()
+    }
+}
+
+#[derive(Debug)]
+struct TransactionHistory {
+    transaction: Option<SessionTransaction>,
+    pending: Vec<PendingPublication>,
+}
+
 pub(crate) fn observe_transaction(
     layout: &RunLayout,
 ) -> Result<TransactionObservation, RunnerError> {
@@ -108,11 +149,31 @@ pub(crate) fn observe_transaction(
             transaction: None,
         });
     }
-    let (transaction, pending_present) = read_history(&directory)?;
+    let history = read_history(&directory)?;
     Ok(TransactionObservation {
         directory_present: true,
-        pending_present,
-        transaction,
+        pending_present: !history.pending.is_empty(),
+        transaction: history.transaction,
+    })
+}
+
+/// Reads the authoritative committed recovery point without requiring callers
+/// to reconstruct any execution binding. This is read-only and grants no
+/// provider or filesystem mutation authority.
+pub(crate) fn inspect_for_recovery(
+    layout: &RunLayout,
+) -> Result<SessionRecoveryInspection, RunnerError> {
+    let directory = layout.run_dir().join("wsb-session-transaction");
+    if !directory.exists() {
+        return Ok(SessionRecoveryInspection {
+            transaction: None,
+            pending: Vec::new(),
+        });
+    }
+    let history = read_history(&directory)?;
+    Ok(SessionRecoveryInspection {
+        transaction: history.transaction,
+        pending: history.pending,
     })
 }
 
@@ -126,6 +187,7 @@ pub(crate) struct SessionBinding {
     pub session_id: String,
     pub request_sha256: String,
     pub workspace_identity_sha256: String,
+    pub recovery: Option<SessionRecoveryBinding>,
 }
 
 impl SessionBinding {
@@ -140,6 +202,11 @@ impl SessionBinding {
             session_id: self.session_id.clone(),
             request_sha256: self.request_sha256.clone(),
             workspace_identity_sha256: self.workspace_identity_sha256.clone(),
+            recovery: Some(self.recovery.clone().ok_or_else(|| {
+                RunnerError::Transaction(
+                    "new session transaction lacks its recovery binding".to_owned(),
+                )
+            })?),
             transitions: Vec::new(),
         };
         transaction.push(SessionTransactionState::StartIntent, reason_code)?;
@@ -155,6 +222,15 @@ impl SessionBinding {
             && transaction.session_id == self.session_id
             && transaction.request_sha256 == self.request_sha256
             && transaction.workspace_identity_sha256 == self.workspace_identity_sha256
+            && match transaction.schema_version.as_str() {
+                SESSION_TRANSACTION_SCHEMA_VERSION => {
+                    self.recovery.is_some() && transaction.recovery == self.recovery
+                }
+                LEGACY_SESSION_TRANSACTION_SCHEMA_VERSION => {
+                    self.recovery.is_none() && transaction.recovery.is_none()
+                }
+                _ => false,
+            }
     }
 }
 
@@ -230,12 +306,101 @@ impl<'a> TransactionStore<'a> {
     }
 
     pub(crate) fn load_for_recovery(&self) -> Result<Option<SessionTransaction>, RunnerError> {
-        self.clean_pending()?;
-        self.load()
+        Ok(self.inspect_for_recovery()?.transaction)
     }
 
     pub(crate) fn load_current(&self) -> Result<Option<SessionTransaction>, RunnerError> {
         self.load()
+    }
+
+    /// Reads committed snapshots and fingerprints staging artifacts without
+    /// creating, deleting, repairing, or otherwise mutating transaction state.
+    pub(crate) fn inspect_for_recovery(&self) -> Result<SessionRecoveryInspection, RunnerError> {
+        let inspection = inspect_for_recovery(self.layout)?;
+        if inspection
+            .transaction
+            .as_ref()
+            .is_some_and(|transaction| !self.binding.matches(transaction))
+        {
+            return Err(RunnerError::Transaction(
+                "session transaction belongs to different approved inputs".to_owned(),
+            ));
+        }
+        Ok(inspection)
+    }
+
+    /// Rechecks that the read-only inspection is still current and returns the
+    /// committed recovery point. It intentionally leaves every staging file in
+    /// place; native provider and workspace authority are established outside
+    /// this persistence boundary.
+    pub(crate) fn resume_from(
+        layout: &'a RunLayout,
+        transaction: &SessionTransaction,
+    ) -> Result<Self, RunnerError> {
+        let current = inspect_for_recovery(layout)?;
+        if current.transaction.as_ref() != Some(transaction) {
+            return Err(RunnerError::RecoveryRequired(
+                "session recovery transaction changed before resume".to_owned(),
+            ));
+        }
+        Ok(Self {
+            layout,
+            binding: SessionBinding {
+                run_id: transaction.run_id.clone(),
+                plan_hash: transaction.plan_hash.clone(),
+                project_revision_hash: transaction.project_revision_hash.clone(),
+                provider_sha256: transaction.provider_sha256.clone(),
+                config_sha256: transaction.config_sha256.clone(),
+                session_id: transaction.session_id.clone(),
+                request_sha256: transaction.request_sha256.clone(),
+                workspace_identity_sha256: transaction.workspace_identity_sha256.clone(),
+                recovery: transaction.recovery.clone(),
+            },
+        })
+    }
+
+    pub(crate) fn verify_inspection(
+        &self,
+        inspection: &SessionRecoveryInspection,
+    ) -> Result<SessionTransaction, RunnerError> {
+        let current = self.inspect_for_recovery()?;
+        if &current != inspection {
+            return Err(RunnerError::RecoveryRequired(
+                "session recovery inspection changed before resume".to_owned(),
+            ));
+        }
+        current.transaction.ok_or_else(|| {
+            RunnerError::Transaction("session recovery transaction disappeared".to_owned())
+        })
+    }
+
+    /// Deletes only the exact staging artifacts captured by a still-current
+    /// inspection. The caller must invoke this only after independently
+    /// establishing persisted workspace and exact-session provider authority.
+    pub(crate) fn discard_pending_after_authority(
+        &self,
+        inspection: &SessionRecoveryInspection,
+    ) -> Result<(), RunnerError> {
+        let current = inspect_for_recovery(self.layout)?;
+        if &current != inspection {
+            return Err(RunnerError::RecoveryRequired(
+                "session recovery inspection changed before staging discard".to_owned(),
+            ));
+        }
+        let directory = self.directory();
+        for pending in &inspection.pending {
+            let path = directory.join(&pending.file_name);
+            if pending_publication(&path)? != *pending {
+                return Err(RunnerError::RecoveryRequired(
+                    "session transaction staging changed before discard".to_owned(),
+                ));
+            }
+        }
+        for pending in &inspection.pending {
+            let path = directory.join(&pending.file_name);
+            fs::remove_file(path).map_err(transaction_io)?;
+        }
+        Ok(())
     }
 
     fn directory(&self) -> PathBuf {
@@ -256,13 +421,14 @@ impl<'a> TransactionStore<'a> {
         if !directory.exists() {
             return Ok(None);
         }
-        let (transaction, pending_present) = read_history(&directory)?;
-        if pending_present {
+        let history = read_history(&directory)?;
+        if !history.pending.is_empty() {
             return Err(RunnerError::RecoveryRequired(
                 "session transaction staging requires recovery".to_owned(),
             ));
         }
-        if transaction
+        if history
+            .transaction
             .as_ref()
             .is_some_and(|transaction| !self.binding.matches(transaction))
         {
@@ -270,7 +436,7 @@ impl<'a> TransactionStore<'a> {
                 "session transaction belongs to different approved inputs".to_owned(),
             ));
         }
-        Ok(transaction)
+        Ok(history.transaction)
     }
 
     fn publish(&self, transaction: &SessionTransaction) -> Result<(), RunnerError> {
@@ -309,41 +475,12 @@ impl<'a> TransactionStore<'a> {
         ensure_ordinary_file(&target)?;
         fs::remove_file(&pending).map_err(transaction_io)
     }
-
-    fn clean_pending(&self) -> Result<(), RunnerError> {
-        let directory = self.directory();
-        if !directory.exists() {
-            return Ok(());
-        }
-        ensure_ordinary_directory(&directory)?;
-        for entry in fs::read_dir(&directory).map_err(transaction_io)? {
-            let path = entry.map_err(transaction_io)?.path();
-            let name = path
-                .file_name()
-                .and_then(|value| value.to_str())
-                .ok_or_else(|| {
-                    RunnerError::Transaction("non-Unicode transaction path".to_owned())
-                })?;
-            if name.ends_with(".pending") {
-                parse_pending_name(name)?;
-                ensure_ordinary_file(&path)?;
-                let metadata = fs::metadata(&path).map_err(transaction_io)?;
-                if metadata.len() > MAX_TRANSACTION_BYTES {
-                    return Err(RunnerError::Transaction(
-                        "transaction staging exceeds its fixed bound".to_owned(),
-                    ));
-                }
-                fs::remove_file(path).map_err(transaction_io)?;
-            }
-        }
-        Ok(())
-    }
 }
 
-fn read_history(directory: &Path) -> Result<(Option<SessionTransaction>, bool), RunnerError> {
+fn read_history(directory: &Path) -> Result<TransactionHistory, RunnerError> {
     ensure_ordinary_directory(directory)?;
     let mut snapshots = Vec::new();
-    let mut pending_present = false;
+    let mut pending = Vec::new();
     for entry in fs::read_dir(directory).map_err(transaction_io)? {
         let path = entry.map_err(transaction_io)?.path();
         let name = path
@@ -352,13 +489,12 @@ fn read_history(directory: &Path) -> Result<(Option<SessionTransaction>, bool), 
             .ok_or_else(|| RunnerError::Transaction("non-Unicode transaction path".to_owned()))?;
         if name.ends_with(".pending") {
             parse_pending_name(name)?;
-            ensure_ordinary_file(&path)?;
-            if fs::metadata(&path).map_err(transaction_io)?.len() > MAX_TRANSACTION_BYTES {
+            pending.push(pending_publication(&path)?);
+            if pending.len() > MAX_TRANSITIONS {
                 return Err(RunnerError::Transaction(
-                    "transaction staging exceeds its fixed bound".to_owned(),
+                    "too many session transaction staging artifacts".to_owned(),
                 ));
             }
-            pending_present = true;
             continue;
         }
         let sequence = parse_snapshot_name(name)?;
@@ -384,6 +520,11 @@ fn read_history(directory: &Path) -> Result<(Option<SessionTransaction>, bool), 
             ));
         }
         if let Some(previous) = &previous {
+            if transaction.schema_version != previous.schema_version {
+                return Err(RunnerError::Transaction(
+                    "session transaction history mixes schema versions".to_owned(),
+                ));
+            }
             if transaction.transitions[..index] != previous.transitions
                 || !same_binding(previous, &transaction)
             {
@@ -394,12 +535,48 @@ fn read_history(directory: &Path) -> Result<(Option<SessionTransaction>, bool), 
         }
         previous = Some(transaction);
     }
-    Ok((previous, pending_present))
+    pending.sort_by(|left, right| left.file_name.cmp(&right.file_name));
+    Ok(TransactionHistory {
+        transaction: previous,
+        pending,
+    })
+}
+
+fn pending_publication(path: &Path) -> Result<PendingPublication, RunnerError> {
+    ensure_ordinary_file(path)?;
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| RunnerError::Transaction("non-Unicode transaction path".to_owned()))?;
+    parse_pending_name(file_name)?;
+    let metadata = fs::metadata(path).map_err(transaction_io)?;
+    if metadata.len() > MAX_TRANSACTION_BYTES {
+        return Err(RunnerError::Transaction(
+            "transaction staging exceeds its fixed bound".to_owned(),
+        ));
+    }
+    let file = File::open(path).map_err(transaction_io)?;
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take(MAX_TRANSACTION_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(transaction_io)?;
+    if bytes.len() as u64 > MAX_TRANSACTION_BYTES {
+        return Err(RunnerError::Transaction(
+            "transaction staging changed beyond its bound".to_owned(),
+        ));
+    }
+    Ok(PendingPublication {
+        file_name: file_name.to_owned(),
+        size_bytes: bytes.len() as u64,
+        sha256: hex::encode(Sha256::digest(bytes)),
+    })
 }
 
 fn validate_transaction(transaction: &SessionTransaction) -> Result<(), RunnerError> {
-    if transaction.schema_version != SESSION_TRANSACTION_SCHEMA_VERSION
-        || !valid_run_id(&transaction.run_id)
+    if !matches!(
+        transaction.schema_version.as_str(),
+        SESSION_TRANSACTION_SCHEMA_VERSION | LEGACY_SESSION_TRANSACTION_SCHEMA_VERSION
+    ) || !valid_run_id(&transaction.run_id)
         || !valid_uuid(&transaction.session_id)
         || transaction
             .session_id
@@ -411,6 +588,23 @@ fn validate_transaction(transaction: &SessionTransaction) -> Result<(), RunnerEr
         return Err(RunnerError::Transaction(
             "session transaction binding is invalid".to_owned(),
         ));
+    }
+    match transaction.schema_version.as_str() {
+        SESSION_TRANSACTION_SCHEMA_VERSION => {
+            let recovery = transaction.recovery.as_ref().ok_or_else(|| {
+                RunnerError::Transaction(
+                    "v0alpha3 session transaction lacks its recovery binding".to_owned(),
+                )
+            })?;
+            validate_recovery_binding(recovery, &transaction.workspace_identity_sha256)?;
+        }
+        LEGACY_SESSION_TRANSACTION_SCHEMA_VERSION if transaction.recovery.is_none() => {}
+        LEGACY_SESSION_TRANSACTION_SCHEMA_VERSION => {
+            return Err(RunnerError::Transaction(
+                "v0alpha2 session transaction contains a mixed-version recovery binding".to_owned(),
+            ));
+        }
+        _ => unreachable!("schema version was bounded above"),
     }
     for value in [
         &transaction.plan_hash,
@@ -452,6 +646,38 @@ fn validate_transaction(transaction: &SessionTransaction) -> Result<(), RunnerEr
         }
         previous_state = Some(transition.state);
         previous_hash.clone_from(&transition.hash);
+    }
+    Ok(())
+}
+
+fn validate_recovery_binding(
+    recovery: &SessionRecoveryBinding,
+    workspace_identity_sha256: &str,
+) -> Result<(), RunnerError> {
+    recovery
+        .workspace
+        .validate()
+        .map_err(|error| RunnerError::Transaction(error.to_owned()))?;
+    if recovery.request_relative_path.len() > 512
+        || !recovery.request_relative_path.is_ascii()
+        || recovery.request_relative_path.contains('\\')
+        || !is_safe_relative_path(&recovery.request_relative_path)
+        || recovery.provider_protocol.cli_version != "0.8.107.0"
+        || recovery.provider_protocol.protocol != "windowsSandboxCli/v0.8.107.0"
+        || recovery.provider_protocol.list_schema != "WindowsSandboxEnvironments/Id"
+    {
+        return Err(RunnerError::Transaction(
+            "session recovery binding is invalid".to_owned(),
+        ));
+    }
+    let value = serde_json::to_value(&recovery.workspace)
+        .map_err(|error| RunnerError::Transaction(error.to_string()))?;
+    let bytes = canonical_json_bytes(&value)
+        .map_err(|error| RunnerError::Transaction(error.to_string()))?;
+    if hex::encode(Sha256::digest(bytes)) != workspace_identity_sha256 {
+        return Err(RunnerError::Transaction(
+            "session recovery workspace does not match its identity hash".to_owned(),
+        ));
     }
     Ok(())
 }
@@ -498,7 +724,7 @@ fn valid_transition(
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TransitionHashInput<'a> {
+struct TransitionHashInputV2<'a> {
     schema_version: &'a str,
     run_id: &'a str,
     plan_hash: &'a str,
@@ -514,6 +740,25 @@ struct TransitionHashInput<'a> {
     previous_hash: &'a str,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TransitionHashInputV3<'a> {
+    schema_version: &'a str,
+    run_id: &'a str,
+    plan_hash: &'a str,
+    project_revision_hash: &'a str,
+    provider_sha256: &'a str,
+    config_sha256: &'a str,
+    session_id: &'a str,
+    request_sha256: &'a str,
+    workspace_identity_sha256: &'a str,
+    recovery: &'a SessionRecoveryBinding,
+    sequence: u32,
+    state: SessionTransactionState,
+    reason_code: &'a str,
+    previous_hash: &'a str,
+}
+
 fn transition_hash(
     transaction: &SessionTransaction,
     sequence: u32,
@@ -521,21 +766,51 @@ fn transition_hash(
     reason_code: &str,
     previous_hash: &str,
 ) -> Result<String, RunnerError> {
-    let value = serde_json::to_value(TransitionHashInput {
-        schema_version: &transaction.schema_version,
-        run_id: &transaction.run_id,
-        plan_hash: &transaction.plan_hash,
-        project_revision_hash: &transaction.project_revision_hash,
-        provider_sha256: &transaction.provider_sha256,
-        config_sha256: &transaction.config_sha256,
-        session_id: &transaction.session_id,
-        request_sha256: &transaction.request_sha256,
-        workspace_identity_sha256: &transaction.workspace_identity_sha256,
-        sequence,
-        state,
-        reason_code,
-        previous_hash,
-    })
+    let value = match transaction.schema_version.as_str() {
+        LEGACY_SESSION_TRANSACTION_SCHEMA_VERSION => serde_json::to_value(TransitionHashInputV2 {
+            schema_version: &transaction.schema_version,
+            run_id: &transaction.run_id,
+            plan_hash: &transaction.plan_hash,
+            project_revision_hash: &transaction.project_revision_hash,
+            provider_sha256: &transaction.provider_sha256,
+            config_sha256: &transaction.config_sha256,
+            session_id: &transaction.session_id,
+            request_sha256: &transaction.request_sha256,
+            workspace_identity_sha256: &transaction.workspace_identity_sha256,
+            sequence,
+            state,
+            reason_code,
+            previous_hash,
+        }),
+        SESSION_TRANSACTION_SCHEMA_VERSION => {
+            let recovery = transaction.recovery.as_ref().ok_or_else(|| {
+                RunnerError::Transaction(
+                    "v0alpha3 transition lacks its recovery binding".to_owned(),
+                )
+            })?;
+            serde_json::to_value(TransitionHashInputV3 {
+                schema_version: &transaction.schema_version,
+                run_id: &transaction.run_id,
+                plan_hash: &transaction.plan_hash,
+                project_revision_hash: &transaction.project_revision_hash,
+                provider_sha256: &transaction.provider_sha256,
+                config_sha256: &transaction.config_sha256,
+                session_id: &transaction.session_id,
+                request_sha256: &transaction.request_sha256,
+                workspace_identity_sha256: &transaction.workspace_identity_sha256,
+                recovery,
+                sequence,
+                state,
+                reason_code,
+                previous_hash,
+            })
+        }
+        _ => {
+            return Err(RunnerError::Transaction(
+                "unsupported session transaction schema version".to_owned(),
+            ));
+        }
+    }
     .map_err(|error| RunnerError::Transaction(error.to_string()))?;
     let bytes = canonical_json_bytes(&value)
         .map_err(|error| RunnerError::Transaction(error.to_string()))?;
@@ -579,6 +854,7 @@ fn same_binding(left: &SessionTransaction, right: &SessionTransaction) -> bool {
         && left.session_id == right.session_id
         && left.request_sha256 == right.request_sha256
         && left.workspace_identity_sha256 == right.workspace_identity_sha256
+        && left.recovery == right.recovery
 }
 
 fn parse_snapshot_name(name: &str) -> Result<u32, RunnerError> {
@@ -684,10 +960,69 @@ fn transaction_io(error: std::io::Error) -> RunnerError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
-    #[test]
-    fn transition_grammar_is_monotonic_and_strict() {
-        let binding = SessionBinding {
+    struct TestRoot(PathBuf);
+
+    impl TestRoot {
+        fn new() -> Self {
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "aiw-session-store-test-{}-{nonce}",
+                std::process::id()
+            ));
+            fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for TestRoot {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn recovery_binding() -> SessionRecoveryBinding {
+        let owner = "S-1-5-21-1".to_owned();
+        let identity = |path: &str, marker: u8| aiw_probe::WindowsFileIdentity {
+            final_path: path.to_owned(),
+            volume_serial_number: "0".repeat(16),
+            file_id: format!("{marker:032x}"),
+        };
+        SessionRecoveryBinding {
+            workspace: WorkspaceBindingEvidence {
+                schema_version: aiw_probe::WINDOWS_WORKSPACE_SCHEMA_VERSION.to_owned(),
+                policy: aiw_probe::WINDOWS_WORKSPACE_SECURITY_POLICY.to_owned(),
+                security_policy_sha256: aiw_probe::workspace_policy_hash(&owner),
+                owner_sid: owner.clone(),
+                dacl_protected: true,
+                allowed_sids: vec![aiw_probe::WINDOWS_SYSTEM_SID.to_owned(), owner],
+                parent: identity("C:\\AIW", 1),
+                root: identity("C:\\AIW\\run-one", 2),
+                tools: identity("C:\\AIW\\run-one\\tools", 3),
+                output: identity("C:\\AIW\\run-one\\output", 4),
+            },
+            request_relative_path: "request.json".to_owned(),
+            provider_protocol: WindowsSandboxCliProtocol {
+                cli_version: "0.8.107.0".to_owned(),
+                protocol: "windowsSandboxCli/v0.8.107.0".to_owned(),
+                list_schema: "WindowsSandboxEnvironments/Id".to_owned(),
+            },
+        }
+    }
+
+    fn workspace_hash(recovery: &SessionRecoveryBinding) -> String {
+        let value = serde_json::to_value(&recovery.workspace).unwrap();
+        let bytes = canonical_json_bytes(&value).unwrap();
+        hex::encode(Sha256::digest(bytes))
+    }
+
+    fn binding() -> SessionBinding {
+        let recovery = recovery_binding();
+        SessionBinding {
             run_id: "run-one".to_owned(),
             plan_hash: "1".repeat(64),
             project_revision_hash: "2".repeat(64),
@@ -695,8 +1030,49 @@ mod tests {
             config_sha256: "4".repeat(64),
             session_id: "11111111-1111-1111-1111-111111111111".to_owned(),
             request_sha256: "5".repeat(64),
-            workspace_identity_sha256: "6".repeat(64),
+            workspace_identity_sha256: workspace_hash(&recovery),
+            recovery: Some(recovery),
+        }
+    }
+
+    fn legacy_transaction(reason_code: &str) -> SessionTransaction {
+        let binding = binding();
+        let mut transaction = SessionTransaction {
+            schema_version: LEGACY_SESSION_TRANSACTION_SCHEMA_VERSION.to_owned(),
+            run_id: binding.run_id,
+            plan_hash: binding.plan_hash,
+            project_revision_hash: binding.project_revision_hash,
+            provider_sha256: binding.provider_sha256,
+            config_sha256: binding.config_sha256,
+            session_id: binding.session_id,
+            request_sha256: binding.request_sha256,
+            workspace_identity_sha256: binding.workspace_identity_sha256,
+            recovery: None,
+            transitions: Vec::new(),
         };
+        transaction
+            .push(SessionTransactionState::StartIntent, reason_code)
+            .unwrap();
+        transaction
+    }
+
+    fn layout(root: &TestRoot) -> RunLayout {
+        let layout = RunLayout::new(&root.0, "run-one").unwrap();
+        fs::create_dir_all(layout.run_dir()).unwrap();
+        layout
+    }
+
+    fn write_snapshot(layout: &RunLayout, transaction: &SessionTransaction) {
+        let directory = layout.run_dir().join("wsb-session-transaction");
+        fs::create_dir_all(&directory).unwrap();
+        let sequence = transaction.transitions.len();
+        let path = directory.join(format!("{sequence:020}.json"));
+        fs::write(path, serde_json::to_vec_pretty(transaction).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn transition_grammar_is_monotonic_and_strict() {
+        let binding = binding();
         let mut transaction = binding.transaction("approved-start").unwrap();
         transaction
             .push(SessionTransactionState::Active, "start-confirmed")
@@ -713,16 +1089,7 @@ mod tests {
 
     #[test]
     fn direct_deserialization_rejects_forged_or_corrupt_snapshots() {
-        let binding = SessionBinding {
-            run_id: "run-one".to_owned(),
-            plan_hash: "1".repeat(64),
-            project_revision_hash: "2".repeat(64),
-            provider_sha256: "3".repeat(64),
-            config_sha256: "4".repeat(64),
-            session_id: "11111111-1111-1111-1111-111111111111".to_owned(),
-            request_sha256: "5".repeat(64),
-            workspace_identity_sha256: "6".repeat(64),
-        };
+        let binding = binding();
         let valid = binding.transaction("approved-start").unwrap();
         assert!(
             serde_json::from_value::<SessionTransaction>(serde_json::to_value(&valid).unwrap())
@@ -765,5 +1132,141 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn v0alpha3_roundtrips_and_binds_recovery_fields_into_the_hash_chain() {
+        let transaction = binding().transaction("approved-start").unwrap();
+        assert_eq!(
+            transaction.schema_version,
+            SESSION_TRANSACTION_SCHEMA_VERSION
+        );
+        assert!(transaction.recovery.is_some());
+        let roundtrip: SessionTransaction =
+            serde_json::from_value(serde_json::to_value(&transaction).unwrap()).unwrap();
+        assert_eq!(roundtrip, transaction);
+
+        let mut request_tamper = serde_json::to_value(&transaction).unwrap();
+        request_tamper["recovery"]["requestRelativePath"] = serde_json::json!("other.json");
+        assert!(serde_json::from_value::<SessionTransaction>(request_tamper).is_err());
+
+        let mut missing_recovery = serde_json::to_value(&transaction).unwrap();
+        missing_recovery.as_object_mut().unwrap().remove("recovery");
+        assert!(serde_json::from_value::<SessionTransaction>(missing_recovery).is_err());
+    }
+
+    #[test]
+    fn v0alpha2_roundtrips_with_its_exact_legacy_hash_input() {
+        let transaction = legacy_transaction("approved-start");
+        let roundtrip: SessionTransaction =
+            serde_json::from_value(serde_json::to_value(&transaction).unwrap()).unwrap();
+        assert_eq!(roundtrip, transaction);
+
+        let root = TestRoot::new();
+        let layout = layout(&root);
+        write_snapshot(&layout, &transaction);
+        assert_eq!(
+            inspect_for_recovery(&layout).unwrap().transaction,
+            Some(transaction.clone())
+        );
+
+        let mut exact_fixture = transaction.clone();
+        exact_fixture.workspace_identity_sha256 = "6".repeat(64);
+        exact_fixture.transitions.clear();
+        exact_fixture
+            .push(SessionTransactionState::StartIntent, "approved-start")
+            .unwrap();
+        assert_eq!(
+            exact_fixture.transitions[0].hash,
+            "2c8bb65f414f9b25490f3cda713e36cd6b78bc94fa1a5d5316005881b0bb597e"
+        );
+
+        let mut mixed_fields = serde_json::to_value(&transaction).unwrap();
+        mixed_fields["recovery"] = serde_json::to_value(recovery_binding()).unwrap();
+        assert!(serde_json::from_value::<SessionTransaction>(mixed_fields).is_err());
+    }
+
+    #[test]
+    fn history_rejects_mixed_v0alpha2_and_v0alpha3_snapshots() {
+        let root = TestRoot::new();
+        let layout = layout(&root);
+        let legacy = legacy_transaction("approved-start");
+        write_snapshot(&layout, &legacy);
+
+        let mut current = binding().transaction("approved-start").unwrap();
+        current
+            .push(SessionTransactionState::Unknown, "start-outcome-unknown")
+            .unwrap();
+        write_snapshot(&layout, &current);
+
+        let error = read_history(&layout.run_dir().join("wsb-session-transaction")).unwrap_err();
+        assert!(
+            error.to_string().contains("mixes schema versions"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn recovery_inspection_is_read_only_until_authorized_pending_discard() {
+        let root = TestRoot::new();
+        let layout = layout(&root);
+        let store = TransactionStore::new(&layout, binding());
+        let committed = store.create("approved-start").unwrap();
+        let pending = layout
+            .run_dir()
+            .join("wsb-session-transaction")
+            .join("00000000000000000002.json.pending");
+        fs::write(&pending, b"interrupted-publication").unwrap();
+
+        let inspection = store.inspect_for_recovery().unwrap();
+        assert!(inspection.pending_present());
+        assert_eq!(inspection.transaction.as_ref(), Some(&committed));
+        assert_eq!(store.verify_inspection(&inspection).unwrap(), committed);
+        assert!(pending.exists(), "read-only recovery removed staging");
+
+        store.discard_pending_after_authority(&inspection).unwrap();
+        assert!(!pending.exists());
+        assert!(store.load_current().unwrap().is_some());
+    }
+
+    #[test]
+    fn recovery_rejects_changed_pending_and_preserves_hardlinked_publication() {
+        let root = TestRoot::new();
+        let layout = layout(&root);
+        let store = TransactionStore::new(&layout, binding());
+        let mut transaction = store.create("approved-start").unwrap();
+        transaction
+            .push(SessionTransactionState::Unknown, "start-outcome-unknown")
+            .unwrap();
+        let directory = layout.run_dir().join("wsb-session-transaction");
+        let pending = directory.join("00000000000000000002.json.pending");
+        let target = directory.join("00000000000000000002.json");
+        fs::write(&pending, serde_json::to_vec_pretty(&transaction).unwrap()).unwrap();
+        fs::hard_link(&pending, &target).unwrap();
+
+        let inspection = store.inspect_for_recovery().unwrap();
+        assert_eq!(inspection.transaction.as_ref(), Some(&transaction));
+        assert!(inspection.pending_present());
+        assert!(pending.exists() && target.exists());
+
+        fs::remove_file(&pending).unwrap();
+        fs::write(&pending, b"changed-after-inspection").unwrap();
+        assert!(matches!(
+            store.verify_inspection(&inspection),
+            Err(RunnerError::RecoveryRequired(_))
+        ));
+        assert!(matches!(
+            store.discard_pending_after_authority(&inspection),
+            Err(RunnerError::RecoveryRequired(_))
+        ));
+        assert!(pending.exists() && target.exists());
+
+        fs::remove_file(&pending).unwrap();
+        fs::hard_link(&target, &pending).unwrap();
+        let current = store.inspect_for_recovery().unwrap();
+        store.discard_pending_after_authority(&current).unwrap();
+        assert!(!pending.exists());
+        assert!(target.exists());
+        assert_eq!(store.load_current().unwrap(), Some(transaction));
     }
 }
