@@ -689,6 +689,7 @@ fn versioned_project_and_orchestrator_schemas_are_public() {
         ("wsb-preparation-result", "WsbPreparationResult"),
         ("wsb-planning-import-receipt", "WsbPlanningImportReceipt"),
         ("wsb-planning-import-result", "WsbPlanningImportResult"),
+        ("wsb-revocation-record", "WsbRevocationRecord"),
         ("error-envelope", "AiwError"),
     ] {
         let output = Command::new(aiw()).args(["schema", kind]).output().unwrap();
