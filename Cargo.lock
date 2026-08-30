@@ -178,6 +178,7 @@ version = "0.1.0-alpha.1"
 dependencies = [
  "aiw-probe",
  "aiw-provider-wsb",
+ "aiw-windows-command-line",
  "hex",
  "serde",
  "serde_json",

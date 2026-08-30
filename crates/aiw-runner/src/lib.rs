@@ -1513,8 +1513,16 @@ mod tests {
             &self,
             executable: &Path,
             arguments: &[String],
-            _timeout_seconds: u32,
+            timeout_seconds: u32,
         ) -> Result<ProcessResult, RunnerError> {
+            if timeout_seconds == 0 {
+                return Err(RunnerError::Process(
+                    "native provider timeout must be nonzero".to_owned(),
+                ));
+            }
+            let requested_timeout = Duration::from_secs(u64::from(timeout_seconds));
+            let read_timeout = requested_timeout.min(Duration::from_secs(15));
+            let mutation_timeout = requested_timeout.min(Duration::from_secs(120));
             let mut state = self.state.lock().unwrap();
             let expected = state
                 .lease
@@ -1536,7 +1544,7 @@ mod tests {
                 [list, raw] if list == "list" && raw == "--raw" => {
                     let observed = state
                         .lease
-                        .list()
+                        .list_with_timeout(read_timeout)
                         .map_err(|error| RunnerError::Process(error.to_string()))?;
                     successful_json(serde_json::json!({
                         "WindowsSandboxEnvironments": observed.session_ids.into_iter().map(|id| serde_json::json!({"Id": id})).collect::<Vec<_>>()
@@ -1565,7 +1573,7 @@ mod tests {
                     state.started_id = Some(id.as_str().to_owned());
                     let observed = state
                         .lease
-                        .start(&id, &self.plan)
+                        .start_with_timeout(&id, &self.plan, mutation_timeout)
                         .map_err(|error| RunnerError::Process(error.to_string()))?;
                     successful_json(serde_json::json!({"Id": observed.session_id}))
                 }
@@ -1579,7 +1587,7 @@ mod tests {
                     }
                     state
                         .lease
-                        .stop_owned()
+                        .stop_owned_with_timeout(mutation_timeout)
                         .map_err(|error| RunnerError::Process(error.to_string()))?;
                     state.started_id = None;
                     Ok(ProcessResult {
@@ -1598,7 +1606,7 @@ mod tests {
                     }
                     state
                         .lease
-                        .connect_owned()
+                        .connect_owned_with_timeout(mutation_timeout)
                         .map_err(|error| RunnerError::Process(error.to_string()))?;
                     Ok(ProcessResult {
                         exit_code: 0,

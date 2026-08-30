@@ -1,10 +1,10 @@
 # Roadmap
 
-AIW is delivered as two milestones with vertical, evidence-gated slices. The current repository has an implemented **W0 candidate** under final validation: contracts and non-executing plans exist, but no provider runner, desktop UI, package authoring, or live provider execution exists.
+AIW is delivered as two milestones with vertical, evidence-gated slices. The current repository has completed the W0 foundation and has a private, live-proven W1 Windows Sandbox kernel. Production provider commands remain unavailable until drift-independent recovery is complete; application assessment, the desktop UI, and package authoring remain later slices.
 
 ## Workbench v1
 
-### W0 — foundation (implementation candidate)
+### W0 — foundation (complete)
 
 - Implement `aiw.dev/v0alpha2` and preserve readable, non-destructive `v0alpha1` migration with an explicit review gate.
 - Separate `AssessmentRun`, `LaunchRun`, and `AuthoringRun` lifecycles.
@@ -13,7 +13,7 @@ AIW is delivered as two milestones with vertical, evidence-gated slices. The cur
 
 **Exit gate:** old examples migrate without overwriting their source; schemas/CI are stable; no behavior bypasses approval.
 
-### W1 — live Windows Sandbox proof
+### W1 — live Windows Sandbox proof (private kernel implemented; recovery gate remains)
 
 - Implement the runner kernel, workspace/journal, fixed-function guest agent, short-lived helper boundary, and full Windows Sandbox lifecycle.
 - Revalidate plan hashes, provider identity, paths, inputs, output emptiness, and leases immediately before execution.

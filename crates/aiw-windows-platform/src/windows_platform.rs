@@ -1,9 +1,10 @@
+use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom};
+use std::os::windows::ffi::OsStrExt;
 use std::os::windows::fs::OpenOptionsExt;
-use std::os::windows::io::AsRawHandle;
+use std::os::windows::io::{AsRawHandle, FromRawHandle, IntoRawHandle, OwnedHandle};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -12,6 +13,7 @@ use aiw_probe::{
     WindowsPackageIdentity, WindowsSandboxCliProtocol, WindowsSandboxReadiness,
 };
 use aiw_provider_wsb::{WindowsSandboxPlan, render_config, validate_host_mappings};
+use aiw_windows_command_line::join_arguments;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -19,11 +21,14 @@ use windows::ApplicationModel::{Package, PackageSignatureKind};
 use windows::Management::Deployment::PackageManager;
 use windows::System::ProcessorArchitecture;
 use windows::System::Profile::AnalyticsInfo;
-use windows::Win32::Foundation::{CloseHandle, WAIT_ABANDONED, WAIT_OBJECT_0, WAIT_TIMEOUT};
-use windows::Win32::Foundation::{HANDLE, HWND};
+use windows::Win32::Foundation::{
+    CloseHandle, HANDLE, HANDLE_FLAG_INHERIT, HANDLE_FLAGS, HWND, SetHandleInformation,
+    WAIT_ABANDONED, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
+};
 use windows::Win32::Security::Cryptography::Catalog::{
     CryptCATAdminAcquireContext2, CryptCATAdminCalcHashFromFileHandle2, CryptCATAdminReleaseContext,
 };
+use windows::Win32::Security::SECURITY_ATTRIBUTES;
 use windows::Win32::Security::WinTrust::{
     WINTRUST_ACTION_GENERIC_VERIFY_V2, WINTRUST_CATALOG_INFO, WINTRUST_DATA, WINTRUST_DATA_0,
     WINTRUST_DATA_PROVIDER_FLAGS, WTD_CACHE_ONLY_URL_RETRIEVAL, WTD_CHOICE_CATALOG,
@@ -34,12 +39,25 @@ use windows::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, FILE_NAME_NORMALIZED, FILE_SHARE_READ, GetFileInformationByHandle,
     GetFinalPathNameByHandleW,
 };
-use windows::Win32::System::Threading::{
-    CreateMutexW, IsProcessorFeaturePresent, PF_VIRT_FIRMWARE_ENABLED, ReleaseMutex,
-    WaitForSingleObject,
+use windows::Win32::System::JobObjects::{
+    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    JobObjectBasicAccountingInformation, JobObjectExtendedLimitInformation,
+    QueryInformationJobObject, SetInformationJobObject, TerminateJobObject,
 };
+use windows::Win32::System::Pipes::CreatePipe;
+use windows::Win32::System::Threading::{
+    CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateMutexW, CreateProcessW,
+    DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess,
+    InitializeProcThreadAttributeList, IsProcessorFeaturePresent, LPPROC_THREAD_ATTRIBUTE_LIST,
+    PF_VIRT_FIRMWARE_ENABLED, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROCESS_INFORMATION, ReleaseMutex,
+    ResumeThread, STARTF_USESTDHANDLES, STARTUPINFOEXW, TerminateProcess,
+    UpdateProcThreadAttribute, WaitForSingleObject,
+};
+#[cfg(test)]
+use windows::Win32::System::Threading::{CreateEventW, SetEvent};
 use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize, RoUninitialize};
-use windows::core::{HSTRING, PCWSTR, w};
+use windows::core::{HSTRING, PCWSTR, PWSTR, w};
 
 const PACKAGE_NAME: &str = "MicrosoftWindows.WindowsSandbox";
 const PACKAGE_FAMILY: &str = "MicrosoftWindows.WindowsSandbox_cw5n1h2txyewy";
@@ -50,6 +68,10 @@ const PROVIDER_FILE: &str = "wsb.exe";
 const CATALOG_FILE: &str = "AppxMetadata\\CodeIntegrity.cat";
 const SUPPORTED_CLI_VERSION: &str = "0.8.107.0";
 const STREAM_LIMIT: u64 = 64 * 1024;
+const READ_ONLY_TIMEOUT: Duration = Duration::from_secs(15);
+const MUTATING_TIMEOUT: Duration = Duration::from_secs(120);
+const MAX_INVOCATION_TIMEOUT: Duration = Duration::from_secs(3_600);
+const PROCESS_TREE_CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
 const PROVIDER_MUTEX_NAME: PCWSTR = w!("Local\\AIW.WindowsSandbox.Provider.v1");
 
 #[derive(Debug, Error)]
@@ -126,10 +148,25 @@ impl WindowsSandboxExecutionLease {
     }
 
     pub fn list(&self) -> Result<WsbListObservation, WindowsSandboxInvocationError> {
+        self.list_with_timeout(READ_ONLY_TIMEOUT)
+    }
+
+    pub fn list_with_timeout(
+        &self,
+        timeout: Duration,
+    ) -> Result<WsbListObservation, WindowsSandboxInvocationError> {
+        self.list_until(invocation_deadline(timeout)?)
+    }
+
+    fn list_until(
+        &self,
+        deadline: Instant,
+    ) -> Result<WsbListObservation, WindowsSandboxInvocationError> {
         let output = invoke_read_only(
             &self.provider_path,
             &["list", "--raw"],
-            Duration::from_secs(15),
+            deadline,
+            DescendantPolicy::ProviderManaged,
         )
         .map_err(WindowsSandboxInvocationError::Process)?;
         let session_ids = parse_list_ids_v0_8_107_0(&output.stdout)
@@ -142,6 +179,16 @@ impl WindowsSandboxExecutionLease {
         sandbox_id: &CanonicalSandboxId,
         plan: &WindowsSandboxPlan,
     ) -> Result<WsbStartObservation, WindowsSandboxInvocationError> {
+        self.start_with_timeout(sandbox_id, plan, MUTATING_TIMEOUT)
+    }
+
+    pub fn start_with_timeout(
+        &mut self,
+        sandbox_id: &CanonicalSandboxId,
+        plan: &WindowsSandboxPlan,
+        timeout: Duration,
+    ) -> Result<WsbStartObservation, WindowsSandboxInvocationError> {
+        let deadline = invocation_deadline(timeout)?;
         if self.owned_session.is_some() {
             return Err(WindowsSandboxInvocationError::Protocol(
                 "this lease already owns or may own a sandbox session".to_owned(),
@@ -152,7 +199,7 @@ impl WindowsSandboxExecutionLease {
                 "this lease has an unresolved prior connection attempt".to_owned(),
             ));
         }
-        if !self.list()?.session_ids.is_empty() {
+        if !self.list_until(deadline)?.session_ids.is_empty() {
             return Err(WindowsSandboxInvocationError::Protocol(
                 "start requires an empty provider under the held lease".to_owned(),
             ));
@@ -180,7 +227,8 @@ impl WindowsSandboxExecutionLease {
                 "--config",
                 &rendered.xml,
             ],
-            Duration::from_secs(120),
+            deadline,
+            DescendantPolicy::ProviderManaged,
         )
         .map_err(WindowsSandboxInvocationError::Process)?;
         let observed = parse_start_v0_8_107_0(&output.stdout)
@@ -198,6 +246,14 @@ impl WindowsSandboxExecutionLease {
     pub fn connect_owned(
         &mut self,
     ) -> Result<WsbConnectObservation, WindowsSandboxInvocationError> {
+        self.connect_owned_with_timeout(MUTATING_TIMEOUT)
+    }
+
+    pub fn connect_owned_with_timeout(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<WsbConnectObservation, WindowsSandboxInvocationError> {
+        let deadline = invocation_deadline(timeout)?;
         if self.connection_attempted {
             return Err(WindowsSandboxInvocationError::Protocol(
                 "the owned sandbox connection is one-shot".to_owned(),
@@ -208,7 +264,7 @@ impl WindowsSandboxExecutionLease {
                 "this lease has no bound sandbox session".to_owned(),
             )
         })?;
-        let current = self.list()?;
+        let current = self.list_until(deadline)?;
         if current.session_ids != [sandbox_id.as_str()] {
             return Err(WindowsSandboxInvocationError::Protocol(
                 "connect requires the exact owned sandbox session and no other session".to_owned(),
@@ -221,10 +277,10 @@ impl WindowsSandboxExecutionLease {
         invoke_without_output(
             &self.provider_path,
             &["connect", "--raw", "--id", sandbox_id.as_str()],
-            Duration::from_secs(120),
+            deadline,
         )
         .map_err(WindowsSandboxInvocationError::Process)?;
-        let current = self.list()?;
+        let current = self.list_until(deadline)?;
         if current.session_ids != [sandbox_id.as_str()] {
             return Err(WindowsSandboxInvocationError::Protocol(
                 "owned sandbox session drifted while establishing the user connection".to_owned(),
@@ -241,6 +297,14 @@ impl WindowsSandboxExecutionLease {
     }
 
     pub fn stop_owned(&mut self) -> Result<WsbStopObservation, WindowsSandboxInvocationError> {
+        self.stop_owned_with_timeout(MUTATING_TIMEOUT)
+    }
+
+    pub fn stop_owned_with_timeout(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<WsbStopObservation, WindowsSandboxInvocationError> {
+        let deadline = invocation_deadline(timeout)?;
         let sandbox_id = self.owned_session.clone().ok_or_else(|| {
             WindowsSandboxInvocationError::Protocol(
                 "this lease has no bound sandbox session".to_owned(),
@@ -249,7 +313,8 @@ impl WindowsSandboxExecutionLease {
         let output = invoke_read_only(
             &self.provider_path,
             &["stop", "--raw", "--id", sandbox_id.as_str()],
-            Duration::from_secs(120),
+            deadline,
+            DescendantPolicy::ProviderManaged,
         )
         .map_err(WindowsSandboxInvocationError::Process)?;
         if !output.stdout.is_empty() {
@@ -257,7 +322,7 @@ impl WindowsSandboxExecutionLease {
                 "stop response must be empty for CLI protocol 0.8.107.0".to_owned(),
             ));
         }
-        let remaining = self.list()?;
+        let remaining = self.list_until(deadline)?;
         if !remaining.session_ids.is_empty() {
             return Err(WindowsSandboxInvocationError::Protocol(
                 "exact stop did not establish an empty provider".to_owned(),
@@ -424,14 +489,24 @@ fn assess_provider(result: &mut WindowsSandboxReadiness) -> Result<(), String> {
     let (sha256, size_bytes) = hash_held_file(&mut provider)?;
     let catalog_trust = verify_catalog_member(&provider, &final_path, &catalog_path)?;
 
-    let version_output = invoke_read_only(&final_path, &["--version"], Duration::from_secs(15))?;
+    let version_output = invoke_read_only(
+        &final_path,
+        &["--version"],
+        invocation_deadline(READ_ONLY_TIMEOUT).map_err(|error| error.to_string())?,
+        DescendantPolicy::ProviderManaged,
+    )?;
     let cli_version = parse_version(&version_output.stdout)?;
     if cli_version != SUPPORTED_CLI_VERSION {
         return Err(format!(
             "AIW_WSB_CLI_VERSION_UNSUPPORTED: observed {cli_version}; supported protocol is {SUPPORTED_CLI_VERSION}."
         ));
     }
-    let list_output = invoke_read_only(&final_path, &["list", "--raw"], Duration::from_secs(15))?;
+    let list_output = invoke_read_only(
+        &final_path,
+        &["list", "--raw"],
+        invocation_deadline(READ_ONLY_TIMEOUT).map_err(|error| error.to_string())?,
+        DescendantPolicy::ProviderManaged,
+    )?;
     let session_count = parse_list_v0_8_107_0(&list_output.stdout)?;
 
     result.sandbox_feature = ReadinessState::Available;
@@ -732,16 +807,263 @@ impl Drop for CatalogAdmin {
     }
 }
 
+#[derive(Debug)]
 struct ProcessOutput {
+    exit_code: u32,
     stdout: Vec<u8>,
+    stderr: Vec<u8>,
 }
 
-fn provider_command(path: &Path) -> Result<Command, String> {
-    let provider_root = path.parent().ok_or_else(|| {
-        "AIW_WSB_CLI_PATH_REJECTED: provider has no protected package parent.".to_owned()
-    })?;
-    let mut command = Command::new(path);
-    command.current_dir(provider_root).env_clear();
+#[derive(Clone, Copy)]
+enum OutputMode {
+    Capture,
+    Discard,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DescendantPolicy {
+    #[cfg(test)]
+    Contained,
+    ProviderManaged,
+}
+
+type BoundedReader = thread::JoinHandle<Result<Vec<u8>, String>>;
+
+struct InvocationStdio {
+    null: Option<File>,
+    stdout_read: Option<OwnedHandle>,
+    stdout_write: Option<OwnedHandle>,
+    stderr_read: Option<OwnedHandle>,
+    stderr_write: Option<OwnedHandle>,
+}
+
+impl InvocationStdio {
+    fn new(mode: OutputMode) -> Result<Self, String> {
+        let null = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("NUL")
+            .map_err(|error| format!("AIW_WSB_CLI_NULL_FAILED: {error}"))?;
+        set_inheritable(file_handle(&null), true)?;
+        let (stdout_read, stdout_write, stderr_read, stderr_write) = match mode {
+            OutputMode::Capture => {
+                let (stdout_read, stdout_write) = inheritable_pipe()?;
+                let (stderr_read, stderr_write) = inheritable_pipe()?;
+                (
+                    Some(stdout_read),
+                    Some(stdout_write),
+                    Some(stderr_read),
+                    Some(stderr_write),
+                )
+            }
+            OutputMode::Discard => (None, None, None, None),
+        };
+        Ok(Self {
+            null: Some(null),
+            stdout_read,
+            stdout_write,
+            stderr_read,
+            stderr_write,
+        })
+    }
+
+    fn inherited_handles(&self) -> Vec<HANDLE> {
+        let mut handles = vec![file_handle(
+            self.null.as_ref().expect("standard handles are present"),
+        )];
+        if let Some(stdout) = self.stdout_write.as_ref() {
+            handles.push(owned_handle(stdout));
+        }
+        if let Some(stderr) = self.stderr_write.as_ref() {
+            handles.push(owned_handle(stderr));
+        }
+        handles
+    }
+
+    fn startup_handles(&self) -> (HANDLE, HANDLE, HANDLE) {
+        let null = file_handle(self.null.as_ref().expect("standard handles are present"));
+        (
+            null,
+            self.stdout_write.as_ref().map_or(null, owned_handle),
+            self.stderr_write.as_ref().map_or(null, owned_handle),
+        )
+    }
+
+    fn close_child_ends(&mut self) {
+        self.stdout_write.take();
+        self.stderr_write.take();
+        self.null.take();
+    }
+
+    fn take_readers(&mut self) -> (Option<BoundedReader>, Option<BoundedReader>) {
+        let stdout = self.stdout_read.take().map(|handle| {
+            thread::spawn(move || {
+                let file = unsafe { File::from_raw_handle(handle.into_raw_handle()) };
+                read_bounded(file)
+            })
+        });
+        let stderr = self.stderr_read.take().map(|handle| {
+            thread::spawn(move || {
+                let file = unsafe { File::from_raw_handle(handle.into_raw_handle()) };
+                read_bounded(file)
+            })
+        });
+        (stdout, stderr)
+    }
+}
+
+struct ProcessAttributeList {
+    _storage: Vec<usize>,
+    list: LPPROC_THREAD_ATTRIBUTE_LIST,
+}
+
+impl ProcessAttributeList {
+    fn new(attribute_count: u32) -> Result<Self, String> {
+        let mut bytes = 0usize;
+        let initial =
+            unsafe { InitializeProcThreadAttributeList(None, attribute_count, None, &mut bytes) };
+        if initial.is_ok() || bytes == 0 {
+            return Err(
+                "AIW_WSB_CLI_ATTRIBUTE_LIST_FAILED: size query returned an invalid result."
+                    .to_owned(),
+            );
+        }
+        let words = bytes.div_ceil(std::mem::size_of::<usize>());
+        let mut storage = vec![0usize; words];
+        let list = LPPROC_THREAD_ATTRIBUTE_LIST(storage.as_mut_ptr().cast());
+        unsafe { InitializeProcThreadAttributeList(Some(list), attribute_count, None, &mut bytes) }
+            .map_err(|error| format!("AIW_WSB_CLI_ATTRIBUTE_LIST_FAILED: {error}"))?;
+        Ok(Self {
+            _storage: storage,
+            list,
+        })
+    }
+
+    fn update_handles(&mut self, attribute: u32, handles: &[HANDLE]) -> Result<(), String> {
+        unsafe {
+            UpdateProcThreadAttribute(
+                self.list,
+                0,
+                attribute as usize,
+                Some(handles.as_ptr().cast()),
+                std::mem::size_of_val(handles),
+                None,
+                None,
+            )
+        }
+        .map_err(|error| format!("AIW_WSB_CLI_ATTRIBUTE_LIST_FAILED: {error}"))
+    }
+}
+
+impl Drop for ProcessAttributeList {
+    fn drop(&mut self) {
+        unsafe { DeleteProcThreadAttributeList(self.list) };
+    }
+}
+
+struct InvocationJob {
+    handle: OwnedHandle,
+}
+
+impl InvocationJob {
+    fn create(_descendants: DescendantPolicy) -> Result<Self, String> {
+        let handle = unsafe { CreateJobObjectW(None, PCWSTR::null()) }
+            .map_err(|error| format!("AIW_WSB_CLI_JOB_CREATE_FAILED: {error}"))?;
+        let handle = unsafe { OwnedHandle::from_raw_handle(handle.0) };
+        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        unsafe {
+            SetInformationJobObject(
+                owned_handle(&handle),
+                JobObjectExtendedLimitInformation,
+                (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+        }
+        .map_err(|error| format!("AIW_WSB_CLI_JOB_LIMIT_FAILED: {error}"))?;
+        Ok(Self { handle })
+    }
+
+    fn raw(&self) -> HANDLE {
+        owned_handle(&self.handle)
+    }
+
+    fn active_processes(&self) -> Result<u32, String> {
+        let mut accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
+        unsafe {
+            QueryInformationJobObject(
+                Some(self.raw()),
+                JobObjectBasicAccountingInformation,
+                (&mut accounting as *mut JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),
+                std::mem::size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
+                None,
+            )
+        }
+        .map_err(|error| format!("AIW_WSB_CLI_JOB_QUERY_FAILED: {error}"))?;
+        Ok(accounting.ActiveProcesses)
+    }
+
+    fn terminate_and_verify_empty(&self) -> Result<(), String> {
+        let active = match self.active_processes() {
+            Ok(active) => active,
+            Err(error) => {
+                let _ = unsafe { TerminateJobObject(self.raw(), 1) };
+                return Err(error);
+            }
+        };
+        if active > 0 {
+            unsafe { TerminateJobObject(self.raw(), 1) }
+                .map_err(|error| format!("AIW_WSB_CLI_JOB_TERMINATE_FAILED: {error}"))?;
+        }
+        let deadline = Instant::now()
+            .checked_add(PROCESS_TREE_CLEANUP_TIMEOUT)
+            .ok_or_else(|| {
+                "AIW_WSB_CLI_JOB_CLEANUP_FAILED: cleanup deadline overflowed.".to_owned()
+            })?;
+        loop {
+            if self.active_processes()? == 0 {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(
+                    "AIW_WSB_CLI_JOB_CLEANUP_FAILED: assigned provider job remained active."
+                        .to_owned(),
+                );
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn release_provider_managed_descendants(&self) -> Result<(), String> {
+        let limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        unsafe {
+            SetInformationJobObject(
+                owned_handle(&self.handle),
+                JobObjectExtendedLimitInformation,
+                (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+        }
+        .map_err(|error| format!("AIW_WSB_CLI_JOB_RELEASE_FAILED: {error}"))
+    }
+}
+
+fn invocation_deadline(timeout: Duration) -> Result<Instant, WindowsSandboxInvocationError> {
+    if timeout.is_zero() || timeout > MAX_INVOCATION_TIMEOUT {
+        return Err(WindowsSandboxInvocationError::Process(
+            "AIW_WSB_CLI_DEADLINE_INVALID: timeout must be between 1 ns and 3600 seconds."
+                .to_owned(),
+        ));
+    }
+    Instant::now().checked_add(timeout).ok_or_else(|| {
+        WindowsSandboxInvocationError::Process(
+            "AIW_WSB_CLI_DEADLINE_INVALID: timeout overflowed the monotonic clock.".to_owned(),
+        )
+    })
+}
+
+fn provider_environment() -> Result<Vec<u16>, String> {
+    let mut environment: Vec<(String, OsString)> = Vec::new();
     for name in [
         "APPDATA",
         "LOCALAPPDATA",
@@ -755,46 +1077,49 @@ fn provider_command(path: &Path) -> Result<Command, String> {
         "WINDIR",
     ] {
         if let Some(value) = std::env::var_os(name) {
-            command.env(name, value);
+            environment.push((name.to_owned(), value));
         }
     }
     if let Some(system_root) = std::env::var_os("SystemRoot") {
-        command.env("PATH", PathBuf::from(system_root).join("System32"));
+        environment.push((
+            "PATH".to_owned(),
+            PathBuf::from(system_root).join("System32").into_os_string(),
+        ));
     }
-    Ok(command)
-}
-
-fn invoke_without_output(path: &Path, arguments: &[&str], timeout: Duration) -> Result<(), String> {
-    let mut command = provider_command(path)?;
-    command
-        .args(arguments)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let mut child = command
-        .spawn()
-        .map_err(|error| format!("AIW_WSB_CLI_START_FAILED: {error}"))?;
-    let deadline = Instant::now() + timeout;
-    let status = loop {
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|error| format!("AIW_WSB_CLI_WAIT_FAILED: {error}"))?
-        {
-            break status;
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
+    environment.sort_by_key(|entry| entry.0.to_ascii_uppercase());
+    let mut block = Vec::new();
+    for (name, value) in environment {
+        let mut entry = OsString::from(name);
+        entry.push("=");
+        entry.push(value);
+        let encoded: Vec<u16> = entry.encode_wide().collect();
+        if encoded.contains(&0) {
             return Err(
-                "AIW_WSB_CLI_TIMEOUT: fixed provider operation exceeded its deadline.".to_owned(),
+                "AIW_WSB_CLI_ENVIRONMENT_REJECTED: environment contained a NUL.".to_owned(),
             );
         }
-        thread::sleep(Duration::from_millis(20));
-    };
-    if !status.success() {
+        block.extend(encoded);
+        block.push(0);
+    }
+    if block.is_empty() {
+        block.push(0);
+    }
+    block.push(0);
+    Ok(block)
+}
+
+fn invoke_without_output(path: &Path, arguments: &[&str], deadline: Instant) -> Result<(), String> {
+    let output = invoke_job_bound(
+        path,
+        arguments,
+        deadline,
+        OutputMode::Discard,
+        DescendantPolicy::ProviderManaged,
+    )?;
+    if output.exit_code != 0 {
         return Err(format!(
-            "AIW_WSB_CLI_FAILED: provider exited with {:?}.",
-            status.code()
+            "AIW_WSB_CLI_FAILED: provider exited with {}.",
+            output.exit_code
         ));
     }
     Ok(())
@@ -803,65 +1128,311 @@ fn invoke_without_output(path: &Path, arguments: &[&str], timeout: Duration) -> 
 fn invoke_read_only(
     path: &Path,
     arguments: &[&str],
-    timeout: Duration,
+    deadline: Instant,
+    descendants: DescendantPolicy,
 ) -> Result<ProcessOutput, String> {
-    let mut command = provider_command(path)?;
-    command
-        .args(arguments)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = command
-        .spawn()
-        .map_err(|error| format!("AIW_WSB_CLI_START_FAILED: {error}"))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "AIW_WSB_CLI_PIPE_FAILED: stdout was unavailable.".to_owned())?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| "AIW_WSB_CLI_PIPE_FAILED: stderr was unavailable.".to_owned())?;
-    let stdout_reader = thread::spawn(move || read_bounded(stdout));
-    let stderr_reader = thread::spawn(move || read_bounded(stderr));
-    let deadline = Instant::now() + timeout;
-    let status = loop {
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|error| format!("AIW_WSB_CLI_WAIT_FAILED: {error}"))?
-        {
-            break status;
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(
-                "AIW_WSB_CLI_TIMEOUT: read-only provider observation exceeded its deadline."
-                    .to_owned(),
-            );
-        }
-        thread::sleep(Duration::from_millis(20));
-    };
-    let stdout = stdout_reader
-        .join()
-        .map_err(|_| "AIW_WSB_CLI_PIPE_FAILED: stdout reader panicked.".to_owned())??;
-    let stderr = stderr_reader
-        .join()
-        .map_err(|_| "AIW_WSB_CLI_PIPE_FAILED: stderr reader panicked.".to_owned())??;
-    if !status.success() {
+    let output = invoke_job_bound(path, arguments, deadline, OutputMode::Capture, descendants)?;
+    if output.exit_code != 0 {
         return Err(format!(
-            "AIW_WSB_CLI_FAILED: provider exited with {:?}; stderr={}",
-            status.code(),
-            bounded_text(&stderr)
+            "AIW_WSB_CLI_FAILED: provider exited with {}; stderr={}",
+            output.exit_code,
+            bounded_text(&output.stderr)
         ));
     }
-    if !stderr.is_empty() {
+    if !output.stderr.is_empty() {
         return Err(format!(
             "AIW_WSB_CLI_STDERR_REJECTED: {}",
-            bounded_text(&stderr)
+            bounded_text(&output.stderr)
         ));
     }
-    Ok(ProcessOutput { stdout })
+    Ok(output)
+}
+
+fn invoke_job_bound(
+    path: &Path,
+    arguments: &[&str],
+    deadline: Instant,
+    output_mode: OutputMode,
+    descendants: DescendantPolicy,
+) -> Result<ProcessOutput, String> {
+    if Instant::now() >= deadline {
+        return Err("AIW_WSB_CLI_TIMEOUT: provider deadline expired before creation.".to_owned());
+    }
+    let provider_root = path.parent().ok_or_else(|| {
+        "AIW_WSB_CLI_PATH_REJECTED: provider has no protected package parent.".to_owned()
+    })?;
+    let provider = path
+        .to_str()
+        .ok_or_else(|| "AIW_WSB_CLI_PATH_REJECTED: provider path was not Unicode.".to_owned())?;
+    let provider_wide = null_terminated(provider)?;
+    let provider_root_wide = null_terminated_os(provider_root.as_os_str())?;
+    let command_line = join_arguments(std::iter::once(provider).chain(arguments.iter().copied()));
+    let mut command_line_wide = null_terminated(&command_line)?;
+    let environment = provider_environment()?;
+
+    let job = InvocationJob::create(descendants)?;
+    let mut stdio = InvocationStdio::new(output_mode)?;
+    let inherited_handles = stdio.inherited_handles();
+    let mut attributes = ProcessAttributeList::new(1)?;
+    attributes.update_handles(PROC_THREAD_ATTRIBUTE_HANDLE_LIST, &inherited_handles)?;
+
+    let (stdin, stdout, stderr) = stdio.startup_handles();
+    let mut startup = STARTUPINFOEXW::default();
+    startup.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
+    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    startup.StartupInfo.hStdInput = stdin;
+    startup.StartupInfo.hStdOutput = stdout;
+    startup.StartupInfo.hStdError = stderr;
+    startup.lpAttributeList = attributes.list;
+    let mut process_information = PROCESS_INFORMATION::default();
+    if Instant::now() >= deadline {
+        return Err("AIW_WSB_CLI_TIMEOUT: provider deadline expired before creation.".to_owned());
+    }
+    unsafe {
+        CreateProcessW(
+            PCWSTR(provider_wide.as_ptr()),
+            Some(PWSTR(command_line_wide.as_mut_ptr())),
+            None,
+            None,
+            true,
+            CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT,
+            Some(environment.as_ptr().cast()),
+            PCWSTR(provider_root_wide.as_ptr()),
+            (&startup as *const STARTUPINFOEXW).cast(),
+            &mut process_information,
+        )
+    }
+    .map_err(|error| format!("AIW_WSB_CLI_START_FAILED: {error}"))?;
+
+    let process = unsafe { OwnedHandle::from_raw_handle(process_information.hProcess.0) };
+    let thread_handle = unsafe { OwnedHandle::from_raw_handle(process_information.hThread.0) };
+    if let Err(error) = unsafe { AssignProcessToJobObject(job.raw(), owned_handle(&process)) } {
+        let cleanup = terminate_suspended_process(owned_handle(&process));
+        return match cleanup {
+            Ok(()) => Err(format!("AIW_WSB_CLI_JOB_ASSIGN_FAILED: {error}")),
+            Err(cleanup) => Err(format!(
+                "AIW_WSB_CLI_JOB_ASSIGN_FAILED: {error}; cleanup={cleanup}"
+            )),
+        };
+    }
+    if unsafe { ResumeThread(owned_handle(&thread_handle)) } == u32::MAX {
+        let cleanup = job.terminate_and_verify_empty();
+        return match cleanup {
+            Ok(()) => Err("AIW_WSB_CLI_RESUME_FAILED: ResumeThread failed.".to_owned()),
+            Err(cleanup) => Err(format!(
+                "AIW_WSB_CLI_RESUME_FAILED: ResumeThread failed; cleanup={cleanup}"
+            )),
+        };
+    }
+    drop(thread_handle);
+    drop(attributes);
+    stdio.close_child_ends();
+    let (stdout_reader, stderr_reader) = stdio.take_readers();
+
+    let wait_result = wait_for_process(owned_handle(&process), deadline);
+    let exit_code: Result<Option<u32>, String> = if wait_result.is_ok() {
+        (|| {
+            let mut code = 0u32;
+            unsafe { GetExitCodeProcess(owned_handle(&process), &mut code) }
+                .map_err(|error| format!("AIW_WSB_CLI_EXIT_CODE_FAILED: {error}"))?;
+            Ok(Some(code))
+        })()
+    } else {
+        Ok(None)
+    };
+    drop(process);
+
+    let root_succeeded = matches!(&exit_code, Ok(Some(0)));
+    let early_cleanup = if root_succeeded {
+        Ok(())
+    } else {
+        job.terminate_and_verify_empty()
+    };
+    let streams_completed =
+        !root_succeeded || wait_for_readers_until(&stdout_reader, &stderr_reader, deadline);
+    let deadline_cleanup = if root_succeeded && !streams_completed {
+        job.terminate_and_verify_empty()
+    } else {
+        Ok(())
+    };
+    let reader_cleanup_deadline = Instant::now()
+        .checked_add(PROCESS_TREE_CLEANUP_TIMEOUT)
+        .ok_or_else(|| "AIW_WSB_CLI_PIPE_CLEANUP_FAILED: deadline overflowed.".to_owned())?;
+    let stdout = join_reader_bounded(stdout_reader, "stdout", reader_cleanup_deadline);
+    let stderr = join_reader_bounded(stderr_reader, "stderr", reader_cleanup_deadline);
+    let streams_succeeded = stdout.is_ok() && stderr.is_ok();
+    let final_cleanup = if root_succeeded && streams_completed && streams_succeeded {
+        match descendants {
+            // A successful packaged CLI invocation can leave provider-owned
+            // descendants. Remove kill-on-close only after the exact CLI root
+            // and both bounded output streams complete cleanly. For mutating
+            // calls, the persisted session UUID and list/stop/list transaction
+            // then become their cleanup authority.
+            DescendantPolicy::ProviderManaged => job.release_provider_managed_descendants(),
+            #[cfg(test)]
+            DescendantPolicy::Contained => job.terminate_and_verify_empty(),
+        }
+    } else if root_succeeded && streams_completed {
+        job.terminate_and_verify_empty()
+    } else {
+        Ok(())
+    };
+    drop(job);
+    early_cleanup?;
+    deadline_cleanup?;
+    final_cleanup?;
+    if root_succeeded && !streams_completed {
+        return Err(
+            "AIW_WSB_CLI_PIPE_TIMEOUT: output remained open past the provider deadline.".to_owned(),
+        );
+    }
+    wait_result?;
+    let exit_code = exit_code?.expect("a successful wait has an exit code");
+    let stdout = stdout?;
+    let stderr = stderr?;
+    Ok(ProcessOutput {
+        exit_code,
+        stdout,
+        stderr,
+    })
+}
+
+fn wait_for_process(process: HANDLE, deadline: Instant) -> Result<(), String> {
+    loop {
+        let now = Instant::now();
+        if now >= deadline {
+            return Err(
+                "AIW_WSB_CLI_TIMEOUT: provider operation exceeded its deadline.".to_owned(),
+            );
+        }
+        let remaining = deadline.saturating_duration_since(now);
+        let slice = remaining.min(Duration::from_millis(20));
+        let milliseconds = slice.as_millis().clamp(1, u128::from(u32::MAX)) as u32;
+        let wait = unsafe { WaitForSingleObject(process, milliseconds) };
+        if wait == WAIT_OBJECT_0 {
+            return Ok(());
+        }
+        if wait == WAIT_TIMEOUT {
+            continue;
+        }
+        if wait == WAIT_FAILED {
+            return Err("AIW_WSB_CLI_WAIT_FAILED: WaitForSingleObject failed.".to_owned());
+        }
+        return Err(format!(
+            "AIW_WSB_CLI_WAIT_FAILED: unexpected wait status 0x{:08x}.",
+            wait.0
+        ));
+    }
+}
+
+fn wait_for_readers_until(
+    stdout: &Option<BoundedReader>,
+    stderr: &Option<BoundedReader>,
+    deadline: Instant,
+) -> bool {
+    while !readers_finished(stdout, stderr) && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(5));
+    }
+    readers_finished(stdout, stderr)
+}
+
+fn readers_finished(stdout: &Option<BoundedReader>, stderr: &Option<BoundedReader>) -> bool {
+    stdout.as_ref().is_none_or(thread::JoinHandle::is_finished)
+        && stderr.as_ref().is_none_or(thread::JoinHandle::is_finished)
+}
+
+fn join_reader_bounded(
+    reader: Option<BoundedReader>,
+    name: &str,
+    deadline: Instant,
+) -> Result<Vec<u8>, String> {
+    match reader {
+        Some(reader) => {
+            if !reader.is_finished() {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                let wait = unsafe {
+                    WaitForSingleObject(
+                        HANDLE(reader.as_raw_handle()),
+                        remaining.as_millis().min(u128::from(u32::MAX)) as u32,
+                    )
+                };
+                if wait != WAIT_OBJECT_0 {
+                    return Err(format!(
+                        "AIW_WSB_CLI_PIPE_CLEANUP_FAILED: {name} reader remained active."
+                    ));
+                }
+            }
+            reader
+                .join()
+                .map_err(|_| format!("AIW_WSB_CLI_PIPE_FAILED: {name} reader panicked."))?
+        }
+        None => Ok(Vec::new()),
+    }
+}
+
+fn terminate_suspended_process(process: HANDLE) -> Result<(), String> {
+    unsafe { TerminateProcess(process, 1) }
+        .map_err(|error| format!("AIW_WSB_CLI_DIRECT_TERMINATE_FAILED: {error}"))?;
+    let wait =
+        unsafe { WaitForSingleObject(process, PROCESS_TREE_CLEANUP_TIMEOUT.as_millis() as u32) };
+    if wait != WAIT_OBJECT_0 {
+        return Err(
+            "AIW_WSB_CLI_DIRECT_CLEANUP_FAILED: suspended provider remained active.".to_owned(),
+        );
+    }
+    Ok(())
+}
+
+fn inheritable_pipe() -> Result<(OwnedHandle, OwnedHandle), String> {
+    let attributes = SECURITY_ATTRIBUTES {
+        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: std::ptr::null_mut(),
+        bInheritHandle: true.into(),
+    };
+    let mut read = HANDLE::default();
+    let mut write = HANDLE::default();
+    unsafe { CreatePipe(&mut read, &mut write, Some(&attributes), 0) }
+        .map_err(|error| format!("AIW_WSB_CLI_PIPE_FAILED: {error}"))?;
+    let read = unsafe { OwnedHandle::from_raw_handle(read.0) };
+    let write = unsafe { OwnedHandle::from_raw_handle(write.0) };
+    set_inheritable(owned_handle(&read), false)?;
+    Ok((read, write))
+}
+
+fn set_inheritable(handle: HANDLE, inheritable: bool) -> Result<(), String> {
+    unsafe {
+        SetHandleInformation(
+            handle,
+            HANDLE_FLAG_INHERIT.0,
+            if inheritable {
+                HANDLE_FLAG_INHERIT
+            } else {
+                HANDLE_FLAGS(0)
+            },
+        )
+    }
+    .map_err(|error| format!("AIW_WSB_CLI_HANDLE_INHERITANCE_FAILED: {error}"))
+}
+
+fn file_handle(file: &File) -> HANDLE {
+    HANDLE(file.as_raw_handle())
+}
+
+fn owned_handle(handle: &OwnedHandle) -> HANDLE {
+    HANDLE(handle.as_raw_handle())
+}
+
+fn null_terminated(value: &str) -> Result<Vec<u16>, String> {
+    null_terminated_os(std::ffi::OsStr::new(value))
+}
+
+fn null_terminated_os(value: &std::ffi::OsStr) -> Result<Vec<u16>, String> {
+    let mut encoded: Vec<u16> = value.encode_wide().collect();
+    if encoded.contains(&0) {
+        return Err("AIW_WSB_CLI_STRING_REJECTED: value contained a NUL.".to_owned());
+    }
+    encoded.push(0);
+    Ok(encoded)
 }
 
 fn read_bounded(reader: impl Read) -> Result<Vec<u8>, String> {
@@ -1036,6 +1607,239 @@ impl Drop for ProviderMutex {
 mod tests {
     use super::*;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+    fn helper_arguments(name: &str) -> Vec<String> {
+        vec![
+            "--ignored".to_owned(),
+            "--exact".to_owned(),
+            format!("windows_platform::tests::{name}"),
+            "--nocapture".to_owned(),
+        ]
+    }
+
+    fn invoked_as_helper(name: &str) -> bool {
+        let expected = format!("windows_platform::tests::{name}");
+        let arguments: Vec<String> = std::env::args().collect();
+        arguments
+            .windows(2)
+            .any(|pair| pair[0] == "--exact" && pair[1] == expected)
+    }
+
+    fn invoke_test_helper(
+        name: &str,
+        timeout: Duration,
+        output_mode: OutputMode,
+    ) -> Result<ProcessOutput, String> {
+        invoke_test_helper_with_arguments(name, timeout, output_mode, &[])
+    }
+
+    fn invoke_test_helper_with_policy(
+        name: &str,
+        timeout: Duration,
+        output_mode: OutputMode,
+        descendants: DescendantPolicy,
+    ) -> Result<ProcessOutput, String> {
+        let executable = std::env::current_exe().unwrap();
+        let arguments = helper_arguments(name);
+        let arguments: Vec<&str> = arguments.iter().map(String::as_str).collect();
+        let deadline = Instant::now().checked_add(timeout).unwrap();
+        invoke_job_bound(&executable, &arguments, deadline, output_mode, descendants)
+    }
+
+    fn invoke_test_helper_with_arguments(
+        name: &str,
+        timeout: Duration,
+        output_mode: OutputMode,
+        additional_arguments: &[String],
+    ) -> Result<ProcessOutput, String> {
+        let executable = std::env::current_exe().unwrap();
+        let mut arguments = helper_arguments(name);
+        arguments.extend_from_slice(additional_arguments);
+        let arguments: Vec<&str> = arguments.iter().map(String::as_str).collect();
+        let deadline = Instant::now().checked_add(timeout).unwrap();
+        invoke_job_bound(
+            &executable,
+            &arguments,
+            deadline,
+            output_mode,
+            DescendantPolicy::Contained,
+        )
+    }
+
+    #[test]
+    #[ignore = "internal subprocess fixture"]
+    fn job_helper_prints_and_exits() {
+        if invoked_as_helper("job_helper_prints_and_exits") {
+            println!("AIW_JOB_HELPER_OK");
+        }
+    }
+
+    #[test]
+    #[ignore = "internal subprocess fixture"]
+    fn job_helper_writes_oversized_output() {
+        if invoked_as_helper("job_helper_writes_oversized_output") {
+            use std::io::Write as _;
+            let bytes = vec![b'x'; STREAM_LIMIT as usize + 1024];
+            let _ = std::io::stdout().write_all(&bytes);
+        }
+    }
+
+    #[test]
+    #[ignore = "internal subprocess fixture"]
+    fn job_helper_checks_unlisted_handle() {
+        if !invoked_as_helper("job_helper_checks_unlisted_handle") {
+            return;
+        }
+        let marker = std::env::args()
+            .find_map(|argument| {
+                argument
+                    .strip_prefix("AIW_SENTINEL_HANDLE_")
+                    .map(str::to_owned)
+            })
+            .expect("sentinel handle marker is present");
+        let raw = usize::from_str_radix(&marker, 16).expect("sentinel handle is hexadecimal");
+        let _ = unsafe { SetEvent(HANDLE(raw as *mut std::ffi::c_void)) };
+        println!("AIW_UNLISTED_HANDLE_PROBED");
+    }
+
+    #[test]
+    #[ignore = "internal subprocess fixture"]
+    fn job_helper_descendant_hangs() {
+        if invoked_as_helper("job_helper_descendant_hangs") {
+            thread::sleep(Duration::from_secs(60));
+        }
+    }
+
+    #[test]
+    #[ignore = "internal subprocess fixture"]
+    fn job_helper_parent_hangs_with_descendant() {
+        if !invoked_as_helper("job_helper_parent_hangs_with_descendant") {
+            return;
+        }
+        let _ = invoke_test_helper(
+            "job_helper_descendant_hangs",
+            Duration::from_secs(60),
+            OutputMode::Discard,
+        );
+        thread::sleep(Duration::from_secs(60));
+    }
+
+    #[test]
+    #[ignore = "internal subprocess fixture"]
+    fn job_helper_exits_with_inheriting_descendant() {
+        if !invoked_as_helper("job_helper_exits_with_inheriting_descendant") {
+            return;
+        }
+        let executable = std::env::current_exe().unwrap();
+        let child = std::process::Command::new(executable)
+            .args(helper_arguments("job_helper_descendant_hangs"))
+            .spawn()
+            .unwrap();
+        drop(child);
+    }
+
+    #[test]
+    fn job_bound_launcher_captures_bounded_output_and_reaps_the_job() {
+        let output = invoke_test_helper(
+            "job_helper_prints_and_exits",
+            Duration::from_secs(10),
+            OutputMode::Capture,
+        )
+        .unwrap();
+        assert_eq!(output.exit_code, 0);
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("AIW_JOB_HELPER_OK"),
+            "captured output was {:?}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        assert!(output.stderr.is_empty());
+    }
+
+    #[test]
+    fn job_bound_launcher_terminates_a_hanging_process_tree_at_deadline() {
+        let started = Instant::now();
+        let error = invoke_test_helper(
+            "job_helper_parent_hangs_with_descendant",
+            Duration::from_millis(250),
+            OutputMode::Capture,
+        )
+        .unwrap_err();
+        assert!(error.contains("AIW_WSB_CLI_TIMEOUT"), "{error}");
+        assert!(
+            started.elapsed()
+                < Duration::from_millis(250)
+                    + PROCESS_TREE_CLEANUP_TIMEOUT
+                    + Duration::from_secs(1)
+        );
+    }
+
+    #[test]
+    fn provider_managed_output_cannot_outlive_the_deadline() {
+        let started = Instant::now();
+        let error = invoke_test_helper_with_policy(
+            "job_helper_exits_with_inheriting_descendant",
+            Duration::from_secs(3),
+            OutputMode::Capture,
+            DescendantPolicy::ProviderManaged,
+        )
+        .unwrap_err();
+        assert!(error.contains("AIW_WSB_CLI_PIPE_TIMEOUT"), "{error}");
+        assert!(
+            started.elapsed()
+                < Duration::from_secs(3) + PROCESS_TREE_CLEANUP_TIMEOUT + Duration::from_secs(1)
+        );
+    }
+
+    #[test]
+    fn job_bound_launcher_rejects_oversized_output_after_tree_cleanup() {
+        let error = invoke_test_helper(
+            "job_helper_writes_oversized_output",
+            Duration::from_secs(10),
+            OutputMode::Capture,
+        )
+        .unwrap_err();
+        assert!(error.contains("AIW_WSB_CLI_OUTPUT_OVERSIZED"), "{error}");
+    }
+
+    #[test]
+    fn job_bound_launcher_inherits_only_the_explicit_handle_list() {
+        let attributes = SECURITY_ATTRIBUTES {
+            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: std::ptr::null_mut(),
+            bInheritHandle: true.into(),
+        };
+        let sentinel = unsafe { CreateEventW(Some(&attributes), true, false, PCWSTR::null()) }
+            .map(|handle| unsafe { OwnedHandle::from_raw_handle(handle.0) })
+            .unwrap();
+        let additional_arguments = vec![
+            "--skip".to_owned(),
+            format!(
+                "AIW_SENTINEL_HANDLE_{:x}",
+                sentinel.as_raw_handle() as usize
+            ),
+        ];
+        let output = invoke_test_helper_with_arguments(
+            "job_helper_checks_unlisted_handle",
+            Duration::from_secs(10),
+            OutputMode::Capture,
+            &additional_arguments,
+        )
+        .unwrap();
+        assert_eq!(output.exit_code, 0);
+        assert!(String::from_utf8_lossy(&output.stdout).contains("AIW_UNLISTED_HANDLE_PROBED"));
+        assert_eq!(
+            unsafe { WaitForSingleObject(owned_handle(&sentinel), 0) },
+            WAIT_TIMEOUT,
+            "the child inherited and signalled a handle absent from HANDLE_LIST"
+        );
+    }
+
+    #[test]
+    fn invocation_deadlines_are_bounded_before_process_creation() {
+        assert!(invocation_deadline(Duration::ZERO).is_err());
+        assert!(invocation_deadline(MAX_INVOCATION_TIMEOUT + Duration::from_nanos(1)).is_err());
+        assert!(invocation_deadline(Duration::from_nanos(1)).is_ok());
+    }
 
     fn live_id(label: &str) -> CanonicalSandboxId {
         let nonce = SystemTime::now()
