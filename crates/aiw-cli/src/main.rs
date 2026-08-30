@@ -658,8 +658,8 @@ fn run(command: Command) -> Result<()> {
             }
             RunCommand::Recover { root, run_id } => {
                 let layout = RunLayout::new(&root, run_id)?;
-                let provider_status = observe_wsb_status(&layout)?;
                 let core = layout.recovery_status()?;
+                let provider_status = observe_wsb_status(&layout)?;
                 if matches!(
                     provider_status.status,
                     WsbSessionDisposition::RecoveryRequired | WsbSessionDisposition::Clean

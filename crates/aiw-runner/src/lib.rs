@@ -436,17 +436,20 @@ pub fn recover_windows_sandbox(layout: &RunLayout) -> Result<WsbRecoveryResult, 
     }
     let store = TransactionStore::resume_from(layout, &transaction)?;
     store.verify_inspection(&inspection)?;
-    store.discard_pending_after_authority(&inspection)?;
 
     let session_id =
         CanonicalSandboxId::parse(&transaction.session_id).map_err(native_recovery_error)?;
     let mut provider = acquire_windows_sandbox_recovery(&transaction.provider_sha256, session_id)
         .map_err(native_recovery_error)?;
+    store.discard_pending_after_authority(&inspection)?;
 
     if transaction.current_state() == SessionTransactionState::CleanupVerified {
         let observed = provider
             .verify_bound_absent()
             .map_err(native_recovery_error)?;
+        workspace
+            .revalidate()
+            .map_err(|error| RunnerError::RecoveryRequired(error.to_string()))?;
         return Ok(WsbRecoveryResult {
             schema_version: WSB_RECOVERY_RESULT_SCHEMA_VERSION.to_owned(),
             run_id: transaction.run_id,
@@ -485,6 +488,9 @@ pub fn recover_windows_sandbox(layout: &RunLayout) -> Result<WsbRecoveryResult, 
     }
 
     let observed = provider.reconcile().map_err(native_recovery_error)?;
+    workspace
+        .revalidate()
+        .map_err(|error| RunnerError::RecoveryRequired(error.to_string()))?;
     let legacy = transaction.recovery.is_none();
     if legacy {
         store.transition(
@@ -498,6 +504,9 @@ pub fn recover_windows_sandbox(layout: &RunLayout) -> Result<WsbRecoveryResult, 
         );
         return Err(RunnerError::RecoveryRequired(error.to_string()));
     } else {
+        workspace
+            .revalidate()
+            .map_err(|error| RunnerError::RecoveryRequired(error.to_string()))?;
         store.transition(
             SessionTransactionState::CleanupVerified,
             "recovery-cleanup-verified",
@@ -599,7 +608,7 @@ fn remove_recovery_request(
     {
         return Err(RunnerError::Drift);
     }
-    if !path.exists() {
+    if !recovery_request_present(&path)? {
         return Ok(());
     }
     ensure_ordinary_file(&path)?;
@@ -613,6 +622,21 @@ fn remove_recovery_request(
         return Err(RunnerError::Drift);
     }
     fs::remove_file(path).map_err(|_| RunnerError::Drift)
+}
+
+fn recovery_request_present(path: &Path) -> Result<bool, RunnerError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata)
+            if metadata.is_file()
+                && !metadata.file_type().is_symlink()
+                && !has_reparse_point(&metadata) =>
+        {
+            Ok(true)
+        }
+        Ok(_) => Err(RunnerError::Drift),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(_) => Err(RunnerError::Drift),
+    }
 }
 
 #[cfg(windows)]
@@ -2474,6 +2498,37 @@ mod tests {
         };
         assert!(guest_to_host(&mapping, "C:\\AIW\\Tools\\request.json").is_some());
         assert!(guest_to_host(&mapping, "C:\\AIW\\Tools\\..\\out.json").is_none());
+    }
+
+    #[test]
+    fn recovery_request_absence_requires_exact_not_found() {
+        let root = Root::new();
+        let missing = root.0.join("missing-request.json");
+        assert!(!recovery_request_present(&missing).unwrap());
+
+        let directory = root.0.join("request-directory");
+        fs::create_dir(&directory).unwrap();
+        assert!(matches!(
+            recovery_request_present(&directory),
+            Err(RunnerError::Drift)
+        ));
+
+        let dangling = root.0.join("dangling-request.json");
+        #[cfg(windows)]
+        let link_created =
+            std::os::windows::fs::symlink_file(root.0.join("absent-target.json"), &dangling)
+                .is_ok();
+        #[cfg(unix)]
+        let link_created = {
+            std::os::unix::fs::symlink(root.0.join("absent-target.json"), &dangling).unwrap();
+            true
+        };
+        if link_created {
+            assert!(matches!(
+                recovery_request_present(&dangling),
+                Err(RunnerError::Drift)
+            ));
+        }
     }
 
     #[test]
