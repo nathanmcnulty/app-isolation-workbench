@@ -19,7 +19,11 @@ use aiw_orchestrator::{
     RecoveryStatus, RunEvent, RunLayout, RunPlan, RunResult, WsbRevocationRecord,
     project_revision_hash,
 };
-use aiw_probe::{WindowsSandboxReadiness, WorkspaceBindingEvidence, probe_host};
+use aiw_probe::{
+    ApplicationInspection, ApplicationInspectionError, ApplicationInspectionKind,
+    PortableContentManifest, WindowsSandboxReadiness, WorkspaceBindingEvidence,
+    inspect_application_source, probe_host,
+};
 use aiw_provider_mxc::{MxcGoldenProbePlan, plan_capability_probe, plan_golden_probe};
 use aiw_provider_wsb::{
     WindowsSandboxCliLifecyclePlan, WindowsSandboxCompletionExpectation,
@@ -67,6 +71,7 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     Project(ProjectArgs),
+    Application(ApplicationArgs),
     ModelPack(ModelPackArgs),
     Analyst(AnalystArgs),
     Evidence(EvidenceArgs),
@@ -78,6 +83,40 @@ enum Command {
     Provider(ProviderArgs),
     Schema(SchemaArgs),
     Compare(CompareArgs),
+}
+
+#[derive(Debug, Args)]
+struct ApplicationArgs {
+    #[command(subcommand)]
+    command: ApplicationCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ApplicationCommand {
+    /// Inspect source identity without executing, copying, or trusting it.
+    Inspect {
+        #[arg(long)]
+        source: PathBuf,
+        #[arg(long, value_enum)]
+        kind: ApplicationKindArg,
+    },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum ApplicationKindArg {
+    Msi,
+    Exe,
+    PortableDirectory,
+}
+
+impl From<ApplicationKindArg> for ApplicationInspectionKind {
+    fn from(value: ApplicationKindArg) -> Self {
+        match value {
+            ApplicationKindArg::Msi => Self::Msi,
+            ApplicationKindArg::Exe => Self::Exe,
+            ApplicationKindArg::PortableDirectory => Self::PortableDirectory,
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -384,6 +423,8 @@ struct SchemaArgs {
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum SchemaKind {
+    ApplicationInspection,
+    PortableContentManifest,
     /// Current project schema. Retained as the stable alias for project-v0alpha2.
     Project,
     #[value(name = "project-v0alpha1")]
@@ -623,6 +664,19 @@ impl std::fmt::Display for RunPreparationImportFailed {
 impl std::error::Error for RunPreparationImportFailed {}
 
 #[derive(Debug)]
+struct ApplicationInspectionFailed {
+    source: ApplicationInspectionError,
+}
+
+impl std::fmt::Display for ApplicationInspectionFailed {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.source.fmt(formatter)
+    }
+}
+
+impl std::error::Error for ApplicationInspectionFailed {}
+
+#[derive(Debug)]
 struct WsbSessionStatusInvalid {
     run_id: String,
     detail: String,
@@ -671,6 +725,13 @@ fn main() -> ExitCode {
 
 fn run(command: Command) -> Result<()> {
     match command {
+        Command::Application(args) => match args.command {
+            ApplicationCommand::Inspect { source, kind } => {
+                let inspection = inspect_application_source(&source, kind.into())
+                    .map_err(|source| anyhow!(ApplicationInspectionFailed { source }))?;
+                write_json(&inspection)
+            }
+        },
         Command::Project(args) => match args.command {
             ProjectCommand::Validate { path } => {
                 let loaded = read_project(&path)?;
@@ -1052,6 +1113,10 @@ fn run(command: Command) -> Result<()> {
             ProviderCommand::MxcProbe { binary } => write_json(&plan_capability_probe(&binary)?),
         },
         Command::Schema(args) => match args.kind {
+            SchemaKind::ApplicationInspection => write_json(&schema_for!(ApplicationInspection)),
+            SchemaKind::PortableContentManifest => {
+                write_json(&schema_for!(PortableContentManifest))
+            }
             SchemaKind::Project | SchemaKind::ProjectV0Alpha2 => write_json(&schema_for!(Project)),
             SchemaKind::ProjectV0Alpha1 => write_json(&schema_for!(LegacyProjectV0Alpha1)),
             SchemaKind::RunPlan | SchemaKind::RunPlanV0Alpha3 => write_json(&schema_for!(RunPlan)),
@@ -1674,6 +1739,16 @@ fn emit_anyhow_error(error: &anyhow::Error) {
         emit_error(&preparation_error_envelope(error));
     } else if let Some(error) = error.downcast_ref::<RunPreparationImportFailed>() {
         emit_error(&preparation_import_error_envelope(error));
+    } else if let Some(error) = error.downcast_ref::<ApplicationInspectionFailed>() {
+        emit_error(&ErrorEnvelope {
+            code: "AIW_APPLICATION_INSPECTION_REJECTED".to_owned(),
+            summary: "application source could not be safely inspected".to_owned(),
+            stage: "applicationInspection".to_owned(),
+            run_id: None,
+            retryable: matches!(error.source, ApplicationInspectionError::SourceDrift),
+            remediation: "Preserve the source, resolve the reported type, path, link, bounds, or drift condition, and retry without executing it.".to_owned(),
+            detail: error.source.to_string().chars().take(512).collect(),
+        });
     } else if let Some(error) = error.downcast_ref::<RunnerError>() {
         emit_error(&ErrorEnvelope {
             code: "AIW_WSB_RUNNER_FAILED".to_owned(),

@@ -43,7 +43,7 @@ The current public execution boundary is `aiw run start` for one fixed imported-
 - `aiw-schema`: strict project/model-pack parsing and semantic validation.
 - `aiw-evidence`: canonical JSON, append-only hash chains, and deterministic allowlisted assessment manifests.
 - `aiw-core`: legal state transitions, deterministic comparison, conservative canary evaluation, and advisory-report validation.
-- `aiw-probe`: read-only environment and executable discovery, plus a conservative Windows Sandbox readiness report. Unknown feature, virtualization, signature, or session state is a blocker; it never enables a feature or elevates.
+- `aiw-probe`: read-only environment and executable discovery, conservative Windows Sandbox readiness, and bounded non-executing application-source snapshots. Application inspection uses an explicit MSI/EXE/portable kind, hashes and reads PE architecture from one held file, and creates a sorted two-pass portable manifest. Portable traversal remains path-based and cannot resist coordinated same-user replacement; signer, hard-link, alternate-stream, and handle-relative checks are explicit limitations, so the snapshot cannot authorize import.
 - `aiw-token`: audited native Win32 target-token evidence boundary.
 - `aiw-golden-probe`: fixed in-target token evidence probe used by the narrow live W1 mapping/logon proof.
 - `aiw-provider-wsb`: hardened `.wsb` rendering, lifecycle planning, and completion-receipt verification.

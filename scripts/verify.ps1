@@ -110,6 +110,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'canary evaluation failed' }
 
     foreach ($schemaKind in @(
+        'application-inspection',
+        'portable-content-manifest',
         'assessment-bundle-manifest',
         'assessment-bundle-spec',
         'assessment-bundle-verification',
