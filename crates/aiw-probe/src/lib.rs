@@ -12,6 +12,7 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 const APPLICATION_INSPECTION_SCHEMA: &str = "aiw.dev/application-inspection/v0alpha1";
+pub const APPLICATION_FILE_AUTHORITY_SCHEMA: &str = "aiw.dev/application-file-authority/v0alpha1";
 const PORTABLE_MANIFEST_SCHEMA: &str = "aiw.dev/portable-content-manifest/v0alpha1";
 const MAX_APPLICATION_FILE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 const MAX_PORTABLE_FILES: usize = 10_000;
@@ -64,6 +65,17 @@ pub struct PortableContentManifest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApplicationFileAuthority {
+    pub schema_version: String,
+    pub identity: WindowsFileIdentity,
+    pub size_bytes: u64,
+    pub sha256: String,
+    pub link_count: u32,
+    pub only_unnamed_data_stream: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ApplicationInspection {
     pub schema_version: String,
     pub kind: ApplicationInspectionKind,
@@ -74,6 +86,8 @@ pub struct ApplicationInspection {
     pub size_bytes: Option<u64>,
     pub architecture: ObservedApplicationArchitecture,
     pub signature_status: ReadinessState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_authority: Option<ApplicationFileAuthority>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub portable_manifest: Option<PortableContentManifest>,
     pub limitations: Vec<String>,
@@ -960,6 +974,7 @@ pub fn inspect_application_source(
                 size_bytes: Some(size_bytes),
                 architecture,
                 signature_status: ReadinessState::Unknown,
+                file_authority: None,
                 portable_manifest: None,
                 limitations: vec![
                     "Authenticode signer and trust have not yet been observed; unknown never means trusted.".to_owned(),
@@ -982,6 +997,7 @@ pub fn inspect_application_source(
                 size_bytes: Some(manifest.total_size_bytes),
                 architecture: ObservedApplicationArchitecture::Unknown,
                 signature_status: ReadinessState::Unknown,
+                file_authority: None,
                 portable_manifest: Some(manifest),
                 limitations: vec![
                     "Entry-point architectures and Authenticode signers have not yet been observed.".to_owned(),

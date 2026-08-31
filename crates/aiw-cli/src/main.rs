@@ -20,9 +20,9 @@ use aiw_orchestrator::{
     project_revision_hash,
 };
 use aiw_probe::{
-    ApplicationInspection, ApplicationInspectionError, ApplicationInspectionKind,
-    PortableContentManifest, WindowsSandboxReadiness, WorkspaceBindingEvidence,
-    inspect_application_source, probe_host,
+    APPLICATION_FILE_AUTHORITY_SCHEMA, ApplicationFileAuthority, ApplicationInspection,
+    ApplicationInspectionError, ApplicationInspectionKind, PortableContentManifest,
+    WindowsSandboxReadiness, WorkspaceBindingEvidence, inspect_application_source, probe_host,
 };
 use aiw_provider_mxc::{MxcGoldenProbePlan, plan_capability_probe, plan_golden_probe};
 use aiw_provider_wsb::{
@@ -47,6 +47,8 @@ use aiw_schema::{
 };
 use aiw_token::{TokenEvidence, collect_current_process_token};
 use aiw_windows_platform::assess_windows_sandbox;
+#[cfg(windows)]
+use aiw_windows_platform::{HeldApplicationFile, SourceInspectionError};
 use anyhow::{Context, Result, anyhow, bail};
 use clap::error::ErrorKind;
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -423,6 +425,7 @@ struct SchemaArgs {
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum SchemaKind {
+    ApplicationFileAuthority,
     ApplicationInspection,
     PortableContentManifest,
     /// Current project schema. Retained as the stable alias for project-v0alpha2.
@@ -676,6 +679,22 @@ impl std::fmt::Display for ApplicationInspectionFailed {
 
 impl std::error::Error for ApplicationInspectionFailed {}
 
+#[cfg(windows)]
+#[derive(Debug)]
+struct ApplicationAuthorityFailed {
+    source: SourceInspectionError,
+}
+
+#[cfg(windows)]
+impl std::fmt::Display for ApplicationAuthorityFailed {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.source.fmt(formatter)
+    }
+}
+
+#[cfg(windows)]
+impl std::error::Error for ApplicationAuthorityFailed {}
+
 #[derive(Debug)]
 struct WsbSessionStatusInvalid {
     run_id: String,
@@ -727,8 +746,41 @@ fn run(command: Command) -> Result<()> {
     match command {
         Command::Application(args) => match args.command {
             ApplicationCommand::Inspect { source, kind } => {
-                let inspection = inspect_application_source(&source, kind.into())
+                #[cfg(windows)]
+                let held = matches!(kind, ApplicationKindArg::Msi | ApplicationKindArg::Exe)
+                    .then(|| {
+                        HeldApplicationFile::open(&source)
+                            .map_err(|source| anyhow!(ApplicationAuthorityFailed { source }))
+                    })
+                    .transpose()?;
+                let mut inspection = inspect_application_source(&source, kind.into())
                     .map_err(|source| anyhow!(ApplicationInspectionFailed { source }))?;
+                #[cfg(windows)]
+                if let Some(held) = held.as_ref() {
+                    let observed = held.observation();
+                    if inspection.sha256.as_deref() != Some(&observed.sha256)
+                        || inspection.size_bytes != Some(observed.size_bytes)
+                    {
+                        return Err(anyhow!(ApplicationAuthorityFailed {
+                            source: SourceInspectionError::Drift,
+                        }));
+                    }
+                    held.revalidate()
+                        .map_err(|source| anyhow!(ApplicationAuthorityFailed { source }))?;
+                    inspection.canonical_path = observed.canonical_path.clone();
+                    inspection.file_authority = Some(ApplicationFileAuthority {
+                        schema_version: APPLICATION_FILE_AUTHORITY_SCHEMA.to_owned(),
+                        identity: observed.identity.clone(),
+                        size_bytes: observed.size_bytes,
+                        sha256: observed.sha256.clone(),
+                        link_count: observed.link_count,
+                        only_unnamed_data_stream: observed.only_unnamed_data_stream,
+                    });
+                    inspection.limitations.retain(|value| {
+                        !value.starts_with("Windows hard-link and alternate-stream")
+                            && !value.starts_with("Path checks are observational")
+                    });
+                }
                 write_json(&inspection)
             }
         },
@@ -1113,6 +1165,9 @@ fn run(command: Command) -> Result<()> {
             ProviderCommand::MxcProbe { binary } => write_json(&plan_capability_probe(&binary)?),
         },
         Command::Schema(args) => match args.kind {
+            SchemaKind::ApplicationFileAuthority => {
+                write_json(&schema_for!(ApplicationFileAuthority))
+            }
             SchemaKind::ApplicationInspection => write_json(&schema_for!(ApplicationInspection)),
             SchemaKind::PortableContentManifest => {
                 write_json(&schema_for!(PortableContentManifest))
@@ -1693,6 +1748,22 @@ fn preparation_import_error_envelope(error: &RunPreparationImportFailed) -> Erro
 }
 
 fn emit_anyhow_error(error: &anyhow::Error) {
+    #[cfg(windows)]
+    if let Some(error) = error.downcast_ref::<ApplicationAuthorityFailed>() {
+        emit_error(&ErrorEnvelope {
+            code: "AIW_APPLICATION_AUTHORITY_REJECTED".to_owned(),
+            summary: "application file authority could not be established".to_owned(),
+            stage: "applicationInspection".to_owned(),
+            run_id: None,
+            retryable: matches!(
+                error.source,
+                SourceInspectionError::Drift | SourceInspectionError::Busy
+            ),
+            remediation: "Close processes that can modify the source, remove hard links or named streams, and retry from an absolute local fixed-volume path.".to_owned(),
+            detail: error.source.to_string().chars().take(512).collect(),
+        });
+        return;
+    }
     if let Some(error) = error.downcast_ref::<AiwError>() {
         emit_error(error);
     } else if let Some(error) = error.downcast_ref::<RunOperationUnavailable>() {

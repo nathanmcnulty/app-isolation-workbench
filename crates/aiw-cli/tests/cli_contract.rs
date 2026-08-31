@@ -250,9 +250,12 @@ fn clap_failures_emit_one_json_envelope_and_no_stdout() {
 
 #[test]
 fn application_inspection_is_json_only_and_type_bound() {
+    let temp = TempDir::new();
+    let source = temp.path().join("aiw-fixture.exe");
+    fs::copy(aiw(), &source).unwrap();
     let inspected = Command::new(aiw())
         .args(["application", "inspect", "--source"])
-        .arg(aiw())
+        .arg(&source)
         .args(["--kind", "exe"])
         .output()
         .unwrap();
@@ -266,10 +269,18 @@ fn application_inspection_is_json_only_and_type_bound() {
     assert_eq!(value["kind"], "exe");
     assert_eq!(value["architecture"], "x64");
     assert_eq!(value["signatureStatus"], "unknown");
+    assert_eq!(
+        value["fileAuthority"]["schemaVersion"],
+        "aiw.dev/application-file-authority/v0alpha1"
+    );
+    assert_eq!(value["fileAuthority"]["linkCount"], 1);
+    assert_eq!(value["fileAuthority"]["sha256"], value["sha256"]);
+    assert_eq!(value["fileAuthority"]["sizeBytes"], value["sizeBytes"]);
+    assert_eq!(value["fileAuthority"]["onlyUnnamedDataStream"], true);
 
     let rejected = Command::new(aiw())
         .args(["application", "inspect", "--source"])
-        .arg(aiw())
+        .arg(&source)
         .args(["--kind", "msi"])
         .output()
         .unwrap();
@@ -278,6 +289,21 @@ fn application_inspection_is_json_only_and_type_bound() {
     let error = parse_one_json(&rejected.stderr);
     assert_eq!(error["code"], "AIW_APPLICATION_INSPECTION_REJECTED");
     assert_eq!(error["stage"], "applicationInspection");
+
+    #[cfg(windows)]
+    {
+        fs::write(format!("{}:extra", source.display()), b"untrusted").unwrap();
+        let streamed = Command::new(aiw())
+            .args(["application", "inspect", "--source"])
+            .arg(&source)
+            .args(["--kind", "exe"])
+            .output()
+            .unwrap();
+        assert!(!streamed.status.success());
+        assert!(streamed.stdout.is_empty());
+        let error = parse_one_json(&streamed.stderr);
+        assert_eq!(error["code"], "AIW_APPLICATION_AUTHORITY_REJECTED");
+    }
 }
 
 #[test]
