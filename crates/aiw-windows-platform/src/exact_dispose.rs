@@ -2,10 +2,10 @@
 //!
 //! `observe_fixed_wsb_tree` is read-only evidence collection, not mutation
 //! authority. This module deliberately does not publish external discard
-//! intent, revoke a run, serialize a deletion checkpoint, classify/resume a
-//! crash prefix, or expose a CLI. Those authority and recovery contracts remain
-//! part of issue #28. Callers must not infer permission to delete from a valid
-//! inventory alone.
+//! intent, revoke a run, publish disposition authority, or expose a CLI. It can
+//! reopen only an explicitly supplied child-first prefix and dispose its exact
+//! next checkpoint-bound object. Authority and durable recovery remain with the
+//! runner; callers must not infer permission to delete from inventory alone.
 
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
@@ -15,10 +15,10 @@ use std::os::windows::fs::{FileExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 use aiw_probe::{
-    DiscardIntentEaEntry, DiscardIntentStableId, WSB_FIXED_TREE_CONTRACT_VERSION,
-    WSB_FIXED_TREE_INVENTORY_SCHEMA_VERSION, WorkspaceBindingEvidence, WsbFixedObjectEvidence,
-    WsbFixedObjectKind, WsbFixedTreeAclPolicy, WsbFixedTreeEaBinding,
-    WsbFixedTreeInventoryEvidence, WsbFixedTreeStreamPolicy,
+    DiscardIntentEaEntry, DiscardIntentStableId, WSB_FIXED_OBJECT_DELETE_ORDER,
+    WSB_FIXED_TREE_CONTRACT_VERSION, WSB_FIXED_TREE_INVENTORY_SCHEMA_VERSION,
+    WorkspaceBindingEvidence, WsbFixedObjectEvidence, WsbFixedObjectKind, WsbFixedTreeAclPolicy,
+    WsbFixedTreeEaBinding, WsbFixedTreeInventoryEvidence, WsbFixedTreeStreamPolicy,
 };
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -126,27 +126,9 @@ const ACQUIRE_ORDER: [FixedWsbObject; 19] = [
     FixedWsbObject::JournalHead3,
 ];
 
-const DELETE_ORDER: [FixedWsbObject; 19] = [
-    FixedWsbObject::JournalHead3,
-    FixedWsbObject::JournalHead2,
-    FixedWsbObject::JournalHead1,
-    FixedWsbObject::JournalHeadsDirectory,
-    FixedWsbObject::RevocationRecord,
-    FixedWsbObject::EventsJournal,
-    FixedWsbObject::PlanningImportReceipt,
-    FixedWsbObject::AuthoritativePlan,
-    FixedWsbObject::RunDirectory,
-    FixedWsbObject::RunLock,
-    FixedWsbObject::LocksDirectory,
-    FixedWsbObject::RunsDirectory,
-    FixedWsbObject::GuestAgent,
-    FixedWsbObject::ToolsDirectory,
-    FixedWsbObject::OutputDirectory,
-    FixedWsbObject::PreparationReceipt,
-    FixedWsbObject::WindowsSandboxPlan,
-    FixedWsbObject::PreparedPlan,
-    FixedWsbObject::WorkspaceRoot,
-];
+fn delete_order() -> [FixedWsbObject; 19] {
+    WSB_FIXED_OBJECT_DELETE_ORDER.map(native_kind)
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct StableFileId {
@@ -340,6 +322,51 @@ pub struct HeldCheckpointBoundWsbRoot {
     tree: HeldFixedWsbTree,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[doc(hidden)]
+pub struct WsbDispositionStep {
+    pub sequence: u8,
+    pub kind: WsbFixedObjectKind,
+    pub id: DiscardIntentStableId,
+}
+
+#[doc(hidden)]
+pub struct HeldCheckpointBoundWsbDisposition {
+    tree: HeldFixedWsbTree,
+}
+
+impl HeldCheckpointBoundWsbDisposition {
+    pub fn completed_count(&self) -> u8 {
+        self.tree.next_delete as u8
+    }
+
+    pub fn next_step(&self) -> Result<Option<WsbDispositionStep>, ExactDisposeError> {
+        let Some(key) = self.tree.next_object() else {
+            return Ok(None);
+        };
+        let binding = self.tree.binding(key)?;
+        Ok(Some(WsbDispositionStep {
+            sequence: self.tree.next_delete as u8,
+            kind: portable_kind(key),
+            id: stable_id_evidence(&binding.id),
+        }))
+    }
+
+    pub fn revalidate(&self) -> Result<(), ExactDisposeError> {
+        self.tree.revalidate_remaining()
+    }
+
+    pub fn dispose_next(&mut self) -> Result<WsbDispositionStep, ExactDisposeError> {
+        let sequence = self.tree.next_delete as u8;
+        let observation = self.tree.dispose_next()?;
+        Ok(WsbDispositionStep {
+            sequence,
+            kind: portable_kind(observation.key),
+            id: stable_id_evidence(&observation.id),
+        })
+    }
+}
+
 impl HeldCheckpointBoundWsbRoot {
     pub fn revalidate(&self) -> Result<(), ExactDisposeError> {
         self.tree.revalidate_remaining()
@@ -523,6 +550,23 @@ pub fn reopen_checkpoint_bound_wsb_root(
     let tree = HeldFixedWsbTree::reopen_exact(&inventory, location)?;
     tree.revalidate_remaining()?;
     Ok(HeldCheckpointBoundWsbRoot { tree })
+}
+
+#[doc(hidden)]
+pub fn reopen_checkpoint_bound_wsb_disposition(
+    expected: &WsbFixedTreeInventoryEvidence,
+    completed_count: u8,
+) -> Result<HeldCheckpointBoundWsbDisposition, ExactDisposeError> {
+    let inventory = portable_inventory(expected)?;
+    let completed = usize::from(completed_count);
+    if completed > delete_order().len() {
+        return Err(ExactDisposeError::Contract(
+            "disposition prefix exceeds the fixed object count".into(),
+        ));
+    }
+    let tree = HeldFixedWsbTree::reopen_disposition_prefix(&inventory, completed)?;
+    tree.revalidate_remaining()?;
+    Ok(HeldCheckpointBoundWsbDisposition { tree })
 }
 
 impl HeldFixedWsbCheckpointSnapshot {
@@ -887,12 +931,87 @@ impl HeldFixedWsbTree {
         })
     }
 
+    fn reopen_disposition_prefix(
+        inventory: &FixedWsbTreeInventory,
+        completed: usize,
+    ) -> Result<Self, ExactDisposeError> {
+        validate_inventory(inventory)?;
+        if completed > delete_order().len() {
+            return Err(ExactDisposeError::Contract(
+                "disposition prefix exceeds the fixed object count".into(),
+            ));
+        }
+        let parent_path = inventory.original_root.parent().ok_or_else(|| {
+            ExactDisposeError::Contract("workspace root has no parent directory".into())
+        })?;
+        let parent = open_parent(parent_path)?;
+        if stable_id(&parent)? != inventory.parent_id {
+            return Err(ExactDisposeError::Rejected(
+                "workspace parent identity changed".into(),
+            ));
+        }
+        reject_case_sensitive_directory(&parent)?;
+        let tombstone_root = parent_path.join(&inventory.tombstone_leaf);
+        let expected_root = &inventory.objects[0].id;
+        let tombstone = path_identity_if_present(&tombstone_root)?;
+        if completed == delete_order().len() {
+            if tombstone.is_some() {
+                return Err(ExactDisposeError::Rejected(
+                    "completed disposition still has a tombstone name".into(),
+                ));
+            }
+        } else if tombstone.as_ref() != Some(expected_root) {
+            return Err(ExactDisposeError::Rejected(
+                "partial disposition tombstone is absent or foreign".into(),
+            ));
+        }
+        let owner =
+            OwnedSid::from_string(&inventory.workspace.owner_sid).map_err(workspace_error)?;
+        let deleted: BTreeSet<_> = delete_order().into_iter().take(completed).collect();
+        let mut objects = Vec::with_capacity(ACQUIRE_ORDER.len());
+        for key in ACQUIRE_ORDER {
+            let path = path_for(&tombstone_root, &inventory.run_id, key);
+            if deleted.contains(&key) {
+                if path_identity_if_present(&path)?.is_some() {
+                    return Err(ExactDisposeError::Rejected(format!(
+                        "committed disposition object {key:?} is still present"
+                    )));
+                }
+                objects.push(HeldExactObject { key, file: None });
+                continue;
+            }
+            let file = open_object(&path, key, OpenPurpose::DisposeTombstone)?;
+            objects.push(HeldExactObject {
+                key,
+                file: Some(file),
+            });
+        }
+        for (object, expected) in objects.iter().zip(&inventory.objects) {
+            if object.key != expected.key {
+                return Err(ExactDisposeError::Contract(
+                    "fixed object ordering changed".into(),
+                ));
+            }
+            if object.file.is_some() {
+                verify_expected(object, expected, &owner, &tombstone_root, &inventory.run_id)?;
+            }
+        }
+        verify_allowlists(&objects, &inventory.run_id)?;
+        Ok(Self {
+            parent,
+            inventory: inventory.clone(),
+            objects,
+            location: FixedWsbTreeLocation::Tombstone,
+            next_delete: completed,
+        })
+    }
+
     pub(crate) fn inventory(&self) -> &FixedWsbTreeInventory {
         &self.inventory
     }
 
     pub(crate) fn next_object(&self) -> Option<FixedWsbObject> {
-        DELETE_ORDER.get(self.next_delete).copied()
+        delete_order().get(self.next_delete).copied()
     }
 
     pub(crate) fn depublish(&mut self) -> Result<ExactRenameObservation, ExactDisposeError> {
@@ -1042,7 +1161,7 @@ impl HeldFixedWsbTree {
     }
 
     pub(crate) fn dispose_all(&mut self) -> Result<Vec<ExactDeleteObservation>, ExactDisposeError> {
-        let mut observations = Vec::with_capacity(DELETE_ORDER.len() - self.next_delete);
+        let mut observations = Vec::with_capacity(delete_order().len() - self.next_delete);
         while self.next_object().is_some() {
             observations.push(self.dispose_next()?);
         }
@@ -3015,25 +3134,62 @@ mod tests {
 
     #[test]
     fn every_partial_prefix_leaves_only_explicitly_deleted_objects_absent() {
-        for stop_after in 0..DELETE_ORDER.len() {
+        for stop_after in 0..delete_order().len() {
             let fixture = Fixture::new();
             let inventory = fixture.inventory();
             let tombstone = fixture.parent.join(inventory.tombstone_leaf());
             let mut held =
                 HeldFixedWsbTree::reopen_exact(&inventory, FixedWsbTreeLocation::Original).unwrap();
             held.depublish().unwrap();
-            for expected in DELETE_ORDER.into_iter().take(stop_after) {
+            for expected in delete_order().into_iter().take(stop_after) {
                 assert_eq!(held.dispose_next().unwrap().key, expected);
             }
             drop(held);
 
-            for (index, key) in DELETE_ORDER.into_iter().enumerate() {
+            for (index, key) in delete_order().into_iter().enumerate() {
                 assert_eq!(
                     path_for(&tombstone, RUN_ID, key).exists(),
                     index >= stop_after,
                     "unexpected name state for {key:?} after prefix {stop_after}"
                 );
             }
+            assert_eq!(fs::read(&fixture.sibling).unwrap(), b"unrelated");
+        }
+    }
+
+    #[test]
+    fn every_checkpoint_bound_disposition_prefix_reopens_and_finishes_exactly() {
+        for completed in 0..=delete_order().len() {
+            let fixture = Fixture::new();
+            let tombstone = tombstone_leaf(&fixture.workspace);
+            let inventory =
+                observe_fixed_wsb_tree_for_checkpoint(&fixture.workspace, RUN_ID, &tombstone)
+                    .unwrap();
+            reopen_checkpoint_bound_wsb_root(&inventory, WsbRootNamespaceState::Original)
+                .unwrap()
+                .depublish_and_release()
+                .unwrap();
+            fs::create_dir(&fixture.root).unwrap();
+            let replacement = fixture.root.join("replacement.txt");
+            fs::write(&replacement, b"unrelated replacement").unwrap();
+            let internal = portable_inventory(&inventory).unwrap();
+            let mut prefix = HeldFixedWsbTree::reopen_disposition_prefix(&internal, 0).unwrap();
+            for sequence in 0..completed {
+                let observation = prefix.dispose_next().unwrap();
+                assert_eq!(observation.key, delete_order()[sequence]);
+            }
+            drop(prefix);
+
+            let mut resumed =
+                reopen_checkpoint_bound_wsb_disposition(&inventory, completed as u8).unwrap();
+            assert_eq!(resumed.completed_count(), completed as u8);
+            while let Some(expected) = resumed.next_step().unwrap() {
+                let observed = resumed.dispose_next().unwrap();
+                assert_eq!(observed, expected);
+            }
+            resumed.revalidate().unwrap();
+            assert!(!fixture.tombstone.exists());
+            assert_eq!(fs::read(replacement).unwrap(), b"unrelated replacement");
             assert_eq!(fs::read(&fixture.sibling).unwrap(), b"unrelated");
         }
     }

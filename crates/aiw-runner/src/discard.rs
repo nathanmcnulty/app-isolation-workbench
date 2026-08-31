@@ -2,9 +2,9 @@
 //!
 //! This workflow may publish only the protected external intent, the hash-bound
 //! internal revocation record, and the protected external fixed-tree
-//! checkpoint and depublish commit. Its sole namespace mutation is the exact
-//! checkpoint-bound root rename. It has no provider operation, child
-//! disposition, deletion, or cleanup-complete claim.
+//! checkpoint and depublish commit. After depublish, it may publish one
+//! immutable, chain-bound authorization record before each exact child-first
+//! disposition. It has no provider operation or cleanup-complete claim.
 
 use std::path::Path;
 
@@ -15,21 +15,29 @@ use aiw_orchestrator::{
     WsbOuterDiscardAuthority, WsbRevocationRecord, project_revision_hash,
 };
 use aiw_probe::{
-    WSB_FIXED_TREE_CONTRACT_VERSION, WorkspaceBindingEvidence, WsbFixedTreeInventoryEvidence,
+    WSB_FIXED_OBJECT_DELETE_ORDER, WSB_FIXED_TREE_CONTRACT_VERSION,
+    WSB_FIXED_TREE_DELETE_ORDER_VERSION, WorkspaceBindingEvidence, WsbFixedObjectKind,
+    WsbFixedTreeInventoryEvidence,
 };
 use aiw_schema::Project;
 use aiw_windows_platform::{
     DepublishCommitBindingEvidence, DepublishCommitError, DiscardCheckpointBindingEvidence,
-    DiscardCheckpointError, DiscardIntentBindingEvidence, DiscardIntentError, ExactDisposeError,
-    HeldDepublishCommitPublication, HeldDiscardCheckpointPublication, HeldDiscardIntentPublication,
-    ReopenedDepublishCommit, ReopenedDiscardCheckpoint, ReopenedDiscardIntent, RunCoordinationKey,
-    RunCoordinationLease, RunCoordinationMode, WsbRootDepublishObservation, WsbRootNamespaceState,
-    classify_checkpoint_bound_wsb_root, hold_fixed_wsb_tree_for_checkpoint,
-    locate_depublish_commit_from_persisted_root, reopen_checkpoint_bound_wsb_root,
+    DiscardCheckpointError, DiscardIntentBindingEvidence, DiscardIntentError,
+    DispositionProgressBindingEvidence, DispositionProgressError, DispositionProgressSlotState,
+    ExactDisposeError, HeldCheckpointBoundWsbDisposition, HeldDepublishCommitPublication,
+    HeldDiscardCheckpointPublication, HeldDiscardIntentPublication,
+    HeldDispositionProgressPublication, ReopenedDepublishCommit, ReopenedDiscardCheckpoint,
+    ReopenedDiscardIntent, ReopenedDispositionProgress, RunCoordinationKey, RunCoordinationLease,
+    RunCoordinationMode, WsbRootDepublishObservation, WsbRootNamespaceState,
+    classify_checkpoint_bound_wsb_root, classify_disposition_progress_slot,
+    hold_fixed_wsb_tree_for_checkpoint, locate_depublish_commit_from_persisted_root,
+    reopen_checkpoint_bound_wsb_disposition, reopen_checkpoint_bound_wsb_root,
     reopen_existing_depublish_commit, reopen_existing_discard_checkpoint,
-    reopen_prepared_depublish_commit, reopen_prepared_discard_checkpoint,
-    reopen_prepared_discard_intent, reopen_published_discard_intent, reserve_depublish_commit,
-    reserve_discard_checkpoint, stage_discard_intent, try_acquire_run_coordination,
+    reopen_existing_disposition_progress, reopen_prepared_depublish_commit,
+    reopen_prepared_discard_checkpoint, reopen_prepared_discard_intent,
+    reopen_prepared_disposition_progress, reopen_published_discard_intent,
+    reserve_depublish_commit, reserve_discard_checkpoint, reserve_disposition_progress,
+    stage_discard_intent, try_acquire_run_coordination,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -49,6 +57,9 @@ const TOMBSTONE_PREFIX: &str = ".aiw-discarded-v1-";
 const DEPUBLISH_COMMIT_SCHEMA: &str = "aiw.dev/wsb-depublish-commit/v0alpha1";
 const DEPUBLISH_COMMIT_POLICY: &str = "checkpoint-bound-original-to-tombstone-v1";
 const DEPUBLISH_OPERATION: &str = "originalToCheckpointBoundTombstone";
+const DISPOSITION_PROGRESS_SCHEMA: &str = "aiw.dev/wsb-disposition-progress/v0alpha1";
+const DISPOSITION_PROGRESS_POLICY: &str = "immutable-pre-disposition-chain-v1";
+const DISPOSITION_OPERATION: &str = "deleteExactCheckpointObject";
 
 #[derive(Debug, Error)]
 pub(crate) enum WsbDiscardPreparationError {
@@ -66,6 +77,8 @@ pub(crate) enum WsbDiscardPreparationError {
     Checkpoint(#[from] DiscardCheckpointError),
     #[error("protected depublish commit failed: {0}")]
     DepublishCommit(#[from] DepublishCommitError),
+    #[error("protected disposition progress failed: {0}")]
+    DispositionProgress(#[from] DispositionProgressError),
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -145,7 +158,7 @@ pub(crate) struct WsbFixedTreeInventoryReceipt {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct WsbDepublishCommitV0Alpha1 {
+pub(crate) struct WsbDepublishCommitV0Alpha1 {
     schema_version: String,
     policy_version: String,
     operation: String,
@@ -169,6 +182,53 @@ struct WsbDepublishCommitV0Alpha1 {
     commit_file_id: aiw_probe::DiscardIntentStableId,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WsbDispositionObjectV0Alpha1 {
+    kind: WsbFixedObjectKind,
+    relative_path: String,
+    id: aiw_probe::DiscardIntentStableId,
+    parent_id: aiw_probe::DiscardIntentStableId,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WsbDispositionRecordFileV0Alpha1 {
+    ordinal: u8,
+    parent_id: aiw_probe::DiscardIntentStableId,
+    file_id: aiw_probe::DiscardIntentStableId,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WsbDispositionProgressV0Alpha1 {
+    schema_version: String,
+    policy_version: String,
+    operation: String,
+    delete_order_version: String,
+    run_id: String,
+    cleanup_id: String,
+    store_key: String,
+    workspace: WorkspaceBindingEvidence,
+    workspace_identity_sha256: String,
+    discard_intent_sha256: String,
+    discard_intent_binding: DiscardIntentBindingEvidence,
+    checkpoint_sha256: String,
+    checkpoint_binding: DiscardCheckpointBindingEvidence,
+    depublish_commit_sha256: String,
+    depublish_commit_binding: DepublishCommitBindingEvidence,
+    fixed_tree_contract_version: String,
+    inventory_sha256: String,
+    tombstone_leaf: String,
+    tombstone_path: String,
+    tombstone_root_id: aiw_probe::DiscardIntentStableId,
+    ordinal: u8,
+    completed_before: u8,
+    next_object: WsbDispositionObjectV0Alpha1,
+    previous_progress_sha256: String,
+    record_file: WsbDispositionRecordFileV0Alpha1,
+}
+
 pub(crate) struct DepublishedWsbTombstone<'a> {
     prepared: PreparedWsbDiscard<'a>,
     commit: WsbDepublishCommitV0Alpha1,
@@ -180,7 +240,9 @@ pub(crate) struct RecoveredDepublishedWsbTombstone {
     _coordination: RunCoordinationLease,
     _intent: HeldDiscardIntentPublication,
     _checkpoint: HeldDiscardCheckpointPublication,
-    commit: HeldDepublishCommitPublication,
+    checkpoint: WsbDiscardCheckpointV0Alpha1,
+    depublish_commit: WsbDepublishCommitV0Alpha1,
+    commit_publication: HeldDepublishCommitPublication,
     observation: WsbRootDepublishObservation,
 }
 
@@ -192,7 +254,12 @@ impl RecoveredDepublishedWsbTombstone {
     pub(crate) fn revalidate(&self) -> Result<(), WsbDiscardPreparationError> {
         self._intent.revalidate()?;
         self._checkpoint.revalidate()?;
-        self.commit.revalidate()?;
+        self.commit_publication.revalidate()?;
+        validate_depublish_commit(
+            &self.depublish_commit,
+            &self.checkpoint,
+            self.commit_publication.evidence(),
+        )?;
         Ok(())
     }
 }
@@ -211,6 +278,437 @@ impl DepublishedWsbTombstone<'_> {
             self.commit_publication.evidence(),
         )
     }
+}
+
+pub(crate) trait WsbTombstoneDispositionAuthority {
+    fn checkpoint(&self) -> &WsbDiscardCheckpointV0Alpha1;
+    fn depublish_commit(&self) -> &WsbDepublishCommitV0Alpha1;
+    fn depublish_binding(&self) -> &DepublishCommitBindingEvidence;
+    fn revalidate_tombstone_authority(&self) -> Result<(), WsbDiscardPreparationError>;
+}
+
+impl WsbTombstoneDispositionAuthority for DepublishedWsbTombstone<'_> {
+    fn checkpoint(&self) -> &WsbDiscardCheckpointV0Alpha1 {
+        self.prepared.checkpoint()
+    }
+    fn depublish_commit(&self) -> &WsbDepublishCommitV0Alpha1 {
+        &self.commit
+    }
+    fn depublish_binding(&self) -> &DepublishCommitBindingEvidence {
+        self.commit_publication.evidence()
+    }
+    fn revalidate_tombstone_authority(&self) -> Result<(), WsbDiscardPreparationError> {
+        self.revalidate()
+    }
+}
+
+impl WsbTombstoneDispositionAuthority for RecoveredDepublishedWsbTombstone {
+    fn checkpoint(&self) -> &WsbDiscardCheckpointV0Alpha1 {
+        &self.checkpoint
+    }
+    fn depublish_commit(&self) -> &WsbDepublishCommitV0Alpha1 {
+        &self.depublish_commit
+    }
+    fn depublish_binding(&self) -> &DepublishCommitBindingEvidence {
+        self.commit_publication.evidence()
+    }
+    fn revalidate_tombstone_authority(&self) -> Result<(), WsbDiscardPreparationError> {
+        self.revalidate()
+    }
+}
+
+pub(crate) struct HeldWsbDispositionPrefix<A> {
+    authority: A,
+    progress: Vec<HeldDispositionProgressPublication>,
+    completed_count: u8,
+}
+
+impl<A: WsbTombstoneDispositionAuthority> HeldWsbDispositionPrefix<A> {
+    pub(crate) fn completed_count(&self) -> u8 {
+        self.completed_count
+    }
+
+    pub(crate) fn revalidate(&self) -> Result<(), WsbDiscardPreparationError> {
+        self.authority.revalidate_tombstone_authority()?;
+        for progress in &self.progress {
+            progress.revalidate()?;
+        }
+        Ok(())
+    }
+}
+
+enum LoadedDispositionProgress {
+    Published(
+        WsbDispositionProgressV0Alpha1,
+        HeldDispositionProgressPublication,
+    ),
+    Pending(
+        WsbDispositionProgressV0Alpha1,
+        aiw_windows_platform::PublishableDispositionProgress,
+    ),
+}
+
+pub(crate) fn dispose_checkpoint_bound_wsb_tombstone<A>(
+    authority: A,
+) -> Result<HeldWsbDispositionPrefix<A>, WsbDiscardPreparationError>
+where
+    A: WsbTombstoneDispositionAuthority,
+{
+    authority.revalidate_tombstone_authority()?;
+    let checkpoint = authority.checkpoint();
+    let initial_root_state = classify_checkpoint_bound_wsb_root(&checkpoint.inventory)?;
+    let workspace = &checkpoint.inventory.workspace;
+    let run_id = &checkpoint.run_id;
+    let store_key = &checkpoint.revocation.discard_intent_binding.store_key;
+    let mut loaded = Vec::new();
+    let mut previous_sha256 = canonical_hash(authority.depublish_commit())?;
+    let mut gap = false;
+    let mut saw_pending = false;
+    for ordinal in 0..WSB_FIXED_OBJECT_DELETE_ORDER.len() as u8 {
+        match classify_disposition_progress_slot(workspace, run_id, store_key, ordinal)? {
+            DispositionProgressSlotState::Absent => gap = true,
+            DispositionProgressSlotState::Ambiguous => {
+                return Err(WsbDiscardPreparationError::Contract(format!(
+                    "disposition progress slot {ordinal} is ambiguous"
+                )));
+            }
+            DispositionProgressSlotState::Pending | DispositionProgressSlotState::Published => {
+                if gap || saw_pending {
+                    return Err(WsbDiscardPreparationError::Contract(
+                        "disposition progress records are not one contiguous prefix".to_owned(),
+                    ));
+                }
+                let existing =
+                    reopen_existing_disposition_progress(workspace, run_id, store_key, ordinal)?;
+                let progress: WsbDispositionProgressV0Alpha1 =
+                    serde_json::from_slice(existing.bytes()).map_err(|error| {
+                        WsbDiscardPreparationError::Contract(format!(
+                            "persisted disposition progress is not the strict schema: {error}"
+                        ))
+                    })?;
+                if canonical_bytes(&progress)? != existing.bytes() {
+                    return Err(WsbDiscardPreparationError::Contract(
+                        "persisted disposition progress is not canonical JSON".to_owned(),
+                    ));
+                }
+                validate_disposition_progress(
+                    &progress,
+                    existing.binding(),
+                    &authority,
+                    &previous_sha256,
+                )?;
+                previous_sha256 = hash_bytes(existing.bytes());
+                match existing.into_reopened() {
+                    ReopenedDispositionProgress::Published(value) => {
+                        loaded.push(LoadedDispositionProgress::Published(progress, value));
+                    }
+                    ReopenedDispositionProgress::Publishable(value) => {
+                        saw_pending = true;
+                        loaded.push(LoadedDispositionProgress::Pending(progress, value));
+                    }
+                }
+            }
+        }
+    }
+
+    let final_count = loaded
+        .iter()
+        .take_while(|record| matches!(record, LoadedDispositionProgress::Published(..)))
+        .count() as u8;
+    let has_pending = matches!(loaded.last(), Some(LoadedDispositionProgress::Pending(..)));
+    let (mut physical_count, mut tree) = reopen_disposition_physical_prefix(&checkpoint.inventory)?;
+    let disposition_complete = physical_count == WSB_FIXED_OBJECT_DELETE_ORDER.len() as u8;
+    if (!disposition_complete && initial_root_state != WsbRootNamespaceState::Tombstone)
+        || (disposition_complete
+            && !matches!(
+                initial_root_state,
+                WsbRootNamespaceState::Absent | WsbRootNamespaceState::Foreign
+            ))
+    {
+        return Err(WsbDiscardPreparationError::Contract(
+            "root namespace state differs from the exact physical disposition prefix".to_owned(),
+        ));
+    }
+    let physical_is_valid = disposition_prefixes_align(final_count, has_pending, physical_count);
+    if !physical_is_valid {
+        return Err(WsbDiscardPreparationError::Contract(format!(
+            "physical disposition prefix {physical_count} differs from receipt prefix {final_count}"
+        )));
+    }
+
+    let mut publications: Vec<HeldDispositionProgressPublication> = Vec::new();
+    let mut pending = None;
+    let depublish_anchor = canonical_hash(authority.depublish_commit())?;
+    for record in loaded {
+        match record {
+            LoadedDispositionProgress::Published(progress, publication) => {
+                let previous = publications
+                    .last()
+                    .map(|value| value.evidence().record_sha256())
+                    .unwrap_or(&depublish_anchor);
+                validate_disposition_progress(
+                    &progress,
+                    publication.evidence(),
+                    &authority,
+                    previous,
+                )?;
+                publications.push(publication);
+            }
+            LoadedDispositionProgress::Pending(progress, publishable) => {
+                pending = Some((progress, publishable));
+            }
+        }
+    }
+
+    while physical_count < WSB_FIXED_OBJECT_DELETE_ORDER.len() as u8 {
+        authority.revalidate_tombstone_authority()?;
+        for publication in &publications {
+            publication.revalidate()?;
+        }
+        tree.revalidate()?;
+
+        let publication = if physical_count + 1 == final_count {
+            publications
+                .get(usize::from(physical_count))
+                .ok_or_else(|| {
+                    WsbDiscardPreparationError::Contract(
+                        "authorized disposition receipt is missing".to_owned(),
+                    )
+                })?
+        } else {
+            let previous = publications
+                .last()
+                .map(|value| value.evidence().record_sha256().to_owned())
+                .unwrap_or(canonical_hash(authority.depublish_commit())?);
+            let publication = if let Some((progress, publishable)) = pending.take() {
+                if progress.ordinal != physical_count {
+                    return Err(WsbDiscardPreparationError::Contract(
+                        "pending disposition ordinal differs from physical prefix".to_owned(),
+                    ));
+                }
+                authority.revalidate_tombstone_authority()?;
+                tree.revalidate()?;
+                let publication = publishable.publish()?;
+                publication.revalidate()?;
+                validate_disposition_progress(
+                    &progress,
+                    publication.evidence(),
+                    &authority,
+                    &previous,
+                )?;
+                publication
+            } else {
+                materialize_disposition_progress(&authority, &tree, physical_count, &previous)?
+            };
+            publications.push(publication);
+            publications.last().expect("just pushed")
+        };
+        publication.revalidate()?;
+        authority.revalidate_tombstone_authority()?;
+        tree.revalidate()?;
+        let expected = tree.next_step()?.ok_or_else(|| {
+            WsbDiscardPreparationError::Contract(
+                "physical tree completed before all disposition receipts".to_owned(),
+            )
+        })?;
+        if expected.sequence != physical_count {
+            return Err(WsbDiscardPreparationError::Contract(
+                "native disposition sequence differs from receipt prefix".to_owned(),
+            ));
+        }
+        let observed = tree.dispose_next()?;
+        if observed != expected {
+            return Err(WsbDiscardPreparationError::Contract(
+                "native disposition observation differs from authorized next object".to_owned(),
+            ));
+        }
+        physical_count += 1;
+        tree.revalidate()?;
+    }
+    Ok(HeldWsbDispositionPrefix {
+        authority,
+        progress: publications,
+        completed_count: physical_count,
+    })
+}
+
+fn disposition_prefixes_align(final_count: u8, has_pending: bool, physical_count: u8) -> bool {
+    if has_pending {
+        physical_count == final_count
+    } else if final_count == 0 {
+        physical_count == 0
+    } else {
+        physical_count == final_count || physical_count + 1 == final_count
+    }
+}
+
+fn reopen_disposition_physical_prefix(
+    inventory: &WsbFixedTreeInventoryEvidence,
+) -> Result<(u8, HeldCheckpointBoundWsbDisposition), WsbDiscardPreparationError> {
+    for completed in 0..=WSB_FIXED_OBJECT_DELETE_ORDER.len() as u8 {
+        if let Ok(tree) = reopen_checkpoint_bound_wsb_disposition(inventory, completed) {
+            return Ok((completed, tree));
+        }
+    }
+    Err(WsbDiscardPreparationError::Contract(
+        "tombstone objects do not form one exact disposition prefix".to_owned(),
+    ))
+}
+
+fn materialize_disposition_progress<A: WsbTombstoneDispositionAuthority>(
+    authority: &A,
+    tree: &HeldCheckpointBoundWsbDisposition,
+    ordinal: u8,
+    previous_progress_sha256: &str,
+) -> Result<HeldDispositionProgressPublication, WsbDiscardPreparationError> {
+    authority.revalidate_tombstone_authority()?;
+    tree.revalidate()?;
+    let checkpoint = authority.checkpoint();
+    let workspace = &checkpoint.inventory.workspace;
+    let store_key = &checkpoint.revocation.discard_intent_binding.store_key;
+    let reserved = reserve_disposition_progress(workspace, &checkpoint.run_id, store_key, ordinal)?;
+    let binding = reserved.evidence().clone();
+    let progress = build_disposition_progress(authority, &binding, previous_progress_sha256)?;
+    let bytes = canonical_bytes(&progress)?;
+    let sha256 = hash_bytes(&bytes);
+    let staged = reserved.persist(&bytes, &sha256)?;
+    let persisted_binding = staged.evidence().clone();
+    authority.revalidate_tombstone_authority()?;
+    tree.revalidate()?;
+    validate_disposition_progress(
+        &progress,
+        &persisted_binding,
+        authority,
+        previous_progress_sha256,
+    )?;
+    let reopened = reopen_prepared_disposition_progress(
+        &bytes,
+        &sha256,
+        workspace,
+        &checkpoint.run_id,
+        &persisted_binding,
+    )?;
+    let publication = match reopened {
+        ReopenedDispositionProgress::Publishable(value) => value.publish()?,
+        ReopenedDispositionProgress::Published(value) => value,
+    };
+    publication.revalidate()?;
+    authority.revalidate_tombstone_authority()?;
+    tree.revalidate()?;
+    validate_disposition_progress(
+        &progress,
+        publication.evidence(),
+        authority,
+        previous_progress_sha256,
+    )?;
+    Ok(publication)
+}
+
+fn build_disposition_progress<A: WsbTombstoneDispositionAuthority>(
+    authority: &A,
+    binding: &DispositionProgressBindingEvidence,
+    previous_progress_sha256: &str,
+) -> Result<WsbDispositionProgressV0Alpha1, WsbDiscardPreparationError> {
+    let ordinal = binding.ordinal();
+    let checkpoint = authority.checkpoint();
+    let inventory = &checkpoint.inventory;
+    let kind = *WSB_FIXED_OBJECT_DELETE_ORDER
+        .get(usize::from(ordinal))
+        .ok_or_else(|| {
+            WsbDiscardPreparationError::Contract(
+                "disposition ordinal exceeds fixed delete order".to_owned(),
+            )
+        })?;
+    let object = inventory
+        .objects
+        .iter()
+        .find(|object| object.kind == kind)
+        .ok_or_else(|| {
+            WsbDiscardPreparationError::Contract(
+                "disposition object is absent from fixed inventory".to_owned(),
+            )
+        })?;
+    let parent_id = match kind.parent() {
+        None => inventory.parent_id.clone(),
+        Some(parent) => inventory
+            .objects
+            .iter()
+            .find(|object| object.kind == parent)
+            .map(|object| object.id.clone())
+            .ok_or_else(|| {
+                WsbDiscardPreparationError::Contract(
+                    "disposition parent is absent from fixed inventory".to_owned(),
+                )
+            })?,
+    };
+    let progress = WsbDispositionProgressV0Alpha1 {
+        schema_version: DISPOSITION_PROGRESS_SCHEMA.to_owned(),
+        policy_version: DISPOSITION_PROGRESS_POLICY.to_owned(),
+        operation: DISPOSITION_OPERATION.to_owned(),
+        delete_order_version: WSB_FIXED_TREE_DELETE_ORDER_VERSION.to_owned(),
+        run_id: checkpoint.run_id.clone(),
+        cleanup_id: checkpoint.cleanup_id.clone(),
+        store_key: checkpoint
+            .revocation
+            .discard_intent_binding
+            .store_key
+            .clone(),
+        workspace: inventory.workspace.clone(),
+        workspace_identity_sha256: checkpoint.revocation.workspace_identity_sha256.clone(),
+        discard_intent_sha256: checkpoint.revocation.discard_intent_sha256.clone(),
+        discard_intent_binding: checkpoint.revocation.discard_intent_binding.clone(),
+        checkpoint_sha256: canonical_hash(checkpoint)?,
+        checkpoint_binding: authority.depublish_commit().checkpoint_binding.clone(),
+        depublish_commit_sha256: canonical_hash(authority.depublish_commit())?,
+        depublish_commit_binding: authority.depublish_binding().clone(),
+        fixed_tree_contract_version: checkpoint.fixed_tree_contract_version.clone(),
+        inventory_sha256: checkpoint.inventory_sha256.clone(),
+        tombstone_leaf: inventory.tombstone_leaf.clone(),
+        tombstone_path: authority.depublish_commit().tombstone_path.clone(),
+        tombstone_root_id: inventory.objects[0].id.clone(),
+        ordinal,
+        completed_before: ordinal,
+        next_object: WsbDispositionObjectV0Alpha1 {
+            kind,
+            relative_path: object.relative_path.clone(),
+            id: object.id.clone(),
+            parent_id,
+        },
+        previous_progress_sha256: previous_progress_sha256.to_owned(),
+        record_file: WsbDispositionRecordFileV0Alpha1 {
+            ordinal,
+            parent_id: binding.parent_id().clone(),
+            file_id: binding.record_id().clone(),
+        },
+    };
+    Ok(progress)
+}
+
+fn validate_disposition_progress<A: WsbTombstoneDispositionAuthority>(
+    progress: &WsbDispositionProgressV0Alpha1,
+    binding: &DispositionProgressBindingEvidence,
+    authority: &A,
+    previous_progress_sha256: &str,
+) -> Result<(), WsbDiscardPreparationError> {
+    let expected = build_disposition_progress(authority, binding, previous_progress_sha256)?;
+    let bytes = canonical_bytes(progress)?;
+    let valid = progress == &expected
+        && progress.ordinal == progress.completed_before
+        && binding.run_id() == progress.run_id
+        && binding.store_key() == progress.store_key
+        && binding.ordinal() == progress.ordinal
+        && binding.owner_sid() == progress.workspace.owner_sid
+        && binding.parent_id().volume_serial_number
+            == progress.workspace.parent.volume_serial_number
+        && binding.parent_id().file_id == progress.workspace.parent.file_id
+        && binding.record_sha256() == hash_bytes(&bytes)
+        && binding.record_size() == bytes.len() as u64;
+    if !valid {
+        return Err(WsbDiscardPreparationError::Contract(
+            "disposition progress differs from its exact authority or platform binding".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 impl PreparedWsbDiscard<'_> {
@@ -291,6 +789,37 @@ pub(crate) fn recover_committed_windows_sandbox_depublish(
     original_root: &Path,
     run_id: &str,
 ) -> Result<RecoveredDepublishedWsbTombstone, WsbDiscardPreparationError> {
+    recover_windows_sandbox_depublish_authority(
+        original_root,
+        run_id,
+        DepublishRecoveryMode::CompleteDepublish,
+    )
+}
+
+pub(crate) fn recover_checkpoint_bound_wsb_disposition(
+    original_root: &Path,
+    run_id: &str,
+) -> Result<HeldWsbDispositionPrefix<RecoveredDepublishedWsbTombstone>, WsbDiscardPreparationError>
+{
+    let authority = recover_windows_sandbox_depublish_authority(
+        original_root,
+        run_id,
+        DepublishRecoveryMode::DispositionOnly,
+    )?;
+    dispose_checkpoint_bound_wsb_tombstone(authority)
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum DepublishRecoveryMode {
+    CompleteDepublish,
+    DispositionOnly,
+}
+
+fn recover_windows_sandbox_depublish_authority(
+    original_root: &Path,
+    run_id: &str,
+    mode: DepublishRecoveryMode,
+) -> Result<RecoveredDepublishedWsbTombstone, WsbDiscardPreparationError> {
     let located = locate_depublish_commit_from_persisted_root(original_root, run_id)?;
     let commit: WsbDepublishCommitV0Alpha1 =
         serde_json::from_slice(located.commit()).map_err(|error| {
@@ -363,6 +892,12 @@ pub(crate) fn recover_committed_windows_sandbox_depublish(
     let state = classify_checkpoint_bound_wsb_root(&checkpoint.inventory)?;
     let (commit_publication, observation) = match commit_reopened {
         ReopenedDepublishCommit::Publishable(value) => {
+            if mode == DepublishRecoveryMode::DispositionOnly {
+                return Err(WsbDiscardPreparationError::Contract(
+                    "disposition recovery requires an already-published depublish commit"
+                        .to_owned(),
+                ));
+            }
             if located.is_published() || state != WsbRootNamespaceState::Original {
                 return Err(WsbDiscardPreparationError::Contract(
                     "pending depublish commit is not paired with the exact original tree"
@@ -382,7 +917,9 @@ pub(crate) fn recover_committed_windows_sandbox_depublish(
         ReopenedDepublishCommit::Published(publication) => {
             publication.revalidate()?;
             let observation = match state {
-                WsbRootNamespaceState::Original => {
+                WsbRootNamespaceState::Original
+                    if mode == DepublishRecoveryMode::CompleteDepublish =>
+                {
                     let tree = reopen_checkpoint_bound_wsb_root(&checkpoint.inventory, state)?;
                     tree.revalidate()?;
                     intent_publication.revalidate()?;
@@ -394,6 +931,14 @@ pub(crate) fn recover_committed_windows_sandbox_depublish(
                     root_id: checkpoint.inventory.objects[0].id.clone(),
                     tombstone_path: commit.tombstone_path.clone(),
                 },
+                WsbRootNamespaceState::Absent | WsbRootNamespaceState::Foreign
+                    if mode == DepublishRecoveryMode::DispositionOnly =>
+                {
+                    WsbRootDepublishObservation {
+                        root_id: checkpoint.inventory.objects[0].id.clone(),
+                        tombstone_path: commit.tombstone_path.clone(),
+                    }
+                }
                 _ => {
                     return Err(WsbDiscardPreparationError::Contract(format!(
                         "committed depublish namespace is ambiguous or foreign: {state:?}"
@@ -403,18 +948,30 @@ pub(crate) fn recover_committed_windows_sandbox_depublish(
             (publication, observation)
         }
     };
-    if classify_checkpoint_bound_wsb_root(&checkpoint.inventory)?
-        != WsbRootNamespaceState::Tombstone
-    {
+    let recovered_state = classify_checkpoint_bound_wsb_root(&checkpoint.inventory)?;
+    let state_is_valid = match mode {
+        DepublishRecoveryMode::CompleteDepublish => {
+            recovered_state == WsbRootNamespaceState::Tombstone
+        }
+        DepublishRecoveryMode::DispositionOnly => matches!(
+            recovered_state,
+            WsbRootNamespaceState::Tombstone
+                | WsbRootNamespaceState::Absent
+                | WsbRootNamespaceState::Foreign
+        ),
+    };
+    if !state_is_valid {
         return Err(WsbDiscardPreparationError::Contract(
-            "recovered depublish did not reach the exact tombstone".to_owned(),
+            "recovered depublish authority is outside the requested recovery mode".to_owned(),
         ));
     }
     Ok(RecoveredDepublishedWsbTombstone {
         _coordination: coordination,
         _intent: intent_publication,
         _checkpoint: checkpoint_publication,
-        commit: commit_publication,
+        checkpoint,
+        depublish_commit: commit,
+        commit_publication,
         observation,
     })
 }
@@ -1321,7 +1878,6 @@ mod tests {
             "fs::rename",
             "SetFileInformationByHandle",
             "exact_dispose",
-            "dispose_next",
             "dispose_all",
             "acquire_windows_sandbox",
             "provider.start",
@@ -1342,6 +1898,9 @@ mod tests {
         assert!(production.contains("reserve_depublish_commit"));
         assert!(production.contains("reopen_existing_depublish_commit"));
         assert!(production.contains("depublish_and_release"));
+        assert!(production.contains("reserve_disposition_progress"));
+        assert!(production.contains("reopen_existing_disposition_progress"));
+        assert!(production.contains("tree.dispose_next()"));
         assert!(
             production.find("into_outer_only(publication)").unwrap()
                 < production
@@ -1368,6 +1927,11 @@ mod tests {
                 < production.find("tree.depublish_and_release").unwrap(),
             "the immutable external commit must be published before root rename"
         );
+        assert!(
+            production.find("materialize_disposition_progress").unwrap()
+                < production.find("tree.dispose_next()").unwrap(),
+            "an immutable progress record must be published before exact disposition"
+        );
         let recovery = production
             .split("fn recover_committed_windows_sandbox_depublish")
             .nth(1)
@@ -1380,6 +1944,16 @@ mod tests {
         assert!(recovery.contains("ReopenedDepublishCommit::Publishable"));
         assert!(recovery.contains("value.publish()"));
         assert!(recovery.contains("WsbRootNamespaceState::Tombstone"));
+        let disposition_recovery = production
+            .split("fn recover_checkpoint_bound_wsb_disposition")
+            .nth(1)
+            .unwrap()
+            .split("enum DepublishRecoveryMode")
+            .next()
+            .unwrap();
+        assert!(disposition_recovery.contains("DepublishRecoveryMode::DispositionOnly"));
+        assert!(disposition_recovery.contains("dispose_checkpoint_bound_wsb_tombstone"));
+        assert!(!disposition_recovery.contains("depublish_and_release"));
     }
 
     #[test]
@@ -1388,6 +1962,23 @@ mod tests {
         assert!(WSB_FIXED_TREE_CONTRACT_VERSION.ends_with("19-objects"));
         assert_eq!(CONTROL_PREFIX, ".aiw-discard-v1-");
         assert_eq!(TOMBSTONE_PREFIX, ".aiw-discarded-v1-");
+    }
+
+    #[test]
+    fn disposition_recovery_accepts_only_the_exact_crash_window() {
+        for final_count in 0..=19 {
+            for physical_count in 0..=19 {
+                assert_eq!(
+                    disposition_prefixes_align(final_count, false, physical_count),
+                    physical_count == final_count
+                        || (final_count > 0 && physical_count + 1 == final_count)
+                );
+                assert_eq!(
+                    disposition_prefixes_align(final_count, true, physical_count),
+                    physical_count == final_count
+                );
+            }
+        }
     }
 
     #[test]
