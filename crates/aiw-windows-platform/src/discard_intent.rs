@@ -628,7 +628,9 @@ fn reopen_stabilized_stage(
         match query_extended_attributes(&file, false) {
             Ok(binding) => {
                 let observed = ea_evidence(binding);
-                if observe_ea_stability(&mut previous, &observed) {
+                if observe_ea_stability(&mut previous, &observed)
+                    && (!observed.entries.is_empty() || attempt + 1 == EA_STABILIZATION_ATTEMPTS)
+                {
                     return Ok((file, observed));
                 }
                 drop(file);

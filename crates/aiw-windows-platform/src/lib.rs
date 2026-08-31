@@ -15,7 +15,10 @@ pub use windows_platform::{
 };
 
 #[cfg(windows)]
-pub use workspace::{HeldRunWorkspace, WorkspaceError};
+pub use workspace::{
+    BoundWorkspaceDirectory, BoundWorkspaceFile, CreatedWorkspaceDirectory, CreatedWorkspaceFile,
+    HeldRunWorkspace, WorkspaceAclPolicy, WorkspaceError,
+};
 
 #[cfg(windows)]
 pub use coordination::{
@@ -63,6 +66,16 @@ pub use disposition_progress::{
 };
 
 #[cfg(windows)]
+pub use cleanup_receipt::{
+    CLEANUP_RECEIPT_BINDING_POLICY_VERSION, CLEANUP_RECEIPT_BINDING_SCHEMA_VERSION,
+    CleanupReceiptBindingEvidence, CleanupReceiptError, CleanupReceiptSlotState,
+    ExistingCleanupReceipt, HeldCleanupReceiptPublication, PublishableCleanupReceipt,
+    ReopenedCleanupReceipt, ReservedCleanupReceipt, StagedCleanupReceipt,
+    classify_cleanup_receipt_slot, reopen_existing_cleanup_receipt,
+    reopen_prepared_cleanup_receipt, reserve_cleanup_receipt, stage_cleanup_receipt,
+};
+
+#[cfg(windows)]
 #[doc(hidden)]
 pub use exact_dispose::{
     ExactDisposeError, HeldCheckpointBoundWsbDisposition, HeldCheckpointBoundWsbRoot,
@@ -89,6 +102,9 @@ mod depublish_commit;
 
 #[cfg(windows)]
 mod disposition_progress;
+
+#[cfg(windows)]
+mod cleanup_receipt;
 
 #[cfg(windows)]
 #[allow(dead_code)]

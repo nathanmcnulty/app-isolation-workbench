@@ -649,8 +649,7 @@ pub fn prepare_windows_sandbox_bundle(
             .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?;
         ensure_empty_directory(&workspace.output_path())?;
         require_tools_allowlist(&workspace.tools_path())?;
-        let (_held_agent, guest_agent) =
-            stage_guest_agent(&mut held_guest_agent, &workspace.tools_path())?;
+        let (_held_agent, guest_agent) = stage_guest_agent(&mut held_guest_agent, &workspace)?;
         require_tools_allowlist(&workspace.tools_path())?;
         let artifacts = build_wsb_preparation(
             run_id,
@@ -664,14 +663,14 @@ pub fn prepare_windows_sandbox_bundle(
             .revalidate()
             .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?;
         ensure_empty_directory(&workspace.output_path())?;
-        let staged = stage_bundle(workspace.root_path(), &artifacts)?;
+        let staged = stage_bundle(&workspace, &artifacts)?;
         workspace
             .revalidate()
             .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?;
         ensure_empty_directory(&workspace.output_path())?;
         require_tools_allowlist(&workspace.tools_path())?;
         require_workspace_allowlist(workspace.root_path(), PreparationWorkspaceState::Building)?;
-        complete_bundle(workspace.root_path(), &artifacts, staged)?;
+        complete_bundle(&workspace, &artifacts, staged)?;
         Ok(artifacts)
     })();
     result.map_err(|error| WsbPreparationError::WorkspacePreserved {
@@ -701,6 +700,10 @@ pub(crate) struct HeldVerifiedWsbPreparation {
 
 #[cfg(windows)]
 impl HeldVerifiedWsbPreparation {
+    pub(crate) fn workspace(&self) -> &aiw_windows_platform::HeldRunWorkspace {
+        &self.workspace
+    }
+
     fn revalidate(&mut self, state: PreparationWorkspaceState) -> Result<(), WsbPreparationError> {
         self.workspace
             .revalidate()
@@ -921,8 +924,12 @@ pub fn import_windows_sandbox_preparation(
     let layout = RunLayout::new(held.workspace.root_path(), &run_id)
         .map_err(|error| WsbPreparationError::Persistence(error.to_string()))?;
     let disposition = layout
-        .create_or_verify_pending_wsb_import(&held.artifacts.run_plan, &receipt)
-        .map_err(|error| WsbPreparationError::Persistence(error.to_string()))?;
+        .create_or_verify_pending_wsb_import_bound(
+            &held.workspace,
+            &held.artifacts.run_plan,
+            &receipt,
+        )
+        .map_err(|error| WsbPreparationError::Persistence(format!("{error}: {}", error.detail)))?;
     require_imported_runs_allowlist(held.workspace.root_path(), &run_id)?;
     held.revalidate(PreparationWorkspaceState::Imported)?;
     if layout
@@ -964,26 +971,19 @@ pub fn import_windows_sandbox_preparation(
 #[cfg(windows)]
 fn stage_guest_agent(
     source: &mut HeldGuestAgentSource,
-    tools_path: &Path,
+    workspace: &aiw_windows_platform::HeldRunWorkspace,
 ) -> Result<(std::fs::File, BinaryIdentity), WsbPreparationError> {
-    use std::fs::OpenOptions;
     use std::io::{Read, Seek, SeekFrom, Write};
-    use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+    use std::os::windows::fs::MetadataExt;
 
     const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
-    const FILE_SHARE_READ: u32 = 0x0000_0001;
-    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
     const MAX_GUEST_AGENT_BYTES: u64 = 128 * 1024 * 1024;
 
-    let destination_path = tools_path.join(GUEST_AGENT_FILE);
-    let mut destination = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create_new(true)
-        .share_mode(FILE_SHARE_READ)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(&destination_path)
+    let created = workspace
+        .create_tools_file_new(GUEST_AGENT_FILE)
         .map_err(|error| WsbPreparationError::GuestAgent(error.to_string()))?;
+    let destination_canonical = created.final_path().to_owned();
+    let mut destination = created.into_file();
     let mut source_digest = Sha256::new();
     let mut copied = 0_u64;
     let mut buffer = [0_u8; 64 * 1024];
@@ -1034,9 +1034,6 @@ fn stage_guest_agent(
             "staged guest agent differs from the held source bytes".to_owned(),
         ));
     }
-    let destination_canonical = destination_path
-        .canonicalize()
-        .map_err(|error| WsbPreparationError::GuestAgent(error.to_string()))?;
     let destination_metadata = destination
         .metadata()
         .map_err(|error| WsbPreparationError::GuestAgent(error.to_string()))?;
@@ -1205,11 +1202,17 @@ struct StagedPreparationFiles {
 
 #[cfg(windows)]
 fn stage_bundle(
-    workspace_root: &Path,
+    workspace: &aiw_windows_platform::HeldRunWorkspace,
     artifacts: &PreparedWsbArtifacts,
 ) -> Result<StagedPreparationFiles, WsbPreparationError> {
-    let mut run_plan = write_json_new(&workspace_root.join(RUN_PLAN_FILE), &artifacts.run_plan)?;
-    let mut wsb_plan = write_json_new(&workspace_root.join(WSB_PLAN_FILE), &artifacts.wsb_plan)?;
+    let mut run_plan = write_json_new(
+        workspace.create_root_file_new(RUN_PLAN_FILE),
+        &artifacts.run_plan,
+    )?;
+    let mut wsb_plan = write_json_new(
+        workspace.create_root_file_new(WSB_PLAN_FILE),
+        &artifacts.wsb_plan,
+    )?;
     let observed_run_plan: RunPlan = read_json_bounded(&mut run_plan)?;
     let observed_wsb_plan: WindowsSandboxPlan = read_json_bounded(&mut wsb_plan)?;
     if observed_run_plan != artifacts.run_plan || observed_wsb_plan != artifacts.wsb_plan {
@@ -1222,16 +1225,19 @@ fn stage_bundle(
 
 #[cfg(windows)]
 fn complete_bundle(
-    workspace_root: &Path,
+    workspace: &aiw_windows_platform::HeldRunWorkspace,
     artifacts: &PreparedWsbArtifacts,
     staged: StagedPreparationFiles,
 ) -> Result<(), WsbPreparationError> {
-    require_workspace_allowlist(workspace_root, PreparationWorkspaceState::Building)?;
+    require_workspace_allowlist(workspace.root_path(), PreparationWorkspaceState::Building)?;
     let _held_plans = staged;
     // This create-new, synced receipt is the final fallible publication step.
     // Any earlier error leaves no completeness marker; an interrupted final
     // write leaves an invalid receipt rather than a successful preparation.
-    let _held_receipt = write_json_new(&workspace_root.join(RECEIPT_FILE), &artifacts.receipt)?;
+    let _held_receipt = write_json_new(
+        workspace.create_root_file_new(RECEIPT_FILE),
+        &artifacts.receipt,
+    )?;
     Ok(())
 }
 
@@ -1288,12 +1294,14 @@ fn open_bundle_file(path: &Path) -> Result<std::fs::File, WsbPreparationError> {
 
 #[cfg(windows)]
 fn write_json_new(
-    path: &Path,
+    created: Result<
+        aiw_windows_platform::CreatedWorkspaceFile,
+        aiw_windows_platform::WorkspaceError,
+    >,
     value: &impl Serialize,
 ) -> Result<std::fs::File, WsbPreparationError> {
-    use std::fs::OpenOptions;
     use std::io::Write;
-    use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+    use std::os::windows::fs::MetadataExt;
 
     const MAX_BUNDLE_ARTIFACT: usize = 1024 * 1024;
     let mut bytes = serde_json::to_vec_pretty(value)
@@ -1304,13 +1312,8 @@ fn write_json_new(
             "bundle artifact exceeds its size bound".to_owned(),
         ));
     }
-    let mut file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create_new(true)
-        .share_mode(0x0000_0001)
-        .custom_flags(0x0020_0000)
-        .open(path)
+    let mut file = created
+        .map(aiw_windows_platform::CreatedWorkspaceFile::into_file)
         .map_err(|error| WsbPreparationError::Persistence(error.to_string()))?;
     file.write_all(&bytes)
         .and_then(|_| file.sync_all())
@@ -1893,21 +1896,29 @@ mod tests {
         .unwrap();
 
         let rejected = TempDir::new("bundle-rejected");
-        std::fs::create_dir(rejected.0.join("tools")).unwrap();
-        std::fs::create_dir(rejected.0.join("output")).unwrap();
-        let staged = stage_bundle(&rejected.0, &artifacts).unwrap();
-        std::fs::write(rejected.0.join("unexpected.txt"), b"unexpected").unwrap();
-        assert!(complete_bundle(&rejected.0, &artifacts, staged).is_err());
-        assert!(!rejected.0.join(RECEIPT_FILE).exists());
+        let rejected_workspace =
+            aiw_windows_platform::HeldRunWorkspace::create(&rejected.0, "workspace").unwrap();
+        let staged = stage_bundle(&rejected_workspace, &artifacts).unwrap();
+        std::fs::write(
+            rejected_workspace.root_path().join("unexpected.txt"),
+            b"unexpected",
+        )
+        .unwrap();
+        assert!(complete_bundle(&rejected_workspace, &artifacts, staged).is_err());
+        assert!(!rejected_workspace.root_path().join(RECEIPT_FILE).exists());
 
         let accepted = TempDir::new("bundle-accepted");
-        std::fs::create_dir(accepted.0.join("tools")).unwrap();
-        std::fs::create_dir(accepted.0.join("output")).unwrap();
-        let staged = stage_bundle(&accepted.0, &artifacts).unwrap();
-        assert!(!accepted.0.join(RECEIPT_FILE).exists());
-        complete_bundle(&accepted.0, &artifacts, staged).unwrap();
-        assert!(accepted.0.join(RECEIPT_FILE).is_file());
-        require_workspace_allowlist(&accepted.0, PreparationWorkspaceState::Prepared).unwrap();
+        let accepted_workspace =
+            aiw_windows_platform::HeldRunWorkspace::create(&accepted.0, "workspace").unwrap();
+        let staged = stage_bundle(&accepted_workspace, &artifacts).unwrap();
+        assert!(!accepted_workspace.root_path().join(RECEIPT_FILE).exists());
+        complete_bundle(&accepted_workspace, &artifacts, staged).unwrap();
+        assert!(accepted_workspace.root_path().join(RECEIPT_FILE).is_file());
+        require_workspace_allowlist(
+            accepted_workspace.root_path(),
+            PreparationWorkspaceState::Prepared,
+        )
+        .unwrap();
     }
 
     #[cfg(windows)]

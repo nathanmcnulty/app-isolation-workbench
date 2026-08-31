@@ -686,24 +686,20 @@ fn publish_reopened(
         .checkpoint
         .sync_all()
         .map_err(|error| native_io("FlushFileBuffers(checkpoint-after-rename)", error))?;
-    verify_checkpoint(
-        &value.checkpoint,
-        &value.parent,
-        &context.final_path,
-        &context,
-        &value.evidence,
-    )?;
+    let initial_id = map_exact(stable_id(&value.checkpoint))?;
     drop(value.checkpoint);
-    let checkpoint = open_checkpoint(&context.final_path, false)?;
+    let (checkpoint, final_ea) = reopen_stabilized_checkpoint(&context.final_path, &initial_id)?;
+    let mut evidence = value.evidence;
+    evidence.checkpoint_ea = Some(final_ea);
     verify_checkpoint(
         &checkpoint,
         &value.parent,
         &context.final_path,
         &context,
-        &value.evidence,
+        &evidence,
     )?;
     Ok(HeldDiscardCheckpointPublication {
-        evidence: value.evidence,
+        evidence,
         _parent: value.parent,
         _checkpoint: checkpoint,
     })
@@ -894,7 +890,9 @@ fn reopen_stabilized_checkpoint(
                     .as_ref()
                     .is_some_and(|prior| same_ea_semantics(prior, &observed));
                 previous = Some(observed.clone());
-                if stable {
+                if stable
+                    && (!observed.entries.is_empty() || attempt + 1 == EA_STABILIZATION_ATTEMPTS)
+                {
                     return Ok((file, observed));
                 }
                 drop(file);
