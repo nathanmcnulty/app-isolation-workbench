@@ -32,6 +32,12 @@ pub use discard_intent::{
     stage_discard_intent,
 };
 
+#[cfg(windows)]
+#[doc(hidden)]
+pub use exact_dispose::{
+    ExactDisposeError, observe_fixed_wsb_tree_for_checkpoint, verify_fixed_wsb_tree_inventory,
+};
+
 pub use aiw_probe::WindowsFileIdentity as WorkspaceDirectoryIdentity;
 pub use aiw_probe::WorkspaceBindingEvidence;
 

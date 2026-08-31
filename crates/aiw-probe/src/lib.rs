@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs::File;
 use std::io::Read;
@@ -97,6 +97,284 @@ pub const WINDOWS_SYSTEM_SID: &str = "S-1-5-18";
 pub const DISCARD_INTENT_BINDING_SCHEMA_VERSION: &str =
     "aiw.dev/wsb-discard-intent-binding/v0alpha1";
 pub const DISCARD_INTENT_BINDING_POLICY_VERSION: &str = "owner-system-protected-single-file-v1";
+pub const WSB_FIXED_TREE_INVENTORY_SCHEMA_VERSION: &str =
+    "aiw.dev/wsb-fixed-tree-inventory/v0alpha1";
+pub const WSB_FIXED_TREE_CONTRACT_VERSION: &str = "aiw.dev/wsb-fixed-tree/v1-19-objects";
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum WsbFixedObjectKind {
+    WorkspaceRoot,
+    ToolsDirectory,
+    OutputDirectory,
+    RunsDirectory,
+    LocksDirectory,
+    RunDirectory,
+    JournalHeadsDirectory,
+    GuestAgent,
+    PreparedPlan,
+    WindowsSandboxPlan,
+    PreparationReceipt,
+    RunLock,
+    AuthoritativePlan,
+    PlanningImportReceipt,
+    EventsJournal,
+    RevocationRecord,
+    JournalHead1,
+    JournalHead2,
+    JournalHead3,
+}
+
+pub const WSB_FIXED_OBJECT_ORDER: [WsbFixedObjectKind; 19] = [
+    WsbFixedObjectKind::WorkspaceRoot,
+    WsbFixedObjectKind::ToolsDirectory,
+    WsbFixedObjectKind::OutputDirectory,
+    WsbFixedObjectKind::RunsDirectory,
+    WsbFixedObjectKind::LocksDirectory,
+    WsbFixedObjectKind::RunDirectory,
+    WsbFixedObjectKind::JournalHeadsDirectory,
+    WsbFixedObjectKind::GuestAgent,
+    WsbFixedObjectKind::PreparedPlan,
+    WsbFixedObjectKind::WindowsSandboxPlan,
+    WsbFixedObjectKind::PreparationReceipt,
+    WsbFixedObjectKind::RunLock,
+    WsbFixedObjectKind::AuthoritativePlan,
+    WsbFixedObjectKind::PlanningImportReceipt,
+    WsbFixedObjectKind::EventsJournal,
+    WsbFixedObjectKind::RevocationRecord,
+    WsbFixedObjectKind::JournalHead1,
+    WsbFixedObjectKind::JournalHead2,
+    WsbFixedObjectKind::JournalHead3,
+];
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WsbFixedTreeEaBinding {
+    pub entries: Vec<DiscardIntentEaEntry>,
+    pub canonical_sha256: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum WsbFixedTreeAclPolicy {
+    OwnerSystemProtected,
+    OwnerSystemInherited,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum WsbFixedTreeStreamPolicy {
+    NoStreams,
+    UnnamedDataOnly,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WsbFixedObjectEvidence {
+    pub kind: WsbFixedObjectKind,
+    pub relative_path: String,
+    pub id: DiscardIntentStableId,
+    pub is_directory: bool,
+    pub attributes: u32,
+    pub link_count: u32,
+    pub acl_policy: WsbFixedTreeAclPolicy,
+    pub stream_policy: WsbFixedTreeStreamPolicy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+    pub ea: WsbFixedTreeEaBinding,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WsbFixedTreeInventoryEvidence {
+    pub schema_version: String,
+    pub contract_version: String,
+    pub run_id: String,
+    pub workspace: WorkspaceBindingEvidence,
+    pub parent_id: DiscardIntentStableId,
+    pub original_root: String,
+    pub tombstone_leaf: String,
+    pub objects: Vec<WsbFixedObjectEvidence>,
+}
+
+impl WsbFixedTreeInventoryEvidence {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.schema_version != WSB_FIXED_TREE_INVENTORY_SCHEMA_VERSION
+            || self.contract_version != WSB_FIXED_TREE_CONTRACT_VERSION
+            || !valid_run_id(&self.run_id)
+            || self.workspace.validate().is_err()
+            || self.original_root != self.workspace.root.final_path
+            || self.parent_id.volume_serial_number != self.workspace.parent.volume_serial_number
+            || self.parent_id.file_id != self.workspace.parent.file_id
+            || !valid_tombstone_leaf(&self.tombstone_leaf)
+            || self.objects.len() != WSB_FIXED_OBJECT_ORDER.len()
+        {
+            return Err("fixed-tree inventory header is invalid");
+        }
+        let mut identities = BTreeSet::new();
+        identities.insert((
+            self.parent_id.volume_serial_number.as_str(),
+            self.parent_id.file_id.as_str(),
+        ));
+        for (object, expected) in self.objects.iter().zip(WSB_FIXED_OBJECT_ORDER) {
+            let identity = (
+                object.id.volume_serial_number.as_str(),
+                object.id.file_id.as_str(),
+            );
+            if object.kind != expected
+                || object.relative_path != expected.relative_path(&self.run_id)
+                || object.is_directory != expected.is_directory()
+                || (object.attributes & 0x10 != 0) != object.is_directory
+                || object.attributes & FIXED_TREE_FORBIDDEN_ATTRIBUTES != 0
+                || !fixed_hex(&object.id.volume_serial_number, 16)
+                || !fixed_hex(&object.id.file_id, 32)
+                || object.id.volume_serial_number != self.parent_id.volume_serial_number
+                || object.link_count == 0
+                || (!object.is_directory && object.link_count != 1)
+                || object.acl_policy != expected.acl_policy()
+                || object.stream_policy != expected.stream_policy()
+                || !valid_fixed_tree_ea(&object.ea)
+                || (object.is_directory && !object.ea.entries.is_empty())
+                || !identities.insert(identity)
+            {
+                return Err("fixed-tree object binding is invalid");
+            }
+            if object.is_directory {
+                if object.size_bytes.is_some() || object.sha256.is_some() {
+                    return Err("fixed-tree directory contains file metadata");
+                }
+            } else {
+                let Some(size) = object.size_bytes else {
+                    return Err("fixed-tree file metadata is invalid");
+                };
+                if size > expected.size_limit()
+                    || (expected == WsbFixedObjectKind::RunLock && size != 0)
+                    || (expected == WsbFixedObjectKind::GuestAgent && size == 0)
+                    || object
+                        .sha256
+                        .as_deref()
+                        .is_none_or(|hash| !fixed_hex(hash, 64))
+                {
+                    return Err("fixed-tree file metadata is invalid");
+                }
+            }
+        }
+        let id_matches = |kind: WsbFixedObjectKind, identity: &WindowsFileIdentity| {
+            self.objects.iter().any(|object| {
+                object.kind == kind
+                    && object.id.volume_serial_number == identity.volume_serial_number
+                    && object.id.file_id == identity.file_id
+            })
+        };
+        if !id_matches(WsbFixedObjectKind::WorkspaceRoot, &self.workspace.root)
+            || !id_matches(WsbFixedObjectKind::ToolsDirectory, &self.workspace.tools)
+            || !id_matches(WsbFixedObjectKind::OutputDirectory, &self.workspace.output)
+        {
+            return Err("fixed-tree workspace identities do not match the inventory");
+        }
+        Ok(())
+    }
+}
+
+impl WsbFixedObjectKind {
+    const fn is_directory(self) -> bool {
+        matches!(
+            self,
+            Self::WorkspaceRoot
+                | Self::ToolsDirectory
+                | Self::OutputDirectory
+                | Self::RunsDirectory
+                | Self::LocksDirectory
+                | Self::RunDirectory
+                | Self::JournalHeadsDirectory
+        )
+    }
+
+    const fn acl_policy(self) -> WsbFixedTreeAclPolicy {
+        if matches!(
+            self,
+            Self::WorkspaceRoot | Self::ToolsDirectory | Self::OutputDirectory
+        ) {
+            WsbFixedTreeAclPolicy::OwnerSystemProtected
+        } else {
+            WsbFixedTreeAclPolicy::OwnerSystemInherited
+        }
+    }
+
+    const fn stream_policy(self) -> WsbFixedTreeStreamPolicy {
+        if self.is_directory() {
+            WsbFixedTreeStreamPolicy::NoStreams
+        } else {
+            WsbFixedTreeStreamPolicy::UnnamedDataOnly
+        }
+    }
+
+    fn relative_path(self, run_id: &str) -> String {
+        match self {
+            Self::WorkspaceRoot => ".".to_owned(),
+            Self::ToolsDirectory => "tools".to_owned(),
+            Self::OutputDirectory => "output".to_owned(),
+            Self::RunsDirectory => "runs".to_owned(),
+            Self::LocksDirectory => "runs/.locks".to_owned(),
+            Self::RunDirectory => format!("runs/{run_id}"),
+            Self::JournalHeadsDirectory => format!("runs/{run_id}/journal-heads"),
+            Self::GuestAgent => "tools/aiw-guest-agent.exe".to_owned(),
+            Self::PreparedPlan => "plan.json".to_owned(),
+            Self::WindowsSandboxPlan => "wsb-plan.json".to_owned(),
+            Self::PreparationReceipt => "preparation.json".to_owned(),
+            Self::RunLock => format!("runs/.locks/{run_id}.lock"),
+            Self::AuthoritativePlan => format!("runs/{run_id}/plan.json"),
+            Self::PlanningImportReceipt => {
+                format!("runs/{run_id}/wsb-planning-import.json")
+            }
+            Self::EventsJournal => format!("runs/{run_id}/events.jsonl"),
+            Self::RevocationRecord => format!("runs/{run_id}/wsb-revocation.json"),
+            Self::JournalHead1 => {
+                format!("runs/{run_id}/journal-heads/00000000000000000001.json")
+            }
+            Self::JournalHead2 => {
+                format!("runs/{run_id}/journal-heads/00000000000000000002.json")
+            }
+            Self::JournalHead3 => {
+                format!("runs/{run_id}/journal-heads/00000000000000000003.json")
+            }
+        }
+    }
+
+    const fn size_limit(self) -> u64 {
+        match self {
+            Self::GuestAgent => 128 * 1024 * 1024,
+            Self::EventsJournal => 64 * 1024 * 1024,
+            Self::WorkspaceRoot
+            | Self::ToolsDirectory
+            | Self::OutputDirectory
+            | Self::RunsDirectory
+            | Self::LocksDirectory
+            | Self::RunDirectory
+            | Self::JournalHeadsDirectory => 0,
+            _ => 1024 * 1024,
+        }
+    }
+}
+
+const FIXED_TREE_FORBIDDEN_ATTRIBUTES: u32 = 0x0000_0001
+    | 0x0000_0004
+    | 0x0000_0040
+    | 0x0000_0100
+    | 0x0000_0200
+    | 0x0000_0400
+    | 0x0000_0800
+    | 0x0000_1000
+    | 0x0000_4000
+    | 0x0000_8000
+    | 0x0001_0000
+    | 0x0002_0000
+    | 0x0004_0000
+    | 0x0008_0000
+    | 0x0010_0000
+    | 0x0040_0000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -286,6 +564,71 @@ fn fixed_hex(value: &str, length: usize) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+}
+
+fn valid_run_id(value: &str) -> bool {
+    let stem = value
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_uppercase();
+    let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || stem
+            .strip_prefix("COM")
+            .or_else(|| stem.strip_prefix("LPT"))
+            .is_some_and(|suffix| {
+                matches!(suffix, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9")
+            });
+    !value.is_empty()
+        && value.len() <= 128
+        && !value.ends_with('.')
+        && !reserved
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-')
+        })
+}
+
+fn valid_tombstone_leaf(value: &str) -> bool {
+    value
+        .strip_prefix(".aiw-discarded-v1-")
+        .is_some_and(|suffix| fixed_hex(suffix, 64))
+}
+
+fn valid_fixed_tree_ea(value: &WsbFixedTreeEaBinding) -> bool {
+    let valid_names = value.entries.is_empty()
+        || (value.entries.len() == 2
+            && value.entries[0].name == "$KERNEL.PURGE.SMARTLOCKER.VALID"
+            && value.entries[1].name == "$KERNEL.SMARTLOCKER.ORIGINCLAIM");
+    if !valid_names {
+        return false;
+    }
+    let mut canonical = Vec::new();
+    for entry in &value.entries {
+        let Ok(name_length) = u16::try_from(entry.name.len()) else {
+            return false;
+        };
+        let valid_length = if entry.name == "$KERNEL.PURGE.SMARTLOCKER.VALID" {
+            entry.value_length == 4
+        } else {
+            entry.value_length > 0
+        };
+        let Ok(value_hash) = hex::decode(&entry.value_sha256) else {
+            return false;
+        };
+        if entry.flags != 0
+            || !valid_length
+            || !fixed_hex(&entry.value_sha256, 64)
+            || value_hash.len() != 32
+        {
+            return false;
+        }
+        canonical.extend_from_slice(&name_length.to_le_bytes());
+        canonical.extend_from_slice(entry.name.as_bytes());
+        canonical.push(entry.flags);
+        canonical.extend_from_slice(&entry.value_length.to_le_bytes());
+        canonical.extend_from_slice(&value_hash);
+    }
+    value.canonical_sha256 == hex::encode(Sha256::digest(canonical))
 }
 
 fn valid_sid_text(value: &str) -> bool {
@@ -481,6 +824,77 @@ pub fn find_command(name: &str) -> Option<PathBuf> {
 mod tests {
     use super::*;
 
+    fn fixed_tree_inventory() -> WsbFixedTreeInventoryEvidence {
+        let owner = "S-1-5-21-1".to_owned();
+        let identity = |path: &str, marker: u8| WindowsFileIdentity {
+            final_path: path.to_owned(),
+            volume_serial_number: "0".repeat(16),
+            file_id: format!("{marker:032x}"),
+        };
+        let workspace = WorkspaceBindingEvidence {
+            schema_version: WINDOWS_WORKSPACE_SCHEMA_VERSION.to_owned(),
+            policy: WINDOWS_WORKSPACE_SECURITY_POLICY.to_owned(),
+            security_policy_sha256: workspace_policy_hash(&owner),
+            owner_sid: owner.clone(),
+            dacl_protected: true,
+            allowed_sids: vec![WINDOWS_SYSTEM_SID.to_owned(), owner],
+            parent: identity("C:\\AIW", 1),
+            root: identity("C:\\AIW\\run-one", 2),
+            tools: identity("C:\\AIW\\run-one\\tools", 3),
+            output: identity("C:\\AIW\\run-one\\output", 4),
+        };
+        let objects = WSB_FIXED_OBJECT_ORDER
+            .into_iter()
+            .enumerate()
+            .map(|(index, kind)| {
+                let file_id = match kind {
+                    WsbFixedObjectKind::WorkspaceRoot => workspace.root.file_id.clone(),
+                    WsbFixedObjectKind::ToolsDirectory => workspace.tools.file_id.clone(),
+                    WsbFixedObjectKind::OutputDirectory => workspace.output.file_id.clone(),
+                    _ => format!("{:032x}", index + 10),
+                };
+                WsbFixedObjectEvidence {
+                    kind,
+                    relative_path: kind.relative_path("run-one"),
+                    id: DiscardIntentStableId {
+                        volume_serial_number: "0".repeat(16),
+                        file_id,
+                    },
+                    is_directory: kind.is_directory(),
+                    attributes: if kind.is_directory() { 0x10 } else { 0x20 },
+                    link_count: 1,
+                    acl_policy: kind.acl_policy(),
+                    stream_policy: kind.stream_policy(),
+                    size_bytes: (!kind.is_directory()).then_some(
+                        if kind == WsbFixedObjectKind::RunLock {
+                            0
+                        } else {
+                            1
+                        },
+                    ),
+                    sha256: (!kind.is_directory()).then(|| "a".repeat(64)),
+                    ea: WsbFixedTreeEaBinding {
+                        entries: Vec::new(),
+                        canonical_sha256: hex::encode(Sha256::digest([])),
+                    },
+                }
+            })
+            .collect();
+        WsbFixedTreeInventoryEvidence {
+            schema_version: WSB_FIXED_TREE_INVENTORY_SCHEMA_VERSION.to_owned(),
+            contract_version: WSB_FIXED_TREE_CONTRACT_VERSION.to_owned(),
+            run_id: "run-one".to_owned(),
+            workspace: workspace.clone(),
+            parent_id: DiscardIntentStableId {
+                volume_serial_number: workspace.parent.volume_serial_number.clone(),
+                file_id: workspace.parent.file_id.clone(),
+            },
+            original_root: workspace.root.final_path.clone(),
+            tombstone_leaf: format!(".aiw-discarded-v1-{}", "b".repeat(64)),
+            objects,
+        }
+    }
+
     #[test]
     fn probe_has_an_explicit_limitation() {
         let probe = probe_host();
@@ -538,5 +952,117 @@ mod tests {
         assert!(!readiness.supported);
         assert!(!readiness.blockers.is_empty());
         assert_eq!(readiness.sandbox_feature, ReadinessState::Unknown);
+    }
+
+    #[test]
+    fn fixed_tree_inventory_is_exact_ordered_and_strict() {
+        let evidence = fixed_tree_inventory();
+        evidence.validate().unwrap();
+        assert_eq!(evidence.objects.len(), 19);
+
+        let mut reordered = evidence.clone();
+        reordered.objects.swap(0, 1);
+        assert!(reordered.validate().is_err());
+        let mut duplicate = evidence.clone();
+        duplicate.objects[1] = duplicate.objects[0].clone();
+        assert!(duplicate.validate().is_err());
+        let mut duplicate_id = evidence.clone();
+        duplicate_id.objects[5].id = duplicate_id.objects[4].id.clone();
+        assert!(duplicate_id.validate().is_err());
+        let mut workspace_mismatch = evidence.clone();
+        workspace_mismatch.objects[0].id.file_id = "f".repeat(32);
+        assert!(workspace_mismatch.validate().is_err());
+        let mut malformed = evidence.clone();
+        malformed.objects[7].sha256 = Some("A".repeat(64));
+        assert!(malformed.validate().is_err());
+        let mut oversized = evidence.clone();
+        oversized.objects[7].size_bytes = Some(128 * 1024 * 1024 + 1);
+        assert!(oversized.validate().is_err());
+        let mut forbidden_attribute = evidence.clone();
+        forbidden_attribute.objects[7].attributes |= 0x400;
+        assert!(forbidden_attribute.validate().is_err());
+        let mut legacy_tombstone = evidence.clone();
+        legacy_tombstone.tombstone_leaf = ".aiw-wsb-tombstone-run-one-deadbeef".to_owned();
+        assert!(legacy_tombstone.validate().is_err());
+    }
+
+    #[test]
+    fn fixed_tree_inventory_json_rejects_unknown_fields() {
+        let evidence = fixed_tree_inventory();
+        let mut value = serde_json::to_value(evidence).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .insert("unexpected".to_owned(), serde_json::Value::Bool(true));
+        assert!(serde_json::from_value::<WsbFixedTreeInventoryEvidence>(value).is_err());
+    }
+
+    #[test]
+    fn fixed_tree_ea_binding_is_semantic_lowercase_and_canonical() {
+        let canonical = |entries: &[DiscardIntentEaEntry]| {
+            let mut bytes = Vec::new();
+            for entry in entries {
+                bytes.extend_from_slice(&(entry.name.len() as u16).to_le_bytes());
+                bytes.extend_from_slice(entry.name.as_bytes());
+                bytes.push(entry.flags);
+                bytes.extend_from_slice(&entry.value_length.to_le_bytes());
+                bytes.extend_from_slice(&hex::decode(&entry.value_sha256).unwrap());
+            }
+            hex::encode(Sha256::digest(bytes))
+        };
+        let entries = vec![
+            DiscardIntentEaEntry {
+                name: "$KERNEL.PURGE.SMARTLOCKER.VALID".to_owned(),
+                flags: 0,
+                value_length: 4,
+                value_sha256: hex::encode(Sha256::digest([1_u8; 4])),
+            },
+            DiscardIntentEaEntry {
+                name: "$KERNEL.SMARTLOCKER.ORIGINCLAIM".to_owned(),
+                flags: 0,
+                value_length: 16,
+                value_sha256: hex::encode(Sha256::digest([2_u8; 16])),
+            },
+        ];
+        let mut evidence = fixed_tree_inventory();
+        evidence.objects[7].ea = WsbFixedTreeEaBinding {
+            canonical_sha256: canonical(&entries),
+            entries: entries.clone(),
+        };
+        evidence.validate().unwrap();
+
+        let mut uppercase = evidence.clone();
+        uppercase.objects[7].ea.entries[0].value_sha256 = uppercase.objects[7].ea.entries[0]
+            .value_sha256
+            .to_ascii_uppercase();
+        assert!(uppercase.validate().is_err());
+        let mut reordered = evidence.clone();
+        reordered.objects[7].ea.entries.swap(0, 1);
+        reordered.objects[7].ea.canonical_sha256 = canonical(&reordered.objects[7].ea.entries);
+        assert!(reordered.validate().is_err());
+        let mut flags = evidence.clone();
+        flags.objects[7].ea.entries[0].flags = 1;
+        flags.objects[7].ea.canonical_sha256 = canonical(&flags.objects[7].ea.entries);
+        assert!(flags.validate().is_err());
+        let mut invalid_length = evidence.clone();
+        invalid_length.objects[7].ea.entries[0].value_length = 3;
+        invalid_length.objects[7].ea.canonical_sha256 =
+            canonical(&invalid_length.objects[7].ea.entries);
+        assert!(invalid_length.validate().is_err());
+        let mut digest_mismatch = evidence.clone();
+        digest_mismatch.objects[7].ea.canonical_sha256 = "0".repeat(64);
+        assert!(digest_mismatch.validate().is_err());
+        let mut directory_ea = evidence;
+        directory_ea.objects[0].ea = directory_ea.objects[7].ea.clone();
+        assert!(directory_ea.validate().is_err());
+    }
+
+    #[test]
+    fn fixed_tree_run_ids_match_the_native_safe_leaf_contract() {
+        for invalid in ["Run-One", "run-one.", "con", "nul.txt", "lpt1", "has space"] {
+            let mut evidence = fixed_tree_inventory();
+            evidence.run_id = invalid.to_owned();
+            assert!(evidence.validate().is_err(), "accepted {invalid}");
+        }
     }
 }

@@ -14,7 +14,12 @@ use std::mem::{offset_of, size_of, size_of_val};
 use std::os::windows::fs::{FileExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
-use aiw_probe::WorkspaceBindingEvidence;
+use aiw_probe::{
+    DiscardIntentEaEntry, DiscardIntentStableId, WSB_FIXED_TREE_CONTRACT_VERSION,
+    WSB_FIXED_TREE_INVENTORY_SCHEMA_VERSION, WorkspaceBindingEvidence, WsbFixedObjectEvidence,
+    WsbFixedObjectKind, WsbFixedTreeAclPolicy, WsbFixedTreeEaBinding,
+    WsbFixedTreeInventoryEvidence, WsbFixedTreeStreamPolicy,
+};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use windows::Wdk::Storage::FileSystem::{
@@ -153,6 +158,8 @@ pub(crate) struct StableFileId {
 pub(crate) struct FixedObjectBinding {
     pub(crate) key: FixedWsbObject,
     pub(crate) id: StableFileId,
+    pub(crate) attributes: u32,
+    pub(crate) link_count: u32,
     pub(crate) size_bytes: Option<u64>,
     pub(crate) sha256: Option<[u8; 32]>,
     pub(crate) ea: ExtendedAttributeBinding,
@@ -240,7 +247,8 @@ pub(crate) struct ExactDeleteObservation {
 }
 
 #[derive(Debug, Error)]
-pub(crate) enum ExactDisposeError {
+#[doc(hidden)]
+pub enum ExactDisposeError {
     #[error("fixed WSB tree contract is invalid: {0}")]
     Contract(String),
     #[error("fixed WSB tree identity, type, ACL, or content was rejected: {0}")]
@@ -301,8 +309,10 @@ pub(crate) struct HeldFixedWsbTree {
 pub(crate) fn observe_fixed_wsb_tree(
     workspace: &WorkspaceBindingEvidence,
     run_id: &str,
+    tombstone_leaf: &str,
 ) -> Result<FixedWsbTreeInventory, ExactDisposeError> {
     validate_inputs(workspace, run_id)?;
+    validate_checkpoint_tombstone_leaf(tombstone_leaf)?;
     let original_root = PathBuf::from(&workspace.root.final_path);
     let parent_path = original_root.parent().ok_or_else(|| {
         ExactDisposeError::Contract("workspace root has no parent directory".into())
@@ -311,6 +321,11 @@ pub(crate) fn observe_fixed_wsb_tree(
     let parent_id = stable_id(&parent)?;
     require_evidence_id(&parent_id, &workspace.parent, "parent")?;
     reject_case_sensitive_directory(&parent)?;
+    if path_identity_if_present(&parent_path.join(tombstone_leaf))?.is_some() {
+        return Err(ExactDisposeError::Rejected(
+            "checkpoint-bound tombstone name is already occupied".into(),
+        ));
+    }
     let owner = OwnedSid::from_string(&workspace.owner_sid).map_err(workspace_error)?;
     let held = open_objects(
         &original_root,
@@ -324,23 +339,150 @@ pub(crate) fn observe_fixed_wsb_tree(
     for object in &held {
         objects.push(observe_binding(object, &owner)?);
     }
-    let root = objects
-        .iter()
-        .find(|binding| binding.key == FixedWsbObject::WorkspaceRoot)
-        .ok_or_else(|| ExactDisposeError::Contract("root binding is missing".into()))?;
-    let tombstone_leaf = format!(
-        ".aiw-wsb-tombstone-{run_id}-{}",
-        &hex::encode(root.id.file_id)[..16]
-    );
-    validate_leaf(&tombstone_leaf)?;
     Ok(FixedWsbTreeInventory {
         workspace: workspace.clone(),
         run_id: run_id.to_owned(),
         parent_id,
         original_root,
-        tombstone_leaf,
+        tombstone_leaf: tombstone_leaf.to_owned(),
         objects,
     })
+}
+
+#[doc(hidden)]
+pub fn observe_fixed_wsb_tree_for_checkpoint(
+    workspace: &WorkspaceBindingEvidence,
+    run_id: &str,
+    tombstone_leaf: &str,
+) -> Result<WsbFixedTreeInventoryEvidence, ExactDisposeError> {
+    inventory_evidence(observe_fixed_wsb_tree(workspace, run_id, tombstone_leaf)?)
+}
+
+#[doc(hidden)]
+pub fn verify_fixed_wsb_tree_inventory(
+    expected: &WsbFixedTreeInventoryEvidence,
+) -> Result<(), ExactDisposeError> {
+    expected
+        .validate()
+        .map_err(|error| ExactDisposeError::Contract(error.into()))?;
+    let observed = observe_fixed_wsb_tree_for_checkpoint(
+        &expected.workspace,
+        &expected.run_id,
+        &expected.tombstone_leaf,
+    )?;
+    if &observed != expected {
+        return Err(ExactDisposeError::Rejected(
+            "portable fixed-tree evidence changed during exact reopen".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn inventory_evidence(
+    inventory: FixedWsbTreeInventory,
+) -> Result<WsbFixedTreeInventoryEvidence, ExactDisposeError> {
+    let root = inventory.original_root.clone();
+    let run_id = inventory.run_id.clone();
+    let objects = inventory
+        .objects
+        .iter()
+        .map(|binding| object_evidence(binding, &root, &run_id))
+        .collect::<Result<Vec<_>, _>>()?;
+    let evidence = WsbFixedTreeInventoryEvidence {
+        schema_version: WSB_FIXED_TREE_INVENTORY_SCHEMA_VERSION.to_owned(),
+        contract_version: WSB_FIXED_TREE_CONTRACT_VERSION.to_owned(),
+        run_id: inventory.run_id,
+        workspace: inventory.workspace,
+        parent_id: stable_id_evidence(&inventory.parent_id),
+        original_root: inventory.original_root.to_string_lossy().into_owned(),
+        tombstone_leaf: inventory.tombstone_leaf,
+        objects,
+    };
+    evidence
+        .validate()
+        .map_err(|error| ExactDisposeError::Contract(error.into()))?;
+    Ok(evidence)
+}
+
+fn object_evidence(
+    binding: &FixedObjectBinding,
+    root: &Path,
+    run_id: &str,
+) -> Result<WsbFixedObjectEvidence, ExactDisposeError> {
+    let path = path_for(root, run_id, binding.key);
+    let relative_path = if binding.key == FixedWsbObject::WorkspaceRoot {
+        ".".to_owned()
+    } else {
+        path.strip_prefix(root)
+            .map_err(|_| ExactDisposeError::Contract("fixed object escaped its root".into()))?
+            .to_string_lossy()
+            .replace('\\', "/")
+    };
+    Ok(WsbFixedObjectEvidence {
+        kind: portable_kind(binding.key),
+        relative_path,
+        id: stable_id_evidence(&binding.id),
+        is_directory: binding.key.is_directory(),
+        attributes: binding.attributes,
+        link_count: binding.link_count,
+        acl_policy: if binding.key.require_protected_acl() {
+            WsbFixedTreeAclPolicy::OwnerSystemProtected
+        } else {
+            WsbFixedTreeAclPolicy::OwnerSystemInherited
+        },
+        stream_policy: if binding.key.is_directory() {
+            WsbFixedTreeStreamPolicy::NoStreams
+        } else {
+            WsbFixedTreeStreamPolicy::UnnamedDataOnly
+        },
+        size_bytes: binding.size_bytes,
+        sha256: binding.sha256.map(hex::encode),
+        ea: WsbFixedTreeEaBinding {
+            entries: binding
+                .ea
+                .entries
+                .iter()
+                .map(|entry| DiscardIntentEaEntry {
+                    name: entry.name.clone(),
+                    flags: entry.flags,
+                    value_length: entry.value_length,
+                    value_sha256: hex::encode(entry.value_sha256),
+                })
+                .collect(),
+            canonical_sha256: hex::encode(binding.ea.canonical_sha256),
+        },
+    })
+}
+
+fn stable_id_evidence(value: &StableFileId) -> DiscardIntentStableId {
+    DiscardIntentStableId {
+        volume_serial_number: format!("{:016x}", value.volume_serial_number),
+        file_id: hex::encode(value.file_id),
+    }
+}
+
+const fn portable_kind(value: FixedWsbObject) -> WsbFixedObjectKind {
+    match value {
+        FixedWsbObject::WorkspaceRoot => WsbFixedObjectKind::WorkspaceRoot,
+        FixedWsbObject::ToolsDirectory => WsbFixedObjectKind::ToolsDirectory,
+        FixedWsbObject::OutputDirectory => WsbFixedObjectKind::OutputDirectory,
+        FixedWsbObject::RunsDirectory => WsbFixedObjectKind::RunsDirectory,
+        FixedWsbObject::LocksDirectory => WsbFixedObjectKind::LocksDirectory,
+        FixedWsbObject::RunDirectory => WsbFixedObjectKind::RunDirectory,
+        FixedWsbObject::JournalHeadsDirectory => WsbFixedObjectKind::JournalHeadsDirectory,
+        FixedWsbObject::GuestAgent => WsbFixedObjectKind::GuestAgent,
+        FixedWsbObject::PreparedPlan => WsbFixedObjectKind::PreparedPlan,
+        FixedWsbObject::WindowsSandboxPlan => WsbFixedObjectKind::WindowsSandboxPlan,
+        FixedWsbObject::PreparationReceipt => WsbFixedObjectKind::PreparationReceipt,
+        FixedWsbObject::RunLock => WsbFixedObjectKind::RunLock,
+        FixedWsbObject::AuthoritativePlan => WsbFixedObjectKind::AuthoritativePlan,
+        FixedWsbObject::PlanningImportReceipt => WsbFixedObjectKind::PlanningImportReceipt,
+        FixedWsbObject::EventsJournal => WsbFixedObjectKind::EventsJournal,
+        FixedWsbObject::RevocationRecord => WsbFixedObjectKind::RevocationRecord,
+        FixedWsbObject::JournalHead1 => WsbFixedObjectKind::JournalHead1,
+        FixedWsbObject::JournalHead2 => WsbFixedObjectKind::JournalHead2,
+        FixedWsbObject::JournalHead3 => WsbFixedObjectKind::JournalHead3,
+    }
 }
 
 impl HeldFixedWsbTree {
@@ -805,11 +947,15 @@ fn observe_binding(
 ) -> Result<FixedObjectBinding, ExactDisposeError> {
     let file = object.file()?;
     verify_object_shape(file, object.key, owner)?;
+    let basic = basic_info(file)?;
+    let standard = standard_info(file)?;
     let ea = query_extended_attributes(file, object.key.is_directory())?;
     if object.key.is_directory() {
         Ok(FixedObjectBinding {
             key: object.key,
             id: stable_id(file)?,
+            attributes: basic.dwFileAttributes,
+            link_count: standard.NumberOfLinks,
             size_bytes: None,
             sha256: None,
             ea,
@@ -828,6 +974,8 @@ fn observe_binding(
         Ok(FixedObjectBinding {
             key: object.key,
             id: stable_id(file)?,
+            attributes: basic.dwFileAttributes,
+            link_count: standard.NumberOfLinks,
             size_bytes: Some(size),
             sha256: Some(hash_file(file, size)?),
             ea,
@@ -847,6 +995,16 @@ fn verify_expected(
     if stable_id(file)? != expected.id {
         return Err(ExactDisposeError::Rejected(format!(
             "fixed {:?} identity changed",
+            object.key
+        )));
+    }
+    let basic = basic_info(file)?;
+    let standard = standard_info(file)?;
+    if basic.dwFileAttributes != expected.attributes
+        || standard.NumberOfLinks != expected.link_count
+    {
+        return Err(ExactDisposeError::Rejected(format!(
+            "fixed {:?} attributes or link count changed",
             object.key
         )));
     }
@@ -1102,6 +1260,24 @@ fn validate_leaf(value: &str) -> Result<(), ExactDisposeError> {
     {
         return Err(ExactDisposeError::Contract(
             "tombstone leaf is unsafe".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_checkpoint_tombstone_leaf(value: &str) -> Result<(), ExactDisposeError> {
+    validate_leaf(value)?;
+    if !value
+        .strip_prefix(".aiw-discarded-v1-")
+        .is_some_and(|suffix| {
+            suffix.len() == 64
+                && suffix
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+        })
+    {
+        return Err(ExactDisposeError::Contract(
+            "tombstone leaf is not bound to the discard-intent convention".into(),
         ));
     }
     Ok(())
@@ -2015,6 +2191,13 @@ mod tests {
     static CURRENT_DIRECTORY_LOCK: Mutex<()> = Mutex::new(());
     const RUN_ID: &str = "run-one";
 
+    fn tombstone_leaf(workspace: &WorkspaceBindingEvidence) -> String {
+        format!(
+            ".aiw-discarded-v1-{}",
+            hex::encode(Sha256::digest(workspace.root.final_path.as_bytes()))
+        )
+    }
+
     struct CurrentDirectoryGuard {
         original: PathBuf,
         _lock: MutexGuard<'static, ()>,
@@ -2086,10 +2269,7 @@ mod tests {
                 let path = path_for(&root, RUN_ID, key);
                 clear_short_name(&path, key.is_directory());
             }
-            let tombstone = parent.join(format!(
-                ".aiw-wsb-tombstone-{RUN_ID}-{}",
-                &evidence.root.file_id[..16]
-            ));
+            let tombstone = parent.join(tombstone_leaf(&evidence));
             Self {
                 parent,
                 root,
@@ -2100,7 +2280,8 @@ mod tests {
         }
 
         fn inventory(&self) -> FixedWsbTreeInventory {
-            observe_fixed_wsb_tree(&self.workspace, RUN_ID).unwrap()
+            observe_fixed_wsb_tree(&self.workspace, RUN_ID, &tombstone_leaf(&self.workspace))
+                .unwrap()
         }
 
         fn cleanup(&self) {
@@ -2175,6 +2356,105 @@ mod tests {
         assert!(!fixture.root.exists());
         assert!(!tombstone.exists());
         assert_eq!(fs::read(&fixture.sibling).unwrap(), b"unrelated");
+    }
+
+    #[test]
+    fn portable_inventory_is_deterministic_strict_and_read_only() {
+        let fixture = Fixture::new();
+        let tombstone = tombstone_leaf(&fixture.workspace);
+        let first =
+            observe_fixed_wsb_tree_for_checkpoint(&fixture.workspace, RUN_ID, &tombstone).unwrap();
+        let second =
+            observe_fixed_wsb_tree_for_checkpoint(&fixture.workspace, RUN_ID, &tombstone).unwrap();
+        assert_eq!(first, second);
+        assert_eq!(first.objects.len(), 19);
+        assert!(first.objects.iter().all(|object| {
+            object
+                .ea
+                .entries
+                .iter()
+                .all(|entry| entry.value_sha256.len() == 64)
+        }));
+        verify_fixed_wsb_tree_inventory(&first).unwrap();
+        assert!(fixture.root.is_dir());
+        assert!(!fixture.parent.join(tombstone).exists());
+
+        let mut reordered = first.clone();
+        reordered.objects.swap(0, 1);
+        assert!(verify_fixed_wsb_tree_inventory(&reordered).is_err());
+        let mut legacy = first;
+        legacy.tombstone_leaf = ".aiw-wsb-tombstone-run-one-deadbeef".to_owned();
+        assert!(verify_fixed_wsb_tree_inventory(&legacy).is_err());
+    }
+
+    #[test]
+    fn portable_inventory_live_verifier_rejects_drift_and_occupied_tombstone() {
+        let fixture = Fixture::new();
+        let tombstone = tombstone_leaf(&fixture.workspace);
+        let inventory =
+            observe_fixed_wsb_tree_for_checkpoint(&fixture.workspace, RUN_ID, &tombstone).unwrap();
+        fs::write(fixture.root.join("plan.json"), b"changed after inventory").unwrap();
+        assert!(verify_fixed_wsb_tree_inventory(&inventory).is_err());
+
+        let occupied = Fixture::new();
+        let occupied_leaf = tombstone_leaf(&occupied.workspace);
+        write_file(&occupied.parent.join(&occupied_leaf), b"foreign");
+        assert!(
+            observe_fixed_wsb_tree_for_checkpoint(&occupied.workspace, RUN_ID, &occupied_leaf,)
+                .is_err()
+        );
+        assert!(occupied.root.is_dir());
+        assert_eq!(
+            fs::read(occupied.parent.join(occupied_leaf)).unwrap(),
+            b"foreign"
+        );
+    }
+
+    #[test]
+    fn portable_inventory_converts_nonempty_semantic_eas_without_query_padding() {
+        let fixture = Fixture::new();
+        let mut inventory = fixture.inventory();
+        let entries = vec![
+            ExtendedAttributeEntryBinding {
+                name: "$KERNEL.PURGE.SMARTLOCKER.VALID".to_owned(),
+                flags: 0,
+                value_length: 4,
+                value_sha256: [1_u8; 32],
+            },
+            ExtendedAttributeEntryBinding {
+                name: "$KERNEL.SMARTLOCKER.ORIGINCLAIM".to_owned(),
+                flags: 0,
+                value_length: 16,
+                value_sha256: [2_u8; 32],
+            },
+        ];
+        let mut canonical = Vec::new();
+        for entry in &entries {
+            canonical.extend_from_slice(&(entry.name.len() as u16).to_le_bytes());
+            canonical.extend_from_slice(entry.name.as_bytes());
+            canonical.push(entry.flags);
+            canonical.extend_from_slice(&entry.value_length.to_le_bytes());
+            canonical.extend_from_slice(&entry.value_sha256);
+        }
+        let guest = inventory
+            .objects
+            .iter_mut()
+            .find(|object| object.key == FixedWsbObject::GuestAgent)
+            .unwrap();
+        guest.ea = ExtendedAttributeBinding {
+            queried_bytes: 65_000,
+            entries,
+            canonical_sha256: Sha256::digest(canonical).into(),
+        };
+        let evidence = inventory_evidence(inventory).unwrap();
+        let guest = evidence
+            .objects
+            .iter()
+            .find(|object| object.kind == WsbFixedObjectKind::GuestAgent)
+            .unwrap();
+        assert_eq!(guest.ea.entries.len(), 2);
+        assert_eq!(guest.ea.entries[0].value_sha256, hex::encode([1_u8; 32]));
+        assert_eq!(guest.ea.entries[1].value_sha256, hex::encode([2_u8; 32]));
     }
 
     #[test]
@@ -2312,7 +2592,14 @@ mod tests {
         for relative in ["unexpected", "output/unexpected"] {
             let fixture = Fixture::new();
             write_file(&fixture.root.join(relative), b"unexpected");
-            assert!(observe_fixed_wsb_tree(&fixture.workspace, RUN_ID).is_err());
+            assert!(
+                observe_fixed_wsb_tree(
+                    &fixture.workspace,
+                    RUN_ID,
+                    &tombstone_leaf(&fixture.workspace),
+                )
+                .is_err()
+            );
             assert!(fixture.root.is_dir());
         }
     }
@@ -2325,7 +2612,14 @@ mod tests {
             hardlink_fixture.root.file_name().unwrap().to_string_lossy()
         ));
         fs::hard_link(hardlink_fixture.root.join("plan.json"), &external).unwrap();
-        assert!(observe_fixed_wsb_tree(&hardlink_fixture.workspace, RUN_ID).is_err());
+        assert!(
+            observe_fixed_wsb_tree(
+                &hardlink_fixture.workspace,
+                RUN_ID,
+                &tombstone_leaf(&hardlink_fixture.workspace),
+            )
+            .is_err()
+        );
         fs::remove_file(external).unwrap();
 
         let stream_fixture = Fixture::new();
@@ -2336,7 +2630,14 @@ mod tests {
             )),
             b"stream",
         );
-        assert!(observe_fixed_wsb_tree(&stream_fixture.workspace, RUN_ID).is_err());
+        assert!(
+            observe_fixed_wsb_tree(
+                &stream_fixture.workspace,
+                RUN_ID,
+                &tombstone_leaf(&stream_fixture.workspace),
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -2368,7 +2669,14 @@ mod tests {
         let mut permissions = fs::metadata(&path).unwrap().permissions();
         permissions.set_readonly(true);
         fs::set_permissions(&path, permissions).unwrap();
-        assert!(observe_fixed_wsb_tree(&fixture.workspace, RUN_ID).is_err());
+        assert!(
+            observe_fixed_wsb_tree(
+                &fixture.workspace,
+                RUN_ID,
+                &tombstone_leaf(&fixture.workspace),
+            )
+            .is_err()
+        );
         assert!(fixture.root.is_dir());
         let mut permissions = fs::metadata(&path).unwrap().permissions();
         permissions.set_readonly(false);
@@ -2387,7 +2695,14 @@ mod tests {
             fs::rename(&target, &plan).unwrap();
             return;
         }
-        assert!(observe_fixed_wsb_tree(&fixture.workspace, RUN_ID).is_err());
+        assert!(
+            observe_fixed_wsb_tree(
+                &fixture.workspace,
+                RUN_ID,
+                &tombstone_leaf(&fixture.workspace),
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -2629,7 +2944,14 @@ mod tests {
         };
         assert_eq!(result.0, 0);
         drop(handle);
-        assert!(observe_fixed_wsb_tree(&fixture.workspace, RUN_ID).is_err());
+        assert!(
+            observe_fixed_wsb_tree(
+                &fixture.workspace,
+                RUN_ID,
+                &tombstone_leaf(&fixture.workspace),
+            )
+            .is_err()
+        );
         assert!(fixture.root.is_dir());
     }
 
@@ -2655,8 +2977,8 @@ mod tests {
     fn relative_rename_buffer_has_exact_nonreplacing_root_bound_layout() {
         let fixture = Fixture::new();
         let parent = open_parent(&fixture.parent).unwrap();
-        let leaf = ".aiw-wsb-tombstone-layout-check";
-        let buffer = build_relative_rename_info(&parent, OsStr::new(leaf)).unwrap();
+        let leaf = tombstone_leaf(&fixture.workspace);
+        let buffer = build_relative_rename_info(&parent, OsStr::new(&leaf)).unwrap();
         let name: Vec<u16> = leaf.encode_utf16().collect();
         assert_eq!(
             buffer.information_length as usize,
