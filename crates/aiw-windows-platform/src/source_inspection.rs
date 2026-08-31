@@ -6,9 +6,10 @@
 
 use std::ffi::{OsStr, c_void};
 use std::fs::{File, OpenOptions};
+use std::io::Write;
 use std::mem::size_of;
 use std::os::windows::ffi::OsStrExt;
-use std::os::windows::fs::OpenOptionsExt;
+use std::os::windows::fs::{FileExt, OpenOptionsExt};
 use std::os::windows::io::{AsRawHandle, FromRawHandle};
 use std::path::{Path, PathBuf};
 
@@ -215,6 +216,33 @@ impl HeldApplicationFile {
             return Err(SourceInspectionError::Drift);
         }
         Ok(())
+    }
+
+    pub(crate) fn copy_to(&self, destination: &mut File) -> Result<(), SourceInspectionError> {
+        if destination.metadata().map_err(native)?.len() != 0 {
+            return Err(SourceInspectionError::InvalidShape);
+        }
+        let mut offset = 0_u64;
+        let mut buffer = [0_u8; 64 * 1024];
+        while offset < self.observation.size_bytes {
+            let remaining = self.observation.size_bytes - offset;
+            let request = usize::try_from(remaining.min(buffer.len() as u64))
+                .map_err(|_| SourceInspectionError::BoundsExceeded)?;
+            let count = self
+                .file
+                .seek_read(&mut buffer[..request], offset)
+                .map_err(native)?;
+            if count == 0 {
+                return Err(SourceInspectionError::Drift);
+            }
+            destination.write_all(&buffer[..count]).map_err(native)?;
+            offset = offset
+                .checked_add(count as u64)
+                .ok_or(SourceInspectionError::BoundsExceeded)?;
+        }
+        destination.flush().map_err(native)?;
+        destination.sync_all().map_err(native)?;
+        self.revalidate()
     }
 }
 

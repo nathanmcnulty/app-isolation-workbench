@@ -154,6 +154,31 @@ impl WorkspaceAclPolicy {
 }
 
 impl CreatedWorkspaceDirectory {
+    /// Creates one new owner-and-SYSTEM-protected directory below an existing
+    /// absolute local fixed-volume parent. Existing leaves are never adopted.
+    pub fn create_protected(parent: &Path, leaf: &str) -> Result<Self, WorkspaceError> {
+        validate_leaf(leaf)?;
+        if !parent.is_absolute() {
+            return Err(WorkspaceError::InvalidParent);
+        }
+        let parent_path = parent
+            .canonicalize()
+            .map_err(|_| WorkspaceError::InvalidParent)?;
+        if !is_fixed_volume(&parent_path)? {
+            return Err(WorkspaceError::InvalidParent);
+        }
+        let parent_handle = open_held_parent(&parent_path)?;
+        verify_local_acl_volume(&parent_handle)?;
+        if !same_path(
+            &directory_identity(&parent_handle)?.final_path,
+            &parent_path,
+        ) {
+            return Err(WorkspaceError::IdentityRejected);
+        }
+        let owner = CurrentUser::query()?;
+        create_directory_handle_with_policy(&parent_handle, leaf, &owner.sid_string, true)
+    }
+
     pub fn identity(&self) -> &WindowsFileIdentity {
         &self.identity
     }
@@ -168,6 +193,15 @@ impl CreatedWorkspaceDirectory {
 
     pub fn into_file(self) -> File {
         self.file
+    }
+
+    pub fn revalidate(&self) -> Result<(), WorkspaceError> {
+        let owner = OwnedSid::from_string(&self.owner_sid)?;
+        verify_owner_system_acl(&self.file, &owner, self.acl_policy.is_protected(), true)?;
+        if directory_identity(&self.file)? != self.identity {
+            return Err(WorkspaceError::IdentityRejected);
+        }
+        Ok(())
     }
 
     /// Publish this newly-created directory under a held, protected parent.
@@ -284,6 +318,11 @@ impl CreatedWorkspaceDirectory {
         }
         create_owner_system_file_handle(&self.file, leaf, &self.owner_sid)
     }
+
+    pub fn reopen_file_readonly(&self, leaf: &str) -> Result<BoundWorkspaceFile, WorkspaceError> {
+        self.revalidate()?;
+        reopen_bound_file_readonly(&self.file, leaf, &self.owner_sid)
+    }
 }
 
 /// A strict read-only binding to an existing ordinary workspace directory.
@@ -349,6 +388,35 @@ impl BoundWorkspaceFile {
 }
 
 impl BoundWorkspaceDirectory {
+    /// Reopens an exact persisted protected directory binding for the current
+    /// owner. This is observational and never creates, repairs, or adopts it.
+    pub fn reopen_protected(expected: &WindowsFileIdentity) -> Result<Self, WorkspaceError> {
+        let path = PathBuf::from(&expected.final_path);
+        let parent_path = path.parent().ok_or(WorkspaceError::IdentityRejected)?;
+        let leaf = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or(WorkspaceError::IdentityRejected)?;
+        validate_leaf(leaf)?;
+        let parent = open_held_parent(parent_path)?;
+        verify_local_acl_volume(&parent)?;
+        if !is_fixed_volume(parent_path)? {
+            return Err(WorkspaceError::InvalidParent);
+        }
+        let owner = CurrentUser::query()?;
+        let bound = reopen_bound_directory_readonly(
+            &parent,
+            leaf,
+            &owner.sid_string,
+            WorkspaceAclPolicy::Protected,
+        )?;
+        if bound.identity != *expected {
+            return Err(WorkspaceError::IdentityRejected);
+        }
+        bound.revalidate()?;
+        Ok(bound)
+    }
+
     pub fn identity(&self) -> &WindowsFileIdentity {
         &self.identity
     }
@@ -389,6 +457,15 @@ impl BoundWorkspaceDirectory {
     ) -> Result<Self, WorkspaceError> {
         self.revalidate()?;
         reopen_bound_directory(&self.file, leaf, &self.owner_sid, acl_policy)
+    }
+
+    pub fn reopen_directory_readonly(
+        &self,
+        leaf: &str,
+        acl_policy: WorkspaceAclPolicy,
+    ) -> Result<Self, WorkspaceError> {
+        self.revalidate()?;
+        reopen_bound_directory_readonly(&self.file, leaf, &self.owner_sid, acl_policy)
     }
 
     /// Publish a recovered directory under another strict bound directory.
@@ -485,6 +562,11 @@ impl BoundWorkspaceDirectory {
         self.revalidate()?;
         reopen_bound_file(&self.file, leaf, &self.owner_sid)
     }
+
+    pub fn reopen_file_readonly(&self, leaf: &str) -> Result<BoundWorkspaceFile, WorkspaceError> {
+        self.revalidate()?;
+        reopen_bound_file_readonly(&self.file, leaf, &self.owner_sid)
+    }
 }
 
 /// A newly-created owner-and-SYSTEM-protected workspace file.  The returned
@@ -516,6 +598,15 @@ impl CreatedWorkspaceFile {
 
     pub fn into_file(self) -> File {
         self.file
+    }
+
+    pub fn revalidate(&self) -> Result<(), WorkspaceError> {
+        let owner = OwnedSid::from_string(&self.owner_sid)?;
+        verify_owner_system_acl(&self.file, &owner, false, false)?;
+        if file_identity(&self.file)? != self.identity {
+            return Err(WorkspaceError::IdentityRejected);
+        }
+        Ok(())
     }
 
     pub fn publish_into_bound(
@@ -1170,6 +1261,68 @@ fn reopen_bound_file(
     })
 }
 
+fn reopen_bound_directory_readonly(
+    parent: &File,
+    leaf: &str,
+    owner_sid: &str,
+    acl_policy: WorkspaceAclPolicy,
+) -> Result<BoundWorkspaceDirectory, WorkspaceError> {
+    validate_new_child_leaf(leaf)?;
+    let owner = OwnedSid::from_string(owner_sid)?;
+    let parent_identity = directory_identity(parent)?;
+    let file = open_child_read_authority(parent, leaf, true)?;
+    verify_owner_system_acl(&file, &owner, acl_policy.is_protected(), true)?;
+    let identity = directory_identity(&file)?;
+    verify_created_child(parent, leaf, &file, true)?;
+    verify_exact_child_entry(parent, leaf, &identity)?;
+    if directory_identity(parent)? != parent_identity {
+        return Err(WorkspaceError::IdentityRejected);
+    }
+    let parent_handle = parent.try_clone().map_err(|error| WorkspaceError::Native {
+        operation: "DuplicateHandle(readonly-bound-directory-parent)",
+        detail: error.to_string(),
+    })?;
+    Ok(BoundWorkspaceDirectory {
+        parent: parent_handle,
+        file,
+        identity,
+        parent_identity,
+        leaf: leaf.to_owned(),
+        owner_sid: owner_sid.to_owned(),
+        acl_policy,
+    })
+}
+
+fn reopen_bound_file_readonly(
+    parent: &File,
+    leaf: &str,
+    owner_sid: &str,
+) -> Result<BoundWorkspaceFile, WorkspaceError> {
+    validate_new_child_leaf(leaf)?;
+    let owner = OwnedSid::from_string(owner_sid)?;
+    let parent_identity = directory_identity(parent)?;
+    let file = open_child_read_authority(parent, leaf, false)?;
+    verify_owner_system_acl(&file, &owner, false, false)?;
+    let identity = file_identity(&file)?;
+    verify_created_child(parent, leaf, &file, false)?;
+    verify_exact_child_entry(parent, leaf, &identity)?;
+    if directory_identity(parent)? != parent_identity {
+        return Err(WorkspaceError::IdentityRejected);
+    }
+    let parent_handle = parent.try_clone().map_err(|error| WorkspaceError::Native {
+        operation: "DuplicateHandle(readonly-bound-file-parent)",
+        detail: error.to_string(),
+    })?;
+    Ok(BoundWorkspaceFile {
+        parent: parent_handle,
+        file,
+        identity,
+        parent_identity,
+        leaf: leaf.to_owned(),
+        owner_sid: owner_sid.to_owned(),
+    })
+}
+
 fn verify_exact_child_entry(
     parent: &File,
     leaf: &str,
@@ -1202,6 +1355,73 @@ fn verify_exact_child_entry(
     Ok(())
 }
 
+fn open_child_read_authority(
+    parent: &File,
+    leaf: &str,
+    directory: bool,
+) -> Result<File, WorkspaceError> {
+    validate_new_child_leaf(leaf)?;
+    let mut name: Vec<u16> = leaf.encode_utf16().collect();
+    let mut unicode = NtUnicodeString {
+        length: u16::try_from(name.len() * 2).map_err(|_| WorkspaceError::InvalidLeaf)?,
+        maximum_length: u16::try_from(name.len() * 2).map_err(|_| WorkspaceError::InvalidLeaf)?,
+        buffer: name.as_mut_ptr(),
+    };
+    let mut attributes = NtObjectAttributes {
+        length: size_of::<NtObjectAttributes>() as u32,
+        root_directory: raw_handle(parent).0,
+        object_name: &mut unicode,
+        attributes: OBJ_CASE_INSENSITIVE,
+        security_descriptor: std::ptr::null_mut(),
+        security_quality_of_service: std::ptr::null_mut(),
+    };
+    let desired_access = FILE_READ_ATTRIBUTES.0
+        | FILE_READ_EA.0
+        | READ_CONTROL.0
+        | SYNCHRONIZE.0
+        | if directory {
+            FILE_LIST_DIRECTORY.0
+        } else {
+            FILE_READ_DATA.0
+        };
+    let create_options = if directory {
+        FILE_DIRECTORY_CREATE_OPTION
+    } else {
+        FILE_NON_DIRECTORY_CREATE_OPTION
+    } | FILE_SYNCHRONOUS_IO_NONALERT_OPTION
+        | FILE_FLAG_OPEN_REPARSE_POINT.0;
+    let mut handle = std::ptr::null_mut();
+    let mut io_status = NtIoStatusBlock {
+        status: 0,
+        information: 0,
+    };
+    // SAFETY: all pointers reference local buffers valid through the call;
+    // successful NtCreateFile returns one uniquely owned handle.
+    let status = unsafe {
+        NtCreateFile(
+            &mut handle,
+            desired_access,
+            &mut attributes,
+            &mut io_status,
+            std::ptr::null_mut(),
+            FILE_ATTRIBUTE_NORMAL.0,
+            FILE_SHARE_READ.0,
+            FILE_OPEN_DISPOSITION,
+            create_options,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if status < 0 || handle.is_null() {
+        return Err(WorkspaceError::Native {
+            operation: "NtCreateFile(relative-read-authority)",
+            detail: format!("ntstatus=0x{:08x}", status as u32),
+        });
+    }
+    // SAFETY: NtCreateFile returned a uniquely owned kernel handle.
+    Ok(unsafe { File::from_raw_handle(handle) })
+}
+
 fn create_child_handle(
     parent: &File,
     leaf: &str,
@@ -1227,7 +1447,11 @@ fn create_child_handle(
         security_quality_of_service: std::ptr::null_mut(),
     };
     let desired_access = if !mutating && directory {
-        FILE_LIST_DIRECTORY.0 | FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0 | SYNCHRONIZE.0
+        FILE_LIST_DIRECTORY.0
+            | FILE_READ_ATTRIBUTES.0
+            | FILE_READ_EA.0
+            | READ_CONTROL.0
+            | SYNCHRONIZE.0
     } else if !mutating && writable {
         FILE_READ_DATA.0
             | FILE_WRITE_DATA.0
@@ -1240,6 +1464,7 @@ fn create_child_handle(
         FILE_LIST_DIRECTORY.0
             | FILE_ADD_SUBDIRECTORY.0
             | FILE_READ_ATTRIBUTES.0
+            | FILE_READ_EA.0
             | FILE_WRITE_ATTRIBUTES.0
             | DELETE.0
             | READ_CONTROL.0

@@ -13,6 +13,10 @@ use thiserror::Error;
 
 const APPLICATION_INSPECTION_SCHEMA: &str = "aiw.dev/application-inspection/v0alpha1";
 pub const APPLICATION_FILE_AUTHORITY_SCHEMA: &str = "aiw.dev/application-file-authority/v0alpha1";
+pub const APPLICATION_FILE_IMPORT_RECEIPT_SCHEMA: &str =
+    "aiw.dev/application-file-import-receipt/v0alpha1";
+pub const APPLICATION_FILE_IMPORT_VERIFICATION_SCHEMA: &str =
+    "aiw.dev/application-file-import-verification/v0alpha1";
 pub const PORTABLE_MANIFEST_SCHEMA: &str = "aiw.dev/portable-content-manifest/v0alpha1";
 pub const PORTABLE_DIRECTORY_AUTHORITY_SCHEMA: &str =
     "aiw.dev/portable-directory-authority/v0alpha1";
@@ -74,6 +78,51 @@ pub struct ApplicationFileAuthority {
     pub sha256: String,
     pub link_count: u32,
     pub only_unnamed_data_stream: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApplicationFileEaEntry {
+    pub name: String,
+    pub flags: u8,
+    pub value_length: u16,
+    pub value_sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApplicationFileEaAuthority {
+    pub entries: Vec<ApplicationFileEaEntry>,
+    pub canonical_sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApplicationFileImportReceipt {
+    pub schema_version: String,
+    pub intake_id: String,
+    pub source_kind: ApplicationInspectionKind,
+    pub source: ApplicationFileAuthority,
+    pub intake_root: WindowsFileIdentity,
+    pub intake_root_eas: ApplicationFileEaAuthority,
+    pub source_directory: WindowsFileIdentity,
+    pub source_directory_eas: ApplicationFileEaAuthority,
+    pub payload_relative_path: String,
+    pub payload: WindowsFileIdentity,
+    pub payload_eas: ApplicationFileEaAuthority,
+    pub receipt: WindowsFileIdentity,
+    pub size_bytes: u64,
+    pub sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApplicationFileImportVerification {
+    pub schema_version: String,
+    pub receipt_sha256: String,
+    pub intake_root: WindowsFileIdentity,
+    pub payload: WindowsFileIdentity,
+    pub verified: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
