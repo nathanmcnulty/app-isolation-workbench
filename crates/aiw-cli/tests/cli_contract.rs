@@ -593,29 +593,27 @@ fn recover_repairs_interrupted_core_journal_before_provider_reconciliation() {
 }
 
 #[test]
-fn unavailable_start_and_provider_recovery_preserve_run_identity() {
+fn rejected_start_and_provider_recovery_preserve_run_identity() {
     let temp = TempDir::new();
     let root = temp.path().join("workspace");
     fs::create_dir(&root).unwrap();
+    let project = repo_path("examples/minimal.aiw.yaml");
     let start = Command::new(aiw())
         .args(["run", "start", "--root"])
         .arg(&root)
+        .args(["--run-id", "exact-run-id", "--project"])
+        .arg(&project)
         .args([
-            "--run-id",
-            "exact-run-id",
-            "--project",
-            "unused-project",
-            "--wsb-plan",
-            "unused-plan",
+            "--guest-agent-sha256",
+            "0000000000000000000000000000000000000000000000000000000000000000",
         ])
         .output()
         .unwrap();
     assert!(!start.status.success());
     let start_error = parse_one_json(&start.stderr);
-    assert_eq!(start_error["code"], "AIW_WSB_EXECUTION_UNAVAILABLE");
+    assert_eq!(start_error["code"], "AIW_WSB_START_REJECTED");
     assert_eq!(start_error["runId"], "exact-run-id");
 
-    let project = repo_path("examples/minimal.aiw.yaml");
     let plan = temp.path().join("plan.json");
     write_plan(&plan, &project, None);
     let created = Command::new(aiw())

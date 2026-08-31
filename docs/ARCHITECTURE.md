@@ -38,6 +38,8 @@ After the exact 19-record published chain and physical absence are proven, the p
 
 ## Current components
 
+The current public execution boundary is `aiw run start` for one fixed imported-and-approved Windows Sandbox golden probe. Its executable, provider, mappings, plan, workspace, approval, and deterministic session ID are persisted-derived; caller inputs are limited to identity/revision checks and a bounded timeout. Live public proofs cover both successful receipt/cleanup and interruption after confirmed start followed by exact-session `run recover`. Successful completion remains `insufficientEvidence`, not a containment verdict. Older component-history text below that calls public start disabled describes the preceding checkpoint.
+
 - `aiw-schema`: strict project/model-pack parsing and semantic validation.
 - `aiw-evidence`: canonical JSON, append-only hash chains, and deterministic allowlisted assessment manifests.
 - `aiw-core`: legal state transitions, deterministic comparison, conservative canary evaluation, and advisory-report validation.
