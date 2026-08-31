@@ -100,6 +100,8 @@ pub const DISCARD_INTENT_BINDING_POLICY_VERSION: &str = "owner-system-protected-
 pub const WSB_FIXED_TREE_INVENTORY_SCHEMA_VERSION: &str =
     "aiw.dev/wsb-fixed-tree-inventory/v0alpha1";
 pub const WSB_FIXED_TREE_CONTRACT_VERSION: &str = "aiw.dev/wsb-fixed-tree/v1-19-objects";
+pub const WSB_FIXED_TREE_DELETE_ORDER_VERSION: &str =
+    "aiw.dev/wsb-fixed-tree-delete-order/v1-child-first-19-objects";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -145,6 +147,28 @@ pub const WSB_FIXED_OBJECT_ORDER: [WsbFixedObjectKind; 19] = [
     WsbFixedObjectKind::JournalHead1,
     WsbFixedObjectKind::JournalHead2,
     WsbFixedObjectKind::JournalHead3,
+];
+
+pub const WSB_FIXED_OBJECT_DELETE_ORDER: [WsbFixedObjectKind; 19] = [
+    WsbFixedObjectKind::JournalHead3,
+    WsbFixedObjectKind::JournalHead2,
+    WsbFixedObjectKind::JournalHead1,
+    WsbFixedObjectKind::JournalHeadsDirectory,
+    WsbFixedObjectKind::RevocationRecord,
+    WsbFixedObjectKind::EventsJournal,
+    WsbFixedObjectKind::PlanningImportReceipt,
+    WsbFixedObjectKind::AuthoritativePlan,
+    WsbFixedObjectKind::RunDirectory,
+    WsbFixedObjectKind::RunLock,
+    WsbFixedObjectKind::LocksDirectory,
+    WsbFixedObjectKind::RunsDirectory,
+    WsbFixedObjectKind::GuestAgent,
+    WsbFixedObjectKind::ToolsDirectory,
+    WsbFixedObjectKind::OutputDirectory,
+    WsbFixedObjectKind::PreparationReceipt,
+    WsbFixedObjectKind::WindowsSandboxPlan,
+    WsbFixedObjectKind::PreparedPlan,
+    WsbFixedObjectKind::WorkspaceRoot,
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -311,7 +335,7 @@ impl WsbFixedObjectKind {
         }
     }
 
-    fn relative_path(self, run_id: &str) -> String {
+    pub fn relative_path(self, run_id: &str) -> String {
         match self {
             Self::WorkspaceRoot => ".".to_owned(),
             Self::ToolsDirectory => "tools".to_owned(),
@@ -339,6 +363,29 @@ impl WsbFixedObjectKind {
             }
             Self::JournalHead3 => {
                 format!("runs/{run_id}/journal-heads/00000000000000000003.json")
+            }
+        }
+    }
+
+    pub const fn parent(self) -> Option<Self> {
+        match self {
+            Self::WorkspaceRoot => None,
+            Self::ToolsDirectory
+            | Self::OutputDirectory
+            | Self::RunsDirectory
+            | Self::PreparedPlan
+            | Self::WindowsSandboxPlan
+            | Self::PreparationReceipt => Some(Self::WorkspaceRoot),
+            Self::GuestAgent => Some(Self::ToolsDirectory),
+            Self::LocksDirectory | Self::RunDirectory => Some(Self::RunsDirectory),
+            Self::RunLock => Some(Self::LocksDirectory),
+            Self::JournalHeadsDirectory
+            | Self::AuthoritativePlan
+            | Self::PlanningImportReceipt
+            | Self::EventsJournal
+            | Self::RevocationRecord => Some(Self::RunDirectory),
+            Self::JournalHead1 | Self::JournalHead2 | Self::JournalHead3 => {
+                Some(Self::JournalHeadsDirectory)
             }
         }
     }
@@ -984,6 +1031,31 @@ mod tests {
         let mut legacy_tombstone = evidence.clone();
         legacy_tombstone.tombstone_leaf = ".aiw-wsb-tombstone-run-one-deadbeef".to_owned();
         assert!(legacy_tombstone.validate().is_err());
+    }
+
+    #[test]
+    fn fixed_tree_delete_order_is_complete_and_child_first() {
+        assert_eq!(
+            WSB_FIXED_TREE_DELETE_ORDER_VERSION,
+            "aiw.dev/wsb-fixed-tree-delete-order/v1-child-first-19-objects"
+        );
+        assert_eq!(WSB_FIXED_OBJECT_DELETE_ORDER.len(), 19);
+        assert_eq!(
+            WSB_FIXED_OBJECT_DELETE_ORDER.last(),
+            Some(&WsbFixedObjectKind::WorkspaceRoot)
+        );
+        for (child_index, child) in WSB_FIXED_OBJECT_DELETE_ORDER.iter().enumerate() {
+            if let Some(parent) = child.parent() {
+                let parent_index = WSB_FIXED_OBJECT_DELETE_ORDER
+                    .iter()
+                    .position(|candidate| *candidate == parent)
+                    .expect("every fixed parent is in the delete order");
+                assert!(
+                    child_index < parent_index,
+                    "{child:?} must precede {parent:?}"
+                );
+            }
+        }
     }
 
     #[test]

@@ -52,11 +52,23 @@ pub use depublish_commit::{
 };
 
 #[cfg(windows)]
+pub use disposition_progress::{
+    DISPOSITION_PROGRESS_BINDING_POLICY_VERSION, DISPOSITION_PROGRESS_BINDING_SCHEMA_VERSION,
+    DISPOSITION_PROGRESS_RECORD_COUNT, DispositionProgressBindingEvidence,
+    DispositionProgressError, DispositionProgressSlotState, ExistingDispositionProgress,
+    HeldDispositionProgressPublication, PublishableDispositionProgress,
+    ReopenedDispositionProgress, ReservedDispositionProgress, StagedDispositionProgress,
+    classify_disposition_progress_slot, reopen_existing_disposition_progress,
+    reopen_prepared_disposition_progress, reserve_disposition_progress, stage_disposition_progress,
+};
+
+#[cfg(windows)]
 #[doc(hidden)]
 pub use exact_dispose::{
-    ExactDisposeError, HeldCheckpointBoundWsbRoot, HeldFixedWsbCheckpointSnapshot,
-    WsbRootDepublishObservation, WsbRootNamespaceState, classify_checkpoint_bound_wsb_root,
-    hold_fixed_wsb_tree_for_checkpoint, observe_fixed_wsb_tree_for_checkpoint,
+    ExactDisposeError, HeldCheckpointBoundWsbDisposition, HeldCheckpointBoundWsbRoot,
+    HeldFixedWsbCheckpointSnapshot, WsbDispositionStep, WsbRootDepublishObservation,
+    WsbRootNamespaceState, classify_checkpoint_bound_wsb_root, hold_fixed_wsb_tree_for_checkpoint,
+    observe_fixed_wsb_tree_for_checkpoint, reopen_checkpoint_bound_wsb_disposition,
     reopen_checkpoint_bound_wsb_root, verify_fixed_wsb_tree_inventory,
 };
 
@@ -74,6 +86,9 @@ mod discard_checkpoint;
 
 #[cfg(windows)]
 mod depublish_commit;
+
+#[cfg(windows)]
+mod disposition_progress;
 
 #[cfg(windows)]
 #[allow(dead_code)]
