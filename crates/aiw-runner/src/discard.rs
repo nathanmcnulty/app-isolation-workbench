@@ -1,9 +1,10 @@
-//! Private, non-destructive Windows Sandbox discard preparation.
+//! Private, checkpoint-bound Windows Sandbox depublish transaction.
 //!
 //! This workflow may publish only the protected external intent, the hash-bound
 //! internal revocation record, and the protected external fixed-tree
-//! checkpoint. It deliberately has no provider, workspace rename, disposition,
-//! deletion, or exact-disposal operation.
+//! checkpoint and depublish commit. Its sole namespace mutation is the exact
+//! checkpoint-bound root rename. It has no provider operation, child
+//! disposition, deletion, or cleanup-complete claim.
 
 use std::path::Path;
 
@@ -18,12 +19,17 @@ use aiw_probe::{
 };
 use aiw_schema::Project;
 use aiw_windows_platform::{
-    DiscardCheckpointBindingEvidence, DiscardCheckpointError, DiscardIntentBindingEvidence,
-    DiscardIntentError, ExactDisposeError, HeldDiscardCheckpointPublication,
-    HeldDiscardIntentPublication, ReopenedDiscardCheckpoint, ReopenedDiscardIntent,
-    hold_fixed_wsb_tree_for_checkpoint, reopen_existing_discard_checkpoint,
-    reopen_prepared_discard_checkpoint, reopen_prepared_discard_intent, reserve_discard_checkpoint,
-    stage_discard_intent,
+    DepublishCommitBindingEvidence, DepublishCommitError, DiscardCheckpointBindingEvidence,
+    DiscardCheckpointError, DiscardIntentBindingEvidence, DiscardIntentError, ExactDisposeError,
+    HeldDepublishCommitPublication, HeldDiscardCheckpointPublication, HeldDiscardIntentPublication,
+    ReopenedDepublishCommit, ReopenedDiscardCheckpoint, ReopenedDiscardIntent, RunCoordinationKey,
+    RunCoordinationLease, RunCoordinationMode, WsbRootDepublishObservation, WsbRootNamespaceState,
+    classify_checkpoint_bound_wsb_root, hold_fixed_wsb_tree_for_checkpoint,
+    locate_depublish_commit_from_persisted_root, reopen_checkpoint_bound_wsb_root,
+    reopen_existing_depublish_commit, reopen_existing_discard_checkpoint,
+    reopen_prepared_depublish_commit, reopen_prepared_discard_checkpoint,
+    reopen_prepared_discard_intent, reopen_published_discard_intent, reserve_depublish_commit,
+    reserve_discard_checkpoint, stage_discard_intent, try_acquire_run_coordination,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -40,6 +46,9 @@ const FIXED_TREE_INVENTORY_RECEIPT_SCHEMA: &str =
 const DISCARD_PHASE: &str = "revocationPending";
 const CONTROL_PREFIX: &str = ".aiw-discard-v1-";
 const TOMBSTONE_PREFIX: &str = ".aiw-discarded-v1-";
+const DEPUBLISH_COMMIT_SCHEMA: &str = "aiw.dev/wsb-depublish-commit/v0alpha1";
+const DEPUBLISH_COMMIT_POLICY: &str = "checkpoint-bound-original-to-tombstone-v1";
+const DEPUBLISH_OPERATION: &str = "originalToCheckpointBoundTombstone";
 
 #[derive(Debug, Error)]
 pub(crate) enum WsbDiscardPreparationError {
@@ -55,6 +64,8 @@ pub(crate) enum WsbDiscardPreparationError {
     Inventory(#[from] ExactDisposeError),
     #[error("protected discard checkpoint failed: {0}")]
     Checkpoint(#[from] DiscardCheckpointError),
+    #[error("protected depublish commit failed: {0}")]
+    DepublishCommit(#[from] DepublishCommitError),
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -132,6 +143,76 @@ pub(crate) struct WsbFixedTreeInventoryReceipt {
     pub(crate) inventory: WsbFixedTreeInventoryEvidence,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WsbDepublishCommitV0Alpha1 {
+    schema_version: String,
+    policy_version: String,
+    operation: String,
+    run_id: String,
+    cleanup_id: String,
+    store_key: String,
+    workspace: WorkspaceBindingEvidence,
+    workspace_identity_sha256: String,
+    revocation_sha256: String,
+    discard_intent_sha256: String,
+    discard_intent_binding: DiscardIntentBindingEvidence,
+    checkpoint_sha256: String,
+    checkpoint_binding: DiscardCheckpointBindingEvidence,
+    fixed_tree_contract_version: String,
+    inventory_sha256: String,
+    original_root: String,
+    root_id: aiw_probe::DiscardIntentStableId,
+    tombstone_leaf: String,
+    tombstone_path: String,
+    commit_parent_id: aiw_probe::DiscardIntentStableId,
+    commit_file_id: aiw_probe::DiscardIntentStableId,
+}
+
+pub(crate) struct DepublishedWsbTombstone<'a> {
+    prepared: PreparedWsbDiscard<'a>,
+    commit: WsbDepublishCommitV0Alpha1,
+    commit_publication: HeldDepublishCommitPublication,
+    observation: WsbRootDepublishObservation,
+}
+
+pub(crate) struct RecoveredDepublishedWsbTombstone {
+    _coordination: RunCoordinationLease,
+    _intent: HeldDiscardIntentPublication,
+    _checkpoint: HeldDiscardCheckpointPublication,
+    commit: HeldDepublishCommitPublication,
+    observation: WsbRootDepublishObservation,
+}
+
+impl RecoveredDepublishedWsbTombstone {
+    pub(crate) fn observation(&self) -> &WsbRootDepublishObservation {
+        &self.observation
+    }
+
+    pub(crate) fn revalidate(&self) -> Result<(), WsbDiscardPreparationError> {
+        self._intent.revalidate()?;
+        self._checkpoint.revalidate()?;
+        self.commit.revalidate()?;
+        Ok(())
+    }
+}
+
+impl DepublishedWsbTombstone<'_> {
+    pub(crate) fn observation(&self) -> &WsbRootDepublishObservation {
+        &self.observation
+    }
+
+    pub(crate) fn revalidate(&self) -> Result<(), WsbDiscardPreparationError> {
+        self.prepared.revalidate_checkpoint()?;
+        self.commit_publication.revalidate()?;
+        validate_depublish_commit(
+            &self.commit,
+            self.prepared.checkpoint(),
+            self.commit_publication.evidence(),
+        )
+    }
+}
+
 impl PreparedWsbDiscard<'_> {
     pub(crate) fn run_id(&self) -> &str {
         self.authority.run_id()
@@ -170,6 +251,376 @@ impl PreparedWsbDiscard<'_> {
             .validate()
             .map_err(|error| WsbDiscardPreparationError::Orchestrator(error.to_string()))
     }
+}
+
+pub(crate) fn depublish_prepared_windows_sandbox<'a>(
+    prepared: PreparedWsbDiscard<'a>,
+) -> Result<DepublishedWsbTombstone<'a>, WsbDiscardPreparationError> {
+    prepared.revalidate_checkpoint()?;
+    let state = classify_checkpoint_bound_wsb_root(prepared.inventory())?;
+    if state != WsbRootNamespaceState::Original {
+        return Err(WsbDiscardPreparationError::Contract(format!(
+            "fresh depublish requires exact original state, observed {state:?}"
+        )));
+    }
+    let tree = reopen_checkpoint_bound_wsb_root(prepared.inventory(), state)?;
+    tree.revalidate()?;
+    prepared.revalidate_checkpoint()?;
+
+    let (commit, commit_publication) = materialize_depublish_commit(&prepared, &tree)?;
+    prepared.revalidate_checkpoint()?;
+    commit_publication.revalidate()?;
+    tree.revalidate()?;
+    let observation = tree.depublish_and_release()?;
+    if classify_checkpoint_bound_wsb_root(prepared.inventory())? != WsbRootNamespaceState::Tombstone
+        || observation.root_id != prepared.inventory().objects[0].id
+    {
+        return Err(WsbDiscardPreparationError::Contract(
+            "depublish postcondition is not the exact checkpoint-bound tombstone".to_owned(),
+        ));
+    }
+    Ok(DepublishedWsbTombstone {
+        prepared,
+        commit,
+        commit_publication,
+        observation,
+    })
+}
+
+pub(crate) fn recover_committed_windows_sandbox_depublish(
+    original_root: &Path,
+    run_id: &str,
+) -> Result<RecoveredDepublishedWsbTombstone, WsbDiscardPreparationError> {
+    let located = locate_depublish_commit_from_persisted_root(original_root, run_id)?;
+    let commit: WsbDepublishCommitV0Alpha1 =
+        serde_json::from_slice(located.commit()).map_err(|error| {
+            WsbDiscardPreparationError::Contract(format!(
+                "persisted depublish commit is not the strict schema: {error}"
+            ))
+        })?;
+    if canonical_bytes(&commit)? != located.commit()
+        || Path::new(&commit.original_root) != original_root
+    {
+        return Err(WsbDiscardPreparationError::Contract(
+            "located depublish commit is noncanonical or bound to another original root".to_owned(),
+        ));
+    }
+    let workspace = &commit.workspace;
+    let key = RunCoordinationKey::from_workspace(workspace, run_id)
+        .map_err(|error| WsbDiscardPreparationError::Contract(error.to_string()))?;
+    if key.binding_sha256() != located.store_key() {
+        return Err(WsbDiscardPreparationError::Contract(
+            "located depublish commit store key differs from embedded workspace".to_owned(),
+        ));
+    }
+    let existing = reopen_existing_depublish_commit(workspace, run_id, key.binding_sha256())?;
+    if existing.commit() != located.commit() {
+        return Err(WsbDiscardPreparationError::Contract(
+            "depublish commit changed between bootstrap and strict reopen".to_owned(),
+        ));
+    }
+    validate_depublish_envelope(&commit, workspace, run_id, existing.binding())?;
+    let commit_binding = existing.binding().clone();
+    let commit_reopened = existing.into_reopened();
+    let coordination = try_acquire_run_coordination(&key, RunCoordinationMode::Recovery)
+        .map_err(|error| WsbDiscardPreparationError::Contract(error.to_string()))?;
+
+    let existing_checkpoint =
+        reopen_existing_discard_checkpoint(workspace, run_id, key.binding_sha256())?;
+    let checkpoint: WsbDiscardCheckpointV0Alpha1 =
+        serde_json::from_slice(existing_checkpoint.checkpoint()).map_err(|error| {
+            WsbDiscardPreparationError::Contract(format!(
+                "persisted discard checkpoint is not the strict schema: {error}"
+            ))
+        })?;
+    if canonical_bytes(&checkpoint)? != existing_checkpoint.checkpoint() {
+        return Err(WsbDiscardPreparationError::Contract(
+            "persisted discard checkpoint is not canonical JSON".to_owned(),
+        ));
+    }
+    checkpoint
+        .validate()
+        .map_err(|error| WsbDiscardPreparationError::Orchestrator(error.to_string()))?;
+    validate_depublish_commit(&commit, &checkpoint, &commit_binding)?;
+    if existing_checkpoint.binding() != &commit.checkpoint_binding {
+        return Err(WsbDiscardPreparationError::Contract(
+            "current checkpoint file binding differs from depublish authority".to_owned(),
+        ));
+    }
+    let checkpoint_publication = match existing_checkpoint.into_reopened() {
+        ReopenedDiscardCheckpoint::Published(value) => value,
+        ReopenedDiscardCheckpoint::Publishable(_) => {
+            return Err(WsbDiscardPreparationError::Contract(
+                "pending-only discard checkpoint cannot authorize recovery".to_owned(),
+            ));
+        }
+    };
+    let intent_publication =
+        reopen_published_discard_intent(workspace, run_id, &commit.discard_intent_binding)?;
+    intent_publication.revalidate()?;
+    checkpoint_publication.revalidate()?;
+
+    let state = classify_checkpoint_bound_wsb_root(&checkpoint.inventory)?;
+    let (commit_publication, observation) = match commit_reopened {
+        ReopenedDepublishCommit::Publishable(value) => {
+            if located.is_published() || state != WsbRootNamespaceState::Original {
+                return Err(WsbDiscardPreparationError::Contract(
+                    "pending depublish commit is not paired with the exact original tree"
+                        .to_owned(),
+                ));
+            }
+            let tree = reopen_checkpoint_bound_wsb_root(&checkpoint.inventory, state)?;
+            tree.revalidate()?;
+            intent_publication.revalidate()?;
+            checkpoint_publication.revalidate()?;
+            let publication = value.publish()?;
+            publication.revalidate()?;
+            tree.revalidate()?;
+            let observation = tree.depublish_and_release()?;
+            (publication, observation)
+        }
+        ReopenedDepublishCommit::Published(publication) => {
+            publication.revalidate()?;
+            let observation = match state {
+                WsbRootNamespaceState::Original => {
+                    let tree = reopen_checkpoint_bound_wsb_root(&checkpoint.inventory, state)?;
+                    tree.revalidate()?;
+                    intent_publication.revalidate()?;
+                    checkpoint_publication.revalidate()?;
+                    publication.revalidate()?;
+                    tree.depublish_and_release()?
+                }
+                WsbRootNamespaceState::Tombstone => WsbRootDepublishObservation {
+                    root_id: checkpoint.inventory.objects[0].id.clone(),
+                    tombstone_path: commit.tombstone_path.clone(),
+                },
+                _ => {
+                    return Err(WsbDiscardPreparationError::Contract(format!(
+                        "committed depublish namespace is ambiguous or foreign: {state:?}"
+                    )));
+                }
+            };
+            (publication, observation)
+        }
+    };
+    if classify_checkpoint_bound_wsb_root(&checkpoint.inventory)?
+        != WsbRootNamespaceState::Tombstone
+    {
+        return Err(WsbDiscardPreparationError::Contract(
+            "recovered depublish did not reach the exact tombstone".to_owned(),
+        ));
+    }
+    Ok(RecoveredDepublishedWsbTombstone {
+        _coordination: coordination,
+        _intent: intent_publication,
+        _checkpoint: checkpoint_publication,
+        commit: commit_publication,
+        observation,
+    })
+}
+
+fn materialize_depublish_commit(
+    prepared: &PreparedWsbDiscard<'_>,
+    tree: &aiw_windows_platform::HeldCheckpointBoundWsbRoot,
+) -> Result<(WsbDepublishCommitV0Alpha1, HeldDepublishCommitPublication), WsbDiscardPreparationError>
+{
+    tree.revalidate()?;
+    prepared.revalidate_checkpoint()?;
+    let workspace = &prepared.inventory().workspace;
+    let run_id = prepared.run_id();
+    let store_key = &prepared.revocation().discard_intent_binding.store_key;
+    match reserve_depublish_commit(workspace, run_id, store_key) {
+        Ok(reserved) => {
+            let commit = build_depublish_commit(
+                prepared,
+                reserved.parent_id().clone(),
+                reserved.commit_id().clone(),
+            )?;
+            let bytes = canonical_bytes(&commit)?;
+            let sha256 = hash_bytes(&bytes);
+            let staged = reserved.persist(&bytes, &sha256)?;
+            let binding = staged.evidence().clone();
+            tree.revalidate()?;
+            prepared.revalidate_checkpoint()?;
+            let reopened =
+                reopen_prepared_depublish_commit(&bytes, &sha256, workspace, run_id, &binding)?;
+            let publication = publish_depublish_commit(reopened)?;
+            publication.revalidate()?;
+            validate_depublish_commit(&commit, prepared.checkpoint(), publication.evidence())?;
+            Ok((commit, publication))
+        }
+        Err(DepublishCommitError::FinalConflict | DepublishCommitError::PendingConflict) => {
+            let existing = reopen_existing_depublish_commit(workspace, run_id, store_key)?;
+            let commit: WsbDepublishCommitV0Alpha1 = serde_json::from_slice(existing.commit())
+                .map_err(|error| {
+                    WsbDiscardPreparationError::Contract(format!(
+                        "persisted depublish commit is not the strict schema: {error}"
+                    ))
+                })?;
+            if canonical_bytes(&commit)? != existing.commit() {
+                return Err(WsbDiscardPreparationError::Contract(
+                    "persisted depublish commit is not canonical JSON".to_owned(),
+                ));
+            }
+            if commit.checkpoint_binding != *prepared.checkpoint_binding() {
+                return Err(WsbDiscardPreparationError::Contract(
+                    "persisted depublish commit checkpoint binding differs from current authority"
+                        .to_owned(),
+                ));
+            }
+            validate_depublish_commit(&commit, prepared.checkpoint(), existing.binding())?;
+            tree.revalidate()?;
+            prepared.revalidate_checkpoint()?;
+            let publication = match existing.into_reopened() {
+                ReopenedDepublishCommit::Published(value) => value,
+                ReopenedDepublishCommit::Publishable(value) => value.publish()?,
+            };
+            publication.revalidate()?;
+            Ok((commit, publication))
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn publish_depublish_commit(
+    reopened: ReopenedDepublishCommit,
+) -> Result<HeldDepublishCommitPublication, WsbDiscardPreparationError> {
+    match reopened {
+        ReopenedDepublishCommit::Publishable(value) => Ok(value.publish()?),
+        ReopenedDepublishCommit::Published(value) => Ok(value),
+    }
+}
+
+fn build_depublish_commit(
+    prepared: &PreparedWsbDiscard<'_>,
+    commit_parent_id: aiw_probe::DiscardIntentStableId,
+    commit_file_id: aiw_probe::DiscardIntentStableId,
+) -> Result<WsbDepublishCommitV0Alpha1, WsbDiscardPreparationError> {
+    let checkpoint = prepared.checkpoint();
+    let workspace = &checkpoint.inventory.workspace;
+    let parent = Path::new(&workspace.parent.final_path);
+    let commit = WsbDepublishCommitV0Alpha1 {
+        schema_version: DEPUBLISH_COMMIT_SCHEMA.to_owned(),
+        policy_version: DEPUBLISH_COMMIT_POLICY.to_owned(),
+        operation: DEPUBLISH_OPERATION.to_owned(),
+        run_id: checkpoint.run_id.clone(),
+        cleanup_id: checkpoint.cleanup_id.clone(),
+        store_key: checkpoint
+            .revocation
+            .discard_intent_binding
+            .store_key
+            .clone(),
+        workspace: workspace.clone(),
+        workspace_identity_sha256: checkpoint.revocation.workspace_identity_sha256.clone(),
+        revocation_sha256: checkpoint.revocation_sha256.clone(),
+        discard_intent_sha256: checkpoint.revocation.discard_intent_sha256.clone(),
+        discard_intent_binding: checkpoint.revocation.discard_intent_binding.clone(),
+        checkpoint_sha256: canonical_hash(checkpoint)?,
+        checkpoint_binding: prepared.checkpoint_binding().clone(),
+        fixed_tree_contract_version: checkpoint.fixed_tree_contract_version.clone(),
+        inventory_sha256: checkpoint.inventory_sha256.clone(),
+        original_root: checkpoint.inventory.original_root.clone(),
+        root_id: checkpoint.inventory.objects[0].id.clone(),
+        tombstone_leaf: checkpoint.inventory.tombstone_leaf.clone(),
+        tombstone_path: parent
+            .join(&checkpoint.inventory.tombstone_leaf)
+            .to_string_lossy()
+            .into_owned(),
+        commit_parent_id,
+        commit_file_id,
+    };
+    // The platform binding is not available until after persist; validate the
+    // complete cross-binding at that boundary.
+    if commit.schema_version != DEPUBLISH_COMMIT_SCHEMA
+        || commit.policy_version != DEPUBLISH_COMMIT_POLICY
+        || commit.operation != DEPUBLISH_OPERATION
+        || commit.commit_parent_id != checkpoint.checkpoint_file.parent_id
+        || commit.commit_file_id == commit.commit_parent_id
+    {
+        return Err(WsbDiscardPreparationError::Contract(
+            "depublish commit reservation does not match the checkpoint parent".to_owned(),
+        ));
+    }
+    Ok(commit)
+}
+
+fn validate_depublish_commit(
+    commit: &WsbDepublishCommitV0Alpha1,
+    checkpoint: &WsbDiscardCheckpointV0Alpha1,
+    binding: &DepublishCommitBindingEvidence,
+) -> Result<(), WsbDiscardPreparationError> {
+    let expected_tombstone = Path::new(&checkpoint.inventory.workspace.parent.final_path)
+        .join(&checkpoint.inventory.tombstone_leaf);
+    let valid = commit.schema_version == DEPUBLISH_COMMIT_SCHEMA
+        && commit.policy_version == DEPUBLISH_COMMIT_POLICY
+        && commit.operation == DEPUBLISH_OPERATION
+        && commit.run_id == checkpoint.run_id
+        && commit.cleanup_id == checkpoint.cleanup_id
+        && commit.store_key == checkpoint.revocation.discard_intent_binding.store_key
+        && commit.workspace == checkpoint.inventory.workspace
+        && commit.workspace_identity_sha256 == checkpoint.revocation.workspace_identity_sha256
+        && commit.revocation_sha256 == checkpoint.revocation_sha256
+        && commit.discard_intent_sha256 == checkpoint.revocation.discard_intent_sha256
+        && commit.discard_intent_binding == checkpoint.revocation.discard_intent_binding
+        && commit.checkpoint_sha256 == canonical_hash(checkpoint)?
+        && commit.checkpoint_binding.parent_id == checkpoint.checkpoint_file.parent_id
+        && commit.checkpoint_binding.checkpoint_id == checkpoint.checkpoint_file.file_id
+        && commit.fixed_tree_contract_version == WSB_FIXED_TREE_CONTRACT_VERSION
+        && commit.inventory_sha256 == checkpoint.inventory_sha256
+        && commit.original_root == checkpoint.inventory.original_root
+        && commit.root_id == checkpoint.inventory.objects[0].id
+        && commit.tombstone_leaf == checkpoint.inventory.tombstone_leaf
+        && commit.tombstone_path == expected_tombstone.to_string_lossy()
+        && commit.commit_parent_id == binding.parent_id
+        && commit.commit_file_id == binding.commit_id
+        && binding.run_id == commit.run_id
+        && binding.store_key == commit.store_key
+        && binding.owner_sid == checkpoint.inventory.workspace.owner_sid
+        && binding.commit_sha256 == hash_bytes(&canonical_bytes(commit)?)
+        && binding.commit_size == canonical_bytes(commit)?.len() as u64;
+    if !valid {
+        return Err(WsbDiscardPreparationError::Contract(
+            "depublish commit differs from its checkpoint or protected file binding".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_depublish_envelope(
+    commit: &WsbDepublishCommitV0Alpha1,
+    workspace: &WorkspaceBindingEvidence,
+    run_id: &str,
+    binding: &DepublishCommitBindingEvidence,
+) -> Result<(), WsbDiscardPreparationError> {
+    let expected_tombstone = Path::new(&workspace.parent.final_path).join(&commit.tombstone_leaf);
+    let valid = commit.schema_version == DEPUBLISH_COMMIT_SCHEMA
+        && commit.policy_version == DEPUBLISH_COMMIT_POLICY
+        && commit.operation == DEPUBLISH_OPERATION
+        && commit.run_id == run_id
+        && commit.store_key == binding.store_key
+        && commit.workspace == *workspace
+        && commit.workspace_identity_sha256 == canonical_hash(&commit.workspace)?
+        && commit.discard_intent_binding.run_id == run_id
+        && commit.discard_intent_binding.store_key == commit.store_key
+        && commit.discard_intent_binding.owner_sid == workspace.owner_sid
+        && commit.discard_intent_sha256 == commit.discard_intent_binding.intent_sha256
+        && commit.original_root == workspace.root.final_path
+        && commit.root_id.volume_serial_number == workspace.root.volume_serial_number
+        && commit.root_id.file_id == workspace.root.file_id
+        && commit.tombstone_leaf == format!("{TOMBSTONE_PREFIX}{}", commit.cleanup_id)
+        && commit.tombstone_path == expected_tombstone.to_string_lossy()
+        && commit.commit_parent_id == binding.parent_id
+        && commit.commit_file_id == binding.commit_id
+        && binding.run_id == run_id
+        && binding.owner_sid == workspace.owner_sid
+        && binding.commit_sha256 == hash_bytes(&canonical_bytes(commit)?)
+        && binding.commit_size == canonical_bytes(commit)?.len() as u64;
+    if !valid {
+        return Err(WsbDiscardPreparationError::Contract(
+            "depublish recovery envelope is not bound to the supplied workspace and run".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn prepare_windows_sandbox_discard<'a>(
@@ -870,6 +1321,8 @@ mod tests {
             "fs::rename",
             "SetFileInformationByHandle",
             "exact_dispose",
+            "dispose_next",
+            "dispose_all",
             "acquire_windows_sandbox",
             "provider.start",
             "provider.stop",
@@ -886,6 +1339,9 @@ mod tests {
         assert!(production.contains("reserve_discard_checkpoint"));
         assert!(production.contains("reopen_existing_discard_checkpoint"));
         assert!(production.contains("reopen_prepared_discard_checkpoint"));
+        assert!(production.contains("reserve_depublish_commit"));
+        assert!(production.contains("reopen_existing_depublish_commit"));
+        assert!(production.contains("depublish_and_release"));
         assert!(
             production.find("into_outer_only(publication)").unwrap()
                 < production
@@ -907,6 +1363,23 @@ mod tests {
                 < production.find("drop(held_stage)").unwrap(),
             "the exact stage handles must survive until internal persistence"
         );
+        assert!(
+            production.find("materialize_depublish_commit").unwrap()
+                < production.find("tree.depublish_and_release").unwrap(),
+            "the immutable external commit must be published before root rename"
+        );
+        let recovery = production
+            .split("fn recover_committed_windows_sandbox_depublish")
+            .nth(1)
+            .unwrap()
+            .split("fn materialize_depublish_commit")
+            .next()
+            .unwrap();
+        assert!(!recovery.contains("RunLayout::new"));
+        assert!(recovery.contains("RunCoordinationMode::Recovery"));
+        assert!(recovery.contains("ReopenedDepublishCommit::Publishable"));
+        assert!(recovery.contains("value.publish()"));
+        assert!(recovery.contains("WsbRootNamespaceState::Tombstone"));
     }
 
     #[test]

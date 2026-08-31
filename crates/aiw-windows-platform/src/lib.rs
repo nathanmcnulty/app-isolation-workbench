@@ -29,7 +29,7 @@ pub use discard_intent::{
     DiscardIntentBindingEvidence, DiscardIntentEaBinding, DiscardIntentEaEntry, DiscardIntentError,
     DiscardIntentStableId, HeldDiscardIntentPublication, PublishableDiscardIntent,
     ReopenedDiscardIntent, StagedDiscardIntent, reopen_prepared_discard_intent,
-    stage_discard_intent,
+    reopen_published_discard_intent, stage_discard_intent,
 };
 
 #[cfg(windows)]
@@ -42,10 +42,22 @@ pub use discard_checkpoint::{
 };
 
 #[cfg(windows)]
+pub use depublish_commit::{
+    DEPUBLISH_COMMIT_BINDING_POLICY_VERSION, DEPUBLISH_COMMIT_BINDING_SCHEMA_VERSION,
+    DepublishCommitBindingEvidence, DepublishCommitError, ExistingDepublishCommit,
+    HeldDepublishCommitPublication, LocatedDepublishCommit, PublishableDepublishCommit,
+    ReopenedDepublishCommit, ReservedDepublishCommit, StagedDepublishCommit,
+    locate_depublish_commit_from_persisted_root, reopen_existing_depublish_commit,
+    reopen_prepared_depublish_commit, reserve_depublish_commit, stage_depublish_commit,
+};
+
+#[cfg(windows)]
 #[doc(hidden)]
 pub use exact_dispose::{
-    ExactDisposeError, HeldFixedWsbCheckpointSnapshot, hold_fixed_wsb_tree_for_checkpoint,
-    observe_fixed_wsb_tree_for_checkpoint, verify_fixed_wsb_tree_inventory,
+    ExactDisposeError, HeldCheckpointBoundWsbRoot, HeldFixedWsbCheckpointSnapshot,
+    WsbRootDepublishObservation, WsbRootNamespaceState, classify_checkpoint_bound_wsb_root,
+    hold_fixed_wsb_tree_for_checkpoint, observe_fixed_wsb_tree_for_checkpoint,
+    reopen_checkpoint_bound_wsb_root, verify_fixed_wsb_tree_inventory,
 };
 
 pub use aiw_probe::WindowsFileIdentity as WorkspaceDirectoryIdentity;
@@ -59,6 +71,9 @@ mod discard_intent;
 
 #[cfg(windows)]
 mod discard_checkpoint;
+
+#[cfg(windows)]
+mod depublish_commit;
 
 #[cfg(windows)]
 #[allow(dead_code)]

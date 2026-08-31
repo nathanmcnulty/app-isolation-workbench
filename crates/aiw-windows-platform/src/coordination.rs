@@ -72,6 +72,18 @@ pub struct RunCoordinationKey {
 }
 
 impl RunCoordinationKey {
+    /// Derive only the deterministic namespace digest from a persisted
+    /// canonical root path and run ID. This does not open the root and grants
+    /// no mutex or filesystem authority; recovery must validate persisted
+    /// evidence before using the result.
+    pub fn binding_from_persisted_root(
+        root: &Path,
+        run_id: &str,
+    ) -> Result<String, RunCoordinationError> {
+        validate_run_id(run_id)?;
+        coordination_binding(root, run_id)
+    }
+
     /// Resolve an existing local root to its canonical namespace and derive a
     /// normal-execution key using the current token owner. Persisted or
     /// elevated recovery must use [`Self::from_workspace`] so it neither opens
@@ -113,16 +125,7 @@ impl RunCoordinationKey {
         expected_owner_sid: String,
     ) -> Result<Self, RunCoordinationError> {
         validate_run_id(run_id)?;
-        let root_namespace = normalized_root_namespace(canonical_root)?;
-        let mut binding = Sha256::new();
-        update_length_prefixed(&mut binding, RUN_BINDING_DOMAIN)?;
-        let mut root_bytes = Vec::with_capacity(root_namespace.len() * size_of::<u16>());
-        for unit in root_namespace {
-            root_bytes.extend_from_slice(&unit.to_le_bytes());
-        }
-        update_length_prefixed(&mut binding, &root_bytes)?;
-        update_length_prefixed(&mut binding, run_id.as_bytes())?;
-        let binding_sha256 = hex::encode(binding.finalize());
+        let binding_sha256 = coordination_binding(canonical_root, run_id)?;
         Ok(Self {
             name: format!("{RUN_MUTEX_PREFIX}.{binding_sha256}"),
             expected_owner_sid,
@@ -134,6 +137,19 @@ impl RunCoordinationKey {
     pub fn binding_sha256(&self) -> &str {
         &self.binding_sha256
     }
+}
+
+fn coordination_binding(root: &Path, run_id: &str) -> Result<String, RunCoordinationError> {
+    let root_namespace = normalized_root_namespace(root)?;
+    let mut binding = Sha256::new();
+    update_length_prefixed(&mut binding, RUN_BINDING_DOMAIN)?;
+    let mut root_bytes = Vec::with_capacity(root_namespace.len() * size_of::<u16>());
+    for unit in root_namespace {
+        root_bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    update_length_prefixed(&mut binding, &root_bytes)?;
+    update_length_prefixed(&mut binding, run_id.as_bytes())?;
+    Ok(hex::encode(binding.finalize()))
 }
 
 #[must_use]
@@ -843,6 +859,10 @@ mod tests {
         let first = RunCoordinationKey::from_workspace(&first, "run-one").unwrap();
         let second = RunCoordinationKey::from_workspace(&second, "run-one").unwrap();
         assert_eq!(first.binding_sha256(), second.binding_sha256());
+        assert_eq!(
+            RunCoordinationKey::binding_from_persisted_root(Path::new(&root), "run-one").unwrap(),
+            first.binding_sha256()
+        );
         assert_eq!(first.name, second.name);
     }
 

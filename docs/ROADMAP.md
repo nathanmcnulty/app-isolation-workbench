@@ -1,6 +1,6 @@
 # Roadmap
 
-AIW is delivered as two milestones with vertical, evidence-gated slices. The current repository has completed the W0 foundation and has a private, live-proven W1 Windows Sandbox kernel. Fresh protected preparation, process-exit verification, and atomic import into provenance-bound `PendingApproval` state are exposed without provider acquisition; drift-independent exact-session cleanup is exposed through the narrow production `run recover` command. Production start remains unavailable until its exact approved-start/crash/recovery path passes the public live gate. Application assessment, the desktop UI, and package authoring remain later slices.
+AIW is delivered as two milestones with vertical, evidence-gated slices. The current repository has completed the W0 foundation and has a private, live-proven W1 Windows Sandbox kernel. Fresh protected preparation, process-exit verification, and atomic import into provenance-bound `PendingApproval` state are exposed without provider acquisition; checkpoint-bound depublish is now a private transaction that commits an immutable external record before an exact non-replacing root rename, with recovery across both sides of that rename. Child disposition, provider execution, public CLI exposure, and cleanup remain later slices. Production start remains unavailable until its exact approved-start/crash/recovery path passes the public live gate. Application assessment, the desktop UI, and package authoring remain later slices.
 
 ## Workbench v1
 
@@ -19,6 +19,8 @@ AIW is delivered as two milestones with vertical, evidence-gated slices. The cur
 - Revalidate plan hashes, provider identity, paths, inputs, output emptiness, and leases immediately before execution.
 - Capture host/provider state, process trees, target tokens, completion receipt, and idempotent cleanup.
 - Prepare a hash-bound fixed-agent workspace and plans without provider mutation; reopen and verify the exact preparation after process exit; atomically import its plan, provenance receipt, and genesis journal before separate approval.
+- Depublish only an exact checkpoint-bound original workspace to its deterministic tombstone: classify original/tombstone/absent/foreign/ambiguous state, publish the immutable external commit first, then perform the exact non-replacing root rename and verify the postcondition.
+- Recover before or after the root rename while retaining the commit, checkpoint, intent, and coordination bindings; preserve ambiguous or foreign state and fail closed. Do not delete children, mutate a provider, expose a CLI, or claim cleanup.
 
 **Exit gate:** a real supported host completes the golden probe in an exact sandbox session and verifies receipt, evidence correlation, and cleanup.
 
