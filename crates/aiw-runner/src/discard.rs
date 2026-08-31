@@ -1,0 +1,599 @@
+//! Private, non-destructive Windows Sandbox discard preparation.
+//!
+//! This workflow may publish only the protected external intent and the
+//! hash-bound internal revocation record. It deliberately has no provider,
+//! rename, disposition, deletion, or exact-disposal operation.
+
+use std::path::Path;
+
+use aiw_evidence::canonical_json_bytes;
+use aiw_orchestrator::{
+    RunLayout, WSB_REVOCATION_SCHEMA_VERSION, WsbOuterDiscardAuthority, WsbRevocationRecord,
+    project_revision_hash,
+};
+use aiw_probe::WorkspaceBindingEvidence;
+use aiw_schema::Project;
+use aiw_windows_platform::{
+    DiscardIntentBindingEvidence, DiscardIntentError, HeldDiscardIntentPublication,
+    ReopenedDiscardIntent, reopen_prepared_discard_intent, stage_discard_intent,
+};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use thiserror::Error;
+
+use crate::preparation::{
+    WsbPreparationError, open_verified_windows_sandbox_preparation,
+    require_current_readiness_matches_receipt,
+};
+
+const DISCARD_INTENT_SCHEMA: &str = "aiw.dev/wsb-discard-intent/v0alpha1";
+const DISCARD_PHASE: &str = "revocationPending";
+const FIXED_TREE_CONTRACT: &str = "aiw.dev/wsb-fixed-tree/v1-19-objects";
+const CONTROL_PREFIX: &str = ".aiw-discard-v1-";
+const TOMBSTONE_PREFIX: &str = ".aiw-discarded-v1-";
+
+#[derive(Debug, Error)]
+pub(crate) enum WsbDiscardPreparationError {
+    #[error("discard preparation contract is invalid: {0}")]
+    Contract(String),
+    #[error("verified WSB preparation could not be reopened: {0}")]
+    Preparation(#[from] WsbPreparationError),
+    #[error("run revocation state is invalid: {0}")]
+    Orchestrator(String),
+    #[error("protected discard intent failed: {0}")]
+    Platform(#[from] DiscardIntentError),
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WsbDiscardIntent {
+    schema_version: String,
+    run_id: String,
+    cleanup_id: String,
+    phase: String,
+    fixed_tree_contract: String,
+    requested_by: String,
+    requested_at: String,
+    tombstone_leaf: String,
+    control_path: String,
+    coordination_binding_sha256: String,
+    plan_sha256: String,
+    import_receipt_sha256: String,
+    preparation_receipt_sha256: String,
+    project_revision_sha256: String,
+    guest_agent_sha256: String,
+    provider_sha256: String,
+    provider_package_sha256: String,
+    provider_catalog_sha256: String,
+    provider_file_identity_sha256: String,
+    provider_protocol_sha256: String,
+    windows_sandbox_plan_sha256: String,
+    workspace: WorkspaceBindingEvidence,
+    workspace_identity_sha256: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CleanupIdMaterial<'a> {
+    schema_version: &'a str,
+    run_id: &'a str,
+    phase: &'a str,
+    fixed_tree_contract: &'a str,
+    requested_by: &'a str,
+    requested_at: &'a str,
+    control_path: &'a str,
+    coordination_binding_sha256: &'a str,
+    plan_sha256: &'a str,
+    import_receipt_sha256: &'a str,
+    preparation_receipt_sha256: &'a str,
+    project_revision_sha256: &'a str,
+    guest_agent_sha256: &'a str,
+    provider_sha256: &'a str,
+    provider_package_sha256: &'a str,
+    provider_catalog_sha256: &'a str,
+    provider_file_identity_sha256: &'a str,
+    provider_protocol_sha256: &'a str,
+    windows_sandbox_plan_sha256: &'a str,
+    workspace_identity_sha256: &'a str,
+}
+
+pub(crate) struct PreparedWsbDiscard<'a> {
+    authority: WsbOuterDiscardAuthority<'a>,
+    intent: WsbDiscardIntent,
+}
+
+impl PreparedWsbDiscard<'_> {
+    pub(crate) fn run_id(&self) -> &str {
+        self.authority.run_id()
+    }
+
+    pub(crate) fn cleanup_id(&self) -> &str {
+        &self.intent.cleanup_id
+    }
+
+    pub(crate) fn revocation(&self) -> &WsbRevocationRecord {
+        self.authority.revocation()
+    }
+}
+
+pub(crate) fn prepare_windows_sandbox_discard<'a>(
+    layout: &'a RunLayout,
+    workspace_root: &Path,
+    project: &Project,
+    expected_guest_agent_sha256: &str,
+    requested_by: &str,
+    requested_at: &str,
+) -> Result<PreparedWsbDiscard<'a>, WsbDiscardPreparationError> {
+    require_request_text("requestedBy", requested_by)?;
+    require_request_text("requestedAt", requested_at)?;
+
+    // The owner-scoped outer mutex and the inner run lock are acquired before
+    // any descendant preparation handle is reopened.
+    let mut guard = layout
+        .begin_wsb_revocation()
+        .map_err(|error| WsbDiscardPreparationError::Orchestrator(error.to_string()))?;
+    let mut held = open_verified_windows_sandbox_preparation(
+        workspace_root,
+        project,
+        expected_guest_agent_sha256,
+        true,
+        true,
+    )?;
+    require_guard_bindings(&guard, &held.artifacts, project)?;
+
+    let intent = build_intent(&guard, &held.artifacts.receipt, requested_by, requested_at)?;
+    let intent_bytes = canonical_bytes(&intent)?;
+    let intent_sha256 = hash_bytes(&intent_bytes);
+
+    let prefix = classify_prefix(
+        guard.recoverable_revocation(),
+        &intent.cleanup_id,
+        &intent_sha256,
+    )?;
+    let (revocation, binding, held_stage) = if let DiscardPrefix::Retry(revocation) = prefix {
+        let binding = revocation.discard_intent_binding.clone();
+        (*revocation, binding, None)
+    } else {
+        let staged = stage_discard_intent(
+            &intent_bytes,
+            &intent_sha256,
+            &held.artifacts.receipt.workspace,
+            layout.run_id(),
+        )?;
+        let revocation = WsbRevocationRecord {
+            schema_version: WSB_REVOCATION_SCHEMA_VERSION.to_owned(),
+            run_id: layout.run_id().to_owned(),
+            cleanup_id: intent.cleanup_id.clone(),
+            discard_intent_sha256: intent_sha256.clone(),
+            discard_intent_binding: staged.evidence().clone(),
+            plan_sha256: guard
+                .plan()
+                .hash()
+                .map_err(|error| WsbDiscardPreparationError::Orchestrator(error.to_string()))?,
+            import_receipt_sha256: canonical_hash(guard.import_receipt())?,
+            workspace_identity_sha256: held.artifacts.receipt.workspace_identity_sha256.clone(),
+            requested_by: requested_by.to_owned(),
+            requested_at: requested_at.to_owned(),
+        };
+        let binding = staged.evidence().clone();
+        (revocation, binding, Some(staged))
+    };
+
+    // A restart may expose a strictly validated durable revocation before its
+    // journal boundary is complete. This call is idempotent for both that
+    // prefix and the already-recorded prefix.
+    guard
+        .persist_staged_revocation(&revocation)
+        .map_err(|error| WsbDiscardPreparationError::Orchestrator(error.to_string()))?;
+    // Keep the exact staged file and parent handles alive until its binding is
+    // durably recorded. Reopen is intentionally a separate strict step.
+    drop(held_stage);
+
+    // Internal revocation is already fail-closed. Revalidate every read-only
+    // observation before the first possible external publication.
+    held.revalidate_revoking()?;
+    require_current_readiness_matches_receipt(&held.artifacts.receipt)?;
+    require_guard_bindings(&guard, &held.artifacts, project)?;
+    let publication = reopen_and_publish(
+        &intent_bytes,
+        &intent_sha256,
+        &held.artifacts.receipt.workspace,
+        layout.run_id(),
+        &binding,
+    )?;
+
+    // Re-read every held descendant artifact and provider observation after
+    // publication. Then release all descendant handles before the guard is
+    // consumed into outer-only authority.
+    held.revalidate_revoking()?;
+    require_current_readiness_matches_receipt(&held.artifacts.receipt)?;
+    require_guard_bindings(&guard, &held.artifacts, project)?;
+    drop(held);
+    let authority = guard
+        .into_outer_only(publication)
+        .map_err(|error| WsbDiscardPreparationError::Orchestrator(error.to_string()))?;
+    Ok(PreparedWsbDiscard { authority, intent })
+}
+
+fn reopen_and_publish(
+    intent_bytes: &[u8],
+    intent_sha256: &str,
+    workspace: &WorkspaceBindingEvidence,
+    run_id: &str,
+    binding: &DiscardIntentBindingEvidence,
+) -> Result<HeldDiscardIntentPublication, WsbDiscardPreparationError> {
+    match reopen_prepared_discard_intent(intent_bytes, intent_sha256, workspace, run_id, binding)? {
+        ReopenedDiscardIntent::Publishable(value) => Ok(value.publish()?),
+        ReopenedDiscardIntent::Published(value) => Ok(value),
+    }
+}
+
+enum DiscardPrefix {
+    Fresh,
+    Retry(Box<WsbRevocationRecord>),
+}
+
+fn classify_prefix(
+    committed: Option<&WsbRevocationRecord>,
+    cleanup_id: &str,
+    intent_sha256: &str,
+) -> Result<DiscardPrefix, WsbDiscardPreparationError> {
+    let Some(committed) = committed else {
+        return Ok(DiscardPrefix::Fresh);
+    };
+    if committed.cleanup_id != cleanup_id || committed.discard_intent_sha256 != intent_sha256 {
+        return Err(WsbDiscardPreparationError::Contract(
+            "the exact retry request differs from committed revocation".to_owned(),
+        ));
+    }
+    Ok(DiscardPrefix::Retry(Box::new(committed.clone())))
+}
+
+fn require_guard_bindings(
+    guard: &aiw_orchestrator::WsbRevocationGuard<'_>,
+    artifacts: &crate::PreparedWsbArtifacts,
+    project: &Project,
+) -> Result<(), WsbDiscardPreparationError> {
+    let import = guard.import_receipt();
+    let receipt = &artifacts.receipt;
+    if guard.plan() != &artifacts.run_plan {
+        return Err(WsbDiscardPreparationError::Contract(
+            "authoritative run plan drifted from the held preparation".to_owned(),
+        ));
+    }
+    let project_sha256 = project_revision_hash(project)
+        .map_err(|error| WsbDiscardPreparationError::Orchestrator(error.to_string()))?;
+    let preparation_sha256 = canonical_hash(receipt)?;
+    require_exact_bindings(&[
+        ("run", guard.plan().run_id.as_str(), receipt.run_id.as_str()),
+        (
+            "import run",
+            import.run_id.as_str(),
+            receipt.run_id.as_str(),
+        ),
+        (
+            "project",
+            project_sha256.as_str(),
+            receipt.project_revision_sha256.as_str(),
+        ),
+        (
+            "run plan",
+            import.run_plan_sha256.as_str(),
+            receipt.run_plan_sha256.as_str(),
+        ),
+        (
+            "WSB plan",
+            import.windows_sandbox_plan_sha256.as_str(),
+            receipt.wsb_plan_sha256.as_str(),
+        ),
+        (
+            "guest agent",
+            import.guest_agent_sha256.as_str(),
+            receipt.guest_agent.sha256.as_str(),
+        ),
+        (
+            "provider",
+            import.provider_sha256.as_str(),
+            receipt.provider.sha256.as_str(),
+        ),
+        (
+            "workspace",
+            import.workspace_identity_sha256.as_str(),
+            receipt.workspace_identity_sha256.as_str(),
+        ),
+        (
+            "preparation",
+            import.preparation_receipt_sha256.as_str(),
+            preparation_sha256.as_str(),
+        ),
+    ])
+}
+
+fn require_exact_bindings(
+    bindings: &[(&str, &str, &str)],
+) -> Result<(), WsbDiscardPreparationError> {
+    if let Some((name, _, _)) = bindings
+        .iter()
+        .find(|(_, observed, expected)| observed != expected)
+    {
+        return Err(WsbDiscardPreparationError::Contract(format!(
+            "{name} binding drifted before discard publication"
+        )));
+    }
+    Ok(())
+}
+
+fn build_intent(
+    guard: &aiw_orchestrator::WsbRevocationGuard<'_>,
+    receipt: &crate::WsbPreparationReceipt,
+    requested_by: &str,
+    requested_at: &str,
+) -> Result<WsbDiscardIntent, WsbDiscardPreparationError> {
+    let control_path = guard
+        .control_path()
+        .map_err(|error| WsbDiscardPreparationError::Orchestrator(error.to_string()))?
+        .to_string_lossy()
+        .into_owned();
+    let coordination_binding_sha256 = Path::new(&control_path)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .and_then(|value| value.strip_prefix(CONTROL_PREFIX))
+        .filter(|value| is_sha256(value))
+        .ok_or_else(|| {
+            WsbDiscardPreparationError::Contract(
+                "discard control path does not contain the full coordination binding".to_owned(),
+            )
+        })?
+        .to_owned();
+    let plan_sha256 = guard
+        .plan()
+        .hash()
+        .map_err(|error| WsbDiscardPreparationError::Orchestrator(error.to_string()))?;
+    let import_receipt_sha256 = canonical_hash(guard.import_receipt())?;
+    let preparation_receipt_sha256 = canonical_hash(receipt)?;
+    let provider_package_sha256 = canonical_hash(&receipt.provider_package)?;
+    let provider_file_identity_sha256 = canonical_hash(&receipt.provider_file_identity)?;
+    let provider_protocol_sha256 = canonical_hash(&receipt.provider_protocol)?;
+    let material = CleanupIdMaterial {
+        schema_version: DISCARD_INTENT_SCHEMA,
+        run_id: guard.plan().run_id.as_str(),
+        phase: DISCARD_PHASE,
+        fixed_tree_contract: FIXED_TREE_CONTRACT,
+        requested_by,
+        requested_at,
+        control_path: &control_path,
+        coordination_binding_sha256: &coordination_binding_sha256,
+        plan_sha256: &plan_sha256,
+        import_receipt_sha256: &import_receipt_sha256,
+        preparation_receipt_sha256: &preparation_receipt_sha256,
+        project_revision_sha256: &receipt.project_revision_sha256,
+        guest_agent_sha256: &receipt.guest_agent.sha256,
+        provider_sha256: &receipt.provider.sha256,
+        provider_package_sha256: &provider_package_sha256,
+        provider_catalog_sha256: &receipt.provider_catalog.catalog_sha256,
+        provider_file_identity_sha256: &provider_file_identity_sha256,
+        provider_protocol_sha256: &provider_protocol_sha256,
+        windows_sandbox_plan_sha256: &receipt.wsb_plan_sha256,
+        workspace_identity_sha256: &receipt.workspace_identity_sha256,
+    };
+    let cleanup_id = canonical_hash(&material)?;
+    Ok(WsbDiscardIntent {
+        schema_version: DISCARD_INTENT_SCHEMA.to_owned(),
+        run_id: receipt.run_id.clone(),
+        cleanup_id: cleanup_id.clone(),
+        phase: DISCARD_PHASE.to_owned(),
+        fixed_tree_contract: FIXED_TREE_CONTRACT.to_owned(),
+        requested_by: requested_by.to_owned(),
+        requested_at: requested_at.to_owned(),
+        tombstone_leaf: format!("{TOMBSTONE_PREFIX}{cleanup_id}"),
+        control_path,
+        coordination_binding_sha256,
+        plan_sha256,
+        import_receipt_sha256,
+        preparation_receipt_sha256,
+        project_revision_sha256: receipt.project_revision_sha256.clone(),
+        guest_agent_sha256: receipt.guest_agent.sha256.clone(),
+        provider_sha256: receipt.provider.sha256.clone(),
+        provider_package_sha256,
+        provider_catalog_sha256: receipt.provider_catalog.catalog_sha256.clone(),
+        provider_file_identity_sha256,
+        provider_protocol_sha256,
+        windows_sandbox_plan_sha256: receipt.wsb_plan_sha256.clone(),
+        workspace: receipt.workspace.clone(),
+        workspace_identity_sha256: receipt.workspace_identity_sha256.clone(),
+    })
+}
+
+fn canonical_bytes(value: &impl Serialize) -> Result<Vec<u8>, WsbDiscardPreparationError> {
+    let value = serde_json::to_value(value)
+        .map_err(|error| WsbDiscardPreparationError::Contract(error.to_string()))?;
+    canonical_json_bytes(&value)
+        .map_err(|error| WsbDiscardPreparationError::Contract(error.to_string()))
+}
+
+fn canonical_hash(value: &impl Serialize) -> Result<String, WsbDiscardPreparationError> {
+    Ok(hash_bytes(&canonical_bytes(value)?))
+}
+
+fn hash_bytes(value: &[u8]) -> String {
+    hex::encode(Sha256::digest(value))
+}
+
+fn require_request_text(field: &str, value: &str) -> Result<(), WsbDiscardPreparationError> {
+    if value.is_empty() || value.len() > 256 || value.chars().any(char::is_control) {
+        return Err(WsbDiscardPreparationError::Contract(format!(
+            "{field} is empty or outside its fixed text bound"
+        )));
+    }
+    Ok(())
+}
+
+fn is_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aiw_probe::{DiscardIntentEaBinding, DiscardIntentStableId};
+
+    fn binding() -> DiscardIntentBindingEvidence {
+        DiscardIntentBindingEvidence {
+            schema_version: aiw_probe::DISCARD_INTENT_BINDING_SCHEMA_VERSION.to_owned(),
+            policy_version: aiw_probe::DISCARD_INTENT_BINDING_POLICY_VERSION.to_owned(),
+            run_id: "run-one".to_owned(),
+            owner_sid: "S-1-5-21-1".to_owned(),
+            store_key: "a".repeat(64),
+            final_path: format!(r"C:\AIW\{}{}", CONTROL_PREFIX, "a".repeat(64)),
+            staging_leaf: format!(".aiw-discard-stage-v1-{}-1234567890abcdef", "a".repeat(64)),
+            parent_id: DiscardIntentStableId {
+                volume_serial_number: "1".repeat(16),
+                file_id: "2".repeat(32),
+            },
+            intent_id: DiscardIntentStableId {
+                volume_serial_number: "1".repeat(16),
+                file_id: "3".repeat(32),
+            },
+            intent_size: 100,
+            intent_sha256: "b".repeat(64),
+            intent_ea: DiscardIntentEaBinding {
+                queried_bytes: 0,
+                entries: vec![],
+                canonical_sha256: "c".repeat(64),
+            },
+        }
+    }
+
+    fn revocation() -> WsbRevocationRecord {
+        WsbRevocationRecord {
+            schema_version: WSB_REVOCATION_SCHEMA_VERSION.to_owned(),
+            run_id: "run-one".to_owned(),
+            cleanup_id: "d".repeat(64),
+            discard_intent_sha256: "b".repeat(64),
+            discard_intent_binding: binding(),
+            plan_sha256: "e".repeat(64),
+            import_receipt_sha256: "f".repeat(64),
+            workspace_identity_sha256: "1".repeat(64),
+            requested_by: "admin".to_owned(),
+            requested_at: "now".to_owned(),
+        }
+    }
+
+    #[test]
+    fn cleanup_material_is_canonical_and_has_no_hash_cycle_fields() {
+        let source = include_str!("discard.rs");
+        let material = source
+            .split("struct CleanupIdMaterial")
+            .nth(1)
+            .unwrap()
+            .split("pub(crate) struct PreparedWsbDiscard")
+            .next()
+            .unwrap();
+        assert!(!material.contains("cleanup_id"));
+        assert!(!material.contains("tombstone_leaf"));
+
+        let left = serde_json::json!({"b": 2, "a": 1});
+        let right = serde_json::json!({"a": 1, "b": 2});
+        assert_eq!(
+            canonical_hash(&left).unwrap(),
+            canonical_hash(&right).unwrap()
+        );
+    }
+
+    #[test]
+    fn request_and_hash_contracts_fail_closed() {
+        assert!(require_request_text("actor", "admin").is_ok());
+        assert!(require_request_text("actor", "").is_err());
+        assert!(require_request_text("actor", "bad\nactor").is_err());
+        assert!(is_sha256(&"a".repeat(64)));
+        assert!(!is_sha256(&"A".repeat(64)));
+        assert!(!is_sha256(&"a".repeat(63)));
+    }
+
+    #[test]
+    fn fresh_and_retry_prefixes_are_exact_and_conflicts_fail_read_only() {
+        assert!(matches!(
+            classify_prefix(None, &"d".repeat(64), &"b".repeat(64)).unwrap(),
+            DiscardPrefix::Fresh
+        ));
+        let committed = revocation();
+        let DiscardPrefix::Retry(observed) = classify_prefix(
+            Some(&committed),
+            &committed.cleanup_id,
+            &committed.discard_intent_sha256,
+        )
+        .unwrap() else {
+            panic!("committed prefix must retry");
+        };
+        assert_eq!(*observed, committed);
+        assert!(classify_prefix(Some(&committed), &"0".repeat(64), &"b".repeat(64)).is_err());
+        assert!(classify_prefix(Some(&committed), &"d".repeat(64), &"0".repeat(64)).is_err());
+    }
+
+    #[test]
+    fn every_imported_identity_pair_is_a_drift_gate() {
+        let names = [
+            "run",
+            "import run",
+            "project",
+            "run plan",
+            "WSB plan",
+            "guest agent",
+            "provider",
+            "workspace",
+            "preparation",
+        ];
+        for changed in 0..names.len() {
+            let mut bindings = names
+                .iter()
+                .map(|name| (*name, "same", "same"))
+                .collect::<Vec<_>>();
+            bindings[changed].1 = "drifted";
+            let error = require_exact_bindings(&bindings).unwrap_err().to_string();
+            assert!(error.contains(names[changed]));
+        }
+        assert!(require_exact_bindings(&[("provider", "same", "same")]).is_ok());
+    }
+
+    #[test]
+    fn production_surface_has_no_workspace_or_provider_mutation_verbs() {
+        let production = include_str!("discard.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        for forbidden in [
+            "remove_dir",
+            "remove_file",
+            "fs::rename",
+            "SetFileInformationByHandle",
+            "exact_dispose",
+            "acquire_windows_sandbox",
+            "provider.start",
+            "provider.stop",
+            "std::process::Command",
+        ] {
+            assert!(
+                !production.contains(forbidden),
+                "found forbidden {forbidden}"
+            );
+        }
+        assert!(production.contains("begin_wsb_revocation"));
+        assert!(production.contains("into_outer_only"));
+        assert!(
+            production.find("persist_staged_revocation").unwrap()
+                < production.find("drop(held_stage)").unwrap(),
+            "the exact stage handles must survive until internal persistence"
+        );
+    }
+
+    #[test]
+    fn fixed_tree_and_phase_contracts_are_explicit() {
+        assert_eq!(DISCARD_PHASE, "revocationPending");
+        assert!(FIXED_TREE_CONTRACT.ends_with("19-objects"));
+        assert_eq!(CONTROL_PREFIX, ".aiw-discard-v1-");
+        assert_eq!(TOMBSTONE_PREFIX, ".aiw-discarded-v1-");
+    }
+}

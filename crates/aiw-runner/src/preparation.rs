@@ -394,14 +394,14 @@ fn validate_request_contract(
     Ok(())
 }
 
-struct TrustedReadiness<'a> {
-    provider: &'a BinaryIdentity,
-    package: &'a WindowsPackageIdentity,
-    catalog: &'a CatalogTrustIdentity,
-    file_identity: &'a WindowsFileIdentity,
+pub(crate) struct TrustedReadiness<'a> {
+    pub(crate) provider: &'a BinaryIdentity,
+    pub(crate) package: &'a WindowsPackageIdentity,
+    pub(crate) catalog: &'a CatalogTrustIdentity,
+    pub(crate) file_identity: &'a WindowsFileIdentity,
 }
 
-fn require_readiness(
+pub(crate) fn require_readiness(
     readiness: &WindowsSandboxReadiness,
 ) -> Result<TrustedReadiness<'_>, WsbPreparationError> {
     if readiness.schema_version != READINESS_SCHEMA
@@ -461,6 +461,25 @@ fn require_readiness(
         catalog,
         file_identity,
     })
+}
+
+#[cfg(windows)]
+pub(crate) fn require_current_readiness_matches_receipt(
+    receipt: &WsbPreparationReceipt,
+) -> Result<(), WsbPreparationError> {
+    let readiness = aiw_windows_platform::assess_windows_sandbox();
+    let trusted = require_readiness(&readiness)?;
+    if trusted.provider != &receipt.provider
+        || trusted.package != &receipt.provider_package
+        || trusted.catalog != &receipt.provider_catalog
+        || trusted.file_identity != &receipt.provider_file_identity
+        || readiness.cli_protocol.as_ref() != Some(&receipt.provider_protocol)
+    {
+        return Err(WsbPreparationError::Readiness(
+            "provider identity or protocol drifted since preparation".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 fn require_pinned_protocol(
@@ -667,11 +686,12 @@ enum PreparationWorkspaceState {
     Building,
     Prepared,
     Imported,
+    Revoking,
 }
 
 #[cfg(windows)]
-struct HeldVerifiedWsbPreparation {
-    artifacts: PreparedWsbArtifacts,
+pub(crate) struct HeldVerifiedWsbPreparation {
+    pub(crate) artifacts: PreparedWsbArtifacts,
     receipt_file: std::fs::File,
     run_plan_file: std::fs::File,
     wsb_plan_file: std::fs::File,
@@ -699,16 +719,35 @@ impl HeldVerifiedWsbPreparation {
                 "held preparation artifacts changed during verification".to_owned(),
             ));
         }
+        if matches!(
+            state,
+            PreparationWorkspaceState::Imported | PreparationWorkspaceState::Revoking
+        ) {
+            require_importable_runs_allowlist(
+                self.workspace.root_path(),
+                &self.artifacts.receipt.run_id,
+                &self.artifacts.receipt.run_plan_sha256,
+            )?;
+        }
         self.artifacts.validate()
+    }
+
+    pub(crate) fn revalidate_imported(&mut self) -> Result<(), WsbPreparationError> {
+        self.revalidate(PreparationWorkspaceState::Imported)
+    }
+
+    pub(crate) fn revalidate_revoking(&mut self) -> Result<(), WsbPreparationError> {
+        self.revalidate(PreparationWorkspaceState::Revoking)
     }
 }
 
 #[cfg(windows)]
-fn open_verified_windows_sandbox_preparation(
+pub(crate) fn open_verified_windows_sandbox_preparation(
     workspace_root: &Path,
     project: &Project,
     expected_guest_agent_sha256: &str,
     allow_imported: bool,
+    allow_revoking: bool,
 ) -> Result<HeldVerifiedWsbPreparation, WsbPreparationError> {
     use aiw_windows_platform::{HeldRunWorkspace, assess_windows_sandbox};
 
@@ -759,7 +798,11 @@ fn open_verified_windows_sandbox_preparation(
                 "preparation has already entered authoritative run state".to_owned(),
             ));
         }
-        PreparationWorkspaceState::Imported
+        if allow_revoking {
+            PreparationWorkspaceState::Revoking
+        } else {
+            PreparationWorkspaceState::Imported
+        }
     } else {
         PreparationWorkspaceState::Prepared
     };
@@ -782,7 +825,10 @@ fn open_verified_windows_sandbox_preparation(
         receipt,
     };
     observed.validate()?;
-    if matches!(state, PreparationWorkspaceState::Imported) {
+    if matches!(
+        state,
+        PreparationWorkspaceState::Imported | PreparationWorkspaceState::Revoking
+    ) {
         require_importable_runs_allowlist(
             workspace.root_path(),
             &observed.receipt.run_id,
@@ -825,6 +871,7 @@ pub fn verify_windows_sandbox_preparation(
         project,
         expected_guest_agent_sha256,
         false,
+        false,
     )?
     .artifacts)
 }
@@ -846,6 +893,7 @@ pub fn import_windows_sandbox_preparation(
         project,
         expected_guest_agent_sha256,
         true,
+        false,
     )?;
     let run_id = held.artifacts.receipt.run_id.clone();
     let receipt = WsbPlanningImportReceipt {
@@ -1286,11 +1334,16 @@ fn require_workspace_allowlist(
     let mut expected = vec!["output", "plan.json", "tools", "wsb-plan.json"];
     if matches!(
         state,
-        PreparationWorkspaceState::Prepared | PreparationWorkspaceState::Imported
+        PreparationWorkspaceState::Prepared
+            | PreparationWorkspaceState::Imported
+            | PreparationWorkspaceState::Revoking
     ) {
         expected.push("preparation.json");
     }
-    if matches!(state, PreparationWorkspaceState::Imported) {
+    if matches!(
+        state,
+        PreparationWorkspaceState::Imported | PreparationWorkspaceState::Revoking
+    ) {
         expected.push("runs");
     }
     expected.sort();
@@ -1884,5 +1937,17 @@ mod tests {
         std::fs::write(runs.join("unrelated"), b"preserve").unwrap();
         assert!(require_importable_runs_allowlist(&temp.0, "run-one", &"a".repeat(64)).is_err());
         assert_eq!(std::fs::read(runs.join("unrelated")).unwrap(), b"preserve");
+        std::fs::remove_file(runs.join("unrelated")).unwrap();
+
+        std::fs::create_dir(runs.join("run-two")).unwrap();
+        assert!(require_importable_runs_allowlist(&temp.0, "run-one", &"a".repeat(64)).is_err());
+        std::fs::remove_dir(runs.join("run-two")).unwrap();
+
+        std::fs::write(runs.join(".locks/run-two.lock"), b"").unwrap();
+        assert!(require_importable_runs_allowlist(&temp.0, "run-one", &"a".repeat(64)).is_err());
+        assert_eq!(
+            std::fs::read(runs.join(".locks/run-two.lock")).unwrap(),
+            b""
+        );
     }
 }

@@ -21,12 +21,15 @@ use std::{
 };
 
 use aiw_evidence::canonical_json_bytes;
-use aiw_probe::WorkspaceBindingEvidence;
+use aiw_probe::{
+    DISCARD_INTENT_BINDING_POLICY_VERSION, DISCARD_INTENT_BINDING_SCHEMA_VERSION,
+    DiscardIntentBindingEvidence, WorkspaceBindingEvidence,
+};
 use aiw_schema::Project;
 #[cfg(windows)]
 use aiw_windows_platform::{
-    RunCoordinationError, RunCoordinationKey, RunCoordinationLease, RunCoordinationMode,
-    try_acquire_run_coordination,
+    HeldDiscardIntentPublication, RunCoordinationError, RunCoordinationKey, RunCoordinationLease,
+    RunCoordinationMode, try_acquire_run_coordination,
 };
 use fs4::FileExt;
 use schemars::JsonSchema;
@@ -41,7 +44,10 @@ const JOURNAL_SCHEMA: &str = "aiw.dev/run-journal/v0alpha1";
 const HEAD_SCHEMA: &str = "aiw.dev/run-journal-head/v0alpha1";
 const RESULT_SCHEMA: &str = "aiw.dev/run-result/v0alpha1";
 const CANCELLATION_SCHEMA: &str = "aiw.dev/cancellation-request/v0alpha1";
-pub const WSB_REVOCATION_SCHEMA_VERSION: &str = "aiw.dev/wsb-revocation-record/v0alpha1";
+pub const WSB_REVOCATION_SCHEMA_VERSION: &str = "aiw.dev/wsb-revocation-record/v0alpha2";
+const WSB_DISCARD_CURRENT_PREFIX: &str = ".aiw-discard-v1-";
+const WSB_DISCARD_STAGE_PREFIX: &str = ".aiw-discard-stage-v1-";
+const MAX_DISCARD_INTENT_BYTES: u64 = 1024 * 1024;
 pub const WSB_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION: &str =
     "aiw.dev/wsb-planning-import-receipt/v0alpha1";
 const WSB_PLANNING_IMPORT_FILE: &str = "wsb-planning-import.json";
@@ -381,6 +387,7 @@ pub struct WsbRevocationRecord {
     pub run_id: String,
     pub cleanup_id: String,
     pub discard_intent_sha256: String,
+    pub discard_intent_binding: DiscardIntentBindingEvidence,
     pub plan_sha256: String,
     pub import_receipt_sha256: String,
     pub workspace_identity_sha256: String,
@@ -498,9 +505,21 @@ pub struct WsbRevocationGuard<'a> {
     _lock: RunLock,
     plan: RunPlan,
     import: WsbPlanningImportReceipt,
+    recoverable_revocation: Option<WsbRevocationRecord>,
+    committed_revocation: Option<WsbRevocationRecord>,
 }
 
-impl WsbRevocationGuard<'_> {
+/// Opaque post-publication authority. It retains only the owner-scoped outer
+/// coordination lease; no descendant workspace handle remains reachable.
+#[cfg(windows)]
+#[doc(hidden)]
+pub struct WsbOuterDiscardAuthority<'a> {
+    layout: &'a RunLayout,
+    revocation: WsbRevocationRecord,
+    _coordination: RunCoordinationLease,
+}
+
+impl<'a> WsbRevocationGuard<'a> {
     pub fn control_path(&self) -> Result<PathBuf, AiwError> {
         self.layout.wsb_discard_control_path()
     }
@@ -513,14 +532,81 @@ impl WsbRevocationGuard<'_> {
         &self.import
     }
 
-    pub fn commit(&self, revocation: &WsbRevocationRecord) -> Result<(), AiwError> {
+    pub fn committed_revocation(&self) -> Option<&WsbRevocationRecord> {
+        self.committed_revocation.as_ref()
+    }
+
+    /// Returns a strictly validated durable binding that can be resumed after
+    /// a crash, even when its journal commit has not yet been recorded.
+    pub fn recoverable_revocation(&self) -> Option<&WsbRevocationRecord> {
+        self.recoverable_revocation.as_ref()
+    }
+
+    pub fn persist_staged_revocation(
+        &mut self,
+        revocation: &WsbRevocationRecord,
+    ) -> Result<(), AiwError> {
         self.layout
-            .write_wsb_revocation_locked(&self.plan, &self.import, revocation)
+            .write_wsb_revocation_locked(&self.plan, &self.import, revocation)?;
+        self.recoverable_revocation = Some(revocation.clone());
+        self.committed_revocation = Some(revocation.clone());
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    pub fn into_outer_only(
+        self,
+        publication: HeldDiscardIntentPublication,
+    ) -> Result<WsbOuterDiscardAuthority<'a>, AiwError> {
+        let revocation = self.committed_revocation.ok_or_else(|| {
+            run_error(
+                "AIW_WSB_DISCARD_STATE_INVALID",
+                "outer-only authority requires committed revocation",
+                "revocation",
+                &self.layout.run_id,
+            )
+        })?;
+        if publication.evidence() != &revocation.discard_intent_binding
+            || !same_path_text(
+                publication.final_path(),
+                &self.layout.wsb_discard_control_path()?.to_string_lossy(),
+            )
+            || !self.layout.current_discard_control_present()?
+        {
+            return Err(run_error(
+                "AIW_WSB_DISCARD_AUTHORITY_MISSING",
+                "published discard authority does not match committed revocation",
+                "revocation",
+                &self.layout.run_id,
+            ));
+        }
+        let RunLock {
+            _coordination,
+            _inner_file,
+        } = self._lock;
+        drop(_inner_file);
+        drop(publication);
+        Ok(WsbOuterDiscardAuthority {
+            layout: self.layout,
+            revocation,
+            _coordination,
+        })
     }
 
     #[cfg(all(test, windows))]
     fn release_inner_lock_for_test(&mut self) {
         self._lock._inner_file.take();
+    }
+}
+
+#[cfg(windows)]
+impl WsbOuterDiscardAuthority<'_> {
+    pub fn run_id(&self) -> &str {
+        self.layout.run_id()
+    }
+
+    pub fn revocation(&self) -> &WsbRevocationRecord {
+        &self.revocation
     }
 }
 
@@ -589,6 +675,32 @@ impl RunLayout {
         let parent = self.root.parent().ok_or_else(|| {
             path_error(
                 "workspace has no parent for external discard authority",
+                &self.run_id,
+                &self.root,
+            )
+        })?;
+        #[cfg(windows)]
+        return Ok(parent.join(format!(
+            "{WSB_DISCARD_CURRENT_PREFIX}{}",
+            self.coordination_key.binding_sha256()
+        )));
+        #[cfg(not(windows))]
+        {
+            let mut digest = Sha256::new();
+            digest.update(self.root.to_string_lossy().to_ascii_lowercase().as_bytes());
+            digest.update([0]);
+            digest.update(self.run_id.as_bytes());
+            return Ok(parent.join(format!(
+                "{WSB_DISCARD_CURRENT_PREFIX}{}",
+                hex::encode(digest.finalize())
+            )));
+        }
+    }
+
+    fn legacy_wsb_discard_control_path(&self) -> Result<PathBuf, AiwError> {
+        let parent = self.root.parent().ok_or_else(|| {
+            path_error(
+                "workspace has no parent for legacy discard authority",
                 &self.run_id,
                 &self.root,
             )
@@ -662,6 +774,17 @@ impl RunLayout {
         ensure_file(&path, &self.run_id, "lock")?;
         FileExt::lock(&file).map_err(|error| storage_error("lock", &self.run_id, error))?;
         self.revalidate_root()?;
+        if matches!(purpose, RunLockPurpose::Ordinary)
+            && self.run_dir().is_dir()
+            && self.has_internal_wsb_revocation_marker_locked()?
+        {
+            return Err(run_error(
+                "AIW_WSB_REVOKED",
+                "Windows Sandbox run is irrevocably reserved for discard",
+                stage,
+                &self.run_id,
+            ));
+        }
         Ok(RunLock {
             #[cfg(windows)]
             _coordination: coordination,
@@ -1645,11 +1768,20 @@ impl RunLayout {
                 &self.run_id,
             ));
         }
-        let discard_started = self.wsb_discard_started_locked(&plan)?;
-        if !discard_started && self.has_internal_wsb_revocation_marker_locked()? {
+        let internal_started = self.has_internal_wsb_revocation_marker_locked()?;
+        let discard_started = self.wsb_discard_started_locked(&plan)? || internal_started;
+        if self.legacy_discard_control_present()? {
+            return Err(run_error(
+                "AIW_WSB_LEGACY_DISCARD_AUTHORITY",
+                "legacy Windows Sandbox discard authority is fail-closed and cannot be adopted",
+                "revocation",
+                &self.run_id,
+            ));
+        }
+        if self.current_discard_control_present()? && !internal_started {
             return Err(run_error(
                 "AIW_WSB_DISCARD_AUTHORITY_MISSING",
-                "Windows Sandbox revocation state exists without external discard authority",
+                "external discard authority has no linked internal revocation",
                 "revocation",
                 &self.run_id,
             ));
@@ -1675,12 +1807,96 @@ impl RunLayout {
                 &self.run_id,
             ));
         }
+        let revocation_recorded = records
+            .iter()
+            .any(|record| record.event.kind == RunEventKind::RevocationRecorded);
+        let recoverable_revocation =
+            self.read_recoverable_wsb_revocation_locked(&plan, &import, &records)?;
+        if revocation_recorded {
+            let revocation = recoverable_revocation.as_ref().ok_or_else(|| {
+                run_error(
+                    "AIW_WSB_DISCARD_STATE_INVALID",
+                    "recorded revocation has no recoverable binding",
+                    "revocation",
+                    &self.run_id,
+                )
+            })?;
+            self.publish_wsb_revocation_artifact_locked(revocation, &hash_value(revocation)?)?;
+        }
+        let committed_revocation = revocation_recorded.then(|| {
+            recoverable_revocation
+                .as_ref()
+                .expect("recorded revocation checked")
+                .clone()
+        });
         Ok(WsbRevocationGuard {
             layout: self,
             _lock: lock,
             plan,
             import,
+            recoverable_revocation,
+            committed_revocation,
         })
+    }
+
+    fn read_recoverable_wsb_revocation_locked(
+        &self,
+        plan: &RunPlan,
+        import: &WsbPlanningImportReceipt,
+        records: &[JournalRecord],
+    ) -> Result<Option<WsbRevocationRecord>, AiwError> {
+        let target = self.wsb_revocation_path();
+        let pending = self.pending_path(&target);
+        let pending_pending = self.pending_path(&pending);
+        let expected_hash = records.iter().rev().find_map(|record| {
+            matches!(
+                record.event.kind,
+                RunEventKind::RevocationIntent | RunEventKind::RevocationRecorded
+            )
+            .then(|| record.event.artifact_hash.clone())
+            .flatten()
+        });
+
+        // A complete pending copy is authoritative for recovery. A malformed
+        // target is deliberately ignored here and will be unlinked by publish.
+        let source = if optional_non_reparse_file(&pending, &self.run_id, "revocation")? {
+            Some(pending)
+        } else if expected_hash.is_some()
+            && optional_non_reparse_file(&target, &self.run_id, "revocation")?
+        {
+            // The target is data-only input. It is never adopted as authority;
+            // publish first creates another complete copy and regenerates it.
+            Some(target)
+        } else {
+            None
+        };
+        let Some(source) = source else {
+            if optional_non_reparse_file(&pending_pending, &self.run_id, "revocation")? {
+                return Err(run_error(
+                    "AIW_WSB_DISCARD_STATE_INVALID",
+                    "incomplete revocation binding blocks automatic recovery",
+                    "revocation",
+                    &self.run_id,
+                ));
+            }
+            return Ok(None);
+        };
+        let revocation: WsbRevocationRecord =
+            read_json(&source, MAX_ARTIFACT, &self.run_id, "revocation")?;
+        validate_wsb_revocation(&revocation, plan, import, self)?;
+        let observed_hash = hash_value(&revocation)?;
+        if expected_hash
+            .as_deref()
+            .is_some_and(|hash| hash != observed_hash)
+        {
+            return Err(run_error(
+                "AIW_WSB_REVOCATION_CONFLICT",
+                "recoverable revocation does not match the journal intent",
+                "revocation",
+                &self.run_id,
+            ));
+        }
+        Ok(Some(revocation))
     }
 
     fn write_wsb_revocation_locked(
@@ -1689,15 +1905,7 @@ impl RunLayout {
         import: &WsbPlanningImportReceipt,
         revocation: &WsbRevocationRecord,
     ) -> Result<(), AiwError> {
-        if !self.wsb_discard_started_locked(plan)? {
-            return Err(run_error(
-                "AIW_WSB_DISCARD_AUTHORITY_MISSING",
-                "Windows Sandbox revocation requires external discard authority",
-                "revocation",
-                &self.run_id,
-            ));
-        }
-        validate_wsb_revocation(revocation, plan, import)?;
+        validate_wsb_revocation(revocation, plan, import, self)?;
         let records = self.load_records(false)?;
         self.verify_committed(&records)?;
         let expected_hash = hash_value(revocation)?;
@@ -1705,44 +1913,61 @@ impl RunLayout {
             .iter()
             .any(|record| record.event.kind == RunEventKind::RevocationRecorded)
         {
-            let observed: WsbRevocationRecord = read_json(
-                &self.wsb_revocation_path(),
-                MAX_ARTIFACT,
-                &self.run_id,
-                "revocation",
-            )?;
-            validate_wsb_revocation(&observed, plan, import)?;
-            return if observed == *revocation {
-                Ok(())
-            } else {
-                Err(run_error(
+            let observed = self
+                .read_recoverable_wsb_revocation_locked(plan, import, &records)?
+                .ok_or_else(|| {
+                    run_error(
+                        "AIW_WSB_DISCARD_STATE_INVALID",
+                        "recorded revocation has no recoverable binding",
+                        "revocation",
+                        &self.run_id,
+                    )
+                })?;
+            if observed != *revocation {
+                return Err(run_error(
                     "AIW_WSB_REVOCATION_CONFLICT",
                     "existing Windows Sandbox revocation differs from this request",
                     "revocation",
                     &self.run_id,
-                ))
-            };
+                ));
+            }
+            return self.publish_wsb_revocation_artifact_locked(revocation, &expected_hash);
         }
         if records.len() == 1 {
-            if self.wsb_revocation_path().exists()
-                || self.pending_path(&self.wsb_revocation_path()).exists()
-            {
+            let target = self.wsb_revocation_path();
+            let pending = self.pending_path(&target);
+            let pending_pending = self.pending_path(&pending);
+            if target.exists() {
                 return Err(run_error(
                     "AIW_ARTIFACT_UNJOURNALED",
-                    "revocation artifact exists without a journal intent",
+                    "committed revocation artifact exists without a journal intent",
                     "revocation",
                     &self.run_id,
                 ));
             }
-            return self.persist_mutation(
+            if pending.exists() {
+                self.verify_revocation_file_locked(&pending, revocation, &expected_hash)?;
+            } else {
+                if pending_pending.exists() {
+                    return Err(run_error(
+                        "AIW_WSB_DISCARD_STATE_INVALID",
+                        "incomplete revocation binding blocks automatic recovery",
+                        "revocation",
+                        &self.run_id,
+                    ));
+                }
+                write_complete_new(&pending_pending, revocation, &self.run_id, "revocation")?;
+                publish_new(&pending_pending, &pending, &self.run_id, "revocation")?;
+            }
+            self.append_record(artifact_event(
                 RunEventKind::RevocationIntent,
-                RunEventKind::RevocationRecorded,
-                &self.wsb_revocation_path(),
-                revocation,
                 &revocation.requested_at,
-                "revocation",
-            );
+                "revocation mutation prepared",
+                &expected_hash,
+            )?)?;
         }
+        let records = self.load_records(false)?;
+        self.verify_committed(&records)?;
         let last = records.last().expect("genesis checked");
         if last.event.kind != RunEventKind::RevocationIntent
             || last.event.artifact_hash.as_deref() != Some(expected_hash.as_str())
@@ -1754,7 +1979,7 @@ impl RunLayout {
                 &self.run_id,
             ));
         }
-        self.reconcile_wsb_revocation_artifact_locked(revocation, &expected_hash)?;
+        self.publish_wsb_revocation_artifact_locked(revocation, &expected_hash)?;
         self.append_record(artifact_event(
             RunEventKind::RevocationRecorded,
             &revocation.requested_at,
@@ -1764,7 +1989,26 @@ impl RunLayout {
         Ok(())
     }
 
-    fn reconcile_wsb_revocation_artifact_locked(
+    fn verify_revocation_file_locked(
+        &self,
+        path: &Path,
+        expected: &WsbRevocationRecord,
+        expected_hash: &str,
+    ) -> Result<(), AiwError> {
+        let observed: WsbRevocationRecord =
+            read_json(path, MAX_ARTIFACT, &self.run_id, "revocation")?;
+        if &observed != expected || hash_value(&observed)? != expected_hash {
+            return Err(run_error(
+                "AIW_WSB_REVOCATION_CONFLICT",
+                "persisted revocation binding differs from this request",
+                "revocation",
+                &self.run_id,
+            ));
+        }
+        Ok(())
+    }
+
+    fn publish_wsb_revocation_artifact_locked(
         &self,
         revocation: &WsbRevocationRecord,
         expected_hash: &str,
@@ -1772,21 +2016,46 @@ impl RunLayout {
         let target = self.wsb_revocation_path();
         let pending = self.pending_path(&target);
         let pending_pending = self.pending_path(&pending);
-        for path in [&target, &pending] {
-            if optional_non_reparse_file(path, &self.run_id, "revocation")? {
-                self.verify_artifact(RunEventKind::RevocationIntent, path, expected_hash)?;
+        let has_target = optional_non_reparse_file(&target, &self.run_id, "revocation")?;
+        let has_pending = optional_non_reparse_file(&pending, &self.run_id, "revocation")?;
+        let has_partial_pending =
+            optional_non_reparse_file(&pending_pending, &self.run_id, "revocation")?;
+
+        if has_pending {
+            self.verify_revocation_file_locked(&pending, revocation, expected_hash)?;
+            if has_partial_pending {
+                remove_pending(&pending_pending, &self.run_id)?;
             }
-        }
-        for path in [&target, &pending, &pending_pending] {
-            if optional_non_reparse_file(path, &self.run_id, "revocation")? {
-                fs::remove_file(path)
-                    .map_err(|error| storage_error("revocation", &self.run_id, error))?;
+        } else {
+            // Preserve a complete trusted copy before touching the target name.
+            // This also makes target-only hard links data inputs rather than
+            // adopted authority. A partial nested pending can be discarded only
+            // while a complete validated target remains available.
+            if has_partial_pending {
+                if !has_target {
+                    return Err(run_error(
+                        "AIW_WSB_DISCARD_STATE_INVALID",
+                        "incomplete revocation binding blocks publication",
+                        "revocation",
+                        &self.run_id,
+                    ));
+                }
+                self.verify_revocation_file_locked(&target, revocation, expected_hash)?;
+                remove_pending(&pending_pending, &self.run_id)?;
             }
+            write_complete_new(&pending, revocation, &self.run_id, "revocation")?;
         }
-        // Recovered names may be attacker-supplied hard links. Unlink every
-        // recognized publication stage and regenerate the authoritative file
-        // from the validated in-memory record instead of retaining its inode.
-        write_complete_new(&target, revocation, &self.run_id, "revocation")
+        self.verify_revocation_file_locked(&pending, revocation, expected_hash)?;
+
+        if has_target {
+            // Never adopt a recovered target inode. Removing an exact hard-link
+            // name does not mutate the externally linked file contents.
+            fs::remove_file(&target)
+                .map_err(|error| storage_error("revocation", &self.run_id, error))?;
+        }
+        write_complete_direct_new(&target, revocation, &self.run_id, "revocation")?;
+        self.verify_revocation_file_locked(&target, revocation, expected_hash)?;
+        remove_pending(&pending, &self.run_id)
     }
 
     fn persist_mutation<T: Serialize>(
@@ -1882,11 +2151,23 @@ impl RunLayout {
     }
 
     fn wsb_discard_started_locked(&self, _plan: &RunPlan) -> Result<bool, AiwError> {
-        self.discard_control_present()
+        Ok(self.discard_control_present()? || self.has_internal_wsb_revocation_marker_locked()?)
     }
 
     fn discard_control_present(&self) -> Result<bool, AiwError> {
-        match fs::symlink_metadata(self.wsb_discard_control_path()?) {
+        Ok(self.current_discard_control_present()? || self.legacy_discard_control_present()?)
+    }
+
+    fn current_discard_control_present(&self) -> Result<bool, AiwError> {
+        self.control_path_present(&self.wsb_discard_control_path()?)
+    }
+
+    fn legacy_discard_control_present(&self) -> Result<bool, AiwError> {
+        self.control_path_present(&self.legacy_wsb_discard_control_path()?)
+    }
+
+    fn control_path_present(&self, path: &Path) -> Result<bool, AiwError> {
+        match fs::symlink_metadata(path) {
             Ok(_) => Ok(true),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
             Err(error) => Err(storage_error("revocation", &self.run_id, error)),
@@ -1945,6 +2226,12 @@ impl RunLayout {
             || optional_non_reparse_file(&self.pending_path(&pending), &self.run_id, "revocation")?
         {
             return Ok(true);
+        }
+
+        match fs::symlink_metadata(self.journal_path()) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(storage_error("revocation", &self.run_id, error)),
+            Ok(_) => ensure_file(&self.journal_path(), &self.run_id, "revocation")?,
         }
 
         // This read is deliberately non-repairing. It recognizes a durable
@@ -2104,9 +2391,10 @@ impl RunLayout {
             ));
         }
         let last_sequence = records.last().map_or(0, |record| record.sequence);
-        let revocation = if records
-            .iter()
-            .any(|record| record.event.kind == RunEventKind::RevocationRecorded)
+        let revocation = if !self.legacy_discard_control_present()?
+            && records
+                .iter()
+                .any(|record| record.event.kind == RunEventKind::RevocationRecorded)
         {
             let import = self.read_wsb_import_receipt_locked(plan, "status")?;
             let value: WsbRevocationRecord = read_json(
@@ -2115,8 +2403,8 @@ impl RunLayout {
                 &self.run_id,
                 "status",
             )?;
-            validate_wsb_revocation(&value, plan, &import)?;
-            Some(value)
+            validate_wsb_revocation(&value, plan, &import, self)?;
+            Some(Box::new(value))
         } else {
             None
         };
@@ -2171,7 +2459,7 @@ impl RunLayout {
                 let import = self.read_wsb_import_receipt_locked(&plan, "recovery")?;
                 let value: WsbRevocationRecord =
                     read_json(path, MAX_ARTIFACT, &self.run_id, "recovery")?;
-                validate_wsb_revocation(&value, &plan, &import)?;
+                validate_wsb_revocation(&value, &plan, &import, self)?;
                 hash_value(&value)?
             }
             RunEventKind::ApprovalIntent => {
@@ -2488,7 +2776,7 @@ pub enum RecoveryStatus {
     },
     RevokedPendingDiscard {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        revocation: Option<WsbRevocationRecord>,
+        revocation: Option<Box<WsbRevocationRecord>>,
         last_sequence: u64,
     },
     Ready {
@@ -2812,12 +3100,72 @@ fn validate_wsb_revocation(
     value: &WsbRevocationRecord,
     plan: &RunPlan,
     import: &WsbPlanningImportReceipt,
+    layout: &RunLayout,
 ) -> Result<(), AiwError> {
+    let workspace = plan
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            PlannedAction::ExecuteWindowsSandboxGoldenProbe { workspace, .. } => {
+                Some(workspace.as_ref())
+            }
+            _ => None,
+        })
+        .ok_or_else(|| {
+            run_error(
+                "AIW_WSB_REVOCATION_INVALID",
+                "Windows Sandbox revocation has no workspace binding",
+                "revocation",
+                &plan.run_id,
+            )
+        })?;
+    let binding = &value.discard_intent_binding;
+    let valid_stage_leaf = binding
+        .staging_leaf
+        .strip_prefix(&format!("{WSB_DISCARD_STAGE_PREFIX}{}-", binding.store_key))
+        .is_some_and(|suffix| suffix.len() == 16 && is_hash_fragment(suffix));
+    let valid_parent_id = binding.parent_id.volume_serial_number
+        == workspace.parent.volume_serial_number
+        && binding.parent_id.file_id == workspace.parent.file_id;
+    let valid_intent_id = binding.intent_id.volume_serial_number.len() == 16
+        && binding.intent_id.file_id.len() == 32
+        && is_hash_fragment(&binding.intent_id.volume_serial_number)
+        && is_hash_fragment(&binding.intent_id.file_id)
+        && binding.intent_id.volume_serial_number == binding.parent_id.volume_serial_number
+        && binding.intent_id.file_id != binding.parent_id.file_id;
+    let valid_ea = validate_discard_intent_ea(&binding.intent_ea);
+    #[cfg(windows)]
+    let valid_coordination = binding.store_key == layout.coordination_key.binding_sha256();
+    #[cfg(not(windows))]
+    let valid_coordination = layout
+        .wsb_discard_control_path()?
+        .file_name()
+        .and_then(|value| value.to_str())
+        .and_then(|value| value.strip_prefix(WSB_DISCARD_CURRENT_PREFIX))
+        .is_some_and(|value| value == binding.store_key);
     if value.schema_version != WSB_REVOCATION_SCHEMA_VERSION
         || value.run_id != plan.run_id
         || value.plan_sha256 != plan.hash()?
         || value.import_receipt_sha256 != hash_value(import)?
         || value.workspace_identity_sha256 != import.workspace_identity_sha256
+        || binding.schema_version != DISCARD_INTENT_BINDING_SCHEMA_VERSION
+        || binding.policy_version != DISCARD_INTENT_BINDING_POLICY_VERSION
+        || binding.run_id != plan.run_id
+        || binding.owner_sid != workspace.owner_sid
+        || binding.store_key.len() != 64
+        || !is_hash_fragment(&binding.store_key)
+        || !valid_coordination
+        || binding.intent_sha256 != value.discard_intent_sha256
+        || binding.intent_size == 0
+        || binding.intent_size > MAX_DISCARD_INTENT_BYTES
+        || !valid_stage_leaf
+        || !valid_parent_id
+        || !valid_intent_id
+        || !valid_ea
+        || !same_path_text(
+            &binding.final_path,
+            &layout.wsb_discard_control_path()?.to_string_lossy(),
+        )
     {
         return Err(run_error(
             "AIW_WSB_REVOCATION_INVALID",
@@ -2844,6 +3192,57 @@ fn validate_wsb_revocation(
     )?;
     validate_text("requestedBy", &value.requested_by, &plan.run_id)?;
     validate_text("requestedAt", &value.requested_at, &plan.run_id)
+}
+
+fn validate_discard_intent_ea(ea: &aiw_probe::DiscardIntentEaBinding) -> bool {
+    let valid_names = ea.entries.is_empty()
+        || (ea.entries.len() == 2
+            && ea.entries[0].name == "$KERNEL.PURGE.SMARTLOCKER.VALID"
+            && ea.entries[1].name == "$KERNEL.SMARTLOCKER.ORIGINCLAIM");
+    let valid_query = if ea.entries.is_empty() {
+        ea.queried_bytes == 0
+    } else {
+        ea.queried_bytes > 0 && ea.queried_bytes <= 64 * 1024
+    };
+    if !valid_names || !valid_query {
+        return false;
+    }
+
+    let mut canonical = Vec::new();
+    for entry in &ea.entries {
+        let Ok(name_len) = u16::try_from(entry.name.len()) else {
+            return false;
+        };
+        let valid_length = if entry.name == "$KERNEL.PURGE.SMARTLOCKER.VALID" {
+            entry.value_length == 4
+        } else {
+            entry.value_length > 0
+        };
+        let Ok(value_hash) = hex::decode(&entry.value_sha256) else {
+            return false;
+        };
+        if entry.flags != 0 || !valid_length || value_hash.len() != 32 {
+            return false;
+        }
+        canonical.extend_from_slice(&name_len.to_le_bytes());
+        canonical.extend_from_slice(entry.name.as_bytes());
+        canonical.push(entry.flags);
+        canonical.extend_from_slice(&entry.value_length.to_le_bytes());
+        canonical.extend_from_slice(&value_hash);
+    }
+    ea.canonical_sha256 == hex::encode(Sha256::digest(&canonical))
+}
+
+fn is_hash_fragment(value: &str) -> bool {
+    value
+        .bytes()
+        .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+}
+
+fn same_path_text(left: &str, right: &str) -> bool {
+    left.replace('/', "\\")
+        .trim_end_matches('\\')
+        .eq_ignore_ascii_case(right.replace('/', "\\").trim_end_matches('\\'))
 }
 
 fn validate_id(name: &str, value: &str) -> Result<(), AiwError> {
@@ -3292,6 +3691,31 @@ fn write_bytes_complete_new(
     publish_new(&pending, path, run_id, stage)
 }
 
+fn write_complete_direct_new<T: Serialize>(
+    path: &Path,
+    value: &T,
+    run_id: &str,
+    stage: &str,
+) -> Result<(), AiwError> {
+    let bytes = json_file_bytes(value, run_id)?;
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|error| {
+            io_error(
+                "AIW_WRITE_ONCE_CONFLICT",
+                "write-once artifact exists or cannot be published",
+                stage,
+                run_id,
+                error,
+            )
+        })?;
+    file.write_all(&bytes)
+        .and_then(|_| file.sync_all())
+        .map_err(|error| storage_error(stage, run_id, error))
+}
+
 fn write_empty_new(path: &Path, run_id: &str, stage: &str) -> Result<(), AiwError> {
     OpenOptions::new()
         .write(true)
@@ -3705,12 +4129,51 @@ mod tests {
         }
     }
 
-    fn wsb_revocation(plan: &RunPlan, import: &WsbPlanningImportReceipt) -> WsbRevocationRecord {
+    fn wsb_revocation(
+        layout: &RunLayout,
+        plan: &RunPlan,
+        import: &WsbPlanningImportReceipt,
+    ) -> WsbRevocationRecord {
+        let PlannedAction::ExecuteWindowsSandboxGoldenProbe { workspace, .. } = &plan.actions[0]
+        else {
+            unreachable!();
+        };
+        let control = layout.wsb_discard_control_path().unwrap();
+        let store_key = control
+            .file_name()
+            .and_then(|value| value.to_str())
+            .and_then(|value| value.strip_prefix(WSB_DISCARD_CURRENT_PREFIX))
+            .unwrap()
+            .to_owned();
         WsbRevocationRecord {
             schema_version: WSB_REVOCATION_SCHEMA_VERSION.to_owned(),
             run_id: plan.run_id.clone(),
             cleanup_id: "e".repeat(64),
             discard_intent_sha256: "f".repeat(64),
+            discard_intent_binding: DiscardIntentBindingEvidence {
+                schema_version: DISCARD_INTENT_BINDING_SCHEMA_VERSION.to_owned(),
+                policy_version: DISCARD_INTENT_BINDING_POLICY_VERSION.to_owned(),
+                run_id: plan.run_id.clone(),
+                owner_sid: workspace.owner_sid.clone(),
+                store_key: store_key.clone(),
+                final_path: control.to_string_lossy().into_owned(),
+                staging_leaf: format!("{WSB_DISCARD_STAGE_PREFIX}{store_key}-{}", "1".repeat(16)),
+                parent_id: aiw_probe::DiscardIntentStableId {
+                    volume_serial_number: workspace.parent.volume_serial_number.clone(),
+                    file_id: workspace.parent.file_id.clone(),
+                },
+                intent_id: aiw_probe::DiscardIntentStableId {
+                    volume_serial_number: workspace.root.volume_serial_number.clone(),
+                    file_id: "9".repeat(32),
+                },
+                intent_size: 128,
+                intent_sha256: "f".repeat(64),
+                intent_ea: aiw_probe::DiscardIntentEaBinding {
+                    queried_bytes: 0,
+                    entries: Vec::new(),
+                    canonical_sha256: hex::encode(Sha256::digest([])),
+                },
+            },
             plan_sha256: plan.hash().unwrap(),
             import_receipt_sha256: hash_value(import).unwrap(),
             workspace_identity_sha256: import.workspace_identity_sha256.clone(),
@@ -4566,6 +5029,35 @@ mod tests {
     }
 
     #[test]
+    fn legacy_discard_sentinel_is_fail_closed_and_never_adopted() {
+        let root = root();
+        let layout = layout(&root, "run-one");
+        let plan = wsb_plan("run-one");
+        let import = wsb_import(&plan);
+        layout
+            .create_or_verify_pending_wsb_import(&plan, &import)
+            .unwrap();
+        let legacy = layout.legacy_wsb_discard_control_path().unwrap();
+        fs::create_dir(&legacy).unwrap();
+
+        assert_eq!(
+            layout.begin_wsb_revocation().err().unwrap().code.as_ref(),
+            "AIW_WSB_LEGACY_DISCARD_AUTHORITY"
+        );
+        assert_eq!(
+            layout
+                .write_approval(&ApprovalRecord::for_plan(&plan, "admin", "now").unwrap())
+                .unwrap_err()
+                .code
+                .as_ref(),
+            "AIW_WSB_REVOKED"
+        );
+        assert!(!layout.wsb_discard_control_path().unwrap().exists());
+        fs::remove_dir_all(legacy).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn revocation_entry_requires_the_exact_pristine_or_revocation_allowlist() {
         for unexpected in [
             "approval.json.pending",
@@ -4659,7 +5151,7 @@ mod tests {
         let layout = layout(&root, "run-one");
         let plan = wsb_plan("run-one");
         let import = wsb_import(&plan);
-        let revocation = wsb_revocation(&plan, &import);
+        let revocation = wsb_revocation(&layout, &plan, &import);
         layout
             .create_or_verify_pending_wsb_import(&plan, &import)
             .unwrap();
@@ -4679,14 +5171,25 @@ mod tests {
         drop(guard);
         let journal_before = fs::read(layout.journal_path()).unwrap();
 
-        for error in [
-            layout.status().unwrap_err(),
-            layout.recovery_status().unwrap_err(),
-        ] {
-            assert_eq!(error.code.as_ref(), "AIW_WSB_DISCARD_AUTHORITY_MISSING");
+        for status in [layout.status().unwrap(), layout.recovery_status().unwrap()] {
+            assert!(matches!(
+                status,
+                RecoveryStatus::RevokedPendingDiscard {
+                    revocation: None,
+                    last_sequence: 2
+                }
+            ));
         }
         assert_eq!(fs::read(layout.journal_path()).unwrap(), journal_before);
         assert!(!layout.approval_path().exists());
+        assert_eq!(
+            layout
+                .write_approval(&ApprovalRecord::for_plan(&plan, "admin", "later").unwrap())
+                .unwrap_err()
+                .code
+                .as_ref(),
+            "AIW_WSB_REVOKED"
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -4696,14 +5199,15 @@ mod tests {
         let layout = layout(&root, "run-one");
         let plan = wsb_plan("run-one");
         let import = wsb_import(&plan);
-        let revocation = wsb_revocation(&plan, &import);
+        let revocation = wsb_revocation(&layout, &plan, &import);
         layout
             .create_or_verify_pending_wsb_import(&plan, &import)
             .unwrap();
-        let guard = layout.begin_wsb_revocation().unwrap();
+        let mut guard = layout.begin_wsb_revocation().unwrap();
         let control = guard.control_path().unwrap();
         fs::create_dir(&control).unwrap();
-        guard.commit(&revocation).unwrap();
+        guard.persist_staged_revocation(&revocation).unwrap();
+        assert_eq!(guard.committed_revocation(), Some(&revocation));
         drop(guard);
 
         assert!(matches!(
@@ -4711,14 +5215,19 @@ mod tests {
             RecoveryStatus::RevokedPendingDiscard {
                 revocation: Some(ref observed),
                 last_sequence: 3
-            } if observed == &revocation
+            } if observed.as_ref() == &revocation
         ));
-        let retry = layout.begin_wsb_revocation().unwrap();
-        retry.commit(&revocation).unwrap();
+        let mut retry = layout.begin_wsb_revocation().unwrap();
+        assert_eq!(retry.committed_revocation(), Some(&revocation));
+        retry.persist_staged_revocation(&revocation).unwrap();
         let mut conflict = revocation.clone();
         conflict.requested_at = "later".to_owned();
         assert_eq!(
-            retry.commit(&conflict).unwrap_err().code.as_ref(),
+            retry
+                .persist_staged_revocation(&conflict)
+                .unwrap_err()
+                .code
+                .as_ref(),
             "AIW_WSB_REVOCATION_CONFLICT"
         );
         drop(retry);
@@ -4729,10 +5238,162 @@ mod tests {
                 .is_err()
         );
         fs::remove_dir_all(&control).unwrap();
+        assert!(matches!(
+            layout.status().unwrap(),
+            RecoveryStatus::RevokedPendingDiscard {
+                revocation: Some(_),
+                last_sequence: 3
+            }
+        ));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn revocation_v2_rejects_binding_tamper_before_persistence() {
+        let root = root();
+        let layout = layout(&root, "run-one");
+        let plan = wsb_plan("run-one");
+        let import = wsb_import(&plan);
+        let mut revocation = wsb_revocation(&layout, &plan, &import);
+        layout
+            .create_or_verify_pending_wsb_import(&plan, &import)
+            .unwrap();
+        let mut guard = layout.begin_wsb_revocation().unwrap();
+
+        revocation.discard_intent_binding.intent_sha256 = "0".repeat(64);
         assert_eq!(
-            layout.status().unwrap_err().code.as_ref(),
-            "AIW_WSB_DISCARD_AUTHORITY_MISSING"
+            guard
+                .persist_staged_revocation(&revocation)
+                .unwrap_err()
+                .code
+                .as_ref(),
+            "AIW_WSB_REVOCATION_INVALID"
         );
+        assert_eq!(layout.load_records(false).unwrap().len(), 1);
+        assert!(!layout.wsb_revocation_path().exists());
+        assert!(!layout.pending_path(&layout.wsb_revocation_path()).exists());
+        drop(guard);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn revocation_v2_rejects_noncanonical_ea_evidence() {
+        for tamper in 0..3 {
+            let root = root();
+            let layout = layout(&root, "run-one");
+            let plan = wsb_plan("run-one");
+            let import = wsb_import(&plan);
+            let mut revocation = wsb_revocation(&layout, &plan, &import);
+            let value_hash = hex::encode(Sha256::digest([1_u8, 2, 3, 4]));
+            revocation.discard_intent_binding.intent_ea = aiw_probe::DiscardIntentEaBinding {
+                queried_bytes: 128,
+                entries: vec![
+                    aiw_probe::DiscardIntentEaEntry {
+                        name: "$KERNEL.PURGE.SMARTLOCKER.VALID".to_owned(),
+                        flags: u8::from(tamper == 0),
+                        value_length: if tamper == 1 { 3 } else { 4 },
+                        value_sha256: value_hash.clone(),
+                    },
+                    aiw_probe::DiscardIntentEaEntry {
+                        name: "$KERNEL.SMARTLOCKER.ORIGINCLAIM".to_owned(),
+                        flags: 0,
+                        value_length: 16,
+                        value_sha256: hex::encode(Sha256::digest([5_u8; 16])),
+                    },
+                ],
+                canonical_sha256: if tamper == 2 {
+                    "0".repeat(64)
+                } else {
+                    // Deliberately remains inconsistent after the flag or
+                    // length mutation above.
+                    "f".repeat(64)
+                },
+            };
+            layout
+                .create_or_verify_pending_wsb_import(&plan, &import)
+                .unwrap();
+            let mut guard = layout.begin_wsb_revocation().unwrap();
+            assert_eq!(
+                guard
+                    .persist_staged_revocation(&revocation)
+                    .unwrap_err()
+                    .code
+                    .as_ref(),
+                "AIW_WSB_REVOCATION_INVALID"
+            );
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn complete_prejournal_binding_is_exposed_only_as_recoverable() {
+        let root = root();
+        let layout = layout(&root, "run-one");
+        let plan = wsb_plan("run-one");
+        let import = wsb_import(&plan);
+        let revocation = wsb_revocation(&layout, &plan, &import);
+        layout
+            .create_or_verify_pending_wsb_import(&plan, &import)
+            .unwrap();
+        let guard = layout.begin_wsb_revocation().unwrap();
+        write_complete_new(
+            &layout.pending_path(&layout.wsb_revocation_path()),
+            &revocation,
+            layout.run_id(),
+            "test",
+        )
+        .unwrap();
+        drop(guard);
+
+        let mut retry = layout.begin_wsb_revocation().unwrap();
+        assert_eq!(retry.recoverable_revocation(), Some(&revocation));
+        assert_eq!(retry.committed_revocation(), None);
+        retry.persist_staged_revocation(&revocation).unwrap();
+        assert_eq!(retry.committed_revocation(), Some(&revocation));
+        drop(retry);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn partial_target_is_rebuilt_from_complete_pending_after_crash() {
+        let root = root();
+        let layout = layout(&root, "run-one");
+        let plan = wsb_plan("run-one");
+        let import = wsb_import(&plan);
+        let revocation = wsb_revocation(&layout, &plan, &import);
+        layout
+            .create_or_verify_pending_wsb_import(&plan, &import)
+            .unwrap();
+        let guard = layout.begin_wsb_revocation().unwrap();
+        let pending = layout.pending_path(&layout.wsb_revocation_path());
+        write_complete_new(&pending, &revocation, layout.run_id(), "test").unwrap();
+        let hash = hash_value(&revocation).unwrap();
+        layout
+            .append_record(
+                artifact_event(
+                    RunEventKind::RevocationIntent,
+                    &revocation.requested_at,
+                    "revocation mutation prepared",
+                    &hash,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        fs::write(layout.wsb_revocation_path(), b"{\"partial\":").unwrap();
+        drop(guard);
+
+        let mut retry = layout.begin_wsb_revocation().unwrap();
+        assert_eq!(retry.recoverable_revocation(), Some(&revocation));
+        retry.persist_staged_revocation(&revocation).unwrap();
+        let observed: WsbRevocationRecord = read_json(
+            &layout.wsb_revocation_path(),
+            MAX_ARTIFACT,
+            layout.run_id(),
+            "test",
+        )
+        .unwrap();
+        assert_eq!(observed, revocation);
+        drop(retry);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -4743,26 +5404,13 @@ mod tests {
             let layout = layout(&root, "run-one");
             let plan = wsb_plan("run-one");
             let import = wsb_import(&plan);
-            let revocation = wsb_revocation(&plan, &import);
+            let revocation = wsb_revocation(&layout, &plan, &import);
             layout
                 .create_or_verify_pending_wsb_import(&plan, &import)
                 .unwrap();
-            let guard = layout.begin_wsb_revocation().unwrap();
-            let control = guard.control_path().unwrap();
-            fs::create_dir(&control).unwrap();
+            let mut guard = layout.begin_wsb_revocation().unwrap();
             let hash = hash_value(&revocation).unwrap();
-            layout
-                .append_record(
-                    artifact_event(
-                        RunEventKind::RevocationIntent,
-                        &revocation.requested_at,
-                        "revocation mutation prepared",
-                        &hash,
-                    )
-                    .unwrap(),
-                )
-                .unwrap();
-            if stage == 1 {
+            if stage <= 1 {
                 write_complete_new(
                     &layout.pending_path(&layout.wsb_revocation_path()),
                     &revocation,
@@ -4770,7 +5418,7 @@ mod tests {
                     "test",
                 )
                 .unwrap();
-            } else if stage == 2 {
+            } else {
                 write_complete_new(
                     &layout.wsb_revocation_path(),
                     &revocation,
@@ -4779,7 +5427,20 @@ mod tests {
                 )
                 .unwrap();
             }
-            guard.commit(&revocation).unwrap();
+            if stage >= 1 {
+                layout
+                    .append_record(
+                        artifact_event(
+                            RunEventKind::RevocationIntent,
+                            &revocation.requested_at,
+                            "revocation mutation prepared",
+                            &hash,
+                        )
+                        .unwrap(),
+                    )
+                    .unwrap();
+            }
+            guard.persist_staged_revocation(&revocation).unwrap();
             drop(guard);
             assert!(matches!(
                 layout.status().unwrap(),
@@ -4788,7 +5449,6 @@ mod tests {
                     last_sequence: 3
                 }
             ));
-            fs::remove_dir_all(&control).unwrap();
             fs::remove_dir_all(root).unwrap();
         }
     }
@@ -4800,13 +5460,18 @@ mod tests {
             let layout = layout(&root, "run-one");
             let plan = wsb_plan("run-one");
             let import = wsb_import(&plan);
-            let revocation = wsb_revocation(&plan, &import);
+            let revocation = wsb_revocation(&layout, &plan, &import);
             layout
                 .create_or_verify_pending_wsb_import(&plan, &import)
                 .unwrap();
             let guard = layout.begin_wsb_revocation().unwrap();
-            let control = guard.control_path().unwrap();
-            fs::create_dir(&control).unwrap();
+            write_complete_new(
+                &layout.pending_path(&layout.wsb_revocation_path()),
+                &revocation,
+                layout.run_id(),
+                "test",
+            )
+            .unwrap();
             drop(guard);
 
             if stage == 0 {
@@ -4837,8 +5502,8 @@ mod tests {
                 }
             }
 
-            let retry = layout.begin_wsb_revocation().unwrap();
-            retry.commit(&revocation).unwrap();
+            let mut retry = layout.begin_wsb_revocation().unwrap();
+            retry.persist_staged_revocation(&revocation).unwrap();
             drop(retry);
             assert!(matches!(
                 layout.status().unwrap(),
@@ -4855,25 +5520,26 @@ mod tests {
                     .as_ref(),
                 "AIW_WSB_REVOKED"
             );
-            fs::remove_dir_all(&control).unwrap();
             fs::remove_dir_all(root).unwrap();
         }
     }
 
     #[test]
-    fn recovered_revocation_artifact_is_unlinked_and_regenerated_from_trusted_bytes() {
+    fn recovered_revocation_target_is_regenerated_while_complete_pending_is_preserved() {
         let root = root();
         let layout = layout(&root, "run-one");
         let plan = wsb_plan("run-one");
         let import = wsb_import(&plan);
-        let revocation = wsb_revocation(&plan, &import);
+        let revocation = wsb_revocation(&layout, &plan, &import);
         layout
             .create_or_verify_pending_wsb_import(&plan, &import)
             .unwrap();
-        let guard = layout.begin_wsb_revocation().unwrap();
+        let mut guard = layout.begin_wsb_revocation().unwrap();
         let control = guard.control_path().unwrap();
         fs::create_dir(&control).unwrap();
         let hash = hash_value(&revocation).unwrap();
+        let pending = layout.pending_path(&layout.wsb_revocation_path());
+        write_complete_new(&pending, &revocation, layout.run_id(), "test").unwrap();
         layout
             .append_record(
                 artifact_event(
@@ -4896,7 +5562,7 @@ mod tests {
         .unwrap();
         fs::hard_link(&outside, layout.wsb_revocation_path()).unwrap();
 
-        guard.commit(&revocation).unwrap();
+        guard.persist_staged_revocation(&revocation).unwrap();
         drop(guard);
         fs::write(&outside, b"externally mutated").unwrap();
         let observed: WsbRevocationRecord = read_json(
@@ -4912,6 +5578,58 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    #[test]
+    fn target_only_hard_link_is_data_only_and_regenerated() {
+        let root = root();
+        let layout = layout(&root, "run-one");
+        let plan = wsb_plan("run-one");
+        let import = wsb_import(&plan);
+        let revocation = wsb_revocation(&layout, &plan, &import);
+        layout
+            .create_or_verify_pending_wsb_import(&plan, &import)
+            .unwrap();
+        let guard = layout.begin_wsb_revocation().unwrap();
+        let hash = hash_value(&revocation).unwrap();
+        layout
+            .append_record(
+                artifact_event(
+                    RunEventKind::RevocationIntent,
+                    &revocation.requested_at,
+                    "revocation mutation prepared",
+                    &hash,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let outside = root.parent().unwrap().join(format!(
+            "{}-target-only-revocation.json",
+            root.file_name().unwrap().to_string_lossy()
+        ));
+        fs::write(
+            &outside,
+            json_file_bytes(&revocation, layout.run_id()).unwrap(),
+        )
+        .unwrap();
+        fs::hard_link(&outside, layout.wsb_revocation_path()).unwrap();
+        drop(guard);
+
+        let mut retry = layout.begin_wsb_revocation().unwrap();
+        assert_eq!(retry.recoverable_revocation(), Some(&revocation));
+        retry.persist_staged_revocation(&revocation).unwrap();
+        drop(retry);
+        fs::write(&outside, b"externally mutated").unwrap();
+        let observed: WsbRevocationRecord = read_json(
+            &layout.wsb_revocation_path(),
+            MAX_ARTIFACT,
+            layout.run_id(),
+            "test",
+        )
+        .unwrap();
+        assert_eq!(observed, revocation);
+        fs::remove_file(outside).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[cfg(windows)]
     #[test]
     fn outer_coordination_keeps_waiter_out_of_tree_during_revoke_and_rename() {
@@ -4919,7 +5637,7 @@ mod tests {
         let layout = Arc::new(layout(&root, "run-one"));
         let plan = wsb_plan("run-one");
         let import = wsb_import(&plan);
-        let revocation = wsb_revocation(&plan, &import);
+        let revocation = wsb_revocation(&layout, &plan, &import);
         layout
             .create_or_verify_pending_wsb_import(&plan, &import)
             .unwrap();
@@ -4947,7 +5665,7 @@ mod tests {
             "approval must wait on outer coordination rather than returning busy"
         );
         fs::create_dir(&control).unwrap();
-        guard.commit(&revocation).unwrap();
+        guard.persist_staged_revocation(&revocation).unwrap();
         guard.release_inner_lock_for_test();
 
         let renamed = root.with_file_name(format!(

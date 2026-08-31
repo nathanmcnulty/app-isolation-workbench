@@ -9,6 +9,8 @@
 //! exact-ID `connect`, and exact-ID `stop` argument arrays. It has no shell, elevation, command,
 //! script, URL, or arbitrary policy API.
 
+#[cfg(windows)]
+mod discard;
 mod preparation;
 mod session;
 

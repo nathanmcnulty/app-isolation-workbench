@@ -94,6 +94,9 @@ pub struct WindowsFileIdentity {
 pub const WINDOWS_WORKSPACE_SCHEMA_VERSION: &str = "aiw.dev/workspace-binding-evidence/v0alpha1";
 pub const WINDOWS_WORKSPACE_SECURITY_POLICY: &str = "owner-system-full-control-protected-v1";
 pub const WINDOWS_SYSTEM_SID: &str = "S-1-5-18";
+pub const DISCARD_INTENT_BINDING_SCHEMA_VERSION: &str =
+    "aiw.dev/wsb-discard-intent-binding/v0alpha1";
+pub const DISCARD_INTENT_BINDING_POLICY_VERSION: &str = "owner-system-protected-single-file-v1";
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -149,6 +152,124 @@ impl WorkspaceBindingEvidence {
             }
         }
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DiscardIntentStableId {
+    pub volume_serial_number: String,
+    pub file_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DiscardIntentEaEntry {
+    pub name: String,
+    pub flags: u8,
+    pub value_length: u16,
+    pub value_sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DiscardIntentEaBinding {
+    /// Bounded native query response length retained for diagnostics only.
+    /// Identity is established by the canonical entries and digest below.
+    pub queried_bytes: u32,
+    pub entries: Vec<DiscardIntentEaEntry>,
+    pub canonical_sha256: String,
+}
+
+/// Portable evidence required to reopen one exact staged or final authority.
+/// EA values are never serialized; only bounded metadata and value hashes are
+/// retained.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DiscardIntentBindingEvidence {
+    pub schema_version: String,
+    pub policy_version: String,
+    pub run_id: String,
+    pub owner_sid: String,
+    pub store_key: String,
+    pub final_path: String,
+    pub staging_leaf: String,
+    pub parent_id: DiscardIntentStableId,
+    pub intent_id: DiscardIntentStableId,
+    pub intent_size: u64,
+    pub intent_sha256: String,
+    pub intent_ea: DiscardIntentEaBinding,
+}
+
+impl DiscardIntentBindingEvidence {
+    pub fn schema_version(&self) -> &str {
+        &self.schema_version
+    }
+    pub fn policy_version(&self) -> &str {
+        &self.policy_version
+    }
+    pub fn run_id(&self) -> &str {
+        &self.run_id
+    }
+    pub fn owner_sid(&self) -> &str {
+        &self.owner_sid
+    }
+    pub fn store_key(&self) -> &str {
+        &self.store_key
+    }
+    pub fn final_path(&self) -> &str {
+        &self.final_path
+    }
+    pub fn parent_id(&self) -> &DiscardIntentStableId {
+        &self.parent_id
+    }
+    pub fn intent_id(&self) -> &DiscardIntentStableId {
+        &self.intent_id
+    }
+    pub fn intent_size(&self) -> u64 {
+        self.intent_size
+    }
+    pub fn intent_sha256(&self) -> &str {
+        &self.intent_sha256
+    }
+    pub fn intent_ea(&self) -> &DiscardIntentEaBinding {
+        &self.intent_ea
+    }
+}
+
+impl DiscardIntentStableId {
+    pub fn volume_serial_number(&self) -> &str {
+        &self.volume_serial_number
+    }
+    pub fn file_id(&self) -> &str {
+        &self.file_id
+    }
+}
+
+impl DiscardIntentEaBinding {
+    pub fn queried_bytes(&self) -> u32 {
+        self.queried_bytes
+    }
+    pub fn entries(&self) -> &[DiscardIntentEaEntry] {
+        &self.entries
+    }
+    pub fn canonical_sha256(&self) -> &str {
+        &self.canonical_sha256
+    }
+}
+
+impl DiscardIntentEaEntry {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn flags(&self) -> u8 {
+        self.flags
+    }
+    pub fn value_length(&self) -> u16 {
+        self.value_length
+    }
+    pub fn value_sha256(&self) -> &str {
+        &self.value_sha256
     }
 }
 

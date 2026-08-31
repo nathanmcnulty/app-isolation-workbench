@@ -48,7 +48,7 @@ use crate::workspace::{OwnedSid, final_path, raw_handle, same_path, verify_owner
 const STREAM_BUFFER_BYTES: usize = 64 * 1024;
 const DIRECTORY_BUFFER_BYTES: usize = 64 * 1024;
 const EA_BUFFER_BYTES: usize = 64 * 1024;
-const ALLOWED_KERNEL_EAS: [&str; 2] = [
+pub(crate) const ALLOWED_KERNEL_EAS: [&str; 2] = [
     "$KERNEL.PURGE.SMARTLOCKER.VALID",
     "$KERNEL.SMARTLOCKER.ORIGINCLAIM",
 ];
@@ -59,7 +59,7 @@ const MAX_STREAM_ENTRIES: usize = 64;
 const MAX_SMALL_ARTIFACT: u64 = 1024 * 1024;
 const MAX_JOURNAL: u64 = 64 * 1024 * 1024;
 const MAX_GUEST_AGENT: u64 = 128 * 1024 * 1024;
-const FORBIDDEN_ATTRIBUTES: u32 = FILE_ATTRIBUTE_READONLY.0
+pub(crate) const FORBIDDEN_ATTRIBUTES: u32 = FILE_ATTRIBUTE_READONLY.0
     | FILE_ATTRIBUTE_REPARSE_POINT.0
     | FILE_ATTRIBUTE_COMPRESSED.0
     | FILE_ATTRIBUTE_DEVICE.0
@@ -166,12 +166,24 @@ pub(crate) struct ExtendedAttributeEntryBinding {
     pub(crate) value_sha256: [u8; 32],
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub(crate) struct ExtendedAttributeBinding {
     pub(crate) queried_bytes: u32,
     pub(crate) entries: Vec<ExtendedAttributeEntryBinding>,
     pub(crate) canonical_sha256: [u8; 32],
 }
+
+// `NtQueryEaFile` may report different trailing zero-padding lengths for the
+// same EA records across exact close/reopen cycles. The parser validates every
+// reported byte, while identity comparison is deliberately over the canonical
+// names, flags, value lengths, and value hashes rather than that padding size.
+impl PartialEq for ExtendedAttributeBinding {
+    fn eq(&self, other: &Self) -> bool {
+        self.entries == other.entries && self.canonical_sha256 == other.canonical_sha256
+    }
+}
+
+impl Eq for ExtendedAttributeBinding {}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct FixedWsbTreeInventory {
@@ -233,6 +245,8 @@ pub(crate) enum ExactDisposeError {
     Contract(String),
     #[error("fixed WSB tree identity, type, ACL, or content was rejected: {0}")]
     Rejected(String),
+    #[error("fixed file SmartLocker EAs have not reached the exact pair")]
+    TransientSmartLockerEa,
     #[error("fixed WSB tree native operation failed at {operation}: {detail}")]
     Native {
         operation: &'static str,
@@ -253,12 +267,12 @@ struct HeldExactObject {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct DirectoryEntry {
-    name: String,
-    file_id: [u8; 16],
-    attributes: u32,
-    ea_size: u32,
-    reparse_tag: u32,
+pub(crate) struct DirectoryEntry {
+    pub(crate) name: String,
+    pub(crate) file_id: [u8; 16],
+    pub(crate) attributes: u32,
+    pub(crate) ea_size: u32,
+    pub(crate) reparse_tag: u32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1093,14 +1107,14 @@ fn validate_leaf(value: &str) -> Result<(), ExactDisposeError> {
     Ok(())
 }
 
-fn basic_info(file: &File) -> Result<BY_HANDLE_FILE_INFORMATION, ExactDisposeError> {
+pub(crate) fn basic_info(file: &File) -> Result<BY_HANDLE_FILE_INFORMATION, ExactDisposeError> {
     let mut info = BY_HANDLE_FILE_INFORMATION::default();
     unsafe { GetFileInformationByHandle(raw_handle(file), &mut info) }
         .map_err(|error| native("GetFileInformationByHandle", error))?;
     Ok(info)
 }
 
-fn stable_id(file: &File) -> Result<StableFileId, ExactDisposeError> {
+pub(crate) fn stable_id(file: &File) -> Result<StableFileId, ExactDisposeError> {
     let mut info = FILE_ID_INFO::default();
     unsafe {
         GetFileInformationByHandleEx(
@@ -1117,7 +1131,7 @@ fn stable_id(file: &File) -> Result<StableFileId, ExactDisposeError> {
     })
 }
 
-fn standard_info(file: &File) -> Result<FILE_STANDARD_INFO, ExactDisposeError> {
+pub(crate) fn standard_info(file: &File) -> Result<FILE_STANDARD_INFO, ExactDisposeError> {
     let mut info = FILE_STANDARD_INFO::default();
     unsafe {
         GetFileInformationByHandleEx(
@@ -1131,12 +1145,12 @@ fn standard_info(file: &File) -> Result<FILE_STANDARD_INFO, ExactDisposeError> {
     Ok(info)
 }
 
-fn file_size(file: &File) -> Result<u64, ExactDisposeError> {
+pub(crate) fn file_size(file: &File) -> Result<u64, ExactDisposeError> {
     let size = standard_info(file)?.EndOfFile;
     u64::try_from(size).map_err(|_| ExactDisposeError::Rejected("negative file size".into()))
 }
 
-fn hash_file(file: &File, expected_size: u64) -> Result<[u8; 32], ExactDisposeError> {
+pub(crate) fn hash_file(file: &File, expected_size: u64) -> Result<[u8; 32], ExactDisposeError> {
     let mut hasher = Sha256::new();
     let mut offset = 0_u64;
     let mut buffer = [0_u8; 64 * 1024];
@@ -1167,7 +1181,7 @@ fn hash_file(file: &File, expected_size: u64) -> Result<[u8; 32], ExactDisposeEr
     Ok(hasher.finalize().into())
 }
 
-fn query_extended_attributes(
+pub(crate) fn query_extended_attributes(
     file: &File,
     directory: bool,
 ) -> Result<ExtendedAttributeBinding, ExactDisposeError> {
@@ -1333,6 +1347,9 @@ fn parse_extended_attributes(
             "fixed directories must not contain EAs".into(),
         ));
     }
+    if !directory && entries.len() == 1 && entries[0].name == "$KERNEL.SMARTLOCKER.ORIGINCLAIM" {
+        return Err(ExactDisposeError::TransientSmartLockerEa);
+    }
     if !directory
         && !entries.is_empty()
         && (entries.len() != ALLOWED_KERNEL_EAS.len()
@@ -1341,9 +1358,10 @@ fn parse_extended_attributes(
                 .zip(ALLOWED_KERNEL_EAS)
                 .any(|(entry, allowed)| entry.name != allowed))
     {
-        return Err(ExactDisposeError::Rejected(
-            "fixed file EAs are outside the exact SmartLocker kernel pair".into(),
-        ));
+        let names: Vec<_> = entries.iter().map(|entry| entry.name.as_str()).collect();
+        return Err(ExactDisposeError::Rejected(format!(
+            "fixed file EAs are outside the exact SmartLocker kernel pair: {names:?}"
+        )));
     }
 
     let mut canonical = Vec::new();
@@ -1427,7 +1445,7 @@ fn require_evidence_id(
     Ok(())
 }
 
-fn reject_case_sensitive_directory(file: &File) -> Result<(), ExactDisposeError> {
+pub(crate) fn reject_case_sensitive_directory(file: &File) -> Result<(), ExactDisposeError> {
     let mut info = FILE_CASE_SENSITIVE_INFO::default();
     unsafe {
         GetFileInformationByHandleEx(
@@ -1446,7 +1464,7 @@ fn reject_case_sensitive_directory(file: &File) -> Result<(), ExactDisposeError>
     Ok(())
 }
 
-fn verify_stream_policy(
+pub(crate) fn verify_stream_policy(
     file: &File,
     directory: bool,
     expected_size: u64,
@@ -1536,7 +1554,64 @@ fn parse_streams(bytes: &[u8]) -> Result<Vec<(String, u64)>, ExactDisposeError> 
     Ok(streams)
 }
 
-fn directory_entries(file: &File) -> Result<Vec<DirectoryEntry>, ExactDisposeError> {
+pub(crate) fn directory_entries(file: &File) -> Result<Vec<DirectoryEntry>, ExactDisposeError> {
+    let mut entries = extended_directory_entries(file)?;
+    let aliases = directory_alias_entries(file)?;
+    let entry_names = normalized_names(entries.iter().map(|entry| entry.name.clone()).collect())?;
+    let alias_names = normalized_names(aliases.iter().map(|entry| entry.name.clone()).collect())?;
+    let short_names: Vec<_> = aliases
+        .iter()
+        .filter_map(|entry| entry.short_name.as_deref())
+        .collect();
+    if entry_names != alias_names || !short_names.is_empty() {
+        return Err(ExactDisposeError::Rejected(format!(
+            "directory enumeration disagrees or exposes short-name aliases {short_names:?}: extended={entry_names:?}, aliases={alias_names:?}"
+        )));
+    }
+    for entry in &mut entries {
+        entry.ea_size = aliases
+            .iter()
+            .find(|alias| alias.name.eq_ignore_ascii_case(&entry.name))
+            .expect("normalized name sets matched")
+            .ea_size;
+    }
+    reject_unsafe_directory_entries(&entries)?;
+    Ok(entries)
+}
+
+pub(crate) fn exact_directory_entry(
+    file: &File,
+    expected_name: &str,
+) -> Result<DirectoryEntry, ExactDisposeError> {
+    let mut entries = extended_directory_entries(file)?;
+    let aliases = directory_alias_entries(file)?;
+    let entry_names = normalized_names(entries.iter().map(|entry| entry.name.clone()).collect())?;
+    let alias_names = normalized_names(aliases.iter().map(|entry| entry.name.clone()).collect())?;
+    if entry_names != alias_names {
+        return Err(ExactDisposeError::Rejected(
+            "directory enumerations disagree or contain case collisions".into(),
+        ));
+    }
+    let entry = entries
+        .iter_mut()
+        .find(|entry| entry.name.eq_ignore_ascii_case(expected_name))
+        .ok_or_else(|| ExactDisposeError::Rejected("expected directory entry is absent".into()))?;
+    let alias = aliases
+        .iter()
+        .find(|alias| alias.name.eq_ignore_ascii_case(expected_name))
+        .expect("normalized name sets matched");
+    if entry.name != expected_name || alias.name != expected_name || alias.short_name.is_some() {
+        return Err(ExactDisposeError::Rejected(
+            "expected directory entry has case drift or a short-name alias".into(),
+        ));
+    }
+    entry.ea_size = alias.ea_size;
+    let result = entry.clone();
+    reject_unsafe_directory_entries(std::slice::from_ref(&result))?;
+    Ok(result)
+}
+
+fn extended_directory_entries(file: &File) -> Result<Vec<DirectoryEntry>, ExactDisposeError> {
     let mut entries = Vec::new();
     let mut first = true;
     loop {
@@ -1572,25 +1647,10 @@ fn directory_entries(file: &File) -> Result<Vec<DirectoryEntry>, ExactDisposeErr
         }
     }
 
-    let aliases = directory_alias_entries(file)?;
-    let entry_names = normalized_names(entries.iter().map(|entry| entry.name.clone()).collect())?;
-    let alias_names = normalized_names(aliases.iter().map(|entry| entry.name.clone()).collect())?;
-    let short_names: Vec<_> = aliases
-        .iter()
-        .filter_map(|entry| entry.short_name.as_deref())
-        .collect();
-    if entry_names != alias_names || !short_names.is_empty() {
-        return Err(ExactDisposeError::Rejected(format!(
-            "directory enumeration disagrees or exposes short-name aliases {short_names:?}: extended={entry_names:?}, aliases={alias_names:?}"
-        )));
-    }
-    for entry in &mut entries {
-        entry.ea_size = aliases
-            .iter()
-            .find(|alias| alias.name.eq_ignore_ascii_case(&entry.name))
-            .expect("normalized name sets matched")
-            .ea_size;
-    }
+    Ok(entries)
+}
+
+fn reject_unsafe_directory_entries(entries: &[DirectoryEntry]) -> Result<(), ExactDisposeError> {
     let unsafe_entries: Vec<_> = entries
         .iter()
         .filter(|entry| entry.attributes & FORBIDDEN_ATTRIBUTES != 0)
@@ -1606,7 +1666,7 @@ fn directory_entries(file: &File) -> Result<Vec<DirectoryEntry>, ExactDisposeErr
             "directory entry has forbidden attributes: {unsafe_entries:?}"
         )));
     }
-    Ok(entries)
+    Ok(())
 }
 
 fn parse_extended_directory_buffer(
@@ -1706,7 +1766,7 @@ fn directory_alias_entries(file: &File) -> Result<Vec<DirectoryAliasEntry>, Exac
     Ok(entries)
 }
 
-fn directory_namespace_names(file: &File) -> Result<Vec<String>, ExactDisposeError> {
+pub(crate) fn directory_namespace_names(file: &File) -> Result<Vec<String>, ExactDisposeError> {
     let mut names = Vec::new();
     for entry in directory_alias_entries(file)? {
         names.push(entry.name);
@@ -1805,7 +1865,7 @@ fn normalized_names(values: Vec<String>) -> Result<Vec<String>, ExactDisposeErro
     Ok(seen.into_iter().collect())
 }
 
-fn contains_name(names: &[String], expected: &str) -> bool {
+pub(crate) fn contains_name(names: &[String], expected: &str) -> bool {
     names.iter().any(|name| name.eq_ignore_ascii_case(expected))
 }
 
@@ -1823,7 +1883,11 @@ fn path_identity_if_present(path: &Path) -> Result<Option<StableFileId>, ExactDi
     Ok(Some(stable_id(&file)?))
 }
 
-fn rename_relative(root: &File, parent: &File, leaf: &OsStr) -> Result<(), ExactDisposeError> {
+pub(crate) fn rename_relative(
+    root: &File,
+    parent: &File,
+    leaf: &OsStr,
+) -> Result<(), ExactDisposeError> {
     let mut buffer = build_relative_rename_info(parent, leaf)?;
     let info_length = buffer.information_length;
     let info = buffer.storage.as_mut_ptr().cast::<FILE_RENAME_INFO>();

@@ -3,7 +3,7 @@ use std::fs::{File, OpenOptions};
 use std::mem::size_of;
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::fs::OpenOptionsExt;
-use std::os::windows::io::AsRawHandle;
+use std::os::windows::io::{AsRawHandle, FromRawHandle};
 use std::path::{Path, PathBuf};
 
 use aiw_probe::{
@@ -25,13 +25,14 @@ use windows::Win32::Security::{
     SE_OWNER_DEFAULTED, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
 };
 use windows::Win32::Storage::FileSystem::{
-    BY_HANDLE_FILE_INFORMATION, CreateDirectoryW, FILE_ADD_SUBDIRECTORY, FILE_ALL_ACCESS,
-    FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS,
-    FILE_FLAG_OPEN_REPARSE_POINT, FILE_ID_INFO, FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES,
-    FILE_REMOTE_PROTOCOL_INFO, FILE_SHARE_READ, FILE_SHARE_WRITE, FileIdInfo,
-    FileRemoteProtocolInfo, GetDriveTypeW, GetFileInformationByHandle,
-    GetFileInformationByHandleEx, GetFinalPathNameByHandleW, GetVolumeInformationByHandleW,
-    GetVolumePathNameW, READ_CONTROL, SYNCHRONIZE,
+    BY_HANDLE_FILE_INFORMATION, CREATE_NEW, CreateDirectoryW, CreateFileW, DELETE,
+    FILE_ADD_SUBDIRECTORY, FILE_ALL_ACCESS, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+    FILE_FLAG_WRITE_THROUGH, FILE_ID_INFO, FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES,
+    FILE_READ_DATA, FILE_READ_EA, FILE_REMOTE_PROTOCOL_INFO, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    FILE_WRITE_DATA, FILE_WRITE_EA, FileIdInfo, FileRemoteProtocolInfo, GetDriveTypeW,
+    GetFileInformationByHandle, GetFileInformationByHandleEx, GetFinalPathNameByHandleW,
+    GetVolumeInformationByHandleW, GetVolumePathNameW, READ_CONTROL, SYNCHRONIZE,
 };
 use windows::Win32::System::SystemServices::ACCESS_ALLOWED_ACE_TYPE;
 use windows::Win32::System::SystemServices::FILE_PERSISTENT_ACLS;
@@ -112,7 +113,7 @@ impl HeldRunWorkspace {
         verify_local_acl_volume(&parent_handle)?;
 
         let owner = CurrentUser::query()?;
-        let descriptor = SecurityDescriptor::owner_system_only(&owner.sid_string)?;
+        let descriptor = SecurityDescriptor::owner_system_only(&owner.sid_string, true)?;
         let root_path = parent_path.join(leaf);
         create_directory(&root_path, &descriptor)?;
 
@@ -344,6 +345,58 @@ fn create_directory(path: &Path, descriptor: &SecurityDescriptor) -> Result<(), 
     }
 }
 
+#[cfg(test)]
+pub(crate) fn create_owner_system_directory(
+    path: &Path,
+    owner_sid: &str,
+) -> Result<(), WorkspaceError> {
+    let descriptor = SecurityDescriptor::owner_system_only(owner_sid, true)?;
+    create_directory(path, &descriptor)
+}
+
+pub(crate) fn create_owner_system_file(
+    path: &Path,
+    owner_sid: &str,
+) -> Result<File, WorkspaceError> {
+    let descriptor = SecurityDescriptor::owner_system_only(owner_sid, false)?;
+    let wide = wide_path(path)?;
+    let attributes = SECURITY_ATTRIBUTES {
+        nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: descriptor.0.0,
+        bInheritHandle: false.into(),
+    };
+    // SAFETY: path and descriptor remain valid through this non-inheritable
+    // CREATE_NEW call. A successful handle owns the newly created exact file.
+    let handle = unsafe {
+        CreateFileW(
+            PCWSTR(wide.as_ptr()),
+            FILE_READ_DATA.0
+                | FILE_WRITE_DATA.0
+                | FILE_READ_EA.0
+                | FILE_WRITE_EA.0
+                | FILE_READ_ATTRIBUTES.0
+                | READ_CONTROL.0
+                | DELETE.0
+                | SYNCHRONIZE.0,
+            FILE_SHARE_READ,
+            Some(&attributes),
+            CREATE_NEW,
+            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_WRITE_THROUGH,
+            None,
+        )
+    };
+    match handle {
+        Ok(handle) => {
+            // SAFETY: CreateFileW returned a uniquely owned kernel handle.
+            Ok(unsafe { File::from_raw_handle(handle.0) })
+        }
+        Err(error) if matches!(error.code().0 as u32, 0x8007_00b7 | 0x8007_0050) => {
+            Err(WorkspaceError::AlreadyExists)
+        }
+        Err(error) => Err(native("CreateFileW(owner-system-file)", error)),
+    }
+}
+
 fn open_held_directory(path: &Path) -> Result<File, WorkspaceError> {
     let file = OpenOptions::new()
         .access_mode(FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0 | SYNCHRONIZE.0)
@@ -387,7 +440,7 @@ fn ensure_directory_handle(file: &File) -> Result<(), WorkspaceError> {
     Ok(())
 }
 
-fn verify_local_acl_volume(file: &File) -> Result<(), WorkspaceError> {
+pub(crate) fn verify_local_acl_volume(file: &File) -> Result<(), WorkspaceError> {
     let mut flags = 0_u32;
     // SAFETY: the held handle is valid and the requested flags output is writable.
     unsafe {
@@ -610,7 +663,7 @@ fn verify_acl(
     Ok(())
 }
 
-fn is_fixed_volume(path: &Path) -> Result<bool, WorkspaceError> {
+pub(crate) fn is_fixed_volume(path: &Path) -> Result<bool, WorkspaceError> {
     let wide = wide_path(path)?;
     let mut volume = vec![0_u16; MAX_FINAL_PATH];
     // SAFETY: both strings are valid and the output slice is writable.
@@ -776,8 +829,10 @@ fn sid_to_string(sid: PSID) -> Result<String, WorkspaceError> {
 struct SecurityDescriptor(PSECURITY_DESCRIPTOR);
 
 impl SecurityDescriptor {
-    fn owner_system_only(owner_sid: &str) -> Result<Self, WorkspaceError> {
-        let sddl = format!("O:{owner_sid}D:P(A;OICI;FA;;;{owner_sid})(A;OICI;FA;;;SY)");
+    fn owner_system_only(owner_sid: &str, directory: bool) -> Result<Self, WorkspaceError> {
+        let inheritance = if directory { "OICI" } else { "" };
+        let sddl =
+            format!("O:{owner_sid}D:P(A;{inheritance};FA;;;{owner_sid})(A;{inheritance};FA;;;SY)");
         let wide = wide_string(&sddl)?;
         let mut descriptor = PSECURITY_DESCRIPTOR::default();
         // SAFETY: input is NUL-terminated and output pointer is valid.
