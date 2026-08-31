@@ -2,13 +2,100 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
-use std::fs::File;
-use std::io::Read;
+use std::fs::{self, File};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use thiserror::Error;
+
+const APPLICATION_INSPECTION_SCHEMA: &str = "aiw.dev/application-inspection/v0alpha1";
+const PORTABLE_MANIFEST_SCHEMA: &str = "aiw.dev/portable-content-manifest/v0alpha1";
+const MAX_APPLICATION_FILE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+const MAX_PORTABLE_FILES: usize = 10_000;
+const MAX_PORTABLE_BYTES: u64 = 16 * 1024 * 1024 * 1024;
+const MAX_RELATIVE_PATH_BYTES: usize = 1_024;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ApplicationInspectionKind {
+    Msi,
+    Exe,
+    PortableDirectory,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ObservedApplicationArchitecture {
+    X64,
+    X86,
+    Arm64,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PortableContentEntryKind {
+    Directory,
+    File,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PortableContentEntry {
+    pub relative_path: String,
+    pub kind: PortableContentEntryKind,
+    pub size_bytes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PortableContentManifest {
+    pub schema_version: String,
+    pub root_path: String,
+    pub entries: Vec<PortableContentEntry>,
+    pub total_size_bytes: u64,
+    pub manifest_sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApplicationInspection {
+    pub schema_version: String,
+    pub kind: ApplicationInspectionKind,
+    pub canonical_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+    pub architecture: ObservedApplicationArchitecture,
+    pub signature_status: ReadinessState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub portable_manifest: Option<PortableContentManifest>,
+    pub limitations: Vec<String>,
+}
+
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum ApplicationInspectionError {
+    #[error("application source path is missing, inaccessible, or has the wrong type")]
+    InvalidSource,
+    #[error("application source extension does not match the explicitly selected type")]
+    TypeMismatch,
+    #[error("application source contains a link or reparse point")]
+    LinkRejected,
+    #[error("application source contains a non-Unicode, unsafe, or case-colliding path")]
+    PathRejected,
+    #[error("application source exceeds the fixed inspection bounds")]
+    BoundsExceeded,
+    #[error("application source changed while it was being inspected")]
+    SourceDrift,
+    #[error("application source could not be read")]
+    Io,
+}
 
 const PROBED_TOOLS: &[&str] = &[
     "wsl.exe",
@@ -832,6 +919,346 @@ pub fn measure_binary_identity(path: &Path) -> Option<BinaryIdentity> {
     })
 }
 
+pub fn inspect_application_source(
+    path: &Path,
+    kind: ApplicationInspectionKind,
+) -> Result<ApplicationInspection, ApplicationInspectionError> {
+    let metadata =
+        fs::symlink_metadata(path).map_err(|_| ApplicationInspectionError::InvalidSource)?;
+    reject_link(&metadata)?;
+    let canonical = path
+        .canonicalize()
+        .map_err(|_| ApplicationInspectionError::InvalidSource)?;
+    let canonical_path = display_path(&canonical)?;
+    match kind {
+        ApplicationInspectionKind::Msi | ApplicationInspectionKind::Exe => {
+            if !metadata.is_file() {
+                return Err(ApplicationInspectionError::InvalidSource);
+            }
+            let expected = if kind == ApplicationInspectionKind::Msi {
+                "msi"
+            } else {
+                "exe"
+            };
+            if !canonical
+                .extension()
+                .is_some_and(|value| value.to_string_lossy().eq_ignore_ascii_case(expected))
+            {
+                return Err(ApplicationInspectionError::TypeMismatch);
+            }
+            reject_multiple_links(&metadata)?;
+            let (sha256, size_bytes, architecture) = inspect_stable_file(
+                &canonical,
+                MAX_APPLICATION_FILE_BYTES,
+                kind == ApplicationInspectionKind::Exe,
+            )?;
+            Ok(ApplicationInspection {
+                schema_version: APPLICATION_INSPECTION_SCHEMA.to_owned(),
+                kind,
+                canonical_path,
+                sha256: Some(sha256),
+                size_bytes: Some(size_bytes),
+                architecture,
+                signature_status: ReadinessState::Unknown,
+                portable_manifest: None,
+                limitations: vec![
+                    "Authenticode signer and trust have not yet been observed; unknown never means trusted.".to_owned(),
+                    "Windows hard-link and alternate-stream inspection is not yet part of this read-only snapshot; it cannot authorize import.".to_owned(),
+                    "Path checks are observational and do not exclude coordinated same-user replacement; protected import requires a later held-handle boundary.".to_owned(),
+                    "Static identity does not execute the source or establish compatibility or containment.".to_owned(),
+                ],
+            })
+        }
+        ApplicationInspectionKind::PortableDirectory => {
+            if !metadata.is_dir() {
+                return Err(ApplicationInspectionError::InvalidSource);
+            }
+            let manifest = inspect_portable_directory(&canonical)?;
+            Ok(ApplicationInspection {
+                schema_version: APPLICATION_INSPECTION_SCHEMA.to_owned(),
+                kind,
+                canonical_path,
+                sha256: None,
+                size_bytes: Some(manifest.total_size_bytes),
+                architecture: ObservedApplicationArchitecture::Unknown,
+                signature_status: ReadinessState::Unknown,
+                portable_manifest: Some(manifest),
+                limitations: vec![
+                    "Entry-point architectures and Authenticode signers have not yet been observed.".to_owned(),
+                    "Windows hard-link and alternate-stream inspection is not yet part of this read-only snapshot; it cannot authorize import.".to_owned(),
+                    "Portable traversal is path-based and does not exclude coordinated same-user replacement; protected import requires a later handle-relative boundary.".to_owned(),
+                    "Static identity does not execute the source or establish compatibility or containment.".to_owned(),
+                ],
+            })
+        }
+    }
+}
+
+fn inspect_portable_directory(
+    root: &Path,
+) -> Result<PortableContentManifest, ApplicationInspectionError> {
+    let first = capture_portable_directory(root)?;
+    let second = capture_portable_directory(root)?;
+    if first != second {
+        return Err(ApplicationInspectionError::SourceDrift);
+    }
+    Ok(second)
+}
+
+fn capture_portable_directory(
+    root: &Path,
+) -> Result<PortableContentManifest, ApplicationInspectionError> {
+    let mut pending = vec![root.to_path_buf()];
+    let mut entries = Vec::new();
+    let mut collision_keys = BTreeSet::new();
+    let mut total_size_bytes = 0_u64;
+    while let Some(directory) = pending.pop() {
+        let metadata = fs::symlink_metadata(&directory)
+            .map_err(|_| ApplicationInspectionError::SourceDrift)?;
+        reject_link(&metadata)?;
+        if !metadata.is_dir() {
+            return Err(ApplicationInspectionError::SourceDrift);
+        }
+        let children = fs::read_dir(&directory).map_err(|_| ApplicationInspectionError::Io)?;
+        for child in children {
+            let child = child.map_err(|_| ApplicationInspectionError::Io)?;
+            let path = child.path();
+            let metadata =
+                fs::symlink_metadata(&path).map_err(|_| ApplicationInspectionError::SourceDrift)?;
+            reject_link(&metadata)?;
+            let relative = path
+                .strip_prefix(root)
+                .map_err(|_| ApplicationInspectionError::PathRejected)?;
+            let relative = safe_manifest_path(relative)?;
+            let key = relative.to_ascii_lowercase();
+            if !collision_keys.insert(key) {
+                return Err(ApplicationInspectionError::PathRejected);
+            }
+            if entries.len() >= MAX_PORTABLE_FILES {
+                return Err(ApplicationInspectionError::BoundsExceeded);
+            }
+            if metadata.is_dir() {
+                entries.push(PortableContentEntry {
+                    relative_path: relative,
+                    kind: PortableContentEntryKind::Directory,
+                    size_bytes: 0,
+                    sha256: None,
+                });
+                pending.push(path);
+            } else if metadata.is_file() {
+                reject_multiple_links(&metadata)?;
+                let remaining = MAX_PORTABLE_BYTES.saturating_sub(total_size_bytes);
+                let (sha256, size_bytes, _) = inspect_stable_file(&path, remaining, false)?;
+                total_size_bytes = total_size_bytes
+                    .checked_add(size_bytes)
+                    .ok_or(ApplicationInspectionError::BoundsExceeded)?;
+                entries.push(PortableContentEntry {
+                    relative_path: relative,
+                    kind: PortableContentEntryKind::File,
+                    size_bytes,
+                    sha256: Some(sha256),
+                });
+            } else {
+                return Err(ApplicationInspectionError::InvalidSource);
+            }
+        }
+    }
+    entries.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    let mut digest = Sha256::new();
+    for entry in &entries {
+        let path = entry.relative_path.as_bytes();
+        digest.update((path.len() as u64).to_le_bytes());
+        digest.update(path);
+        digest.update([match entry.kind {
+            PortableContentEntryKind::Directory => 0,
+            PortableContentEntryKind::File => 1,
+        }]);
+        digest.update(entry.size_bytes.to_le_bytes());
+        if let Some(sha256) = &entry.sha256 {
+            digest.update(hex::decode(sha256).map_err(|_| ApplicationInspectionError::Io)?);
+        }
+    }
+    Ok(PortableContentManifest {
+        schema_version: PORTABLE_MANIFEST_SCHEMA.to_owned(),
+        root_path: display_path(root)?,
+        entries,
+        total_size_bytes,
+        manifest_sha256: hex::encode(digest.finalize()),
+    })
+}
+
+fn inspect_stable_file(
+    path: &Path,
+    limit: u64,
+    inspect_pe: bool,
+) -> Result<(String, u64, ObservedApplicationArchitecture), ApplicationInspectionError> {
+    let mut file = File::open(path).map_err(|_| ApplicationInspectionError::Io)?;
+    let before = file
+        .metadata()
+        .map_err(|_| ApplicationInspectionError::Io)?;
+    if before.len() > limit {
+        return Err(ApplicationInspectionError::BoundsExceeded);
+    }
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    let mut observed = 0_u64;
+    loop {
+        let count = file
+            .read(&mut buffer)
+            .map_err(|_| ApplicationInspectionError::Io)?;
+        if count == 0 {
+            break;
+        }
+        observed = observed
+            .checked_add(count as u64)
+            .ok_or(ApplicationInspectionError::BoundsExceeded)?;
+        if observed > limit {
+            return Err(ApplicationInspectionError::BoundsExceeded);
+        }
+        digest.update(&buffer[..count]);
+    }
+    let architecture = if inspect_pe {
+        inspect_pe_architecture(&mut file)?
+    } else {
+        ObservedApplicationArchitecture::Unknown
+    };
+    let after = file
+        .metadata()
+        .map_err(|_| ApplicationInspectionError::Io)?;
+    if observed != before.len()
+        || after.len() != before.len()
+        || after.modified().ok() != before.modified().ok()
+    {
+        return Err(ApplicationInspectionError::SourceDrift);
+    }
+    Ok((hex::encode(digest.finalize()), observed, architecture))
+}
+
+fn inspect_pe_architecture(
+    file: &mut File,
+) -> Result<ObservedApplicationArchitecture, ApplicationInspectionError> {
+    file.seek(SeekFrom::Start(0))
+        .map_err(|_| ApplicationInspectionError::Io)?;
+    let mut dos = [0_u8; 64];
+    if file.read_exact(&mut dos).is_err() || &dos[..2] != b"MZ" {
+        return Ok(ObservedApplicationArchitecture::Unknown);
+    }
+    let offset = u32::from_le_bytes(
+        dos[60..64]
+            .try_into()
+            .map_err(|_| ApplicationInspectionError::Io)?,
+    ) as u64;
+    if offset > 16 * 1024 * 1024 {
+        return Ok(ObservedApplicationArchitecture::Unknown);
+    }
+    file.seek(SeekFrom::Start(offset))
+        .map_err(|_| ApplicationInspectionError::Io)?;
+    let mut header = [0_u8; 6];
+    if file.read_exact(&mut header).is_err() || &header[..4] != b"PE\0\0" {
+        return Ok(ObservedApplicationArchitecture::Unknown);
+    }
+    Ok(match u16::from_le_bytes([header[4], header[5]]) {
+        0x8664 => ObservedApplicationArchitecture::X64,
+        0x014c => ObservedApplicationArchitecture::X86,
+        0xaa64 => ObservedApplicationArchitecture::Arm64,
+        _ => ObservedApplicationArchitecture::Unknown,
+    })
+}
+
+fn safe_manifest_path(path: &Path) -> Result<String, ApplicationInspectionError> {
+    let mut parts = Vec::new();
+    for component in path.components() {
+        let std::path::Component::Normal(value) = component else {
+            return Err(ApplicationInspectionError::PathRejected);
+        };
+        let value = value
+            .to_str()
+            .ok_or(ApplicationInspectionError::PathRejected)?;
+        if value.is_empty()
+            || !value.is_ascii()
+            || value == "."
+            || value == ".."
+            || value.contains([':', '/', '\\'])
+            || value.ends_with(['.', ' '])
+            || value.bytes().any(|byte| byte < 32)
+            || value.contains(['<', '>', '"', '|', '?', '*'])
+            || is_reserved_windows_name(value)
+        {
+            return Err(ApplicationInspectionError::PathRejected);
+        }
+        parts.push(value);
+    }
+    let value = parts.join("/");
+    if value.is_empty() || value.len() > MAX_RELATIVE_PATH_BYTES {
+        return Err(ApplicationInspectionError::PathRejected);
+    }
+    Ok(value)
+}
+
+fn is_reserved_windows_name(value: &str) -> bool {
+    let stem = value
+        .split('.')
+        .next()
+        .unwrap_or(value)
+        .to_ascii_uppercase();
+    matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || stem
+            .strip_prefix("COM")
+            .or_else(|| stem.strip_prefix("LPT"))
+            .is_some_and(|suffix| {
+                matches!(suffix, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9")
+            })
+}
+
+fn display_path(path: &Path) -> Result<String, ApplicationInspectionError> {
+    let value = path
+        .to_str()
+        .ok_or(ApplicationInspectionError::PathRejected)?;
+    Ok(value.strip_prefix("\\\\?\\").unwrap_or(value).to_owned())
+}
+
+fn reject_link(metadata: &fs::Metadata) -> Result<(), ApplicationInspectionError> {
+    if metadata.file_type().is_symlink() || is_windows_reparse(metadata) {
+        return Err(ApplicationInspectionError::LinkRejected);
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn is_windows_reparse(metadata: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    metadata.file_attributes() & 0x400 != 0
+}
+
+#[cfg(not(windows))]
+fn is_windows_reparse(_metadata: &fs::Metadata) -> bool {
+    false
+}
+
+fn reject_multiple_links(metadata: &fs::Metadata) -> Result<(), ApplicationInspectionError> {
+    if link_count(metadata) > 1 {
+        Err(ApplicationInspectionError::LinkRejected)
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+fn link_count(_metadata: &fs::Metadata) -> u64 {
+    1
+}
+
+#[cfg(unix)]
+fn link_count(metadata: &fs::Metadata) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+    metadata.nlink()
+}
+
+#[cfg(not(any(windows, unix)))]
+fn link_count(_metadata: &fs::Metadata) -> u64 {
+    u64::MAX
+}
+
 /// Production package/alias/handle/signature verification belongs to the
 /// future native platform boundary. This placeholder deliberately grants no
 /// executable identity authority.
@@ -878,6 +1305,29 @@ pub fn find_command(name: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_APPLICATION_INSPECTION: AtomicU64 = AtomicU64::new(1);
+
+    struct InspectionRoot(PathBuf);
+
+    impl InspectionRoot {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "aiw-application-inspection-{}-{}",
+                std::process::id(),
+                NEXT_APPLICATION_INSPECTION.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for InspectionRoot {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
 
     fn fixed_tree_inventory() -> WsbFixedTreeInventoryEvidence {
         let owner = "S-1-5-21-1".to_owned();
@@ -1171,5 +1621,74 @@ mod tests {
             evidence.run_id = invalid.to_owned();
             assert!(evidence.validate().is_err(), "accepted {invalid}");
         }
+    }
+
+    #[test]
+    fn portable_manifest_is_sorted_deterministic_and_content_bound() {
+        let root = InspectionRoot::new();
+        fs::create_dir(root.0.join("nested")).unwrap();
+        fs::write(root.0.join("z.txt"), b"z").unwrap();
+        fs::write(root.0.join("nested").join("a.txt"), b"a").unwrap();
+        let first =
+            inspect_application_source(&root.0, ApplicationInspectionKind::PortableDirectory)
+                .unwrap();
+        let second =
+            inspect_application_source(&root.0, ApplicationInspectionKind::PortableDirectory)
+                .unwrap();
+        assert_eq!(first, second);
+        let manifest = first.portable_manifest.unwrap();
+        assert_eq!(
+            manifest
+                .entries
+                .iter()
+                .map(|entry| entry.relative_path.as_str())
+                .collect::<Vec<_>>(),
+            ["nested", "nested/a.txt", "z.txt"]
+        );
+        fs::write(root.0.join("z.txt"), b"changed").unwrap();
+        let changed =
+            inspect_application_source(&root.0, ApplicationInspectionKind::PortableDirectory)
+                .unwrap();
+        assert_ne!(
+            manifest.manifest_sha256,
+            changed.portable_manifest.unwrap().manifest_sha256
+        );
+    }
+
+    #[test]
+    fn explicit_file_kind_rejects_extension_mismatch() {
+        let root = InspectionRoot::new();
+        let source = root.0.join("setup.msi");
+        fs::write(&source, b"fixture").unwrap();
+        assert_eq!(
+            inspect_application_source(&source, ApplicationInspectionKind::Exe),
+            Err(ApplicationInspectionError::TypeMismatch)
+        );
+        for rejected in [
+            "CON.txt",
+            "nested/file.txt:stream",
+            "trailing. ",
+            "café.exe",
+        ] {
+            assert_eq!(
+                safe_manifest_path(Path::new(rejected)),
+                Err(ApplicationInspectionError::PathRejected)
+            );
+        }
+    }
+
+    #[test]
+    fn pe_machine_is_observed_without_executing_the_file() {
+        let root = InspectionRoot::new();
+        let source = root.0.join("fixture.exe");
+        let mut bytes = vec![0_u8; 0x86];
+        bytes[0..2].copy_from_slice(b"MZ");
+        bytes[60..64].copy_from_slice(&0x80_u32.to_le_bytes());
+        bytes[0x80..0x84].copy_from_slice(b"PE\0\0");
+        bytes[0x84..0x86].copy_from_slice(&0x8664_u16.to_le_bytes());
+        fs::write(&source, bytes).unwrap();
+        let result = inspect_application_source(&source, ApplicationInspectionKind::Exe).unwrap();
+        assert_eq!(result.architecture, ObservedApplicationArchitecture::X64);
+        assert_eq!(result.signature_status, ReadinessState::Unknown);
     }
 }

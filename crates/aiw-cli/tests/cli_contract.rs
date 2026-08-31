@@ -249,6 +249,38 @@ fn clap_failures_emit_one_json_envelope_and_no_stdout() {
 }
 
 #[test]
+fn application_inspection_is_json_only_and_type_bound() {
+    let inspected = Command::new(aiw())
+        .args(["application", "inspect", "--source"])
+        .arg(aiw())
+        .args(["--kind", "exe"])
+        .output()
+        .unwrap();
+    assert!(inspected.status.success());
+    assert!(inspected.stderr.is_empty());
+    let value = parse_one_json(&inspected.stdout);
+    assert_eq!(
+        value["schemaVersion"],
+        "aiw.dev/application-inspection/v0alpha1"
+    );
+    assert_eq!(value["kind"], "exe");
+    assert_eq!(value["architecture"], "x64");
+    assert_eq!(value["signatureStatus"], "unknown");
+
+    let rejected = Command::new(aiw())
+        .args(["application", "inspect", "--source"])
+        .arg(aiw())
+        .args(["--kind", "msi"])
+        .output()
+        .unwrap();
+    assert!(!rejected.status.success());
+    assert!(rejected.stdout.is_empty());
+    let error = parse_one_json(&rejected.stderr);
+    assert_eq!(error["code"], "AIW_APPLICATION_INSPECTION_REJECTED");
+    assert_eq!(error["stage"], "applicationInspection");
+}
+
+#[test]
 fn legacy_validation_reports_pending_review_as_one_success_result() {
     let project = repo_path("examples/minimal-v0alpha1.aiw.yaml");
     let output = Command::new(aiw())
