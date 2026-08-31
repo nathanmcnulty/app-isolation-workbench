@@ -1,24 +1,29 @@
 //! Private, non-destructive Windows Sandbox discard preparation.
 //!
-//! This workflow may publish only the protected external intent and the
-//! hash-bound internal revocation record. It deliberately has no provider,
-//! rename, disposition, deletion, or exact-disposal operation.
+//! This workflow may publish only the protected external intent, the hash-bound
+//! internal revocation record, and the protected external fixed-tree
+//! checkpoint. It deliberately has no provider, workspace rename, disposition,
+//! deletion, or exact-disposal operation.
 
 use std::path::Path;
 
 use aiw_evidence::canonical_json_bytes;
 use aiw_orchestrator::{
-    RunLayout, WSB_REVOCATION_SCHEMA_VERSION, WsbOuterDiscardAuthority, WsbRevocationRecord,
-    project_revision_hash,
+    RunLayout, WSB_DISCARD_CHECKPOINT_POLICY_VERSION, WSB_DISCARD_CHECKPOINT_SCHEMA_VERSION,
+    WSB_REVOCATION_SCHEMA_VERSION, WsbDiscardCheckpointFileIdentity, WsbDiscardCheckpointV0Alpha1,
+    WsbOuterDiscardAuthority, WsbRevocationRecord, project_revision_hash,
 };
 use aiw_probe::{
     WSB_FIXED_TREE_CONTRACT_VERSION, WorkspaceBindingEvidence, WsbFixedTreeInventoryEvidence,
 };
 use aiw_schema::Project;
 use aiw_windows_platform::{
-    DiscardIntentBindingEvidence, DiscardIntentError, ExactDisposeError,
-    HeldDiscardIntentPublication, ReopenedDiscardIntent, observe_fixed_wsb_tree_for_checkpoint,
-    reopen_prepared_discard_intent, stage_discard_intent, verify_fixed_wsb_tree_inventory,
+    DiscardCheckpointBindingEvidence, DiscardCheckpointError, DiscardIntentBindingEvidence,
+    DiscardIntentError, ExactDisposeError, HeldDiscardCheckpointPublication,
+    HeldDiscardIntentPublication, ReopenedDiscardCheckpoint, ReopenedDiscardIntent,
+    hold_fixed_wsb_tree_for_checkpoint, reopen_existing_discard_checkpoint,
+    reopen_prepared_discard_checkpoint, reopen_prepared_discard_intent, reserve_discard_checkpoint,
+    stage_discard_intent,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -48,6 +53,8 @@ pub(crate) enum WsbDiscardPreparationError {
     Platform(#[from] DiscardIntentError),
     #[error("read-only fixed-tree inventory failed: {0}")]
     Inventory(#[from] ExactDisposeError),
+    #[error("protected discard checkpoint failed: {0}")]
+    Checkpoint(#[from] DiscardCheckpointError),
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -107,6 +114,9 @@ pub(crate) struct PreparedWsbDiscard<'a> {
     authority: WsbOuterDiscardAuthority<'a>,
     intent: WsbDiscardIntent,
     inventory_receipt: WsbFixedTreeInventoryReceipt,
+    checkpoint: WsbDiscardCheckpointV0Alpha1,
+    checkpoint_binding: DiscardCheckpointBindingEvidence,
+    checkpoint_publication: HeldDiscardCheckpointPublication,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -141,6 +151,24 @@ impl PreparedWsbDiscard<'_> {
 
     pub(crate) fn inventory_receipt(&self) -> &WsbFixedTreeInventoryReceipt {
         &self.inventory_receipt
+    }
+
+    pub(crate) fn checkpoint(&self) -> &WsbDiscardCheckpointV0Alpha1 {
+        &self.checkpoint
+    }
+
+    pub(crate) fn checkpoint_binding(&self) -> &DiscardCheckpointBindingEvidence {
+        &self.checkpoint_binding
+    }
+
+    pub(crate) fn revalidate_checkpoint(&self) -> Result<(), WsbDiscardPreparationError> {
+        self.authority
+            .revalidate_external_intent()
+            .map_err(|error| WsbDiscardPreparationError::Orchestrator(error.to_string()))?;
+        self.checkpoint_publication.revalidate()?;
+        self.checkpoint
+            .validate()
+            .map_err(|error| WsbDiscardPreparationError::Orchestrator(error.to_string()))
     }
 }
 
@@ -242,24 +270,157 @@ pub(crate) fn prepare_windows_sandbox_discard<'a>(
         .into_outer_only(publication)
         .map_err(|error| WsbDiscardPreparationError::Orchestrator(error.to_string()))?;
     require_current_readiness_matches_receipt(&preparation_receipt)?;
-    let inventory = observe_fixed_wsb_tree_for_checkpoint(
+    authority
+        .revalidate_external_intent()
+        .map_err(|error| WsbDiscardPreparationError::Orchestrator(error.to_string()))?;
+    let snapshot = hold_fixed_wsb_tree_for_checkpoint(
         &intent.workspace,
         layout.run_id(),
         &intent.tombstone_leaf,
     )?;
-    verify_fixed_wsb_tree_inventory(&inventory)?;
+    snapshot.revalidate()?;
     require_current_readiness_matches_receipt(&preparation_receipt)?;
     let inventory_receipt = build_inventory_receipt(
         &intent,
         authority.revocation(),
         &preparation_receipt.workspace_identity_sha256,
-        inventory,
+        snapshot.evidence().clone(),
     )?;
+    let (checkpoint, checkpoint_binding, checkpoint_publication) =
+        materialize_discard_checkpoint(&authority, &inventory_receipt, &snapshot)?;
+    snapshot.revalidate()?;
+    authority
+        .revalidate_external_intent()
+        .map_err(|error| WsbDiscardPreparationError::Orchestrator(error.to_string()))?;
+    checkpoint_publication.revalidate()?;
+    drop(snapshot);
     Ok(PreparedWsbDiscard {
         authority,
         intent,
         inventory_receipt,
+        checkpoint,
+        checkpoint_binding,
+        checkpoint_publication,
     })
+}
+
+fn materialize_discard_checkpoint(
+    authority: &WsbOuterDiscardAuthority<'_>,
+    inventory_receipt: &WsbFixedTreeInventoryReceipt,
+    snapshot: &aiw_windows_platform::HeldFixedWsbCheckpointSnapshot,
+) -> Result<
+    (
+        WsbDiscardCheckpointV0Alpha1,
+        DiscardCheckpointBindingEvidence,
+        HeldDiscardCheckpointPublication,
+    ),
+    WsbDiscardPreparationError,
+> {
+    snapshot.revalidate()?;
+    authority
+        .revalidate_external_intent()
+        .map_err(|error| WsbDiscardPreparationError::Orchestrator(error.to_string()))?;
+    let store_key = &authority.revocation().discard_intent_binding.store_key;
+    match reserve_discard_checkpoint(
+        &inventory_receipt.inventory.workspace,
+        &inventory_receipt.run_id,
+        store_key,
+    ) {
+        Ok(reserved) => {
+            let checkpoint = build_checkpoint(
+                authority.revocation(),
+                &inventory_receipt.inventory,
+                reserved.parent_id().clone(),
+                reserved.checkpoint_id().clone(),
+            )?;
+            let bytes = canonical_bytes(&checkpoint)?;
+            let sha256 = hash_bytes(&bytes);
+            let staged = reserved.persist(&bytes, &sha256)?;
+            let binding = staged.evidence().clone();
+            snapshot.revalidate()?;
+            authority
+                .revalidate_external_intent()
+                .map_err(|error| WsbDiscardPreparationError::Orchestrator(error.to_string()))?;
+            let reopened = reopen_prepared_discard_checkpoint(
+                &bytes,
+                &sha256,
+                &inventory_receipt.inventory.workspace,
+                &inventory_receipt.run_id,
+                &binding,
+            )?;
+            let publication = publish_checkpoint(reopened)?;
+            publication.revalidate()?;
+            Ok((checkpoint, binding, publication))
+        }
+        Err(DiscardCheckpointError::FinalConflict | DiscardCheckpointError::PendingConflict) => {
+            let existing = reopen_existing_discard_checkpoint(
+                &inventory_receipt.inventory.workspace,
+                &inventory_receipt.run_id,
+                store_key,
+            )?;
+            let checkpoint: WsbDiscardCheckpointV0Alpha1 =
+                serde_json::from_slice(existing.checkpoint()).map_err(|error| {
+                    WsbDiscardPreparationError::Contract(format!(
+                        "persisted discard checkpoint is not the strict schema: {error}"
+                    ))
+                })?;
+            if canonical_bytes(&checkpoint)? != existing.checkpoint()
+                || checkpoint.revocation != *authority.revocation()
+                || checkpoint.inventory != inventory_receipt.inventory
+                || checkpoint.checkpoint_file.parent_id != *existing.binding().parent_id()
+                || checkpoint.checkpoint_file.file_id != *existing.binding().checkpoint_id()
+            {
+                return Err(WsbDiscardPreparationError::Contract(
+                    "persisted discard checkpoint differs from fresh held authority".to_owned(),
+                ));
+            }
+            checkpoint
+                .validate()
+                .map_err(|error| WsbDiscardPreparationError::Orchestrator(error.to_string()))?;
+            let binding = existing.binding().clone();
+            snapshot.revalidate()?;
+            authority
+                .revalidate_external_intent()
+                .map_err(|error| WsbDiscardPreparationError::Orchestrator(error.to_string()))?;
+            let publication = publish_checkpoint(existing.into_reopened())?;
+            publication.revalidate()?;
+            Ok((checkpoint, binding, publication))
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn build_checkpoint(
+    revocation: &WsbRevocationRecord,
+    inventory: &WsbFixedTreeInventoryEvidence,
+    parent_id: aiw_probe::DiscardIntentStableId,
+    file_id: aiw_probe::DiscardIntentStableId,
+) -> Result<WsbDiscardCheckpointV0Alpha1, WsbDiscardPreparationError> {
+    let checkpoint = WsbDiscardCheckpointV0Alpha1 {
+        schema_version: WSB_DISCARD_CHECKPOINT_SCHEMA_VERSION.to_owned(),
+        policy_version: WSB_DISCARD_CHECKPOINT_POLICY_VERSION.to_owned(),
+        run_id: revocation.run_id.clone(),
+        cleanup_id: revocation.cleanup_id.clone(),
+        fixed_tree_contract_version: WSB_FIXED_TREE_CONTRACT_VERSION.to_owned(),
+        revocation: revocation.clone(),
+        revocation_sha256: canonical_hash(revocation)?,
+        inventory: inventory.clone(),
+        inventory_sha256: canonical_hash(inventory)?,
+        checkpoint_file: WsbDiscardCheckpointFileIdentity { parent_id, file_id },
+    };
+    checkpoint
+        .validate()
+        .map_err(|error| WsbDiscardPreparationError::Orchestrator(error.to_string()))?;
+    Ok(checkpoint)
+}
+
+fn publish_checkpoint(
+    reopened: ReopenedDiscardCheckpoint,
+) -> Result<HeldDiscardCheckpointPublication, WsbDiscardPreparationError> {
+    match reopened {
+        ReopenedDiscardCheckpoint::Publishable(value) => Ok(value.publish()?),
+        ReopenedDiscardCheckpoint::Published(value) => Ok(value),
+    }
 }
 
 fn build_inventory_receipt(
@@ -721,16 +882,26 @@ mod tests {
         }
         assert!(production.contains("begin_wsb_revocation"));
         assert!(production.contains("into_outer_only"));
-        assert!(production.contains("observe_fixed_wsb_tree_for_checkpoint"));
-        assert!(production.contains("verify_fixed_wsb_tree_inventory"));
+        assert!(production.contains("hold_fixed_wsb_tree_for_checkpoint"));
+        assert!(production.contains("reserve_discard_checkpoint"));
+        assert!(production.contains("reopen_existing_discard_checkpoint"));
+        assert!(production.contains("reopen_prepared_discard_checkpoint"));
         assert!(
             production.find("into_outer_only(publication)").unwrap()
                 < production
-                    .rfind("observe_fixed_wsb_tree_for_checkpoint")
+                    .rfind("hold_fixed_wsb_tree_for_checkpoint")
                     .unwrap(),
-            "inventory observation must occur only after outer-only handoff"
+            "checkpoint snapshot must occur only after outer-only handoff"
         );
-        assert!(!production.contains(".aiw-discard-checkpoint"));
+        assert!(
+            production
+                .find("hold_fixed_wsb_tree_for_checkpoint")
+                .unwrap()
+                < production.find("reserve_discard_checkpoint").unwrap(),
+            "write/delete-denying tree handles must precede checkpoint creation"
+        );
+        assert!(!production.contains("events.jsonl"));
+        assert!(!production.contains("journal-heads"));
         assert!(
             production.find("persist_staged_revocation").unwrap()
                 < production.find("drop(held_stage)").unwrap(),

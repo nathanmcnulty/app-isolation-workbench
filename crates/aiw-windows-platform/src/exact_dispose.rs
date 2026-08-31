@@ -265,6 +265,7 @@ pub enum ExactDisposeError {
 #[derive(Clone, Copy)]
 enum OpenPurpose {
     Observe,
+    CheckpointSnapshot,
     DisposeOriginal,
     DisposeTombstone,
 }
@@ -304,6 +305,17 @@ pub(crate) struct HeldFixedWsbTree {
     objects: Vec<HeldExactObject>,
     location: FixedWsbTreeLocation,
     next_delete: usize,
+}
+
+/// Read-only authority over the exact pre-disposal tree. The object handles
+/// deliberately refuse write and delete sharing until checkpoint publication
+/// has completed.
+#[doc(hidden)]
+pub struct HeldFixedWsbCheckpointSnapshot {
+    parent: File,
+    inventory: FixedWsbTreeInventory,
+    evidence: WsbFixedTreeInventoryEvidence,
+    objects: Vec<HeldExactObject>,
 }
 
 pub(crate) fn observe_fixed_wsb_tree(
@@ -356,6 +368,102 @@ pub fn observe_fixed_wsb_tree_for_checkpoint(
     tombstone_leaf: &str,
 ) -> Result<WsbFixedTreeInventoryEvidence, ExactDisposeError> {
     inventory_evidence(observe_fixed_wsb_tree(workspace, run_id, tombstone_leaf)?)
+}
+
+#[doc(hidden)]
+pub fn hold_fixed_wsb_tree_for_checkpoint(
+    workspace: &WorkspaceBindingEvidence,
+    run_id: &str,
+    tombstone_leaf: &str,
+) -> Result<HeldFixedWsbCheckpointSnapshot, ExactDisposeError> {
+    validate_inputs(workspace, run_id)?;
+    validate_checkpoint_tombstone_leaf(tombstone_leaf)?;
+    let original_root = PathBuf::from(&workspace.root.final_path);
+    let parent_path = original_root.parent().ok_or_else(|| {
+        ExactDisposeError::Contract("workspace root has no parent directory".into())
+    })?;
+    let parent = open_parent(parent_path)?;
+    let parent_id = stable_id(&parent)?;
+    require_evidence_id(&parent_id, &workspace.parent, "parent")?;
+    reject_case_sensitive_directory(&parent)?;
+    if path_identity_if_present(&parent_path.join(tombstone_leaf))?.is_some() {
+        return Err(ExactDisposeError::Rejected(
+            "checkpoint-bound tombstone name is already occupied".into(),
+        ));
+    }
+    let owner = OwnedSid::from_string(&workspace.owner_sid).map_err(workspace_error)?;
+    let objects = open_objects(
+        &original_root,
+        run_id,
+        OpenPurpose::CheckpointSnapshot,
+        &owner,
+        workspace,
+    )?;
+    verify_allowlists(&objects, run_id)?;
+    let mut bindings = Vec::with_capacity(ACQUIRE_ORDER.len());
+    for object in &objects {
+        bindings.push(observe_binding(object, &owner)?);
+    }
+    let inventory = FixedWsbTreeInventory {
+        workspace: workspace.clone(),
+        run_id: run_id.to_owned(),
+        parent_id,
+        original_root,
+        tombstone_leaf: tombstone_leaf.to_owned(),
+        objects: bindings,
+    };
+    let evidence = inventory_evidence(inventory.clone())?;
+    let held = HeldFixedWsbCheckpointSnapshot {
+        parent,
+        inventory,
+        evidence,
+        objects,
+    };
+    held.revalidate()?;
+    Ok(held)
+}
+
+impl HeldFixedWsbCheckpointSnapshot {
+    #[must_use]
+    pub fn evidence(&self) -> &WsbFixedTreeInventoryEvidence {
+        &self.evidence
+    }
+
+    pub fn revalidate(&self) -> Result<(), ExactDisposeError> {
+        self.evidence
+            .validate()
+            .map_err(|error| ExactDisposeError::Contract(error.into()))?;
+        if stable_id(&self.parent)? != self.inventory.parent_id {
+            return Err(ExactDisposeError::Rejected(
+                "workspace parent identity changed during checkpoint capture".into(),
+            ));
+        }
+        let parent_path = self.inventory.original_root.parent().ok_or_else(|| {
+            ExactDisposeError::Contract("workspace root has no parent directory".into())
+        })?;
+        if path_identity_if_present(&parent_path.join(&self.inventory.tombstone_leaf))?.is_some() {
+            return Err(ExactDisposeError::Rejected(
+                "checkpoint-bound tombstone appeared during checkpoint capture".into(),
+            ));
+        }
+        let owner =
+            OwnedSid::from_string(&self.inventory.workspace.owner_sid).map_err(workspace_error)?;
+        for (object, expected) in self.objects.iter().zip(&self.inventory.objects) {
+            if object.key != expected.key {
+                return Err(ExactDisposeError::Contract(
+                    "fixed object ordering changed".into(),
+                ));
+            }
+            verify_expected(
+                object,
+                expected,
+                &owner,
+                &self.inventory.original_root,
+                &self.inventory.run_id,
+            )?;
+        }
+        verify_allowlists(&self.objects, &self.inventory.run_id)
+    }
 }
 
 #[doc(hidden)]
@@ -915,7 +1023,10 @@ fn open_object(
     } else {
         FILE_READ_DATA.0
     };
-    if !matches!(purpose, OpenPurpose::Observe) {
+    if matches!(
+        purpose,
+        OpenPurpose::DisposeOriginal | OpenPurpose::DisposeTombstone
+    ) {
         access |= DELETE.0;
     }
     let share = if matches!(purpose, OpenPurpose::DisposeOriginal) && key == FixedWsbObject::RunLock
@@ -924,8 +1035,16 @@ fn open_object(
         // Its standard Windows share mode includes delete, so this exact
         // delete-capable observation must reciprocally share read and write.
         FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0 | FILE_SHARE_DELETE.0
-    } else if !matches!(purpose, OpenPurpose::Observe) {
+    } else if matches!(
+        purpose,
+        OpenPurpose::DisposeOriginal | OpenPurpose::DisposeTombstone
+    ) {
         0
+    } else if matches!(purpose, OpenPurpose::CheckpointSnapshot) {
+        // This is the non-destructive commit barrier: cooperating or hostile
+        // opens cannot acquire write/delete access while the exact snapshot is
+        // being committed outside the tree.
+        FILE_SHARE_READ.0
     } else {
         FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0 | FILE_SHARE_DELETE.0
     };
@@ -2385,6 +2504,30 @@ mod tests {
         let mut legacy = first;
         legacy.tombstone_leaf = ".aiw-wsb-tombstone-run-one-deadbeef".to_owned();
         assert!(verify_fixed_wsb_tree_inventory(&legacy).is_err());
+    }
+
+    #[test]
+    fn checkpoint_snapshot_blocks_tree_write_and_rename_until_drop() {
+        let fixture = Fixture::new();
+        let tombstone = tombstone_leaf(&fixture.workspace);
+        let held =
+            hold_fixed_wsb_tree_for_checkpoint(&fixture.workspace, RUN_ID, &tombstone).unwrap();
+        held.revalidate().unwrap();
+        assert_eq!(held.evidence().objects.len(), ACQUIRE_ORDER.len());
+
+        let plan = fixture.root.join("plan.json");
+        assert!(OpenOptions::new().write(true).open(&plan).is_err());
+        let renamed = fixture.parent.join(format!(
+            "{}-blocked",
+            fixture.root.file_name().unwrap().to_string_lossy()
+        ));
+        assert!(fs::rename(&fixture.root, &renamed).is_err());
+
+        drop(held);
+        OpenOptions::new()
+            .write(true)
+            .open(&plan)
+            .expect("write sharing must be released with checkpoint snapshot");
     }
 
     #[test]

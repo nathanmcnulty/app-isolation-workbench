@@ -33,9 +33,19 @@ pub use discard_intent::{
 };
 
 #[cfg(windows)]
+pub use discard_checkpoint::{
+    DISCARD_CHECKPOINT_BINDING_POLICY_VERSION, DISCARD_CHECKPOINT_BINDING_SCHEMA_VERSION,
+    DiscardCheckpointBindingEvidence, DiscardCheckpointError, ExistingDiscardCheckpoint,
+    HeldDiscardCheckpointPublication, PublishableDiscardCheckpoint, ReopenedDiscardCheckpoint,
+    ReservedDiscardCheckpoint, StagedDiscardCheckpoint, reopen_existing_discard_checkpoint,
+    reopen_prepared_discard_checkpoint, reserve_discard_checkpoint,
+};
+
+#[cfg(windows)]
 #[doc(hidden)]
 pub use exact_dispose::{
-    ExactDisposeError, observe_fixed_wsb_tree_for_checkpoint, verify_fixed_wsb_tree_inventory,
+    ExactDisposeError, HeldFixedWsbCheckpointSnapshot, hold_fixed_wsb_tree_for_checkpoint,
+    observe_fixed_wsb_tree_for_checkpoint, verify_fixed_wsb_tree_inventory,
 };
 
 pub use aiw_probe::WindowsFileIdentity as WorkspaceDirectoryIdentity;
@@ -46,6 +56,9 @@ mod coordination;
 
 #[cfg(windows)]
 mod discard_intent;
+
+#[cfg(windows)]
+mod discard_checkpoint;
 
 #[cfg(windows)]
 #[allow(dead_code)]

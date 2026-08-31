@@ -141,6 +141,21 @@ impl HeldDiscardIntentPublication {
     pub fn intent_ea(&self) -> &DiscardIntentEaBinding {
         self.evidence.intent_ea()
     }
+
+    /// Revalidates the exact held external authority without reopening by a
+    /// caller-controlled path.
+    #[doc(hidden)]
+    pub fn revalidate(&self) -> Result<(), DiscardIntentError> {
+        let context = Context::from_projection(&self.evidence)?;
+        verify_parent(&self._parent, &context, &self.evidence.parent_id)?;
+        verify_intent(
+            &self._intent,
+            &self._parent,
+            &context.final_path,
+            &context,
+            &self.evidence,
+        )
+    }
 }
 
 #[must_use]
@@ -303,10 +318,19 @@ fn publish_reopened(
         &context,
         &value.evidence,
     )?;
+    drop(value.intent);
+    let intent = open_intent(&context.final_path, false)?;
+    verify_intent(
+        &intent,
+        &value.parent,
+        &context.final_path,
+        &context,
+        &value.evidence,
+    )?;
     Ok(HeldDiscardIntentPublication {
         evidence: value.evidence,
         _parent: value.parent,
-        _intent: value.intent,
+        _intent: intent,
     })
 }
 
