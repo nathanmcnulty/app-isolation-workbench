@@ -332,6 +332,79 @@ fn application_inspection_is_json_only_and_type_bound() {
     }
 }
 
+#[cfg(windows)]
+#[test]
+fn protected_file_import_is_receipt_last_create_new_and_read_only_verifiable() {
+    let temp = TempDir::new();
+    let source = temp.path().join("fixture.exe");
+    fs::copy(aiw(), &source).unwrap();
+    let intake_parent = temp.path().join("intakes");
+    fs::create_dir(&intake_parent).unwrap();
+    let imported = Command::new(aiw())
+        .args(["application", "import", "--source"])
+        .arg(&source)
+        .args(["--kind", "exe", "--intake-parent"])
+        .arg(&intake_parent)
+        .args(["--intake-id", "cli-intake-001"])
+        .output()
+        .unwrap();
+    assert!(imported.status.success());
+    assert!(imported.stderr.is_empty());
+    let receipt = parse_one_json(&imported.stdout);
+    assert_eq!(
+        receipt["schemaVersion"],
+        "aiw.dev/application-file-import-receipt/v0alpha1"
+    );
+    assert_eq!(receipt["sourceKind"], "exe");
+    assert_eq!(receipt["payloadRelativePath"], "source/payload.exe");
+    let receipt_path = temp.path().join("receipt.json");
+    fs::write(&receipt_path, serde_json::to_vec(&receipt).unwrap()).unwrap();
+
+    let verified = Command::new(aiw())
+        .args(["application", "verify-import", "--receipt"])
+        .arg(&receipt_path)
+        .output()
+        .unwrap();
+    assert!(verified.status.success());
+    assert!(verified.stderr.is_empty());
+    let verification = parse_one_json(&verified.stdout);
+    assert_eq!(verification["verified"], true);
+    assert_eq!(
+        verification["schemaVersion"],
+        "aiw.dev/application-file-import-verification/v0alpha1"
+    );
+
+    let collision = Command::new(aiw())
+        .args(["application", "import", "--source"])
+        .arg(&source)
+        .args(["--kind", "exe", "--intake-parent"])
+        .arg(&intake_parent)
+        .args(["--intake-id", "cli-intake-001"])
+        .output()
+        .unwrap();
+    assert!(!collision.status.success());
+    assert!(collision.stdout.is_empty());
+    let collision_error = parse_one_json(&collision.stderr);
+    assert_eq!(collision_error["code"], "AIW_APPLICATION_IMPORT_REJECTED");
+    assert_eq!(collision_error["retryable"], false);
+
+    let payload = receipt["payload"]["finalPath"].as_str().unwrap();
+    fs::write(payload, b"tampered").unwrap();
+    let rejected = Command::new(aiw())
+        .args(["application", "verify-import", "--receipt"])
+        .arg(&receipt_path)
+        .output()
+        .unwrap();
+    assert!(!rejected.status.success());
+    assert!(rejected.stdout.is_empty());
+    let rejected_error = parse_one_json(&rejected.stderr);
+    assert_eq!(
+        rejected_error["code"],
+        "AIW_APPLICATION_IMPORT_VERIFICATION_REJECTED"
+    );
+    assert_eq!(rejected_error["stage"], "applicationImportVerification");
+}
+
 #[test]
 fn legacy_validation_reports_pending_review_as_one_success_result() {
     let project = repo_path("examples/minimal-v0alpha1.aiw.yaml");

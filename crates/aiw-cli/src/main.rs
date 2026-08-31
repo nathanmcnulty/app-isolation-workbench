@@ -20,10 +20,10 @@ use aiw_orchestrator::{
     project_revision_hash,
 };
 use aiw_probe::{
-    APPLICATION_FILE_AUTHORITY_SCHEMA, ApplicationFileAuthority, ApplicationInspection,
-    ApplicationInspectionError, ApplicationInspectionKind, PortableContentManifest,
-    PortableDirectoryAuthority, WindowsSandboxReadiness, WorkspaceBindingEvidence,
-    inspect_application_source, probe_host,
+    APPLICATION_FILE_AUTHORITY_SCHEMA, ApplicationFileAuthority, ApplicationFileImportReceipt,
+    ApplicationFileImportVerification, ApplicationInspection, ApplicationInspectionError,
+    ApplicationInspectionKind, PortableContentManifest, PortableDirectoryAuthority,
+    WindowsSandboxReadiness, WorkspaceBindingEvidence, inspect_application_source, probe_host,
 };
 use aiw_provider_mxc::{MxcGoldenProbePlan, plan_capability_probe, plan_golden_probe};
 use aiw_provider_wsb::{
@@ -50,6 +50,10 @@ use aiw_token::{TokenEvidence, collect_current_process_token};
 use aiw_windows_platform::assess_windows_sandbox;
 #[cfg(windows)]
 use aiw_windows_platform::{HeldApplicationFile, HeldPortableDirectory, SourceInspectionError};
+#[cfg(windows)]
+use aiw_windows_platform::{
+    SourceImportError, import_application_file, verify_application_file_import,
+};
 use anyhow::{Context, Result, anyhow, bail};
 use clap::error::ErrorKind;
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -103,6 +107,22 @@ enum ApplicationCommand {
         #[arg(long, value_enum)]
         kind: ApplicationKindArg,
     },
+    /// Copy one held MSI or EXE into a new protected receipt-last intake.
+    Import {
+        #[arg(long)]
+        source: PathBuf,
+        #[arg(long, value_enum)]
+        kind: FileApplicationKindArg,
+        #[arg(long)]
+        intake_parent: PathBuf,
+        #[arg(long)]
+        intake_id: String,
+    },
+    /// Verify a protected file intake without modifying or repairing it.
+    VerifyImport {
+        #[arg(long)]
+        receipt: PathBuf,
+    },
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -118,6 +138,21 @@ impl From<ApplicationKindArg> for ApplicationInspectionKind {
             ApplicationKindArg::Msi => Self::Msi,
             ApplicationKindArg::Exe => Self::Exe,
             ApplicationKindArg::PortableDirectory => Self::PortableDirectory,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum FileApplicationKindArg {
+    Msi,
+    Exe,
+}
+
+impl From<FileApplicationKindArg> for ApplicationInspectionKind {
+    fn from(value: FileApplicationKindArg) -> Self {
+        match value {
+            FileApplicationKindArg::Msi => Self::Msi,
+            FileApplicationKindArg::Exe => Self::Exe,
         }
     }
 }
@@ -427,6 +462,8 @@ struct SchemaArgs {
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum SchemaKind {
     ApplicationFileAuthority,
+    ApplicationFileImportReceipt,
+    ApplicationFileImportVerification,
     ApplicationInspection,
     PortableDirectoryAuthority,
     PortableContentManifest,
@@ -697,6 +734,23 @@ impl std::fmt::Display for ApplicationAuthorityFailed {
 #[cfg(windows)]
 impl std::error::Error for ApplicationAuthorityFailed {}
 
+#[cfg(windows)]
+#[derive(Debug)]
+struct SourceImportFailed {
+    source: SourceImportError,
+    verification: bool,
+}
+
+#[cfg(windows)]
+impl std::fmt::Display for SourceImportFailed {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.source.fmt(formatter)
+    }
+}
+
+#[cfg(windows)]
+impl std::error::Error for SourceImportFailed {}
+
 #[derive(Debug)]
 struct WsbSessionStatusInvalid {
     run_id: String,
@@ -822,6 +876,61 @@ fn run(command: Command) -> Result<()> {
                     );
                 }
                 write_json(&inspection)
+            }
+            ApplicationCommand::Import {
+                source,
+                kind,
+                intake_parent,
+                intake_id,
+            } => {
+                #[cfg(windows)]
+                {
+                    let inspection_kind: ApplicationInspectionKind = kind.into();
+                    let held = HeldApplicationFile::open(&source)
+                        .map_err(|source| anyhow!(ApplicationAuthorityFailed { source }))?;
+                    let inspection = inspect_application_source(&source, inspection_kind)
+                        .map_err(|source| anyhow!(ApplicationInspectionFailed { source }))?;
+                    if inspection.sha256.as_deref() != Some(&held.observation().sha256)
+                        || inspection.size_bytes != Some(held.observation().size_bytes)
+                    {
+                        return Err(anyhow!(ApplicationAuthorityFailed {
+                            source: SourceInspectionError::Drift,
+                        }));
+                    }
+                    let receipt =
+                        import_application_file(&intake_parent, &intake_id, inspection_kind, &held)
+                            .map_err(|source| {
+                                anyhow!(SourceImportFailed {
+                                    source,
+                                    verification: false,
+                                })
+                            })?;
+                    write_json(&receipt)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (source, kind, intake_parent, intake_id);
+                    bail!("protected application import requires Windows")
+                }
+            }
+            ApplicationCommand::VerifyImport { receipt } => {
+                #[cfg(windows)]
+                {
+                    let receipt: ApplicationFileImportReceipt =
+                        read_document(&receipt, MAX_CONFIG_BYTES)?;
+                    let verified = verify_application_file_import(&receipt).map_err(|source| {
+                        anyhow!(SourceImportFailed {
+                            source,
+                            verification: true,
+                        })
+                    })?;
+                    write_json(&verified)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = receipt;
+                    bail!("protected application import verification requires Windows")
+                }
             }
         },
         Command::Project(args) => match args.command {
@@ -1207,6 +1316,12 @@ fn run(command: Command) -> Result<()> {
         Command::Schema(args) => match args.kind {
             SchemaKind::ApplicationFileAuthority => {
                 write_json(&schema_for!(ApplicationFileAuthority))
+            }
+            SchemaKind::ApplicationFileImportReceipt => {
+                write_json(&schema_for!(ApplicationFileImportReceipt))
+            }
+            SchemaKind::ApplicationFileImportVerification => {
+                write_json(&schema_for!(ApplicationFileImportVerification))
             }
             SchemaKind::ApplicationInspection => write_json(&schema_for!(ApplicationInspection)),
             SchemaKind::PortableDirectoryAuthority => {
@@ -1791,6 +1906,40 @@ fn preparation_import_error_envelope(error: &RunPreparationImportFailed) -> Erro
 }
 
 fn emit_anyhow_error(error: &anyhow::Error) {
+    #[cfg(windows)]
+    if let Some(error) = error.downcast_ref::<SourceImportFailed>() {
+        emit_error(&ErrorEnvelope {
+            code: if error.verification {
+                "AIW_APPLICATION_IMPORT_VERIFICATION_REJECTED"
+            } else {
+                "AIW_APPLICATION_IMPORT_REJECTED"
+            }
+            .to_owned(),
+            summary: if error.verification {
+                "protected application import could not be verified"
+            } else {
+                "protected application import could not be completed"
+            }
+            .to_owned(),
+            stage: if error.verification {
+                "applicationImportVerification"
+            } else {
+                "applicationImport"
+            }
+            .to_owned(),
+            run_id: None,
+            retryable: matches!(
+                error.source,
+                SourceImportError::Source(
+                    SourceInspectionError::Busy | SourceInspectionError::Drift
+                )
+            ),
+            remediation: "Preserve incomplete or conflicting intake state for inspection. Retry with a new intake ID only after correcting the reported source, destination, or receipt condition."
+                .to_owned(),
+            detail: error.source.to_string().chars().take(512).collect(),
+        });
+        return;
+    }
     #[cfg(windows)]
     if let Some(error) = error.downcast_ref::<ApplicationAuthorityFailed>() {
         emit_error(&ErrorEnvelope {

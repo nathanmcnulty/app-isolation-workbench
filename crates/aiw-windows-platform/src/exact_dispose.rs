@@ -1490,7 +1490,7 @@ fn observe_binding(
     }
 }
 
-fn stabilized_extended_attributes(
+pub(crate) fn stabilized_extended_attributes(
     file: &File,
     directory: bool,
 ) -> Result<ExtendedAttributeBinding, ExactDisposeError> {
@@ -1901,6 +1901,21 @@ pub(crate) fn query_extended_attributes(
     file: &File,
     directory: bool,
 ) -> Result<ExtendedAttributeBinding, ExactDisposeError> {
+    query_extended_attributes_with_policy(file, directory, true)
+}
+
+pub(crate) fn query_extended_attributes_for_import(
+    file: &File,
+    directory: bool,
+) -> Result<ExtendedAttributeBinding, ExactDisposeError> {
+    query_extended_attributes_with_policy(file, directory, false)
+}
+
+fn query_extended_attributes_with_policy(
+    file: &File,
+    directory: bool,
+    reject_transient_origin_claim: bool,
+) -> Result<ExtendedAttributeBinding, ExactDisposeError> {
     // u64 storage guarantees stronger alignment than FILE_FULL_EA_INFORMATION
     // requires. Zeroing also makes any tolerated final-record padding
     // deterministic and prevents stale process memory from entering evidence.
@@ -1940,7 +1955,12 @@ pub(crate) fn query_extended_attributes(
     if bytes.is_empty() {
         return empty_ea_binding();
     }
-    parse_extended_attributes(bytes, queried_bytes, directory)
+    parse_extended_attributes(
+        bytes,
+        queried_bytes,
+        directory,
+        reject_transient_origin_claim,
+    )
 }
 
 fn empty_ea_binding() -> Result<ExtendedAttributeBinding, ExactDisposeError> {
@@ -1955,6 +1975,7 @@ fn parse_extended_attributes(
     bytes: &[u8],
     queried_bytes: u32,
     directory: bool,
+    reject_transient_origin_claim: bool,
 ) -> Result<ExtendedAttributeBinding, ExactDisposeError> {
     if bytes.len() != queried_bytes as usize || bytes.len() > EA_BUFFER_BYTES {
         return Err(ExactDisposeError::Rejected(
@@ -2058,7 +2079,9 @@ fn parse_extended_attributes(
             ));
         }
     }
-    if !directory && entries.len() == 1 && entries[0].name == "$KERNEL.SMARTLOCKER.ORIGINCLAIM" {
+    let file_origin_claim =
+        !directory && entries.len() == 1 && entries[0].name == "$KERNEL.SMARTLOCKER.ORIGINCLAIM";
+    if reject_transient_origin_claim && file_origin_claim {
         return Err(ExactDisposeError::TransientSmartLockerEa);
     }
     let stable_directory_origin_claim =
@@ -2077,6 +2100,7 @@ fn parse_extended_attributes(
             .all(|(entry, allowed)| entry.name == allowed);
     if !entries.is_empty()
         && !stable_directory_origin_claim
+        && !(file_origin_claim && !reject_transient_origin_claim)
         && !exact_kernel_pair
         && !exact_kernel_triple
     {
@@ -3477,7 +3501,7 @@ mod tests {
         ]);
         let ea = misaligned(ea);
         assert_eq!(
-            parse_extended_attributes(&ea[1..], (ea.len() - 1) as u32, false)
+            parse_extended_attributes(&ea[1..], (ea.len() - 1) as u32, false, true)
                 .unwrap()
                 .entries
                 .len(),
@@ -3531,7 +3555,7 @@ mod tests {
     #[test]
     fn safe_byte_parsers_reject_exactly_header_sized_inputs() {
         let ea = vec![0_u8; offset_of!(FILE_FULL_EA_INFORMATION, EaName)];
-        assert!(parse_extended_attributes(&ea, ea.len() as u32, false).is_err());
+        assert!(parse_extended_attributes(&ea, ea.len() as u32, false, true).is_err());
 
         let streams = vec![0_u8; offset_of!(FILE_STREAM_INFO, StreamName)];
         assert!(parse_streams(&streams).is_err());
@@ -3553,8 +3577,8 @@ mod tests {
             (ALLOWED_KERNEL_EAS[0], 0, b"SMV1"),
             (ALLOWED_KERNEL_EAS[1], 0, b"opaque-origin"),
         ]);
-        let first = parse_extended_attributes(&first, first.len() as u32, false).unwrap();
-        let second = parse_extended_attributes(&second, second.len() as u32, false).unwrap();
+        let first = parse_extended_attributes(&first, first.len() as u32, false, true).unwrap();
+        let second = parse_extended_attributes(&second, second.len() as u32, false, true).unwrap();
         assert_eq!(first.entries, second.entries);
         assert_eq!(first.canonical_sha256, second.canonical_sha256);
         assert_eq!(first.entries[0].value_length, 4);
@@ -3566,7 +3590,7 @@ mod tests {
         let directory =
             synthetic_ea_buffer(&[("$KERNEL.SMARTLOCKER.ORIGINCLAIM", 0, b"opaque-origin")]);
         let directory =
-            parse_extended_attributes(&directory, directory.len() as u32, true).unwrap();
+            parse_extended_attributes(&directory, directory.len() as u32, true, true).unwrap();
         assert_eq!(directory.entries.len(), 1);
         assert_eq!(directory.entries[0].name, "$KERNEL.SMARTLOCKER.ORIGINCLAIM");
 
@@ -3575,7 +3599,7 @@ mod tests {
             (ALLOWED_KERNEL_EAS_WITH_FILE_HASH[1], 0, b"SMV1"),
             (ALLOWED_KERNEL_EAS_WITH_FILE_HASH[2], 0, b"opaque-origin"),
         ]);
-        let file = parse_extended_attributes(&file, file.len() as u32, false).unwrap();
+        let file = parse_extended_attributes(&file, file.len() as u32, false, true).unwrap();
         assert_eq!(file.entries.len(), 3);
         assert!(
             file.entries
@@ -3603,13 +3627,13 @@ mod tests {
             ],
         ] {
             let bytes = synthetic_ea_buffer(&entries);
-            assert!(parse_extended_attributes(&bytes, bytes.len() as u32, false).is_err());
+            assert!(parse_extended_attributes(&bytes, bytes.len() as u32, false, true).is_err());
         }
         let bytes = synthetic_ea_buffer(&[
             (ALLOWED_KERNEL_EAS[0], 0, b"one"),
             (ALLOWED_KERNEL_EAS[1], 0, b"two"),
         ]);
-        assert!(parse_extended_attributes(&bytes, bytes.len() as u32, true).is_err());
+        assert!(parse_extended_attributes(&bytes, bytes.len() as u32, true, true).is_err());
     }
 
     #[test]
@@ -3621,22 +3645,26 @@ mod tests {
         let mut missing_nul = valid.clone();
         let nul = offset_of!(FILE_FULL_EA_INFORMATION, EaName) + ALLOWED_KERNEL_EAS[0].len();
         missing_nul[nul] = 1;
-        assert!(parse_extended_attributes(&missing_nul, missing_nul.len() as u32, false).is_err());
+        assert!(
+            parse_extended_attributes(&missing_nul, missing_nul.len() as u32, false, true).is_err()
+        );
 
         let mut bad_offset = valid.clone();
         bad_offset[..4].copy_from_slice(&3_u32.to_le_bytes());
-        assert!(parse_extended_attributes(&bad_offset, bad_offset.len() as u32, false).is_err());
+        assert!(
+            parse_extended_attributes(&bad_offset, bad_offset.len() as u32, false, true).is_err()
+        );
 
         let mut nonzero_padding = valid.clone();
         let next = u32::from_le_bytes(nonzero_padding[..4].try_into().unwrap()) as usize;
         nonzero_padding[next - 1] = 1;
         assert!(
-            parse_extended_attributes(&nonzero_padding, nonzero_padding.len() as u32, false)
+            parse_extended_attributes(&nonzero_padding, nonzero_padding.len() as u32, false, true)
                 .is_err()
         );
 
-        assert!(parse_extended_attributes(&valid[..7], 7, false).is_err());
-        assert!(parse_extended_attributes(&valid, (valid.len() - 1) as u32, false).is_err());
+        assert!(parse_extended_attributes(&valid[..7], 7, false, true).is_err());
+        assert!(parse_extended_attributes(&valid, (valid.len() - 1) as u32, false, true).is_err());
     }
 
     #[test]

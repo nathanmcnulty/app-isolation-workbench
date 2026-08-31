@@ -21,6 +21,10 @@ pub use workspace::{
 };
 
 #[cfg(windows)]
+pub use source_import::{
+    SourceImportError, import_application_file, verify_application_file_import,
+};
+#[cfg(windows)]
 pub use source_inspection::{
     HeldApplicationFile, HeldPortableDirectory, SourceFileObservation, SourceInspectionError,
 };
@@ -123,6 +127,8 @@ mod windows_platform;
 #[cfg(windows)]
 mod workspace;
 
+#[cfg(windows)]
+mod source_import;
 #[cfg(windows)]
 mod source_inspection;
 
