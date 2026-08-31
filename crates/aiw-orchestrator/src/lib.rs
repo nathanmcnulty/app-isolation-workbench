@@ -23,7 +23,8 @@ use std::{
 use aiw_evidence::canonical_json_bytes;
 use aiw_probe::{
     DISCARD_INTENT_BINDING_POLICY_VERSION, DISCARD_INTENT_BINDING_SCHEMA_VERSION,
-    DiscardIntentBindingEvidence, WorkspaceBindingEvidence,
+    DiscardIntentBindingEvidence, DiscardIntentStableId, WSB_FIXED_TREE_CONTRACT_VERSION,
+    WorkspaceBindingEvidence, WsbFixedTreeInventoryEvidence,
 };
 use aiw_schema::Project;
 #[cfg(windows)]
@@ -45,6 +46,8 @@ const HEAD_SCHEMA: &str = "aiw.dev/run-journal-head/v0alpha1";
 const RESULT_SCHEMA: &str = "aiw.dev/run-result/v0alpha1";
 const CANCELLATION_SCHEMA: &str = "aiw.dev/cancellation-request/v0alpha1";
 pub const WSB_REVOCATION_SCHEMA_VERSION: &str = "aiw.dev/wsb-revocation-record/v0alpha2";
+pub const WSB_DISCARD_CHECKPOINT_SCHEMA_VERSION: &str = "aiw.dev/wsb-discard-checkpoint/v0alpha1";
+pub const WSB_DISCARD_CHECKPOINT_POLICY_VERSION: &str = "owner-system-protected-checkpoint-v1";
 const WSB_DISCARD_CURRENT_PREFIX: &str = ".aiw-discard-v1-";
 const WSB_DISCARD_STAGE_PREFIX: &str = ".aiw-discard-stage-v1-";
 const MAX_DISCARD_INTENT_BYTES: u64 = 1024 * 1024;
@@ -397,6 +400,108 @@ pub struct WsbRevocationRecord {
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WsbDiscardCheckpointFileIdentity {
+    pub parent_id: DiscardIntentStableId,
+    pub file_id: DiscardIntentStableId,
+}
+
+/// Cycle-free external commit binding the immutable revocation record to one
+/// exact portable observation of the pre-disposal 19-object tree.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WsbDiscardCheckpointV0Alpha1 {
+    pub schema_version: String,
+    pub policy_version: String,
+    pub run_id: String,
+    pub cleanup_id: String,
+    pub fixed_tree_contract_version: String,
+    pub revocation: WsbRevocationRecord,
+    pub revocation_sha256: String,
+    pub inventory: WsbFixedTreeInventoryEvidence,
+    pub inventory_sha256: String,
+    pub checkpoint_file: WsbDiscardCheckpointFileIdentity,
+}
+
+impl WsbDiscardCheckpointV0Alpha1 {
+    pub fn validate(&self) -> Result<(), AiwError> {
+        let revocation = &self.revocation;
+        let inventory = &self.inventory;
+        let binding = &revocation.discard_intent_binding;
+        let valid_ids = [
+            &self.checkpoint_file.parent_id,
+            &self.checkpoint_file.file_id,
+        ]
+        .into_iter()
+        .all(|id| {
+            is_fixed_lower_hex(&id.volume_serial_number, 16) && is_fixed_lower_hex(&id.file_id, 32)
+        });
+        let checkpoint_leaf_matches = Path::new(&binding.final_path)
+            .file_name()
+            .and_then(|leaf| leaf.to_str())
+            .is_some_and(|leaf| {
+                leaf == format!("{WSB_DISCARD_CURRENT_PREFIX}{}", binding.store_key)
+            });
+        let checkpoint_id_is_external = inventory.objects.iter().all(|object| {
+            object.id != self.checkpoint_file.file_id && object.id != self.checkpoint_file.parent_id
+        });
+        let revocation_hashes_are_valid = [
+            revocation.discard_intent_sha256.as_str(),
+            revocation.plan_sha256.as_str(),
+            revocation.import_receipt_sha256.as_str(),
+            revocation.workspace_identity_sha256.as_str(),
+            self.revocation_sha256.as_str(),
+            self.inventory_sha256.as_str(),
+        ]
+        .into_iter()
+        .all(|hash| is_fixed_lower_hex(hash, 64));
+        let expected_control = Path::new(&inventory.workspace.parent.final_path)
+            .join(format!("{WSB_DISCARD_CURRENT_PREFIX}{}", binding.store_key));
+        validate_wsb_revocation_shape(revocation, &inventory.workspace, &expected_control)?;
+        let valid = self.schema_version == WSB_DISCARD_CHECKPOINT_SCHEMA_VERSION
+            && self.policy_version == WSB_DISCARD_CHECKPOINT_POLICY_VERSION
+            && self.fixed_tree_contract_version == WSB_FIXED_TREE_CONTRACT_VERSION
+            && revocation.schema_version == WSB_REVOCATION_SCHEMA_VERSION
+            && inventory.validate().is_ok()
+            && self.run_id == revocation.run_id
+            && self.run_id == inventory.run_id
+            && self.cleanup_id == revocation.cleanup_id
+            && is_fixed_lower_hex(&self.cleanup_id, 64)
+            && inventory.tombstone_leaf == format!(".aiw-discarded-v1-{}", self.cleanup_id)
+            && self.revocation_sha256 == hash_value(revocation)?
+            && self.inventory_sha256 == hash_value(inventory)?
+            && revocation.discard_intent_sha256 == binding.intent_sha256
+            && binding.schema_version == DISCARD_INTENT_BINDING_SCHEMA_VERSION
+            && binding.policy_version == DISCARD_INTENT_BINDING_POLICY_VERSION
+            && binding.run_id == self.run_id
+            && binding.owner_sid == inventory.workspace.owner_sid
+            && binding.store_key.len() == 64
+            && is_fixed_lower_hex(&binding.store_key, 64)
+            && checkpoint_leaf_matches
+            && inventory.workspace.parent.volume_serial_number
+                == self.checkpoint_file.parent_id.volume_serial_number
+            && inventory.workspace.parent.file_id == self.checkpoint_file.parent_id.file_id
+            && binding.parent_id == self.checkpoint_file.parent_id
+            && self.checkpoint_file.file_id.volume_serial_number
+                == self.checkpoint_file.parent_id.volume_serial_number
+            && self.checkpoint_file.file_id != self.checkpoint_file.parent_id
+            && checkpoint_id_is_external
+            && revocation.workspace_identity_sha256 == hash_value(&inventory.workspace)?
+            && revocation_hashes_are_valid
+            && valid_ids;
+        if !valid {
+            return Err(run_error(
+                "AIW_WSB_DISCARD_CHECKPOINT_INVALID",
+                "protected discard checkpoint bindings are invalid",
+                "checkpoint",
+                &self.run_id,
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AiwError {
     pub code: Box<str>,
     pub summary: Box<str>,
@@ -509,13 +614,15 @@ pub struct WsbRevocationGuard<'a> {
     committed_revocation: Option<WsbRevocationRecord>,
 }
 
-/// Opaque post-publication authority. It retains only the owner-scoped outer
-/// coordination lease; no descendant workspace handle remains reachable.
+/// Opaque post-publication authority. It retains the owner-scoped outer
+/// coordination lease and exact external intent handle; no descendant
+/// workspace handle remains reachable.
 #[cfg(windows)]
 #[doc(hidden)]
 pub struct WsbOuterDiscardAuthority<'a> {
     layout: &'a RunLayout,
     revocation: WsbRevocationRecord,
+    publication: HeldDiscardIntentPublication,
     _coordination: RunCoordinationLease,
 }
 
@@ -585,10 +692,10 @@ impl<'a> WsbRevocationGuard<'a> {
             _inner_file,
         } = self._lock;
         drop(_inner_file);
-        drop(publication);
         Ok(WsbOuterDiscardAuthority {
             layout: self.layout,
             revocation,
+            publication,
             _coordination,
         })
     }
@@ -607,6 +714,17 @@ impl WsbOuterDiscardAuthority<'_> {
 
     pub fn revocation(&self) -> &WsbRevocationRecord {
         &self.revocation
+    }
+
+    pub fn revalidate_external_intent(&self) -> Result<(), AiwError> {
+        self.publication.revalidate().map_err(|_error| {
+            run_error(
+                "AIW_WSB_DISCARD_AUTHORITY_MISSING",
+                "published discard authority no longer matches committed revocation",
+                "revocation",
+                self.run_id(),
+            )
+        })
     }
 }
 
@@ -3119,6 +3237,43 @@ fn validate_wsb_revocation(
                 &plan.run_id,
             )
         })?;
+    let expected_control = layout.wsb_discard_control_path()?;
+    validate_wsb_revocation_shape(value, workspace, &expected_control)?;
+    let binding = &value.discard_intent_binding;
+    #[cfg(windows)]
+    let valid_coordination = binding.store_key == layout.coordination_key.binding_sha256();
+    #[cfg(not(windows))]
+    let valid_coordination = layout
+        .wsb_discard_control_path()?
+        .file_name()
+        .and_then(|value| value.to_str())
+        .and_then(|value| value.strip_prefix(WSB_DISCARD_CURRENT_PREFIX))
+        .is_some_and(|value| value == binding.store_key);
+    if value.run_id != plan.run_id
+        || value.plan_sha256 != plan.hash()?
+        || value.import_receipt_sha256 != hash_value(import)?
+        || value.workspace_identity_sha256 != import.workspace_identity_sha256
+        || !valid_coordination
+        || !same_path_text(
+            &binding.final_path,
+            &layout.wsb_discard_control_path()?.to_string_lossy(),
+        )
+    {
+        return Err(run_error(
+            "AIW_WSB_REVOCATION_INVALID",
+            "Windows Sandbox revocation bindings are invalid",
+            "revocation",
+            &plan.run_id,
+        ));
+    }
+    Ok(())
+}
+
+fn validate_wsb_revocation_shape(
+    value: &WsbRevocationRecord,
+    workspace: &WorkspaceBindingEvidence,
+    expected_control: &Path,
+) -> Result<(), AiwError> {
     let binding = &value.discard_intent_binding;
     let valid_stage_leaf = binding
         .staging_leaf
@@ -3133,65 +3288,51 @@ fn validate_wsb_revocation(
         && is_hash_fragment(&binding.intent_id.file_id)
         && binding.intent_id.volume_serial_number == binding.parent_id.volume_serial_number
         && binding.intent_id.file_id != binding.parent_id.file_id;
-    let valid_ea = validate_discard_intent_ea(&binding.intent_ea);
-    #[cfg(windows)]
-    let valid_coordination = binding.store_key == layout.coordination_key.binding_sha256();
-    #[cfg(not(windows))]
-    let valid_coordination = layout
-        .wsb_discard_control_path()?
-        .file_name()
-        .and_then(|value| value.to_str())
-        .and_then(|value| value.strip_prefix(WSB_DISCARD_CURRENT_PREFIX))
-        .is_some_and(|value| value == binding.store_key);
     if value.schema_version != WSB_REVOCATION_SCHEMA_VERSION
-        || value.run_id != plan.run_id
-        || value.plan_sha256 != plan.hash()?
-        || value.import_receipt_sha256 != hash_value(import)?
-        || value.workspace_identity_sha256 != import.workspace_identity_sha256
+        || workspace.validate().is_err()
+        || value.run_id.is_empty()
         || binding.schema_version != DISCARD_INTENT_BINDING_SCHEMA_VERSION
         || binding.policy_version != DISCARD_INTENT_BINDING_POLICY_VERSION
-        || binding.run_id != plan.run_id
+        || binding.run_id != value.run_id
         || binding.owner_sid != workspace.owner_sid
         || binding.store_key.len() != 64
         || !is_hash_fragment(&binding.store_key)
-        || !valid_coordination
         || binding.intent_sha256 != value.discard_intent_sha256
         || binding.intent_size == 0
         || binding.intent_size > MAX_DISCARD_INTENT_BYTES
         || !valid_stage_leaf
         || !valid_parent_id
         || !valid_intent_id
-        || !valid_ea
-        || !same_path_text(
-            &binding.final_path,
-            &layout.wsb_discard_control_path()?.to_string_lossy(),
-        )
+        || !validate_discard_intent_ea(&binding.intent_ea)
+        || !same_path_text(&binding.final_path, &expected_control.to_string_lossy())
+        || value.workspace_identity_sha256 != hash_value(workspace)?
     {
         return Err(run_error(
             "AIW_WSB_REVOCATION_INVALID",
-            "Windows Sandbox revocation bindings are invalid",
+            "Windows Sandbox revocation shape is invalid",
             "revocation",
-            &plan.run_id,
+            &value.run_id,
         ));
     }
-    validate_hash(&value.cleanup_id, "cleanupId", &plan.run_id)?;
+    validate_hash(&value.cleanup_id, "cleanupId", &value.run_id)?;
     validate_hash(
         &value.discard_intent_sha256,
         "discardIntentSha256",
-        &plan.run_id,
+        &value.run_id,
     )?;
+    validate_hash(&value.plan_sha256, "planSha256", &value.run_id)?;
     validate_hash(
         &value.import_receipt_sha256,
         "importReceiptSha256",
-        &plan.run_id,
+        &value.run_id,
     )?;
     validate_hash(
         &value.workspace_identity_sha256,
         "workspaceIdentitySha256",
-        &plan.run_id,
+        &value.run_id,
     )?;
-    validate_text("requestedBy", &value.requested_by, &plan.run_id)?;
-    validate_text("requestedAt", &value.requested_at, &plan.run_id)
+    validate_text("requestedBy", &value.requested_by, &value.run_id)?;
+    validate_text("requestedAt", &value.requested_at, &value.run_id)
 }
 
 fn validate_discard_intent_ea(ea: &aiw_probe::DiscardIntentEaBinding) -> bool {
@@ -3218,6 +3359,9 @@ fn validate_discard_intent_ea(ea: &aiw_probe::DiscardIntentEaBinding) -> bool {
         } else {
             entry.value_length > 0
         };
+        if !is_fixed_lower_hex(&entry.value_sha256, 64) {
+            return false;
+        }
         let Ok(value_hash) = hex::decode(&entry.value_sha256) else {
             return false;
         };
@@ -3230,7 +3374,8 @@ fn validate_discard_intent_ea(ea: &aiw_probe::DiscardIntentEaBinding) -> bool {
         canonical.extend_from_slice(&entry.value_length.to_le_bytes());
         canonical.extend_from_slice(&value_hash);
     }
-    ea.canonical_sha256 == hex::encode(Sha256::digest(&canonical))
+    is_fixed_lower_hex(&ea.canonical_sha256, 64)
+        && ea.canonical_sha256 == hex::encode(Sha256::digest(&canonical))
 }
 
 fn is_hash_fragment(value: &str) -> bool {
@@ -3346,6 +3491,13 @@ fn hash_value<T: Serialize>(value: &T) -> Result<String, AiwError> {
         )
     })?;
     Ok(hex::encode(Sha256::digest(bytes)))
+}
+
+fn is_fixed_lower_hex(value: &str, length: usize) -> bool {
+    value.len() == length
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
 }
 
 /// Hashes the canonical, validated project wire representation bound into a run plan.
@@ -4039,6 +4191,306 @@ mod tests {
         ));
         fs::create_dir(&path).unwrap();
         fs::canonicalize(path).unwrap()
+    }
+
+    fn checkpoint_fixture() -> WsbDiscardCheckpointV0Alpha1 {
+        let owner = "S-1-5-21-1".to_owned();
+        let identity = |path: &str, marker: u8| aiw_probe::WindowsFileIdentity {
+            final_path: path.to_owned(),
+            volume_serial_number: "1".repeat(16),
+            file_id: format!("{marker:032x}"),
+        };
+        let workspace = WorkspaceBindingEvidence {
+            schema_version: aiw_probe::WINDOWS_WORKSPACE_SCHEMA_VERSION.to_owned(),
+            policy: aiw_probe::WINDOWS_WORKSPACE_SECURITY_POLICY.to_owned(),
+            security_policy_sha256: aiw_probe::workspace_policy_hash(&owner),
+            owner_sid: owner.clone(),
+            dacl_protected: true,
+            allowed_sids: vec![aiw_probe::WINDOWS_SYSTEM_SID.to_owned(), owner.clone()],
+            parent: identity(r"C:\AIW", 1),
+            root: identity(r"C:\AIW\workspace", 2),
+            tools: identity(r"C:\AIW\workspace\tools", 3),
+            output: identity(r"C:\AIW\workspace\output", 4),
+        };
+        let kinds = [
+            (
+                "workspaceRoot",
+                ".",
+                true,
+                "ownerSystemProtected",
+                "noStreams",
+            ),
+            (
+                "toolsDirectory",
+                "tools",
+                true,
+                "ownerSystemProtected",
+                "noStreams",
+            ),
+            (
+                "outputDirectory",
+                "output",
+                true,
+                "ownerSystemProtected",
+                "noStreams",
+            ),
+            (
+                "runsDirectory",
+                "runs",
+                true,
+                "ownerSystemInherited",
+                "noStreams",
+            ),
+            (
+                "locksDirectory",
+                "runs/.locks",
+                true,
+                "ownerSystemInherited",
+                "noStreams",
+            ),
+            (
+                "runDirectory",
+                "runs/run-one",
+                true,
+                "ownerSystemInherited",
+                "noStreams",
+            ),
+            (
+                "journalHeadsDirectory",
+                "runs/run-one/journal-heads",
+                true,
+                "ownerSystemInherited",
+                "noStreams",
+            ),
+            (
+                "guestAgent",
+                "tools/aiw-guest-agent.exe",
+                false,
+                "ownerSystemInherited",
+                "unnamedDataOnly",
+            ),
+            (
+                "preparedPlan",
+                "plan.json",
+                false,
+                "ownerSystemInherited",
+                "unnamedDataOnly",
+            ),
+            (
+                "windowsSandboxPlan",
+                "wsb-plan.json",
+                false,
+                "ownerSystemInherited",
+                "unnamedDataOnly",
+            ),
+            (
+                "preparationReceipt",
+                "preparation.json",
+                false,
+                "ownerSystemInherited",
+                "unnamedDataOnly",
+            ),
+            (
+                "runLock",
+                "runs/.locks/run-one.lock",
+                false,
+                "ownerSystemInherited",
+                "unnamedDataOnly",
+            ),
+            (
+                "authoritativePlan",
+                "runs/run-one/plan.json",
+                false,
+                "ownerSystemInherited",
+                "unnamedDataOnly",
+            ),
+            (
+                "planningImportReceipt",
+                "runs/run-one/wsb-planning-import.json",
+                false,
+                "ownerSystemInherited",
+                "unnamedDataOnly",
+            ),
+            (
+                "eventsJournal",
+                "runs/run-one/events.jsonl",
+                false,
+                "ownerSystemInherited",
+                "unnamedDataOnly",
+            ),
+            (
+                "revocationRecord",
+                "runs/run-one/wsb-revocation.json",
+                false,
+                "ownerSystemInherited",
+                "unnamedDataOnly",
+            ),
+            (
+                "journalHead1",
+                "runs/run-one/journal-heads/00000000000000000001.json",
+                false,
+                "ownerSystemInherited",
+                "unnamedDataOnly",
+            ),
+            (
+                "journalHead2",
+                "runs/run-one/journal-heads/00000000000000000002.json",
+                false,
+                "ownerSystemInherited",
+                "unnamedDataOnly",
+            ),
+            (
+                "journalHead3",
+                "runs/run-one/journal-heads/00000000000000000003.json",
+                false,
+                "ownerSystemInherited",
+                "unnamedDataOnly",
+            ),
+        ];
+        let empty_ea = hex::encode(Sha256::digest([]));
+        let objects = kinds
+            .iter()
+            .enumerate()
+            .map(|(index, (kind, path, directory, acl, stream))| {
+                let marker = match index {
+                    0 => 2,
+                    1 => 3,
+                    2 => 4,
+                    _ => index as u8 + 5,
+                };
+                let mut value = serde_json::json!({
+                    "kind": kind,
+                    "relativePath": path,
+                    "id": {"volumeSerialNumber": "1".repeat(16), "fileId": format!("{marker:032x}")},
+                    "isDirectory": directory,
+                    "attributes": if *directory { 16 } else { 32 },
+                    "linkCount": 1,
+                    "aclPolicy": acl,
+                    "streamPolicy": stream,
+                    "ea": {"entries": [], "canonicalSha256": empty_ea}
+                });
+                if !directory {
+                    value["sizeBytes"] = serde_json::json!(if *kind == "runLock" { 0 } else { 1 });
+                    value["sha256"] = serde_json::json!("a".repeat(64));
+                }
+                serde_json::from_value(value).unwrap()
+            })
+            .collect();
+        let inventory = WsbFixedTreeInventoryEvidence {
+            schema_version: aiw_probe::WSB_FIXED_TREE_INVENTORY_SCHEMA_VERSION.to_owned(),
+            contract_version: WSB_FIXED_TREE_CONTRACT_VERSION.to_owned(),
+            run_id: "run-one".to_owned(),
+            workspace: workspace.clone(),
+            parent_id: DiscardIntentStableId {
+                volume_serial_number: workspace.parent.volume_serial_number.clone(),
+                file_id: workspace.parent.file_id.clone(),
+            },
+            original_root: workspace.root.final_path.clone(),
+            tombstone_leaf: format!(".aiw-discarded-v1-{}", "d".repeat(64)),
+            objects,
+        };
+        assert!(inventory.validate().is_ok());
+        let binding = DiscardIntentBindingEvidence {
+            schema_version: DISCARD_INTENT_BINDING_SCHEMA_VERSION.to_owned(),
+            policy_version: DISCARD_INTENT_BINDING_POLICY_VERSION.to_owned(),
+            run_id: "run-one".to_owned(),
+            owner_sid: owner,
+            store_key: "c".repeat(64),
+            final_path: format!(r"C:\AIW\.aiw-discard-v1-{}", "c".repeat(64)),
+            staging_leaf: format!(".aiw-discard-stage-v1-{}-1234567890abcdef", "c".repeat(64)),
+            parent_id: inventory.parent_id.clone(),
+            intent_id: DiscardIntentStableId {
+                volume_serial_number: "1".repeat(16),
+                file_id: "e".repeat(32),
+            },
+            intent_size: 1,
+            intent_sha256: "b".repeat(64),
+            intent_ea: aiw_probe::DiscardIntentEaBinding {
+                queried_bytes: 0,
+                entries: vec![],
+                canonical_sha256: empty_ea,
+            },
+        };
+        let revocation = WsbRevocationRecord {
+            schema_version: WSB_REVOCATION_SCHEMA_VERSION.to_owned(),
+            run_id: "run-one".to_owned(),
+            cleanup_id: "d".repeat(64),
+            discard_intent_sha256: "b".repeat(64),
+            discard_intent_binding: binding,
+            plan_sha256: "1".repeat(64),
+            import_receipt_sha256: "2".repeat(64),
+            workspace_identity_sha256: hash_value(&workspace).unwrap(),
+            requested_by: "admin".to_owned(),
+            requested_at: "now".to_owned(),
+        };
+        WsbDiscardCheckpointV0Alpha1 {
+            schema_version: WSB_DISCARD_CHECKPOINT_SCHEMA_VERSION.to_owned(),
+            policy_version: WSB_DISCARD_CHECKPOINT_POLICY_VERSION.to_owned(),
+            run_id: "run-one".to_owned(),
+            cleanup_id: "d".repeat(64),
+            fixed_tree_contract_version: WSB_FIXED_TREE_CONTRACT_VERSION.to_owned(),
+            revocation_sha256: hash_value(&revocation).unwrap(),
+            inventory_sha256: hash_value(&inventory).unwrap(),
+            revocation,
+            inventory,
+            checkpoint_file: WsbDiscardCheckpointFileIdentity {
+                parent_id: DiscardIntentStableId {
+                    volume_serial_number: "1".repeat(16),
+                    file_id: format!("{:032x}", 1),
+                },
+                file_id: DiscardIntentStableId {
+                    volume_serial_number: "1".repeat(16),
+                    file_id: "f".repeat(32),
+                },
+            },
+        }
+    }
+
+    #[test]
+    fn discard_checkpoint_cross_bindings_fail_closed() {
+        let checkpoint = checkpoint_fixture();
+        checkpoint.validate().unwrap();
+        let mut changed = checkpoint.clone();
+        changed.cleanup_id = "0".repeat(64);
+        assert!(changed.validate().is_err());
+        let mut changed = checkpoint.clone();
+        changed.inventory_sha256 = "0".repeat(64);
+        assert!(changed.validate().is_err());
+        let mut changed = checkpoint.clone();
+        changed.revocation.plan_sha256 = "0".repeat(64);
+        assert!(changed.validate().is_err());
+        let mut changed = checkpoint.clone();
+        changed.revocation.discard_intent_binding.staging_leaf = "foreign".to_owned();
+        changed.revocation_sha256 = hash_value(&changed.revocation).unwrap();
+        assert!(changed.validate().is_err());
+        let mut changed = checkpoint.clone();
+        changed.revocation.discard_intent_binding.intent_id =
+            changed.revocation.discard_intent_binding.parent_id.clone();
+        changed.revocation_sha256 = hash_value(&changed.revocation).unwrap();
+        assert!(changed.validate().is_err());
+        let mut changed = checkpoint.clone();
+        changed.revocation.discard_intent_binding.intent_size = 0;
+        changed.revocation_sha256 = hash_value(&changed.revocation).unwrap();
+        assert!(changed.validate().is_err());
+        let mut changed = checkpoint.clone();
+        changed.revocation.discard_intent_binding.intent_ea = aiw_probe::DiscardIntentEaBinding {
+            queried_bytes: 64,
+            entries: vec![aiw_probe::DiscardIntentEaEntry {
+                name: "$KERNEL.PURGE.SMARTLOCKER.VALID".to_owned(),
+                flags: 1,
+                value_length: 4,
+                value_sha256: "a".repeat(64),
+            }],
+            canonical_sha256: "a".repeat(64),
+        };
+        changed.revocation_sha256 = hash_value(&changed.revocation).unwrap();
+        assert!(changed.validate().is_err());
+        let mut changed = checkpoint.clone();
+        changed.checkpoint_file.file_id = changed.inventory.objects[0].id.clone();
+        assert!(changed.validate().is_err());
+        let mut changed = checkpoint;
+        changed.inventory.tombstone_leaf = format!(".aiw-discarded-v1-{}", "0".repeat(64));
+        assert!(changed.validate().is_err());
     }
 
     fn plan(run_id: &str) -> RunPlan {
