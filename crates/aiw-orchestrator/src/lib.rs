@@ -10,7 +10,7 @@ use std::{
     collections::BTreeMap,
     fmt,
     fs::{self, File, OpenOptions},
-    io::{self, Read, Write},
+    io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -29,8 +29,9 @@ use aiw_probe::{
 use aiw_schema::Project;
 #[cfg(windows)]
 use aiw_windows_platform::{
-    HeldDiscardIntentPublication, RunCoordinationError, RunCoordinationKey, RunCoordinationLease,
-    RunCoordinationMode, try_acquire_run_coordination,
+    BoundWorkspaceDirectory, HeldDiscardIntentPublication, HeldRunWorkspace, RunCoordinationError,
+    RunCoordinationKey, RunCoordinationLease, RunCoordinationMode, WorkspaceAclPolicy,
+    try_acquire_run_coordination,
 };
 use fs4::FileExt;
 use schemars::JsonSchema;
@@ -614,6 +615,33 @@ pub struct WsbRevocationGuard<'a> {
     committed_revocation: Option<WsbRevocationRecord>,
 }
 
+/// Opaque two-phase revocation authority. It holds coordination and the run
+/// lock while the runner reopens the independently receipt-bound workspace.
+#[cfg(windows)]
+#[doc(hidden)]
+pub struct WsbRevocationLease<'a> {
+    layout: &'a RunLayout,
+    lock: RunLock,
+}
+
+#[cfg(windows)]
+impl<'a> WsbRevocationLease<'a> {
+    pub fn begin_bound(
+        self,
+        workspace: &HeldRunWorkspace,
+    ) -> Result<WsbRevocationGuard<'a>, AiwError> {
+        self.layout
+            .revalidate_bound_workspace(workspace, "revocation")?;
+        self.layout.begin_wsb_revocation_locked(
+            self.lock,
+            |layout| layout.repair_revocation_journal_bound_locked(workspace),
+            |layout, revocation, hash| {
+                layout.publish_wsb_revocation_artifact_bound_locked(workspace, revocation, hash)
+            },
+        )
+    }
+}
+
 /// Opaque post-publication authority. It retains the owner-scoped outer
 /// coordination lease and exact external intent handle; no descendant
 /// workspace handle remains reachable.
@@ -655,6 +683,27 @@ impl<'a> WsbRevocationGuard<'a> {
     ) -> Result<(), AiwError> {
         self.layout
             .write_wsb_revocation_locked(&self.plan, &self.import, revocation)?;
+        self.recoverable_revocation = Some(revocation.clone());
+        self.committed_revocation = Some(revocation.clone());
+        Ok(())
+    }
+
+    /// Persist a Windows Sandbox revocation through the held preparation
+    /// workspace.  The caller must supply the same live workspace authority
+    /// that was used to import this run; a path-only reopening is never used
+    /// for the revocation or its journal heads.
+    #[cfg(windows)]
+    pub fn persist_staged_revocation_bound(
+        &mut self,
+        workspace: &HeldRunWorkspace,
+        revocation: &WsbRevocationRecord,
+    ) -> Result<(), AiwError> {
+        self.layout.write_wsb_revocation_artifact_bound_locked(
+            workspace,
+            &self.plan,
+            &self.import,
+            revocation,
+        )?;
         self.recoverable_revocation = Some(revocation.clone());
         self.committed_revocation = Some(revocation.clone());
         Ok(())
@@ -1030,6 +1079,155 @@ impl RunLayout {
             };
         self.verify_pristine_pending_wsb_import_locked(plan, receipt)?;
         Ok(disposition)
+    }
+
+    /// Windows-only WSB import path.  The caller retains the workspace
+    /// authority created during preparation so every fixed-tree entry is
+    /// created relative to a held parent and never adopted by path.
+    #[cfg(windows)]
+    pub fn create_or_verify_pending_wsb_import_bound(
+        &self,
+        workspace: &HeldRunWorkspace,
+        plan: &RunPlan,
+        receipt: &WsbPlanningImportReceipt,
+    ) -> Result<PendingRunDisposition, AiwError> {
+        validate_plan(plan)?;
+        if plan.run_id != self.run_id || !has_wsb_action(plan) {
+            return Err(run_error(
+                "AIW_WSB_IMPORT_INVALID",
+                "verified import requires the matching Windows Sandbox plan",
+                "create",
+                &self.run_id,
+            ));
+        }
+        validate_wsb_import(receipt, plan)?;
+        self.revalidate_bound_workspace(workspace, "create")?;
+        let _lock = self.acquire_bound_wsb_import_lock(workspace, "create", false)?;
+        self.reject_if_wsb_discard_started_locked(plan, "create")?;
+
+        let disposition =
+            if optional_non_reparse_directory(&self.run_dir(), &self.run_id, "create")? {
+                PendingRunDisposition::AlreadyPresent
+            } else {
+                self.create_or_resume_wsb_import_bound_locked(workspace, plan, receipt)?;
+                PendingRunDisposition::Created
+            };
+        self.verify_pristine_pending_wsb_import_locked(plan, receipt)?;
+        Ok(disposition)
+    }
+
+    #[cfg(windows)]
+    fn revalidate_bound_workspace(
+        &self,
+        workspace: &HeldRunWorkspace,
+        stage: &'static str,
+    ) -> Result<(), AiwError> {
+        workspace
+            .revalidate()
+            .map_err(|error| workspace_storage_error(stage, &self.run_id, error))?;
+        if !same_path_text(
+            workspace.root_path().to_string_lossy().as_ref(),
+            self.root.to_string_lossy().as_ref(),
+        ) {
+            return Err(path_error(
+                "held workspace differs from run layout root",
+                &self.run_id,
+                workspace.root_path(),
+            ));
+        }
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    fn acquire_bound_wsb_import_lock(
+        &self,
+        workspace: &HeldRunWorkspace,
+        stage: &'static str,
+        allow_existing_discard_authority: bool,
+    ) -> Result<RunLock, AiwError> {
+        let coordination = self.acquire_outer_coordination(stage)?;
+        if !allow_existing_discard_authority {
+            self.reject_if_discard_control_present(stage)?;
+        }
+        self.revalidate_bound_workspace(workspace, stage)?;
+        let runs = bind_or_create_root_directory(workspace, "runs", &self.run_id, stage)?;
+        let locks = bind_or_create_directory(&runs, ".locks", &self.run_id, stage)?;
+        let leaf = format!("{}.lock", self.run_id);
+        let file = match locks.create_file_new(&leaf) {
+            Ok(created) => created.into_file(),
+            Err(aiw_windows_platform::WorkspaceError::AlreadyExists) => locks
+                .reopen_file(&leaf)
+                .map_err(|error| workspace_storage_error(stage, &self.run_id, error))?
+                .into_file(),
+            Err(error) => return Err(workspace_storage_error(stage, &self.run_id, error)),
+        };
+        FileExt::lock(&file).map_err(|error| storage_error(stage, &self.run_id, error))?;
+        self.revalidate_bound_workspace(workspace, stage)?;
+        Ok(RunLock {
+            _coordination: coordination,
+            _inner_file: Some(file),
+        })
+    }
+
+    #[cfg(windows)]
+    fn create_or_resume_wsb_import_bound_locked(
+        &self,
+        workspace: &HeldRunWorkspace,
+        plan: &RunPlan,
+        receipt: &WsbPlanningImportReceipt,
+    ) -> Result<(), AiwError> {
+        let runs = bind_or_create_root_directory(workspace, "runs", &self.run_id, "create")?;
+        let stage_leaf = self
+            .wsb_import_stage_path(plan)?
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| journal_error(&self.run_id, "invalid WSB import stage leaf"))?
+            .to_owned();
+        let stage = bind_or_create_directory(&runs, &stage_leaf, &self.run_id, "create")?;
+        validate_bound_wsb_stage_namespace(&stage, &self.run_id)?;
+        let heads = bind_or_create_directory(&stage, "journal-heads", &self.run_id, "create")?;
+
+        let plan_bytes = json_file_bytes(plan, &self.run_id)?;
+        let receipt_bytes = json_file_bytes(receipt, &self.run_id)?;
+        let plan_hash = plan.hash()?;
+        let receipt_hash = hash_value(receipt)?;
+        let event = artifact_event(
+            RunEventKind::Created,
+            &plan.created_at,
+            "verified Windows Sandbox preparation imported",
+            &receipt_hash,
+        )?;
+        let record = build_record(&self.run_id, &plan_hash, 1, ZERO_HASH, event)?;
+        let mut journal_bytes = serde_json::to_vec(&record)
+            .map_err(|error| serialization_error("create", &self.run_id, error))?;
+        journal_bytes.push(b'\n');
+        let head = JournalHead {
+            schema: HEAD_SCHEMA.to_owned(),
+            run_id: self.run_id.clone(),
+            plan_hash,
+            sequence: 1,
+            hash: record.hash,
+        };
+        let head_bytes = json_file_bytes(&head, &self.run_id)?;
+
+        reconcile_bound_wsb_file(&stage, "plan.json", &plan_bytes, &self.run_id)?;
+        reconcile_bound_wsb_file(
+            &stage,
+            WSB_PLANNING_IMPORT_FILE,
+            &receipt_bytes,
+            &self.run_id,
+        )?;
+        reconcile_bound_wsb_file(&stage, "events.jsonl", &journal_bytes, &self.run_id)?;
+        reconcile_bound_wsb_file(&heads, &head_name(1), &head_bytes, &self.run_id)?;
+        self.verify_wsb_import_stage(stage.final_path(), plan, receipt)?;
+        // `heads` retains a duplicate of the stage directory as its parent
+        // authority. Release it before the stage is reopened with DELETE for
+        // the one non-replacing publication rename.
+        drop(heads);
+        stage
+            .publish_into_bound(&runs, &self.run_id)
+            .map_err(|error| workspace_storage_error("create", &self.run_id, error))?;
+        Ok(())
     }
 
     fn create_locked(&self, plan: &RunPlan) -> Result<(), AiwError> {
@@ -1862,6 +2060,32 @@ impl RunLayout {
     #[doc(hidden)]
     pub fn begin_wsb_revocation(&self) -> Result<WsbRevocationGuard<'_>, AiwError> {
         let lock = self.acquire_discard_inspection_lock("revocation")?;
+        self.begin_wsb_revocation_locked(
+            lock,
+            |layout| layout.repair_revocation_journal_locked(),
+            |layout, revocation, hash| {
+                layout.publish_wsb_revocation_artifact_locked(revocation, hash)
+            },
+        )
+    }
+
+    #[cfg(windows)]
+    #[doc(hidden)]
+    pub fn acquire_wsb_revocation_lease(&self) -> Result<WsbRevocationLease<'_>, AiwError> {
+        let lock = self.acquire_discard_inspection_lock("revocation")?;
+        Ok(WsbRevocationLease { layout: self, lock })
+    }
+
+    fn begin_wsb_revocation_locked<R, F>(
+        &self,
+        lock: RunLock,
+        repair_journal: R,
+        publish_recorded: F,
+    ) -> Result<WsbRevocationGuard<'_>, AiwError>
+    where
+        R: FnOnce(&RunLayout) -> Result<Vec<JournalRecord>, AiwError>,
+        F: FnOnce(&RunLayout, &WsbRevocationRecord, &str) -> Result<(), AiwError>,
+    {
         self.validate_run_dir()?;
         let plan = self.read_plan_locked()?;
         self.validate_wsb_import_provenance_locked(&plan, "revocation")?;
@@ -1906,7 +2130,7 @@ impl RunLayout {
         }
         let records = if discard_started {
             self.verify_revocation_run_allowlist_locked()?;
-            self.repair_revocation_journal_locked()?
+            repair_journal(self)?
         } else {
             self.verify_pristine_pending_wsb_import_locked(&plan, &import)?;
             self.load_records(false)?
@@ -1939,7 +2163,7 @@ impl RunLayout {
                     &self.run_id,
                 )
             })?;
-            self.publish_wsb_revocation_artifact_locked(revocation, &hash_value(revocation)?)?;
+            publish_recorded(self, revocation, &hash_value(revocation)?)?;
         }
         let committed_revocation = revocation_recorded.then(|| {
             recoverable_revocation
@@ -2105,6 +2329,311 @@ impl RunLayout {
             &expected_hash,
         )?)?;
         Ok(())
+    }
+
+    #[cfg(windows)]
+    fn write_wsb_revocation_artifact_bound_locked(
+        &self,
+        workspace: &HeldRunWorkspace,
+        plan: &RunPlan,
+        import: &WsbPlanningImportReceipt,
+        revocation: &WsbRevocationRecord,
+    ) -> Result<(), AiwError> {
+        self.revalidate_bound_workspace(workspace, "revocation")?;
+        validate_wsb_revocation(revocation, plan, import, self)?;
+        let (run, heads) = self.bind_wsb_revocation_run_directories(workspace)?;
+        let records = self.load_records(false)?;
+        self.verify_committed(&records)?;
+        let expected_hash = hash_value(revocation)?;
+        if records
+            .iter()
+            .any(|record| record.event.kind == RunEventKind::RevocationRecorded)
+        {
+            let observed = self
+                .read_recoverable_wsb_revocation_locked(plan, import, &records)?
+                .ok_or_else(|| {
+                    run_error(
+                        "AIW_WSB_DISCARD_STATE_INVALID",
+                        "recorded revocation has no recoverable binding",
+                        "revocation",
+                        &self.run_id,
+                    )
+                })?;
+            if observed != *revocation {
+                return Err(run_error(
+                    "AIW_WSB_REVOCATION_CONFLICT",
+                    "existing Windows Sandbox revocation differs from this request",
+                    "revocation",
+                    &self.run_id,
+                ));
+            }
+            return self.publish_wsb_revocation_artifact_bound_from_directories(
+                &run,
+                revocation,
+                &expected_hash,
+            );
+        }
+        if records.len() == 1 {
+            let target = self.wsb_revocation_path();
+            let pending = self.pending_path(&target);
+            let pending_pending = self.pending_path(&pending);
+            if target.exists() {
+                return Err(run_error(
+                    "AIW_ARTIFACT_UNJOURNALED",
+                    "committed revocation artifact exists without a journal intent",
+                    "revocation",
+                    &self.run_id,
+                ));
+            }
+            if pending.exists() {
+                self.verify_revocation_file_locked(&pending, revocation, &expected_hash)?;
+            } else {
+                if pending_pending.exists() {
+                    return Err(run_error(
+                        "AIW_WSB_DISCARD_STATE_INVALID",
+                        "incomplete revocation binding blocks automatic recovery",
+                        "revocation",
+                        &self.run_id,
+                    ));
+                }
+                let bytes = json_file_bytes(revocation, &self.run_id)?;
+                reconcile_bound_wsb_file(
+                    &run,
+                    "wsb-revocation.json.pending",
+                    &bytes,
+                    &self.run_id,
+                )?;
+            }
+            self.append_record_bound(
+                &run,
+                &heads,
+                artifact_event(
+                    RunEventKind::RevocationIntent,
+                    &revocation.requested_at,
+                    "revocation mutation prepared",
+                    &expected_hash,
+                )?,
+            )?;
+        }
+        let records = self.load_records(false)?;
+        self.verify_committed(&records)?;
+        let last = records.last().expect("genesis checked");
+        if last.event.kind != RunEventKind::RevocationIntent
+            || last.event.artifact_hash.as_deref() != Some(expected_hash.as_str())
+        {
+            return Err(run_error(
+                "AIW_WSB_DISCARD_STATE_INVALID",
+                "run lifecycle changed before revocation completed",
+                "revocation",
+                &self.run_id,
+            ));
+        }
+        self.publish_wsb_revocation_artifact_bound_from_directories(
+            &run,
+            revocation,
+            &expected_hash,
+        )?;
+        self.append_record_bound(
+            &run,
+            &heads,
+            artifact_event(
+                RunEventKind::RevocationRecorded,
+                &revocation.requested_at,
+                "revocation persisted",
+                &expected_hash,
+            )?,
+        )?;
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    fn bind_wsb_revocation_run_directories(
+        &self,
+        workspace: &HeldRunWorkspace,
+    ) -> Result<(BoundWorkspaceDirectory, BoundWorkspaceDirectory), AiwError> {
+        self.revalidate_bound_workspace(workspace, "revocation")?;
+        let runs = workspace
+            .reopen_root_directory("runs", WorkspaceAclPolicy::Inherited)
+            .map_err(|error| workspace_storage_error("revocation", &self.run_id, error))?;
+        let run = runs
+            .reopen_directory(&self.run_id, WorkspaceAclPolicy::Inherited)
+            .map_err(|error| workspace_storage_error("revocation", &self.run_id, error))?;
+        let heads = run
+            .reopen_directory("journal-heads", WorkspaceAclPolicy::Inherited)
+            .map_err(|error| workspace_storage_error("revocation", &self.run_id, error))?;
+        run.revalidate()
+            .map_err(|error| workspace_storage_error("revocation", &self.run_id, error))?;
+        heads
+            .revalidate()
+            .map_err(|error| workspace_storage_error("revocation", &self.run_id, error))?;
+        Ok((run, heads))
+    }
+
+    #[cfg(windows)]
+    fn publish_wsb_revocation_artifact_bound_locked(
+        &self,
+        workspace: &HeldRunWorkspace,
+        revocation: &WsbRevocationRecord,
+        expected_hash: &str,
+    ) -> Result<(), AiwError> {
+        let (run, _heads) = self.bind_wsb_revocation_run_directories(workspace)?;
+        self.publish_wsb_revocation_artifact_bound_from_directories(&run, revocation, expected_hash)
+    }
+
+    #[cfg(windows)]
+    fn publish_wsb_revocation_artifact_bound_from_directories(
+        &self,
+        run: &BoundWorkspaceDirectory,
+        revocation: &WsbRevocationRecord,
+        expected_hash: &str,
+    ) -> Result<(), AiwError> {
+        let target = self.wsb_revocation_path();
+        let pending = self.pending_path(&target);
+        let pending_pending = self.pending_path(&pending);
+        let has_target = optional_non_reparse_file(&target, &self.run_id, "revocation")?;
+        let has_pending = optional_non_reparse_file(&pending, &self.run_id, "revocation")?;
+        let has_partial_pending =
+            optional_non_reparse_file(&pending_pending, &self.run_id, "revocation")?;
+
+        if has_pending {
+            self.verify_revocation_file_locked(&pending, revocation, expected_hash)?;
+            if has_partial_pending {
+                remove_pending(&pending_pending, &self.run_id)?;
+            }
+        } else {
+            if has_partial_pending {
+                if !has_target {
+                    return Err(run_error(
+                        "AIW_WSB_DISCARD_STATE_INVALID",
+                        "incomplete revocation binding blocks publication",
+                        "revocation",
+                        &self.run_id,
+                    ));
+                }
+                self.verify_revocation_file_locked(&target, revocation, expected_hash)?;
+                remove_pending(&pending_pending, &self.run_id)?;
+            }
+            let bytes = json_file_bytes(revocation, &self.run_id)?;
+            reconcile_bound_wsb_file(run, "wsb-revocation.json.pending", &bytes, &self.run_id)?;
+        }
+        self.verify_revocation_file_locked(&pending, revocation, expected_hash)?;
+        if has_target {
+            fs::remove_file(&target)
+                .map_err(|error| storage_error("revocation", &self.run_id, error))?;
+        }
+        // Keep the complete pending binding in place until a separately
+        // created nested pending file has been published at the final name.
+        // Unlike recreating `wsb-revocation.json.pending` in place, this
+        // leaves a durable recovery source throughout the pending -> final
+        // boundary.
+        let bytes = json_file_bytes(revocation, &self.run_id)?;
+        let nested_leaf = "wsb-revocation.json.pending.pending";
+        if optional_non_reparse_file(
+            &run.final_path().join(nested_leaf),
+            &self.run_id,
+            "revocation",
+        )? {
+            return Err(run_error(
+                "AIW_WSB_DISCARD_STATE_INVALID",
+                "incomplete nested revocation publication blocks recovery",
+                "revocation",
+                &self.run_id,
+            ));
+        }
+        let mut created = run
+            .create_file_new(nested_leaf)
+            .map_err(|error| workspace_storage_error("revocation", &self.run_id, error))?;
+        created
+            .as_file_mut()
+            .write_all(&bytes)
+            .and_then(|_| created.as_file_mut().sync_all())
+            .map_err(|error| storage_error("revocation", &self.run_id, error))?;
+        created
+            .publish_into_bound(run, "wsb-revocation.json")
+            .map_err(|error| workspace_storage_error("revocation", &self.run_id, error))?;
+        self.verify_revocation_file_locked(&target, revocation, expected_hash)?;
+        let pending_file = run
+            .reopen_file("wsb-revocation.json.pending")
+            .map_err(|error| workspace_storage_error("revocation", &self.run_id, error))?;
+        pending_file
+            .revalidate()
+            .map_err(|error| workspace_storage_error("revocation", &self.run_id, error))?;
+        drop(pending_file);
+        fs::remove_file(&pending).map_err(|error| storage_error("revocation", &self.run_id, error))
+    }
+
+    #[cfg(windows)]
+    fn append_record_bound(
+        &self,
+        run: &BoundWorkspaceDirectory,
+        heads: &BoundWorkspaceDirectory,
+        event: RunEvent,
+    ) -> Result<JournalRecord, AiwError> {
+        validate_event(&event)?;
+        let mut records = self.load_records(false)?;
+        if records.len() >= MAX_RECORDS {
+            return Err(run_error(
+                "AIW_JOURNAL_TOO_LARGE",
+                "journal reached its record bound",
+                "journal",
+                &self.run_id,
+            ));
+        }
+        let plan = self.read_plan_locked()?;
+        let plan_hash = plan.hash()?;
+        let genesis_artifact_hash = self.expected_genesis_artifact_hash_locked(&plan)?;
+        let sequence = records.last().map_or(1, |record| record.sequence + 1);
+        let previous = records
+            .last()
+            .map_or(ZERO_HASH, |record| record.hash.as_str());
+        let record = build_record(&self.run_id, &plan_hash, sequence, previous, event)?;
+        records.push(record.clone());
+        validate_grammar(&records, &self.run_id, &genesis_artifact_hash)?;
+
+        let journal = run
+            .reopen_file("events.jsonl")
+            .map_err(|error| workspace_storage_error("journal", &self.run_id, error))?;
+        journal
+            .revalidate()
+            .map_err(|error| workspace_storage_error("journal", &self.run_id, error))?;
+        let mut bytes = serde_json::to_vec(&record)
+            .map_err(|error| serialization_error("journal", &self.run_id, error))?;
+        bytes.push(b'\n');
+        let length = journal
+            .as_file()
+            .metadata()
+            .map_err(|error| storage_error("journal", &self.run_id, error))?
+            .len();
+        if bytes.len() > MAX_LINE || length.saturating_add(bytes.len() as u64) > MAX_JOURNAL {
+            return Err(run_error(
+                "AIW_JOURNAL_TOO_LARGE",
+                "journal exceeds storage bound",
+                "journal",
+                &self.run_id,
+            ));
+        }
+        let mut file = journal
+            .as_file()
+            .try_clone()
+            .map_err(|error| storage_error("journal", &self.run_id, error))?;
+        file.seek(SeekFrom::End(0))
+            .and_then(|_| file.write_all(&bytes))
+            .and_then(|_| file.sync_all())
+            .map_err(|error| storage_error("journal", &self.run_id, error))?;
+        journal
+            .revalidate()
+            .map_err(|error| workspace_storage_error("journal", &self.run_id, error))?;
+
+        let value = JournalHead {
+            schema: HEAD_SCHEMA.into(),
+            run_id: record.run_id.clone(),
+            plan_hash: record.plan_hash.clone(),
+            sequence: record.sequence,
+            hash: record.hash.clone(),
+        };
+        let bytes = json_file_bytes(&value, &self.run_id)?;
+        reconcile_bound_wsb_file(heads, &head_name(record.sequence), &bytes, &self.run_id)?;
+        Ok(record)
     }
 
     fn verify_revocation_file_locked(
@@ -2430,6 +2959,94 @@ impl RunLayout {
         }
         self.preflight_revocation_head_repair_locked(&records)?;
         self.load_records(true)
+    }
+
+    /// Bound counterpart to revocation journal recovery.  It deliberately
+    /// does not call the ordinary journal repair path because that path may
+    /// create head files by pathname.  The run and heads handles have already
+    /// been rebound from the live preparation workspace.
+    #[cfg(windows)]
+    fn repair_revocation_journal_bound_locked(
+        &self,
+        workspace: &HeldRunWorkspace,
+    ) -> Result<Vec<JournalRecord>, AiwError> {
+        let plan = self.read_plan_locked()?;
+        let plan_hash = plan.hash()?;
+        let genesis_artifact_hash = self.expected_genesis_artifact_hash_locked(&plan)?;
+        let (run, heads) = self.bind_wsb_revocation_run_directories(workspace)?;
+        let bytes = read_bounded(
+            &self.journal_path(),
+            MAX_JOURNAL,
+            &self.run_id,
+            "revocation",
+        )?;
+        let complete_len = bytes
+            .iter()
+            .rposition(|byte| *byte == b'\n')
+            .map_or(0, |index| index + 1);
+        let mut records = Vec::new();
+        if complete_len > 0 {
+            for raw in bytes[..complete_len - 1].split(|byte| *byte == b'\n') {
+                if raw.is_empty() || raw.len() > MAX_LINE || records.len() >= MAX_RECORDS {
+                    return Err(journal_error(
+                        &self.run_id,
+                        "revocation journal input is invalid or exceeds its bound",
+                    ));
+                }
+                let record: JournalRecord = serde_json::from_slice(raw)
+                    .map_err(|error| journal_error(&self.run_id, error.to_string()))?;
+                verify_record(&record, records.last(), &self.run_id, &plan_hash)?;
+                records.push(record);
+            }
+        }
+        if records.is_empty() {
+            return Err(journal_error(&self.run_id, "journal has no genesis record"));
+        }
+        validate_grammar(&records, &self.run_id, &genesis_artifact_hash)?;
+        let lifecycle_is_revocation_only = records.len() == 1
+            || (records.len() == 2 && records[1].event.kind == RunEventKind::RevocationIntent)
+            || (records.len() == 3
+                && records[1].event.kind == RunEventKind::RevocationIntent
+                && records[2].event.kind == RunEventKind::RevocationRecorded);
+        if !lifecycle_is_revocation_only {
+            return Err(run_error(
+                "AIW_WSB_DISCARD_STATE_INVALID",
+                "external discard authority conflicts with the journal lifecycle",
+                "revocation",
+                &self.run_id,
+            ));
+        }
+        self.preflight_revocation_head_repair_locked(&records)?;
+        if complete_len != bytes.len() {
+            let journal = run
+                .reopen_file("events.jsonl")
+                .map_err(|error| workspace_storage_error("revocation", &self.run_id, error))?;
+            journal
+                .revalidate()
+                .map_err(|error| workspace_storage_error("revocation", &self.run_id, error))?;
+            journal
+                .as_file()
+                .set_len(complete_len as u64)
+                .and_then(|_| journal.as_file().sync_all())
+                .map_err(|error| storage_error("revocation", &self.run_id, error))?;
+        }
+        for record in &records {
+            let head = JournalHead {
+                schema: HEAD_SCHEMA.into(),
+                run_id: record.run_id.clone(),
+                plan_hash: record.plan_hash.clone(),
+                sequence: record.sequence,
+                hash: record.hash.clone(),
+            };
+            let head_bytes = json_file_bytes(&head, &self.run_id)?;
+            reconcile_bound_wsb_file(
+                &heads,
+                &head_name(record.sequence),
+                &head_bytes,
+                &self.run_id,
+            )?;
+        }
+        Ok(records)
     }
 
     fn preflight_revocation_head_repair_locked(
@@ -3385,9 +4002,15 @@ fn is_hash_fragment(value: &str) -> bool {
 }
 
 fn same_path_text(left: &str, right: &str) -> bool {
-    left.replace('/', "\\")
-        .trim_end_matches('\\')
-        .eq_ignore_ascii_case(right.replace('/', "\\").trim_end_matches('\\'))
+    fn normalized(value: &str) -> String {
+        let value = value.replace('/', "\\");
+        value
+            .strip_prefix(r"\\?\")
+            .unwrap_or(&value)
+            .trim_end_matches('\\')
+            .to_owned()
+    }
+    normalized(left).eq_ignore_ascii_case(&normalized(right))
 }
 
 fn validate_id(name: &str, value: &str) -> Result<(), AiwError> {
@@ -3725,6 +4348,175 @@ fn commit_for(kind: RunEventKind) -> RunEventKind {
         RunEventKind::TerminalIntent => RunEventKind::TerminalRecorded,
         _ => unreachable!("validated intent"),
     }
+}
+
+#[cfg(windows)]
+fn bind_or_create_root_directory(
+    workspace: &HeldRunWorkspace,
+    leaf: &str,
+    run_id: &str,
+    stage: &'static str,
+) -> Result<BoundWorkspaceDirectory, AiwError> {
+    match workspace.create_root_directory_new_with_policy(leaf, WorkspaceAclPolicy::Inherited) {
+        Ok(created) => {
+            let identity = created.identity().clone();
+            drop(created);
+            let bound = workspace
+                .reopen_root_directory(leaf, WorkspaceAclPolicy::Inherited)
+                .map_err(|error| workspace_storage_error(stage, run_id, error))?;
+            if bound.identity() != &identity {
+                return Err(path_error(
+                    "created directory identity changed",
+                    run_id,
+                    bound.final_path(),
+                ));
+            }
+            Ok(bound)
+        }
+        Err(aiw_windows_platform::WorkspaceError::AlreadyExists) => workspace
+            .reopen_root_directory(leaf, WorkspaceAclPolicy::Inherited)
+            .map_err(|error| workspace_storage_error(stage, run_id, error)),
+        Err(error) => Err(workspace_storage_error(stage, run_id, error)),
+    }
+}
+
+#[cfg(windows)]
+fn bind_or_create_directory(
+    parent: &BoundWorkspaceDirectory,
+    leaf: &str,
+    run_id: &str,
+    stage: &'static str,
+) -> Result<BoundWorkspaceDirectory, AiwError> {
+    match parent.create_directory_new_with_policy(leaf, WorkspaceAclPolicy::Inherited) {
+        Ok(created) => {
+            let identity = created.identity().clone();
+            drop(created);
+            let bound = parent
+                .reopen_directory(leaf, WorkspaceAclPolicy::Inherited)
+                .map_err(|error| workspace_storage_error(stage, run_id, error))?;
+            if bound.identity() != &identity {
+                return Err(path_error(
+                    "created directory identity changed",
+                    run_id,
+                    bound.final_path(),
+                ));
+            }
+            Ok(bound)
+        }
+        Err(aiw_windows_platform::WorkspaceError::AlreadyExists) => parent
+            .reopen_directory(leaf, WorkspaceAclPolicy::Inherited)
+            .map_err(|error| workspace_storage_error(stage, run_id, error)),
+        Err(error) => Err(workspace_storage_error(stage, run_id, error)),
+    }
+}
+
+#[cfg(windows)]
+fn reconcile_bound_wsb_file(
+    parent: &BoundWorkspaceDirectory,
+    leaf: &str,
+    expected: &[u8],
+    run_id: &str,
+) -> Result<(), AiwError> {
+    let target = parent.final_path().join(leaf);
+    let pending_leaf = format!("{leaf}.pending");
+    let pending = parent.final_path().join(&pending_leaf);
+    for (name, path) in [(leaf, &target), (&pending_leaf, &pending)] {
+        if path.exists() {
+            let bound = parent
+                .reopen_file(name)
+                .map_err(|error| workspace_storage_error("create", run_id, error))?;
+            let mut observed = Vec::new();
+            bound
+                .as_file()
+                .try_clone()
+                .and_then(|mut file| file.read_to_end(&mut observed))
+                .map_err(|error| storage_error("create", run_id, error))?;
+            let valid = if name == leaf {
+                observed == expected
+            } else {
+                expected.starts_with(&observed)
+            };
+            if !valid {
+                return Err(run_error(
+                    "AIW_WSB_IMPORT_STAGE_INVALID",
+                    "Windows Sandbox import stage artifact differs from its expected crash prefix",
+                    "create",
+                    run_id,
+                ));
+            }
+            // Existing valid prefixes are recovery inputs, never adopted as
+            // authority. Remove only after the strict held rebind above.
+            // The bound handle deliberately has no delete sharing, so close
+            // it only after all identity and content checks have completed.
+            drop(bound);
+            fs::remove_file(path).map_err(|error| storage_error("create", run_id, error))?;
+        }
+    }
+    let mut created = parent
+        .create_file_new(&pending_leaf)
+        .map_err(|error| workspace_storage_error("create", run_id, error))?;
+    created
+        .as_file_mut()
+        .write_all(expected)
+        .and_then(|_| created.as_file_mut().sync_all())
+        .map_err(|error| storage_error("create", run_id, error))?;
+    created
+        .publish_into_bound(parent, leaf)
+        .map_err(|error| workspace_storage_error("create", run_id, error))?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn validate_bound_wsb_stage_namespace(
+    stage: &BoundWorkspaceDirectory,
+    run_id: &str,
+) -> Result<(), AiwError> {
+    const ALLOWED: [&str; 7] = [
+        "events.jsonl",
+        "events.jsonl.pending",
+        "journal-heads",
+        "plan.json",
+        "plan.json.pending",
+        WSB_PLANNING_IMPORT_FILE,
+        "wsb-planning-import.json.pending",
+    ];
+    stage
+        .revalidate()
+        .map_err(|error| workspace_storage_error("create", run_id, error))?;
+    for entry in
+        fs::read_dir(stage.final_path()).map_err(|error| storage_error("create", run_id, error))?
+    {
+        let name = entry
+            .map_err(|error| storage_error("create", run_id, error))?
+            .file_name()
+            .into_string()
+            .map_err(|_| {
+                run_error(
+                    "AIW_WSB_IMPORT_STAGE_INVALID",
+                    "Windows Sandbox import stage contains a non-Unicode entry",
+                    "create",
+                    run_id,
+                )
+            })?;
+        if !ALLOWED.contains(&name.as_str()) {
+            return Err(run_error(
+                "AIW_WSB_IMPORT_STAGE_INVALID",
+                "Windows Sandbox import stage differs from its exact allowlist",
+                "create",
+                run_id,
+            ));
+        }
+        if name == "journal-heads" {
+            stage
+                .reopen_directory(&name, WorkspaceAclPolicy::Inherited)
+                .map_err(|error| workspace_storage_error("create", run_id, error))?;
+        } else {
+            stage
+                .reopen_file(&name)
+                .map_err(|error| workspace_storage_error("create", run_id, error))?;
+        }
+    }
+    Ok(())
 }
 
 fn append_raw(path: &Path, value: &JournalRecord, run_id: &str) -> Result<(), AiwError> {
@@ -4091,6 +4883,23 @@ fn storage_error(stage: &str, run_id: &str, error: io::Error) -> AiwError {
 }
 
 #[cfg(windows)]
+fn workspace_storage_error(
+    stage: &str,
+    run_id: &str,
+    error: aiw_windows_platform::WorkspaceError,
+) -> AiwError {
+    AiwError::new(
+        "AIW_WORKSPACE_BINDING_FAILED",
+        "held Windows workspace could not be validated or extended",
+        stage,
+        Some(run_id),
+        false,
+        "Do not modify the workspace; inspect the exact workspace identity and recover from an intact prefix.",
+        error.to_string(),
+    )
+}
+
+#[cfg(windows)]
 fn coordination_error(stage: &str, run_id: &str, error: RunCoordinationError) -> AiwError {
     match error {
         RunCoordinationError::LeaseUnavailable => AiwError::new(
@@ -4179,6 +4988,12 @@ fn limit_detail(mut detail: String) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_verbatim_prefix_is_path_identity_not_drift() {
+        assert!(same_path_text(r"C:\AIW\run-one", r"\\?\C:\AIW\run-one"));
+        assert!(!same_path_text(r"C:\AIW\run-one", r"\\?\C:\AIW\run-two"));
+    }
     #[cfg(windows)]
     use std::sync::mpsc;
     use std::{panic, sync::Arc, thread};
@@ -4530,6 +5345,27 @@ mod tests {
             tools: identity(&format!(r"C:\AIW\{run_id}\tools"), '3'),
             output: identity(&format!(r"C:\AIW\{run_id}\output"), '4'),
         };
+        let workspace_identity_sha256 = hash_value(&workspace).unwrap();
+        RunPlan::new(
+            run_id,
+            "project.one",
+            "f".repeat(64),
+            RunLifecycleKind::Assessment,
+            "2026-08-29T00:00:00Z",
+            vec![PlannedAction::ExecuteWindowsSandboxGoldenProbe {
+                sandbox_plan_sha256: "a".repeat(64),
+                provider_sha256: "b".repeat(64),
+                guest_agent_sha256: "c".repeat(64),
+                workspace: Box::new(workspace),
+                workspace_identity_sha256,
+            }],
+            vec!["starts one exact Windows Sandbox session".into()],
+        )
+        .unwrap()
+    }
+
+    #[cfg(windows)]
+    fn bound_wsb_plan(run_id: &str, workspace: WorkspaceBindingEvidence) -> RunPlan {
         let workspace_identity_sha256 = hash_value(&workspace).unwrap();
         RunPlan::new(
             run_id,
@@ -5698,6 +6534,70 @@ mod tests {
             }
         ));
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn bound_revocation_recovers_intent_only_and_recorded_prefixes() {
+        for recorded in [false, true] {
+            let base = root();
+            let workspace = HeldRunWorkspace::create(&base, "authority").unwrap();
+            let layout = layout(workspace.root_path(), "run-one");
+            let plan = bound_wsb_plan("run-one", workspace.evidence().clone());
+            let import = wsb_import(&plan);
+            let revocation = wsb_revocation(&layout, &plan, &import);
+            layout
+                .create_or_verify_pending_wsb_import_bound(&workspace, &plan, &import)
+                .unwrap();
+
+            let lease = layout.acquire_wsb_revocation_lease().unwrap();
+            let guard = lease.begin_bound(&workspace).unwrap();
+            let (run, heads) = layout
+                .bind_wsb_revocation_run_directories(&workspace)
+                .unwrap();
+            reconcile_bound_wsb_file(
+                &run,
+                "wsb-revocation.json.pending",
+                &json_file_bytes(&revocation, layout.run_id()).unwrap(),
+                layout.run_id(),
+            )
+            .unwrap();
+            if recorded {
+                let hash = hash_value(&revocation).unwrap();
+                layout
+                    .append_record_bound(
+                        &run,
+                        &heads,
+                        artifact_event(
+                            RunEventKind::RevocationIntent,
+                            &revocation.requested_at,
+                            "revocation mutation prepared",
+                            &hash,
+                        )
+                        .unwrap(),
+                    )
+                    .unwrap();
+            }
+            drop(heads);
+            drop(run);
+            drop(guard);
+
+            let lease = layout.acquire_wsb_revocation_lease().unwrap();
+            let mut retry = lease.begin_bound(&workspace).unwrap();
+            assert_eq!(retry.recoverable_revocation(), Some(&revocation));
+            retry
+                .persist_staged_revocation_bound(&workspace, &revocation)
+                .unwrap();
+            assert_eq!(retry.committed_revocation(), Some(&revocation));
+            drop(retry);
+
+            let records = layout.load_records(false).unwrap();
+            assert_eq!(records.len(), 3);
+            assert_eq!(records[1].event.kind, RunEventKind::RevocationIntent);
+            assert_eq!(records[2].event.kind, RunEventKind::RevocationRecorded);
+            drop(workspace);
+            fs::remove_dir_all(base).unwrap();
+        }
     }
 
     #[test]

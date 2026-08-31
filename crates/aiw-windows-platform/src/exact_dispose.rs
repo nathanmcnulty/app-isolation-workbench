@@ -13,6 +13,7 @@ use std::fs::{File, OpenOptions};
 use std::mem::{offset_of, size_of, size_of_val};
 use std::os::windows::fs::{FileExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use aiw_probe::{
     DiscardIntentEaEntry, DiscardIntentStableId, WSB_FIXED_OBJECT_DELETE_ORDER,
@@ -57,13 +58,20 @@ pub(crate) const ALLOWED_KERNEL_EAS: [&str; 2] = [
     "$KERNEL.PURGE.SMARTLOCKER.VALID",
     "$KERNEL.SMARTLOCKER.ORIGINCLAIM",
 ];
+const ALLOWED_KERNEL_EAS_WITH_FILE_HASH: [&str; 3] = [
+    "$KERNEL.PURGE.SEC.FILEHASH",
+    "$KERNEL.PURGE.SMARTLOCKER.VALID",
+    "$KERNEL.SMARTLOCKER.ORIGINCLAIM",
+];
 // The workspace directories have tiny exact allowlists, but the held parent is
 // shared with unrelated applications and may legitimately contain more names.
 const MAX_DIRECTORY_ENTRIES: usize = 4096;
 const MAX_STREAM_ENTRIES: usize = 64;
+const MAX_EA_ENTRIES: usize = 16;
 const MAX_SMALL_ARTIFACT: u64 = 1024 * 1024;
 const MAX_JOURNAL: u64 = 64 * 1024 * 1024;
 const MAX_GUEST_AGENT: u64 = 128 * 1024 * 1024;
+const EA_STABILIZATION_ATTEMPTS: usize = 40;
 pub(crate) const FORBIDDEN_ATTRIBUTES: u32 = FILE_ATTRIBUTE_READONLY.0
     | FILE_ATTRIBUTE_REPARSE_POINT.0
     | FILE_ATTRIBUTE_COMPRESSED.0
@@ -354,6 +362,34 @@ impl HeldCheckpointBoundWsbDisposition {
 
     pub fn revalidate(&self) -> Result<(), ExactDisposeError> {
         self.tree.revalidate_remaining()
+    }
+
+    pub fn completed_original_replacement_id(
+        &self,
+    ) -> Result<Option<DiscardIntentStableId>, ExactDisposeError> {
+        if self.tree.next_delete != delete_order().len() {
+            return Err(ExactDisposeError::Contract(
+                "original replacement observation requires a complete disposition".into(),
+            ));
+        }
+        if stable_id(&self.tree.parent)? != self.tree.inventory.parent_id {
+            return Err(ExactDisposeError::Rejected(
+                "workspace parent identity changed after disposition".into(),
+            ));
+        }
+        reject_case_sensitive_directory(&self.tree.parent)?;
+        if path_identity_if_present(&self.tree.tombstone_root())?.is_some() {
+            return Err(ExactDisposeError::Rejected(
+                "completed disposition tombstone name is occupied".into(),
+            ));
+        }
+        let observed = path_identity_if_present(&self.tree.inventory.original_root)?;
+        if observed.as_ref() == Some(&self.tree.inventory.objects[0].id) {
+            return Err(ExactDisposeError::Rejected(
+                "disposed workspace identity reappeared at the original name".into(),
+            ));
+        }
+        Ok(observed.map(|id| stable_id_evidence(&id)))
     }
 
     pub fn dispose_next(&mut self) -> Result<WsbDispositionStep, ExactDisposeError> {
@@ -1196,6 +1232,14 @@ impl HeldFixedWsbTree {
     }
 
     fn revalidate_remaining(&self) -> Result<(), ExactDisposeError> {
+        if self.location == FixedWsbTreeLocation::Tombstone
+            && self.next_delete == delete_order().len()
+            && path_identity_if_present(&self.tombstone_root())?.is_some()
+        {
+            return Err(ExactDisposeError::Rejected(
+                "completed disposition tombstone name was recreated".into(),
+            ));
+        }
         let owner =
             OwnedSid::from_string(&self.inventory.workspace.owner_sid).map_err(workspace_error)?;
         let root = match self.location {
@@ -1407,7 +1451,12 @@ fn observe_binding(
     verify_object_shape(file, object.key, owner)?;
     let basic = basic_info(file)?;
     let standard = standard_info(file)?;
-    let ea = query_extended_attributes(file, object.key.is_directory())?;
+    let ea = stabilized_extended_attributes(file, object.key.is_directory()).map_err(|error| {
+        ExactDisposeError::Rejected(format!(
+            "fixed {:?} extended attributes were rejected: {error}",
+            object.key
+        ))
+    })?;
     if object.key.is_directory() {
         Ok(FixedObjectBinding {
             key: object.key,
@@ -1441,6 +1490,33 @@ fn observe_binding(
     }
 }
 
+fn stabilized_extended_attributes(
+    file: &File,
+    directory: bool,
+) -> Result<ExtendedAttributeBinding, ExactDisposeError> {
+    let mut previous = None::<ExtendedAttributeBinding>;
+    for attempt in 0..EA_STABILIZATION_ATTEMPTS {
+        match query_extended_attributes(file, directory) {
+            Ok(observed) => {
+                if previous.as_ref().is_some_and(|prior| prior == &observed)
+                    && (!observed.entries.is_empty() || attempt + 1 == EA_STABILIZATION_ATTEMPTS)
+                {
+                    return Ok(observed);
+                }
+                previous = Some(observed);
+            }
+            Err(ExactDisposeError::TransientSmartLockerEa) => previous = None,
+            Err(error) => return Err(error),
+        }
+        if attempt + 1 < EA_STABILIZATION_ATTEMPTS {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+    Err(ExactDisposeError::Rejected(
+        "SmartLocker EA metadata did not stabilize to none or the exact kernel pair".into(),
+    ))
+}
+
 fn verify_expected(
     object: &HeldExactObject,
     expected: &FixedObjectBinding,
@@ -1466,7 +1542,13 @@ fn verify_expected(
             object.key
         )));
     }
-    if query_extended_attributes(file, object.key.is_directory())? != expected.ea {
+    if query_extended_attributes(file, object.key.is_directory()).map_err(|error| {
+        ExactDisposeError::Rejected(format!(
+            "fixed {:?} extended attributes were rejected: {error}",
+            object.key
+        ))
+    })? != expected.ea
+    {
         return Err(ExactDisposeError::Rejected(format!(
             "fixed {:?} extended attributes changed",
             object.key
@@ -1926,7 +2008,7 @@ fn parse_extended_attributes(
             value_length: info.EaValueLength,
             value_sha256: Sha256::digest(&bytes[value_start..value_end]).into(),
         });
-        if entries.len() > ALLOWED_KERNEL_EAS.len() {
+        if entries.len() > MAX_EA_ENTRIES {
             return Err(ExactDisposeError::Rejected(
                 "fixed object contains too many EAs".into(),
             ));
@@ -1976,25 +2058,31 @@ fn parse_extended_attributes(
             ));
         }
     }
-    if directory && !entries.is_empty() {
-        return Err(ExactDisposeError::Rejected(
-            "fixed directories must not contain EAs".into(),
-        ));
-    }
     if !directory && entries.len() == 1 && entries[0].name == "$KERNEL.SMARTLOCKER.ORIGINCLAIM" {
         return Err(ExactDisposeError::TransientSmartLockerEa);
     }
-    if !directory
-        && !entries.is_empty()
-        && (entries.len() != ALLOWED_KERNEL_EAS.len()
-            || entries
-                .iter()
-                .zip(ALLOWED_KERNEL_EAS)
-                .any(|(entry, allowed)| entry.name != allowed))
+    let stable_directory_origin_claim =
+        directory && entries.len() == 1 && entries[0].name == "$KERNEL.SMARTLOCKER.ORIGINCLAIM";
+    let exact_kernel_pair = !directory
+        && entries.len() == ALLOWED_KERNEL_EAS.len()
+        && entries
+            .iter()
+            .zip(ALLOWED_KERNEL_EAS)
+            .all(|(entry, allowed)| entry.name == allowed);
+    let exact_kernel_triple = !directory
+        && entries.len() == ALLOWED_KERNEL_EAS_WITH_FILE_HASH.len()
+        && entries
+            .iter()
+            .zip(ALLOWED_KERNEL_EAS_WITH_FILE_HASH)
+            .all(|(entry, allowed)| entry.name == allowed);
+    if !entries.is_empty()
+        && !stable_directory_origin_claim
+        && !exact_kernel_pair
+        && !exact_kernel_triple
     {
         let names: Vec<_> = entries.iter().map(|entry| entry.name.as_str()).collect();
         return Err(ExactDisposeError::Rejected(format!(
-            "fixed file EAs are outside the exact SmartLocker kernel pair: {names:?}"
+            "fixed object EAs are outside the exact SmartLocker kernel sets: {names:?}"
         )));
     }
 
@@ -2773,19 +2861,26 @@ mod tests {
             flags |= FILE_FLAG_BACKUP_SEMANTICS.0;
         }
         let file = OpenOptions::new()
-            .access_mode(DELETE.0)
+            .access_mode(DELETE.0 | windows::Win32::Storage::FileSystem::FILE_WRITE_ATTRIBUTES.0)
             .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0 | FILE_SHARE_DELETE.0)
             .custom_flags(flags)
             .open(path)
             .unwrap();
         let empty = [0_u16];
-        unsafe {
-            windows::Win32::Storage::FileSystem::SetFileShortNameW(
-                raw_handle(&file),
-                PCWSTR(empty.as_ptr()),
-            )
+        for attempt in 0..40 {
+            match unsafe {
+                windows::Win32::Storage::FileSystem::SetFileShortNameW(
+                    raw_handle(&file),
+                    PCWSTR(empty.as_ptr()),
+                )
+            } {
+                Ok(()) => return,
+                Err(_) if attempt < 39 => {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => panic!("failed to clear fixture short name for {path:?}: {error}"),
+            }
         }
-        .unwrap();
     }
 
     fn competing_delete_open(path: &Path, directory: bool) -> std::io::Result<File> {
@@ -3183,14 +3278,28 @@ mod tests {
             let mut resumed =
                 reopen_checkpoint_bound_wsb_disposition(&inventory, completed as u8).unwrap();
             assert_eq!(resumed.completed_count(), completed as u8);
+            if completed < delete_order().len() {
+                assert!(resumed.completed_original_replacement_id().is_err());
+            }
             while let Some(expected) = resumed.next_step().unwrap() {
                 let observed = resumed.dispose_next().unwrap();
                 assert_eq!(observed, expected);
             }
             resumed.revalidate().unwrap();
+            assert!(
+                resumed
+                    .completed_original_replacement_id()
+                    .unwrap()
+                    .is_some()
+            );
             assert!(!fixture.tombstone.exists());
             assert_eq!(fs::read(replacement).unwrap(), b"unrelated replacement");
             assert_eq!(fs::read(&fixture.sibling).unwrap(), b"unrelated");
+            if completed == delete_order().len() {
+                fs::create_dir(&fixture.tombstone).unwrap();
+                assert!(resumed.revalidate().is_err());
+                fs::remove_dir(&fixture.tombstone).unwrap();
+            }
         }
     }
 
@@ -3443,6 +3552,30 @@ mod tests {
         assert_eq!(first.canonical_sha256, second.canonical_sha256);
         assert_eq!(first.entries[0].value_length, 4);
         assert_eq!(first.entries[1].value_length, 13);
+    }
+
+    #[test]
+    fn approved_directory_origin_and_file_hash_triple_are_exact() {
+        let directory =
+            synthetic_ea_buffer(&[("$KERNEL.SMARTLOCKER.ORIGINCLAIM", 0, b"opaque-origin")]);
+        let directory =
+            parse_extended_attributes(&directory, directory.len() as u32, true).unwrap();
+        assert_eq!(directory.entries.len(), 1);
+        assert_eq!(directory.entries[0].name, "$KERNEL.SMARTLOCKER.ORIGINCLAIM");
+
+        let file = synthetic_ea_buffer(&[
+            (ALLOWED_KERNEL_EAS_WITH_FILE_HASH[0], 0, b"opaque-file-hash"),
+            (ALLOWED_KERNEL_EAS_WITH_FILE_HASH[1], 0, b"SMV1"),
+            (ALLOWED_KERNEL_EAS_WITH_FILE_HASH[2], 0, b"opaque-origin"),
+        ]);
+        let file = parse_extended_attributes(&file, file.len() as u32, false).unwrap();
+        assert_eq!(file.entries.len(), 3);
+        assert!(
+            file.entries
+                .iter()
+                .zip(ALLOWED_KERNEL_EAS_WITH_FILE_HASH)
+                .all(|(entry, expected)| entry.name == expected)
+        );
     }
 
     #[test]

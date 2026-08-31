@@ -21,23 +21,26 @@ use aiw_probe::{
 };
 use aiw_schema::Project;
 use aiw_windows_platform::{
+    CleanupReceiptBindingEvidence, CleanupReceiptError, CleanupReceiptSlotState,
     DepublishCommitBindingEvidence, DepublishCommitError, DiscardCheckpointBindingEvidence,
     DiscardCheckpointError, DiscardIntentBindingEvidence, DiscardIntentError,
     DispositionProgressBindingEvidence, DispositionProgressError, DispositionProgressSlotState,
-    ExactDisposeError, HeldCheckpointBoundWsbDisposition, HeldDepublishCommitPublication,
-    HeldDiscardCheckpointPublication, HeldDiscardIntentPublication,
-    HeldDispositionProgressPublication, ReopenedDepublishCommit, ReopenedDiscardCheckpoint,
-    ReopenedDiscardIntent, ReopenedDispositionProgress, RunCoordinationKey, RunCoordinationLease,
-    RunCoordinationMode, WsbRootDepublishObservation, WsbRootNamespaceState,
-    classify_checkpoint_bound_wsb_root, classify_disposition_progress_slot,
-    hold_fixed_wsb_tree_for_checkpoint, locate_depublish_commit_from_persisted_root,
-    reopen_checkpoint_bound_wsb_disposition, reopen_checkpoint_bound_wsb_root,
+    ExactDisposeError, HeldCheckpointBoundWsbDisposition, HeldCleanupReceiptPublication,
+    HeldDepublishCommitPublication, HeldDiscardCheckpointPublication, HeldDiscardIntentPublication,
+    HeldDispositionProgressPublication, ReopenedCleanupReceipt, ReopenedDepublishCommit,
+    ReopenedDiscardCheckpoint, ReopenedDiscardIntent, ReopenedDispositionProgress,
+    RunCoordinationKey, RunCoordinationLease, RunCoordinationMode, WsbRootDepublishObservation,
+    WsbRootNamespaceState, classify_checkpoint_bound_wsb_root, classify_cleanup_receipt_slot,
+    classify_disposition_progress_slot, hold_fixed_wsb_tree_for_checkpoint,
+    locate_depublish_commit_from_persisted_root, reopen_checkpoint_bound_wsb_disposition,
+    reopen_checkpoint_bound_wsb_root, reopen_existing_cleanup_receipt,
     reopen_existing_depublish_commit, reopen_existing_discard_checkpoint,
-    reopen_existing_disposition_progress, reopen_prepared_depublish_commit,
-    reopen_prepared_discard_checkpoint, reopen_prepared_discard_intent,
-    reopen_prepared_disposition_progress, reopen_published_discard_intent,
-    reserve_depublish_commit, reserve_discard_checkpoint, reserve_disposition_progress,
-    stage_discard_intent, try_acquire_run_coordination,
+    reopen_existing_disposition_progress, reopen_prepared_cleanup_receipt,
+    reopen_prepared_depublish_commit, reopen_prepared_discard_checkpoint,
+    reopen_prepared_discard_intent, reopen_prepared_disposition_progress,
+    reopen_published_discard_intent, reserve_cleanup_receipt, reserve_depublish_commit,
+    reserve_discard_checkpoint, reserve_disposition_progress, stage_discard_intent,
+    try_acquire_run_coordination,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -60,6 +63,9 @@ const DEPUBLISH_OPERATION: &str = "originalToCheckpointBoundTombstone";
 const DISPOSITION_PROGRESS_SCHEMA: &str = "aiw.dev/wsb-disposition-progress/v0alpha1";
 const DISPOSITION_PROGRESS_POLICY: &str = "immutable-pre-disposition-chain-v1";
 const DISPOSITION_OPERATION: &str = "deleteExactCheckpointObject";
+const TERMINAL_CLEANUP_SCHEMA: &str = "aiw.dev/wsb-terminal-cleanup-receipt/v0alpha1";
+const TERMINAL_CLEANUP_POLICY: &str = "checkpoint-bound-full-disposition-v1";
+const TERMINAL_CLEANUP_OPERATION: &str = "recordTerminalCleanup";
 
 #[derive(Debug, Error)]
 pub(crate) enum WsbDiscardPreparationError {
@@ -79,6 +85,8 @@ pub(crate) enum WsbDiscardPreparationError {
     DepublishCommit(#[from] DepublishCommitError),
     #[error("protected disposition progress failed: {0}")]
     DispositionProgress(#[from] DispositionProgressError),
+    #[error("protected terminal cleanup receipt failed: {0}")]
+    CleanupReceipt(#[from] CleanupReceiptError),
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -229,6 +237,74 @@ struct WsbDispositionProgressV0Alpha1 {
     record_file: WsbDispositionRecordFileV0Alpha1,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+enum WsbOriginalRootTerminalState {
+    Absent,
+    UnrelatedReplacement,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+enum WsbTombstoneTerminalState {
+    Absent,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WsbOriginalRootTerminalObservation {
+    path: String,
+    state: WsbOriginalRootTerminalState,
+    replacement_id: Option<aiw_probe::DiscardIntentStableId>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WsbPhysicalDispositionV0Alpha1 {
+    expected_object_count: u8,
+    completed_object_count: u8,
+    tombstone_path: String,
+    tombstone_root_id: aiw_probe::DiscardIntentStableId,
+    tombstone_state: WsbTombstoneTerminalState,
+    original_root: WsbOriginalRootTerminalObservation,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WsbTerminalReceiptFileV0Alpha1 {
+    parent_id: aiw_probe::DiscardIntentStableId,
+    file_id: aiw_probe::DiscardIntentStableId,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WsbTerminalCleanupReceiptV0Alpha1 {
+    schema_version: String,
+    policy_version: String,
+    operation: String,
+    run_id: String,
+    cleanup_id: String,
+    store_key: String,
+    completed_at: String,
+    workspace: WorkspaceBindingEvidence,
+    workspace_identity_sha256: String,
+    workspace_parent_id: aiw_probe::DiscardIntentStableId,
+    discard_intent_sha256: String,
+    discard_intent_binding: DiscardIntentBindingEvidence,
+    checkpoint_sha256: String,
+    checkpoint_binding: DiscardCheckpointBindingEvidence,
+    depublish_commit_sha256: String,
+    depublish_commit_binding: DepublishCommitBindingEvidence,
+    fixed_tree_contract_version: String,
+    inventory_sha256: String,
+    delete_order_version: String,
+    disposed_object_count: u8,
+    final_progress_sha256: String,
+    final_progress_binding: DispositionProgressBindingEvidence,
+    physical_disposition: WsbPhysicalDispositionV0Alpha1,
+    receipt_file: WsbTerminalReceiptFileV0Alpha1,
+}
+
 pub(crate) struct DepublishedWsbTombstone<'a> {
     prepared: PreparedWsbDiscard<'a>,
     commit: WsbDepublishCommitV0Alpha1,
@@ -320,6 +396,7 @@ impl WsbTombstoneDispositionAuthority for RecoveredDepublishedWsbTombstone {
 pub(crate) struct HeldWsbDispositionPrefix<A> {
     authority: A,
     progress: Vec<HeldDispositionProgressPublication>,
+    tree: HeldCheckpointBoundWsbDisposition,
     completed_count: u8,
 }
 
@@ -333,6 +410,7 @@ impl<A: WsbTombstoneDispositionAuthority> HeldWsbDispositionPrefix<A> {
         for progress in &self.progress {
             progress.revalidate()?;
         }
+        self.tree.revalidate()?;
         Ok(())
     }
 }
@@ -350,6 +428,25 @@ enum LoadedDispositionProgress {
 
 pub(crate) fn dispose_checkpoint_bound_wsb_tombstone<A>(
     authority: A,
+) -> Result<HeldWsbDispositionPrefix<A>, WsbDiscardPreparationError>
+where
+    A: WsbTombstoneDispositionAuthority,
+{
+    resume_checkpoint_bound_wsb_disposition(authority, true)
+}
+
+fn reopen_completed_checkpoint_bound_wsb_disposition<A>(
+    authority: A,
+) -> Result<HeldWsbDispositionPrefix<A>, WsbDiscardPreparationError>
+where
+    A: WsbTombstoneDispositionAuthority,
+{
+    resume_checkpoint_bound_wsb_disposition(authority, false)
+}
+
+fn resume_checkpoint_bound_wsb_disposition<A>(
+    authority: A,
+    allow_disposition: bool,
 ) -> Result<HeldWsbDispositionPrefix<A>, WsbDiscardPreparationError>
 where
     A: WsbTombstoneDispositionAuthority,
@@ -460,6 +557,17 @@ where
         }
     }
 
+    if !allow_disposition
+        && (physical_count != WSB_FIXED_OBJECT_DELETE_ORDER.len() as u8
+            || final_count != WSB_FIXED_OBJECT_DELETE_ORDER.len() as u8
+            || pending.is_some())
+    {
+        return Err(WsbDiscardPreparationError::Contract(
+            "terminal receipt recovery requires 19 published records and a complete physical disposition"
+                .to_owned(),
+        ));
+    }
+
     while physical_count < WSB_FIXED_OBJECT_DELETE_ORDER.len() as u8 {
         authority.revalidate_tombstone_authority()?;
         for publication in &publications {
@@ -528,6 +636,7 @@ where
     Ok(HeldWsbDispositionPrefix {
         authority,
         progress: publications,
+        tree,
         completed_count: physical_count,
     })
 }
@@ -540,6 +649,242 @@ fn disposition_prefixes_align(final_count: u8, has_pending: bool, physical_count
     } else {
         physical_count == final_count || physical_count + 1 == final_count
     }
+}
+
+pub(crate) struct HeldTerminalWsbCleanupReceipt<A> {
+    completed: HeldWsbDispositionPrefix<A>,
+    receipt: WsbTerminalCleanupReceiptV0Alpha1,
+    publication: HeldCleanupReceiptPublication,
+}
+
+impl<A: WsbTombstoneDispositionAuthority> HeldTerminalWsbCleanupReceipt<A> {
+    pub(crate) fn revalidate(&self) -> Result<(), WsbDiscardPreparationError> {
+        self.completed.revalidate()?;
+        self.publication.revalidate()?;
+        validate_terminal_cleanup_receipt(
+            &self.receipt,
+            self.publication.evidence(),
+            &self.completed,
+            &self.receipt.completed_at,
+        )
+    }
+
+    pub(crate) fn receipt_sha256(&self) -> &str {
+        self.publication.evidence().receipt_sha256()
+    }
+}
+
+pub(crate) fn publish_terminal_wsb_cleanup_receipt<A>(
+    completed: HeldWsbDispositionPrefix<A>,
+    completed_at: &str,
+) -> Result<HeldTerminalWsbCleanupReceipt<A>, WsbDiscardPreparationError>
+where
+    A: WsbTombstoneDispositionAuthority,
+{
+    require_canonical_utc_timestamp("completedAt", completed_at)?;
+    completed.revalidate()?;
+    if completed.completed_count != WSB_FIXED_OBJECT_DELETE_ORDER.len() as u8
+        || completed.progress.len() != WSB_FIXED_OBJECT_DELETE_ORDER.len()
+    {
+        return Err(WsbDiscardPreparationError::Contract(
+            "terminal cleanup receipt requires the complete 19-record disposition".to_owned(),
+        ));
+    }
+    let checkpoint = completed.authority.checkpoint();
+    let workspace = &checkpoint.inventory.workspace;
+    let run_id = &checkpoint.run_id;
+    let store_key = &checkpoint.revocation.discard_intent_binding.store_key;
+
+    let (receipt, publication) = match classify_cleanup_receipt_slot(workspace, run_id, store_key)?
+    {
+        CleanupReceiptSlotState::Ambiguous => {
+            return Err(WsbDiscardPreparationError::Contract(
+                "terminal cleanup receipt pending and final namespaces are both occupied"
+                    .to_owned(),
+            ));
+        }
+        CleanupReceiptSlotState::Absent => {
+            let reserved = reserve_cleanup_receipt(workspace, run_id, store_key)?;
+            let binding = reserved.evidence().clone();
+            let receipt = build_terminal_cleanup_receipt(&completed, &binding, completed_at)?;
+            let bytes = canonical_bytes(&receipt)?;
+            let sha256 = hash_bytes(&bytes);
+            let staged = reserved.persist(&bytes, &sha256)?;
+            let persisted_binding = staged.evidence().clone();
+            drop(staged);
+            completed.revalidate()?;
+            validate_terminal_cleanup_receipt(
+                &receipt,
+                &persisted_binding,
+                &completed,
+                completed_at,
+            )?;
+            let reopened = reopen_prepared_cleanup_receipt(
+                &bytes,
+                &sha256,
+                workspace,
+                run_id,
+                &persisted_binding,
+            )?;
+            let publication = match reopened {
+                ReopenedCleanupReceipt::Publishable(value) => {
+                    completed.revalidate()?;
+                    validate_terminal_cleanup_receipt(
+                        &receipt,
+                        value.evidence(),
+                        &completed,
+                        completed_at,
+                    )?;
+                    value.publish()?
+                }
+                ReopenedCleanupReceipt::Published(value) => value,
+            };
+            (receipt, publication)
+        }
+        CleanupReceiptSlotState::Pending | CleanupReceiptSlotState::Published => {
+            let existing = reopen_existing_cleanup_receipt(workspace, run_id, store_key)?;
+            let receipt: WsbTerminalCleanupReceiptV0Alpha1 =
+                serde_json::from_slice(existing.bytes()).map_err(|error| {
+                    WsbDiscardPreparationError::Contract(format!(
+                        "persisted terminal cleanup receipt is not the strict schema: {error}"
+                    ))
+                })?;
+            if canonical_bytes(&receipt)? != existing.bytes() {
+                return Err(WsbDiscardPreparationError::Contract(
+                    "persisted terminal cleanup receipt is not canonical JSON".to_owned(),
+                ));
+            }
+            validate_terminal_cleanup_receipt(
+                &receipt,
+                existing.binding(),
+                &completed,
+                completed_at,
+            )?;
+            let publication = match existing.into_reopened() {
+                ReopenedCleanupReceipt::Publishable(value) => {
+                    completed.revalidate()?;
+                    validate_terminal_cleanup_receipt(
+                        &receipt,
+                        value.evidence(),
+                        &completed,
+                        completed_at,
+                    )?;
+                    value.publish()?
+                }
+                ReopenedCleanupReceipt::Published(value) => value,
+            };
+            (receipt, publication)
+        }
+    };
+    completed.revalidate()?;
+    publication.revalidate()?;
+    validate_terminal_cleanup_receipt(&receipt, publication.evidence(), &completed, completed_at)?;
+    Ok(HeldTerminalWsbCleanupReceipt {
+        completed,
+        receipt,
+        publication,
+    })
+}
+
+fn build_terminal_cleanup_receipt<A: WsbTombstoneDispositionAuthority>(
+    completed: &HeldWsbDispositionPrefix<A>,
+    binding: &CleanupReceiptBindingEvidence,
+    completed_at: &str,
+) -> Result<WsbTerminalCleanupReceiptV0Alpha1, WsbDiscardPreparationError> {
+    let checkpoint = completed.authority.checkpoint();
+    let inventory = &checkpoint.inventory;
+    let final_progress = completed.progress.last().ok_or_else(|| {
+        WsbDiscardPreparationError::Contract(
+            "terminal cleanup receipt has no final disposition progress".to_owned(),
+        )
+    })?;
+    if final_progress.ordinal() != WSB_FIXED_OBJECT_DELETE_ORDER.len() as u8 - 1 {
+        return Err(WsbDiscardPreparationError::Contract(
+            "terminal cleanup receipt final progress is not ordinal 18".to_owned(),
+        ));
+    }
+    let replacement_id = completed.tree.completed_original_replacement_id()?;
+    let original_root = WsbOriginalRootTerminalObservation {
+        path: inventory.original_root.clone(),
+        state: if replacement_id.is_some() {
+            WsbOriginalRootTerminalState::UnrelatedReplacement
+        } else {
+            WsbOriginalRootTerminalState::Absent
+        },
+        replacement_id,
+    };
+    Ok(WsbTerminalCleanupReceiptV0Alpha1 {
+        schema_version: TERMINAL_CLEANUP_SCHEMA.to_owned(),
+        policy_version: TERMINAL_CLEANUP_POLICY.to_owned(),
+        operation: TERMINAL_CLEANUP_OPERATION.to_owned(),
+        run_id: checkpoint.run_id.clone(),
+        cleanup_id: checkpoint.cleanup_id.clone(),
+        store_key: checkpoint
+            .revocation
+            .discard_intent_binding
+            .store_key
+            .clone(),
+        completed_at: completed_at.to_owned(),
+        workspace: inventory.workspace.clone(),
+        workspace_identity_sha256: checkpoint.revocation.workspace_identity_sha256.clone(),
+        workspace_parent_id: inventory.parent_id.clone(),
+        discard_intent_sha256: checkpoint.revocation.discard_intent_sha256.clone(),
+        discard_intent_binding: checkpoint.revocation.discard_intent_binding.clone(),
+        checkpoint_sha256: canonical_hash(checkpoint)?,
+        checkpoint_binding: completed
+            .authority
+            .depublish_commit()
+            .checkpoint_binding
+            .clone(),
+        depublish_commit_sha256: canonical_hash(completed.authority.depublish_commit())?,
+        depublish_commit_binding: completed.authority.depublish_binding().clone(),
+        fixed_tree_contract_version: checkpoint.fixed_tree_contract_version.clone(),
+        inventory_sha256: checkpoint.inventory_sha256.clone(),
+        delete_order_version: WSB_FIXED_TREE_DELETE_ORDER_VERSION.to_owned(),
+        disposed_object_count: completed.completed_count,
+        final_progress_sha256: final_progress.evidence().record_sha256().to_owned(),
+        final_progress_binding: final_progress.evidence().clone(),
+        physical_disposition: WsbPhysicalDispositionV0Alpha1 {
+            expected_object_count: WSB_FIXED_OBJECT_DELETE_ORDER.len() as u8,
+            completed_object_count: completed.completed_count,
+            tombstone_path: completed
+                .authority
+                .depublish_commit()
+                .tombstone_path
+                .clone(),
+            tombstone_root_id: inventory.objects[0].id.clone(),
+            tombstone_state: WsbTombstoneTerminalState::Absent,
+            original_root,
+        },
+        receipt_file: WsbTerminalReceiptFileV0Alpha1 {
+            parent_id: binding.parent_id().clone(),
+            file_id: binding.receipt_id().clone(),
+        },
+    })
+}
+
+fn validate_terminal_cleanup_receipt<A: WsbTombstoneDispositionAuthority>(
+    receipt: &WsbTerminalCleanupReceiptV0Alpha1,
+    binding: &CleanupReceiptBindingEvidence,
+    completed: &HeldWsbDispositionPrefix<A>,
+    completed_at: &str,
+) -> Result<(), WsbDiscardPreparationError> {
+    let expected = build_terminal_cleanup_receipt(completed, binding, completed_at)?;
+    let bytes = canonical_bytes(receipt)?;
+    let valid = receipt == &expected
+        && binding.run_id() == receipt.run_id
+        && binding.store_key() == receipt.store_key
+        && binding.owner_sid() == receipt.workspace.owner_sid
+        && binding.parent_id() == &receipt.workspace_parent_id
+        && binding.receipt_sha256() == hash_bytes(&bytes)
+        && binding.receipt_size() == bytes.len() as u64;
+    if !valid {
+        return Err(WsbDiscardPreparationError::Contract(
+            "terminal cleanup receipt differs from its exact authority or platform binding"
+                .to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 fn reopen_disposition_physical_prefix(
@@ -573,6 +918,7 @@ fn materialize_disposition_progress<A: WsbTombstoneDispositionAuthority>(
     let sha256 = hash_bytes(&bytes);
     let staged = reserved.persist(&bytes, &sha256)?;
     let persisted_binding = staged.evidence().clone();
+    drop(staged);
     authority.revalidate_tombstone_authority()?;
     tree.revalidate()?;
     validate_disposition_progress(
@@ -692,21 +1038,32 @@ fn validate_disposition_progress<A: WsbTombstoneDispositionAuthority>(
 ) -> Result<(), WsbDiscardPreparationError> {
     let expected = build_disposition_progress(authority, binding, previous_progress_sha256)?;
     let bytes = canonical_bytes(progress)?;
-    let valid = progress == &expected
-        && progress.ordinal == progress.completed_before
-        && binding.run_id() == progress.run_id
-        && binding.store_key() == progress.store_key
-        && binding.ordinal() == progress.ordinal
-        && binding.owner_sid() == progress.workspace.owner_sid
-        && binding.parent_id().volume_serial_number
-            == progress.workspace.parent.volume_serial_number
-        && binding.parent_id().file_id == progress.workspace.parent.file_id
-        && binding.record_sha256() == hash_bytes(&bytes)
-        && binding.record_size() == bytes.len() as u64;
-    if !valid {
-        return Err(WsbDiscardPreparationError::Contract(
-            "disposition progress differs from its exact authority or platform binding".to_owned(),
-        ));
+    let checks = [
+        (progress == &expected, "authority"),
+        (
+            progress.ordinal == progress.completed_before,
+            "completed-before",
+        ),
+        (binding.run_id() == progress.run_id, "run-id"),
+        (binding.store_key() == progress.store_key, "store-key"),
+        (binding.ordinal() == progress.ordinal, "ordinal"),
+        (binding.owner_sid() == progress.workspace.owner_sid, "owner"),
+        (
+            binding.parent_id().volume_serial_number
+                == progress.workspace.parent.volume_serial_number,
+            "parent-volume",
+        ),
+        (
+            binding.parent_id().file_id == progress.workspace.parent.file_id,
+            "parent-id",
+        ),
+        (binding.record_sha256() == hash_bytes(&bytes), "record-hash"),
+        (binding.record_size() == bytes.len() as u64, "record-size"),
+    ];
+    if let Some((_, failed)) = checks.into_iter().find(|(valid, _)| !valid) {
+        return Err(WsbDiscardPreparationError::Contract(format!(
+            "disposition progress differs from its exact authority or platform binding: {failed}"
+        )));
     }
     Ok(())
 }
@@ -809,6 +1166,23 @@ pub(crate) fn recover_checkpoint_bound_wsb_disposition(
     dispose_checkpoint_bound_wsb_tombstone(authority)
 }
 
+pub(crate) fn recover_terminal_wsb_cleanup_receipt(
+    original_root: &Path,
+    run_id: &str,
+    completed_at: &str,
+) -> Result<
+    HeldTerminalWsbCleanupReceipt<RecoveredDepublishedWsbTombstone>,
+    WsbDiscardPreparationError,
+> {
+    let authority = recover_windows_sandbox_depublish_authority(
+        original_root,
+        run_id,
+        DepublishRecoveryMode::DispositionOnly,
+    )?;
+    let completed = reopen_completed_checkpoint_bound_wsb_disposition(authority)?;
+    publish_terminal_wsb_cleanup_receipt(completed, completed_at)
+}
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum DepublishRecoveryMode {
     CompleteDepublish,
@@ -828,7 +1202,7 @@ fn recover_windows_sandbox_depublish_authority(
             ))
         })?;
     if canonical_bytes(&commit)? != located.commit()
-        || Path::new(&commit.original_root) != original_root
+        || !same_windows_path_text(&commit.original_root, &original_root.to_string_lossy())
     {
         return Err(WsbDiscardPreparationError::Contract(
             "located depublish commit is noncanonical or bound to another original root".to_owned(),
@@ -997,6 +1371,7 @@ fn materialize_depublish_commit(
             let sha256 = hash_bytes(&bytes);
             let staged = reserved.persist(&bytes, &sha256)?;
             let binding = staged.evidence().clone();
+            drop(staged);
             tree.revalidate()?;
             prepared.revalidate_checkpoint()?;
             let reopened =
@@ -1193,9 +1568,9 @@ pub(crate) fn prepare_windows_sandbox_discard<'a>(
 
     // The owner-scoped outer mutex and the inner run lock are acquired before
     // any descendant preparation handle is reopened.
-    let mut guard = layout
-        .begin_wsb_revocation()
-        .map_err(|error| WsbDiscardPreparationError::Orchestrator(error.to_string()))?;
+    let lease = layout.acquire_wsb_revocation_lease().map_err(|error| {
+        WsbDiscardPreparationError::Orchestrator(format!("{error}: {}", error.detail))
+    })?;
     let mut held = open_verified_windows_sandbox_preparation(
         workspace_root,
         project,
@@ -1203,6 +1578,9 @@ pub(crate) fn prepare_windows_sandbox_discard<'a>(
         true,
         true,
     )?;
+    let mut guard = lease.begin_bound(held.workspace()).map_err(|error| {
+        WsbDiscardPreparationError::Orchestrator(format!("{error}: {}", error.detail))
+    })?;
     require_guard_bindings(&guard, &held.artifacts, project)?;
 
     let intent = build_intent(&guard, &held.artifacts.receipt, requested_by, requested_at)?;
@@ -1247,8 +1625,10 @@ pub(crate) fn prepare_windows_sandbox_discard<'a>(
     // journal boundary is complete. This call is idempotent for both that
     // prefix and the already-recorded prefix.
     guard
-        .persist_staged_revocation(&revocation)
-        .map_err(|error| WsbDiscardPreparationError::Orchestrator(error.to_string()))?;
+        .persist_staged_revocation_bound(held.workspace(), &revocation)
+        .map_err(|error| {
+            WsbDiscardPreparationError::Orchestrator(format!("{error}: {}", error.detail))
+        })?;
     // Keep the exact staged file and parent handles alive until its binding is
     // durably recorded. Reopen is intentionally a separate strict step.
     drop(held_stage);
@@ -1345,6 +1725,10 @@ fn materialize_discard_checkpoint(
             let sha256 = hash_bytes(&bytes);
             let staged = reserved.persist(&bytes, &sha256)?;
             let binding = staged.evidence().clone();
+            // The checkpoint contract requires a close/reopen boundary before
+            // publication. Retaining the staged DELETE-capable handle would
+            // make the strict reopen fail with a sharing violation.
+            drop(staged);
             snapshot.revalidate()?;
             authority
                 .revalidate_external_intent()
@@ -1358,7 +1742,8 @@ fn materialize_discard_checkpoint(
             )?;
             let publication = publish_checkpoint(reopened)?;
             publication.revalidate()?;
-            Ok((checkpoint, binding, publication))
+            let published_binding = publication.evidence().clone();
+            Ok((checkpoint, published_binding, publication))
         }
         Err(DiscardCheckpointError::FinalConflict | DiscardCheckpointError::PendingConflict) => {
             let existing = reopen_existing_discard_checkpoint(
@@ -1698,6 +2083,19 @@ fn hash_bytes(value: &[u8]) -> String {
     hex::encode(Sha256::digest(value))
 }
 
+fn same_windows_path_text(left: &str, right: &str) -> bool {
+    fn normalized(value: &str) -> String {
+        let value = value.replace('/', "\\");
+        value
+            .strip_prefix(r"\\?\")
+            .unwrap_or(&value)
+            .trim_end_matches('\\')
+            .to_owned()
+    }
+
+    normalized(left).eq_ignore_ascii_case(&normalized(right))
+}
+
 fn tombstone_matches_cleanup(intent: &WsbDiscardIntent) -> bool {
     intent.tombstone_leaf == format!("{TOMBSTONE_PREFIX}{}", intent.cleanup_id)
 }
@@ -1706,6 +2104,57 @@ fn require_request_text(field: &str, value: &str) -> Result<(), WsbDiscardPrepar
     if value.is_empty() || value.len() > 256 || value.chars().any(char::is_control) {
         return Err(WsbDiscardPreparationError::Contract(format!(
             "{field} is empty or outside its fixed text bound"
+        )));
+    }
+    Ok(())
+}
+
+fn require_canonical_utc_timestamp(
+    field: &str,
+    value: &str,
+) -> Result<(), WsbDiscardPreparationError> {
+    let bytes = value.as_bytes();
+    let digits = |range: std::ops::Range<usize>| {
+        bytes
+            .get(range)
+            .filter(|slice| slice.iter().all(u8::is_ascii_digit))
+            .and_then(|slice| std::str::from_utf8(slice).ok())
+            .and_then(|slice| slice.parse::<u32>().ok())
+    };
+    let year = digits(0..4);
+    let month = digits(5..7);
+    let day = digits(8..10);
+    let hour = digits(11..13);
+    let minute = digits(14..16);
+    let second = digits(17..19);
+    let shape = bytes.len() == 20
+        && bytes.get(4) == Some(&b'-')
+        && bytes.get(7) == Some(&b'-')
+        && bytes.get(10) == Some(&b'T')
+        && bytes.get(13) == Some(&b':')
+        && bytes.get(16) == Some(&b':')
+        && bytes.get(19) == Some(&b'Z');
+    let valid_date = match (year, month, day) {
+        (Some(year @ 2000..=9999), Some(month @ 1..=12), Some(day)) => {
+            let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+            let max_day = match month {
+                2 if leap => 29,
+                2 => 28,
+                4 | 6 | 9 | 11 => 30,
+                _ => 31,
+            };
+            (1..=max_day).contains(&day)
+        }
+        _ => false,
+    };
+    if !shape
+        || !valid_date
+        || !matches!(hour, Some(0..=23))
+        || !matches!(minute, Some(0..=59))
+        || !matches!(second, Some(0..=59))
+    {
+        return Err(WsbDiscardPreparationError::Contract(format!(
+            "{field} must be canonical UTC YYYY-MM-DDTHH:MM:SSZ"
         )));
     }
     Ok(())
@@ -1726,6 +2175,24 @@ mod tests {
         WINDOWS_WORKSPACE_SCHEMA_VERSION, WINDOWS_WORKSPACE_SECURITY_POLICY, WindowsFileIdentity,
         workspace_policy_hash,
     };
+
+    #[cfg(windows)]
+    fn native_project() -> Project {
+        serde_yaml::from_str(include_str!("../../../examples/minimal.aiw.yaml")).unwrap()
+    }
+
+    #[cfg(windows)]
+    fn native_unique_parent(label: &str) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        let path = std::env::temp_dir().join(format!(
+            "aiw-runner-{label}-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir(&path).unwrap();
+        path.canonicalize().unwrap()
+    }
 
     fn test_workspace() -> WorkspaceBindingEvidence {
         let owner = "S-1-5-21-1".to_owned();
@@ -1819,6 +2286,17 @@ mod tests {
         assert!(is_sha256(&"a".repeat(64)));
         assert!(!is_sha256(&"A".repeat(64)));
         assert!(!is_sha256(&"a".repeat(63)));
+        assert!(require_canonical_utc_timestamp("completedAt", "2026-08-31T09:30:00Z").is_ok());
+        for invalid in [
+            "2026-02-29T09:30:00Z",
+            "2024-02-30T09:30:00Z",
+            "2024-02-29T24:00:00Z",
+            "2024-02-29T09:60:00Z",
+            "2024-02-29T09:30:00+00:00",
+            "2024-02-29 09:30:00Z",
+        ] {
+            assert!(require_canonical_utc_timestamp("completedAt", invalid).is_err());
+        }
     }
 
     #[test]
@@ -1883,13 +2361,15 @@ mod tests {
             "provider.start",
             "provider.stop",
             "std::process::Command",
+            "RunResult",
         ] {
             assert!(
                 !production.contains(forbidden),
                 "found forbidden {forbidden}"
             );
         }
-        assert!(production.contains("begin_wsb_revocation"));
+        assert!(production.contains("acquire_wsb_revocation_lease"));
+        assert!(production.contains("lease.begin_bound(held.workspace())"));
         assert!(production.contains("into_outer_only"));
         assert!(production.contains("hold_fixed_wsb_tree_for_checkpoint"));
         assert!(production.contains("reserve_discard_checkpoint"));
@@ -1901,6 +2381,8 @@ mod tests {
         assert!(production.contains("reserve_disposition_progress"));
         assert!(production.contains("reopen_existing_disposition_progress"));
         assert!(production.contains("tree.dispose_next()"));
+        assert!(production.contains("reserve_cleanup_receipt"));
+        assert!(production.contains("reopen_existing_cleanup_receipt"));
         assert!(
             production.find("into_outer_only(publication)").unwrap()
                 < production
@@ -1954,6 +2436,26 @@ mod tests {
         assert!(disposition_recovery.contains("DepublishRecoveryMode::DispositionOnly"));
         assert!(disposition_recovery.contains("dispose_checkpoint_bound_wsb_tombstone"));
         assert!(!disposition_recovery.contains("depublish_and_release"));
+        let terminal_recovery = production
+            .split("fn recover_terminal_wsb_cleanup_receipt")
+            .nth(1)
+            .unwrap()
+            .split("enum DepublishRecoveryMode")
+            .next()
+            .unwrap();
+        assert!(terminal_recovery.contains("reopen_completed_checkpoint_bound_wsb_disposition"));
+        assert!(!terminal_recovery.contains("dispose_checkpoint_bound_wsb_tombstone"));
+        assert!(!terminal_recovery.contains("depublish_and_release"));
+        let terminal_publication = production
+            .split("fn publish_terminal_wsb_cleanup_receipt")
+            .nth(1)
+            .unwrap()
+            .split("fn build_terminal_cleanup_receipt")
+            .next()
+            .unwrap();
+        assert!(terminal_publication.contains("completed.revalidate()?"));
+        assert!(terminal_publication.contains("reserve_cleanup_receipt"));
+        assert!(terminal_publication.contains("value.publish()?"));
     }
 
     #[test]
@@ -1962,6 +2464,11 @@ mod tests {
         assert!(WSB_FIXED_TREE_CONTRACT_VERSION.ends_with("19-objects"));
         assert_eq!(CONTROL_PREFIX, ".aiw-discard-v1-");
         assert_eq!(TOMBSTONE_PREFIX, ".aiw-discarded-v1-");
+        assert_eq!(
+            TERMINAL_CLEANUP_SCHEMA,
+            "aiw.dev/wsb-terminal-cleanup-receipt/v0alpha1"
+        );
+        assert_eq!(TERMINAL_CLEANUP_OPERATION, "recordTerminalCleanup");
     }
 
     #[test]
@@ -2011,5 +2518,80 @@ mod tests {
         assert!(tombstone_matches_cleanup(&intent));
         intent.tombstone_leaf = format!("{TOMBSTONE_PREFIX}{}", "9".repeat(64));
         assert!(!tombstone_matches_cleanup(&intent));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "native protected WSB workspace terminal-receipt proof; run explicitly on a supported host"]
+    fn native_terminal_cleanup_receipt_fresh_recovery_and_replacement() {
+        use crate::preparation::{
+            import_windows_sandbox_preparation, prepare_windows_sandbox_bundle,
+        };
+
+        let base = native_unique_parent("terminal-receipt");
+        let outer = aiw_windows_platform::HeldRunWorkspace::create(&base, "authority").unwrap();
+        let parent = outer.root_path().to_owned();
+        drop(outer);
+        let run_id = format!("terminal-{}", std::process::id());
+        let workspace_root = parent.join(&run_id);
+        let project = native_project();
+        let agent = std::env::current_exe().unwrap();
+        let agent_sha256 = hash_bytes(&std::fs::read(&agent).unwrap());
+        prepare_windows_sandbox_bundle(
+            &run_id,
+            &project,
+            &agent,
+            &agent_sha256,
+            &parent,
+            &run_id,
+            "2026-08-31T09:00:00Z",
+        )
+        .unwrap();
+        import_windows_sandbox_preparation(
+            &workspace_root,
+            &project,
+            &agent_sha256,
+            "2026-08-31T09:01:00Z",
+        )
+        .unwrap();
+        let layout = RunLayout::new(&workspace_root, &run_id).unwrap();
+        let prepared = prepare_windows_sandbox_discard(
+            &layout,
+            &workspace_root,
+            &project,
+            &agent_sha256,
+            "native-test",
+            "2026-08-31T09:02:00Z",
+        )
+        .unwrap();
+        let depublished = depublish_prepared_windows_sandbox(prepared).unwrap();
+        let completed = dispose_checkpoint_bound_wsb_tombstone(depublished).unwrap();
+        assert_eq!(completed.completed_count(), 19);
+        std::fs::create_dir(&workspace_root).unwrap();
+        let replacement = workspace_root.join("replacement.txt");
+        std::fs::write(&replacement, b"unrelated replacement").unwrap();
+        let terminal =
+            publish_terminal_wsb_cleanup_receipt(completed, "2026-08-31T09:03:00Z").unwrap();
+        terminal.revalidate().unwrap();
+        let receipt_sha256 = terminal.receipt_sha256().to_owned();
+        drop(terminal);
+        drop(layout);
+
+        let recovered =
+            recover_terminal_wsb_cleanup_receipt(&workspace_root, &run_id, "2026-08-31T09:03:00Z")
+                .unwrap();
+        assert_eq!(recovered.receipt_sha256(), receipt_sha256);
+        recovered.revalidate().unwrap();
+        assert_eq!(
+            std::fs::read(&replacement).unwrap(),
+            b"unrelated replacement"
+        );
+        drop(recovered);
+        assert!(
+            recover_terminal_wsb_cleanup_receipt(&workspace_root, &run_id, "2026-08-31T09:03:01Z",)
+                .is_err()
+        );
+
+        std::fs::remove_dir_all(&base).unwrap();
     }
 }

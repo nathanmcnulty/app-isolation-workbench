@@ -259,8 +259,7 @@ impl WsbFixedTreeInventoryEvidence {
                 || (!object.is_directory && object.link_count != 1)
                 || object.acl_policy != expected.acl_policy()
                 || object.stream_policy != expected.stream_policy()
-                || !valid_fixed_tree_ea(&object.ea)
-                || (object.is_directory && !object.ea.entries.is_empty())
+                || !valid_fixed_tree_ea(&object.ea, object.is_directory)
                 || !identities.insert(identity)
             {
                 return Err("fixed-tree object binding is invalid");
@@ -641,11 +640,20 @@ fn valid_tombstone_leaf(value: &str) -> bool {
         .is_some_and(|suffix| fixed_hex(suffix, 64))
 }
 
-fn valid_fixed_tree_ea(value: &WsbFixedTreeEaBinding) -> bool {
+fn valid_fixed_tree_ea(value: &WsbFixedTreeEaBinding, directory: bool) -> bool {
     let valid_names = value.entries.is_empty()
-        || (value.entries.len() == 2
+        || (directory
+            && value.entries.len() == 1
+            && value.entries[0].name == "$KERNEL.SMARTLOCKER.ORIGINCLAIM")
+        || (!directory
+            && value.entries.len() == 2
             && value.entries[0].name == "$KERNEL.PURGE.SMARTLOCKER.VALID"
-            && value.entries[1].name == "$KERNEL.SMARTLOCKER.ORIGINCLAIM");
+            && value.entries[1].name == "$KERNEL.SMARTLOCKER.ORIGINCLAIM")
+        || (!directory
+            && value.entries.len() == 3
+            && value.entries[0].name == "$KERNEL.PURGE.SEC.FILEHASH"
+            && value.entries[1].name == "$KERNEL.PURGE.SMARTLOCKER.VALID"
+            && value.entries[2].name == "$KERNEL.SMARTLOCKER.ORIGINCLAIM");
     if !valid_names {
         return false;
     }
@@ -1102,6 +1110,33 @@ mod tests {
             entries: entries.clone(),
         };
         evidence.validate().unwrap();
+
+        let directory_entries = vec![DiscardIntentEaEntry {
+            name: "$KERNEL.SMARTLOCKER.ORIGINCLAIM".to_owned(),
+            flags: 0,
+            value_length: 16,
+            value_sha256: hex::encode(Sha256::digest([3_u8; 16])),
+        }];
+        let mut directory_origin = fixed_tree_inventory();
+        directory_origin.objects[0].ea = WsbFixedTreeEaBinding {
+            canonical_sha256: canonical(&directory_entries),
+            entries: directory_entries,
+        };
+        directory_origin.validate().unwrap();
+
+        let mut triple_entries = vec![DiscardIntentEaEntry {
+            name: "$KERNEL.PURGE.SEC.FILEHASH".to_owned(),
+            flags: 0,
+            value_length: 32,
+            value_sha256: hex::encode(Sha256::digest([4_u8; 32])),
+        }];
+        triple_entries.extend(entries.clone());
+        let mut file_hash_triple = fixed_tree_inventory();
+        file_hash_triple.objects[7].ea = WsbFixedTreeEaBinding {
+            canonical_sha256: canonical(&triple_entries),
+            entries: triple_entries,
+        };
+        file_hash_triple.validate().unwrap();
 
         let mut uppercase = evidence.clone();
         uppercase.objects[7].ea.entries[0].value_sha256 = uppercase.objects[7].ea.entries[0]

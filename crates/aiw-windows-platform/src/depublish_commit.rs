@@ -220,17 +220,20 @@ impl PublishableDepublishCommit {
         self.commit
             .sync_all()
             .map_err(|error| native_io("FlushFileBuffers(commit-after-rename)", error))?;
+        let initial_id = map_exact(stable_id(&self.commit))?;
         drop(self.commit);
-        let final_file = open_commit(&context.final_path, false)?;
+        let (final_file, final_ea) = reopen_stabilized(&context.final_path, &initial_id)?;
+        let mut evidence = self.evidence;
+        evidence.commit_ea = final_ea;
         verify_commit(
             &final_file,
             &self.parent,
             &context.final_path,
             &context,
-            &self.evidence,
+            &evidence,
         )?;
         Ok(HeldDepublishCommitPublication {
-            evidence: self.evidence,
+            evidence,
             _parent: self.parent,
             _commit: final_file,
             commit_bytes: self.commit_bytes,
@@ -837,6 +840,7 @@ fn reopen_stabilized(
                 if previous
                     .as_ref()
                     .is_some_and(|prior| same_ea_semantics(prior, &observed))
+                    && (!observed.entries.is_empty() || attempt + 1 == EA_STABILIZATION_ATTEMPTS)
                 {
                     return Ok((file, observed));
                 }
