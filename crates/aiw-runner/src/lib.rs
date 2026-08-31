@@ -102,7 +102,7 @@ struct ProcessResult {
     pub stderr: Vec<u8>,
 }
 
-/// Private test seam. No production process implementation exists yet.
+/// Fixed provider-process boundary used by the native adapter and deterministic tests.
 trait ProcessBoundary {
     fn invoke(
         &self,
@@ -114,6 +114,8 @@ trait ProcessBoundary {
 
 #[derive(Debug, Error, Clone)]
 pub enum RunnerError {
+    #[error("approved Windows Sandbox preparation is invalid: {0}")]
+    Preparation(String),
     #[error("Windows Sandbox readiness is not sufficient: {0}")]
     Readiness(String),
     #[error("approved W1 plan is missing or does not bind the current inputs")]
@@ -288,7 +290,7 @@ trait WorkspaceBoundary {
     fn revalidate(&self) -> Result<(), RunnerError>;
 }
 
-#[cfg(all(test, windows))]
+#[cfg(windows)]
 impl WorkspaceBoundary for aiw_windows_platform::HeldRunWorkspace {
     fn evidence(&self) -> &WorkspaceBindingEvidence {
         self.evidence()
@@ -299,9 +301,163 @@ impl WorkspaceBoundary for aiw_windows_platform::HeldRunWorkspace {
     }
 }
 
+#[cfg(windows)]
+struct NativeWsbProcess {
+    state: std::sync::Mutex<NativeWsbState>,
+    plan: WindowsSandboxPlan,
+}
+
+#[cfg(windows)]
+struct NativeWsbState {
+    lease: aiw_windows_platform::WindowsSandboxExecutionLease,
+    started_id: Option<String>,
+}
+
+#[cfg(windows)]
+impl ProcessBoundary for NativeWsbProcess {
+    fn invoke(
+        &self,
+        executable: &Path,
+        arguments: &[String],
+        timeout_seconds: u32,
+    ) -> Result<ProcessResult, RunnerError> {
+        if timeout_seconds == 0 {
+            return Err(RunnerError::Process(
+                "native provider timeout must be nonzero".to_owned(),
+            ));
+        }
+        let requested_timeout = Duration::from_secs(u64::from(timeout_seconds));
+        let read_timeout = requested_timeout.min(Duration::from_secs(15));
+        let mutation_timeout = requested_timeout.min(Duration::from_secs(120));
+        let mut state = self.state.lock().map_err(|_| {
+            RunnerError::Process("native provider adapter lock was poisoned".to_owned())
+        })?;
+        let expected = state
+            .lease
+            .readiness()
+            .provider_binary
+            .as_ref()
+            .ok_or_else(|| RunnerError::Process("native provider identity absent".to_owned()))?;
+        if !executable
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&expected.canonical_path)
+        {
+            return Err(RunnerError::Process(
+                "runner executable did not match native authority".to_owned(),
+            ));
+        }
+        match arguments {
+            [list, raw] if list == "list" && raw == "--raw" => {
+                let observed = state
+                    .lease
+                    .list_with_timeout(read_timeout)
+                    .map_err(native_invocation_error)?;
+                process_json_result(serde_json::json!({
+                    "WindowsSandboxEnvironments": observed.session_ids.into_iter().map(|id| serde_json::json!({"Id": id})).collect::<Vec<_>>()
+                }))
+            }
+            [start, raw, id_flag, id, config_flag, xml]
+                if start == "start"
+                    && raw == "--raw"
+                    && id_flag == "--id"
+                    && config_flag == "--config" =>
+            {
+                let rendered = render_config(&self.plan)
+                    .map_err(|error| RunnerError::Process(error.to_string()))?;
+                if rendered.xml != *xml {
+                    return Err(RunnerError::Process(
+                        "runner XML did not match the internally rendered typed plan".to_owned(),
+                    ));
+                }
+                let id = aiw_windows_platform::CanonicalSandboxId::parse(id)
+                    .map_err(|error| RunnerError::Process(error.to_string()))?;
+                state.started_id = Some(id.as_str().to_owned());
+                let observed = state
+                    .lease
+                    .start_with_timeout(&id, &self.plan, mutation_timeout)
+                    .map_err(native_invocation_error)?;
+                process_json_result(serde_json::json!({"Id": observed.session_id}))
+            }
+            [stop, raw, id_flag, id] if stop == "stop" && raw == "--raw" && id_flag == "--id" => {
+                let id = aiw_windows_platform::CanonicalSandboxId::parse(id)
+                    .map_err(|error| RunnerError::Process(error.to_string()))?;
+                if state.started_id.as_deref() != Some(id.as_str()) {
+                    return Err(RunnerError::SessionConflict);
+                }
+                state
+                    .lease
+                    .stop_owned_with_timeout(mutation_timeout)
+                    .map_err(native_invocation_error)?;
+                state.started_id = None;
+                Ok(ProcessResult {
+                    exit_code: 0,
+                    stdout: vec![],
+                    stderr: vec![],
+                })
+            }
+            [connect, raw, id_flag, id]
+                if connect == "connect" && raw == "--raw" && id_flag == "--id" =>
+            {
+                let id = aiw_windows_platform::CanonicalSandboxId::parse(id)
+                    .map_err(|error| RunnerError::Process(error.to_string()))?;
+                if state.started_id.as_deref() != Some(id.as_str()) {
+                    return Err(RunnerError::SessionConflict);
+                }
+                state
+                    .lease
+                    .connect_owned_with_timeout(mutation_timeout)
+                    .map_err(native_invocation_error)?;
+                Ok(ProcessResult {
+                    exit_code: 0,
+                    stdout: vec![],
+                    stderr: vec![],
+                })
+            }
+            _ => Err(RunnerError::Process(
+                "native adapter rejected an unexpected provider operation".to_owned(),
+            )),
+        }
+    }
+}
+
+#[cfg(windows)]
+fn native_invocation_error(
+    error: aiw_windows_platform::WindowsSandboxInvocationError,
+) -> RunnerError {
+    match error {
+        aiw_windows_platform::WindowsSandboxInvocationError::LeaseUnavailable => {
+            RunnerError::LeaseUnavailable
+        }
+        aiw_windows_platform::WindowsSandboxInvocationError::RecoveryRequired => {
+            RunnerError::RecoveryRequired(
+                "the native provider lease was abandoned before this start".to_owned(),
+            )
+        }
+        error => RunnerError::Process(error.to_string()),
+    }
+}
+
+fn process_json_result(value: serde_json::Value) -> Result<ProcessResult, RunnerError> {
+    Ok(ProcessResult {
+        exit_code: 0,
+        stdout: serde_json::to_vec(&value).map_err(|_| RunnerError::ProviderJson)?,
+        stderr: vec![],
+    })
+}
+
+#[cfg(windows)]
+#[derive(Default)]
+struct AlreadyHeldProviderLease;
+
+#[cfg(windows)]
+impl LeaseBoundary for AlreadyHeldProviderLease {
+    fn try_acquire(&self) -> Result<Box<dyn LeaseGuard + '_>, RunnerError> {
+        Ok(Box::new(()))
+    }
+}
+
 /// Execute the one approved W1 provider operation.  A success means lifecycle
 /// and receipt correlation succeeded, not that containment has been proven.
-#[cfg(test)]
 pub(crate) fn execute_wsb_golden_probe(
     request: &WsbGoldenProbeStart,
     readiness: &WindowsSandboxReadiness,
@@ -416,6 +572,76 @@ pub(crate) fn execute_wsb_golden_probe(
         workspace_identity_sha256: request.workspace_identity_sha256.clone(),
         cleanup_complete: true,
     })
+}
+
+/// Starts only the fixed golden probe described by an imported, approved
+/// preparation. Provider, workspace, mappings, agent and session authority are
+/// derived from persisted evidence; callers cannot supply an executable,
+/// provider path, session ID, command, or policy fragment.
+#[cfg(windows)]
+pub fn start_approved_windows_sandbox_golden_probe(
+    workspace_root: &Path,
+    project_path: &Path,
+    project: &Project,
+    expected_guest_agent_sha256: &str,
+    timeout_seconds: u32,
+) -> Result<WsbGoldenProbeExecution, RunnerError> {
+    let mut held = preparation::open_verified_windows_sandbox_preparation(
+        workspace_root,
+        project,
+        expected_guest_agent_sha256,
+        true,
+        false,
+    )
+    .map_err(|error| RunnerError::Preparation(error.to_string()))?;
+    held.revalidate_imported()
+        .map_err(|error| RunnerError::Preparation(error.to_string()))?;
+    let artifacts = held.artifacts.clone();
+    let layout = RunLayout::new(held.workspace().root_path(), &artifacts.receipt.run_id)
+        .map_err(journal_error)?;
+    if layout.read_plan().map_err(journal_error)? != artifacts.run_plan {
+        return Err(RunnerError::ApprovalBinding);
+    }
+
+    let request = WsbGoldenProbeStart {
+        schema_version: "aiw.dev/wsb-golden-probe-start/v0alpha2".to_owned(),
+        run_root: artifacts.receipt.workspace.root.final_path.clone(),
+        project_path: project_path.to_string_lossy().into_owned(),
+        wsb_plan: artifacts.wsb_plan.clone(),
+        provider: artifacts.receipt.provider.clone(),
+        guest_agent: artifacts.receipt.guest_agent.clone(),
+        workspace: artifacts.receipt.workspace.clone(),
+        workspace_identity_sha256: artifacts.receipt.workspace_identity_sha256.clone(),
+        timeout_seconds,
+    };
+    let approval = layout.read_approval().map_err(journal_error)?;
+    if !matches!(
+        layout.status().map_err(journal_error)?,
+        aiw_orchestrator::RecoveryStatus::Ready { .. }
+    ) {
+        return Err(RunnerError::ApprovalBinding);
+    }
+    ensure_approval(&artifacts.run_plan, &approval, &request)?;
+
+    let native_lease =
+        aiw_windows_platform::acquire_windows_sandbox(&artifacts.receipt.provider.sha256)
+            .map_err(native_invocation_error)?;
+    let readiness = native_lease.readiness().clone();
+    let process = NativeWsbProcess {
+        state: std::sync::Mutex::new(NativeWsbState {
+            lease: native_lease,
+            started_id: None,
+        }),
+        plan: artifacts.wsb_plan,
+    };
+    execute_wsb_golden_probe(
+        &request,
+        &readiness,
+        &layout,
+        &process,
+        &AlreadyHeldProviderLease,
+        held.workspace(),
+    )
 }
 
 /// Reconciles one persisted Windows Sandbox transaction. The caller supplies
@@ -1812,132 +2038,6 @@ mod tests {
 
     static NEXT: AtomicU64 = AtomicU64::new(1);
 
-    #[cfg(windows)]
-    struct NativeWsbProcess {
-        state: Mutex<NativeWsbState>,
-        plan: WindowsSandboxPlan,
-    }
-
-    #[cfg(windows)]
-    struct NativeWsbState {
-        lease: aiw_windows_platform::WindowsSandboxExecutionLease,
-        started_id: Option<String>,
-    }
-
-    #[cfg(windows)]
-    impl ProcessBoundary for NativeWsbProcess {
-        fn invoke(
-            &self,
-            executable: &Path,
-            arguments: &[String],
-            timeout_seconds: u32,
-        ) -> Result<ProcessResult, RunnerError> {
-            if timeout_seconds == 0 {
-                return Err(RunnerError::Process(
-                    "native provider timeout must be nonzero".to_owned(),
-                ));
-            }
-            let requested_timeout = Duration::from_secs(u64::from(timeout_seconds));
-            let read_timeout = requested_timeout.min(Duration::from_secs(15));
-            let mutation_timeout = requested_timeout.min(Duration::from_secs(120));
-            let mut state = self.state.lock().unwrap();
-            let expected = state
-                .lease
-                .readiness()
-                .provider_binary
-                .as_ref()
-                .ok_or_else(|| {
-                    RunnerError::Process("native provider identity absent".to_owned())
-                })?;
-            if !executable
-                .to_string_lossy()
-                .eq_ignore_ascii_case(&expected.canonical_path)
-            {
-                return Err(RunnerError::Process(
-                    "runner executable did not match native authority".to_owned(),
-                ));
-            }
-            match arguments {
-                [list, raw] if list == "list" && raw == "--raw" => {
-                    let observed = state
-                        .lease
-                        .list_with_timeout(read_timeout)
-                        .map_err(|error| RunnerError::Process(error.to_string()))?;
-                    successful_json(serde_json::json!({
-                        "WindowsSandboxEnvironments": observed.session_ids.into_iter().map(|id| serde_json::json!({"Id": id})).collect::<Vec<_>>()
-                    }))
-                }
-                [start, raw, id_flag, id, config_flag, xml]
-                    if start == "start"
-                        && raw == "--raw"
-                        && id_flag == "--id"
-                        && config_flag == "--config" =>
-                {
-                    let rendered = render_config(&self.plan)
-                        .map_err(|error| RunnerError::Process(error.to_string()))?;
-                    if rendered.xml != *xml {
-                        return Err(RunnerError::Process(
-                            "runner XML did not match the internally rendered typed plan"
-                                .to_owned(),
-                        ));
-                    }
-                    let id = aiw_windows_platform::CanonicalSandboxId::parse(id)
-                        .map_err(|error| RunnerError::Process(error.to_string()))?;
-                    // Bind the preselected identity before the mutating call.
-                    // The platform lease does the same internally, so a lost
-                    // or malformed start response can still be reconciled and
-                    // stopped through the exact persisted UUID.
-                    state.started_id = Some(id.as_str().to_owned());
-                    let observed = state
-                        .lease
-                        .start_with_timeout(&id, &self.plan, mutation_timeout)
-                        .map_err(|error| RunnerError::Process(error.to_string()))?;
-                    successful_json(serde_json::json!({"Id": observed.session_id}))
-                }
-                [stop, raw, id_flag, id]
-                    if stop == "stop" && raw == "--raw" && id_flag == "--id" =>
-                {
-                    let id = aiw_windows_platform::CanonicalSandboxId::parse(id)
-                        .map_err(|error| RunnerError::Process(error.to_string()))?;
-                    if state.started_id.as_deref() != Some(id.as_str()) {
-                        return Err(RunnerError::SessionConflict);
-                    }
-                    state
-                        .lease
-                        .stop_owned_with_timeout(mutation_timeout)
-                        .map_err(|error| RunnerError::Process(error.to_string()))?;
-                    state.started_id = None;
-                    Ok(ProcessResult {
-                        exit_code: 0,
-                        stdout: vec![],
-                        stderr: vec![],
-                    })
-                }
-                [connect, raw, id_flag, id]
-                    if connect == "connect" && raw == "--raw" && id_flag == "--id" =>
-                {
-                    let id = aiw_windows_platform::CanonicalSandboxId::parse(id)
-                        .map_err(|error| RunnerError::Process(error.to_string()))?;
-                    if state.started_id.as_deref() != Some(id.as_str()) {
-                        return Err(RunnerError::SessionConflict);
-                    }
-                    state
-                        .lease
-                        .connect_owned_with_timeout(mutation_timeout)
-                        .map_err(|error| RunnerError::Process(error.to_string()))?;
-                    Ok(ProcessResult {
-                        exit_code: 0,
-                        stdout: vec![],
-                        stderr: vec![],
-                    })
-                }
-                _ => Err(RunnerError::Process(
-                    "native adapter rejected an unexpected provider operation".to_owned(),
-                )),
-            }
-        }
-    }
-
     struct Root(PathBuf, bool);
     impl Root {
         fn new() -> Self {
@@ -2483,6 +2583,23 @@ mod tests {
         let id = deterministic_sandbox_id("run-one");
         assert_eq!(id.len(), 36);
         assert_eq!(id, deterministic_sandbox_id("run-one"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn native_provider_coordination_errors_preserve_recovery_semantics() {
+        assert!(matches!(
+            native_invocation_error(
+                aiw_windows_platform::WindowsSandboxInvocationError::LeaseUnavailable
+            ),
+            RunnerError::LeaseUnavailable
+        ));
+        assert!(matches!(
+            native_invocation_error(
+                aiw_windows_platform::WindowsSandboxInvocationError::RecoveryRequired
+            ),
+            RunnerError::RecoveryRequired(_)
+        ));
     }
 
     #[test]

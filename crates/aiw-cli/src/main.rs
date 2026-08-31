@@ -34,7 +34,7 @@ use aiw_runner::{
 #[cfg(windows)]
 use aiw_runner::{
     import_windows_sandbox_preparation, prepare_windows_sandbox_bundle, recover_windows_sandbox,
-    verify_windows_sandbox_preparation,
+    start_approved_windows_sandbox_golden_probe, verify_windows_sandbox_preparation,
 };
 use aiw_schema::{
     LEGACY_PROJECT_SCHEMA_VERSION, LegacyProjectV0Alpha1, ModelPack, PROJECT_SCHEMA_VERSION,
@@ -326,8 +326,12 @@ enum RunCommand {
         /// Exact validated project revision. It is rehashed immediately before start.
         #[arg(long)]
         project: PathBuf,
+        /// Independently supplied lowercase SHA-256 of the fixed-function guest agent.
         #[arg(long)]
-        wsb_plan: PathBuf,
+        guest_agent_sha256: String,
+        /// Total provider-operation timeout in seconds.
+        #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u32).range(1..=3600))]
+        timeout_seconds: u32,
     },
 }
 
@@ -568,6 +572,27 @@ impl std::fmt::Display for RunRecoveryFailed {
 }
 
 impl std::error::Error for RunRecoveryFailed {}
+
+#[derive(Debug)]
+struct RunStartFailed {
+    run_id: String,
+    source: RunnerError,
+}
+
+impl std::fmt::Display for RunStartFailed {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.source.fmt(formatter)
+    }
+}
+
+impl std::error::Error for RunStartFailed {}
+
+fn start_error_is_retryable(error: &RunnerError) -> bool {
+    matches!(
+        error,
+        RunnerError::LeaseUnavailable | RunnerError::RecoveryRequired(_)
+    )
+}
 
 #[derive(Debug)]
 struct RunPreparationFailed {
@@ -956,17 +981,45 @@ fn run(command: Command) -> Result<()> {
                 root,
                 run_id,
                 project,
-                wsb_plan,
+                guest_agent_sha256,
+                timeout_seconds,
             } => {
-                let _ = (root, project, wsb_plan);
-                Err(anyhow!(RunOperationUnavailable {
-                    code: "AIW_WSB_EXECUTION_UNAVAILABLE",
-                    summary: "trusted native Windows Sandbox verification and process execution are unavailable",
-                    stage: "wsbRunner",
-                    remediation: "Wait for the native Windows Sandbox execution boundary to be implemented; do not bypass provider cleanup state.",
-                    detail: "Production Windows Sandbox execution remains fail-closed.",
-                    run_id,
-                }))
+                let loaded = read_project(&project)?;
+                #[cfg(windows)]
+                {
+                    if root.file_name().and_then(|value| value.to_str()) != Some(run_id.as_str()) {
+                        return Err(anyhow!(RunStartFailed {
+                            run_id,
+                            source: RunnerError::ApprovalBinding,
+                        }));
+                    }
+                    let execution = start_approved_windows_sandbox_golden_probe(
+                        &root,
+                        &project,
+                        &loaded.project,
+                        &guest_agent_sha256,
+                        timeout_seconds,
+                    )
+                    .map_err(|source| {
+                        anyhow!(RunStartFailed {
+                            run_id: run_id.clone(),
+                            source,
+                        })
+                    })?;
+                    write_json(&execution)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (root, loaded, guest_agent_sha256, timeout_seconds);
+                    Err(anyhow!(RunOperationUnavailable {
+                        code: "AIW_WINDOWS_REQUIRED",
+                        summary: "approved Windows Sandbox execution requires Windows",
+                        stage: "wsbRunner",
+                        remediation: "Start this exact approved run on its original supported Windows host.",
+                        detail: "No provider was acquired and no run state was changed.",
+                        run_id,
+                    }))
+                }
             }
         },
         Command::Provider(args) => match args.command {
@@ -1603,11 +1656,18 @@ fn emit_anyhow_error(error: &anyhow::Error) {
             summary: "Windows Sandbox recovery could not be safely completed".to_owned(),
             stage: "wsbRecovery".to_owned(),
             run_id: Some(error.run_id.clone()),
-            retryable: matches!(
-                error.source,
-                RunnerError::LeaseUnavailable | RunnerError::RecoveryRequired(_)
-            ),
+            retryable: start_error_is_retryable(&error.source),
             remediation: "Preserve the run directory and provider state, resolve the reported authority or drift condition, and retry the same run recovery command.".to_owned(),
+            detail: error.source.to_string().chars().take(512).collect(),
+        });
+    } else if let Some(error) = error.downcast_ref::<RunStartFailed>() {
+        emit_error(&ErrorEnvelope {
+            code: "AIW_WSB_START_REJECTED".to_owned(),
+            summary: "approved Windows Sandbox golden-probe run was not completed".to_owned(),
+            stage: "wsbRunner".to_owned(),
+            run_id: Some(error.run_id.clone()),
+            retryable: start_error_is_retryable(&error.source),
+            remediation: "Preserve the run directory and provider state; inspect readiness, approval binding, drift, and recovery status before retrying.".to_owned(),
             detail: error.source.to_string().chars().take(512).collect(),
         });
     } else if let Some(error) = error.downcast_ref::<RunPreparationFailed>() {
@@ -1645,6 +1705,15 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn start_retryability_preserves_provider_coordination_semantics() {
+        assert!(start_error_is_retryable(&RunnerError::LeaseUnavailable));
+        assert!(start_error_is_retryable(&RunnerError::RecoveryRequired(
+            "exact recovery required".to_owned()
+        )));
+        assert!(!start_error_is_retryable(&RunnerError::ApprovalBinding));
+    }
 
     fn example_path(name: &str) -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
