@@ -215,6 +215,25 @@ pub fn reopen_prepared_discard_intent(
     }
 }
 
+/// Reopen an already-published exact intent using only its persisted binding.
+/// This is the narrow recovery path used after the workspace name is gone; it
+/// can neither publish a staged object nor mutate the namespace.
+pub fn reopen_published_discard_intent(
+    workspace: &WorkspaceBindingEvidence,
+    run_id: &str,
+    expected: &DiscardIntentBindingEvidence,
+) -> Result<HeldDiscardIntentPublication, DiscardIntentError> {
+    let context = Context::new(workspace, run_id)?;
+    validate_persisted_projection(expected, &context, run_id)?;
+    let parent = open_parent(&context)?;
+    if !namespace_present(&context.final_path)? {
+        return Err(DiscardIntentError::Rejected(
+            "published discard-intent is absent".to_owned(),
+        ));
+    }
+    open_published(parent, &context, expected)
+}
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum StageFailpoint {
     None,
@@ -671,6 +690,20 @@ fn validate_projection(
     intent: &[u8],
     expected_sha256: &str,
 ) -> Result<(), DiscardIntentError> {
+    validate_persisted_projection(expected, context, run_id)?;
+    if expected.intent_size != intent.len() as u64 || expected.intent_sha256 != expected_sha256 {
+        return Err(DiscardIntentError::Contract(
+            "persisted discard-intent binding differs from supplied bytes",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_persisted_projection(
+    expected: &DiscardIntentBindingEvidence,
+    context: &Context,
+    run_id: &str,
+) -> Result<(), DiscardIntentError> {
     if expected.schema_version != DISCARD_INTENT_BINDING_SCHEMA_VERSION
         || expected.policy_version != DISCARD_INTENT_BINDING_POLICY_VERSION
         || expected.run_id != run_id
@@ -680,8 +713,10 @@ fn validate_projection(
         || expected.store_key != context.store_key
         || !same_path(&expected.final_path, &context.final_path)
         || expected.parent_id != context.parent_expected
-        || expected.intent_size != intent.len() as u64
-        || expected.intent_sha256 != expected_sha256
+        || expected.intent_size == 0
+        || expected.intent_size > MAX_INTENT_BYTES as u64
+        || expected.intent_sha256.len() != 64
+        || !is_lower_hex(&expected.intent_sha256)
         || !valid_stage_leaf(&expected.staging_leaf, &context.store_key)
         || !valid_id(&expected.intent_id)
         || !valid_ea(&expected.intent_ea)
@@ -961,6 +996,10 @@ mod tests {
             "held final authority must exclude competing writers"
         );
         drop(held);
+        reopen_published_discard_intent(&workspace, RUN_ID, &projection)
+            .unwrap()
+            .revalidate()
+            .unwrap();
         assert!(matches!(
             reopen_prepared_discard_intent(INTENT, &digest(), &workspace, RUN_ID, &projection)
                 .unwrap(),

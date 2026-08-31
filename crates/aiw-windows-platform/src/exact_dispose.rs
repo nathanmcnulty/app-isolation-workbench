@@ -318,6 +318,44 @@ pub struct HeldFixedWsbCheckpointSnapshot {
     objects: Vec<HeldExactObject>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[doc(hidden)]
+pub enum WsbRootNamespaceState {
+    Original,
+    Tombstone,
+    Absent,
+    Foreign,
+    Ambiguous,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[doc(hidden)]
+pub struct WsbRootDepublishObservation {
+    pub root_id: DiscardIntentStableId,
+    pub tombstone_path: String,
+}
+
+#[doc(hidden)]
+pub struct HeldCheckpointBoundWsbRoot {
+    tree: HeldFixedWsbTree,
+}
+
+impl HeldCheckpointBoundWsbRoot {
+    pub fn revalidate(&self) -> Result<(), ExactDisposeError> {
+        self.tree.revalidate_remaining()
+    }
+
+    pub fn depublish_and_release(
+        mut self,
+    ) -> Result<WsbRootDepublishObservation, ExactDisposeError> {
+        let observation = self.tree.depublish()?;
+        Ok(WsbRootDepublishObservation {
+            root_id: stable_id_evidence(&observation.root_id),
+            tombstone_path: observation.tombstone_path.to_string_lossy().into_owned(),
+        })
+    }
+}
+
 pub(crate) fn observe_fixed_wsb_tree(
     workspace: &WorkspaceBindingEvidence,
     run_id: &str,
@@ -423,6 +461,70 @@ pub fn hold_fixed_wsb_tree_for_checkpoint(
     Ok(held)
 }
 
+#[doc(hidden)]
+pub fn classify_checkpoint_bound_wsb_root(
+    expected: &WsbFixedTreeInventoryEvidence,
+) -> Result<WsbRootNamespaceState, ExactDisposeError> {
+    let inventory = portable_inventory(expected)?;
+    let parent_path = inventory.original_root.parent().ok_or_else(|| {
+        ExactDisposeError::Contract("workspace root has no parent directory".into())
+    })?;
+    let parent = open_parent(parent_path)?;
+    if stable_id(&parent)? != inventory.parent_id {
+        return Err(ExactDisposeError::Rejected(
+            "workspace parent identity changed".into(),
+        ));
+    }
+    reject_case_sensitive_directory(&parent)?;
+    let expected_root = &inventory.objects[0].id;
+    let original = path_identity_if_present(&inventory.original_root)?;
+    let tombstone = path_identity_if_present(&parent_path.join(&inventory.tombstone_leaf))?;
+    let state = match (&original, &tombstone) {
+        (Some(original), None) if original == expected_root => WsbRootNamespaceState::Original,
+        (original, Some(tombstone))
+            if tombstone == expected_root && original.as_ref() != Some(expected_root) =>
+        {
+            // A replacement at the old name after a completed depublish is
+            // unrelated. Exact tombstone recovery must neither open it nor let
+            // it obscure the already-completed rename.
+            WsbRootNamespaceState::Tombstone
+        }
+        (None, None) => WsbRootNamespaceState::Absent,
+        (Some(_), Some(_)) => WsbRootNamespaceState::Ambiguous,
+        _ => WsbRootNamespaceState::Foreign,
+    };
+    match state {
+        WsbRootNamespaceState::Original => {
+            HeldFixedWsbTree::reopen_exact(&inventory, FixedWsbTreeLocation::Original)?;
+        }
+        WsbRootNamespaceState::Tombstone => {
+            HeldFixedWsbTree::reopen_exact(&inventory, FixedWsbTreeLocation::Tombstone)?;
+        }
+        _ => {}
+    }
+    Ok(state)
+}
+
+#[doc(hidden)]
+pub fn reopen_checkpoint_bound_wsb_root(
+    expected: &WsbFixedTreeInventoryEvidence,
+    state: WsbRootNamespaceState,
+) -> Result<HeldCheckpointBoundWsbRoot, ExactDisposeError> {
+    let inventory = portable_inventory(expected)?;
+    let location = match state {
+        WsbRootNamespaceState::Original => FixedWsbTreeLocation::Original,
+        WsbRootNamespaceState::Tombstone => FixedWsbTreeLocation::Tombstone,
+        _ => {
+            return Err(ExactDisposeError::Contract(
+                "only exact original or tombstone state can be reopened".into(),
+            ));
+        }
+    };
+    let tree = HeldFixedWsbTree::reopen_exact(&inventory, location)?;
+    tree.revalidate_remaining()?;
+    Ok(HeldCheckpointBoundWsbRoot { tree })
+}
+
 impl HeldFixedWsbCheckpointSnapshot {
     #[must_use]
     pub fn evidence(&self) -> &WsbFixedTreeInventoryEvidence {
@@ -510,6 +612,124 @@ fn inventory_evidence(
         .validate()
         .map_err(|error| ExactDisposeError::Contract(error.into()))?;
     Ok(evidence)
+}
+
+fn portable_inventory(
+    evidence: &WsbFixedTreeInventoryEvidence,
+) -> Result<FixedWsbTreeInventory, ExactDisposeError> {
+    evidence
+        .validate()
+        .map_err(|error| ExactDisposeError::Contract(error.into()))?;
+    let parse_id = |value: &DiscardIntentStableId| -> Result<StableFileId, ExactDisposeError> {
+        let volume_serial_number = u64::from_str_radix(&value.volume_serial_number, 16)
+            .map_err(|_| ExactDisposeError::Contract("portable volume ID is invalid".into()))?;
+        let file_id = hex::decode(&value.file_id)
+            .map_err(|_| ExactDisposeError::Contract("portable file ID is invalid".into()))?
+            .try_into()
+            .map_err(|_| ExactDisposeError::Contract("portable file ID is invalid".into()))?;
+        Ok(StableFileId {
+            volume_serial_number,
+            file_id,
+        })
+    };
+    let objects = evidence
+        .objects
+        .iter()
+        .map(|object| {
+            let sha256 = object
+                .sha256
+                .as_ref()
+                .map(|value| {
+                    hex::decode(value)
+                        .map_err(|_| {
+                            ExactDisposeError::Contract("portable file hash is invalid".into())
+                        })?
+                        .try_into()
+                        .map_err(|_| {
+                            ExactDisposeError::Contract("portable file hash is invalid".into())
+                        })
+                })
+                .transpose()?;
+            let entries = object
+                .ea
+                .entries
+                .iter()
+                .map(|entry| {
+                    Ok(ExtendedAttributeEntryBinding {
+                        name: entry.name.clone(),
+                        flags: entry.flags,
+                        value_length: entry.value_length,
+                        value_sha256: hex::decode(&entry.value_sha256)
+                            .map_err(|_| {
+                                ExactDisposeError::Contract(
+                                    "portable EA value hash is invalid".into(),
+                                )
+                            })?
+                            .try_into()
+                            .map_err(|_| {
+                                ExactDisposeError::Contract(
+                                    "portable EA value hash is invalid".into(),
+                                )
+                            })?,
+                    })
+                })
+                .collect::<Result<Vec<_>, ExactDisposeError>>()?;
+            Ok(FixedObjectBinding {
+                key: native_kind(object.kind),
+                id: parse_id(&object.id)?,
+                attributes: object.attributes,
+                link_count: object.link_count,
+                size_bytes: object.size_bytes,
+                sha256,
+                ea: ExtendedAttributeBinding {
+                    queried_bytes: 0,
+                    entries,
+                    canonical_sha256: hex::decode(&object.ea.canonical_sha256)
+                        .map_err(|_| {
+                            ExactDisposeError::Contract("portable EA digest is invalid".into())
+                        })?
+                        .try_into()
+                        .map_err(|_| {
+                            ExactDisposeError::Contract("portable EA digest is invalid".into())
+                        })?,
+                },
+            })
+        })
+        .collect::<Result<Vec<_>, ExactDisposeError>>()?;
+    let inventory = FixedWsbTreeInventory {
+        workspace: evidence.workspace.clone(),
+        run_id: evidence.run_id.clone(),
+        parent_id: parse_id(&evidence.parent_id)?,
+        original_root: PathBuf::from(&evidence.original_root),
+        tombstone_leaf: evidence.tombstone_leaf.clone(),
+        objects,
+    };
+    validate_inventory(&inventory)?;
+    Ok(inventory)
+}
+
+fn native_kind(kind: WsbFixedObjectKind) -> FixedWsbObject {
+    match kind {
+        WsbFixedObjectKind::WorkspaceRoot => FixedWsbObject::WorkspaceRoot,
+        WsbFixedObjectKind::ToolsDirectory => FixedWsbObject::ToolsDirectory,
+        WsbFixedObjectKind::OutputDirectory => FixedWsbObject::OutputDirectory,
+        WsbFixedObjectKind::RunsDirectory => FixedWsbObject::RunsDirectory,
+        WsbFixedObjectKind::LocksDirectory => FixedWsbObject::LocksDirectory,
+        WsbFixedObjectKind::RunDirectory => FixedWsbObject::RunDirectory,
+        WsbFixedObjectKind::JournalHeadsDirectory => FixedWsbObject::JournalHeadsDirectory,
+        WsbFixedObjectKind::GuestAgent => FixedWsbObject::GuestAgent,
+        WsbFixedObjectKind::PreparedPlan => FixedWsbObject::PreparedPlan,
+        WsbFixedObjectKind::WindowsSandboxPlan => FixedWsbObject::WindowsSandboxPlan,
+        WsbFixedObjectKind::PreparationReceipt => FixedWsbObject::PreparationReceipt,
+        WsbFixedObjectKind::RunLock => FixedWsbObject::RunLock,
+        WsbFixedObjectKind::AuthoritativePlan => FixedWsbObject::AuthoritativePlan,
+        WsbFixedObjectKind::PlanningImportReceipt => FixedWsbObject::PlanningImportReceipt,
+        WsbFixedObjectKind::EventsJournal => FixedWsbObject::EventsJournal,
+        WsbFixedObjectKind::RevocationRecord => FixedWsbObject::RevocationRecord,
+        WsbFixedObjectKind::JournalHead1 => FixedWsbObject::JournalHead1,
+        WsbFixedObjectKind::JournalHead2 => FixedWsbObject::JournalHead2,
+        WsbFixedObjectKind::JournalHead3 => FixedWsbObject::JournalHead3,
+    }
 }
 
 fn object_evidence(
@@ -2504,6 +2724,112 @@ mod tests {
         let mut legacy = first;
         legacy.tombstone_leaf = ".aiw-wsb-tombstone-run-one-deadbeef".to_owned();
         assert!(verify_fixed_wsb_tree_inventory(&legacy).is_err());
+    }
+
+    #[test]
+    fn checkpoint_bound_root_classifies_reopens_and_depublishes_exactly_once() {
+        let fixture = Fixture::new();
+        let tombstone = tombstone_leaf(&fixture.workspace);
+        let inventory =
+            observe_fixed_wsb_tree_for_checkpoint(&fixture.workspace, RUN_ID, &tombstone).unwrap();
+
+        assert_eq!(
+            classify_checkpoint_bound_wsb_root(&inventory).unwrap(),
+            WsbRootNamespaceState::Original
+        );
+        let held =
+            reopen_checkpoint_bound_wsb_root(&inventory, WsbRootNamespaceState::Original).unwrap();
+        held.revalidate().unwrap();
+        let observation = held.depublish_and_release().unwrap();
+
+        assert_eq!(observation.root_id, inventory.objects[0].id);
+        assert!(same_path(
+            PathBuf::from(observation.tombstone_path),
+            &fixture.tombstone
+        ));
+        assert!(!fixture.root.exists());
+        assert!(fixture.tombstone.is_dir());
+        assert_eq!(fs::read(&fixture.sibling).unwrap(), b"unrelated");
+        assert_eq!(
+            classify_checkpoint_bound_wsb_root(&inventory).unwrap(),
+            WsbRootNamespaceState::Tombstone
+        );
+        reopen_checkpoint_bound_wsb_root(&inventory, WsbRootNamespaceState::Tombstone)
+            .unwrap()
+            .revalidate()
+            .unwrap();
+    }
+
+    #[test]
+    fn checkpoint_bound_classifier_fails_closed_on_ambiguous_foreign_and_absent_states() {
+        let occupied = Fixture::new();
+        let tombstone = tombstone_leaf(&occupied.workspace);
+        let inventory =
+            observe_fixed_wsb_tree_for_checkpoint(&occupied.workspace, RUN_ID, &tombstone).unwrap();
+        fs::create_dir(&occupied.tombstone).unwrap();
+        assert_eq!(
+            classify_checkpoint_bound_wsb_root(&inventory).unwrap(),
+            WsbRootNamespaceState::Ambiguous
+        );
+        assert!(
+            reopen_checkpoint_bound_wsb_root(&inventory, WsbRootNamespaceState::Ambiguous).is_err()
+        );
+        fs::remove_dir(&occupied.tombstone).unwrap();
+
+        let moved = Fixture::new();
+        let tombstone = tombstone_leaf(&moved.workspace);
+        let inventory =
+            observe_fixed_wsb_tree_for_checkpoint(&moved.workspace, RUN_ID, &tombstone).unwrap();
+        let displaced = moved.parent.join(format!(
+            "{}-displaced",
+            moved.root.file_name().unwrap().to_string_lossy()
+        ));
+        fs::rename(&moved.root, &displaced).unwrap();
+        fs::create_dir(&moved.root).unwrap();
+        assert_eq!(
+            classify_checkpoint_bound_wsb_root(&inventory).unwrap(),
+            WsbRootNamespaceState::Foreign
+        );
+        fs::remove_dir(&moved.root).unwrap();
+        fs::rename(&displaced, &moved.root).unwrap();
+
+        let absent = Fixture::new();
+        let tombstone = tombstone_leaf(&absent.workspace);
+        let inventory =
+            observe_fixed_wsb_tree_for_checkpoint(&absent.workspace, RUN_ID, &tombstone).unwrap();
+        let displaced = absent.parent.join(format!(
+            "{}-displaced",
+            absent.root.file_name().unwrap().to_string_lossy()
+        ));
+        fs::rename(&absent.root, &displaced).unwrap();
+        assert_eq!(
+            classify_checkpoint_bound_wsb_root(&inventory).unwrap(),
+            WsbRootNamespaceState::Absent
+        );
+        fs::rename(&displaced, &absent.root).unwrap();
+    }
+
+    #[test]
+    fn exact_tombstone_classification_ignores_but_never_touches_old_name_replacement() {
+        let fixture = Fixture::new();
+        let tombstone = tombstone_leaf(&fixture.workspace);
+        let inventory =
+            observe_fixed_wsb_tree_for_checkpoint(&fixture.workspace, RUN_ID, &tombstone).unwrap();
+        reopen_checkpoint_bound_wsb_root(&inventory, WsbRootNamespaceState::Original)
+            .unwrap()
+            .depublish_and_release()
+            .unwrap();
+        fs::create_dir(&fixture.root).unwrap();
+        write_file(&fixture.root.join("foreign"), b"replacement");
+
+        assert_eq!(
+            classify_checkpoint_bound_wsb_root(&inventory).unwrap(),
+            WsbRootNamespaceState::Tombstone
+        );
+        assert_eq!(
+            fs::read(fixture.root.join("foreign")).unwrap(),
+            b"replacement"
+        );
     }
 
     #[test]
