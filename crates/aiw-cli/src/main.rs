@@ -22,7 +22,8 @@ use aiw_orchestrator::{
 use aiw_probe::{
     APPLICATION_FILE_AUTHORITY_SCHEMA, ApplicationFileAuthority, ApplicationInspection,
     ApplicationInspectionError, ApplicationInspectionKind, PortableContentManifest,
-    WindowsSandboxReadiness, WorkspaceBindingEvidence, inspect_application_source, probe_host,
+    PortableDirectoryAuthority, WindowsSandboxReadiness, WorkspaceBindingEvidence,
+    inspect_application_source, probe_host,
 };
 use aiw_provider_mxc::{MxcGoldenProbePlan, plan_capability_probe, plan_golden_probe};
 use aiw_provider_wsb::{
@@ -48,7 +49,7 @@ use aiw_schema::{
 use aiw_token::{TokenEvidence, collect_current_process_token};
 use aiw_windows_platform::assess_windows_sandbox;
 #[cfg(windows)]
-use aiw_windows_platform::{HeldApplicationFile, SourceInspectionError};
+use aiw_windows_platform::{HeldApplicationFile, HeldPortableDirectory, SourceInspectionError};
 use anyhow::{Context, Result, anyhow, bail};
 use clap::error::ErrorKind;
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -427,6 +428,7 @@ struct SchemaArgs {
 enum SchemaKind {
     ApplicationFileAuthority,
     ApplicationInspection,
+    PortableDirectoryAuthority,
     PortableContentManifest,
     /// Current project schema. Retained as the stable alias for project-v0alpha2.
     Project,
@@ -747,16 +749,23 @@ fn run(command: Command) -> Result<()> {
         Command::Application(args) => match args.command {
             ApplicationCommand::Inspect { source, kind } => {
                 #[cfg(windows)]
-                let held = matches!(kind, ApplicationKindArg::Msi | ApplicationKindArg::Exe)
+                let held_file = matches!(kind, ApplicationKindArg::Msi | ApplicationKindArg::Exe)
                     .then(|| {
                         HeldApplicationFile::open(&source)
+                            .map_err(|source| anyhow!(ApplicationAuthorityFailed { source }))
+                    })
+                    .transpose()?;
+                #[cfg(windows)]
+                let held_portable = matches!(kind, ApplicationKindArg::PortableDirectory)
+                    .then(|| {
+                        HeldPortableDirectory::open(&source)
                             .map_err(|source| anyhow!(ApplicationAuthorityFailed { source }))
                     })
                     .transpose()?;
                 let mut inspection = inspect_application_source(&source, kind.into())
                     .map_err(|source| anyhow!(ApplicationInspectionFailed { source }))?;
                 #[cfg(windows)]
-                if let Some(held) = held.as_ref() {
+                if let Some(held) = held_file.as_ref() {
                     let observed = held.observation();
                     if inspection.sha256.as_deref() != Some(&observed.sha256)
                         || inspection.size_bytes != Some(observed.size_bytes)
@@ -780,6 +789,37 @@ fn run(command: Command) -> Result<()> {
                         !value.starts_with("Windows hard-link and alternate-stream")
                             && !value.starts_with("Path checks are observational")
                     });
+                }
+                #[cfg(windows)]
+                if let Some(held) = held_portable.as_ref() {
+                    let path_manifest = inspection.portable_manifest.as_ref().ok_or_else(|| {
+                        anyhow!(ApplicationAuthorityFailed {
+                            source: SourceInspectionError::Drift,
+                        })
+                    })?;
+                    if path_manifest.schema_version != held.manifest().schema_version
+                        || path_manifest.entries != held.manifest().entries
+                        || path_manifest.total_size_bytes != held.manifest().total_size_bytes
+                        || path_manifest.manifest_sha256 != held.manifest().manifest_sha256
+                    {
+                        return Err(anyhow!(ApplicationAuthorityFailed {
+                            source: SourceInspectionError::Drift,
+                        }));
+                    }
+                    held.revalidate()
+                        .map_err(|source| anyhow!(ApplicationAuthorityFailed { source }))?;
+                    inspection.canonical_path = held.manifest().root_path.clone();
+                    inspection.size_bytes = Some(held.manifest().total_size_bytes);
+                    inspection.portable_manifest = Some(held.manifest().clone());
+                    inspection.portable_directory_authority = Some(held.authority().clone());
+                    inspection.limitations.retain(|value| {
+                        !value.starts_with("Windows hard-link and alternate-stream")
+                            && !value.starts_with("Portable traversal is path-based")
+                    });
+                    inspection.limitations.push(
+                        "Held handle-relative traversal binds every observed object, but a directory namespace addition after final enumeration cannot be excluded until protected import."
+                            .to_owned(),
+                    );
                 }
                 write_json(&inspection)
             }
@@ -1169,6 +1209,9 @@ fn run(command: Command) -> Result<()> {
                 write_json(&schema_for!(ApplicationFileAuthority))
             }
             SchemaKind::ApplicationInspection => write_json(&schema_for!(ApplicationInspection)),
+            SchemaKind::PortableDirectoryAuthority => {
+                write_json(&schema_for!(PortableDirectoryAuthority))
+            }
             SchemaKind::PortableContentManifest => {
                 write_json(&schema_for!(PortableContentManifest))
             }

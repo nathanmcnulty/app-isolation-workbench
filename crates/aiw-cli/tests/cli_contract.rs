@@ -278,6 +278,32 @@ fn application_inspection_is_json_only_and_type_bound() {
     assert_eq!(value["fileAuthority"]["sizeBytes"], value["sizeBytes"]);
     assert_eq!(value["fileAuthority"]["onlyUnnamedDataStream"], true);
 
+    let portable = temp.path().join("portable");
+    fs::create_dir(&portable).unwrap();
+    fs::write(portable.join("app.txt"), b"portable").unwrap();
+    let inspected_portable = Command::new(aiw())
+        .args(["application", "inspect", "--source"])
+        .arg(&portable)
+        .args(["--kind", "portable-directory"])
+        .output()
+        .unwrap();
+    assert!(inspected_portable.status.success());
+    assert!(inspected_portable.stderr.is_empty());
+    let portable_value = parse_one_json(&inspected_portable.stdout);
+    assert_eq!(portable_value["kind"], "portableDirectory");
+    assert_eq!(
+        portable_value["portableDirectoryAuthority"]["schemaVersion"],
+        "aiw.dev/portable-directory-authority/v0alpha1"
+    );
+    assert_eq!(
+        portable_value["portableDirectoryAuthority"]["manifestSha256"],
+        portable_value["portableManifest"]["manifestSha256"]
+    );
+    assert_eq!(
+        portable_value["portableDirectoryAuthority"]["entries"][0]["relativePath"],
+        "app.txt"
+    );
+
     let rejected = Command::new(aiw())
         .args(["application", "inspect", "--source"])
         .arg(&source)

@@ -112,6 +112,7 @@ try {
     foreach ($schemaKind in @(
         'application-file-authority',
         'application-inspection',
+        'portable-directory-authority',
         'portable-content-manifest',
         'assessment-bundle-manifest',
         'assessment-bundle-spec',
