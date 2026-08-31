@@ -11,11 +11,14 @@ use aiw_orchestrator::{
     RunLayout, WSB_REVOCATION_SCHEMA_VERSION, WsbOuterDiscardAuthority, WsbRevocationRecord,
     project_revision_hash,
 };
-use aiw_probe::WorkspaceBindingEvidence;
+use aiw_probe::{
+    WSB_FIXED_TREE_CONTRACT_VERSION, WorkspaceBindingEvidence, WsbFixedTreeInventoryEvidence,
+};
 use aiw_schema::Project;
 use aiw_windows_platform::{
-    DiscardIntentBindingEvidence, DiscardIntentError, HeldDiscardIntentPublication,
-    ReopenedDiscardIntent, reopen_prepared_discard_intent, stage_discard_intent,
+    DiscardIntentBindingEvidence, DiscardIntentError, ExactDisposeError,
+    HeldDiscardIntentPublication, ReopenedDiscardIntent, observe_fixed_wsb_tree_for_checkpoint,
+    reopen_prepared_discard_intent, stage_discard_intent, verify_fixed_wsb_tree_inventory,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -27,8 +30,9 @@ use crate::preparation::{
 };
 
 const DISCARD_INTENT_SCHEMA: &str = "aiw.dev/wsb-discard-intent/v0alpha1";
+const FIXED_TREE_INVENTORY_RECEIPT_SCHEMA: &str =
+    "aiw.dev/wsb-fixed-tree-inventory-receipt/v0alpha1";
 const DISCARD_PHASE: &str = "revocationPending";
-const FIXED_TREE_CONTRACT: &str = "aiw.dev/wsb-fixed-tree/v1-19-objects";
 const CONTROL_PREFIX: &str = ".aiw-discard-v1-";
 const TOMBSTONE_PREFIX: &str = ".aiw-discarded-v1-";
 
@@ -42,6 +46,8 @@ pub(crate) enum WsbDiscardPreparationError {
     Orchestrator(String),
     #[error("protected discard intent failed: {0}")]
     Platform(#[from] DiscardIntentError),
+    #[error("read-only fixed-tree inventory failed: {0}")]
+    Inventory(#[from] ExactDisposeError),
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -100,6 +106,20 @@ struct CleanupIdMaterial<'a> {
 pub(crate) struct PreparedWsbDiscard<'a> {
     authority: WsbOuterDiscardAuthority<'a>,
     intent: WsbDiscardIntent,
+    inventory_receipt: WsbFixedTreeInventoryReceipt,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct WsbFixedTreeInventoryReceipt {
+    pub(crate) schema_version: String,
+    pub(crate) run_id: String,
+    pub(crate) cleanup_id: String,
+    pub(crate) discard_intent_sha256: String,
+    pub(crate) revocation_sha256: String,
+    pub(crate) workspace_identity_sha256: String,
+    pub(crate) inventory_sha256: String,
+    pub(crate) inventory: WsbFixedTreeInventoryEvidence,
 }
 
 impl PreparedWsbDiscard<'_> {
@@ -113,6 +133,14 @@ impl PreparedWsbDiscard<'_> {
 
     pub(crate) fn revocation(&self) -> &WsbRevocationRecord {
         self.authority.revocation()
+    }
+
+    pub(crate) fn inventory(&self) -> &WsbFixedTreeInventoryEvidence {
+        &self.inventory_receipt.inventory
+    }
+
+    pub(crate) fn inventory_receipt(&self) -> &WsbFixedTreeInventoryReceipt {
+        &self.inventory_receipt
     }
 }
 
@@ -208,11 +236,93 @@ pub(crate) fn prepare_windows_sandbox_discard<'a>(
     held.revalidate_revoking()?;
     require_current_readiness_matches_receipt(&held.artifacts.receipt)?;
     require_guard_bindings(&guard, &held.artifacts, project)?;
+    let preparation_receipt = held.artifacts.receipt.clone();
     drop(held);
     let authority = guard
         .into_outer_only(publication)
         .map_err(|error| WsbDiscardPreparationError::Orchestrator(error.to_string()))?;
-    Ok(PreparedWsbDiscard { authority, intent })
+    require_current_readiness_matches_receipt(&preparation_receipt)?;
+    let inventory = observe_fixed_wsb_tree_for_checkpoint(
+        &intent.workspace,
+        layout.run_id(),
+        &intent.tombstone_leaf,
+    )?;
+    verify_fixed_wsb_tree_inventory(&inventory)?;
+    require_current_readiness_matches_receipt(&preparation_receipt)?;
+    let inventory_receipt = build_inventory_receipt(
+        &intent,
+        authority.revocation(),
+        &preparation_receipt.workspace_identity_sha256,
+        inventory,
+    )?;
+    Ok(PreparedWsbDiscard {
+        authority,
+        intent,
+        inventory_receipt,
+    })
+}
+
+fn build_inventory_receipt(
+    intent: &WsbDiscardIntent,
+    revocation: &WsbRevocationRecord,
+    workspace_identity_sha256: &str,
+    inventory: WsbFixedTreeInventoryEvidence,
+) -> Result<WsbFixedTreeInventoryReceipt, WsbDiscardPreparationError> {
+    inventory
+        .validate()
+        .map_err(|error| WsbDiscardPreparationError::Contract(error.to_owned()))?;
+    if inventory.run_id != intent.run_id
+        || inventory.workspace != intent.workspace
+        || inventory.original_root != intent.workspace.root.final_path
+        || inventory.tombstone_leaf != intent.tombstone_leaf
+        || revocation.run_id != intent.run_id
+        || revocation.cleanup_id != intent.cleanup_id
+        || !tombstone_matches_cleanup(intent)
+        || revocation.discard_intent_sha256 != hash_bytes(&canonical_bytes(intent)?)
+        || workspace_identity_sha256 != intent.workspace_identity_sha256
+    {
+        return Err(WsbDiscardPreparationError::Contract(
+            "fixed-tree inventory bindings differ from discard authority".to_owned(),
+        ));
+    }
+    let inventory_sha256 = canonical_hash(&inventory)?;
+    let receipt = WsbFixedTreeInventoryReceipt {
+        schema_version: FIXED_TREE_INVENTORY_RECEIPT_SCHEMA.to_owned(),
+        run_id: intent.run_id.clone(),
+        cleanup_id: intent.cleanup_id.clone(),
+        discard_intent_sha256: revocation.discard_intent_sha256.clone(),
+        revocation_sha256: canonical_hash(revocation)?,
+        workspace_identity_sha256: workspace_identity_sha256.to_owned(),
+        inventory_sha256,
+        inventory,
+    };
+    validate_inventory_receipt(&receipt, intent, revocation)?;
+    Ok(receipt)
+}
+
+fn validate_inventory_receipt(
+    receipt: &WsbFixedTreeInventoryReceipt,
+    intent: &WsbDiscardIntent,
+    revocation: &WsbRevocationRecord,
+) -> Result<(), WsbDiscardPreparationError> {
+    if receipt.schema_version != FIXED_TREE_INVENTORY_RECEIPT_SCHEMA
+        || receipt.run_id != intent.run_id
+        || receipt.cleanup_id != intent.cleanup_id
+        || receipt.discard_intent_sha256 != revocation.discard_intent_sha256
+        || receipt.revocation_sha256 != canonical_hash(revocation)?
+        || receipt.workspace_identity_sha256 != intent.workspace_identity_sha256
+        || receipt.inventory_sha256 != canonical_hash(&receipt.inventory)?
+        || receipt.inventory.run_id != receipt.run_id
+        || receipt.inventory.workspace != intent.workspace
+        || receipt.inventory.tombstone_leaf != intent.tombstone_leaf
+        || !tombstone_matches_cleanup(intent)
+        || receipt.inventory.validate().is_err()
+    {
+        return Err(WsbDiscardPreparationError::Contract(
+            "fixed-tree inventory receipt is invalid".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 fn reopen_and_publish(
@@ -358,7 +468,7 @@ fn build_intent(
         schema_version: DISCARD_INTENT_SCHEMA,
         run_id: guard.plan().run_id.as_str(),
         phase: DISCARD_PHASE,
-        fixed_tree_contract: FIXED_TREE_CONTRACT,
+        fixed_tree_contract: WSB_FIXED_TREE_CONTRACT_VERSION,
         requested_by,
         requested_at,
         control_path: &control_path,
@@ -382,7 +492,7 @@ fn build_intent(
         run_id: receipt.run_id.clone(),
         cleanup_id: cleanup_id.clone(),
         phase: DISCARD_PHASE.to_owned(),
-        fixed_tree_contract: FIXED_TREE_CONTRACT.to_owned(),
+        fixed_tree_contract: WSB_FIXED_TREE_CONTRACT_VERSION.to_owned(),
         requested_by: requested_by.to_owned(),
         requested_at: requested_at.to_owned(),
         tombstone_leaf: format!("{TOMBSTONE_PREFIX}{cleanup_id}"),
@@ -419,6 +529,10 @@ fn hash_bytes(value: &[u8]) -> String {
     hex::encode(Sha256::digest(value))
 }
 
+fn tombstone_matches_cleanup(intent: &WsbDiscardIntent) -> bool {
+    intent.tombstone_leaf == format!("{TOMBSTONE_PREFIX}{}", intent.cleanup_id)
+}
+
 fn require_request_text(field: &str, value: &str) -> Result<(), WsbDiscardPreparationError> {
     if value.is_empty() || value.len() > 256 || value.chars().any(char::is_control) {
         return Err(WsbDiscardPreparationError::Contract(format!(
@@ -438,7 +552,32 @@ fn is_sha256(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aiw_probe::{DiscardIntentEaBinding, DiscardIntentStableId};
+    use aiw_probe::{
+        DiscardIntentEaBinding, DiscardIntentStableId, WINDOWS_SYSTEM_SID,
+        WINDOWS_WORKSPACE_SCHEMA_VERSION, WINDOWS_WORKSPACE_SECURITY_POLICY, WindowsFileIdentity,
+        workspace_policy_hash,
+    };
+
+    fn test_workspace() -> WorkspaceBindingEvidence {
+        let owner = "S-1-5-21-1".to_owned();
+        let identity = |path: &str, marker: u8| WindowsFileIdentity {
+            final_path: path.to_owned(),
+            volume_serial_number: "1".repeat(16),
+            file_id: format!("{marker:032x}"),
+        };
+        WorkspaceBindingEvidence {
+            schema_version: WINDOWS_WORKSPACE_SCHEMA_VERSION.to_owned(),
+            policy: WINDOWS_WORKSPACE_SECURITY_POLICY.to_owned(),
+            security_policy_sha256: workspace_policy_hash(&owner),
+            owner_sid: owner.clone(),
+            dacl_protected: true,
+            allowed_sids: vec![WINDOWS_SYSTEM_SID.to_owned(), owner],
+            parent: identity("C:\\AIW", 1),
+            root: identity("C:\\AIW\\run-one", 2),
+            tools: identity("C:\\AIW\\run-one\\tools", 3),
+            output: identity("C:\\AIW\\run-one\\output", 4),
+        }
+    }
 
     fn binding() -> DiscardIntentBindingEvidence {
         DiscardIntentBindingEvidence {
@@ -582,6 +721,16 @@ mod tests {
         }
         assert!(production.contains("begin_wsb_revocation"));
         assert!(production.contains("into_outer_only"));
+        assert!(production.contains("observe_fixed_wsb_tree_for_checkpoint"));
+        assert!(production.contains("verify_fixed_wsb_tree_inventory"));
+        assert!(
+            production.find("into_outer_only(publication)").unwrap()
+                < production
+                    .rfind("observe_fixed_wsb_tree_for_checkpoint")
+                    .unwrap(),
+            "inventory observation must occur only after outer-only handoff"
+        );
+        assert!(!production.contains(".aiw-discard-checkpoint"));
         assert!(
             production.find("persist_staged_revocation").unwrap()
                 < production.find("drop(held_stage)").unwrap(),
@@ -592,8 +741,40 @@ mod tests {
     #[test]
     fn fixed_tree_and_phase_contracts_are_explicit() {
         assert_eq!(DISCARD_PHASE, "revocationPending");
-        assert!(FIXED_TREE_CONTRACT.ends_with("19-objects"));
+        assert!(WSB_FIXED_TREE_CONTRACT_VERSION.ends_with("19-objects"));
         assert_eq!(CONTROL_PREFIX, ".aiw-discard-v1-");
         assert_eq!(TOMBSTONE_PREFIX, ".aiw-discarded-v1-");
+    }
+
+    #[test]
+    fn tombstone_is_bound_to_the_exact_cleanup_identity() {
+        let mut intent = WsbDiscardIntent {
+            schema_version: DISCARD_INTENT_SCHEMA.to_owned(),
+            run_id: "run-one".to_owned(),
+            cleanup_id: "a".repeat(64),
+            phase: DISCARD_PHASE.to_owned(),
+            fixed_tree_contract: WSB_FIXED_TREE_CONTRACT_VERSION.to_owned(),
+            requested_by: "admin".to_owned(),
+            requested_at: "now".to_owned(),
+            tombstone_leaf: format!("{TOMBSTONE_PREFIX}{}", "a".repeat(64)),
+            control_path: "control".to_owned(),
+            coordination_binding_sha256: "b".repeat(64),
+            plan_sha256: "c".repeat(64),
+            import_receipt_sha256: "d".repeat(64),
+            preparation_receipt_sha256: "e".repeat(64),
+            project_revision_sha256: "f".repeat(64),
+            guest_agent_sha256: "1".repeat(64),
+            provider_sha256: "2".repeat(64),
+            provider_package_sha256: "3".repeat(64),
+            provider_catalog_sha256: "4".repeat(64),
+            provider_file_identity_sha256: "5".repeat(64),
+            provider_protocol_sha256: "6".repeat(64),
+            windows_sandbox_plan_sha256: "7".repeat(64),
+            workspace: test_workspace(),
+            workspace_identity_sha256: "8".repeat(64),
+        };
+        assert!(tombstone_matches_cleanup(&intent));
+        intent.tombstone_leaf = format!("{TOMBSTONE_PREFIX}{}", "9".repeat(64));
+        assert!(!tombstone_matches_cleanup(&intent));
     }
 }
