@@ -21,7 +21,9 @@ pub use workspace::{
 };
 
 #[cfg(windows)]
-pub use source_inspection::{HeldApplicationFile, SourceFileObservation, SourceInspectionError};
+pub use source_inspection::{
+    HeldApplicationFile, HeldPortableDirectory, SourceFileObservation, SourceInspectionError,
+};
 
 #[cfg(windows)]
 pub use coordination::{

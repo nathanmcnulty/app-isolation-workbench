@@ -2277,6 +2277,14 @@ fn parse_streams(bytes: &[u8]) -> Result<Vec<(String, u64)>, ExactDisposeError> 
 }
 
 pub(crate) fn directory_entries(file: &File) -> Result<Vec<DirectoryEntry>, ExactDisposeError> {
+    let entries = source_directory_entries(file)?;
+    reject_unsafe_directory_entries(&entries)?;
+    Ok(entries)
+}
+
+pub(crate) fn source_directory_entries(
+    file: &File,
+) -> Result<Vec<DirectoryEntry>, ExactDisposeError> {
     let mut entries = extended_directory_entries(file)?;
     let aliases = directory_alias_entries(file)?;
     let entry_names = normalized_names(entries.iter().map(|entry| entry.name.clone()).collect())?;
@@ -2297,7 +2305,6 @@ pub(crate) fn directory_entries(file: &File) -> Result<Vec<DirectoryEntry>, Exac
             .expect("normalized name sets matched")
             .ea_size;
     }
-    reject_unsafe_directory_entries(&entries)?;
     Ok(entries)
 }
 
