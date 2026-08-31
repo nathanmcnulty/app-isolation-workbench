@@ -28,6 +28,10 @@ The recovery exception is intentionally narrow: `aiw run recover` accepts only a
 
 Preparation is not a containment boundary against another process already running as the same user. It reduces race exposure with protected held workspace directories, expected-hash source holding, create-new files held without write/delete sharing, bounded reads from the same handles, exact root/tools entry allowlists, and a receipt written last. The separate verifier requires the independent agent hash again and must be run before planning/approval; same-user or administrator modification after verification is still caught again by the approval/start hash and identity checks rather than treated as trustworthy.
 
+## W1 discard-intent clarification
+
+The current private discard slice has implemented the durable logical ordering that the earlier limitation text describes: a hash-bound internal revocation record is persisted before a protected external single-file marker, with both layers retained under the owner-bound run lease. The marker is created with write-through file semantics and verified after flush and reopen; this does not claim that a parent directory is flushed. Binding validation covers IDs, canonical paths and hashes, file identity, exact owner-and-SYSTEM ACL, links, streams, special attributes, and permitted kernel EA evidence. A complete protected parent is required. Same-user crash-time modification is not prevented solely by the owner DACL; malformed, torn, partial, or drifted state fails closed. This remains non-destructive: no workspace rename/delete, provider mutation, or public discard CLI is present. The 19-object tree is still only a fixed benchmark; read-only inventory/classification is deferred. This clarification supersedes the older “remain unimplemented” wording below for the internal gate and marker, while the future depublish/checkpoint/recovery integration remains outstanding.
+
 ## Required controls
 
 ### Intake and paths

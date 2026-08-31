@@ -23,11 +23,23 @@ pub use coordination::{
     try_acquire_run_coordination,
 };
 
+#[cfg(windows)]
+pub use discard_intent::{
+    DISCARD_INTENT_BINDING_POLICY_VERSION, DISCARD_INTENT_BINDING_SCHEMA_VERSION,
+    DiscardIntentBindingEvidence, DiscardIntentEaBinding, DiscardIntentEaEntry, DiscardIntentError,
+    DiscardIntentStableId, HeldDiscardIntentPublication, PublishableDiscardIntent,
+    ReopenedDiscardIntent, StagedDiscardIntent, reopen_prepared_discard_intent,
+    stage_discard_intent,
+};
+
 pub use aiw_probe::WindowsFileIdentity as WorkspaceDirectoryIdentity;
 pub use aiw_probe::WorkspaceBindingEvidence;
 
 #[cfg(windows)]
 mod coordination;
+
+#[cfg(windows)]
+mod discard_intent;
 
 #[cfg(windows)]
 #[allow(dead_code)]

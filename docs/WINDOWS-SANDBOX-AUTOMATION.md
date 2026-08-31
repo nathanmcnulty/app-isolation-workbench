@@ -1,5 +1,7 @@
 # Windows Sandbox automation
 
+> **W1 discard-intent clarification:** The private runner now publishes a hash-bound internal revocation record before a protected external single-file marker, while retaining both under the owner-bound run lease. This slice is non-destructive: it does not rename/delete workspaces, mutate a provider, or expose a discard CLI. Marker publication uses write-through file semantics followed by flush and strict reopen verification; it makes no parent-directory flush claim. The exact protected owner-and-SYSTEM DACL, equally protected parent, stable IDs, canonical paths/hashes, file identity, links, streams, attributes, and permitted kernel EA evidence are all bound and revalidated. Same-user crash-time tampering is not prevented solely by the owner DACL; malformed, torn, partial, or drifted state fails closed. The fixed 19-object tree remains a benchmark, and read-only inventory/classification is deferred.
+
 Research snapshot: 2026-08-19. This contract targets the Store-updated Windows Sandbox available on Windows 11 24H2 and later. Its command-line surface is explicitly described by Microsoft as an early interface, so AIW treats the resolved executable identity, app version, OS build, and effective behavior as run evidence rather than permanent assumptions.
 
 ## Current Microsoft surface
