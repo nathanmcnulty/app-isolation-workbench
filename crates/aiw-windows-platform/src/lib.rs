@@ -21,6 +21,9 @@ pub use workspace::{
 };
 
 #[cfg(windows)]
+pub use source_inspection::{HeldApplicationFile, SourceFileObservation, SourceInspectionError};
+
+#[cfg(windows)]
 pub use coordination::{
     RunCoordinationError, RunCoordinationKey, RunCoordinationLease, RunCoordinationMode,
     try_acquire_run_coordination,
@@ -117,6 +120,9 @@ mod windows_platform;
 
 #[cfg(windows)]
 mod workspace;
+
+#[cfg(windows)]
+mod source_inspection;
 
 #[must_use]
 pub fn assess_windows_sandbox() -> WindowsSandboxReadiness {
