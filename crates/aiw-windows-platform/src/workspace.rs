@@ -2307,13 +2307,13 @@ mod tests {
 
         assert!(matches!(
             HeldRunWorkspace::reopen_bound(&evidence),
-            Err(WorkspaceError::AclRejected)
+            Err(WorkspaceError::AclRejected | WorkspaceError::AclRejectedDetail { .. })
         ));
         // Recovery is deliberately non-repairing; the drift remains observable.
         let reopened = open_held_directory(&path).unwrap();
         assert!(matches!(
             verify_owner_system_directory(&reopened, &CurrentUser::query().unwrap().sid),
-            Err(WorkspaceError::AclRejected)
+            Err(WorkspaceError::AclRejected | WorkspaceError::AclRejectedDetail { .. })
         ));
         drop(reopened);
         std::fs::remove_dir_all(path).unwrap();
