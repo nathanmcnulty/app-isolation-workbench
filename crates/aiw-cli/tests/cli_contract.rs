@@ -268,7 +268,7 @@ fn application_inspection_is_json_only_and_type_bound() {
     );
     assert_eq!(value["kind"], "exe");
     assert_eq!(value["architecture"], "x64");
-    assert_eq!(value["signatureStatus"], "unknown");
+    assert_eq!(value["signatureStatus"], "missing");
     assert_eq!(
         value["fileAuthority"]["schemaVersion"],
         "aiw.dev/application-file-authority/v0alpha1"

@@ -33,7 +33,7 @@ AIW is delivered as two milestones with vertical, evidence-gated slices. The cur
 
 **Exit gate:** representative applications produce complete baseline/candidate evidence; missing, timed-out, or ambiguous evidence remains indeterminate.
 
-Current progress: MSI/EXE and portable sources have held native inspection authority and protected receipt-last copy/verification. Portable import is bounded more narrowly than inspection and preserves every incomplete/conflicting prefix. Signer/version metadata and compatibility findings remain.
+Current progress: MSI/EXE and portable sources have held native inspection authority and protected receipt-last copy/verification. Portable import is bounded more narrowly than inspection and preserves every incomplete/conflicting prefix. MSI/EXE inspection now performs cache-only embedded Authenticode validation against the exact held file; signer identity, timestamp, installer-aware version/architecture metadata, and compatibility findings remain. The first real dual-format fixture proof is recorded in `FIXTURE-NOTEPAD-PLUS-PLUS-8.9.8.md`.
 
 ### W3 — runtime isolation
 

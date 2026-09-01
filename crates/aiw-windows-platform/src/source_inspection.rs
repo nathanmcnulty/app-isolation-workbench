@@ -16,10 +16,18 @@ use std::path::{Path, PathBuf};
 use aiw_probe::{
     PORTABLE_DIRECTORY_AUTHORITY_SCHEMA, PORTABLE_MANIFEST_SCHEMA, PortableContentEntry,
     PortableContentEntryKind, PortableContentManifest, PortableDirectoryAuthority,
-    PortableEntryAuthority, WindowsFileIdentity,
+    PortableEntryAuthority, ReadinessState, WindowsFileIdentity,
 };
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+use windows::Win32::Foundation::{HANDLE, HWND, TRUST_E_NOSIGNATURE};
+use windows::Win32::Security::WinTrust::{
+    WINTRUST_ACTION_GENERIC_VERIFY_V2, WINTRUST_DATA, WINTRUST_DATA_0,
+    WINTRUST_DATA_PROVIDER_FLAGS, WINTRUST_FILE_INFO, WTD_CACHE_ONLY_URL_RETRIEVAL,
+    WTD_CHOICE_FILE, WTD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT, WTD_REVOKE_WHOLECHAIN,
+    WTD_STATEACTION_CLOSE, WTD_STATEACTION_VERIFY, WTD_UI_NONE, WTD_UICONTEXT_EXECUTE,
+    WinVerifyTrust,
+};
 use windows::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_DEVICE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_OFFLINE,
     FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS, FILE_ATTRIBUTE_RECALL_ON_OPEN,
@@ -27,6 +35,7 @@ use windows::Win32::Storage::FileSystem::{
     FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_READ_EA, FILE_SHARE_READ,
     FILE_TRAVERSE, READ_CONTROL, SYNCHRONIZE,
 };
+use windows::core::PCWSTR;
 
 use crate::exact_dispose::{
     DirectoryEntry, ExactDisposeError, StableFileId, basic_info, file_size, hash_file,
@@ -253,6 +262,17 @@ impl HeldApplicationFile {
         Ok(())
     }
 
+    /// Verify an embedded Authenticode signature against the exact held file.
+    /// Revocation retrieval is cache-only, so this observation never causes
+    /// network access. `Unknown` is fail-closed for every invalid, untrusted,
+    /// or otherwise unverified signature result.
+    pub fn embedded_signature_status(&self) -> Result<ReadinessState, SourceInspectionError> {
+        self.revalidate()?;
+        let status = verify_embedded_signature(&self.file, &self.source_path)?;
+        self.revalidate()?;
+        Ok(status)
+    }
+
     pub(crate) fn copy_to(&self, destination: &mut File) -> Result<(), SourceInspectionError> {
         if destination.metadata().map_err(native)?.len() != 0 {
             return Err(SourceInspectionError::InvalidShape);
@@ -279,6 +299,66 @@ impl HeldApplicationFile {
         destination.sync_all().map_err(native)?;
         self.revalidate()
     }
+}
+
+fn verify_embedded_signature(
+    file: &File,
+    path: &Path,
+) -> Result<ReadinessState, SourceInspectionError> {
+    let mut path_wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+    if path_wide.is_empty() || path_wide.contains(&0) {
+        return Err(SourceInspectionError::InvalidPath(
+            "held path is empty or contains a NUL".to_owned(),
+        ));
+    }
+    path_wide.push(0);
+    let mut file_info = WINTRUST_FILE_INFO {
+        cbStruct: size_of::<WINTRUST_FILE_INFO>() as u32,
+        pcwszFilePath: PCWSTR(path_wide.as_ptr()),
+        hFile: HANDLE(file.as_raw_handle()),
+        ..Default::default()
+    };
+    let mut trust_data = WINTRUST_DATA {
+        cbStruct: size_of::<WINTRUST_DATA>() as u32,
+        dwUIChoice: WTD_UI_NONE,
+        fdwRevocationChecks: WTD_REVOKE_WHOLECHAIN,
+        dwUnionChoice: WTD_CHOICE_FILE,
+        Anonymous: WINTRUST_DATA_0 {
+            pFile: &mut file_info,
+        },
+        dwStateAction: WTD_STATEACTION_VERIFY,
+        dwProvFlags: WINTRUST_DATA_PROVIDER_FLAGS(
+            WTD_CACHE_ONLY_URL_RETRIEVAL.0 | WTD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT.0,
+        ),
+        dwUIContext: WTD_UICONTEXT_EXECUTE,
+        ..Default::default()
+    };
+    let mut action = WINTRUST_ACTION_GENERIC_VERIFY_V2;
+    // SAFETY: the trust structures and held file handle remain valid through
+    // both calls, and UI plus network retrieval are explicitly disabled.
+    let status = unsafe {
+        WinVerifyTrust(
+            HWND::default(),
+            &mut action,
+            (&mut trust_data as *mut WINTRUST_DATA).cast(),
+        )
+    };
+    trust_data.dwStateAction = WTD_STATEACTION_CLOSE;
+    // SAFETY: this closes only the provider state opened by the call above.
+    let _ = unsafe {
+        WinVerifyTrust(
+            HWND::default(),
+            &mut action,
+            (&mut trust_data as *mut WINTRUST_DATA).cast(),
+        )
+    };
+    Ok(if status == 0 {
+        ReadinessState::Available
+    } else if status == TRUST_E_NOSIGNATURE.0 {
+        ReadinessState::Missing
+    } else {
+        ReadinessState::Unknown
+    })
 }
 
 impl HeldPortableDirectory {
@@ -474,6 +554,13 @@ fn observe_portable_object(
         reject_case_sensitive_directory(file).map_err(exact)?;
         verify_stream_policy(file, true, 0).map_err(exact)?;
         let mut children = source_directory_entries(file).map_err(exact)?;
+        // The held child handles independently bind identity, shape, content,
+        // and stream policy. Do not retain the directory entry's EA byte count:
+        // Windows may attach allowed kernel SmartLocker metadata after opening
+        // even though user-mode write/EA handles remain excluded.
+        for child in &mut children {
+            child.ea_size = 0;
+        }
         children.sort_by(|left, right| left.name.cmp(&right.name));
         Ok(PortableObjectObservation {
             id: stable_id(file).map_err(exact)?,
@@ -827,6 +914,10 @@ mod tests {
         assert!(held.observation().only_unnamed_data_stream);
         assert!(OpenOptions::new().write(true).open(&path).is_err());
         assert!(fs::rename(&path, root.0.join("replacement.exe")).is_err());
+        assert_eq!(
+            held.embedded_signature_status().unwrap(),
+            ReadinessState::Unknown
+        );
         held.revalidate().unwrap();
     }
 

@@ -23,8 +23,8 @@ use aiw_probe::{
     APPLICATION_FILE_AUTHORITY_SCHEMA, ApplicationFileAuthority, ApplicationFileImportReceipt,
     ApplicationFileImportVerification, ApplicationInspection, ApplicationInspectionError,
     ApplicationInspectionKind, PortableContentManifest, PortableDirectoryAuthority,
-    PortableDirectoryImportReceipt, PortableDirectoryImportVerification, WindowsSandboxReadiness,
-    WorkspaceBindingEvidence, inspect_application_source, probe_host,
+    PortableDirectoryImportReceipt, PortableDirectoryImportVerification, ReadinessState,
+    WindowsSandboxReadiness, WorkspaceBindingEvidence, inspect_application_source, probe_host,
 };
 use aiw_provider_mxc::{MxcGoldenProbePlan, plan_capability_probe, plan_golden_probe};
 use aiw_provider_wsb::{
@@ -865,6 +865,9 @@ fn run(command: Command) -> Result<()> {
                     }
                     held.revalidate()
                         .map_err(|source| anyhow!(ApplicationAuthorityFailed { source }))?;
+                    inspection.signature_status = held
+                        .embedded_signature_status()
+                        .map_err(|source| anyhow!(ApplicationAuthorityFailed { source }))?;
                     inspection.canonical_path = observed.canonical_path.clone();
                     inspection.file_authority = Some(ApplicationFileAuthority {
                         schema_version: APPLICATION_FILE_AUTHORITY_SCHEMA.to_owned(),
@@ -875,9 +878,19 @@ fn run(command: Command) -> Result<()> {
                         only_unnamed_data_stream: observed.only_unnamed_data_stream,
                     });
                     inspection.limitations.retain(|value| {
-                        !value.starts_with("Windows hard-link and alternate-stream")
+                        !value.starts_with("Authenticode signer and trust")
+                            && !value.starts_with("Windows hard-link and alternate-stream")
                             && !value.starts_with("Path checks are observational")
                     });
+                    inspection.limitations.push(
+                        match inspection.signature_status {
+                            ReadinessState::Available => "The embedded Authenticode signature validated under cache-only whole-chain policy; signer identity and timestamp are not yet recorded.",
+                            ReadinessState::Missing => "No embedded Authenticode signature was found; catalog membership and signer identity are not yet assessed.",
+                            ReadinessState::Unknown => "The embedded Authenticode signature did not validate under cache-only whole-chain policy; unknown never means trusted.",
+                            ReadinessState::NeedsElevation => unreachable!("signature inspection never requests elevation"),
+                        }
+                        .to_owned(),
+                    );
                 }
                 #[cfg(windows)]
                 if let Some(held) = held_portable.as_ref() {

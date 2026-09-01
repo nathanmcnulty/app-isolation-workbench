@@ -72,6 +72,7 @@ const MAX_SMALL_ARTIFACT: u64 = 1024 * 1024;
 const MAX_JOURNAL: u64 = 64 * 1024 * 1024;
 const MAX_GUEST_AGENT: u64 = 128 * 1024 * 1024;
 const EA_STABILIZATION_ATTEMPTS: usize = 40;
+const EA_NONEMPTY_STABLE_OBSERVATIONS: usize = 20;
 pub(crate) const FORBIDDEN_ATTRIBUTES: u32 = FILE_ATTRIBUTE_READONLY.0
     | FILE_ATTRIBUTE_REPARSE_POINT.0
     | FILE_ATTRIBUTE_COMPRESSED.0
@@ -1495,17 +1496,28 @@ pub(crate) fn stabilized_extended_attributes(
     directory: bool,
 ) -> Result<ExtendedAttributeBinding, ExactDisposeError> {
     let mut previous = None::<ExtendedAttributeBinding>;
+    let mut matching_observations = 0usize;
     for attempt in 0..EA_STABILIZATION_ATTEMPTS {
         match query_extended_attributes(file, directory) {
             Ok(observed) => {
-                if previous.as_ref().is_some_and(|prior| prior == &observed)
-                    && (!observed.entries.is_empty() || attempt + 1 == EA_STABILIZATION_ATTEMPTS)
+                matching_observations = if previous.as_ref().is_some_and(|prior| prior == &observed)
+                {
+                    matching_observations + 1
+                } else {
+                    1
+                };
+                if (!observed.entries.is_empty()
+                    && matching_observations >= EA_NONEMPTY_STABLE_OBSERVATIONS)
+                    || (observed.entries.is_empty() && attempt + 1 == EA_STABILIZATION_ATTEMPTS)
                 {
                     return Ok(observed);
                 }
                 previous = Some(observed);
             }
-            Err(ExactDisposeError::TransientSmartLockerEa) => previous = None,
+            Err(ExactDisposeError::TransientSmartLockerEa) => {
+                previous = None;
+                matching_observations = 0;
+            }
             Err(error) => return Err(error),
         }
         if attempt + 1 < EA_STABILIZATION_ATTEMPTS {
