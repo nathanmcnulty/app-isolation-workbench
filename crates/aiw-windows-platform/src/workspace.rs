@@ -398,7 +398,7 @@ impl BoundWorkspaceDirectory {
             .and_then(|value| value.to_str())
             .ok_or(WorkspaceError::IdentityRejected)?;
         validate_leaf(leaf)?;
-        let parent = open_held_parent(parent_path)?;
+        let parent = open_held_parent_readonly(parent_path)?;
         verify_local_acl_volume(&parent)?;
         if !is_fixed_volume(parent_path)? {
             return Err(WorkspaceError::InvalidParent);
@@ -1665,6 +1665,24 @@ fn open_held_parent(path: &Path) -> Result<File, WorkspaceError> {
         .open(path)
         .map_err(|error| WorkspaceError::Native {
             operation: "CreateFileW(parent-directory)",
+            detail: error.to_string(),
+        })?;
+    ensure_directory_handle(&file)?;
+    Ok(file)
+}
+
+fn open_held_parent_readonly(path: &Path) -> Result<File, WorkspaceError> {
+    let file = OpenOptions::new()
+        .access_mode(
+            FILE_READ_ATTRIBUTES.0 | FILE_LIST_DIRECTORY.0 | READ_CONTROL.0 | SYNCHRONIZE.0,
+        )
+        // Exclude existing and future write/delete authorities while the
+        // persisted child binding is verified relative to this parent.
+        .share_mode(FILE_SHARE_READ.0)
+        .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
+        .open(path)
+        .map_err(|error| WorkspaceError::Native {
+            operation: "CreateFileW(readonly-parent-directory)",
             detail: error.to_string(),
         })?;
     ensure_directory_handle(&file)?;

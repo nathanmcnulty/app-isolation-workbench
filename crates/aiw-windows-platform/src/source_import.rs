@@ -596,6 +596,20 @@ mod tests {
 
     #[test]
     fn active_writers_block_read_only_verification_authority() {
+        let (_parent_root, parent_receipt) = import_fixture(ApplicationInspectionKind::Exe);
+        let parent_path = Path::new(&parent_receipt.intake_root.final_path)
+            .parent()
+            .unwrap();
+        let parent_writer = OpenOptions::new()
+            .access_mode(FILE_ADD_FILE.0)
+            .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0 | FILE_SHARE_DELETE.0)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0)
+            .open(parent_path)
+            .unwrap();
+        assert!(verify_application_file_import(&parent_receipt).is_err());
+        drop(parent_writer);
+        verify_application_file_import(&parent_receipt).unwrap();
+
         for select_path in [0, 1, 2, 3] {
             let (_root, receipt) = import_fixture(ApplicationInspectionKind::Exe);
             let root_path = Path::new(&receipt.intake_root.final_path);
