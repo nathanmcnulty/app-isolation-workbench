@@ -406,6 +406,61 @@ fn protected_file_import_is_receipt_last_create_new_and_read_only_verifiable() {
 }
 
 #[test]
+fn protected_portable_import_is_json_only_and_read_only_verifiable() {
+    let temp = TempDir::new();
+    let source = temp.path().join("portable");
+    fs::create_dir(&source).unwrap();
+    fs::create_dir(source.join("bin")).unwrap();
+    fs::create_dir(source.join("empty")).unwrap();
+    fs::write(source.join("bin").join("app.exe"), b"portable-app").unwrap();
+    fs::write(source.join("readme.txt"), b"readme").unwrap();
+    let intake_parent = temp.path().join("intakes");
+    fs::create_dir(&intake_parent).unwrap();
+
+    let imported = Command::new(aiw())
+        .args(["application", "import-portable", "--source"])
+        .arg(&source)
+        .arg("--intake-parent")
+        .arg(&intake_parent)
+        .args(["--intake-id", "portable-001"])
+        .output()
+        .unwrap();
+    assert!(imported.status.success());
+    assert!(imported.stderr.is_empty());
+    let receipt = parse_one_json(&imported.stdout);
+    assert_eq!(
+        receipt["schemaVersion"],
+        "aiw.dev/portable-directory-import-receipt/v0alpha1"
+    );
+    assert_eq!(receipt["sourceKind"], "portableDirectory");
+    assert_eq!(receipt["entryCount"], 4);
+    let receipt_path = temp.path().join("portable-receipt.json");
+    fs::write(&receipt_path, serde_json::to_vec(&receipt).unwrap()).unwrap();
+
+    let verified = Command::new(aiw())
+        .args(["application", "verify-portable-import", "--receipt"])
+        .arg(&receipt_path)
+        .output()
+        .unwrap();
+    assert!(verified.status.success());
+    assert!(verified.stderr.is_empty());
+    assert_eq!(parse_one_json(&verified.stdout)["verified"], true);
+
+    let payload = receipt["payloadDirectory"]["finalPath"].as_str().unwrap();
+    fs::write(Path::new(payload).join("readme.txt"), b"tampered").unwrap();
+    let rejected = Command::new(aiw())
+        .args(["application", "verify-portable-import", "--receipt"])
+        .arg(&receipt_path)
+        .output()
+        .unwrap();
+    assert!(!rejected.status.success());
+    assert!(rejected.stdout.is_empty());
+    let error = parse_one_json(&rejected.stderr);
+    assert_eq!(error["code"], "AIW_PORTABLE_IMPORT_VERIFICATION_REJECTED");
+    assert_eq!(error["stage"], "portableImportVerification");
+}
+
+#[test]
 fn legacy_validation_reports_pending_review_as_one_success_result() {
     let project = repo_path("examples/minimal-v0alpha1.aiw.yaml");
     let output = Command::new(aiw())

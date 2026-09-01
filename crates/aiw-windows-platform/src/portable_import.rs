@@ -778,8 +778,13 @@ fn native(error: impl std::fmt::Display) -> PortableImportError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
+    use std::fs::{self, OpenOptions};
+    use std::os::windows::fs::OpenOptionsExt;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use windows::Win32::Storage::FileSystem::{
+        FILE_ADD_FILE, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE, FILE_SHARE_READ,
+        FILE_SHARE_WRITE,
+    };
 
     static NEXT: AtomicU64 = AtomicU64::new(1);
 
@@ -862,5 +867,62 @@ mod tests {
         ));
         assert!(root.0.join("partial-001").join(SOURCE_LEAF).is_dir());
         assert!(!root.0.join("partial-001").join(RECEIPT_LEAF).exists());
+    }
+
+    #[test]
+    fn drift_active_parent_writer_and_receipt_prefixes_fail_closed() {
+        let root = Root::new();
+        let source_path = root.0.join("portable");
+        fs::create_dir(&source_path).unwrap();
+        fs::write(source_path.join("app.exe"), b"portable-app").unwrap();
+        let held = HeldPortableDirectory::open(&source_path).unwrap();
+        let receipt = import_portable_directory(&root.0, "portable-drift", &held).unwrap();
+
+        let parent = Path::new(&receipt.intake_root.final_path).parent().unwrap();
+        let writer = OpenOptions::new()
+            .access_mode(FILE_ADD_FILE.0)
+            .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0 | FILE_SHARE_DELETE.0)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0)
+            .open(parent)
+            .unwrap();
+        assert!(verify_portable_directory_import(&receipt).is_err());
+        drop(writer);
+        verify_portable_directory_import(&receipt).unwrap();
+
+        fs::write(
+            Path::new(&receipt.payload_directory.final_path).join("app.exe"),
+            b"tampered",
+        )
+        .unwrap();
+        assert!(verify_portable_directory_import(&receipt).is_err());
+
+        let root_two = Root::new();
+        let source_two = root_two.0.join("portable");
+        fs::create_dir(&source_two).unwrap();
+        fs::write(source_two.join("app.exe"), b"portable-app").unwrap();
+        let held_two = HeldPortableDirectory::open(&source_two).unwrap();
+        let receipt_two =
+            import_portable_directory(&root_two.0, "receipt-prefix", &held_two).unwrap();
+        let receipt_path = Path::new(&receipt_two.intake_root.final_path).join(RECEIPT_LEAF);
+        fs::write(&receipt_path, b"{").unwrap();
+        assert!(verify_portable_directory_import(&receipt_two).is_err());
+        assert!(matches!(
+            import_portable_directory(&root_two.0, "receipt-prefix", &held_two),
+            Err(PortableImportError::Workspace(
+                WorkspaceError::AlreadyExists
+            ))
+        ));
+        assert_eq!(fs::read(receipt_path).unwrap(), b"{");
+    }
+
+    #[test]
+    fn unsupported_destination_name_fails_before_root_creation() {
+        let root = Root::new();
+        let source_path = root.0.join("portable");
+        fs::create_dir(&source_path).unwrap();
+        fs::write(source_path.join("bad$.txt"), b"content").unwrap();
+        let held = HeldPortableDirectory::open(&source_path).unwrap();
+        assert!(import_portable_directory(&root.0, "must-not-exist", &held).is_err());
+        assert!(!root.0.join("must-not-exist").exists());
     }
 }
