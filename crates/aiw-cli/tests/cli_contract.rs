@@ -348,7 +348,12 @@ fn protected_file_import_is_receipt_last_create_new_and_read_only_verifiable() {
         .args(["--intake-id", "cli-intake-001"])
         .output()
         .unwrap();
-    assert!(imported.status.success());
+    assert!(
+        imported.status.success(),
+        "protected file import failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&imported.stdout),
+        String::from_utf8_lossy(&imported.stderr)
+    );
     assert!(imported.stderr.is_empty());
     let receipt = parse_one_json(&imported.stdout);
     assert_eq!(
@@ -425,7 +430,12 @@ fn protected_portable_import_is_json_only_and_read_only_verifiable() {
         .args(["--intake-id", "portable-001"])
         .output()
         .unwrap();
-    assert!(imported.status.success());
+    assert!(
+        imported.status.success(),
+        "protected portable import failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&imported.stdout),
+        String::from_utf8_lossy(&imported.stderr)
+    );
     assert!(imported.stderr.is_empty());
     let receipt = parse_one_json(&imported.stdout);
     assert_eq!(
