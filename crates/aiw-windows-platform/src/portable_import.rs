@@ -52,6 +52,8 @@ pub enum PortableImportError {
     Bounds,
     #[error("protected portable intake content or identity drifted")]
     Drift,
+    #[error("protected portable intake content or identity drifted: {0}")]
+    DriftAt(&'static str),
     #[error("protected portable intake serialization failed: {0}")]
     Serialization(String),
     #[error("protected portable intake native observation failed: {0}")]
@@ -250,7 +252,7 @@ pub fn verify_portable_directory_import(
         .map_err(|error| PortableImportError::Serialization(error.to_string()))?;
     let actual_bytes = read_bounded(internal_receipt.as_file())?;
     if actual_bytes != expected_bytes {
-        return Err(PortableImportError::Drift);
+        return Err(PortableImportError::DriftAt("receipt bytes changed"));
     }
     verify_file(
         internal_receipt.as_file(),
@@ -583,11 +585,11 @@ fn verify_file(
         || standard.NumberOfLinks != 1
         || file_size(file).map_err(exact)? != size
     {
-        return Err(PortableImportError::Drift);
+        return Err(PortableImportError::DriftAt("file shape changed"));
     }
     verify_stream_policy(file, false, size).map_err(exact)?;
     if hex::encode(hash_file(file, size).map_err(exact)?) != hash {
-        return Err(PortableImportError::Drift);
+        return Err(PortableImportError::DriftAt("file content changed"));
     }
     Ok(())
 }
@@ -599,7 +601,7 @@ fn verify_directory(file: &File, links: Option<u32>) -> Result<(), PortableImpor
         || basic.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0 == 0
         || links.is_some_and(|value| value != standard.NumberOfLinks)
     {
-        return Err(PortableImportError::Drift);
+        return Err(PortableImportError::DriftAt("directory shape changed"));
     }
     reject_case_sensitive_directory(file).map_err(exact)?;
     verify_stream_policy(file, true, 0).map_err(exact)?;
@@ -636,7 +638,7 @@ fn require_eas(
     expected: &ApplicationFileEaAuthority,
 ) -> Result<(), PortableImportError> {
     if capture_eas(file, directory)? != *expected {
-        return Err(PortableImportError::Drift);
+        return Err(PortableImportError::DriftAt("extended attributes changed"));
     }
     Ok(())
 }
@@ -655,7 +657,7 @@ fn require_names(file: &File, expected: &[&str]) -> Result<(), PortableImportErr
         .collect::<BTreeSet<_>>();
     let expected = expected.iter().map(|value| (*value).to_owned()).collect();
     if actual != expected {
-        return Err(PortableImportError::Drift);
+        return Err(PortableImportError::DriftAt("directory names changed"));
     }
     Ok(())
 }
@@ -758,7 +760,7 @@ fn require_identity(
     expected: &WindowsFileIdentity,
 ) -> Result<(), PortableImportError> {
     if actual != expected {
-        return Err(PortableImportError::Drift);
+        return Err(PortableImportError::DriftAt("object identity changed"));
     }
     Ok(())
 }
