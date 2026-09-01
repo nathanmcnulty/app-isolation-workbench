@@ -23,7 +23,8 @@ use aiw_probe::{
     APPLICATION_FILE_AUTHORITY_SCHEMA, ApplicationFileAuthority, ApplicationFileImportReceipt,
     ApplicationFileImportVerification, ApplicationInspection, ApplicationInspectionError,
     ApplicationInspectionKind, PortableContentManifest, PortableDirectoryAuthority,
-    WindowsSandboxReadiness, WorkspaceBindingEvidence, inspect_application_source, probe_host,
+    PortableDirectoryImportReceipt, PortableDirectoryImportVerification, WindowsSandboxReadiness,
+    WorkspaceBindingEvidence, inspect_application_source, probe_host,
 };
 use aiw_provider_mxc::{MxcGoldenProbePlan, plan_capability_probe, plan_golden_probe};
 use aiw_provider_wsb::{
@@ -52,7 +53,8 @@ use aiw_windows_platform::assess_windows_sandbox;
 use aiw_windows_platform::{HeldApplicationFile, HeldPortableDirectory, SourceInspectionError};
 #[cfg(windows)]
 use aiw_windows_platform::{
-    SourceImportError, import_application_file, verify_application_file_import,
+    PortableImportError, SourceImportError, import_application_file, import_portable_directory,
+    verify_application_file_import, verify_portable_directory_import,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use clap::error::ErrorKind;
@@ -120,6 +122,20 @@ enum ApplicationCommand {
     },
     /// Verify a protected file intake without modifying or repairing it.
     VerifyImport {
+        #[arg(long)]
+        receipt: PathBuf,
+    },
+    /// Copy one held portable directory into a new protected receipt-last intake.
+    ImportPortable {
+        #[arg(long)]
+        source: PathBuf,
+        #[arg(long)]
+        intake_parent: PathBuf,
+        #[arg(long)]
+        intake_id: String,
+    },
+    /// Verify a protected portable intake without modifying or repairing it.
+    VerifyPortableImport {
         #[arg(long)]
         receipt: PathBuf,
     },
@@ -464,6 +480,8 @@ enum SchemaKind {
     ApplicationFileAuthority,
     ApplicationFileImportReceipt,
     ApplicationFileImportVerification,
+    PortableDirectoryImportReceipt,
+    PortableDirectoryImportVerification,
     ApplicationInspection,
     PortableDirectoryAuthority,
     PortableContentManifest,
@@ -751,6 +769,23 @@ impl std::fmt::Display for SourceImportFailed {
 #[cfg(windows)]
 impl std::error::Error for SourceImportFailed {}
 
+#[cfg(windows)]
+#[derive(Debug)]
+struct PortableImportFailed {
+    source: PortableImportError,
+    verification: bool,
+}
+
+#[cfg(windows)]
+impl std::fmt::Display for PortableImportFailed {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.source.fmt(formatter)
+    }
+}
+
+#[cfg(windows)]
+impl std::error::Error for PortableImportFailed {}
+
 #[derive(Debug)]
 struct WsbSessionStatusInvalid {
     run_id: String,
@@ -930,6 +965,50 @@ fn run(command: Command) -> Result<()> {
                 {
                     let _ = receipt;
                     bail!("protected application import verification requires Windows")
+                }
+            }
+            ApplicationCommand::ImportPortable {
+                source,
+                intake_parent,
+                intake_id,
+            } => {
+                #[cfg(windows)]
+                {
+                    let held = HeldPortableDirectory::open(&source)
+                        .map_err(|source| anyhow!(ApplicationAuthorityFailed { source }))?;
+                    let receipt = import_portable_directory(&intake_parent, &intake_id, &held)
+                        .map_err(|source| {
+                            anyhow!(PortableImportFailed {
+                                source,
+                                verification: false,
+                            })
+                        })?;
+                    write_json(&receipt)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (source, intake_parent, intake_id);
+                    bail!("protected portable import requires Windows")
+                }
+            }
+            ApplicationCommand::VerifyPortableImport { receipt } => {
+                #[cfg(windows)]
+                {
+                    let receipt: PortableDirectoryImportReceipt =
+                        read_document(&receipt, MAX_CONFIG_BYTES)?;
+                    let verified =
+                        verify_portable_directory_import(&receipt).map_err(|source| {
+                            anyhow!(PortableImportFailed {
+                                source,
+                                verification: true,
+                            })
+                        })?;
+                    write_json(&verified)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = receipt;
+                    bail!("protected portable import verification requires Windows")
                 }
             }
         },
@@ -1322,6 +1401,12 @@ fn run(command: Command) -> Result<()> {
             }
             SchemaKind::ApplicationFileImportVerification => {
                 write_json(&schema_for!(ApplicationFileImportVerification))
+            }
+            SchemaKind::PortableDirectoryImportReceipt => {
+                write_json(&schema_for!(PortableDirectoryImportReceipt))
+            }
+            SchemaKind::PortableDirectoryImportVerification => {
+                write_json(&schema_for!(PortableDirectoryImportVerification))
             }
             SchemaKind::ApplicationInspection => write_json(&schema_for!(ApplicationInspection)),
             SchemaKind::PortableDirectoryAuthority => {
@@ -1906,6 +1991,40 @@ fn preparation_import_error_envelope(error: &RunPreparationImportFailed) -> Erro
 }
 
 fn emit_anyhow_error(error: &anyhow::Error) {
+    #[cfg(windows)]
+    if let Some(error) = error.downcast_ref::<PortableImportFailed>() {
+        emit_error(&ErrorEnvelope {
+            code: if error.verification {
+                "AIW_PORTABLE_IMPORT_VERIFICATION_REJECTED"
+            } else {
+                "AIW_PORTABLE_IMPORT_REJECTED"
+            }
+            .to_owned(),
+            summary: if error.verification {
+                "protected portable import could not be verified"
+            } else {
+                "protected portable import could not be completed"
+            }
+            .to_owned(),
+            stage: if error.verification {
+                "portableImportVerification"
+            } else {
+                "portableImport"
+            }
+            .to_owned(),
+            run_id: None,
+            retryable: matches!(
+                error.source,
+                PortableImportError::Source(
+                    SourceInspectionError::Busy | SourceInspectionError::Drift
+                )
+            ),
+            remediation: "Preserve incomplete or conflicting portable intake state for inspection. Retry with a new intake ID only after correcting the reported source, destination, or receipt condition."
+                .to_owned(),
+            detail: error.source.to_string().chars().take(512).collect(),
+        });
+        return;
+    }
     #[cfg(windows)]
     if let Some(error) = error.downcast_ref::<SourceImportFailed>() {
         emit_error(&ErrorEnvelope {

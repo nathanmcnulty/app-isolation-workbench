@@ -45,6 +45,7 @@ After the exact 19-record published chain and physical absence are proven, the p
 ### Intake and paths
 
 - Import MSI, EXE, and portable directories into ACL-restricted workspaces; hash the source and record signer, version, architecture, entry points, reboot behavior, persistence, and compatibility findings without executing it.
+- Portable import treats every source name, manifest field, file byte, destination object, and receipt as untrusted. It preflights safe destination leaves and aggregate receipt bounds, copies only from retained handles, creates descendants only relative to protected held parents, excludes active writers during verification, binds exact per-object identity/content/namespace/EA evidence, and never adopts or removes a partial intake.
 - Reject traversal, Windows case collisions, symbolic links/reparse points, unsafe output classes, oversized payloads, canonical workspace escapes, and mapping overlap.
 - Revalidate canonical paths, provider identity, input hashes, plan hashes, and empty output directories immediately before a run. Use handle-based checks where a same-host path-swap race is possible.
 

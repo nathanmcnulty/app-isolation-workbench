@@ -33,7 +33,7 @@ AIW is delivered as two milestones with vertical, evidence-gated slices. The cur
 
 **Exit gate:** representative applications produce complete baseline/candidate evidence; missing, timed-out, or ambiguous evidence remains indeterminate.
 
-Current progress: MSI/EXE and portable sources have held native inspection authority. MSI/EXE protected copy and receipt-last read-only verification are implemented; portable protected copy, signer/version metadata, and compatibility findings remain.
+Current progress: MSI/EXE and portable sources have held native inspection authority and protected receipt-last copy/verification. Portable import is bounded more narrowly than inspection and preserves every incomplete/conflicting prefix. Signer/version metadata and compatibility findings remain.
 
 ### W3 — runtime isolation
 

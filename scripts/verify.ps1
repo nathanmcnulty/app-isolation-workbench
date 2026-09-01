@@ -113,6 +113,8 @@ try {
         'application-file-authority',
         'application-file-import-receipt',
         'application-file-import-verification',
+        'portable-directory-import-receipt',
+        'portable-directory-import-verification',
         'application-inspection',
         'portable-directory-authority',
         'portable-content-manifest',
