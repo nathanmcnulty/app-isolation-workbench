@@ -17,6 +17,10 @@ pub const APPLICATION_FILE_IMPORT_RECEIPT_SCHEMA: &str =
     "aiw.dev/application-file-import-receipt/v0alpha1";
 pub const APPLICATION_FILE_IMPORT_VERIFICATION_SCHEMA: &str =
     "aiw.dev/application-file-import-verification/v0alpha1";
+pub const PORTABLE_DIRECTORY_IMPORT_RECEIPT_SCHEMA: &str =
+    "aiw.dev/portable-directory-import-receipt/v0alpha1";
+pub const PORTABLE_DIRECTORY_IMPORT_VERIFICATION_SCHEMA: &str =
+    "aiw.dev/portable-directory-import-verification/v0alpha1";
 pub const PORTABLE_MANIFEST_SCHEMA: &str = "aiw.dev/portable-content-manifest/v0alpha1";
 pub const PORTABLE_DIRECTORY_AUTHORITY_SCHEMA: &str =
     "aiw.dev/portable-directory-authority/v0alpha1";
@@ -122,6 +126,54 @@ pub struct ApplicationFileImportVerification {
     pub receipt_sha256: String,
     pub intake_root: WindowsFileIdentity,
     pub payload: WindowsFileIdentity,
+    pub verified: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PortableImportEntry {
+    pub relative_path: String,
+    pub kind: PortableContentEntryKind,
+    pub identity: WindowsFileIdentity,
+    pub eas: ApplicationFileEaAuthority,
+    pub size_bytes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+    pub link_count: u32,
+    pub only_unnamed_data_stream: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PortableDirectoryImportReceipt {
+    pub schema_version: String,
+    pub intake_id: String,
+    pub source_kind: ApplicationInspectionKind,
+    pub source_manifest: PortableContentManifest,
+    pub source_authority: PortableDirectoryAuthority,
+    pub intake_root: WindowsFileIdentity,
+    pub intake_root_eas: ApplicationFileEaAuthority,
+    pub source_directory: WindowsFileIdentity,
+    pub source_directory_eas: ApplicationFileEaAuthority,
+    pub payload_directory: WindowsFileIdentity,
+    pub payload_directory_eas: ApplicationFileEaAuthority,
+    pub entries: Vec<PortableImportEntry>,
+    pub receipt: WindowsFileIdentity,
+    pub entry_count: u32,
+    pub total_size_bytes: u64,
+    pub manifest_sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PortableDirectoryImportVerification {
+    pub schema_version: String,
+    pub receipt_sha256: String,
+    pub intake_root: WindowsFileIdentity,
+    pub payload_directory: WindowsFileIdentity,
+    pub manifest_sha256: String,
+    pub entry_count: u32,
+    pub verified_entries: u32,
     pub verified: bool,
 }
 

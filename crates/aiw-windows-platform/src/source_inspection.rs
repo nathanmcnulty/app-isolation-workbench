@@ -135,6 +135,41 @@ struct HeldPortableObject {
     observation: PortableObjectObservation,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct HeldPortableCopyObject<'a> {
+    object: &'a HeldPortableObject,
+}
+
+impl HeldPortableCopyObject<'_> {
+    #[must_use]
+    pub(crate) fn relative_path(&self) -> &str {
+        &self.object.relative_path
+    }
+
+    #[must_use]
+    pub(crate) fn kind(&self) -> PortableContentEntryKind {
+        self.object.kind
+    }
+
+    #[must_use]
+    pub(crate) fn size_bytes(&self) -> u64 {
+        self.object.observation.size_bytes
+    }
+
+    pub(crate) fn copy_file_to(&self, destination: &mut File) -> Result<(), SourceInspectionError> {
+        if self.object.kind != PortableContentEntryKind::File
+            || destination.metadata().map_err(native)?.len() != 0
+        {
+            return Err(SourceInspectionError::InvalidShape);
+        }
+        copy_held_file(
+            &self.object.file,
+            self.object.observation.size_bytes,
+            destination,
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PortableObjectObservation {
     id: StableFileId,
@@ -383,6 +418,39 @@ impl HeldPortableDirectory {
         }
         Ok(())
     }
+
+    pub(crate) fn copy_plan(&self) -> impl ExactSizeIterator<Item = HeldPortableCopyObject<'_>> {
+        self.objects[1..]
+            .iter()
+            .map(|object| HeldPortableCopyObject { object })
+    }
+}
+
+fn copy_held_file(
+    source: &File,
+    size_bytes: u64,
+    destination: &mut File,
+) -> Result<(), SourceInspectionError> {
+    let mut offset = 0_u64;
+    let mut buffer = [0_u8; 64 * 1024];
+    while offset < size_bytes {
+        let remaining = size_bytes - offset;
+        let request = usize::try_from(remaining.min(buffer.len() as u64))
+            .map_err(|_| SourceInspectionError::BoundsExceeded)?;
+        let count = source
+            .seek_read(&mut buffer[..request], offset)
+            .map_err(native)?;
+        if count == 0 {
+            return Err(SourceInspectionError::Drift);
+        }
+        destination.write_all(&buffer[..count]).map_err(native)?;
+        offset = offset
+            .checked_add(count as u64)
+            .ok_or(SourceInspectionError::BoundsExceeded)?;
+    }
+    destination.flush().map_err(native)?;
+    destination.sync_all().map_err(native)?;
+    Ok(())
 }
 
 fn observe_portable_object(
@@ -818,6 +886,97 @@ mod tests {
         assert!(fs::write(nested.join("app.exe"), b"changed").is_err());
         assert!(fs::rename(&root.0, root.0.with_extension("moved")).is_err());
         held.revalidate().unwrap();
+    }
+
+    #[test]
+    fn portable_copy_plan_is_parent_first_and_copies_from_retained_file_handles() {
+        let source = Root::new();
+        fs::create_dir(source.0.join("bin")).unwrap();
+        fs::create_dir(source.0.join("bin").join("nested")).unwrap();
+        fs::write(
+            source.0.join("bin").join("nested").join("app.exe"),
+            b"portable-app",
+        )
+        .unwrap();
+        fs::write(source.0.join("readme.txt"), b"readme").unwrap();
+        let held = HeldPortableDirectory::open(&source.0).unwrap();
+
+        let plan: Vec<_> = held.copy_plan().collect();
+        for object in &plan {
+            if let Some((parent, _)) = object.relative_path().rsplit_once('/') {
+                let parent_index = plan
+                    .iter()
+                    .position(|candidate| candidate.relative_path() == parent)
+                    .unwrap();
+                let object_index = plan
+                    .iter()
+                    .position(|candidate| candidate.relative_path() == object.relative_path())
+                    .unwrap();
+                assert!(parent_index < object_index);
+            }
+        }
+
+        let destination = Root::new();
+        for object in plan {
+            let destination_path = destination
+                .0
+                .join(object.relative_path().replace('/', "\\"));
+            match object.kind() {
+                PortableContentEntryKind::Directory => {
+                    assert_eq!(object.size_bytes(), 0);
+                    fs::create_dir(&destination_path).unwrap();
+                    let mut invalid_destination = File::create(
+                        destination
+                            .0
+                            .join(format!("invalid-{}", NEXT.fetch_add(1, Ordering::Relaxed))),
+                    )
+                    .unwrap();
+                    assert!(matches!(
+                        object.copy_file_to(&mut invalid_destination),
+                        Err(SourceInspectionError::InvalidShape)
+                    ));
+                }
+                PortableContentEntryKind::File => {
+                    let mut destination_file = File::create(&destination_path).unwrap();
+                    object.copy_file_to(&mut destination_file).unwrap();
+                    assert_eq!(
+                        fs::read(&destination_path).unwrap().len() as u64,
+                        object.size_bytes()
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            fs::read(destination.0.join("bin").join("nested").join("app.exe")).unwrap(),
+            b"portable-app"
+        );
+        assert_eq!(
+            fs::read(destination.0.join("readme.txt")).unwrap(),
+            b"readme"
+        );
+        held.revalidate().unwrap();
+    }
+
+    #[test]
+    fn portable_copy_rejects_nonempty_destination() {
+        let source = Root::new();
+        fs::write(source.0.join("app.exe"), b"portable-app").unwrap();
+        let held = HeldPortableDirectory::open(&source.0).unwrap();
+        let file = held
+            .copy_plan()
+            .find(|object| object.kind() == PortableContentEntryKind::File)
+            .unwrap();
+        let destination = Root::new();
+        let mut destination_file = File::create(destination.0.join("app.exe")).unwrap();
+        destination_file.write_all(b"existing").unwrap();
+        assert!(matches!(
+            file.copy_file_to(&mut destination_file),
+            Err(SourceInspectionError::InvalidShape)
+        ));
+        assert_eq!(
+            fs::read(destination.0.join("app.exe")).unwrap(),
+            b"existing"
+        );
     }
 
     #[test]

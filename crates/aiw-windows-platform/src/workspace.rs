@@ -1057,7 +1057,7 @@ fn validate_leaf(leaf: &str) -> Result<(), WorkspaceError> {
     Ok(())
 }
 
-fn validate_new_child_leaf(leaf: &str) -> Result<(), WorkspaceError> {
+pub(crate) fn validate_new_child_leaf(leaf: &str) -> Result<(), WorkspaceError> {
     if leaf.is_empty()
         || leaf.len() > 255
         || leaf.ends_with(['.', ' '])
