@@ -3987,6 +3987,321 @@ mod tests {
         drop(workspace);
         fs::remove_dir_all(root_path).unwrap();
     }
+
+    fn fake_msi_import_receipt(
+        scenario: &aiw_provider_wsb::CompiledMsiScenario,
+        size_bytes: u64,
+    ) -> aiw_probe::ApplicationFileImportReceipt {
+        let sha256 = scenario.application_sha256.clone();
+        let identity = |path: &str, marker: char| aiw_probe::WindowsFileIdentity {
+            final_path: path.to_owned(),
+            volume_serial_number: "0".repeat(16),
+            file_id: marker.to_string().repeat(32),
+        };
+        let intake_root = identity(r"C:\AIW\intake-one", '1');
+        let source_directory = identity(r"C:\AIW\intake-one\source", '2');
+        let payload = identity(r"C:\AIW\intake-one\source\payload.msi", '3');
+        let receipt = identity(r"C:\AIW\intake-one\import-receipt.json", '4');
+        let eas = aiw_probe::ApplicationFileEaAuthority {
+            entries: vec![],
+            canonical_sha256: "0".repeat(64),
+        };
+        aiw_probe::ApplicationFileImportReceipt {
+            schema_version: aiw_probe::APPLICATION_FILE_IMPORT_RECEIPT_SCHEMA.to_owned(),
+            intake_id: "intake-one".to_owned(),
+            source_kind: aiw_probe::ApplicationInspectionKind::Msi,
+            source: aiw_probe::ApplicationFileAuthority {
+                schema_version: aiw_probe::APPLICATION_FILE_AUTHORITY_SCHEMA.to_owned(),
+                identity: identity(r"C:\source\application.msi", '5'),
+                size_bytes,
+                sha256: sha256.clone(),
+                link_count: 1,
+                only_unnamed_data_stream: true,
+            },
+            intake_root,
+            intake_root_eas: eas.clone(),
+            source_directory,
+            source_directory_eas: eas.clone(),
+            payload_relative_path: "source/payload.msi".to_owned(),
+            payload,
+            payload_eas: eas,
+            receipt,
+            size_bytes,
+            sha256,
+        }
+    }
+
+    fn setup_msi() -> (
+        Root,
+        RunLayout,
+        WsbGoldenProbeStart,
+        WindowsSandboxReadiness,
+    ) {
+        let (root, old_layout, mut start, readiness) = setup();
+        let project_path = PathBuf::from(&start.project_path);
+        let project_source = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("examples")
+            .join("notepad-plus-plus-msi.aiw.yaml");
+        fs::copy(project_source, &project_path).unwrap();
+        let mut project: Project =
+            serde_yaml::from_slice(&fs::read(&project_path).unwrap()).unwrap();
+
+        let msi_path = root.0.join("tools").join("application.msi");
+        let msi_bytes = b"deterministic MSI fixture";
+        fs::write(&msi_path, msi_bytes).unwrap();
+        let msi_sha256 = hex::encode(Sha256::digest(msi_bytes));
+        if let aiw_schema::ApplicationSource::Msi(source) = &mut project.application {
+            source.sha256 = msi_sha256;
+        } else {
+            panic!("MSI fixture did not contain an MSI application source");
+        }
+        fs::write(&project_path, serde_yaml::to_string(&project).unwrap()).unwrap();
+        let staged_payload = identity(&msi_path);
+        let staged_path = msi_path.to_string_lossy().into_owned();
+        let scenario = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
+            &project,
+            "install-launch-close",
+        )
+        .unwrap();
+        let import_receipt = fake_msi_import_receipt(&scenario, msi_bytes.len() as u64);
+        let import_receipt_sha256 =
+            hex::encode(Sha256::digest(serde_json::to_vec(&import_receipt).unwrap()));
+        let msi = WsbMsiApplication {
+            import_receipt,
+            import_receipt_sha256,
+            scenario_sha256: canonical_hash(&scenario).unwrap(),
+            scenario,
+            staged_payload: BinaryIdentity {
+                canonical_path: staged_path.clone(),
+                sha256: staged_payload.sha256.clone(),
+                size_bytes: staged_payload.size_bytes,
+                version: None,
+                signature_status: aiw_probe::ReadinessState::Unknown,
+            },
+            staged_identity: aiw_probe::WindowsFileIdentity {
+                final_path: staged_path,
+                volume_serial_number: start.workspace.tools.volume_serial_number.clone(),
+                file_id: "9".repeat(32),
+            },
+        };
+        start.schema_version = "aiw.dev/wsb-imported-msi-start/v0alpha1".to_owned();
+        start.wsb_plan.probe.output = r"C:\AIW\Output\scenario-result.json".to_owned();
+        start.msi = Some(msi.clone());
+
+        drop(old_layout);
+        fs::remove_dir_all(root.0.join("runs")).unwrap();
+        let plan = RunPlan::new(
+            "w1-run",
+            project.metadata.name.clone(),
+            project_revision_hash(&project).unwrap(),
+            aiw_orchestrator::RunLifecycleKind::Assessment,
+            "now",
+            vec![
+                PlannedAction::AssessHost,
+                PlannedAction::PrepareWorkspace,
+                PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
+                    sandbox_plan_sha256: canonical_hash(&start.wsb_plan).unwrap(),
+                    provider_sha256: start.provider.sha256.clone(),
+                    guest_agent_sha256: start.guest_agent.sha256.clone(),
+                    workspace: Box::new(start.workspace.clone()),
+                    workspace_identity_sha256: start.workspace_identity_sha256.clone(),
+                    import_receipt_sha256: msi.import_receipt_sha256.clone(),
+                    application_sha256: msi.staged_payload.sha256.clone(),
+                    scenario_sha256: msi.scenario_sha256.clone(),
+                },
+                PlannedAction::CollectEvidence,
+            ],
+            vec![
+                "installs and exercises the approved imported MSI in Windows Sandbox".to_owned(),
+                "maps fixed guest tools read-only and treats writable output as untrusted"
+                    .to_owned(),
+            ],
+        )
+        .unwrap();
+        let layout = RunLayout::new(&root.0, "w1-run").unwrap();
+        let receipt = aiw_orchestrator::WsbPlanningImportReceipt {
+            schema_version: aiw_orchestrator::WSB_MSI_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION
+                .to_owned(),
+            run_id: plan.run_id.clone(),
+            imported_at: "now".to_owned(),
+            status: aiw_orchestrator::WsbPlanningImportStatus::PendingApproval,
+            project_revision_sha256: plan.project_revision_hash.clone(),
+            workspace_root: start.workspace.root.final_path.clone(),
+            workspace_identity_sha256: start.workspace_identity_sha256.clone(),
+            preparation_receipt_sha256: "d".repeat(64),
+            run_plan_sha256: plan.hash().unwrap(),
+            windows_sandbox_plan_sha256: canonical_hash(&start.wsb_plan).unwrap(),
+            guest_agent_sha256: start.guest_agent.sha256.clone(),
+            provider_sha256: start.provider.sha256.clone(),
+            run_root: start.workspace.root.final_path.clone(),
+            journal_sequence: 1,
+            approval_present: false,
+            provider_acquired: false,
+            provider_mutated: false,
+        };
+        layout
+            .create_or_verify_pending_wsb_import(&plan, &receipt)
+            .unwrap();
+        layout
+            .write_approval(&ApprovalRecord::for_plan(&plan, "admin", "now").unwrap())
+            .unwrap();
+        (root, layout, start, readiness)
+    }
+
+    fn msi_request_for(start: &WsbGoldenProbeStart) -> aiw_provider_wsb::ImportedMsiGuestRequest {
+        let rendered = render_config(&start.wsb_plan).unwrap();
+        let msi = start.msi.as_ref().unwrap();
+        aiw_provider_wsb::ImportedMsiGuestRequest::new(
+            "w1-run",
+            &deterministic_sandbox_id("w1-run"),
+            &rendered.sha256,
+            &start.guest_agent.sha256,
+            msi.scenario.clone(),
+            &msi.staged_payload.sha256,
+            msi.staged_payload.size_bytes,
+            &msi.import_receipt_sha256,
+        )
+        .unwrap()
+    }
+
+    fn write_valid_msi_completion(
+        start: &WsbGoldenProbeStart,
+        scenario_result: aiw_provider_wsb::ImportedMsiScenarioResult,
+    ) {
+        let rendered = render_config(&start.wsb_plan).unwrap();
+        let request = msi_request_for(start);
+        let output = PathBuf::from(
+            &mapping(&start.wsb_plan, MappingPurpose::Output)
+                .unwrap()
+                .host_folder,
+        );
+        let scenario_bytes = serde_json::to_vec(&scenario_result).unwrap();
+        publish_test_file(&output.join("scenario-result.json"), &scenario_bytes);
+
+        let mut evidence = aiw_evidence::EvidenceLog::new();
+        evidence
+            .append(aiw_evidence::EvidenceEvent {
+                observed_utc: "guest-time-not-trusted".to_owned(),
+                kind: "importedMsiScenario".to_owned(),
+                source: "test-guest-agent".to_owned(),
+                payload: serde_json::json!({"completed":true}),
+            })
+            .unwrap();
+        let mut evidence_bytes = Vec::new();
+        for record in evidence.records() {
+            serde_json::to_writer(&mut evidence_bytes, record).unwrap();
+            evidence_bytes.push(b'\n');
+        }
+        publish_test_file(&output.join("evidence.jsonl"), &evidence_bytes);
+        let artifact = |path: &str,
+                        role: aiw_evidence::ArtifactRole,
+                        media_type: &str,
+                        bytes: &[u8]| aiw_provider_wsb::CompletionArtifact {
+            path: path.to_owned(),
+            role,
+            media_type: media_type.to_owned(),
+            size_bytes: bytes.len() as u64,
+            sha256: hex::encode(Sha256::digest(bytes)),
+        };
+        let receipt = aiw_provider_wsb::WindowsSandboxCompletionReceipt {
+            schema_version: aiw_provider_wsb::WINDOWS_SANDBOX_COMPLETION_RECEIPT_SCHEMA_VERSION
+                .to_owned(),
+            run_id: "w1-run".to_owned(),
+            sandbox_id: deterministic_sandbox_id("w1-run"),
+            config_sha256: rendered.sha256,
+            request_sha256: request.request_sha256,
+            agent_sha256: start.guest_agent.sha256.clone(),
+            status: aiw_provider_wsb::CompletionStatus::Succeeded,
+            exit_code: 0,
+            evidence_root_hash: evidence.manifest().unwrap().root_hash,
+            artifacts: vec![
+                artifact(
+                    "scenario-result.json",
+                    aiw_evidence::ArtifactRole::ScenarioResults,
+                    "application/json",
+                    &scenario_bytes,
+                ),
+                artifact(
+                    "evidence.jsonl",
+                    aiw_evidence::ArtifactRole::EvidenceLog,
+                    "application/x-ndjson",
+                    &evidence_bytes,
+                ),
+            ],
+        };
+        let mut receipt_bytes = serde_json::to_vec(&receipt).unwrap();
+        receipt_bytes.push(b'\n');
+        publish_test_file(&output.join("completion.json"), &receipt_bytes);
+    }
+
+    fn successful_msi_process(
+        start: &WsbGoldenProbeStart,
+        scenario_result: aiw_provider_wsb::ImportedMsiScenarioResult,
+    ) -> FakeProcess {
+        let id = deterministic_sandbox_id("w1-run");
+        let output_start = start.clone();
+        FakeProcess::new(vec![
+            empty_list(),
+            started(&id),
+            list_with(&id, "running"),
+            list_with(&id, "running"),
+            stopped(&id),
+            empty_list(),
+        ])
+        .with_start_action(Box::new(move || {
+            write_valid_msi_completion(&output_start, scenario_result)
+        }))
+    }
+
+    #[test]
+    fn imported_msi_mismatched_scenario_result_fails_after_exact_cleanup() {
+        let (_root, layout, start, readiness) = setup_msi();
+        let request = msi_request_for(&start);
+        let mut mismatched =
+            aiw_provider_wsb::ImportedMsiScenarioResult::succeeded(&request, 0, 42, 0).unwrap();
+        mismatched.scenario_id = "other-scenario".to_owned();
+        let fake = successful_msi_process(&start, mismatched);
+        let error =
+            execute_wsb_golden_probe(&start, &readiness, &layout, &fake, &TestLease::default())
+                .unwrap_err();
+        assert!(matches!(error, RunnerError::Receipt(_)));
+        assert_eq!(
+            observe_wsb_session_status(&layout).unwrap().status,
+            WsbSessionDisposition::Clean
+        );
+        assert!(!request_path(&start).exists());
+        assert_eq!(layout.read_result().unwrap().outcome, RunOutcome::Failed);
+    }
+
+    #[test]
+    fn imported_msi_validated_request_and_staging_are_cleaned_on_retry() {
+        let (_root, layout, start, readiness) = setup_msi();
+        let request = msi_request_for(&start);
+        let path = request_path(&start);
+        let pending = request_pending_path(&path).unwrap();
+        publish_request(
+            &path,
+            &pending,
+            &ExecutionGuestRequest::ImportedMsi(Box::new(request.clone())),
+        )
+        .unwrap();
+        fs::write(&pending, b"partial").unwrap();
+        let valid =
+            aiw_provider_wsb::ImportedMsiScenarioResult::succeeded(&request, 0, 42, 0).unwrap();
+        let fake = successful_msi_process(&start, valid);
+        let execution =
+            execute_wsb_golden_probe(&start, &readiness, &layout, &fake, &TestLease::default())
+                .unwrap();
+        assert!(execution.cleanup_complete);
+        assert!(!path.exists());
+        assert!(!pending.exists());
+        assert_eq!(
+            layout.read_result().unwrap().outcome,
+            RunOutcome::InsufficientEvidence
+        );
+    }
 }
 
 #[cfg(all(test, windows))]
