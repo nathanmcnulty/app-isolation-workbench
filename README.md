@@ -58,6 +58,7 @@ cargo run -p aiw-cli -- run start --root <workspace-from-prepare> --run-id <fres
 cargo run -p aiw-cli -- run status --root <workspace-from-prepare> --run-id <fresh-id>
 cargo run -p aiw-cli -- run recover --root <workspace-from-prepare> --run-id <fresh-id>
 cargo run -p aiw-cli -- provider wsb --plan .\examples\windows-sandbox-plan.json
+cargo run -p aiw-cli -- provider compile-msi-scenario --project .\examples\notepad-plus-plus-msi.aiw.yaml --scenario install-launch-close
 cargo run -p aiw-cli -- provider mxc --plan .\examples\mxc-golden-probe-plan.json
 cargo run -p aiw-cli -- schema project
 cargo run -p aiw-cli -- evidence verify --log .\run\evidence.jsonl
@@ -67,6 +68,8 @@ cargo run -p aiw-cli -- compare --left .\baseline.json --right .\candidate.json
 ```
 
 All successful commands emit JSON. Diagnostics go to standard error and a nonzero exit code indicates failure. Preparation requires an independently obtained agent hash, leaves the run `pendingApproval`, never writes approval or provider-session state, and preserves incomplete workspaces for explicit inspection. Provider planning commands remain non-executing. `run start` accepts no arbitrary execution input, fails closed on drift, and may require `run recover` after an interrupted provider attempt.
+
+`provider compile-msi-scenario` produces a strict, versioned Notepad++ MSI install/launch/observe/close plan for review. It does not read the installer, verify an intake, approve a run, or start a process. The example binds the recorded 8.9.8 MSI content hash and uses a placeholder provider identity. Application preparation and guest execution are not connected yet; see [the scenario integration contract](docs/TYPED-MSI-SCENARIO.md).
 
 ## Local validation
 

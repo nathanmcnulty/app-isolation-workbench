@@ -92,6 +92,8 @@ impl CompiledMsiScenario {
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ScenarioCompileError {
+    #[error("project is invalid or awaits migration review")]
+    InvalidProject,
     #[error("only MSI application sources are supported by this Windows Sandbox scenario profile")]
     UnsupportedApplicationSource,
     #[error(
@@ -99,7 +101,7 @@ pub enum ScenarioCompileError {
     )]
     UnsupportedInstallerSemantics,
     #[error(
-        "the project requests secrets, host resources, network access, or unsupported evidence semantics"
+        "the project requests unsupported secrets, host resources, network access, or runtime boundary"
     )]
     UnsupportedProjectSemantics,
     #[error("the requested scenario does not exist or is not the exact Notepad++ MSI sequence")]
@@ -117,6 +119,9 @@ pub fn compile_notepad_plus_plus_msi_scenario(
     project: &Project,
     scenario_id: &str,
 ) -> Result<CompiledMsiScenario, ScenarioCompileError> {
+    if !aiw_schema::validate_project_for_planning(project).is_empty() {
+        return Err(ScenarioCompileError::InvalidProject);
+    }
     require_project_semantics(project)?;
     let ApplicationSource::Msi(application) = &project.application else {
         return Err(ScenarioCompileError::UnsupportedApplicationSource);
@@ -177,19 +182,12 @@ pub fn compile_notepad_plus_plus_msi_scenario(
 
 fn require_project_semantics(project: &Project) -> Result<(), ScenarioCompileError> {
     let intent = &project.isolation_intent;
-    let assertions = &project.assertions;
     if !project.secrets.is_empty()
         || intent.runtime_boundary != RuntimeBoundary::WindowsSandbox
         || intent.network != NetworkIntent::Blocked
         || intent.allow_clipboard
         || intent.allow_host_file_access
         || intent.allow_host_registry_access
-        || intent.require_descendant_coverage
-        || assertions.require_effective_backend_match
-        || assertions.require_target_token_evidence
-        || assertions.require_expected_child_coverage
-        || assertions.require_offline_canary_denied
-        || assertions.fail_on_evidence_truncation
     {
         return Err(ScenarioCompileError::UnsupportedProjectSemantics);
     }
@@ -262,7 +260,7 @@ mod tests {
                 "allowHostRegistryAccess": false,
                 "requireDescendantCoverage": false
             },
-            "candidates": [],
+            "candidates": [{"id": "baseline", "type": "unpackagedBaseline", "config": {"type": "baseline"}}],
             "scenarios": [{
                 "id": "first-run",
                 "description": "Install, launch, observe, and close Notepad++.",
@@ -367,5 +365,52 @@ mod tests {
             compiled.canonical_sha256(),
             Err(ScenarioCompileError::InvalidCompiledProfile)
         );
+    }
+
+    #[test]
+    fn rejects_ambiguous_project_authority() {
+        let mut value = project();
+        value.scenarios.push(value.scenarios[0].clone());
+        assert_eq!(
+            compile_notepad_plus_plus_msi_scenario(&value, "first-run"),
+            Err(ScenarioCompileError::InvalidProject)
+        );
+        let mut value = project();
+        let ApplicationSource::Msi(application) = &mut value.application else {
+            unreachable!()
+        };
+        application
+            .entry_points
+            .push(application.entry_points[0].clone());
+        assert_eq!(
+            compile_notepad_plus_plus_msi_scenario(&value, "first-run"),
+            Err(ScenarioCompileError::InvalidProject)
+        );
+    }
+
+    #[test]
+    fn retains_assessment_requirements_without_claiming_to_satisfy_them() {
+        let mut value = project();
+        value.isolation_intent.require_descendant_coverage = true;
+        value.assertions = aiw_schema::Assertions::default();
+        let before = value.clone();
+        compile_notepad_plus_plus_msi_scenario(&value, "first-run").unwrap();
+        assert_eq!(value, before);
+    }
+
+    #[test]
+    fn strict_wire_rejects_unknown_command_fields() {
+        let compiled = compile_notepad_plus_plus_msi_scenario(&project(), "first-run").unwrap();
+        let mut value = serde_json::to_value(&compiled).unwrap();
+        value["command"] = serde_json::json!("cmd.exe");
+        assert!(serde_json::from_value::<CompiledMsiScenario>(value).is_err());
+        let mut changed = compiled.clone();
+        changed.process_wait_timeout_seconds += 1;
+        assert_ne!(
+            compiled.canonical_sha256().unwrap(),
+            changed.canonical_sha256().unwrap()
+        );
+        changed.process_wait_timeout_seconds = 61;
+        assert!(changed.canonical_sha256().is_err());
     }
 }

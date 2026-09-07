@@ -68,6 +68,9 @@ try {
     cargo run --quiet --locked -p aiw-cli -- project validate --path .\examples\minimal.aiw.yaml | ConvertFrom-Json | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'example project validation failed' }
 
+    cargo run --quiet --locked -p aiw-cli -- provider compile-msi-scenario --project .\examples\notepad-plus-plus-msi.aiw.yaml --scenario install-launch-close | ConvertFrom-Json | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'typed MSI scenario compilation failed' }
+
     cargo run --quiet --locked -p aiw-cli -- model-pack validate --path .\examples\model-pack.json | ConvertFrom-Json | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'example model-pack validation failed' }
 
@@ -110,6 +113,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'canary evaluation failed' }
 
     foreach ($schemaKind in @(
+        'compiled-msi-scenario',
+        'msi-scenario-compilation',
         'application-file-authority',
         'application-file-import-receipt',
         'application-file-import-verification',

@@ -28,9 +28,11 @@ use aiw_probe::{
 };
 use aiw_provider_mxc::{MxcGoldenProbePlan, plan_capability_probe, plan_golden_probe};
 use aiw_provider_wsb::{
-    WindowsSandboxCliLifecyclePlan, WindowsSandboxCompletionExpectation,
-    WindowsSandboxCompletionReceipt, WindowsSandboxCompletionVerification, WindowsSandboxPlan,
-    plan_cli_lifecycle, render_config, validate_host_mappings, verify_completion_receipt,
+    CompiledMsiScenario, ScenarioCompileError, WindowsSandboxCliLifecyclePlan,
+    WindowsSandboxCompletionExpectation, WindowsSandboxCompletionReceipt,
+    WindowsSandboxCompletionVerification, WindowsSandboxPlan,
+    compile_notepad_plus_plus_msi_scenario, plan_cli_lifecycle, render_config,
+    validate_host_mappings, verify_completion_receipt,
 };
 use aiw_runner::{
     RunnerError, SessionTransaction, WsbGoldenProbeExecution, WsbGoldenProbeStart,
@@ -436,6 +438,13 @@ struct ProviderArgs {
 
 #[derive(Debug, Subcommand)]
 enum ProviderCommand {
+    /// Compile the fixed Notepad++ MSI scenario for review without executing it.
+    CompileMsiScenario {
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        scenario: String,
+    },
     /// Render a hardened Windows Sandbox configuration after checking mapped folders.
     Wsb {
         #[arg(long)]
@@ -477,6 +486,8 @@ struct SchemaArgs {
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum SchemaKind {
+    CompiledMsiScenario,
+    MsiScenarioCompilation,
     ApplicationFileAuthority,
     ApplicationFileImportReceipt,
     ApplicationFileImportVerification,
@@ -533,6 +544,16 @@ enum SchemaKind {
     WindowsSandboxCompletionReceipt,
     WindowsSandboxCompletionVerification,
     MxcGoldenProbePlan,
+}
+
+/// Review output only; this object is not an imported preparation or approval.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct MsiScenarioCompilation {
+    schema_version: &'static str,
+    project_revision_sha256: String,
+    scenario_sha256: String,
+    scenario: CompiledMsiScenario,
 }
 
 #[derive(Debug, Args)]
@@ -1377,6 +1398,16 @@ fn run(command: Command) -> Result<()> {
             }
         },
         Command::Provider(args) => match args.command {
+            ProviderCommand::CompileMsiScenario { project, scenario } => {
+                let loaded = read_project(&project)?;
+                let scenario = compile_notepad_plus_plus_msi_scenario(&loaded.project, &scenario)?;
+                write_json(&MsiScenarioCompilation {
+                    schema_version: "aiw.dev/msi-scenario-compilation/v0alpha1",
+                    project_revision_sha256: project_revision_hash(&loaded.project)?,
+                    scenario_sha256: scenario.canonical_sha256()?,
+                    scenario,
+                })
+            }
             ProviderCommand::Wsb { plan } => {
                 let plan: WindowsSandboxPlan = read_document(&plan, MAX_CONFIG_BYTES)?;
                 validate_host_mappings(&plan)?;
@@ -1406,6 +1437,8 @@ fn run(command: Command) -> Result<()> {
             ProviderCommand::MxcProbe { binary } => write_json(&plan_capability_probe(&binary)?),
         },
         Command::Schema(args) => match args.kind {
+            SchemaKind::CompiledMsiScenario => write_json(&schema_for!(CompiledMsiScenario)),
+            SchemaKind::MsiScenarioCompilation => write_json(&schema_for!(MsiScenarioCompilation)),
             SchemaKind::ApplicationFileAuthority => {
                 write_json(&schema_for!(ApplicationFileAuthority))
             }
@@ -2144,6 +2177,16 @@ fn emit_anyhow_error(error: &anyhow::Error) {
             remediation: "Preserve the source, resolve the reported type, path, link, bounds, or drift condition, and retry without executing it.".to_owned(),
             detail: error.source.to_string().chars().take(512).collect(),
         });
+    } else if let Some(error) = error.downcast_ref::<ScenarioCompileError>() {
+        emit_error(&ErrorEnvelope {
+            code: "AIW_MSI_SCENARIO_REJECTED".to_owned(),
+            summary: "project scenario is outside the supported MSI profile".to_owned(),
+            stage: "scenarioCompilation".to_owned(),
+            run_id: None,
+            retryable: false,
+            remediation: "Review the typed MSI profile and correct unsupported project fields or steps before compiling again.".to_owned(),
+            detail: error.to_string().chars().take(512).collect(),
+        });
     } else if let Some(error) = error.downcast_ref::<RunnerError>() {
         emit_error(&ErrorEnvelope {
             code: "AIW_WSB_RUNNER_FAILED".to_owned(),
@@ -2208,6 +2251,17 @@ mod tests {
         assert_eq!(loaded.source_schema_version, PROJECT_SCHEMA_VERSION);
         assert!(validate_project_for_planning(&loaded.project).is_empty());
         assert!(!project_requires_migration_review(&loaded.project));
+    }
+
+    #[test]
+    fn notepad_msi_example_compiles_without_reading_installer() {
+        let loaded = read_project(&example_path("notepad-plus-plus-msi.aiw.yaml")).unwrap();
+        let compiled =
+            compile_notepad_plus_plus_msi_scenario(&loaded.project, "install-launch-close")
+                .unwrap();
+        compiled.validate().unwrap();
+        assert_eq!(compiled.canonical_sha256().unwrap().len(), 64);
+        assert!(compile_notepad_plus_plus_msi_scenario(&loaded.project, "missing").is_err());
     }
 
     #[test]
