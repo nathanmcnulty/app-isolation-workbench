@@ -27,7 +27,9 @@ No downloaded installer was executed by this stabilization work.
 | Live recovery | Passed in 40.48 seconds; fresh post-test host assessment supported Sandbox and reported zero sessions. |
 | Notepad++ EXE/MSI | Fresh v0alpha2 receipts verified immediately and after 519/512 seconds; originals unchanged. See the updated fixture record. |
 | Independent review and local documentation links | Passed. Recovery, native ownership, intake cache projection, and fixture-only stabilization received independent review. |
-| Hosted CI | Still needs a run of this patch. No commit, push, PR, or merge has been performed. |
+| Hosted CI | One [manual CI run](https://github.com/nathanmcnulty/app-isolation-workbench/actions/runs/34153248021) tested `a4b28d79b3288a7e9710bd588a8226c115e92707`. Rust 1.85 passed. Verification reached 117 passing tests and one stale dangling-link assertion failure in the orchestrator. The expected code was corrected from nonexistent `AIW_PATH_INVALID` to the existing production `AIW_PATH_UNSAFE` and pushed as `d50cf504669fa8e0c33f9d1d50aa0011dd539db` on `codex/stabilize-health-review`. Native platform tests and subsequent verification/audit steps were not reached. No second CI run, PR, or merge was performed. |
+
+The corrected assertion retains rejection, link preservation, and absence of a published run. The hosted run exercised the symlink branch that local tests may skip when symlink creation is unavailable. Hosted owner/ACL/native validation remains outstanding and must not be described as green. Further scenario work remains local; batch the next hosted validation with a substantive execution integration milestone to conserve Actions worker hours.
 
 The last monolithic verification run stopped at a native fixture race. After fixing shared fixture construction, the entire native suite passed; formatting, Clippy, documentation tests, and the verification script's remaining smoke/schema stage were run separately. This records composed check coverage, not a claim that the final tree has completed a new monolithic `scripts/verify.ps1` invocation. Logs use the `aiw-stabilization-` prefix in the system temporary directory.
 

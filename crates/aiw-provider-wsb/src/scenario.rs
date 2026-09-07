@@ -2,8 +2,9 @@
 //!
 //! This module intentionally recognizes one reviewed application profile.  It
 //! is not a command-line or scenario-step interpreter: all executable paths,
-//! installer arguments, timeouts, and observations in the compiled value are
-//! constants selected by the profile.
+//! installer arguments, and observation targets are selected by the profile.
+//! The requested process-wait timeout is preserved within a fixed bound and
+//! included in the canonical hash; install and close deadlines are fixed.
 
 use aiw_evidence::canonical_json_bytes;
 use aiw_schema::{

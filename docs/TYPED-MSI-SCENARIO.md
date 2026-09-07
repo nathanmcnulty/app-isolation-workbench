@@ -4,6 +4,8 @@ The first typed application slice is a pure compiler for a fixed Notepad++ MSI p
 
 The CLI wraps the compiled plan with its canonical SHA-256 and the full project revision SHA-256. This separates executable-profile identity from project identity, so future preparation can bind both. `schema msi-scenario-compilation` describes that review output; it is not accepted as an approval or prepared workspace.
 
+Required assessment assertions and descendant coverage remain unchanged in the project and its hash. Compiling an action sequence does not satisfy those requirements. A future assessment must still return insufficient evidence when their measurements are unavailable.
+
 The supported sequence is install, launch, wait for the expected process, graceful close, and require exit code zero. Application and launch arguments must be empty. The compiler resolves the recognized relative entry point to a fixed installed guest path and rejects unsupported steps instead of skipping them. The MSI content hash comes from the project and remains an unverified claim until protected intake verification and staging.
 
 ```powershell
@@ -23,3 +25,7 @@ These commands do not execute the MSI or open its source path. The fixture's pro
 6. Validate tampering and approval rejection before provider acquisition, then perform an ignored live MSI canary inside Windows Sandbox using the separately retained local fixture. No installer runs on the host. Correlated guest observations remain insufficient containment evidence until independently measured host evidence is available.
 
 The compiler is implemented; these execution integration steps remain pending. Existing approved start still runs only the fixed golden token probe. This local slice does not schedule additional CI.
+
+## Local validation — 2026-09-07
+
+Provider and CLI coverage passed: 17 provider tests, 13 CLI unit tests, and 19 CLI integration tests (the added command-binding test ran separately after the existing 18-test suite). The assessment-requirement/hash regression passed after review. All-target Clippy with warnings denied, formatting, schema output, and governance checks passed. Independent review found no blocking issue. No new guest agent, MSI execution, or hosted scenario validation is claimed by these checks.

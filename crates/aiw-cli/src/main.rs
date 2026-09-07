@@ -2262,6 +2262,24 @@ mod tests {
         compiled.validate().unwrap();
         assert_eq!(compiled.canonical_sha256().unwrap().len(), 64);
         assert!(compile_notepad_plus_plus_msi_scenario(&loaded.project, "missing").is_err());
+
+        let mut changed_requirements = loaded.project.clone();
+        changed_requirements
+            .isolation_intent
+            .require_descendant_coverage = !changed_requirements
+            .isolation_intent
+            .require_descendant_coverage;
+        assert_ne!(
+            project_revision_hash(&loaded.project).unwrap(),
+            project_revision_hash(&changed_requirements).unwrap()
+        );
+        assert_eq!(
+            compiled.canonical_sha256().unwrap(),
+            compile_notepad_plus_plus_msi_scenario(&changed_requirements, "install-launch-close")
+                .unwrap()
+                .canonical_sha256()
+                .unwrap()
+        );
     }
 
     #[test]
