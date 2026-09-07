@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod completion;
+mod scenario;
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -20,6 +21,9 @@ pub use completion::{
     WINDOWS_SANDBOX_COMPLETION_VERIFICATION_SCHEMA_VERSION, WindowsSandboxCompletionError,
     WindowsSandboxCompletionExpectation, WindowsSandboxCompletionReceipt,
     WindowsSandboxCompletionVerification, verify_completion_receipt,
+};
+pub use scenario::{
+    CompiledMsiScenario, ScenarioCompileError, compile_notepad_plus_plus_msi_scenario,
 };
 
 pub const WINDOWS_SANDBOX_PLAN_SCHEMA_VERSION: &str = "aiw.dev/windows-sandbox-plan/v0alpha1";
