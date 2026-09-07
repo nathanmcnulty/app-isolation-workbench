@@ -98,6 +98,8 @@ pub struct WsbGoldenProbeExecution {
     pub cleanup_complete: bool,
     #[serde(skip)]
     scenario: Option<aiw_provider_wsb::ImportedMsiScenarioResult>,
+    #[serde(skip)]
+    application_token: Option<aiw_provider_wsb::ImportedMsiApplicationToken>,
 }
 
 /// Common receipt-correlated lifecycle result. Application observations remain
@@ -117,6 +119,8 @@ pub struct WsbImportedMsiExecution {
     pub workspace_identity_sha256: String,
     pub cleanup_complete: bool,
     pub scenario: aiw_provider_wsb::ImportedMsiScenarioResult,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub application_token: Option<aiw_provider_wsb::ImportedMsiApplicationToken>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -601,12 +605,19 @@ pub(crate) fn execute_wsb_golden_probe(
                 observed
                     .validate_for_request(expected)
                     .map_err(|e| RunnerError::Receipt(e.to_string()))?;
-                Some(observed)
+                let token = aiw_provider_wsb::verify_msi_application_token(
+                    &read_bounded_bytes(&context.output_root.join("evidence.jsonl"), 1024 * 1024)?,
+                    &verification.evidence_root_hash,
+                    expected,
+                    &observed,
+                )
+                .map_err(RunnerError::Receipt)?;
+                (Some(observed), token)
             }
-            ExecutionGuestRequest::Golden(_) => None,
+            ExecutionGuestRequest::Golden(_) => (None, None),
         })
     })();
-    let scenario = match scenario {
+    let (scenario, application_token) = match scenario {
         Ok(value) => value,
         Err(error) => {
             record_terminal_failure(layout, error.clone())?;
@@ -636,6 +647,7 @@ pub(crate) fn execute_wsb_golden_probe(
         workspace_identity_sha256: request.workspace_identity_sha256.clone(),
         cleanup_complete: true,
         scenario,
+        application_token,
     })
 }
 
@@ -759,7 +771,12 @@ fn start_approved_windows_sandbox_inner(
     if request.msi.is_some() {
         let scenario = result.scenario.ok_or(RunnerError::Drift)?;
         Ok(WsbApprovedExecution::ImportedMsi(WsbImportedMsiExecution {
-            schema_version: "aiw.dev/wsb-imported-msi-execution/v0alpha1".to_owned(),
+            schema_version: if result.application_token.is_some() {
+                "aiw.dev/wsb-imported-msi-execution/v0alpha2"
+            } else {
+                "aiw.dev/wsb-imported-msi-execution/v0alpha1"
+            }
+            .to_owned(),
             run_id: result.run_id,
             sandbox_id: result.sandbox_id,
             provider_sha256: result.provider_sha256,
@@ -771,6 +788,7 @@ fn start_approved_windows_sandbox_inner(
             workspace_identity_sha256: result.workspace_identity_sha256,
             cleanup_complete: result.cleanup_complete,
             scenario,
+            application_token: result.application_token,
         }))
     } else {
         Ok(WsbApprovedExecution::GoldenProbe(result))
@@ -1648,6 +1666,11 @@ fn read_bounded_json<T: for<'de> Deserialize<'de>>(
     path: &Path,
     maximum: u64,
 ) -> Result<T, RunnerError> {
+    let bytes = read_bounded_bytes(path, maximum)?;
+    serde_json::from_slice(&bytes).map_err(|_| RunnerError::Drift)
+}
+
+fn read_bounded_bytes(path: &Path, maximum: u64) -> Result<Vec<u8>, RunnerError> {
     ensure_ordinary_file(path)?;
     let metadata = fs::metadata(path).map_err(|_| RunnerError::Drift)?;
     if metadata.len() > maximum {
@@ -1661,7 +1684,7 @@ fn read_bounded_json<T: for<'de> Deserialize<'de>>(
     if bytes.len() as u64 > maximum {
         return Err(RunnerError::Drift);
     }
-    serde_json::from_slice(&bytes).map_err(|_| RunnerError::Drift)
+    Ok(bytes)
 }
 
 fn validate_recovery_mappings(plan: &WindowsSandboxPlan) -> Result<(), RunnerError> {
@@ -4189,6 +4212,30 @@ mod tests {
                 payload: serde_json::json!({"completed":true}),
             })
             .unwrap();
+        let valid_result =
+            aiw_provider_wsb::ImportedMsiScenarioResult::succeeded(&request, 0, 42, 0).unwrap();
+        let token = aiw_provider_wsb::ImportedMsiApplicationToken::new(
+            &request,
+            &valid_result,
+            serde_json::from_value(serde_json::json!({
+                "schemaVersion": "aiw.dev/token-evidence/v0alpha1",
+                "processId": 42, "tokenType": "primary", "isAppContainer": false,
+                "userSid": "S-1-5-21-1-2-3-1001",
+                "integrity": {"sid": "S-1-16-8192", "rid": 8192, "level": "medium"},
+                "elevationType": "default", "isElevated": false,
+                "capabilities": [], "restrictedSidCount": 0
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        evidence
+            .append(aiw_evidence::EvidenceEvent {
+                observed_utc: "guest-time-not-trusted".to_owned(),
+                kind: aiw_provider_wsb::MSI_APPLICATION_TOKEN_EVENT.to_owned(),
+                source: "aiw-guest-agent".to_owned(),
+                payload: serde_json::to_value(token).unwrap(),
+            })
+            .unwrap();
         let mut evidence_bytes = Vec::new();
         for record in evidence.records() {
             serde_json::to_writer(&mut evidence_bytes, record).unwrap();
@@ -4302,6 +4349,15 @@ mod tests {
             execute_wsb_golden_probe(&start, &readiness, &layout, &fake, &TestLease::default())
                 .unwrap();
         assert!(execution.cleanup_complete);
+        assert_eq!(
+            execution
+                .application_token
+                .as_ref()
+                .unwrap()
+                .token
+                .process_id,
+            42
+        );
         assert!(!path.exists());
         assert!(!pending.exists());
         assert_eq!(

@@ -112,6 +112,16 @@ fn live_imported_msi_install_observe_close_and_cleanup() {
         panic!("wrong execution profile")
     };
     assert!(result.scenario.successful());
+    assert_eq!(
+        result.schema_version,
+        "aiw.dev/wsb-imported-msi-execution/v0alpha2"
+    );
+    let token = result
+        .application_token
+        .as_ref()
+        .expect("approved profile requires application token");
+    assert_eq!(token.token.process_id, result.scenario.launch_process_id);
+    assert_eq!(token.request_sha256, result.request_sha256);
     assert_eq!(result.scenario.install_exit_code, 0);
     assert_eq!(result.scenario.launch_exit_code, 0);
     assert!(result.cleanup_complete);

@@ -17,9 +17,9 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 pub const COMPILED_MSI_SCENARIO_SCHEMA_VERSION: &str =
-    "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha1";
+    "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha2";
 pub const NOTEPAD_PLUS_PLUS_MSI_PROFILE: &str =
-    "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha1";
+    "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha2";
 
 const NOTEPAD_PLUS_PLUS_ENTRYPOINT_ID: &str = "notepad-plus-plus";
 const NOTEPAD_PLUS_PLUS_ENTRYPOINT_PATH: &str = "notepad++.exe";
@@ -54,8 +54,12 @@ pub struct CompiledMsiScenario {
 impl CompiledMsiScenario {
     /// Validates the fixed profile constants and the copied source binding.
     pub fn validate(&self) -> Result<(), ScenarioCompileError> {
-        if self.schema_version != COMPILED_MSI_SCENARIO_SCHEMA_VERSION
-            || self.profile != NOTEPAD_PLUS_PLUS_MSI_PROFILE
+        let current = self.schema_version == COMPILED_MSI_SCENARIO_SCHEMA_VERSION
+            && self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE;
+        let legacy = self.schema_version
+            == "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha1"
+            && self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha1";
+        if !(current || legacy)
             || !valid_id(&self.scenario_id)
             || !lower_hex_sha256(&self.application_sha256)
             || self.installer_path != STAGED_INSTALLER_PATH
@@ -78,6 +82,11 @@ impl CompiledMsiScenario {
             return Err(ScenarioCompileError::InvalidCompiledProfile);
         }
         Ok(())
+    }
+
+    /// The versioned profile is part of the approved scenario hash.
+    pub fn requires_application_token(&self) -> bool {
+        self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
     }
 
     /// Returns the canonical digest used by later plan/approval layers.

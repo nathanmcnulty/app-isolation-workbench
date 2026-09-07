@@ -35,7 +35,7 @@ AIW is delivered as two milestones with vertical, evidence-gated slices. W0 is i
 
 Current progress: MSI/EXE and portable sources have held native inspection authority and protected receipt-last copy/verification. Portable import is bounded more narrowly than inspection and preserves every incomplete/conflicting prefix. MSI/EXE inspection now performs cache-only embedded Authenticode validation against the exact held file; signer identity, timestamp, installer-aware version/architecture metadata, and compatibility findings remain. The first real dual-format fixture proof is recorded in `FIXTURE-NOTEPAD-PLUS-PLUS-8.9.8.md`.
 
-The first typed MSI scenario compiler is available locally through `provider compile-msi-scenario`, with a Notepad++ fixture and canonical scenario/project hashes. Compilation remains non-executing. Imported-MSI preparation, separate approval, guest execution, and exact cleanup are now connected and passed a local live install/observe/close proof. See [the integration contract](TYPED-MSI-SCENARIO.md).
+The first typed MSI scenario compiler is available locally through `provider compile-msi-scenario`, with a Notepad++ fixture and canonical scenario/project hashes. Compilation remains non-executing. Imported-MSI preparation, separate approval, guest execution, and exact cleanup are now connected and passed a local live install/observe/close proof. Compiled profile v0alpha2 additionally requires a receipt-bound token snapshot from the held launched-root process handle. Ordinary baseline execution and independent host/descendant evidence remain pending. See [the integration contract](TYPED-MSI-SCENARIO.md).
 
 ### W3 — runtime isolation
 

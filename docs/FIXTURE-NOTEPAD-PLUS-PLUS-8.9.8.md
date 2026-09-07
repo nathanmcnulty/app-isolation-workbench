@@ -65,3 +65,19 @@ The ignored `live_imported_msi_install_observe_close_and_cleanup` test exercised
 | Evidence root | `f6ee6887eb8639e83008f4b3f1431387d60d0ebc0f405ced5bf526549cb16471` |
 
 The machine-local prepared workspace, journal, result, and guest artifacts remain under `%TEMP%\aiw-msi-live-10380-1788811934450793200`. A separate negative fixture, `%TEMP%\aiw-msi-live-13140-1788811878424248900`, passed staged MSI tamper rejection before request or session creation. Both tests also verified that the golden-only API rejects the MSI profile. No installer ran on the host. No new CI run was triggered.
+
+## Candidate token snapshot — 2026-09-07
+
+The v0alpha2 compiled profile passed a fresh approved MSI install/observe/close run in 113.81 seconds. The held launched-process token snapshot and scenario result both identify PID 5780. The guest reported a primary, high-integrity token (RID 12288), elevated with default elevation type, no AppContainer SID, no capabilities, and zero restricted SIDs. These are guest-local observations; the Windows Sandbox VM boundary is distinct from AppContainer token isolation. No ordinary baseline or independent containment conclusion is claimed.
+
+| Binding | Measured value |
+|---|---|
+| Run ID | `aiw-msi-live-19192-1788819016541089200` |
+| Sandbox ID | `b7ae18a6-9bfc-70bb-c13a-ff9faff3a9c2` |
+| Static guest SHA-256 | `8ccc5d79a707214726f94eab4dd4f53885aaa70391e1affec4652c7fd93eedcc` |
+| Request SHA-256 | `e7fdbe8e2de00b1b1bf094ab23b708b9f4f1d1f8f341517c26b1c8b475049e23` |
+| Scenario SHA-256 | `65471de6d43328e8752e7adfceef96229420860ebc895fad816c28f5ed1189ea` |
+| Completion receipt SHA-256 | `b3ce6b293c399fabdea44049fd5f427ae053f71da022626d3a69b361c661464f` |
+| Evidence root | `6533bbd868701d13610911ea31fab6a98c8bf1805eda9e7c29c398580f066c0c` |
+
+Installation and launched-process exit codes were both zero. The host verified the receipt, reverified the token event's evidence root and request/PID bindings, and returned execution v0alpha2 with `applicationToken`. Exact cleanup succeeded, request removal was verified, no Sandbox sessions remained, and assessment stayed `insufficientEvidence`. The prepared workspace remains under `%TEMP%\aiw-msi-live-19192-1788819016541089200`; the log is `%TEMP%\aiw-msi-token-live.log`. No installer ran on the host and no CI was triggered.

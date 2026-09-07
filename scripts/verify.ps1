@@ -115,6 +115,7 @@ try {
     foreach ($schemaKind in @(
         'compiled-msi-scenario',
         'msi-scenario-compilation',
+        'msi-application-token',
         'application-file-authority',
         'application-file-import-receipt',
         'application-file-import-verification',

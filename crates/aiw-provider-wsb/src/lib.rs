@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod application_token;
 mod completion;
 mod imported_msi;
 mod scenario;
@@ -14,6 +15,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+
+pub use application_token::{
+    ImportedMsiApplicationToken, MSI_APPLICATION_TOKEN_EVENT, MSI_APPLICATION_TOKEN_SCHEMA,
+    verify_msi_application_token,
+};
 
 pub use completion::{
     CompletionArtifact, CompletionArtifactExpectation, CompletionStatus,
@@ -851,3 +857,6 @@ mod tests {
         fs::remove_dir_all(&root).expect("test fixture should be removed");
     }
 }
+
+#[cfg(test)]
+mod application_token_tests;

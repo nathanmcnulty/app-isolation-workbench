@@ -202,6 +202,18 @@ fn execute_imported_msi_request(request: &ImportedMsiGuestRequest) -> Result<()>
         source: "aiw-guest-agent".to_owned(),
         payload: serde_json::to_value(&result)?,
     })?;
+    let token = aiw_provider_wsb::ImportedMsiApplicationToken::new(
+        request,
+        &result,
+        observation.application_token,
+    )
+    .map_err(anyhow::Error::msg)?;
+    evidence.append(EvidenceEvent {
+        observed_utc: "guest-agent-time-not-trusted".to_owned(),
+        kind: aiw_provider_wsb::MSI_APPLICATION_TOKEN_EVENT.to_owned(),
+        source: "aiw-guest-agent".to_owned(),
+        payload: serde_json::to_value(&token)?,
+    })?;
     let mut bytes = Vec::new();
     for record in evidence.records() {
         serde_json::to_writer(&mut bytes, record)?;

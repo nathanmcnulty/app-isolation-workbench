@@ -509,6 +509,7 @@ enum SchemaKind {
     ImportedMsiGuestRequest,
     ImportedMsiScenarioResult,
     WsbApprovedExecution,
+    MsiApplicationToken,
     CompiledMsiScenario,
     MsiScenarioCompilation,
     ApplicationFileAuthority,
@@ -1512,6 +1513,9 @@ fn run(command: Command) -> Result<()> {
             }
             SchemaKind::ImportedMsiScenarioResult => {
                 write_json(&schema_for!(aiw_provider_wsb::ImportedMsiScenarioResult))
+            }
+            SchemaKind::MsiApplicationToken => {
+                write_json(&schema_for!(aiw_provider_wsb::ImportedMsiApplicationToken))
             }
             SchemaKind::WsbApprovedExecution => {
                 write_json(&schema_for!(aiw_runner::WsbApprovedExecution))

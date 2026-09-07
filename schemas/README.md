@@ -30,3 +30,5 @@ cargo run -p aiw-cli -- schema mxc-golden-probe-plan
 ```
 
 Checked-in schema snapshots will be added when the first external consumer is introduced. At that point, schema drift becomes a required review and compatibility test.
+
+`msi-application-token` describes the versioned guest root-process token observation. Compiled MSI profile v0alpha2 requires it; the profile/version is part of the approved scenario hash. Imported MSI execution v0alpha2 includes the verified observation, while legacy v0alpha1 without it remains explicitly missing evidence.
