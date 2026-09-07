@@ -1,6 +1,6 @@
 # Roadmap
 
-AIW is delivered as two milestones with vertical, evidence-gated slices. W0 is implemented. W1 exposes protected preparation/import, separate approval, public fixed golden-probe start, and exact-session recovery; PR #50 records live public success and interruption/recovery proofs. Exact-object preparation discard and its terminal workspace receipt remain private, with no public cleanup UX. W2 intake is in progress. Complete application assessment, validated application launch, the desktop UI, and package authoring remain later slices.
+AIW is delivered as two milestones with vertical, evidence-gated slices. W0 is implemented. W1 exposes protected preparation/import, separate approval, public fixed golden-probe start, and exact-session recovery; PR #50 records live public success and interruption/recovery proofs. Exact-object preparation discard and its terminal workspace receipt remain private, with no public cleanup UX. W2 intake and a fixed approved Notepad++ MSI scenario are implemented; complete assessment is in progress. Complete application assessment, validated application launch, the desktop UI, and package authoring remain later slices.
 
 ## Workbench v1
 
@@ -35,7 +35,7 @@ AIW is delivered as two milestones with vertical, evidence-gated slices. W0 is i
 
 Current progress: MSI/EXE and portable sources have held native inspection authority and protected receipt-last copy/verification. Portable import is bounded more narrowly than inspection and preserves every incomplete/conflicting prefix. MSI/EXE inspection now performs cache-only embedded Authenticode validation against the exact held file; signer identity, timestamp, installer-aware version/architecture metadata, and compatibility findings remain. The first real dual-format fixture proof is recorded in `FIXTURE-NOTEPAD-PLUS-PLUS-8.9.8.md`.
 
-The first typed MSI scenario compiler is available locally through `provider compile-msi-scenario`, with a Notepad++ fixture and canonical scenario/project hashes. It is non-executing; imported-MSI preparation, approval binding, guest execution, and live application proof remain pending. See [the integration contract](TYPED-MSI-SCENARIO.md).
+The first typed MSI scenario compiler is available locally through `provider compile-msi-scenario`, with a Notepad++ fixture and canonical scenario/project hashes. Compilation remains non-executing. Imported-MSI preparation, separate approval, guest execution, and exact cleanup are now connected and passed a local live install/observe/close proof. See [the integration contract](TYPED-MSI-SCENARIO.md).
 
 ### W3 — runtime isolation
 

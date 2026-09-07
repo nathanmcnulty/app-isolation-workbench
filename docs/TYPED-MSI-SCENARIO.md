@@ -1,31 +1,32 @@
 # Typed MSI scenario integration
 
-The first typed application slice is a pure compiler for a fixed Notepad++ MSI profile. It accepts a validated project and an exact scenario ID, emits a versioned plan, and provides validated canonical hashing. The CLI exposes it through `provider compile-msi-scenario`; `schema compiled-msi-scenario` describes its wire format.
+The fixed Notepad++ MSI profile now connects protected intake, preparation, separate import and approval, Windows Sandbox execution, completion verification, and exact-session cleanup. The pure compiler remains available through `provider compile-msi-scenario`; compilation alone grants no execution authority.
 
-The CLI wraps the compiled plan with its canonical SHA-256 and the full project revision SHA-256. This separates executable-profile identity from project identity, so future preparation can bind both. `schema msi-scenario-compilation` describes that review output; it is not accepted as an approval or prepared workspace.
+## Supported profile
 
-Required assessment assertions and descendant coverage remain unchanged in the project and its hash. Compiling an action sequence does not satisfy those requirements. A future assessment must still return insufficient evidence when their measurements are unavailable.
+The sequence is install, launch, observe the exact process and a visible window, request graceful close, and require exit code zero. The x64 MSI must match the project hash and be at most 128 MiB. Installer and application arguments must be empty in the project. The guest uses fixed MSI arguments (`/qn /norestart`) and fixed installer/application paths. Install, observation, and close waits are bounded. Reboot-required installer outcomes fail this profile.
 
-The supported sequence is install, launch, wait for the expected process, graceful close, and require exit code zero. Application and launch arguments must be empty. The compiler resolves the recognized relative entry point to a fixed installed guest path and rejects unsupported steps instead of skipping them. The MSI content hash comes from the project and remains an unverified claim until protected intake verification and staging.
+Preparation holds and verifies the v0alpha2 intake receipt and payload, copies only held bytes to `tools\application.msi`, and binds staged identity/content, intake receipt, compiled scenario, project revision, provider, agent, and protected workspace. The tools mapping remains read-only. The original intake must remain available and valid through start.
+
+The imported MSI action uses run-plan v0alpha4 with preparation and planning-import receipts v0alpha2. Golden profiles retain their existing versions. Import and approval are distinct operations. Public `run start` dispatches only from the approved preparation; it accepts no new installer, arguments, or scenario. The golden-only API rejects MSI approval. Private golden workspace discard rejects MSI workspaces.
+
+The guest assigns suspended processes to kill-on-close jobs before resuming them. It records install and launch exit codes, exact process observation, and graceful-close outcome. Failures produce bounded diagnostics without a successful completion receipt. Successful execution publishes `scenario-result.json` and evidence before the completion receipt. The host verifies request/result bindings after exact cleanup; interrupted attempts reuse the persisted recovery lifecycle.
+
+## Review and execution flow
 
 ```powershell
 cargo run -p aiw-cli -- provider compile-msi-scenario --project .\examples\notepad-plus-plus-msi.aiw.yaml --scenario install-launch-close
-cargo run -p aiw-cli -- schema compiled-msi-scenario
+cargo run -p aiw-cli -- run prepare-wsb-msi --run-id <fresh-id> --project .\examples\notepad-plus-plus-msi.aiw.yaml --guest-agent <absolute-path> --guest-agent-sha256 <independent-sha256> --workspace-parent <canonical-existing-local-directory> --created-at <timestamp> --import-receipt <saved-v2-msi-receipt.json> --scenario install-launch-close
 ```
 
-These commands do not execute the MSI or open its source path. The fixture's provider hash is a planning placeholder. Compilation is neither approval nor proof of application identity, compatibility, containment, or successful installation.
+Review the prepared plan and trust deltas. Use the shared `verify-prepared-wsb`, `import-prepared-wsb`, `approve`, and `start` commands documented in the README with the same MSI project, workspace, run ID, and independent agent hash. Approval must bind the imported plan; preparation does not create approval. The example provider identity is a planning placeholder, replaced by the observed trusted provider binding during preparation.
 
-## Required application execution integration
+## Evidence and remaining scope
 
-1. Add a distinct imported-MSI preparation profile. Verify the current protected MSI intake, hold its payload, and copy the held bytes to exactly `tools\application.msi`. Bind both the import receipt and the staged payload. Preserve the existing read-only tools mapping rather than mapping Downloads or the intake directory into Sandbox.
-2. Persist the compiled scenario and bind its canonical hash, staged MSI hash, intake receipt hash, project revision, provider, guest agent, and workspace into a distinct run-plan action. Import and approval remain separate operations. Existing generic `ExecuteScenario` and fixed golden-probe actions do not authorize application execution.
-3. Extend public start to dispatch solely from the imported preparation. It must accept no new application path, arguments, scenario selector, executable, or policy after approval. Revalidate the held workspace after staging the request and immediately before durable start intent.
-4. Add a separate strict guest request and a bounded native executor for this profile. Install without reboot, observe the exact launched process, and close that process gracefully with bounded waits. Record failed installation, reboot-required results, early exits, timeouts, and close failures explicitly. Publish a fixed scenario result and evidence log before the completion receipt.
-5. Reuse provider lease, session transaction, exact-ID cleanup, request removal, recovery, and completion verification. Extend profile-specific workspace allowlists; do not loosen the private golden-only discard inventory.
-6. Validate tampering and approval rejection before provider acquisition, then perform an ignored live MSI canary inside Windows Sandbox using the separately retained local fixture. No installer runs on the host. Correlated guest observations remain insufficient containment evidence until independently measured host evidence is available.
+A local live test on 2026-09-07 installed the recorded Notepad++ 8.9.8 MSI inside Windows Sandbox, observed its visible process, closed it with WM_CLOSE, verified exit code zero, and confirmed exact cleanup with zero remaining Sandbox sessions. A separate staged-byte tamper test rejected start before request/session creation. See [the fixture evidence](FIXTURE-NOTEPAD-PLUS-PLUS-8.9.8.md).
 
-The compiler is implemented; these execution integration steps remain pending. Existing approved start still runs only the fixed golden token probe. This local slice does not schedule additional CI.
+Required assessment assertions and descendant coverage remain in the project hash. Correlated guest results do not satisfy independent containment measurements: the successful run intentionally remains `insufficientEvidence`. Ordinary baseline comparison, other installers/EXE/portable execution, update/uninstall scenarios, reboot handling, public MSI workspace discard, and complete assessment remain future work. Native fault injection and MSI-specific interrupted recovery need further live coverage. No additional hosted CI was scheduled for this slice.
 
 ## Local validation — 2026-09-07
 
-Provider and CLI coverage passed: 17 provider tests, 13 CLI unit tests, and 19 CLI integration tests (the added command-binding test ran separately after the existing 18-test suite). The assessment-requirement/hash regression passed after review. All-target Clippy with warnings denied, formatting, schema output, and governance checks passed. Independent review found no blocking issue. No new guest agent, MSI execution, or hosted scenario validation is claimed by these checks.
+Workspace tests passed: 365 passed, 0 failed, 14 ignored opt-in/helper tests. The live MSI success and pre-start tamper tests passed separately. Workspace/all-target Clippy with warnings denied, formatting, offline Rust 1.85 workspace/all-target compatibility, new CLI command/schema smoke checks, governance checks, and changed-document local links passed. Independent code review found no material defect. Logs remain under `%TEMP%` as `aiw-msi-workspace-tests.log` and `aiw-msi-msrv.log`. Hosted validation remains separate and was not rerun.

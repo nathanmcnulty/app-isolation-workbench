@@ -1163,7 +1163,7 @@ fn prepare_execution(
     }
     let guest_request = if let Some(msi) = &request.msi {
         revalidate_identity(&msi.staged_payload)?;
-        ExecutionGuestRequest::ImportedMsi(
+        ExecutionGuestRequest::ImportedMsi(Box::new(
             aiw_provider_wsb::ImportedMsiGuestRequest::new(
                 &plan.run_id,
                 &session_id,
@@ -1175,15 +1175,15 @@ fn prepare_execution(
                 &msi.import_receipt_sha256,
             )
             .map_err(|e| RunnerError::Preparation(e.to_string()))?,
-        )
+        ))
     } else {
-        ExecutionGuestRequest::Golden(GuestRequest::new(
+        ExecutionGuestRequest::Golden(Box::new(GuestRequest::new(
             &plan.run_id,
             &session_id,
             &rendered.sha256,
             &request.guest_agent.sha256,
             &output.sandbox_folder,
-        )?)
+        )?))
     };
     let mut completion = completion_expectation(
         &plan.run_id,
@@ -1753,8 +1753,8 @@ struct GuestRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(untagged)]
 enum ExecutionGuestRequest {
-    Golden(GuestRequest),
-    ImportedMsi(aiw_provider_wsb::ImportedMsiGuestRequest),
+    Golden(Box<GuestRequest>),
+    ImportedMsi(Box<aiw_provider_wsb::ImportedMsiGuestRequest>),
 }
 
 impl ExecutionGuestRequest {
@@ -3669,7 +3669,12 @@ mod tests {
         let request = request_for(&start);
         let path = request_path(&start);
         let pending = request_pending_path(&path).unwrap();
-        publish_request(&path, &pending, &ExecutionGuestRequest::Golden(request)).unwrap();
+        publish_request(
+            &path,
+            &pending,
+            &ExecutionGuestRequest::Golden(Box::new(request)),
+        )
+        .unwrap();
         fs::write(&pending, b"partial").unwrap();
         let fake = success_process(&start);
         execute_wsb_golden_probe(&start, &readiness, &layout, &fake, &TestLease::default())

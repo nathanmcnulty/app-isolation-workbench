@@ -41,12 +41,27 @@ Delayed verification exposed a Windows kernel file-hash cache appearing after im
 
 Machine-local working copies, external receipts, and verification JSON are retained under `%TEMP%\aiw-health-fixtures-176e3524e9f04ef28902716f28811d3d`. Use `exe-v2-import.json` and `msi-v2-import.json`; earlier experimental receipts in that directory are preserved diagnostic artifacts, not current intake authority. Reverify before any later approved execution.
 
-The existing fixed golden probe also passed a separate live Sandbox cleanup-before-result recovery canary. That proof did not install or exercise these applications. The next milestone is approved imported-application execution with typed installation/exercise scenarios inside Windows Sandbox.
+The existing fixed golden probe also passed a separate live Sandbox cleanup-before-result recovery canary. That proof did not install or exercise these applications. The approved MSI scenario was subsequently exercised as recorded below.
 
 ## Interpretation and remaining evidence
 
 - The EXE outer PE image is x86. This does not establish the architecture of the product payload selected by the installer.
 - MSI package architecture, product properties, signer identity, and timestamp are not yet recorded.
-- No installer or application process was launched.
+- The intake observations above were non-executing; the subsequent MSI test below ran only inside Windows Sandbox.
 - No compatibility, containment, or safety conclusion follows from successful intake.
-- Baseline and Windows Sandbox execution remain gated on the public approved-start lifecycle and typed assessment scenarios.
+- Baseline comparison, EXE execution, and independent containment measurements remain pending.
+
+## Approved MSI Sandbox proof — 2026-09-07
+
+The ignored `live_imported_msi_install_observe_close_and_cleanup` test exercised the public preparation/import/approval/start APIs using the retained v0alpha2 MSI intake. It passed in 159.58 seconds. Installation returned 0; launched PID 1396 had a visible window, received WM_CLOSE, and exited with 0. Completion verification and exact cleanup succeeded, the request was removed, and no Sandbox sessions remained. The terminal assessment remained `insufficientEvidence`.
+
+| Binding | Measured value |
+|---|---|
+| Run ID | `aiw-msi-live-10380-1788811934450793200` |
+| Sandbox ID | `e162c72b-5b43-a08b-945a-397f85bf8a17` |
+| Static guest SHA-256 | `785663fa6a08d017065cda5feb38f482a4900709a459ba9b629d5d36cbe0aa1c` |
+| Request SHA-256 | `e25b5484687af661690d8e44dad95e7456bffddb862f387bd1bf322f81cbcfb4` |
+| Completion receipt SHA-256 | `055bd17b27b9c06b3bedb1a063ad84af23426fe5d08b8271375cc76b94f3a179` |
+| Evidence root | `f6ee6887eb8639e83008f4b3f1431387d60d0ebc0f405ced5bf526549cb16471` |
+
+The machine-local prepared workspace, journal, result, and guest artifacts remain under `%TEMP%\aiw-msi-live-10380-1788811934450793200`. A separate negative fixture, `%TEMP%\aiw-msi-live-13140-1788811878424248900`, passed staged MSI tamper rejection before request or session creation. Both tests also verified that the golden-only API rejects the MSI profile. No installer ran on the host. No new CI run was triggered.

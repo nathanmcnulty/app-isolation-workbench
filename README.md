@@ -9,19 +9,19 @@ The delivery sequence is `contracts -> live runner -> evidence/scenarios -> reco
 
 ## Current status
 
-AIW is pre-alpha. The W0 contracts and the fixed Windows Sandbox golden-probe path are implemented; complete application assessment, validated application launch, the desktop UI, and Studio authoring remain future work. Projects use `aiw.dev/v0alpha2`; legacy `v0alpha1` projects remain readable and migrate non-destructively with an explicit review gate.
+AIW is pre-alpha. The W0 contracts, fixed Windows Sandbox golden probe, and approved typed Notepad++ MSI scenario are implemented; complete application assessment, validated application launch, the desktop UI, and Studio authoring remain future work. Projects use `aiw.dev/v0alpha2`; legacy `v0alpha1` projects remain readable and migrate non-destructively with an explicit review gate.
 
 | Capability | Current boundary |
 |---|---|
 | Application intake | Read-only MSI/EXE/portable inspection and protected, receipt-last import and verification. Existing or incomplete intake IDs are preserved; retry requires a new ID. |
 | Signature observation | MSI/EXE inspection validates embedded Authenticode against the held file using cache-only whole-chain policy. Signer identity, timestamp, and installer-aware metadata are not yet recorded. Signature observation is not execution approval. |
-| Windows Sandbox preparation | `prepare-wsb`, `verify-prepared-wsb`, and `import-prepared-wsb` bind a fixed agent, provider, protected workspace, plans, and import provenance before separate approval. |
-| Public execution and recovery | `run start` runs only the imported and explicitly approved fixed golden probe. `run recover` reconciles and, if needed, stops only the persisted session. Neither accepts arbitrary execution authority. |
-| Evidence | The golden probe returns token evidence and a bound completion receipt. Even successful receipt verification and exact provider cleanup return `insufficientEvidence`; imported-application execution and containment are not proven. |
+| Windows Sandbox preparation | `prepare-wsb`, `prepare-wsb-msi`, `verify-prepared-wsb`, and `import-prepared-wsb` bind a fixed agent, provider, protected workspace, plans, and import provenance before separate approval. |
+| Public execution and recovery | `run start` dispatches the imported and explicitly approved golden probe or fixed Notepad++ MSI profile. `run recover` reconciles and, if needed, stops only the persisted session. Neither accepts arbitrary execution authority. |
+| Evidence | The golden probe returns token evidence; the MSI profile returns bound install/observe/close results. Both verify completion and exact cleanup and remain `insufficientEvidence` for containment. |
 | Workspace discard | Exact-object revocation, depublish, disposition, and terminal receipt transactions exist privately for the fixed preparation tree. Public discard and general intake cleanup are not implemented. |
 | Other providers | MXC is a pinned, non-executing planning adapter. |
 
-[PR #50](https://github.com/nathanmcnulty/app-isolation-workbench/pull/50) records live public-command success and interruption/recovery proofs. The [Notepad++ fixture](docs/FIXTURE-NOTEPAD-PLUS-PLUS-8.9.8.md) records non-executing EXE/MSI intake and signature observations. These are dated proofs, not evidence that every host or application is supported. Hosted CI checks contracts and native code but does not establish containment.
+[PR #50](https://github.com/nathanmcnulty/app-isolation-workbench/pull/50) records live public-command success and interruption/recovery proofs. The [Notepad++ fixture](docs/FIXTURE-NOTEPAD-PLUS-PLUS-8.9.8.md) records EXE/MSI intake, signature observations, and a live approved MSI Sandbox scenario. These are dated proofs, not evidence that every host or application is supported. Hosted CI checks contracts and native code but does not establish containment.
 
 Protected intake copies bytes only from retained native handles into create-new owner-and-SYSTEM storage. Verification checks the externally retained receipt, exact identities, namespace, content hashes, ACLs, links, streams, and semantic extended attributes. Missing `intake.json` means incomplete; its presence alone grants no authority. File flush is provided, but parent-directory and power-loss durability are not claimed. See [Architecture](docs/ARCHITECTURE.md) and [Threat model](docs/THREAT-MODEL.md) for the execution and recovery boundaries.
 
@@ -39,7 +39,7 @@ The initial live target is Windows 11 24H2 (build 26100+) x64. Provider support 
 
 ## Current CLI
 
-These commands exercise the current contracts and fixed Windows Sandbox proof. `run start` starts the approved fixed probe; `run recover` can stop its persisted session:
+These commands exercise the current contracts and fixed Windows Sandbox proof. `run start` starts the approved prepared profile; `run recover` can stop its persisted session:
 
 ```powershell
 cargo run -p aiw-cli -- project validate --path .\examples\minimal.aiw.yaml
@@ -69,7 +69,7 @@ cargo run -p aiw-cli -- compare --left .\baseline.json --right .\candidate.json
 
 All successful commands emit JSON. Diagnostics go to standard error and a nonzero exit code indicates failure. Preparation requires an independently obtained agent hash, leaves the run `pendingApproval`, never writes approval or provider-session state, and preserves incomplete workspaces for explicit inspection. Provider planning commands remain non-executing. `run start` accepts no arbitrary execution input, fails closed on drift, and may require `run recover` after an interrupted provider attempt.
 
-`provider compile-msi-scenario` produces a strict, versioned Notepad++ MSI install/launch/observe/close plan for review. It does not read the installer, verify an intake, approve a run, or start a process. The example binds the recorded 8.9.8 MSI content hash and uses a placeholder provider identity. Application preparation and guest execution are not connected yet; see [the scenario integration contract](docs/TYPED-MSI-SCENARIO.md).
+`provider compile-msi-scenario` produces a strict, versioned Notepad++ MSI install/launch/observe/close plan for review. It does not read the installer, verify an intake, approve a run, or start a process. The example binds the recorded 8.9.8 MSI content hash and uses a placeholder provider identity. `run prepare-wsb-msi` connects verified intake to separate import, approval, and guest execution; see [the scenario integration contract](docs/TYPED-MSI-SCENARIO.md).
 
 ## Local validation
 

@@ -431,7 +431,7 @@ enum RunCommand {
         #[arg(long)]
         requested_at: String,
     },
-    /// Start only an already-approved, hash-bound Windows Sandbox golden probe.
+    /// Start only the already-approved, hash-bound Windows Sandbox preparation profile.
     /// No arbitrary command, script, policy fragment, or provider verb is accepted.
     Start {
         #[arg(long)]
@@ -532,6 +532,8 @@ enum SchemaKind {
     RunPlanV0Alpha2,
     #[value(name = "run-plan-v0alpha3")]
     RunPlanV0Alpha3,
+    #[value(name = "run-plan-v0alpha4")]
+    RunPlanV0Alpha4,
     ApprovalRecord,
     RunEvent,
     RunResult,
@@ -1540,7 +1542,9 @@ fn run(command: Command) -> Result<()> {
             }
             SchemaKind::Project | SchemaKind::ProjectV0Alpha2 => write_json(&schema_for!(Project)),
             SchemaKind::ProjectV0Alpha1 => write_json(&schema_for!(LegacyProjectV0Alpha1)),
-            SchemaKind::RunPlan | SchemaKind::RunPlanV0Alpha3 => write_json(&schema_for!(RunPlan)),
+            SchemaKind::RunPlan | SchemaKind::RunPlanV0Alpha3 | SchemaKind::RunPlanV0Alpha4 => {
+                write_json(&schema_for!(RunPlan))
+            }
             SchemaKind::RunPlanV0Alpha1 => write_json(&schema_for!(LegacyRunPlanV0Alpha1)),
             SchemaKind::RunPlanV0Alpha2 => write_json(&schema_for!(LegacyRunPlanV0Alpha2)),
             SchemaKind::ApprovalRecord => write_json(&schema_for!(ApprovalRecord)),
@@ -2233,7 +2237,7 @@ fn emit_anyhow_error(error: &anyhow::Error) {
     } else if let Some(error) = error.downcast_ref::<RunStartFailed>() {
         emit_error(&ErrorEnvelope {
             code: "AIW_WSB_START_REJECTED".to_owned(),
-            summary: "approved Windows Sandbox golden-probe run was not completed".to_owned(),
+            summary: "approved Windows Sandbox run was not completed".to_owned(),
             stage: "wsbRunner".to_owned(),
             run_id: Some(error.run_id.clone()),
             retryable: start_error_is_retryable(&error.source),
@@ -2267,7 +2271,7 @@ fn emit_anyhow_error(error: &anyhow::Error) {
     } else if let Some(error) = error.downcast_ref::<RunnerError>() {
         emit_error(&ErrorEnvelope {
             code: "AIW_WSB_RUNNER_FAILED".to_owned(),
-            summary: "Windows Sandbox golden-probe run was not completed".to_owned(),
+            summary: "Windows Sandbox run was not completed".to_owned(),
             stage: "wsbRunner".to_owned(),
             run_id: None,
             retryable: false,

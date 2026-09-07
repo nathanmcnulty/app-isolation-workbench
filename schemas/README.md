@@ -18,6 +18,10 @@ cargo run -p aiw-cli -- schema token-evidence
 cargo run -p aiw-cli -- schema windows-sandbox-plan
 cargo run -p aiw-cli -- schema compiled-msi-scenario
 cargo run -p aiw-cli -- schema msi-scenario-compilation
+cargo run -p aiw-cli -- schema imported-msi-guest-request
+cargo run -p aiw-cli -- schema imported-msi-scenario-result
+cargo run -p aiw-cli -- schema wsb-approved-execution
+cargo run -p aiw-cli -- schema run-plan-v0alpha4
 cargo run -p aiw-cli -- schema windows-sandbox-cli-lifecycle-plan
 cargo run -p aiw-cli -- schema windows-sandbox-completion-expectation
 cargo run -p aiw-cli -- schema windows-sandbox-completion-receipt

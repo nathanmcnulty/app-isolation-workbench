@@ -25,7 +25,7 @@ use windows::Win32::System::Threading::{
     PROCESS_INFORMATION, ResumeThread, STARTUPINFOW, TerminateProcess, WaitForSingleObject,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetWindowThreadProcessId, PostMessageW, WM_CLOSE,
+    EnumWindows, GetWindowThreadProcessId, IsWindowVisible, PostMessageW, WM_CLOSE,
 };
 use windows::core::{BOOL, PCWSTR, PWSTR};
 
@@ -79,6 +79,13 @@ pub fn execute_fixed_notepad_plus_plus_msi(
         let window = application.wait_for_window(Duration::from_secs(u64::from(
             scenario.process_wait_timeout_seconds,
         )))?;
+        let mut window_process_id = 0;
+        unsafe { GetWindowThreadProcessId(window, Some(&mut window_process_id)) };
+        if window_process_id != application.process_id {
+            return Err(GuestMsiExecutionError::Process(
+                "observed application window changed owner".to_owned(),
+            ));
+        }
         unsafe { PostMessageW(Some(window), WM_CLOSE, WPARAM(0), LPARAM(0)) }.map_err(|error| {
             GuestMsiExecutionError::Process(format!("WM_CLOSE failed: {error}"))
         })?;
@@ -393,12 +400,15 @@ unsafe extern "system" fn find_window_for_process(window: HWND, value: LPARAM) -
     let context = unsafe { &mut *(value.0 as *mut WindowSearch) };
     let mut process_id = 0u32;
     unsafe { GetWindowThreadProcessId(window, Some(&mut process_id)) };
-    if process_id == context.process_id {
+    if process_id == context.process_id
+        && context.window.is_none()
+        && unsafe { IsWindowVisible(window) }.as_bool()
+    {
         context.window = Some(window);
-        BOOL(0)
-    } else {
-        BOOL(1)
     }
+    // Returning FALSE also makes EnumWindows return FALSE. Continue the bounded
+    // enumeration so discovering the window is not misreported as API failure.
+    BOOL(1)
 }
 
 fn raw_handle(handle: &OwnedHandle) -> HANDLE {

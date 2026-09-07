@@ -1,5 +1,9 @@
 # Workbench health review — 2026-09-06
 
+## Application execution follow-up — 2026-09-07
+
+The next bounded slice now connects approved imported-MSI start and typed Notepad++ install/observe/close execution. The local live Sandbox proof passed with exit code zero, verified completion, exact cleanup, and no remaining sessions; staged-byte tampering was rejected before start. The run still reports `insufficientEvidence` for containment. See [the integration boundary](TYPED-MSI-SCENARIO.md) and [retained fixture evidence](FIXTURE-NOTEPAD-PLUS-PLUS-8.9.8.md). This follow-up did not trigger CI; the hosted limitations below remain.
+
 ## Stabilization follow-up — 2026-09-07
 
 The assessment below is the original review snapshot. Its open findings are superseded by this follow-up where explicitly addressed.
