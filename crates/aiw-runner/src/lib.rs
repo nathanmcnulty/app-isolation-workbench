@@ -4155,7 +4155,7 @@ mod tests {
         let msi = start.msi.as_ref().unwrap();
         aiw_provider_wsb::ImportedMsiGuestRequest::new(
             "w1-run",
-            &deterministic_sandbox_id("w1-run"),
+            deterministic_sandbox_id("w1-run"),
             &rendered.sha256,
             &start.guest_agent.sha256,
             msi.scenario.clone(),
@@ -4266,13 +4266,20 @@ mod tests {
         let error =
             execute_wsb_golden_probe(&start, &readiness, &layout, &fake, &TestLease::default())
                 .unwrap_err();
-        assert!(matches!(error, RunnerError::Receipt(_)));
+        assert!(matches!(
+            error,
+            RunnerError::Receipt(detail)
+                if detail == "imported MSI scenario result is not bound to the approved request"
+        ));
         assert_eq!(
             observe_wsb_session_status(&layout).unwrap().status,
             WsbSessionDisposition::Clean
         );
         assert!(!request_path(&start).exists());
-        assert_eq!(layout.read_result().unwrap().outcome, RunOutcome::Failed);
+        let result = layout.read_result().unwrap();
+        assert_eq!(result.outcome, RunOutcome::Failed);
+        assert!(result.cleanup_complete);
+        assert!(result.evidence_root.is_none());
     }
 
     #[test]
