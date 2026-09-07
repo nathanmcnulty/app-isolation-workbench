@@ -28,6 +28,21 @@ AIW then completed protected receipt-last imports and independent read-only veri
 
 The protected payloads retained the source hashes and received only the explicitly recognized semantic SmartLocker extended-attribute sets, which are bound into their import receipts.
 
+## Stabilization refresh — 2026-09-07
+
+The downloaded originals still match the identities above and still carry `Zone.Identifier` and `SmartScreen`; they remain unchanged negative fixtures. New unnamed-stream working copies were created in a separate local temporary directory, retaining identical file content. AIW reports embedded signature availability for both copies; no installer was launched.
+
+Delayed verification exposed a Windows kernel file-hash cache appearing after import. File and portable intake receipts now use `v0alpha2`: native EA sets are validated, then only `$KERNEL.PURGE.SEC.FILEHASH` is excluded from canonical intake authority. Other metadata and content checks remain exact. Old `v0alpha1` receipts are rejected and require fresh import.
+
+| Kind | Fresh intake ID | v0alpha2 receipt SHA-256 | Result |
+|---|---|---|---|
+| EXE | `npp-v2-exe` | `1c9d8964dd585e642c45fd9a1c7b9cd2dff99241aefb030bd13939d648bd57e4` | Immediate and delayed (over eight minutes) independent verification passed. |
+| MSI | `npp-v2-msi` | `41427fe2d10e57d4fd1005d4e9c328704c8b17880083d9e9a4a3cd6dac9e06c7` | Immediate and delayed (over eight minutes) independent verification passed. |
+
+Machine-local working copies, external receipts, and verification JSON are retained under `%TEMP%\aiw-health-fixtures-176e3524e9f04ef28902716f28811d3d`. Use `exe-v2-import.json` and `msi-v2-import.json`; earlier experimental receipts in that directory are preserved diagnostic artifacts, not current intake authority. Reverify before any later approved execution.
+
+The existing fixed golden probe also passed a separate live Sandbox cleanup-before-result recovery canary. That proof did not install or exercise these applications. The next milestone is approved imported-application execution with typed installation/exercise scenarios inside Windows Sandbox.
+
 ## Interpretation and remaining evidence
 
 - The EXE outer PE image is x86. This does not establish the architecture of the product payload selected by the installer.

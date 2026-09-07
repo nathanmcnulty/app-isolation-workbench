@@ -27,7 +27,7 @@ The verification script is intentionally local and deterministic. Hosted CI runs
 - Evidence is authoritative; model-generated text is advisory only.
 - Imported project content and installer output are untrusted.
 - Project files cannot contain free-form commands or scripts.
-- Every mutating operation has a typed plan, an explicit approval, and a run-bound journal.
+- Provider execution requires a typed plan, explicit approval, and run-bound journal. Non-executing intake and preparation use explicit create-new operations with protected receipt-bound state and never grant execution authority.
 - Unsupported, degraded, incomplete, or ambiguous isolation results are `insufficientEvidence`, never success.
 - There is no persistent privileged service and no automatic telemetry.
 - Master Packager is a manual export/import handoff; the project must not call or embed it.

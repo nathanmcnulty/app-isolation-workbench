@@ -14,11 +14,11 @@ use thiserror::Error;
 const APPLICATION_INSPECTION_SCHEMA: &str = "aiw.dev/application-inspection/v0alpha1";
 pub const APPLICATION_FILE_AUTHORITY_SCHEMA: &str = "aiw.dev/application-file-authority/v0alpha1";
 pub const APPLICATION_FILE_IMPORT_RECEIPT_SCHEMA: &str =
-    "aiw.dev/application-file-import-receipt/v0alpha1";
+    "aiw.dev/application-file-import-receipt/v0alpha2";
 pub const APPLICATION_FILE_IMPORT_VERIFICATION_SCHEMA: &str =
     "aiw.dev/application-file-import-verification/v0alpha1";
 pub const PORTABLE_DIRECTORY_IMPORT_RECEIPT_SCHEMA: &str =
-    "aiw.dev/portable-directory-import-receipt/v0alpha1";
+    "aiw.dev/portable-directory-import-receipt/v0alpha2";
 pub const PORTABLE_DIRECTORY_IMPORT_VERIFICATION_SCHEMA: &str =
     "aiw.dev/portable-directory-import-verification/v0alpha1";
 pub const PORTABLE_MANIFEST_SCHEMA: &str = "aiw.dev/portable-content-manifest/v0alpha1";
@@ -1723,6 +1723,13 @@ mod tests {
             value_sha256: hex::encode(Sha256::digest([4_u8; 32])),
         }];
         triple_entries.extend(entries.clone());
+        let singleton_entries = vec![triple_entries[0].clone()];
+        let mut file_hash_only = fixed_tree_inventory();
+        file_hash_only.objects[7].ea = WsbFixedTreeEaBinding {
+            canonical_sha256: canonical(&singleton_entries),
+            entries: singleton_entries,
+        };
+        assert!(file_hash_only.validate().is_err());
         let mut file_hash_triple = fixed_tree_inventory();
         file_hash_triple.objects[7].ea = WsbFixedTreeEaBinding {
             canonical_sha256: canonical(&triple_entries),

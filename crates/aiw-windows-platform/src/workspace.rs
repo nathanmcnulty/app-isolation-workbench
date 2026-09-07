@@ -1124,13 +1124,15 @@ fn create_directory_handle_with_policy(
     owner_sid: &str,
     protected_acl: bool,
 ) -> Result<CreatedWorkspaceDirectory, WorkspaceError> {
-    let descriptor = protected_acl
-        .then(|| SecurityDescriptor::owner_system_only(owner_sid, true))
-        .transpose()?;
+    let descriptor = if protected_acl {
+        SecurityDescriptor::owner_system_only(owner_sid, true)?
+    } else {
+        SecurityDescriptor::owner_only(owner_sid)?
+    };
     let file = create_child_handle(
         parent,
         leaf,
-        descriptor.as_ref(),
+        Some(&descriptor),
         true,
         FILE_CREATE_DISPOSITION,
         true,
@@ -1161,13 +1163,14 @@ fn create_owner_system_file_handle(
     leaf: &str,
     owner_sid: &str,
 ) -> Result<CreatedWorkspaceFile, WorkspaceError> {
-    // Files inherit the protected owner/SYSTEM DACL from their held parent.
-    // An explicit file descriptor would produce an unprotected DACL that does
-    // not match the fixed WSB inventory contract.
+    // Set the exact token user as owner even when TokenOwner defaults to an
+    // administrator group. Omit the DACL so the held parent's two ACEs inherit
+    // unchanged, preserving the fixed workspace ACL contract.
+    let descriptor = SecurityDescriptor::owner_only(owner_sid)?;
     let file = create_child_handle(
         parent,
         leaf,
-        None,
+        Some(&descriptor),
         false,
         FILE_CREATE_DISPOSITION,
         true,
@@ -2144,7 +2147,15 @@ impl SecurityDescriptor {
         let inheritance = if directory { "OICI" } else { "" };
         let sddl =
             format!("O:{owner_sid}D:P(A;{inheritance};FA;;;{owner_sid})(A;{inheritance};FA;;;SY)");
-        let wide = wide_string(&sddl)?;
+        Self::from_sddl(&sddl)
+    }
+
+    fn owner_only(owner_sid: &str) -> Result<Self, WorkspaceError> {
+        Self::from_sddl(&format!("O:{owner_sid}"))
+    }
+
+    fn from_sddl(sddl: &str) -> Result<Self, WorkspaceError> {
+        let wide = wide_string(sddl)?;
         let mut descriptor = PSECURITY_DESCRIPTOR::default();
         // SAFETY: input is NUL-terminated and output pointer is valid.
         unsafe {
@@ -2483,6 +2494,26 @@ mod tests {
     }
 
     #[test]
+    fn inherited_creation_descriptor_sets_user_owner_without_a_dacl() {
+        use windows::Win32::Security::{GetSecurityDescriptorDacl, GetSecurityDescriptorOwner};
+        let user = CurrentUser::query().unwrap();
+        let descriptor = SecurityDescriptor::owner_only(&user.sid_string).unwrap();
+        let mut owner = PSID::default();
+        let mut defaulted = Default::default();
+        // SAFETY: descriptor is live and both output pointers are writable.
+        unsafe { GetSecurityDescriptorOwner(descriptor.0, &mut owner, &mut defaulted) }.unwrap();
+        assert!(!defaulted.as_bool());
+        assert!(unsafe { EqualSid(owner, user.sid.0) }.is_ok());
+        let mut present = Default::default();
+        let mut dacl = std::ptr::null_mut();
+        unsafe { GetSecurityDescriptorDacl(descriptor.0, &mut present, &mut dacl, &mut defaulted) }
+            .unwrap();
+        // No supplied DACL (not an explicitly supplied NULL DACL): children
+        // receive the held parent's two inherited owner/SYSTEM ACEs.
+        assert!(!present.as_bool());
+    }
+
+    #[test]
     fn bound_directory_reopens_strictly_and_creates_inherited_children() {
         let name = leaf("bound-directory");
         let path = parent().join(&name);
@@ -2510,6 +2541,10 @@ mod tests {
             .unwrap();
         assert_eq!(reopened_run.identity(), &run_identity);
         let mut events = reopened_run.create_file_new("events.json").unwrap();
+        let user = CurrentUser::query().unwrap();
+        verify_owner_system_acl(events.as_file(), &user.sid, false, false).unwrap();
+        let administrators = OwnedSid::from_string("S-1-5-32-544").unwrap();
+        assert!(verify_owner_system_acl(events.as_file(), &administrators, false, false).is_err());
         events.as_file_mut().write_all(b"bound-child").unwrap();
         events.as_file_mut().sync_all().unwrap();
         drop(events);

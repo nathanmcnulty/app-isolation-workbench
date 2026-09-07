@@ -358,7 +358,7 @@ fn protected_file_import_is_receipt_last_create_new_and_read_only_verifiable() {
     let receipt = parse_one_json(&imported.stdout);
     assert_eq!(
         receipt["schemaVersion"],
-        "aiw.dev/application-file-import-receipt/v0alpha1"
+        "aiw.dev/application-file-import-receipt/v0alpha2"
     );
     assert_eq!(receipt["sourceKind"], "exe");
     assert_eq!(receipt["payloadRelativePath"], "source/payload.exe");
@@ -440,7 +440,7 @@ fn protected_portable_import_is_json_only_and_read_only_verifiable() {
     let receipt = parse_one_json(&imported.stdout);
     assert_eq!(
         receipt["schemaVersion"],
-        "aiw.dev/portable-directory-import-receipt/v0alpha1"
+        "aiw.dev/portable-directory-import-receipt/v0alpha2"
     );
     assert_eq!(receipt["sourceKind"], "portableDirectory");
     assert_eq!(receipt["entryCount"], 4);
@@ -734,7 +734,11 @@ fn clean_wsb_transaction_without_terminal_result_fails_closed() {
     assert!(status.status.success());
     let status_json = parse_one_json(&status.stdout);
     assert_eq!(status_json["core"]["status"], "ready");
-    assert_eq!(status_json["windowsSandbox"]["status"], "clean");
+    assert_eq!(status_json["windowsSandbox"]["status"], "recoveryRequired");
+    assert_eq!(
+        status_json["windowsSandbox"]["reasonCode"],
+        "legacy-request-location-unavailable"
+    );
     assert_eq!(fs::read(&journal).unwrap(), before);
 
     let recovery = Command::new(aiw())

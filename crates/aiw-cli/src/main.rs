@@ -1298,7 +1298,7 @@ fn run(command: Command) -> Result<()> {
                         return write_json(&RunRecoveryEnvelope {
                             schema_version: RUN_RECOVERY_SCHEMA_VERSION.to_owned(),
                             run_id: layout.run_id().to_owned(),
-                            core,
+                            core: layout.status()?,
                             windows_sandbox: Some(windows_sandbox),
                         });
                     }

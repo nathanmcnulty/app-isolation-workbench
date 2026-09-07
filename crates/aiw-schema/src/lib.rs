@@ -944,9 +944,7 @@ pub fn validate_project(project: &Project) -> Vec<ValidationIssue> {
         );
     }
 
-    if let Some(analyst) = &project.analyst
-        && analyst.enabled
-    {
+    if let Some(analyst) = project.analyst.as_ref().filter(|analyst| analyst.enabled) {
         if !analyst.require_evidence_citations {
             issue(
                 &mut issues,

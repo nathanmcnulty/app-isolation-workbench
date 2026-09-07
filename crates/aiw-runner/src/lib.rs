@@ -260,7 +260,8 @@ pub fn observe_wsb_session_status(layout: &RunLayout) -> Result<WsbSessionStatus
         .last()
         .expect("validated transactions contain a transition");
     let clean = !observation.pending_present
-        && transition.state == SessionTransactionState::CleanupVerified;
+        && transition.state == SessionTransactionState::CleanupVerified
+        && transaction.recovery.is_some();
     Ok(WsbSessionStatus {
         schema_version: WSB_SESSION_STATUS_SCHEMA_VERSION.to_owned(),
         run_id: layout.run_id().to_owned(),
@@ -272,6 +273,10 @@ pub fn observe_wsb_session_status(layout: &RunLayout) -> Result<WsbSessionStatus
         current_state: Some(transition.state),
         reason_code: Some(if observation.pending_present {
             "transaction-staging-present".to_owned()
+        } else if transaction.recovery.is_none()
+            && transition.state == SessionTransactionState::CleanupVerified
+        {
+            "legacy-request-location-unavailable".to_owned()
         } else {
             transition.reason_code.clone()
         }),
@@ -468,7 +473,7 @@ pub(crate) fn execute_wsb_golden_probe(
 ) -> Result<WsbGoldenProbeExecution, RunnerError> {
     let _lease = lease.try_acquire()?;
     if cancellation_requested(layout)? {
-        record_terminal_failure(layout, RunnerError::Cancelled)?;
+        record_prestart_failure(layout, RunnerError::Cancelled)?;
         return Err(RunnerError::Cancelled);
     }
     let context = prepare_execution(request, readiness, layout, true)?;
@@ -492,7 +497,7 @@ pub(crate) fn execute_wsb_golden_probe(
     prepare_request_artifact(&context.request_path, &context.guest_request)?;
     if cancellation_requested(layout)? {
         remove_owned_request(&context.request_path, &context.guest_request)?;
-        record_terminal_failure(layout, RunnerError::Cancelled)?;
+        record_prestart_failure(layout, RunnerError::Cancelled)?;
         return Err(RunnerError::Cancelled);
     }
 
@@ -500,7 +505,7 @@ pub(crate) fn execute_wsb_golden_probe(
     // therefore means "may have started" and is recoverable by exact ID.
     if let Err(error) = revalidate_workspace(request, workspace) {
         remove_owned_request(&context.request_path, &context.guest_request)?;
-        record_terminal_failure(layout, error.clone())?;
+        record_prestart_failure(layout, error.clone())?;
         return Err(error);
     }
     store.create("approved-start")?;
@@ -689,24 +694,37 @@ pub fn recover_windows_sandbox(layout: &RunLayout) -> Result<WsbRecoveryResult, 
         let observed = provider
             .verify_bound_absent()
             .map_err(native_recovery_error)?;
+        let legacy = transaction.recovery.is_none();
+        if !legacy {
+            remove_recovery_request(&workspace, &transaction)
+                .map_err(|error| RunnerError::RecoveryRequired(error.to_string()))?;
+        }
         workspace
             .revalidate()
             .map_err(|error| RunnerError::RecoveryRequired(error.to_string()))?;
+        if !legacy {
+            terminalize_verified_wsb_recovery(layout, &store)?;
+        }
         return Ok(WsbRecoveryResult {
             schema_version: WSB_RECOVERY_RESULT_SCHEMA_VERSION.to_owned(),
             run_id: transaction.run_id,
             session_id: transaction.session_id,
             state: SessionTransactionState::CleanupVerified,
             provider_cleanup_verified: true,
-            workspace_cleanup_verified: true,
-            terminalizable: true,
+            workspace_cleanup_verified: !legacy,
+            terminalizable: !legacy,
             mutex_was_abandoned: provider.mutex_was_abandoned(),
             start_provider_sha256: provider.start_provider_sha256().to_owned(),
             recovery_provider_sha256: provider.recovery_provider_sha256().to_owned(),
             provider_drifted: provider.provider_drifted(),
             session_ids_before: observed.session_ids.clone(),
             session_ids_after: observed.session_ids,
-            reason_code: "already-clean".to_owned(),
+            reason_code: if legacy {
+                "legacy-request-location-unavailable"
+            } else {
+                "already-clean"
+            }
+            .to_owned(),
         });
     }
 
@@ -758,6 +776,9 @@ pub fn recover_windows_sandbox(layout: &RunLayout) -> Result<WsbRecoveryResult, 
         .load_current()?
         .ok_or_else(|| RunnerError::Transaction("session transaction disappeared".to_owned()))?;
     let final_state = final_transaction.current_state();
+    if !legacy {
+        terminalize_verified_wsb_recovery(layout, &store)?;
+    }
     Ok(WsbRecoveryResult {
         schema_version: WSB_RECOVERY_RESULT_SCHEMA_VERSION.to_owned(),
         run_id: final_transaction.run_id,
@@ -919,12 +940,7 @@ pub(crate) fn recover_wsb_session(
     } else {
         remove_owned_request(&context.request_path, &context.guest_request)?;
     }
-    if !layout.result_path().exists() {
-        record_terminal_failure(
-            layout,
-            RunnerError::RecoveryRequired("provider session was recovered".to_owned()),
-        )?;
-    }
+    terminalize_verified_wsb_recovery(layout, &store)?;
     store
         .load_for_recovery()?
         .ok_or_else(|| RunnerError::Transaction("recovered transaction disappeared".to_owned()))
@@ -1255,7 +1271,66 @@ fn prepare_cleanup_transaction(store: &TransactionStore<'_>) -> Option<RunnerErr
     }
 }
 
+/// Called under the provider lease only after fresh exact-session absence and
+/// held workspace/request cleanup checks. Persisted cleanup alone is not proof.
+fn terminalize_verified_wsb_recovery(
+    layout: &RunLayout,
+    store: &TransactionStore<'_>,
+) -> Result<(), RunnerError> {
+    let transaction = store.load_current()?.ok_or_else(|| {
+        RunnerError::RecoveryRequired("session cleanup transaction is missing".to_owned())
+    })?;
+    if transaction.current_state() != SessionTransactionState::CleanupVerified
+        || transaction.recovery.is_none()
+    {
+        return Err(RunnerError::RecoveryRequired(
+            "complete workspace-bound session cleanup is required before terminalization"
+                .to_owned(),
+        ));
+    }
+    // Repair an interrupted terminal publication before deciding whether a
+    // result is missing. An already committed result is immutable on retry.
+    let cancelled = match layout.recovery_status().map_err(journal_error)? {
+        aiw_orchestrator::RecoveryStatus::Terminal { .. } => return Ok(()),
+        aiw_orchestrator::RecoveryStatus::Ready { .. } => false,
+        aiw_orchestrator::RecoveryStatus::CancellationRequested { .. } => true,
+        _ => {
+            return Err(RunnerError::RecoveryRequired(
+                "committed approved run state is required before terminalization".to_owned(),
+            ));
+        }
+    };
+    let result = RunResult::new(
+        layout.run_id(),
+        if cancelled { RunOutcome::Cancelled } else { RunOutcome::Failed },
+        "recovery-time-not-trusted",
+        None,
+        true,
+        "Windows Sandbox recovery verified exact-session and request cleanup; interrupted completion processing does not establish a completed assessment.",
+    )
+    .map_err(journal_error)?;
+    layout.write_result(&result).map_err(journal_error)
+}
+
+fn record_prestart_failure(layout: &RunLayout, error: RunnerError) -> Result<(), RunnerError> {
+    if session::observe_transaction(layout)?.directory_present {
+        return Err(RunnerError::RecoveryRequired(
+            "an earlier provider attempt must be recovered before recording a pre-start failure"
+                .to_owned(),
+        ));
+    }
+    record_failure_result(layout, error, false)
+}
+
 fn record_terminal_failure(layout: &RunLayout, error: RunnerError) -> Result<(), RunnerError> {
+    record_failure_result(layout, error, true)
+}
+
+fn record_failure_result(
+    layout: &RunLayout,
+    error: RunnerError,
+    provider_cleanup_verified: bool,
+) -> Result<(), RunnerError> {
     match layout.status().map_err(journal_error)? {
         aiw_orchestrator::RecoveryStatus::Terminal { .. } => return Ok(()),
         aiw_orchestrator::RecoveryStatus::RecoveryRequired { .. } => {
@@ -1275,8 +1350,10 @@ fn record_terminal_failure(layout: &RunLayout, error: RunnerError) -> Result<(),
         },
         "provider-time-not-trusted",
         None,
-        true,
-        if cancelled {
+        provider_cleanup_verified,
+        if !provider_cleanup_verified {
+            "Windows Sandbox W1 run stopped before provider start; no exact-session cleanup was performed by this attempt."
+        } else if cancelled {
             "Windows Sandbox W1 run was cancelled after exact-session cleanup was verified."
         } else {
             "Windows Sandbox W1 run failed after exact-session cleanup was verified."
@@ -2847,6 +2924,10 @@ mod tests {
         assert_eq!(none.calls.load(Ordering::SeqCst), 1);
         assert!(!request_path(&start).exists());
         assert!(!layout.run_dir().join("wsb-session-transaction").exists());
+        let result = layout.read_result().unwrap();
+        assert_eq!(result.outcome, RunOutcome::Failed);
+        assert!(!result.cleanup_complete);
+        assert!(result.summary.contains("before provider start"));
 
         let (_root, layout, start, readiness) = setup();
         let fake = success_process(&start);
@@ -3120,6 +3201,164 @@ mod tests {
     }
 
     #[test]
+    fn verified_recovery_terminalizes_interrupted_completion_without_trusting_guest_output() {
+        for cancelled in [false, true] {
+            let (_root, layout, start, readiness) = setup();
+            let context = prepare_execution(&start, &readiness, &layout, false).unwrap();
+            let store = TransactionStore::new(&layout, context.binding);
+            store.create("approved-start").unwrap();
+            store
+                .transition(SessionTransactionState::Active, "started")
+                .unwrap();
+            store
+                .transition(SessionTransactionState::CleanupIntent, "cleanup-attempt")
+                .unwrap();
+            store
+                .transition(SessionTransactionState::CleanupVerified, "cleanup-verified")
+                .unwrap();
+            // A crash after cleanup can leave unprocessed guest artifacts.
+            let output = context.output_root.join("completion.json");
+            fs::write(&output, b"untrusted incomplete guest output").unwrap();
+            if cancelled {
+                layout.request_cancellation("admin", "now").unwrap();
+            }
+            terminalize_verified_wsb_recovery(&layout, &store).unwrap();
+            let result = layout.read_result().unwrap();
+            assert_eq!(
+                result.outcome,
+                if cancelled {
+                    RunOutcome::Cancelled
+                } else {
+                    RunOutcome::Failed
+                }
+            );
+            assert!(result.cleanup_complete);
+            assert!(result.evidence_root.is_none());
+            assert_eq!(result.completed_at, "recovery-time-not-trusted");
+            assert!(matches!(
+                layout.status().unwrap(),
+                aiw_orchestrator::RecoveryStatus::Terminal { .. }
+            ));
+            let journal_before = fs::read(layout.journal_path()).unwrap();
+            let result_before = fs::read(layout.result_path()).unwrap();
+            terminalize_verified_wsb_recovery(&layout, &store).unwrap();
+            assert_eq!(fs::read(layout.journal_path()).unwrap(), journal_before);
+            assert_eq!(fs::read(layout.result_path()).unwrap(), result_before);
+            assert_eq!(
+                fs::read(output).unwrap(),
+                b"untrusted incomplete guest output"
+            );
+        }
+    }
+
+    #[test]
+    fn recovery_terminalization_requires_complete_current_authority() {
+        for legacy in [false, true] {
+            let (_root, layout, start, readiness) = setup();
+            let mut context = prepare_execution(&start, &readiness, &layout, false).unwrap();
+            if legacy {
+                context.binding.recovery = None;
+            }
+            let store = TransactionStore::new(&layout, context.binding);
+            assert!(terminalize_verified_wsb_recovery(&layout, &store).is_err());
+            if legacy {
+                store.seed_legacy_for_test().unwrap();
+            } else {
+                store.create("approved-start").unwrap();
+            }
+            assert!(terminalize_verified_wsb_recovery(&layout, &store).is_err());
+            store
+                .transition(SessionTransactionState::Active, "started")
+                .unwrap();
+            assert!(terminalize_verified_wsb_recovery(&layout, &store).is_err());
+            store
+                .transition(SessionTransactionState::CleanupIntent, "cleanup-attempt")
+                .unwrap();
+            assert!(terminalize_verified_wsb_recovery(&layout, &store).is_err());
+            assert!(!layout.result_path().exists());
+            store
+                .transition(SessionTransactionState::CleanupVerified, "cleanup-verified")
+                .unwrap();
+            if legacy {
+                assert!(terminalize_verified_wsb_recovery(&layout, &store).is_err());
+                assert!(!layout.result_path().exists());
+                let status = observe_wsb_session_status(&layout).unwrap();
+                assert_eq!(status.status, WsbSessionDisposition::RecoveryRequired);
+                assert_eq!(
+                    status.reason_code.as_deref(),
+                    Some("legacy-request-location-unavailable")
+                );
+            } else {
+                terminalize_verified_wsb_recovery(&layout, &store).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn recovery_preserves_an_existing_terminal_result() {
+        let (_root, layout, start, readiness) = setup();
+        execute_wsb_golden_probe(
+            &start,
+            &readiness,
+            &layout,
+            &success_process(&start),
+            &TestLease::default(),
+        )
+        .unwrap();
+        let context = prepare_execution(&start, &readiness, &layout, false).unwrap();
+        let store = TransactionStore::new(&layout, context.binding);
+        let result_before = fs::read(layout.result_path()).unwrap();
+        let journal_before = fs::read(layout.journal_path()).unwrap();
+        terminalize_verified_wsb_recovery(&layout, &store).unwrap();
+        assert_eq!(fs::read(layout.result_path()).unwrap(), result_before);
+        assert_eq!(fs::read(layout.journal_path()).unwrap(), journal_before);
+        assert_eq!(
+            layout.read_result().unwrap().outcome,
+            RunOutcome::InsufficientEvidence
+        );
+    }
+
+    #[test]
+    fn prestart_cancellation_does_not_claim_exact_session_cleanup() {
+        let (_root, layout, start, readiness) = setup();
+        layout.request_cancellation("admin", "now").unwrap();
+        let none = FakeProcess::new(vec![]);
+        assert!(matches!(
+            execute_wsb_golden_probe(&start, &readiness, &layout, &none, &TestLease::default()),
+            Err(RunnerError::Cancelled)
+        ));
+        assert_eq!(none.calls.load(Ordering::SeqCst), 0);
+        assert!(!layout.run_dir().join("wsb-session-transaction").exists());
+        let result = layout.read_result().unwrap();
+        assert_eq!(result.outcome, RunOutcome::Cancelled);
+        assert!(!result.cleanup_complete);
+        assert!(result.summary.contains("before provider start"));
+    }
+
+    #[test]
+    fn prestart_cancellation_cannot_finalize_an_earlier_provider_attempt() {
+        let (_root, layout, start, readiness) = setup();
+        let context = prepare_execution(&start, &readiness, &layout, false).unwrap();
+        let store = TransactionStore::new(&layout, context.binding);
+        store.create("approved-start").unwrap();
+        store
+            .transition(SessionTransactionState::Active, "started")
+            .unwrap();
+        layout.request_cancellation("admin", "now").unwrap();
+        let none = FakeProcess::new(vec![]);
+        assert!(matches!(
+            execute_wsb_golden_probe(&start, &readiness, &layout, &none, &TestLease::default()),
+            Err(RunnerError::RecoveryRequired(_))
+        ));
+        assert_eq!(none.calls.load(Ordering::SeqCst), 0);
+        assert!(!layout.result_path().exists());
+        assert_eq!(
+            store.load_current().unwrap().unwrap().current_state(),
+            SessionTransactionState::Active
+        );
+    }
+
+    #[test]
     fn cancellation_after_start_still_performs_exact_cleanup() {
         let (_root, layout, start, readiness) = setup();
         let id = deterministic_sandbox_id("w1-run");
@@ -3335,6 +3574,18 @@ mod tests {
     #[test]
     #[ignore = "starts a real hardened Windows Sandbox golden probe; set AIW_RUN_LIVE_WSB_GOLDEN=1 and AIW_LIVE_GUEST_AGENT"]
     fn live_native_golden_probe_receipt_and_cleanup() {
+        live_native_probe(false);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "starts a real hardened Sandbox and recovers before result publication; set AIW_RUN_LIVE_WSB_GOLDEN=1 and AIW_LIVE_GUEST_AGENT"]
+    fn live_native_recovery_after_cleanup_before_result() {
+        live_native_probe(true);
+    }
+
+    #[cfg(windows)]
+    fn live_native_probe(interrupt_after_cleanup: bool) {
         if std::env::var("AIW_RUN_LIVE_WSB_GOLDEN").as_deref() != Ok("1") {
             return;
         }
@@ -3352,72 +3603,54 @@ mod tests {
             .as_nanos();
         let run_id = format!("w1-live-{}-{nonce}", std::process::id());
         let workspace_parent = std::env::temp_dir().canonicalize().unwrap();
-        let workspace = aiw_windows_platform::HeldRunWorkspace::create(
-            &workspace_parent,
-            &format!("aiw-w1-live-{}-{nonce}", std::process::id()),
-        )
-        .unwrap();
-        let root_path = workspace.root_path().to_path_buf();
-        let tools = workspace.tools_path();
-        let output = workspace.output_path();
-        let provider_path = |path: &Path| {
-            let value = path.to_string_lossy();
-            PathBuf::from(value.strip_prefix(r"\\?\").unwrap_or(&value))
-        };
-        let provider_root = provider_path(&root_path);
-        let provider_tools = provider_path(&tools);
-        let provider_output = provider_path(&output);
-        let agent = tools.join("aiw-guest-agent.exe");
-        fs::copy(&agent_source, &agent).unwrap();
-        let project_path = root_path.join("project.yaml");
-        fs::copy(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("..")
-                .join("..")
-                .join("examples")
-                .join("minimal.aiw.yaml"),
-            &project_path,
-        )
-        .unwrap();
+        let project_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/minimal.aiw.yaml")
+            .canonicalize()
+            .unwrap();
         let project: Project = serde_yaml::from_slice(&fs::read(&project_path).unwrap()).unwrap();
-        eprintln!(
-            "AIW live recovery state: workspace={} sandboxId={}",
-            root_path.display(),
-            deterministic_sandbox_id(&run_id)
-        );
-        let wsb_plan = WindowsSandboxPlan {
-            schema_version: aiw_provider_wsb::WINDOWS_SANDBOX_PLAN_SCHEMA_VERSION.to_owned(),
-            workspace_root: provider_root.to_string_lossy().into_owned(),
-            mappings: vec![
-                aiw_provider_wsb::MappedFolder {
-                    purpose: MappingPurpose::Tools,
-                    host_folder: provider_tools.to_string_lossy().into_owned(),
-                    sandbox_folder: "C:\\AIW\\Tools".to_owned(),
-                },
-                aiw_provider_wsb::MappedFolder {
-                    purpose: MappingPurpose::Output,
-                    host_folder: provider_output.to_string_lossy().into_owned(),
-                    sandbox_folder: "C:\\AIW\\Output".to_owned(),
-                },
-            ],
-            probe: aiw_provider_wsb::GoldenProbe {
-                executable: "C:\\AIW\\Tools\\aiw-guest-agent.exe".to_owned(),
-                request: Some("C:\\AIW\\Tools\\request.json".to_owned()),
-                output: "C:\\AIW\\Output\\token.json".to_owned(),
-            },
-            memory_mb: Some(2048),
-        };
-        let workspace_evidence = workspace.evidence().clone();
-        let workspace_identity_sha256 = canonical_hash(&workspace_evidence).unwrap();
+        let agent_hash = identity(&agent_source).sha256;
+        let artifacts = prepare_windows_sandbox_bundle(
+            &run_id,
+            &project,
+            &agent_source,
+            &agent_hash,
+            &workspace_parent,
+            &run_id,
+            "host-time-not-trusted",
+        )
+        .unwrap();
+        let root_path = PathBuf::from(&artifacts.receipt.workspace.root.final_path);
+        import_windows_sandbox_preparation(
+            &root_path,
+            &project,
+            &agent_hash,
+            "host-time-not-trusted",
+        )
+        .unwrap();
+        let layout = RunLayout::new(&root_path, &run_id).unwrap();
+        layout
+            .write_approval(
+                &ApprovalRecord::for_plan(
+                    &artifacts.run_plan,
+                    "live-test-user",
+                    "host-time-not-trusted",
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let workspace =
+            aiw_windows_platform::HeldRunWorkspace::reopen_bound(&artifacts.receipt.workspace)
+                .unwrap();
+        let output = workspace.output_path();
         let start = WsbGoldenProbeStart {
             schema_version: "aiw.dev/wsb-golden-probe-start/v0alpha2".to_owned(),
-            run_root: wsb_plan.workspace_root.clone(),
+            run_root: artifacts.receipt.workspace.root.final_path.clone(),
             project_path: project_path.to_string_lossy().into_owned(),
-            wsb_plan,
+            wsb_plan: artifacts.wsb_plan,
             provider,
-            guest_agent: identity(&agent),
-            workspace: workspace_evidence,
-            workspace_identity_sha256,
+            guest_agent: artifacts.receipt.guest_agent,
+            workspace: artifacts.receipt.workspace,
+            workspace_identity_sha256: artifacts.receipt.workspace_identity_sha256,
             timeout_seconds: 180,
         };
         let native = NativeWsbProcess {
@@ -3428,64 +3661,49 @@ mod tests {
             }),
             plan: start.wsb_plan.clone(),
         };
-        let plan = RunPlan::new(
-            &run_id,
-            project.metadata.name.clone(),
-            project_revision_hash(&project).unwrap(),
-            aiw_orchestrator::RunLifecycleKind::Assessment,
-            "host-time-not-trusted",
-            vec![
-                PlannedAction::AssessHost,
-                PlannedAction::PrepareWorkspace,
-                PlannedAction::ExecuteWindowsSandboxGoldenProbe {
-                    sandbox_plan_sha256: canonical_hash(&start.wsb_plan).unwrap(),
-                    provider_sha256: start.provider.sha256.clone(),
-                    guest_agent_sha256: start.guest_agent.sha256.clone(),
-                    workspace: Box::new(start.workspace.clone()),
-                    workspace_identity_sha256: start.workspace_identity_sha256.clone(),
-                },
-                PlannedAction::CollectEvidence,
-            ],
-            vec!["starts an approved Windows Sandbox golden probe".to_owned()],
-        )
-        .unwrap();
-        let layout = RunLayout::new(&root_path, &run_id).unwrap();
-        layout.create(&plan).unwrap();
-        layout
-            .write_approval(
-                &ApprovalRecord::for_plan(&plan, "live-test-user", "host-time-not-trusted")
-                    .unwrap(),
+        eprintln!(
+            "AIW live recovery state: workspace={} sandboxId={}",
+            root_path.display(),
+            deterministic_sandbox_id(&run_id)
+        );
+        if interrupt_after_cleanup {
+            // Exercise the real attempt and cleanup, then deliberately omit result
+            // publication to model process loss at the CleanupVerified boundary.
+            let context = prepare_execution(&start, &readiness, &layout, true).unwrap();
+            let store = TransactionStore::new(&layout, context.binding.clone());
+            prepare_request_artifact(&context.request_path, &context.guest_request).unwrap();
+            revalidate_workspace(&start, &workspace).unwrap();
+            store.create("approved-start").unwrap();
+            let operation = run_attempt(&start, &layout, &native, &context, &store);
+            finalize_attempt(
+                &start,
+                &native,
+                &context,
+                &store,
+                false,
+                operation.as_ref().err(),
             )
             .unwrap();
-        validate_start(&start, &readiness).expect("live start contract must validate");
-        ensure_approval(&plan, &layout.read_approval().unwrap(), &start)
-            .expect("live approval must bind every input");
-        revalidate_project_revision(&plan, &project_path)
-            .expect("live project revision must remain stable");
-        revalidate_identity(&start.provider).expect("live provider identity must remain stable");
-        revalidate_identity(&start.guest_agent)
-            .expect("live guest-agent identity must remain stable");
-        validate_host_mappings(&start.wsb_plan).expect("live host mappings must remain valid");
-        let rendered = render_config(&start.wsb_plan).expect("live config must render");
-        let lifecycle = plan_cli_lifecycle(
-            &start.provider.canonical_path,
-            &deterministic_sandbox_id(&run_id),
-            &start.wsb_plan,
-        )
-        .expect("live CLI lifecycle must remain valid");
-        assert_eq!(lifecycle.rendered_config.sha256, rendered.sha256);
-        let tools_mapping = mapping(&start.wsb_plan, MappingPurpose::Tools).unwrap();
-        let output_mapping = mapping(&start.wsb_plan, MappingPurpose::Output).unwrap();
-        validate_workspace_paths(&start, tools_mapping, output_mapping)
-            .expect("live mapping paths must match held workspace evidence");
-        let mapped_agent = guest_to_host(tools_mapping, &start.wsb_plan.probe.executable).unwrap();
-        revalidate_mapped_identity(&mapped_agent, &start.guest_agent)
-            .expect("live mapped agent must match its approved identity");
-        prepare_execution(&start, &readiness, &layout, true)
-            .expect("live bound request must pass immutable preflight");
-        workspace
-            .revalidate()
-            .expect("live held workspace must pass native revalidation after staging");
+            operation.unwrap();
+            assert!(!layout.result_path().exists());
+            drop(native);
+            let recovered = super::recover_windows_sandbox(&layout).unwrap();
+            assert!(recovered.provider_cleanup_verified && recovered.workspace_cleanup_verified);
+            assert!(recovered.terminalizable);
+            let result = layout.read_result().unwrap();
+            assert_eq!(result.outcome, RunOutcome::Failed);
+            assert!(result.evidence_root.is_none());
+            assert!(result.cleanup_complete);
+            let result_bytes = fs::read(layout.result_path()).unwrap();
+            let journal_bytes = fs::read(layout.journal_path()).unwrap();
+            super::recover_windows_sandbox(&layout).unwrap();
+            assert_eq!(fs::read(layout.result_path()).unwrap(), result_bytes);
+            assert_eq!(fs::read(layout.journal_path()).unwrap(), journal_bytes);
+            drop(layout);
+            drop(workspace);
+            fs::remove_dir_all(root_path).unwrap();
+            return;
+        }
 
         let execution = super::execute_wsb_golden_probe(
             &start,

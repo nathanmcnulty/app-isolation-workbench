@@ -1,6 +1,6 @@
 # Roadmap
 
-AIW is delivered as two milestones with vertical, evidence-gated slices. The current repository has completed the W0 foundation and has a private, live-proven W1 Windows Sandbox kernel. Fresh protected preparation, process-exit verification, and atomic import into provenance-bound `PendingApproval` state are exposed without provider acquisition; checkpoint-bound depublish is now a private transaction that commits an immutable external record before an exact non-replacing root rename, with recovery across both sides of that rename. Child disposition and the private terminal workspace-cleanup receipt are now bounded transactions over the exact 19 fixed objects; provider execution, public CLI exposure, `RunResult`, and public cleanup UX remain later slices. Production start remains unavailable until its exact approved-start/crash/recovery path passes the public live gate. Application assessment, the desktop UI, and package authoring remain later slices.
+AIW is delivered as two milestones with vertical, evidence-gated slices. W0 is implemented. W1 exposes protected preparation/import, separate approval, public fixed golden-probe start, and exact-session recovery; PR #50 records live public success and interruption/recovery proofs. Exact-object preparation discard and its terminal workspace receipt remain private, with no public cleanup UX. W2 intake is in progress. Complete application assessment, validated application launch, the desktop UI, and package authoring remain later slices.
 
 ## Workbench v1
 
@@ -13,7 +13,7 @@ AIW is delivered as two milestones with vertical, evidence-gated slices. The cur
 
 **Exit gate:** old examples migrate without overwriting their source; schemas/CI are stable; no behavior bypasses approval.
 
-### W1 — live Windows Sandbox proof (preparation/recovery exposed; start gate remains)
+### W1 — live Windows Sandbox proof (public fixed probe and recovery; discard UX remains)
 
 - Implement the runner kernel, workspace/journal, fixed-function guest agent, short-lived helper boundary, and full Windows Sandbox lifecycle.
 - Revalidate plan hashes, provider identity, paths, inputs, output emptiness, and leases immediately before execution.

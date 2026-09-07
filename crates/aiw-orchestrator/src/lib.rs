@@ -2023,9 +2023,7 @@ impl RunLayout {
         let records = self.load_records(false)?;
         self.verify_committed(&records)?;
         let last_sequence = records.last().map_or(0, |record| record.sequence);
-        if let Some(last) = records.last()
-            && is_intent(last.event.kind)
-        {
+        if let Some(last) = records.last().filter(|last| is_intent(last.event.kind)) {
             return Ok(RecoveryStatus::RecoveryRequired {
                 pending_event: last.event.kind,
                 last_sequence,
@@ -2899,12 +2897,12 @@ impl RunLayout {
             return Ok(false);
         }
         for raw in bytes[..complete_len - 1].split(|byte| *byte == b'\n') {
-            if let Ok(record) = serde_json::from_slice::<JournalRecord>(raw)
-                && matches!(
+            if serde_json::from_slice::<JournalRecord>(raw).is_ok_and(|record| {
+                matches!(
                     record.event.kind,
                     RunEventKind::RevocationIntent | RunEventKind::RevocationRecorded
                 )
-            {
+            }) {
                 return Ok(true);
             }
         }
@@ -7188,6 +7186,67 @@ mod tests {
             }
         ));
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn interrupted_terminal_publication_recovers_before_an_idempotent_retry() {
+        for published in [false, true] {
+            let root = root();
+            let layout = layout(&root, "run-one");
+            let plan = plan("run-one");
+            layout.create(&plan).unwrap();
+            approve(&layout, &plan);
+            let result = RunResult::new(
+                "run-one",
+                RunOutcome::Failed,
+                "recovery-time-not-trusted",
+                None,
+                true,
+                "interrupted completion processing after verified cleanup",
+            )
+            .unwrap();
+            {
+                let _lock = layout.acquire_lock("test").unwrap();
+                let hash = hash_value(&result).unwrap();
+                layout
+                    .append_record(
+                        artifact_event(
+                            RunEventKind::TerminalIntent,
+                            &result.completed_at,
+                            "result",
+                            &hash,
+                        )
+                        .unwrap(),
+                    )
+                    .unwrap();
+                if published {
+                    write_complete_new(&layout.result_path(), &result, "run-one", "test").unwrap();
+                }
+                let mut journal = OpenOptions::new()
+                    .append(true)
+                    .open(layout.journal_path())
+                    .unwrap();
+                journal.write_all(b"partial").unwrap();
+                journal.sync_all().unwrap();
+            }
+            let status = layout.recovery_status().unwrap();
+            if published {
+                assert!(matches!(status, RecoveryStatus::Terminal { .. }));
+            } else {
+                assert!(matches!(status, RecoveryStatus::Ready { .. }));
+                layout.write_result(&result).unwrap();
+            }
+            assert_eq!(layout.read_result().unwrap(), result);
+            let journal_before = fs::read(layout.journal_path()).unwrap();
+            let result_before = fs::read(layout.result_path()).unwrap();
+            assert!(matches!(
+                layout.recovery_status().unwrap(),
+                RecoveryStatus::Terminal { .. }
+            ));
+            assert_eq!(fs::read(layout.journal_path()).unwrap(), journal_before);
+            assert_eq!(fs::read(layout.result_path()).unwrap(), result_before);
+            fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[test]

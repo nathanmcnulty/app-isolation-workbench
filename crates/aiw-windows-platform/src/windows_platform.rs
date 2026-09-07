@@ -63,7 +63,9 @@ use windows::Win32::System::Threading::{
     STARTUPINFOEXW, TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
 };
 #[cfg(test)]
-use windows::Win32::System::Threading::{CreateEventW, CreateMutexW, SetEvent};
+use windows::Win32::System::Threading::{
+    CreateEventW, CreateMutexW, EVENT_MODIFY_STATE, OpenEventW, SetEvent,
+};
 use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize, RoUninitialize};
 use windows::core::{HSTRING, PCWSTR, PWSTR, w};
 
@@ -2088,9 +2090,11 @@ mod tests {
         timeout: Duration,
         output_mode: OutputMode,
         descendants: DescendantPolicy,
+        additional_arguments: &[String],
     ) -> Result<ProcessOutput, String> {
         let executable = std::env::current_exe().unwrap();
-        let arguments = helper_arguments(name);
+        let mut arguments = helper_arguments(name);
+        arguments.extend_from_slice(additional_arguments);
         let arguments: Vec<&str> = arguments.iter().map(String::as_str).collect();
         let deadline = Instant::now().checked_add(timeout).unwrap();
         invoke_job_bound(&executable, &arguments, deadline, output_mode, descendants)
@@ -2156,6 +2160,7 @@ mod tests {
     #[ignore = "internal subprocess fixture"]
     fn job_helper_descendant_hangs() {
         if invoked_as_helper("job_helper_descendant_hangs") {
+            signal_pipe_fixture_event("AIW_PIPE_CHILD_EVENT_");
             thread::sleep(Duration::from_secs(60));
         }
     }
@@ -2180,12 +2185,30 @@ mod tests {
         if !invoked_as_helper("job_helper_exits_with_inheriting_descendant") {
             return;
         }
+        signal_pipe_fixture_event("AIW_PIPE_ROOT_EVENT_");
         let executable = std::env::current_exe().unwrap();
-        let child = std::process::Command::new(executable)
+        let _child = std::process::Command::new(executable)
             .args(helper_arguments("job_helper_descendant_hangs"))
+            .args(std::env::args().filter(|value| value.starts_with("AIW_PIPE_CHILD_EVENT_")))
             .spawn()
             .unwrap();
-        drop(child);
+        // This isolated fixture must exit while its in-job descendant retains
+        // the inherited pipes, without waiting for test-harness teardown.
+        std::process::exit(0);
+    }
+
+    fn signal_pipe_fixture_event(prefix: &str) {
+        if let Some(name) =
+            std::env::args().find_map(|value| value.strip_prefix(prefix).map(str::to_owned))
+        {
+            let name: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+            // SAFETY: the test-owned event name is terminated and the returned
+            // handle is owned until the signal has been sent.
+            let raw =
+                unsafe { OpenEventW(EVENT_MODIFY_STATE, false, PCWSTR(name.as_ptr())) }.unwrap();
+            let event = unsafe { OwnedHandle::from_raw_handle(raw.0) };
+            unsafe { SetEvent(owned_handle(&event)) }.unwrap();
+        }
     }
 
     #[test]
@@ -2225,18 +2248,56 @@ mod tests {
 
     #[test]
     fn provider_managed_output_cannot_outlive_the_deadline() {
+        // Budget for two debug test processes to start before testing retained
+        // pipes. The production deadline and cleanup allowance are unchanged.
+        let timeout = Duration::from_secs(15);
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let event_name = |suffix| {
+            format!(
+                "Local\\AIW.PipeFixture.{}.{nonce}.{suffix}",
+                std::process::id()
+            )
+        };
+        let root_name = event_name("root");
+        let child_name = event_name("child");
+        let create_event = |name: &str| {
+            let wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+            // SAFETY: name is terminated; these test-only manual-reset events
+            // are not inherited and stay alive through invocation cleanup.
+            let raw = unsafe { CreateEventW(None, true, false, PCWSTR(wide.as_ptr())) }.unwrap();
+            unsafe { OwnedHandle::from_raw_handle(raw.0) }
+        };
+        let root_ready = create_event(&root_name);
+        let child_ready = create_event(&child_name);
         let started = Instant::now();
         let error = invoke_test_helper_with_policy(
             "job_helper_exits_with_inheriting_descendant",
-            Duration::from_secs(3),
+            timeout,
             OutputMode::Capture,
             DescendantPolicy::ProviderManaged,
+            &[
+                format!("AIW_PIPE_ROOT_EVENT_{root_name}"),
+                format!("AIW_PIPE_CHILD_EVENT_{child_name}"),
+            ],
         )
         .unwrap_err();
+        assert_eq!(
+            unsafe { WaitForSingleObject(owned_handle(&root_ready), 0) },
+            WAIT_OBJECT_0,
+            "fixture root never became ready: {error}"
+        );
+        assert_eq!(
+            unsafe { WaitForSingleObject(owned_handle(&child_ready), 0) },
+            WAIT_OBJECT_0,
+            "pipe-holding descendant never became ready: {error}"
+        );
         assert!(error.contains("AIW_WSB_CLI_PIPE_TIMEOUT"), "{error}");
+        assert!(started.elapsed() >= timeout);
         assert!(
-            started.elapsed()
-                < Duration::from_secs(3) + PROCESS_TREE_CLEANUP_TIMEOUT + Duration::from_secs(1)
+            started.elapsed() < timeout + PROCESS_TREE_CLEANUP_TIMEOUT + Duration::from_secs(1)
         );
     }
 

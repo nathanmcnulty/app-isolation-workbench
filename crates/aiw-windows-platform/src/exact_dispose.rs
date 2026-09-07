@@ -1495,10 +1495,25 @@ pub(crate) fn stabilized_extended_attributes(
     file: &File,
     directory: bool,
 ) -> Result<ExtendedAttributeBinding, ExactDisposeError> {
+    stabilized_eas_with_policy(file, directory, false)
+}
+
+pub(crate) fn stabilized_import_extended_attributes(
+    file: &File,
+    directory: bool,
+) -> Result<ExtendedAttributeBinding, ExactDisposeError> {
+    stabilized_eas_with_policy(file, directory, true)
+}
+
+fn stabilized_eas_with_policy(
+    file: &File,
+    directory: bool,
+    allow_file_hash_only: bool,
+) -> Result<ExtendedAttributeBinding, ExactDisposeError> {
     let mut previous = None::<ExtendedAttributeBinding>;
     let mut matching_observations = 0usize;
     for attempt in 0..EA_STABILIZATION_ATTEMPTS {
-        match query_extended_attributes(file, directory) {
+        match query_extended_attributes_with_policy(file, directory, true, allow_file_hash_only) {
             Ok(observed) => {
                 matching_observations = if previous.as_ref().is_some_and(|prior| prior == &observed)
                 {
@@ -1525,7 +1540,7 @@ pub(crate) fn stabilized_extended_attributes(
         }
     }
     Err(ExactDisposeError::Rejected(
-        "SmartLocker EA metadata did not stabilize to none or the exact kernel pair".into(),
+        "kernel EA metadata did not stabilize to an exact allowed set".into(),
     ))
 }
 
@@ -1913,20 +1928,21 @@ pub(crate) fn query_extended_attributes(
     file: &File,
     directory: bool,
 ) -> Result<ExtendedAttributeBinding, ExactDisposeError> {
-    query_extended_attributes_with_policy(file, directory, true)
+    query_extended_attributes_with_policy(file, directory, true, false)
 }
 
 pub(crate) fn query_extended_attributes_for_import(
     file: &File,
     directory: bool,
 ) -> Result<ExtendedAttributeBinding, ExactDisposeError> {
-    query_extended_attributes_with_policy(file, directory, false)
+    query_extended_attributes_with_policy(file, directory, false, true)
 }
 
 fn query_extended_attributes_with_policy(
     file: &File,
     directory: bool,
     reject_transient_origin_claim: bool,
+    allow_file_hash_only: bool,
 ) -> Result<ExtendedAttributeBinding, ExactDisposeError> {
     // u64 storage guarantees stronger alignment than FILE_FULL_EA_INFORMATION
     // requires. Zeroing also makes any tolerated final-record padding
@@ -1967,11 +1983,12 @@ fn query_extended_attributes_with_policy(
     if bytes.is_empty() {
         return empty_ea_binding();
     }
-    parse_extended_attributes(
+    parse_extended_attributes_with_policy(
         bytes,
         queried_bytes,
         directory,
         reject_transient_origin_claim,
+        allow_file_hash_only,
     )
 }
 
@@ -1983,11 +2000,28 @@ fn empty_ea_binding() -> Result<ExtendedAttributeBinding, ExactDisposeError> {
     })
 }
 
+#[cfg(test)]
 fn parse_extended_attributes(
     bytes: &[u8],
     queried_bytes: u32,
     directory: bool,
     reject_transient_origin_claim: bool,
+) -> Result<ExtendedAttributeBinding, ExactDisposeError> {
+    parse_extended_attributes_with_policy(
+        bytes,
+        queried_bytes,
+        directory,
+        reject_transient_origin_claim,
+        false,
+    )
+}
+
+fn parse_extended_attributes_with_policy(
+    bytes: &[u8],
+    queried_bytes: u32,
+    directory: bool,
+    reject_transient_origin_claim: bool,
+    allow_file_hash_only: bool,
 ) -> Result<ExtendedAttributeBinding, ExactDisposeError> {
     if bytes.len() != queried_bytes as usize || bytes.len() > EA_BUFFER_BYTES {
         return Err(ExactDisposeError::Rejected(
@@ -2098,6 +2132,8 @@ fn parse_extended_attributes(
     }
     let stable_directory_origin_claim =
         directory && entries.len() == 1 && entries[0].name == "$KERNEL.SMARTLOCKER.ORIGINCLAIM";
+    let file_hash_only =
+        !directory && entries.len() == 1 && entries[0].name == "$KERNEL.PURGE.SEC.FILEHASH";
     let exact_kernel_pair = !directory
         && entries.len() == ALLOWED_KERNEL_EAS.len()
         && entries
@@ -2112,6 +2148,7 @@ fn parse_extended_attributes(
             .all(|(entry, allowed)| entry.name == allowed);
     if !entries.is_empty()
         && !stable_directory_origin_claim
+        && !(allow_file_hash_only && file_hash_only)
         && !(file_origin_claim && !reject_transient_origin_claim)
         && !exact_kernel_pair
         && !exact_kernel_triple
@@ -2122,8 +2159,17 @@ fn parse_extended_attributes(
         )));
     }
 
+    let canonical_sha256 = ea_digest(&entries);
+    Ok(ExtendedAttributeBinding {
+        queried_bytes,
+        entries,
+        canonical_sha256,
+    })
+}
+
+fn ea_digest(entries: &[ExtendedAttributeEntryBinding]) -> [u8; 32] {
     let mut canonical = Vec::new();
-    for entry in &entries {
+    for entry in entries {
         let name = entry.name.as_bytes();
         canonical.extend_from_slice(
             &u16::try_from(name.len())
@@ -2135,11 +2181,58 @@ fn parse_extended_attributes(
         canonical.extend_from_slice(&entry.value_length.to_le_bytes());
         canonical.extend_from_slice(&entry.value_sha256);
     }
-    Ok(ExtendedAttributeBinding {
-        queried_bytes,
-        entries,
-        canonical_sha256: Sha256::digest(canonical).into(),
-    })
+    Sha256::digest(canonical).into()
+}
+
+impl ExtendedAttributeBinding {
+    /// v0alpha2 intake receipts bind content independently of this kernel-only
+    /// hash cache. Full native set validation must precede this projection.
+    /// Fixed-tree discard authority deliberately does not use this projection.
+    pub(crate) fn for_import_receipt(mut self) -> Self {
+        self.entries
+            .retain(|entry| entry.name != "$KERNEL.PURGE.SEC.FILEHASH");
+        self.canonical_sha256 = ea_digest(&self.entries);
+        self
+    }
+}
+
+pub(crate) fn valid_import_ea_authority(value: &aiw_probe::ApplicationFileEaAuthority) -> bool {
+    let names: Vec<_> = value
+        .entries
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect();
+    if !names.is_empty()
+        && names != ["$KERNEL.SMARTLOCKER.ORIGINCLAIM"]
+        && names != ALLOWED_KERNEL_EAS
+    {
+        return false;
+    }
+    let mut entries = Vec::new();
+    for entry in &value.entries {
+        if entry.flags != 0
+            || entry.value_length == 0
+            || (entry.name == ALLOWED_KERNEL_EAS[0] && entry.value_length != 4)
+        {
+            return false;
+        }
+        let Ok(hash) = hex::decode(&entry.value_sha256) else {
+            return false;
+        };
+        let Ok(value_sha256) = <[u8; 32]>::try_from(hash) else {
+            return false;
+        };
+        if hex::encode(value_sha256) != entry.value_sha256 {
+            return false;
+        }
+        entries.push(ExtendedAttributeEntryBinding {
+            name: entry.name.clone(),
+            flags: entry.flags,
+            value_length: entry.value_length,
+            value_sha256,
+        });
+    }
+    hex::encode(ea_digest(&entries)) == value.canonical_sha256
 }
 
 fn ntstatus_io(
@@ -2859,18 +2952,40 @@ mod tests {
                 clear_short_name(&path, key.is_directory());
             }
             let tombstone = parent.join(tombstone_leaf(&evidence));
-            Self {
+            let fixture = Self {
                 parent,
                 root,
                 tombstone,
                 sibling,
                 workspace: evidence,
-            }
+            };
+            fixture.require_stable_metadata();
+            fixture
         }
 
         fn inventory(&self) -> FixedWsbTreeInventory {
             observe_fixed_wsb_tree(&self.workspace, RUN_ID, &tombstone_leaf(&self.workspace))
                 .unwrap()
+        }
+
+        fn require_stable_metadata(&self) {
+            // Hashing freshly written fixtures can cause Windows to publish
+            // cache EAs after the observation handles close. Establish the
+            // positive test precondition across complete read-only reopen
+            // cycles, before any deletion authority or mutation is attempted.
+            let observe = || {
+                observe_fixed_wsb_tree(&self.workspace, RUN_ID, &tombstone_leaf(&self.workspace))
+                    .unwrap()
+            };
+            let mut previous = observe();
+            for _ in 0..3 {
+                let current = observe();
+                if current == previous {
+                    return;
+                }
+                previous = current;
+            }
+            panic!("fixture metadata changed across all bounded preflight observations");
         }
 
         fn cleanup(&self) {
@@ -3599,6 +3714,30 @@ mod tests {
 
     #[test]
     fn approved_directory_origin_and_file_hash_triple_are_exact() {
+        let singleton =
+            synthetic_ea_buffer(&[("$KERNEL.PURGE.SEC.FILEHASH", 0, b"opaque-file-hash")]);
+        let parsed = parse_extended_attributes_with_policy(
+            &singleton,
+            singleton.len() as u32,
+            false,
+            true,
+            true,
+        )
+        .unwrap();
+        assert_eq!(parsed.entries.len(), 1);
+        assert!(
+            parse_extended_attributes(&singleton, singleton.len() as u32, false, true).is_err()
+        );
+        assert!(
+            parse_extended_attributes_with_policy(
+                &singleton,
+                singleton.len() as u32,
+                true,
+                true,
+                true
+            )
+            .is_err()
+        );
         let directory =
             synthetic_ea_buffer(&[("$KERNEL.SMARTLOCKER.ORIGINCLAIM", 0, b"opaque-origin")]);
         let directory =
@@ -3619,6 +3758,46 @@ mod tests {
                 .zip(ALLOWED_KERNEL_EAS_WITH_FILE_HASH)
                 .all(|(entry, expected)| entry.name == expected)
         );
+    }
+
+    #[test]
+    fn intake_projection_excludes_only_the_kernel_file_hash_cache() {
+        let parse = |entries: &[(&str, u8, &[u8])]| {
+            let bytes = synthetic_ea_buffer(entries);
+            parse_extended_attributes_with_policy(&bytes, bytes.len() as u32, false, true, true)
+                .unwrap()
+        };
+        let empty = empty_ea_binding().unwrap().for_import_receipt();
+        for cache in [b"first-cache".as_slice(), b"updated-cache".as_slice()] {
+            let singleton = parse(&[("$KERNEL.PURGE.SEC.FILEHASH", 0, cache)]).for_import_receipt();
+            assert_eq!(singleton.entries, empty.entries);
+            assert_eq!(singleton.canonical_sha256, empty.canonical_sha256);
+            let pair = parse(&[
+                (ALLOWED_KERNEL_EAS[0], 0, b"SMV1"),
+                (ALLOWED_KERNEL_EAS[1], 0, b"origin"),
+            ]);
+            let triple = parse(&[
+                ("$KERNEL.PURGE.SEC.FILEHASH", 0, cache),
+                (ALLOWED_KERNEL_EAS[0], 0, b"SMV1"),
+                (ALLOWED_KERNEL_EAS[1], 0, b"origin"),
+            ]);
+            // Exact discard authority still distinguishes the cache states.
+            assert_ne!(pair.canonical_sha256, triple.canonical_sha256);
+            let projected = triple.for_import_receipt();
+            assert_eq!(pair.entries, projected.entries);
+            assert_eq!(pair.canonical_sha256, projected.canonical_sha256);
+        }
+        let origin_changed = parse(&[
+            (ALLOWED_KERNEL_EAS[0], 0, b"SMV1"),
+            (ALLOWED_KERNEL_EAS[1], 0, b"changed"),
+        ])
+        .for_import_receipt();
+        let original = parse(&[
+            (ALLOWED_KERNEL_EAS[0], 0, b"SMV1"),
+            (ALLOWED_KERNEL_EAS[1], 0, b"origin"),
+        ])
+        .for_import_receipt();
+        assert_ne!(original.canonical_sha256, origin_changed.canonical_sha256);
     }
 
     #[test]
