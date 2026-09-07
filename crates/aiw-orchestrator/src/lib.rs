@@ -7397,7 +7397,7 @@ mod tests {
         let error = layout
             .create_or_verify_pending_wsb_import(&expected, &receipt)
             .unwrap_err();
-        assert_eq!(error.code.as_ref(), "AIW_PATH_INVALID");
+        assert_eq!(error.code.as_ref(), "AIW_PATH_UNSAFE");
         assert!(
             fs::symlink_metadata(&link)
                 .unwrap()
