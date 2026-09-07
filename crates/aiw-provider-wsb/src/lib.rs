@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod completion;
+mod imported_msi;
 mod scenario;
 
 use std::collections::BTreeSet;
@@ -21,6 +22,11 @@ pub use completion::{
     WINDOWS_SANDBOX_COMPLETION_VERIFICATION_SCHEMA_VERSION, WindowsSandboxCompletionError,
     WindowsSandboxCompletionExpectation, WindowsSandboxCompletionReceipt,
     WindowsSandboxCompletionVerification, verify_completion_receipt,
+};
+pub use imported_msi::{
+    IMPORTED_MSI_GUEST_REQUEST_SCHEMA_VERSION, IMPORTED_MSI_SCENARIO_RESULT_SCHEMA_VERSION,
+    ImportedMsiGuestRequest, ImportedMsiRequestError, ImportedMsiScenarioResult,
+    ImportedMsiScenarioStatus,
 };
 pub use scenario::{
     CompiledMsiScenario, ScenarioCompileError, compile_notepad_plus_plus_msi_scenario,
