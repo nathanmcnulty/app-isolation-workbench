@@ -27,8 +27,8 @@ use crate::exact_dispose::{
 };
 use crate::source_inspection::{HeldApplicationFile, SourceInspectionError};
 use crate::workspace::{
-    BoundWorkspaceDirectory, CreatedWorkspaceDirectory, WorkspaceAclPolicy, WorkspaceError,
-    same_path,
+    BoundWorkspaceDirectory, BoundWorkspaceFile, CreatedWorkspaceDirectory, CreatedWorkspaceFile,
+    WorkspaceAclPolicy, WorkspaceError, same_path,
 };
 
 const RECEIPT_LEAF: &str = "intake.json";
@@ -49,6 +49,126 @@ pub enum SourceImportError {
     Serialization(String),
     #[error("protected intake native observation failed: {0}")]
     Native(String),
+}
+
+/// Opaque, read-only authority for one independently verified imported file.
+///
+/// The import receipt is verified while the intake root, source directory,
+/// payload, and receipt file are retained by handle. Callers can only copy the
+/// payload into a newly-created protected workspace file, never reopen its
+/// recorded path as a new source authority.
+#[derive(Debug)]
+pub struct HeldVerifiedApplicationFileImport {
+    receipt: ApplicationFileImportReceipt,
+    verification: ApplicationFileImportVerification,
+    root: BoundWorkspaceDirectory,
+    source_directory: BoundWorkspaceDirectory,
+    payload: BoundWorkspaceFile,
+    internal_receipt: BoundWorkspaceFile,
+}
+
+impl HeldVerifiedApplicationFileImport {
+    /// Returns the fixed verification result while this held authority remains valid.
+    pub fn verification(&self) -> &ApplicationFileImportVerification {
+        &self.verification
+    }
+
+    /// Repeats the complete receipt, namespace, content, EA, and handle checks.
+    pub fn revalidate(&self) -> Result<(), SourceImportError> {
+        validate_receipt(&self.receipt)?;
+        if self.root.identity() != &self.receipt.intake_root
+            || self.source_directory.identity() != &self.receipt.source_directory
+            || self.payload.identity() != &self.receipt.payload
+            || self.internal_receipt.identity() != &self.receipt.receipt
+        {
+            return Err(SourceImportError::Drift);
+        }
+        require_names(self.root.as_file(), &[RECEIPT_LEAF, SOURCE_DIRECTORY_LEAF])?;
+        verify_directory_file(self.root.as_file())?;
+        require_ea_authority(self.root.as_file(), true, &self.receipt.intake_root_eas)?;
+
+        let payload_leaf = payload_leaf(self.receipt.source_kind)?;
+        require_names(self.source_directory.as_file(), &[payload_leaf])?;
+        verify_directory_file(self.source_directory.as_file())?;
+        require_ea_authority(
+            self.source_directory.as_file(),
+            true,
+            &self.receipt.source_directory_eas,
+        )?;
+
+        verify_payload(
+            self.payload.as_file(),
+            self.receipt.size_bytes,
+            &self.receipt.sha256,
+        )?;
+        require_ea_authority(self.payload.as_file(), false, &self.receipt.payload_eas)?;
+
+        let expected_bytes = receipt_bytes(&self.receipt)?;
+        let actual_bytes = read_exact_bounded(self.internal_receipt.as_file(), MAX_RECEIPT_BYTES)?;
+        if actual_bytes != expected_bytes {
+            return Err(SourceImportError::Drift);
+        }
+        verify_ordinary_file(self.internal_receipt.as_file(), actual_bytes.len() as u64)?;
+        require_allowed_receipt_eas(self.internal_receipt.as_file())?;
+
+        self.internal_receipt.revalidate()?;
+        self.payload.revalidate()?;
+        self.source_directory.revalidate()?;
+        self.root.revalidate()?;
+        if self.verification != verification_for(&self.receipt, &expected_bytes) {
+            return Err(SourceImportError::Drift);
+        }
+        Ok(())
+    }
+
+    /// Copies the retained payload only into a caller-created protected workspace file.
+    /// The destination remains held by the caller and both ends are revalidated
+    /// before the copy is returned.
+    pub fn copy_to(
+        &mut self,
+        mut destination: CreatedWorkspaceFile,
+    ) -> Result<CreatedWorkspaceFile, SourceImportError> {
+        self.revalidate()?;
+        verify_ordinary_file(destination.as_file(), 0)?;
+        destination.revalidate()?;
+        let mut source_hash = Sha256::new();
+        let mut copied = 0_u64;
+        let mut buffer = [0_u8; 64 * 1024];
+        loop {
+            let count = self
+                .payload
+                .as_file()
+                .seek_read(&mut buffer, copied)
+                .map_err(native)?;
+            if count == 0 {
+                break;
+            }
+            copied = copied.saturating_add(count as u64);
+            if copied > self.receipt.size_bytes {
+                return Err(SourceImportError::Drift);
+            }
+            source_hash.update(&buffer[..count]);
+            destination
+                .as_file_mut()
+                .write_all(&buffer[..count])
+                .map_err(native)?;
+        }
+        if copied != self.receipt.size_bytes
+            || hex::encode(source_hash.finalize()) != self.receipt.sha256
+        {
+            return Err(SourceImportError::Drift);
+        }
+        destination.as_file_mut().flush().map_err(native)?;
+        destination.as_file().sync_all().map_err(native)?;
+        verify_payload(
+            destination.as_file(),
+            self.receipt.size_bytes,
+            &self.receipt.sha256,
+        )?;
+        destination.revalidate()?;
+        self.revalidate()?;
+        Ok(destination)
+    }
 }
 
 pub fn import_application_file(
@@ -129,13 +249,7 @@ pub fn import_application_file(
         sha256: source.observation().sha256.clone(),
     };
     validate_receipt(&receipt)?;
-    let receipt_bytes = serde_json::to_vec(&receipt)
-        .map_err(|error| SourceImportError::Serialization(error.to_string()))?;
-    if receipt_bytes.len() as u64 > MAX_RECEIPT_BYTES {
-        return Err(SourceImportError::Contract(
-            "receipt exceeds its fixed bound".to_owned(),
-        ));
-    }
+    let receipt_bytes = receipt_bytes(&receipt)?;
     receipt_file
         .as_file_mut()
         .write_all(&receipt_bytes)
@@ -164,60 +278,36 @@ pub fn import_application_file(
     Ok(receipt)
 }
 
+pub fn open_verified_application_file_import(
+    receipt: &ApplicationFileImportReceipt,
+) -> Result<HeldVerifiedApplicationFileImport, SourceImportError> {
+    validate_receipt(receipt)?;
+    let root = BoundWorkspaceDirectory::reopen_protected(&receipt.intake_root)?;
+    let source_directory =
+        root.reopen_directory_readonly(SOURCE_DIRECTORY_LEAF, WorkspaceAclPolicy::Protected)?;
+    let payload_leaf = payload_leaf(receipt.source_kind)?;
+    let payload = source_directory.reopen_file_readonly(payload_leaf)?;
+    let internal_receipt = root.reopen_file_readonly(RECEIPT_LEAF)?;
+    let expected_bytes = receipt_bytes(receipt)?;
+    let verification = verification_for(receipt, &expected_bytes);
+    let held = HeldVerifiedApplicationFileImport {
+        receipt: receipt.clone(),
+        verification,
+        root,
+        source_directory,
+        payload,
+        internal_receipt,
+    };
+    held.revalidate()?;
+    Ok(held)
+}
+
 pub fn verify_application_file_import(
     receipt: &ApplicationFileImportReceipt,
 ) -> Result<ApplicationFileImportVerification, SourceImportError> {
-    validate_receipt(receipt)?;
-    let root = BoundWorkspaceDirectory::reopen_protected(&receipt.intake_root)?;
-    require_names(root.as_file(), &[RECEIPT_LEAF, SOURCE_DIRECTORY_LEAF])?;
-    verify_directory_file(root.as_file())?;
-    require_ea_authority(root.as_file(), true, &receipt.intake_root_eas)?;
-
-    let source_directory =
-        root.reopen_directory_readonly(SOURCE_DIRECTORY_LEAF, WorkspaceAclPolicy::Protected)?;
-    if source_directory.identity() != &receipt.source_directory {
-        return Err(SourceImportError::Drift);
-    }
-    let payload_leaf = payload_leaf(receipt.source_kind)?;
-    require_names(source_directory.as_file(), &[payload_leaf])?;
-    verify_directory_file(source_directory.as_file())?;
-    require_ea_authority(
-        source_directory.as_file(),
-        true,
-        &receipt.source_directory_eas,
-    )?;
-
-    let payload = source_directory.reopen_file_readonly(payload_leaf)?;
-    if payload.identity() != &receipt.payload {
-        return Err(SourceImportError::Drift);
-    }
-    verify_payload(payload.as_file(), receipt.size_bytes, &receipt.sha256)?;
-    require_ea_authority(payload.as_file(), false, &receipt.payload_eas)?;
-
-    let internal_receipt = root.reopen_file_readonly(RECEIPT_LEAF)?;
-    if internal_receipt.identity() != &receipt.receipt {
-        return Err(SourceImportError::Drift);
-    }
-    let expected_bytes = serde_json::to_vec(receipt)
-        .map_err(|error| SourceImportError::Serialization(error.to_string()))?;
-    let actual_bytes = read_exact_bounded(internal_receipt.as_file(), MAX_RECEIPT_BYTES)?;
-    if actual_bytes != expected_bytes {
-        return Err(SourceImportError::Drift);
-    }
-    verify_ordinary_file(internal_receipt.as_file(), actual_bytes.len() as u64)?;
-    require_allowed_receipt_eas(internal_receipt.as_file())?;
-
-    internal_receipt.revalidate()?;
-    payload.revalidate()?;
-    source_directory.revalidate()?;
-    root.revalidate()?;
-    Ok(ApplicationFileImportVerification {
-        schema_version: APPLICATION_FILE_IMPORT_VERIFICATION_SCHEMA.to_owned(),
-        receipt_sha256: hex::encode(Sha256::digest(&expected_bytes)),
-        intake_root: receipt.intake_root.clone(),
-        payload: receipt.payload.clone(),
-        verified: true,
-    })
+    Ok(open_verified_application_file_import(receipt)?
+        .verification()
+        .clone())
 }
 
 fn payload_leaf(kind: ApplicationInspectionKind) -> Result<&'static str, SourceImportError> {
@@ -278,6 +368,30 @@ fn validate_receipt(receipt: &ApplicationFileImportReceipt) -> Result<(), Source
         ));
     }
     Ok(())
+}
+
+fn receipt_bytes(receipt: &ApplicationFileImportReceipt) -> Result<Vec<u8>, SourceImportError> {
+    let bytes = serde_json::to_vec(receipt)
+        .map_err(|error| SourceImportError::Serialization(error.to_string()))?;
+    if bytes.len() as u64 > MAX_RECEIPT_BYTES {
+        return Err(SourceImportError::Contract(
+            "receipt exceeds its fixed bound".to_owned(),
+        ));
+    }
+    Ok(bytes)
+}
+
+fn verification_for(
+    receipt: &ApplicationFileImportReceipt,
+    receipt_bytes: &[u8],
+) -> ApplicationFileImportVerification {
+    ApplicationFileImportVerification {
+        schema_version: APPLICATION_FILE_IMPORT_VERIFICATION_SCHEMA.to_owned(),
+        receipt_sha256: hex::encode(Sha256::digest(receipt_bytes)),
+        intake_root: receipt.intake_root.clone(),
+        payload: receipt.payload.clone(),
+        verified: true,
+    }
 }
 
 fn verify_payload(
@@ -430,6 +544,7 @@ fn native(error: impl std::fmt::Display) -> SourceImportError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workspace::HeldRunWorkspace;
     use std::fs::{self, OpenOptions};
     use std::os::windows::fs::OpenOptionsExt;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -486,6 +601,40 @@ mod tests {
             assert_eq!(verified.payload, receipt.payload);
             assert_eq!(verified.receipt_sha256.len(), 64);
         }
+    }
+
+    #[test]
+    fn held_verification_excludes_payload_writers_and_remains_revalidatable() {
+        let (_root, receipt) = import_fixture(ApplicationInspectionKind::Msi);
+        let held = open_verified_application_file_import(&receipt).unwrap();
+        assert!(
+            OpenOptions::new()
+                .write(true)
+                .open(&receipt.payload.final_path)
+                .is_err()
+        );
+        held.revalidate().unwrap();
+    }
+
+    #[test]
+    fn held_import_copies_only_to_a_created_workspace_file() {
+        let (_root, receipt) = import_fixture(ApplicationInspectionKind::Msi);
+        let mut held = open_verified_application_file_import(&receipt).unwrap();
+        let staging_parent = Root::new();
+        let workspace_parent = staging_parent.0.canonicalize().unwrap();
+        let workspace = HeldRunWorkspace::create(&workspace_parent, "staging").unwrap();
+        let staged = held
+            .copy_to(workspace.create_tools_file_new("application.msi").unwrap())
+            .unwrap();
+        let expected_path = workspace.tools_path().join("application.msi");
+        assert!(same_path(staged.final_path(), &expected_path));
+        verify_payload(staged.as_file(), receipt.size_bytes, &receipt.sha256).unwrap();
+        let identity = staged.identity().clone();
+        drop(staged);
+        let reopened = workspace.reopen_tools_file("application.msi").unwrap();
+        assert_eq!(reopened.identity(), &identity);
+        verify_payload(reopened.as_file(), receipt.size_bytes, &receipt.sha256).unwrap();
+        held.revalidate().unwrap();
     }
 
     #[test]
