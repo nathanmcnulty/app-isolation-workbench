@@ -39,6 +39,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub const RUN_PLAN_SCHEMA_VERSION: &str = "aiw.dev/run-plan/v0alpha3";
+pub const IMPORTED_MSI_RUN_PLAN_SCHEMA_VERSION: &str = "aiw.dev/run-plan/v0alpha4";
 pub const LEGACY_RUN_PLAN_SCHEMA_VERSION: &str = "aiw.dev/run-plan/v0alpha1";
 const APPROVAL_SCHEMA: &str = "aiw.dev/approval-record/v0alpha1";
 const EVENT_SCHEMA: &str = "aiw.dev/run-event/v0alpha1";
@@ -54,6 +55,8 @@ const WSB_DISCARD_STAGE_PREFIX: &str = ".aiw-discard-stage-v1-";
 const MAX_DISCARD_INTENT_BYTES: u64 = 1024 * 1024;
 pub const WSB_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION: &str =
     "aiw.dev/wsb-planning-import-receipt/v0alpha1";
+pub const WSB_MSI_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION: &str =
+    "aiw.dev/wsb-planning-import-receipt/v0alpha2";
 const WSB_PLANNING_IMPORT_FILE: &str = "wsb-planning-import.json";
 const ZERO_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 const MAX_TEXT: usize = 4096;
@@ -99,6 +102,16 @@ pub enum PlannedAction {
         guest_agent_sha256: String,
         workspace: Box<WorkspaceBindingEvidence>,
         workspace_identity_sha256: String,
+    },
+    ExecuteWindowsSandboxImportedMsiScenario {
+        sandbox_plan_sha256: String,
+        provider_sha256: String,
+        guest_agent_sha256: String,
+        workspace: Box<WorkspaceBindingEvidence>,
+        workspace_identity_sha256: String,
+        import_receipt_sha256: String,
+        application_sha256: String,
+        scenario_sha256: String,
     },
     CollectEvidence,
     LaunchValidatedProfile {
@@ -193,7 +206,16 @@ impl RunPlan {
         trust_deltas: Vec<String>,
     ) -> Result<Self, AiwError> {
         let value = Self {
-            schema: RUN_PLAN_SCHEMA_VERSION.into(),
+            schema: if actions.iter().any(|action| {
+                matches!(
+                    action,
+                    PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
+                )
+            }) {
+                IMPORTED_MSI_RUN_PLAN_SCHEMA_VERSION.into()
+            } else {
+                RUN_PLAN_SCHEMA_VERSION.into()
+            },
             run_id: run_id.into(),
             project_id: project_id.into(),
             project_revision_hash: project_revision_hash.into(),
@@ -215,7 +237,10 @@ impl RunPlan {
     /// remain separately readable for inspection and fail closed here.
     pub fn from_value(value: serde_json::Value) -> Result<Self, AiwError> {
         let schema = value.get("schema").and_then(serde_json::Value::as_str);
-        if schema != Some(RUN_PLAN_SCHEMA_VERSION) {
+        if !matches!(
+            schema,
+            Some(RUN_PLAN_SCHEMA_VERSION) | Some(IMPORTED_MSI_RUN_PLAN_SCHEMA_VERSION)
+        ) {
             return Err(run_error(
                 "AIW_PLAN_SCHEMA_UNSUPPORTED",
                 "run plan schema is unsupported for mutation and must be replanned",
@@ -3527,10 +3552,25 @@ pub enum RecoveryStatus {
 }
 
 fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
-    if plan.schema != RUN_PLAN_SCHEMA_VERSION {
+    let has_msi_action = plan.actions.iter().any(|action| {
+        matches!(
+            action,
+            PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
+        )
+    });
+    let expected_schema = if has_msi_action {
+        IMPORTED_MSI_RUN_PLAN_SCHEMA_VERSION
+    } else {
+        RUN_PLAN_SCHEMA_VERSION
+    };
+    if plan.schema != expected_schema {
         return Err(run_error(
             "AIW_PLAN_SCHEMA_UNSUPPORTED",
-            "run plan schema is unsupported",
+            if has_msi_action {
+                "MSI Windows Sandbox plans require the imported-scenario schema"
+            } else {
+                "run plan schema is unsupported or does not match its action profile"
+            },
             "plan",
             &plan.run_id,
         ));
@@ -3559,7 +3599,11 @@ fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
             &plan.run_id,
         ));
     }
+    let mut wsb_action_count = 0usize;
     for action in &plan.actions {
+        if is_wsb_action(action) {
+            wsb_action_count += 1;
+        }
         match action {
             PlannedAction::ExecuteScenario { scenario_id } => {
                 validate_id("scenarioId", scenario_id)?
@@ -3597,6 +3641,45 @@ fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
                     ));
                 }
             }
+            PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+                import_receipt_sha256,
+                application_sha256,
+                scenario_sha256,
+            } => {
+                for (field, hash) in [
+                    ("sandboxPlanSha256", sandbox_plan_sha256),
+                    ("providerSha256", provider_sha256),
+                    ("guestAgentSha256", guest_agent_sha256),
+                    ("workspaceIdentitySha256", workspace_identity_sha256),
+                    ("importReceiptSha256", import_receipt_sha256),
+                    ("applicationSha256", application_sha256),
+                    ("scenarioSha256", scenario_sha256),
+                ] {
+                    if !is_hash(hash) {
+                        return Err(run_error(
+                            "AIW_PLAN_BINDING_INVALID",
+                            "Windows Sandbox MSI scenario binding is invalid",
+                            field,
+                            &plan.run_id,
+                        ));
+                    }
+                }
+                if workspace.validate().is_err()
+                    || hash_value(workspace)? != *workspace_identity_sha256
+                {
+                    return Err(run_error(
+                        "AIW_PLAN_BINDING_INVALID",
+                        "Windows Sandbox workspace evidence is invalid or does not match its hash",
+                        "workspace",
+                        &plan.run_id,
+                    ));
+                }
+            }
             PlannedAction::LaunchValidatedProfile { profile_id } => {
                 validate_id("profileId", profile_id)?
             }
@@ -3611,51 +3694,118 @@ fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
             ));
         }
     }
+    if wsb_action_count > 1 {
+        return Err(run_error(
+            "AIW_PLAN_BINDING_INVALID",
+            "a run plan may contain at most one Windows Sandbox profile action",
+            "actions",
+            &plan.run_id,
+        ));
+    }
     for delta in &plan.trust_deltas {
         validate_text("trustDelta", delta, &plan.run_id)?;
     }
     Ok(())
 }
 
+fn is_wsb_action(action: &PlannedAction) -> bool {
+    matches!(
+        action,
+        PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. }
+            | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
+    )
+}
+
 fn has_wsb_action(plan: &RunPlan) -> bool {
-    plan.actions.iter().any(|action| {
-        matches!(
-            action,
-            PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. }
+    plan.actions.iter().any(is_wsb_action)
+}
+
+fn wsb_action(plan: &RunPlan) -> Result<Option<&PlannedAction>, AiwError> {
+    let mut found = None;
+    for action in &plan.actions {
+        if is_wsb_action(action) {
+            if found.is_some() {
+                return Err(run_error(
+                    "AIW_WSB_IMPORT_INVALID",
+                    "verified import requires exactly one Windows Sandbox profile action",
+                    "create",
+                    &plan.run_id,
+                ));
+            }
+            found = Some(action);
+        }
+    }
+    Ok(found)
+}
+
+fn wsb_workspace(plan: &RunPlan) -> Result<&WorkspaceBindingEvidence, AiwError> {
+    let action = wsb_action(plan)?.ok_or_else(|| {
+        run_error(
+            "AIW_WSB_REVOCATION_INVALID",
+            "Windows Sandbox revocation has no workspace binding",
+            "revocation",
+            &plan.run_id,
         )
-    })
+    })?;
+    match action {
+        PlannedAction::ExecuteWindowsSandboxGoldenProbe { workspace, .. }
+        | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { workspace, .. } => {
+            Ok(workspace.as_ref())
+        }
+        _ => unreachable!("wsb_action only returns WSB profile actions"),
+    }
 }
 
 fn validate_wsb_import(receipt: &WsbPlanningImportReceipt, plan: &RunPlan) -> Result<(), AiwError> {
     validate_plan(plan)?;
-    let [
+    let action = wsb_action(plan)?.ok_or_else(|| {
+        run_error(
+            "AIW_WSB_IMPORT_INVALID",
+            "verified import requires exactly one Windows Sandbox action",
+            "create",
+            &plan.run_id,
+        )
+    })?;
+    let (
+        receipt_schema,
+        sandbox_plan_sha256,
+        provider_sha256,
+        guest_agent_sha256,
+        workspace,
+        workspace_identity_sha256,
+    ) = match action {
         PlannedAction::ExecuteWindowsSandboxGoldenProbe {
             sandbox_plan_sha256,
             provider_sha256,
             guest_agent_sha256,
             workspace,
             workspace_identity_sha256,
-        },
-    ] = plan
-        .actions
-        .iter()
-        .filter(|action| {
-            matches!(
-                action,
-                PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. }
-            )
-        })
-        .collect::<Vec<_>>()
-        .as_slice()
-    else {
-        return Err(run_error(
-            "AIW_WSB_IMPORT_INVALID",
-            "verified import requires exactly one Windows Sandbox action",
-            "create",
-            &plan.run_id,
-        ));
+        } => (
+            WSB_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION,
+            sandbox_plan_sha256,
+            provider_sha256,
+            guest_agent_sha256,
+            workspace,
+            workspace_identity_sha256,
+        ),
+        PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
+            sandbox_plan_sha256,
+            provider_sha256,
+            guest_agent_sha256,
+            workspace,
+            workspace_identity_sha256,
+            ..
+        } => (
+            WSB_MSI_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION,
+            sandbox_plan_sha256,
+            provider_sha256,
+            guest_agent_sha256,
+            workspace,
+            workspace_identity_sha256,
+        ),
+        _ => unreachable!("wsb_action only returns WSB profile actions"),
     };
-    if receipt.schema_version != WSB_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION
+    if receipt.schema_version != receipt_schema
         || receipt.run_id != plan.run_id
         || receipt.status != WsbPlanningImportStatus::PendingApproval
         || receipt.project_revision_sha256 != plan.project_revision_hash
@@ -3709,6 +3859,7 @@ fn action_allowed(lifecycle: RunLifecycleKind, action: &PlannedAction) -> bool {
                 | PlannedAction::PrepareWorkspace
                 | PlannedAction::ExecuteScenario { .. }
                 | PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. }
+                | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
                 | PlannedAction::CollectEvidence
         ),
         RunLifecycleKind::Launch => matches!(
@@ -3835,23 +3986,7 @@ fn validate_wsb_revocation(
     import: &WsbPlanningImportReceipt,
     layout: &RunLayout,
 ) -> Result<(), AiwError> {
-    let workspace = plan
-        .actions
-        .iter()
-        .find_map(|action| match action {
-            PlannedAction::ExecuteWindowsSandboxGoldenProbe { workspace, .. } => {
-                Some(workspace.as_ref())
-            }
-            _ => None,
-        })
-        .ok_or_else(|| {
-            run_error(
-                "AIW_WSB_REVOCATION_INVALID",
-                "Windows Sandbox revocation has no workspace binding",
-                "revocation",
-                &plan.run_id,
-            )
-        })?;
+    let workspace = wsb_workspace(plan)?;
     let expected_control = layout.wsb_discard_control_path()?;
     validate_wsb_revocation_shape(value, workspace, &expected_control)?;
     let binding = &value.discard_intent_binding;
@@ -5324,14 +5459,14 @@ mod tests {
         .unwrap()
     }
 
-    fn wsb_plan(run_id: &str) -> RunPlan {
+    fn wsb_workspace(run_id: &str) -> WorkspaceBindingEvidence {
         let owner = "S-1-5-21-1";
         let identity = |path: &str, marker: char| aiw_probe::WindowsFileIdentity {
             final_path: path.to_owned(),
             volume_serial_number: "1".repeat(16),
             file_id: marker.to_string().repeat(32),
         };
-        let workspace = WorkspaceBindingEvidence {
+        WorkspaceBindingEvidence {
             schema_version: aiw_probe::WINDOWS_WORKSPACE_SCHEMA_VERSION.to_owned(),
             policy: aiw_probe::WINDOWS_WORKSPACE_SECURITY_POLICY.to_owned(),
             security_policy_sha256: aiw_probe::workspace_policy_hash(owner),
@@ -5342,7 +5477,11 @@ mod tests {
             root: identity(&format!(r"C:\AIW\{run_id}"), '2'),
             tools: identity(&format!(r"C:\AIW\{run_id}\tools"), '3'),
             output: identity(&format!(r"C:\AIW\{run_id}\output"), '4'),
-        };
+        }
+    }
+
+    fn wsb_plan(run_id: &str) -> RunPlan {
+        let workspace = wsb_workspace(run_id);
         let workspace_identity_sha256 = hash_value(&workspace).unwrap();
         RunPlan::new(
             run_id,
@@ -5358,6 +5497,30 @@ mod tests {
                 workspace_identity_sha256,
             }],
             vec!["starts one exact Windows Sandbox session".into()],
+        )
+        .unwrap()
+    }
+
+    fn msi_wsb_plan(run_id: &str) -> RunPlan {
+        let workspace = wsb_workspace(run_id);
+        let workspace_identity_sha256 = hash_value(&workspace).unwrap();
+        RunPlan::new(
+            run_id,
+            "project.one",
+            "f".repeat(64),
+            RunLifecycleKind::Assessment,
+            "2026-08-29T00:00:00Z",
+            vec![PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
+                sandbox_plan_sha256: "a".repeat(64),
+                provider_sha256: "b".repeat(64),
+                guest_agent_sha256: "c".repeat(64),
+                workspace: Box::new(workspace),
+                workspace_identity_sha256,
+                import_receipt_sha256: "d".repeat(64),
+                application_sha256: "e".repeat(64),
+                scenario_sha256: "f".repeat(64),
+            }],
+            vec!["starts one exact imported MSI Windows Sandbox session".into()],
         )
         .unwrap()
     }
@@ -5384,18 +5547,47 @@ mod tests {
     }
 
     fn wsb_import(plan: &RunPlan) -> WsbPlanningImportReceipt {
-        let PlannedAction::ExecuteWindowsSandboxGoldenProbe {
+        let (
+            schema_version,
             sandbox_plan_sha256,
             provider_sha256,
             guest_agent_sha256,
             workspace,
             workspace_identity_sha256,
-        } = &plan.actions[0]
-        else {
-            unreachable!();
+        ) = match &plan.actions[0] {
+            PlannedAction::ExecuteWindowsSandboxGoldenProbe {
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+            } => (
+                WSB_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION,
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+            ),
+            PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+                ..
+            } => (
+                WSB_MSI_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION,
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+            ),
+            _ => unreachable!(),
         };
         WsbPlanningImportReceipt {
-            schema_version: WSB_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION.to_owned(),
+            schema_version: schema_version.to_owned(),
             run_id: plan.run_id.clone(),
             imported_at: "2026-08-29T00:01:00Z".to_owned(),
             status: WsbPlanningImportStatus::PendingApproval,
@@ -6074,12 +6266,88 @@ mod tests {
 
     #[test]
     fn generic_create_rejects_wsb_before_creating_run_storage() {
+        for plan in [wsb_plan("run-one"), msi_wsb_plan("run-one")] {
+            let root = root();
+            let layout = layout(&root, "run-one");
+            let error = layout.create(&plan).unwrap_err();
+            assert_eq!(error.code.as_ref(), "AIW_WSB_IMPORT_REQUIRED");
+            assert!(!root.join("runs").exists());
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn imported_msi_plan_uses_distinct_schema_and_receipt_contract() {
+        let plan = msi_wsb_plan("run-one");
+        assert_eq!(plan.schema, IMPORTED_MSI_RUN_PLAN_SCHEMA_VERSION);
+        assert_eq!(
+            wsb_import(&plan).schema_version,
+            WSB_MSI_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION
+        );
+        assert!(RunPlan::from_value(serde_json::to_value(&plan).unwrap()).is_ok());
+
+        let golden = wsb_plan("run-two");
+        assert_eq!(golden.schema, RUN_PLAN_SCHEMA_VERSION);
+        assert_eq!(
+            wsb_import(&golden).schema_version,
+            WSB_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION
+        );
+
+        let mut msi_with_golden_schema = serde_json::to_value(&plan).unwrap();
+        msi_with_golden_schema["schema"] = serde_json::json!(RUN_PLAN_SCHEMA_VERSION);
+        assert!(RunPlan::from_value(msi_with_golden_schema).is_err());
+        let mut golden_with_msi_schema = serde_json::to_value(&golden).unwrap();
+        golden_with_msi_schema["schema"] = serde_json::json!(IMPORTED_MSI_RUN_PLAN_SCHEMA_VERSION);
+        assert!(RunPlan::from_value(golden_with_msi_schema).is_err());
+
+        let mut wrong_golden_receipt = wsb_import(&golden);
+        wrong_golden_receipt.schema_version =
+            WSB_MSI_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION.to_owned();
+        assert!(validate_wsb_import(&wrong_golden_receipt, &golden).is_err());
+        let mut wrong_msi_receipt = wsb_import(&plan);
+        wrong_msi_receipt.schema_version = WSB_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION.to_owned();
+        assert!(validate_wsb_import(&wrong_msi_receipt, &plan).is_err());
+    }
+
+    #[test]
+    fn imported_msi_hash_change_invalidates_the_existing_receipt() {
         let root = root();
         let layout = layout(&root, "run-one");
-        let error = layout.create(&wsb_plan("run-one")).unwrap_err();
-        assert_eq!(error.code.as_ref(), "AIW_WSB_IMPORT_REQUIRED");
+        let expected = msi_wsb_plan("run-one");
+        let receipt = wsb_import(&expected);
+        let mut changed = expected.clone();
+        let PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
+            application_sha256, ..
+        } = &mut changed.actions[0]
+        else {
+            unreachable!();
+        };
+        *application_sha256 = "0".repeat(64);
+        let error = layout
+            .create_or_verify_pending_wsb_import(&changed, &receipt)
+            .unwrap_err();
+        assert_eq!(error.code.as_ref(), "AIW_WSB_IMPORT_INVALID");
         assert!(!root.join("runs").exists());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn duplicate_windows_sandbox_profile_actions_are_rejected() {
+        let plan = msi_wsb_plan("run-one");
+        let mut actions = plan.actions.clone();
+        let duplicate = actions[0].clone();
+        actions.push(duplicate);
+        let error = RunPlan::new(
+            plan.run_id,
+            plan.project_id,
+            plan.project_revision_hash,
+            plan.lifecycle,
+            plan.created_at,
+            actions,
+            plan.trust_deltas,
+        )
+        .unwrap_err();
+        assert_eq!(error.code.as_ref(), "AIW_PLAN_BINDING_INVALID");
     }
 
     #[test]
