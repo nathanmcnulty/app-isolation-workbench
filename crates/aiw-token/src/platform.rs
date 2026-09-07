@@ -1,5 +1,6 @@
 use std::ffi::c_void;
 use std::mem::{MaybeUninit, size_of};
+use std::os::windows::io::{AsRawHandle as _, BorrowedHandle};
 use std::slice;
 
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HLOCAL, LocalFree};
@@ -14,7 +15,9 @@ use windows::Win32::Security::{
     TokenImpersonation, TokenImpersonationLevel, TokenIntegrityLevel, TokenIsAppContainer,
     TokenPrimary, TokenRestrictedSids, TokenType as TokenTypeClass, TokenUser,
 };
-use windows::Win32::System::Threading::{GetCurrentProcess, GetCurrentProcessId, OpenProcessToken};
+use windows::Win32::System::Threading::{
+    GetCurrentProcess, GetCurrentProcessId, GetProcessId, OpenProcessToken,
+};
 use windows::core::PWSTR;
 
 use super::{
@@ -24,7 +27,35 @@ use super::{
 };
 
 pub(super) fn collect_current_process_token() -> Result<TokenEvidence, TokenEvidenceError> {
-    let token = OwnedHandle::current_process_token()?;
+    // SAFETY: GetCurrentProcessId has no preconditions. GetCurrentProcess is
+    // the documented current-process pseudo-handle accepted by OpenProcessToken.
+    collect_token_for_process(unsafe { GetCurrentProcess() }, unsafe {
+        GetCurrentProcessId()
+    })
+}
+
+pub(super) fn collect_process_token(
+    process: BorrowedHandle<'_>,
+) -> Result<TokenEvidence, TokenEvidenceError> {
+    let process = HANDLE(process.as_raw_handle());
+    // SAFETY: A BorrowedHandle supplies a live Windows handle for this call.
+    // GetProcessId only observes that same handle and returns zero for a
+    // handle that does not identify a process.
+    let process_id = unsafe { GetProcessId(process) };
+    if process_id == 0 {
+        return Err(api_error(
+            "GetProcessId",
+            windows::core::Error::from_thread(),
+        ));
+    }
+    collect_token_for_process(process, process_id)
+}
+
+fn collect_token_for_process(
+    process: HANDLE,
+    process_id: u32,
+) -> Result<TokenEvidence, TokenEvidenceError> {
+    let token = OwnedHandle::process_token(process)?;
     let raw_token_type: TOKEN_TYPE = query_fixed(token.0, TokenTypeClass, "TokenType")?;
     let token_type = map_token_type(raw_token_type)?;
     let impersonation_level = if token_type == TokenType::Impersonation {
@@ -72,12 +103,11 @@ pub(super) fn collect_current_process_token() -> Result<TokenEvidence, TokenEvid
     let restricted_sid_count =
         query_group_count(token.0, TokenRestrictedSids, "TokenRestrictedSids")?;
 
-    // This evidence is emitted by the target process itself. It deliberately
-    // does not inspect the launcher token or infer the backend from config.
+    // This evidence is bound to the exact process handle the caller retained.
+    // It does not infer a token from a PID or from the launcher/config.
     Ok(TokenEvidence {
         schema_version: TOKEN_EVIDENCE_SCHEMA_VERSION.to_owned(),
-        // SAFETY: GetCurrentProcessId has no preconditions.
-        process_id: unsafe { GetCurrentProcessId() },
+        process_id,
         token_type,
         impersonation_level,
         is_app_container,
@@ -98,11 +128,12 @@ pub(super) fn collect_current_process_token() -> Result<TokenEvidence, TokenEvid
 struct OwnedHandle(HANDLE);
 
 impl OwnedHandle {
-    fn current_process_token() -> Result<Self, TokenEvidenceError> {
+    fn process_token(process: HANDLE) -> Result<Self, TokenEvidenceError> {
         let mut token = HANDLE::default();
-        // SAFETY: GetCurrentProcess returns a valid pseudo-handle. The output
-        // pointer is valid, and TOKEN_QUERY is the minimum required access.
-        unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) }
+        // SAFETY: `process` is either the documented current-process pseudo-
+        // handle or a caller-owned borrowed process handle. The output pointer
+        // is valid, and TOKEN_QUERY is the minimum required access.
+        unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) }
             .map_err(|error| api_error("OpenProcessToken", error))?;
         Ok(Self(token))
     }

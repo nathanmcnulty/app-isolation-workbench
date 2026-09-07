@@ -4,12 +4,13 @@
 
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
-use std::os::windows::io::{FromRawHandle, OwnedHandle};
+use std::os::windows::io::{AsHandle as _, FromRawHandle, OwnedHandle};
 use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use aiw_provider_wsb::CompiledMsiScenario;
+use aiw_token::{TokenEvidence, collect_process_token};
 use thiserror::Error;
 use windows::Win32::Foundation::{
     HANDLE, HWND, LPARAM, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT, WPARAM,
@@ -37,6 +38,7 @@ pub struct GuestMsiExecutionObservation {
     pub install_exit_code: i32,
     pub launch_process_id: u32,
     pub launch_exit_code: i32,
+    pub application_token: TokenEvidence,
 }
 
 #[derive(Debug, Error)]
@@ -86,6 +88,17 @@ pub fn execute_fixed_notepad_plus_plus_msi(
                 "observed application window changed owner".to_owned(),
             ));
         }
+        let application_token =
+            collect_process_token(application.process.as_handle()).map_err(|error| {
+                GuestMsiExecutionError::Process(format!(
+                    "collect launched application token failed: {error}"
+                ))
+            })?;
+        if application_token.process_id != application.process_id {
+            return Err(GuestMsiExecutionError::Process(
+                "collected application token changed process identity".to_owned(),
+            ));
+        }
         unsafe { PostMessageW(Some(window), WM_CLOSE, WPARAM(0), LPARAM(0)) }.map_err(|error| {
             GuestMsiExecutionError::Process(format!("WM_CLOSE failed: {error}"))
         })?;
@@ -97,18 +110,19 @@ pub fn execute_fixed_notepad_plus_plus_msi(
                 "Notepad++ exited with {exit_code} after WM_CLOSE"
             )));
         }
-        Ok(exit_code)
+        Ok((exit_code, application_token))
     })();
     let cleanup = if operation.is_ok() {
         application.verify_empty_after_success()
     } else {
         application.cleanup()
     };
-    let launch_exit_code = complete_process_operation(operation, cleanup)?;
+    let (launch_exit_code, application_token) = complete_process_operation(operation, cleanup)?;
     Ok(GuestMsiExecutionObservation {
         install_exit_code,
         launch_process_id,
         launch_exit_code,
+        application_token,
     })
 }
 

@@ -10,6 +10,7 @@ rust-version.workspace = true
 [dependencies]
 aiw-probe.workspace = true
 aiw-provider-wsb.workspace = true
+aiw-token.workspace = true
 aiw-windows-command-line.workspace = true
 hex.workspace = true
 serde_json.workspace = true
