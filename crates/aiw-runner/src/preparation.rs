@@ -2338,4 +2338,252 @@ mod tests {
             b""
         );
     }
+
+    fn msi_project() -> Project {
+        serde_yaml::from_str(include_str!(
+            "../../../examples/notepad-plus-plus-msi.aiw.yaml"
+        ))
+        .unwrap()
+    }
+
+    fn fake_import_receipt(
+        scenario: &aiw_provider_wsb::CompiledMsiScenario,
+    ) -> aiw_probe::ApplicationFileImportReceipt {
+        let size_bytes = 1024;
+        let sha256 = scenario.application_sha256.clone();
+        let intake_id = "intake-one";
+        let intake_root = identity(r"C:\AIW\intake-one", '5');
+        let source_directory = identity(r"C:\AIW\intake-one\source", '6');
+        let payload = identity(r"C:\AIW\intake-one\source\payload.msi", '7');
+        let receipt = identity(r"C:\AIW\intake-one\import-receipt.json", '8');
+        let eas = aiw_probe::ApplicationFileEaAuthority {
+            entries: vec![],
+            canonical_sha256: "0".repeat(64),
+        };
+        aiw_probe::ApplicationFileImportReceipt {
+            schema_version: aiw_probe::APPLICATION_FILE_IMPORT_RECEIPT_SCHEMA.to_owned(),
+            intake_id: intake_id.to_owned(),
+            source_kind: aiw_probe::ApplicationInspectionKind::Msi,
+            source: aiw_probe::ApplicationFileAuthority {
+                schema_version: aiw_probe::APPLICATION_FILE_AUTHORITY_SCHEMA.to_owned(),
+                identity: identity(r"C:\source\application.msi", '4'),
+                size_bytes,
+                sha256: sha256.clone(),
+                link_count: 1,
+                only_unnamed_data_stream: true,
+            },
+            intake_root,
+            intake_root_eas: eas.clone(),
+            source_directory,
+            source_directory_eas: eas.clone(),
+            payload_relative_path: "source/payload.msi".to_owned(),
+            payload,
+            payload_eas: eas,
+            receipt,
+            size_bytes,
+            sha256,
+        }
+    }
+
+    fn fake_msi_application() -> WsbMsiApplication {
+        let project = msi_project();
+        let scenario = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
+            &project,
+            "install-launch-close",
+        )
+        .unwrap();
+        let import_receipt = fake_import_receipt(&scenario);
+        let import_receipt_sha256 =
+            hex::encode(Sha256::digest(serde_json::to_vec(&import_receipt).unwrap()));
+        let staged_path = format!(r"C:\AIW\run-one\tools\{MSI_FILE}");
+        WsbMsiApplication {
+            import_receipt,
+            import_receipt_sha256,
+            scenario_sha256: canonical_hash(&scenario).unwrap(),
+            staged_payload: BinaryIdentity {
+                canonical_path: staged_path.clone(),
+                sha256: scenario.application_sha256.clone(),
+                size_bytes: 1024,
+                version: None,
+                signature_status: ReadinessState::Unknown,
+            },
+            staged_identity: identity(&staged_path, '9'),
+            scenario,
+        }
+    }
+
+    #[test]
+    fn imported_msi_preparation_binds_the_distinct_profile_and_all_hashes() {
+        let project = msi_project();
+        let msi = fake_msi_application();
+        let artifacts = build_wsb_msi_preparation(
+            "run-one",
+            &project,
+            &readiness(),
+            &workspace(),
+            &guest(),
+            "now",
+            msi,
+        )
+        .unwrap();
+        assert_eq!(
+            artifacts.receipt.schema_version,
+            WSB_MSI_PREPARATION_RECEIPT_SCHEMA_VERSION
+        );
+        assert_eq!(
+            artifacts.run_plan.schema,
+            aiw_orchestrator::IMPORTED_MSI_RUN_PLAN_SCHEMA_VERSION
+        );
+        assert_eq!(artifacts.wsb_plan.probe.output, GUEST_MSI_RESULT);
+        let receipt_msi = artifacts.receipt.msi.as_ref().unwrap();
+        let [
+            PlannedAction::AssessHost,
+            PlannedAction::PrepareWorkspace,
+            PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace_identity_sha256,
+                import_receipt_sha256,
+                application_sha256,
+                scenario_sha256,
+                ..
+            },
+            PlannedAction::CollectEvidence,
+        ] = artifacts.run_plan.actions.as_slice()
+        else {
+            panic!("MSI preparation did not produce the exact imported profile");
+        };
+        assert_eq!(sandbox_plan_sha256, &artifacts.receipt.wsb_plan_sha256);
+        assert_eq!(provider_sha256, &artifacts.receipt.provider.sha256);
+        assert_eq!(guest_agent_sha256, &artifacts.receipt.guest_agent.sha256);
+        assert_eq!(
+            workspace_identity_sha256,
+            &artifacts.receipt.workspace_identity_sha256
+        );
+        assert_eq!(import_receipt_sha256, &receipt_msi.import_receipt_sha256);
+        assert_eq!(application_sha256, &receipt_msi.staged_payload.sha256);
+        assert_eq!(scenario_sha256, &receipt_msi.scenario_sha256);
+        assert_eq!(
+            artifacts.receipt.run_plan_sha256,
+            artifacts.run_plan.hash().unwrap()
+        );
+        artifacts.validate().unwrap();
+    }
+
+    #[test]
+    fn imported_msi_preparation_rejects_source_project_scenario_and_staged_hash_drift() {
+        let readiness = readiness();
+        let workspace = workspace();
+        let guest = guest();
+
+        let mut source_kind = fake_msi_application();
+        source_kind.import_receipt.source_kind = aiw_probe::ApplicationInspectionKind::Exe;
+        assert!(
+            build_wsb_msi_preparation(
+                "run-one",
+                &msi_project(),
+                &readiness,
+                &workspace,
+                &guest,
+                "now",
+                source_kind,
+            )
+            .is_err()
+        );
+
+        let mut changed_project = msi_project();
+        if let aiw_schema::ApplicationSource::Msi(source) = &mut changed_project.application {
+            source.sha256 = "0".repeat(64);
+        } else {
+            panic!("MSI fixture did not contain an MSI application source");
+        }
+        assert!(
+            build_wsb_msi_preparation(
+                "run-one",
+                &changed_project,
+                &readiness,
+                &workspace,
+                &guest,
+                "now",
+                fake_msi_application(),
+            )
+            .is_err()
+        );
+
+        let mut changed_scenario = fake_msi_application();
+        changed_scenario.scenario.scenario_id = "changed-scenario".to_owned();
+        assert!(
+            build_wsb_msi_preparation(
+                "run-one",
+                &msi_project(),
+                &readiness,
+                &workspace,
+                &guest,
+                "now",
+                changed_scenario,
+            )
+            .is_err()
+        );
+
+        let mut changed_staged_hash = fake_msi_application();
+        changed_staged_hash.staged_payload.sha256 = "0".repeat(64);
+        assert!(
+            build_wsb_msi_preparation(
+                "run-one",
+                &msi_project(),
+                &readiness,
+                &workspace,
+                &guest,
+                "now",
+                changed_staged_hash,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn msi_preparation_rejects_v1_receipt_and_golden_preparation_stays_v1_without_msi() {
+        let msi_project_value = msi_project();
+        let mut msi = build_wsb_msi_preparation(
+            "run-one",
+            &msi_project_value,
+            &readiness(),
+            &workspace(),
+            &guest(),
+            "now",
+            fake_msi_application(),
+        )
+        .unwrap();
+        msi.receipt.schema_version = WSB_PREPARATION_RECEIPT_SCHEMA_VERSION.to_owned();
+        assert!(msi.receipt.validate().is_err());
+
+        let golden = build_wsb_preparation(
+            "run-one",
+            &project(),
+            &readiness(),
+            &workspace(),
+            &guest(),
+            "now",
+        )
+        .unwrap();
+        assert_eq!(
+            golden.receipt.schema_version,
+            WSB_PREPARATION_RECEIPT_SCHEMA_VERSION
+        );
+        assert!(golden.receipt.msi.is_none());
+        assert_eq!(
+            golden.run_plan.schema,
+            aiw_orchestrator::RUN_PLAN_SCHEMA_VERSION
+        );
+        assert!(matches!(
+            golden.run_plan.actions.as_slice(),
+            [
+                PlannedAction::AssessHost,
+                PlannedAction::PrepareWorkspace,
+                PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. },
+                PlannedAction::CollectEvidence
+            ]
+        ));
+    }
 }
