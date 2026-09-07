@@ -28,6 +28,8 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 pub const WSB_PREPARATION_RECEIPT_SCHEMA_VERSION: &str = "aiw.dev/wsb-preparation-receipt/v0alpha1";
+pub const WSB_MSI_PREPARATION_RECEIPT_SCHEMA_VERSION: &str =
+    "aiw.dev/wsb-preparation-receipt/v0alpha2";
 pub const WSB_PLANNING_IMPORT_RESULT_SCHEMA_VERSION: &str =
     "aiw.dev/wsb-planning-import-result/v0alpha1";
 
@@ -36,6 +38,9 @@ const PINNED_CLI_VERSION: &str = "0.8.107.0";
 const PINNED_CLI_PROTOCOL: &str = "windowsSandboxCli/v0.8.107.0";
 const PINNED_LIST_SCHEMA: &str = "WindowsSandboxEnvironments/Id";
 const GUEST_AGENT_FILE: &str = "aiw-guest-agent.exe";
+const MSI_FILE: &str = "application.msi";
+const GUEST_MSI_RESULT: &str = r"C:\AIW\Output\scenario-result.json";
+const TRUST_DELTA_MSI: &str = "installs and exercises the approved imported MSI in Windows Sandbox";
 const GUEST_TOOLS: &str = r"C:\AIW\Tools";
 const GUEST_OUTPUT: &str = r"C:\AIW\Output";
 const GUEST_AGENT: &str = r"C:\AIW\Tools\aiw-guest-agent.exe";
@@ -109,11 +114,68 @@ pub struct WsbPreparationReceipt {
     pub approval_required: bool,
     pub provider_acquired: bool,
     pub provider_mutated: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub msi: Option<WsbMsiApplication>,
+}
+
+#[derive(Debug, Clone, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WsbMsiApplication {
+    pub import_receipt: aiw_probe::ApplicationFileImportReceipt,
+    pub import_receipt_sha256: String,
+    pub scenario: aiw_provider_wsb::CompiledMsiScenario,
+    pub scenario_sha256: String,
+    pub staged_payload: BinaryIdentity,
+    pub staged_identity: WindowsFileIdentity,
+}
+
+impl WsbMsiApplication {
+    pub(crate) fn validate(
+        &self,
+        workspace: &WorkspaceBindingEvidence,
+    ) -> Result<(), WsbPreparationError> {
+        self.scenario
+            .validate()
+            .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+        let receipt_bytes = serde_json::to_vec(&self.import_receipt)
+            .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+        if self.import_receipt.schema_version != aiw_probe::APPLICATION_FILE_IMPORT_RECEIPT_SCHEMA
+            || self.import_receipt.source_kind != aiw_probe::ApplicationInspectionKind::Msi
+            || hex::encode(Sha256::digest(receipt_bytes)) != self.import_receipt_sha256
+            || canonical_hash(&self.scenario)? != self.scenario_sha256
+            || self.scenario.application_sha256 != self.import_receipt.sha256
+            || self.staged_payload.sha256 != self.import_receipt.sha256
+            || self.staged_payload.size_bytes != self.import_receipt.size_bytes
+            || self.staged_payload.size_bytes == 0
+            || self.staged_payload.size_bytes > 128 * 1024 * 1024
+            || self.staged_payload.version.is_some()
+            || self.staged_payload.signature_status != ReadinessState::Unknown
+            || normalized_windows_path(&self.staged_payload.canonical_path)
+                != format!(
+                    "{}\\{}",
+                    normalized_windows_path(&workspace.tools.final_path),
+                    MSI_FILE
+                )
+            || normalized_windows_path(&self.staged_identity.final_path)
+                != normalized_windows_path(&self.staged_payload.canonical_path)
+            || self.staged_identity.volume_serial_number != workspace.tools.volume_serial_number
+        {
+            return Err(WsbPreparationError::Contract(
+                "MSI preparation bindings are inconsistent".to_owned(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl WsbPreparationReceipt {
     pub fn validate(&self) -> Result<(), WsbPreparationError> {
-        if self.schema_version != WSB_PREPARATION_RECEIPT_SCHEMA_VERSION
+        let expected_schema = if self.msi.is_some() {
+            WSB_MSI_PREPARATION_RECEIPT_SCHEMA_VERSION
+        } else {
+            WSB_PREPARATION_RECEIPT_SCHEMA_VERSION
+        };
+        if self.schema_version != expected_schema
             || self.status != WsbPreparationStatus::PendingApproval
             || self.run_id.is_empty()
             || self.created_at.is_empty()
@@ -172,6 +234,9 @@ impl WsbPreparationReceipt {
             ));
         }
         require_pinned_protocol(&self.provider_protocol)?;
+        if let Some(msi) = &self.msi {
+            msi.validate(&self.workspace)?;
+        }
         Ok(())
     }
 }
@@ -186,7 +251,16 @@ pub struct PreparedWsbArtifacts {
 impl PreparedWsbArtifacts {
     pub fn validate(&self) -> Result<(), WsbPreparationError> {
         self.receipt.validate()?;
-        validate_fixed_wsb_plan(&self.wsb_plan, &self.receipt.workspace)?;
+        let mut profile_plan = self.wsb_plan.clone();
+        if self.receipt.msi.is_some() {
+            if profile_plan.probe.output != GUEST_MSI_RESULT {
+                return Err(WsbPreparationError::Contract(
+                    "MSI output path is not fixed".to_owned(),
+                ));
+            }
+            profile_plan.probe.output = GUEST_TOKEN.to_owned();
+        }
+        validate_fixed_wsb_plan(&profile_plan, &self.receipt.workspace)?;
         if self.run_plan.run_id != self.receipt.run_id
             || self.run_plan.project_id != self.receipt.project_id
             || self.run_plan.project_revision_hash != self.receipt.project_revision_sha256
@@ -194,7 +268,12 @@ impl PreparedWsbArtifacts {
             || self.run_plan.created_at != self.receipt.created_at
             || self.run_plan.trust_deltas
                 != [
-                    TRUST_DELTA_START.to_owned(),
+                    if self.receipt.msi.is_some() {
+                        TRUST_DELTA_MSI
+                    } else {
+                        TRUST_DELTA_START
+                    }
+                    .to_owned(),
                     TRUST_DELTA_MAPPINGS.to_owned(),
                 ]
             || self
@@ -221,12 +300,37 @@ impl PreparedWsbArtifacts {
                 },
                 PlannedAction::CollectEvidence,
             ] => {
-                sandbox_plan_sha256 == &self.receipt.wsb_plan_sha256
+                self.receipt.msi.is_none()
+                    && sandbox_plan_sha256 == &self.receipt.wsb_plan_sha256
                     && provider_sha256 == &self.receipt.provider.sha256
                     && guest_agent_sha256 == &self.receipt.guest_agent.sha256
                     && workspace.as_ref() == &self.receipt.workspace
                     && workspace_identity_sha256 == &self.receipt.workspace_identity_sha256
             }
+            [
+                PlannedAction::AssessHost,
+                PlannedAction::PrepareWorkspace,
+                PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
+                    sandbox_plan_sha256,
+                    provider_sha256,
+                    guest_agent_sha256,
+                    workspace,
+                    workspace_identity_sha256,
+                    import_receipt_sha256,
+                    application_sha256,
+                    scenario_sha256,
+                },
+                PlannedAction::CollectEvidence,
+            ] => self.receipt.msi.as_ref().is_some_and(|msi| {
+                sandbox_plan_sha256 == &self.receipt.wsb_plan_sha256
+                    && provider_sha256 == &self.receipt.provider.sha256
+                    && guest_agent_sha256 == &self.receipt.guest_agent.sha256
+                    && workspace.as_ref() == &self.receipt.workspace
+                    && workspace_identity_sha256 == &self.receipt.workspace_identity_sha256
+                    && import_receipt_sha256 == &msi.import_receipt_sha256
+                    && application_sha256 == &msi.staged_payload.sha256
+                    && scenario_sha256 == &msi.scenario_sha256
+            }),
             _ => false,
         };
         if !matching_action {
@@ -357,12 +461,77 @@ pub fn build_wsb_preparation(
         approval_required: true,
         provider_acquired: false,
         provider_mutated: false,
+        msi: None,
     };
     let artifacts = PreparedWsbArtifacts {
         run_plan,
         wsb_plan,
         receipt,
     };
+    artifacts.validate()?;
+    Ok(artifacts)
+}
+
+pub fn build_wsb_msi_preparation(
+    run_id: &str,
+    project: &Project,
+    readiness: &WindowsSandboxReadiness,
+    workspace: &WorkspaceBindingEvidence,
+    guest_agent: &BinaryIdentity,
+    created_at: &str,
+    msi: WsbMsiApplication,
+) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
+    msi.validate(workspace)?;
+    let compiled = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
+        project,
+        &msi.scenario.scenario_id,
+    )
+    .map_err(|e| WsbPreparationError::Project(e.to_string()))?;
+    if compiled != msi.scenario {
+        return Err(WsbPreparationError::Project(
+            "compiled scenario differs from project".to_owned(),
+        ));
+    }
+    let mut artifacts = build_wsb_preparation(
+        run_id,
+        project,
+        readiness,
+        workspace,
+        guest_agent,
+        created_at,
+    )?;
+    artifacts.wsb_plan.probe.output = GUEST_MSI_RESULT.to_owned();
+    artifacts.receipt.wsb_plan_sha256 = canonical_hash(&artifacts.wsb_plan)?;
+    artifacts.run_plan = RunPlan::new(
+        run_id,
+        &project.metadata.name,
+        &artifacts.receipt.project_revision_sha256,
+        RunLifecycleKind::Assessment,
+        created_at,
+        vec![
+            PlannedAction::AssessHost,
+            PlannedAction::PrepareWorkspace,
+            PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
+                sandbox_plan_sha256: artifacts.receipt.wsb_plan_sha256.clone(),
+                provider_sha256: artifacts.receipt.provider.sha256.clone(),
+                guest_agent_sha256: guest_agent.sha256.clone(),
+                workspace: Box::new(workspace.clone()),
+                workspace_identity_sha256: artifacts.receipt.workspace_identity_sha256.clone(),
+                import_receipt_sha256: msi.import_receipt_sha256.clone(),
+                application_sha256: msi.staged_payload.sha256.clone(),
+                scenario_sha256: msi.scenario_sha256.clone(),
+            },
+            PlannedAction::CollectEvidence,
+        ],
+        vec![TRUST_DELTA_MSI.to_owned(), TRUST_DELTA_MAPPINGS.to_owned()],
+    )
+    .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+    artifacts.receipt.run_plan_sha256 = artifacts
+        .run_plan
+        .hash()
+        .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+    artifacts.receipt.schema_version = WSB_MSI_PREPARATION_RECEIPT_SCHEMA_VERSION.to_owned();
+    artifacts.receipt.msi = Some(msi);
     artifacts.validate()?;
     Ok(artifacts)
 }
@@ -619,9 +788,84 @@ pub fn prepare_windows_sandbox_bundle(
     workspace_leaf: &str,
     created_at: &str,
 ) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
+    prepare_bundle(
+        run_id,
+        project,
+        guest_agent_source,
+        expected_guest_agent_sha256,
+        workspace_parent,
+        workspace_leaf,
+        created_at,
+        None,
+    )
+}
+
+#[cfg(windows)]
+pub struct WsbMsiPreparationInput<'a> {
+    pub import_receipt: &'a aiw_probe::ApplicationFileImportReceipt,
+    pub scenario_id: &'a str,
+}
+
+#[cfg(windows)]
+pub fn prepare_windows_sandbox_msi_bundle(
+    run_id: &str,
+    project: &Project,
+    guest_agent_source: &Path,
+    expected_guest_agent_sha256: &str,
+    workspace_parent: &Path,
+    created_at: &str,
+    msi: WsbMsiPreparationInput<'_>,
+) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
+    prepare_bundle(
+        run_id,
+        project,
+        guest_agent_source,
+        expected_guest_agent_sha256,
+        workspace_parent,
+        run_id,
+        created_at,
+        Some(msi),
+    )
+}
+
+#[cfg(windows)]
+#[allow(clippy::too_many_arguments)]
+fn prepare_bundle(
+    run_id: &str,
+    project: &Project,
+    guest_agent_source: &Path,
+    expected_guest_agent_sha256: &str,
+    workspace_parent: &Path,
+    workspace_leaf: &str,
+    created_at: &str,
+    msi_input: Option<WsbMsiPreparationInput<'_>>,
+) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
     use aiw_windows_platform::{HeldRunWorkspace, WorkspaceError, assess_windows_sandbox};
 
     validate_request_contract(run_id, project, created_at)?;
+    let mut held_msi = match &msi_input {
+        Some(input) => {
+            let scenario = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
+                project,
+                input.scenario_id,
+            )
+            .map_err(|e| WsbPreparationError::Project(e.to_string()))?;
+            if input.import_receipt.source_kind != aiw_probe::ApplicationInspectionKind::Msi
+                || input.import_receipt.sha256 != scenario.application_sha256
+                || input.import_receipt.size_bytes > 128 * 1024 * 1024
+            {
+                return Err(WsbPreparationError::Contract(
+                    "MSI intake differs from scenario or exceeds size limit".to_owned(),
+                ));
+            }
+            Some((
+                aiw_windows_platform::open_verified_application_file_import(input.import_receipt)
+                    .map_err(|e| WsbPreparationError::Contract(e.to_string()))?,
+                scenario,
+            ))
+        }
+        None => None,
+    };
     if workspace_leaf != run_id {
         return Err(WsbPreparationError::Contract(
             "workspace leaf must exactly match the run ID".to_owned(),
@@ -651,7 +895,7 @@ pub fn prepare_windows_sandbox_bundle(
         require_tools_allowlist(&workspace.tools_path())?;
         let (_held_agent, guest_agent) = stage_guest_agent(&mut held_guest_agent, &workspace)?;
         require_tools_allowlist(&workspace.tools_path())?;
-        let artifacts = build_wsb_preparation(
+        let mut artifacts = build_wsb_preparation(
             run_id,
             project,
             &readiness,
@@ -659,6 +903,57 @@ pub fn prepare_windows_sandbox_bundle(
             &guest_agent,
             created_at,
         )?;
+        let held_staged_msi = if let Some((held, scenario)) = &mut held_msi {
+            let created = workspace
+                .create_tools_file_new(MSI_FILE)
+                .map_err(|e| WsbPreparationError::Workspace(e.to_string()))?;
+            let staged = held
+                .copy_to(created)
+                .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+            let staged_identity = staged.identity().clone();
+            drop(staged);
+            let staged = workspace
+                .reopen_tools_file_readonly(MSI_FILE)
+                .map_err(|e| WsbPreparationError::Workspace(e.to_string()))?;
+            let input = msi_input.as_ref().expect("held MSI requires input");
+            let observed = aiw_windows_platform::HeldApplicationFile::open(staged.final_path())
+                .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+            if staged.identity() != &staged_identity
+                || observed.observation().identity != staged_identity
+                || observed.observation().sha256 != input.import_receipt.sha256
+                || observed.observation().size_bytes != input.import_receipt.size_bytes
+            {
+                return Err(WsbPreparationError::Contract(
+                    "staged MSI drifted during readonly reopen".to_owned(),
+                ));
+            }
+            let binding = WsbMsiApplication {
+                import_receipt: input.import_receipt.clone(),
+                import_receipt_sha256: held.verification().receipt_sha256.clone(),
+                scenario: scenario.clone(),
+                scenario_sha256: canonical_hash(scenario)?,
+                staged_payload: BinaryIdentity {
+                    canonical_path: provider_path(&staged.final_path().to_string_lossy()),
+                    sha256: input.import_receipt.sha256.clone(),
+                    size_bytes: input.import_receipt.size_bytes,
+                    version: None,
+                    signature_status: ReadinessState::Unknown,
+                },
+                staged_identity: staged.identity().clone(),
+            };
+            artifacts = build_wsb_msi_preparation(
+                run_id,
+                project,
+                &readiness,
+                workspace.evidence(),
+                &guest_agent,
+                created_at,
+                binding,
+            )?;
+            Some((staged, observed))
+        } else {
+            None
+        };
         workspace
             .revalidate()
             .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?;
@@ -668,8 +963,19 @@ pub fn prepare_windows_sandbox_bundle(
             .revalidate()
             .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?;
         ensure_empty_directory(&workspace.output_path())?;
-        require_tools_allowlist(&workspace.tools_path())?;
+        require_profile_tools_allowlist(&workspace.tools_path(), artifacts.receipt.msi.is_some())?;
         require_workspace_allowlist(workspace.root_path(), PreparationWorkspaceState::Building)?;
+        if let Some((held, _)) = &mut held_msi {
+            held.revalidate()
+                .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+        }
+        if let Some((file, observed)) = &held_staged_msi {
+            file.revalidate()
+                .map_err(|e| WsbPreparationError::Workspace(e.to_string()))?;
+            observed
+                .revalidate()
+                .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+        }
         complete_bundle(&workspace, &artifacts, staged)?;
         Ok(artifacts)
     })();
@@ -695,6 +1001,11 @@ pub(crate) struct HeldVerifiedWsbPreparation {
     run_plan_file: std::fs::File,
     wsb_plan_file: std::fs::File,
     _held_agent: HeldGuestAgentSource,
+    held_msi: Option<(
+        aiw_windows_platform::BoundWorkspaceFile,
+        aiw_windows_platform::HeldApplicationFile,
+        aiw_windows_platform::HeldVerifiedApplicationFileImport,
+    )>,
     workspace: aiw_windows_platform::HeldRunWorkspace,
 }
 
@@ -709,7 +1020,20 @@ impl HeldVerifiedWsbPreparation {
             .revalidate()
             .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?;
         ensure_empty_directory(&self.workspace.output_path())?;
-        require_tools_allowlist(&self.workspace.tools_path())?;
+        require_profile_tools_allowlist(
+            &self.workspace.tools_path(),
+            self.artifacts.receipt.msi.is_some(),
+        )?;
+        if let Some((file, observed, intake)) = &self.held_msi {
+            intake
+                .revalidate()
+                .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+            file.revalidate()
+                .map_err(|e| WsbPreparationError::Workspace(e.to_string()))?;
+            observed
+                .revalidate()
+                .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+        }
         require_workspace_allowlist(self.workspace.root_path(), state)?;
         let receipt: WsbPreparationReceipt = read_json_bounded(&mut self.receipt_file)?;
         let run_plan: RunPlan = read_json_bounded(&mut self.run_plan_file)?;
@@ -757,6 +1081,11 @@ pub(crate) fn open_verified_windows_sandbox_preparation(
     let mut receipt_file = open_bundle_file(&workspace_root.join(RECEIPT_FILE))?;
     let receipt: WsbPreparationReceipt = read_json_bounded(&mut receipt_file)?;
     receipt.validate()?;
+    if allow_revoking && receipt.msi.is_some() {
+        return Err(WsbPreparationError::Contract(
+            "private golden discard does not authorize MSI workspace deletion".to_owned(),
+        ));
+    }
     require_hash(expected_guest_agent_sha256).map_err(|_| {
         WsbPreparationError::GuestAgent(
             "expected guest-agent identity is not lowercase SHA-256".to_owned(),
@@ -794,7 +1123,7 @@ pub(crate) fn open_verified_windows_sandbox_preparation(
         .revalidate()
         .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?;
     ensure_empty_directory(&workspace.output_path())?;
-    require_tools_allowlist(&workspace.tools_path())?;
+    require_profile_tools_allowlist(&workspace.tools_path(), receipt.msi.is_some())?;
     let state = if workspace.root_path().join("runs").exists() {
         if !allow_imported {
             return Err(WsbPreparationError::Contract(
@@ -822,6 +1151,38 @@ pub(crate) fn open_verified_windows_sandbox_preparation(
             "staged guest-agent size differs from the preparation receipt".to_owned(),
         ));
     }
+    let held_msi = if let Some(msi) = &receipt.msi {
+        let intake =
+            aiw_windows_platform::open_verified_application_file_import(&msi.import_receipt)
+                .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+        let compiled = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
+            project,
+            &msi.scenario.scenario_id,
+        )
+        .map_err(|e| WsbPreparationError::Project(e.to_string()))?;
+        if compiled != msi.scenario {
+            return Err(WsbPreparationError::Project(
+                "persisted MSI scenario differs from project".to_owned(),
+            ));
+        }
+        let file = workspace
+            .reopen_tools_file_readonly(MSI_FILE)
+            .map_err(|e| WsbPreparationError::Workspace(e.to_string()))?;
+        let observed = aiw_windows_platform::HeldApplicationFile::open(file.final_path())
+            .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+        if file.identity() != &msi.staged_identity
+            || observed.observation().identity != msi.staged_identity
+            || observed.observation().sha256 != msi.staged_payload.sha256
+            || observed.observation().size_bytes != msi.staged_payload.size_bytes
+        {
+            return Err(WsbPreparationError::Contract(
+                "staged MSI identity or content drifted".to_owned(),
+            ));
+        }
+        Some((file, observed, intake))
+    } else {
+        None
+    };
     let observed = PreparedWsbArtifacts {
         run_plan,
         wsb_plan,
@@ -857,6 +1218,7 @@ pub(crate) fn open_verified_windows_sandbox_preparation(
         run_plan_file,
         wsb_plan_file,
         _held_agent: held_agent,
+        held_msi,
         workspace,
     };
     held.revalidate(state)?;
@@ -900,7 +1262,12 @@ pub fn import_windows_sandbox_preparation(
     )?;
     let run_id = held.artifacts.receipt.run_id.clone();
     let receipt = WsbPlanningImportReceipt {
-        schema_version: aiw_orchestrator::WSB_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION.to_owned(),
+        schema_version: if held.artifacts.receipt.msi.is_some() {
+            aiw_orchestrator::WSB_MSI_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION
+        } else {
+            aiw_orchestrator::WSB_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION
+        }
+        .to_owned(),
         run_id: run_id.clone(),
         imported_at: imported_at.to_owned(),
         status: WsbPlanningImportStatus::PendingApproval,
@@ -1173,6 +1540,11 @@ fn ensure_empty_directory(path: &Path) -> Result<(), WsbPreparationError> {
 
 #[cfg(windows)]
 fn require_tools_allowlist(path: &Path) -> Result<(), WsbPreparationError> {
+    require_profile_tools_allowlist(path, false)
+}
+
+#[cfg(windows)]
+fn require_profile_tools_allowlist(path: &Path, msi: bool) -> Result<(), WsbPreparationError> {
     let mut observed = std::fs::read_dir(path)
         .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?
         .map(|entry| {
@@ -1186,7 +1558,12 @@ fn require_tools_allowlist(path: &Path) -> Result<(), WsbPreparationError> {
         })
         .collect::<Result<Vec<_>, _>>()?;
     observed.sort();
-    if !observed.is_empty() && observed.as_slice() != [GUEST_AGENT_FILE] {
+    let valid = if msi {
+        observed.as_slice() == [GUEST_AGENT_FILE, MSI_FILE]
+    } else {
+        observed.is_empty() || observed.as_slice() == [GUEST_AGENT_FILE]
+    };
+    if !valid {
         return Err(WsbPreparationError::Workspace(
             "tools directory contains entries outside the fixed preparation allowlist".to_owned(),
         ));

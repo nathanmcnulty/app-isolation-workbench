@@ -41,8 +41,9 @@ use aiw_runner::{
 };
 #[cfg(windows)]
 use aiw_runner::{
-    import_windows_sandbox_preparation, prepare_windows_sandbox_bundle, recover_windows_sandbox,
-    start_approved_windows_sandbox_golden_probe, verify_windows_sandbox_preparation,
+    WsbMsiPreparationInput, import_windows_sandbox_preparation, prepare_windows_sandbox_bundle,
+    prepare_windows_sandbox_msi_bundle, recover_windows_sandbox, start_approved_windows_sandbox,
+    verify_windows_sandbox_preparation,
 };
 use aiw_schema::{
     LEGACY_PROJECT_SCHEMA_VERSION, LegacyProjectV0Alpha1, ModelPack, PROJECT_SCHEMA_VERSION,
@@ -320,6 +321,25 @@ struct RunArgs {
 
 #[derive(Debug, Subcommand)]
 enum RunCommand {
+    /// Stage a verified MSI and fixed typed scenario for separate approval.
+    PrepareWsbMsi {
+        #[arg(long)]
+        run_id: String,
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        guest_agent: PathBuf,
+        #[arg(long)]
+        guest_agent_sha256: String,
+        #[arg(long)]
+        workspace_parent: PathBuf,
+        #[arg(long)]
+        created_at: String,
+        #[arg(long)]
+        import_receipt: PathBuf,
+        #[arg(long)]
+        scenario: String,
+    },
     /// Create and verify a fresh Windows Sandbox workspace and approvable plan bundle.
     /// This does not approve, acquire, start, connect, stop, or recover a provider.
     PrepareWsb {
@@ -486,6 +506,9 @@ struct SchemaArgs {
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum SchemaKind {
+    ImportedMsiGuestRequest,
+    ImportedMsiScenarioResult,
+    WsbApprovedExecution,
     CompiledMsiScenario,
     MsiScenarioCompilation,
     ApplicationFileAuthority,
@@ -1131,6 +1154,51 @@ fn run(command: Command) -> Result<()> {
             HostCommand::Assess => write_json(&assess_windows_sandbox()),
         },
         Command::Run(args) => match args.command {
+            RunCommand::PrepareWsbMsi {
+                run_id,
+                project,
+                guest_agent,
+                guest_agent_sha256,
+                workspace_parent,
+                created_at,
+                import_receipt,
+                scenario,
+            } => {
+                let loaded = read_project(&project)?;
+                let receipt: ApplicationFileImportReceipt =
+                    read_document(&import_receipt, MAX_CONFIG_BYTES)?;
+                #[cfg(windows)]
+                {
+                    let prepared = prepare_windows_sandbox_msi_bundle(
+                        &run_id,
+                        &loaded.project,
+                        &guest_agent,
+                        &guest_agent_sha256,
+                        &workspace_parent,
+                        &created_at,
+                        WsbMsiPreparationInput {
+                            import_receipt: &receipt,
+                            scenario_id: &scenario,
+                        },
+                    )
+                    .map_err(|source| anyhow!(RunPreparationFailed { run_id, source }))?;
+                    write_json(&preparation_result(prepared))
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (
+                        run_id,
+                        loaded,
+                        guest_agent,
+                        guest_agent_sha256,
+                        workspace_parent,
+                        created_at,
+                        receipt,
+                        scenario,
+                    );
+                    bail!("MSI preparation requires Windows")
+                }
+            }
             RunCommand::PrepareWsb {
                 run_id,
                 project,
@@ -1368,7 +1436,7 @@ fn run(command: Command) -> Result<()> {
                             source: RunnerError::ApprovalBinding,
                         }));
                     }
-                    let execution = start_approved_windows_sandbox_golden_probe(
+                    let execution = start_approved_windows_sandbox(
                         &root,
                         &project,
                         &loaded.project,
@@ -1437,6 +1505,15 @@ fn run(command: Command) -> Result<()> {
             ProviderCommand::MxcProbe { binary } => write_json(&plan_capability_probe(&binary)?),
         },
         Command::Schema(args) => match args.kind {
+            SchemaKind::ImportedMsiGuestRequest => {
+                write_json(&schema_for!(aiw_provider_wsb::ImportedMsiGuestRequest))
+            }
+            SchemaKind::ImportedMsiScenarioResult => {
+                write_json(&schema_for!(aiw_provider_wsb::ImportedMsiScenarioResult))
+            }
+            SchemaKind::WsbApprovedExecution => {
+                write_json(&schema_for!(aiw_runner::WsbApprovedExecution))
+            }
             SchemaKind::CompiledMsiScenario => write_json(&schema_for!(CompiledMsiScenario)),
             SchemaKind::MsiScenarioCompilation => write_json(&schema_for!(MsiScenarioCompilation)),
             SchemaKind::ApplicationFileAuthority => {

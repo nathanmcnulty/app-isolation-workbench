@@ -26,7 +26,8 @@ pub use portable_import::{
 };
 #[cfg(windows)]
 pub use source_import::{
-    SourceImportError, import_application_file, verify_application_file_import,
+    HeldVerifiedApplicationFileImport, SourceImportError, import_application_file,
+    open_verified_application_file_import, verify_application_file_import,
 };
 #[cfg(windows)]
 pub use source_inspection::{

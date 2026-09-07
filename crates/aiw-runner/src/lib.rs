@@ -15,16 +15,17 @@ mod preparation;
 mod session;
 
 pub use preparation::{
-    PreparedWsbArtifacts, WSB_PLANNING_IMPORT_RESULT_SCHEMA_VERSION,
-    WSB_PREPARATION_RECEIPT_SCHEMA_VERSION, WsbPlanningImportDisposition, WsbPlanningImportReceipt,
+    PreparedWsbArtifacts, WSB_MSI_PREPARATION_RECEIPT_SCHEMA_VERSION,
+    WSB_PLANNING_IMPORT_RESULT_SCHEMA_VERSION, WSB_PREPARATION_RECEIPT_SCHEMA_VERSION,
+    WsbMsiApplication, WsbPlanningImportDisposition, WsbPlanningImportReceipt,
     WsbPlanningImportResult, WsbPreparationError, WsbPreparationReceipt, WsbPreparationStatus,
-    build_wsb_preparation,
+    build_wsb_msi_preparation, build_wsb_preparation,
 };
 
 #[cfg(windows)]
 pub use preparation::{
-    import_windows_sandbox_preparation, prepare_windows_sandbox_bundle,
-    verify_windows_sandbox_preparation,
+    WsbMsiPreparationInput, import_windows_sandbox_preparation, prepare_windows_sandbox_bundle,
+    prepare_windows_sandbox_msi_bundle, verify_windows_sandbox_preparation,
 };
 
 pub use session::{
@@ -77,6 +78,8 @@ pub struct WsbGoldenProbeStart {
     pub workspace: WorkspaceBindingEvidence,
     pub workspace_identity_sha256: String,
     pub timeout_seconds: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub msi: Option<WsbMsiApplication>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
@@ -93,6 +96,34 @@ pub struct WsbGoldenProbeExecution {
     pub workspace: WorkspaceBindingEvidence,
     pub workspace_identity_sha256: String,
     pub cleanup_complete: bool,
+    #[serde(skip)]
+    scenario: Option<aiw_provider_wsb::ImportedMsiScenarioResult>,
+}
+
+/// Common receipt-correlated lifecycle result. Application observations remain
+/// untrusted evidence and do not establish containment.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WsbImportedMsiExecution {
+    pub schema_version: String,
+    pub run_id: String,
+    pub sandbox_id: String,
+    pub provider_sha256: String,
+    pub config_sha256: String,
+    pub request_sha256: String,
+    pub receipt_sha256: String,
+    pub evidence_root_hash: String,
+    pub workspace: WorkspaceBindingEvidence,
+    pub workspace_identity_sha256: String,
+    pub cleanup_complete: bool,
+    pub scenario: aiw_provider_wsb::ImportedMsiScenarioResult,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum WsbApprovedExecution {
+    GoldenProbe(WsbGoldenProbeExecution),
+    ImportedMsi(WsbImportedMsiExecution),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -226,6 +257,12 @@ pub fn observe_wsb_session_status(layout: &RunLayout) -> Result<WsbSessionStatus
         .iter()
         .filter_map(|action| match action {
             PlannedAction::ExecuteWindowsSandboxGoldenProbe {
+                provider_sha256,
+                workspace,
+                workspace_identity_sha256,
+                ..
+            }
+            | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
                 provider_sha256,
                 workspace,
                 workspace_identity_sha256,
@@ -554,13 +591,35 @@ pub(crate) fn execute_wsb_golden_probe(
         record_terminal_failure(layout, RunnerError::Cancelled)?;
         return Err(RunnerError::Cancelled);
     }
+    let scenario = (|| -> Result<_, RunnerError> {
+        Ok(match &context.guest_request {
+            ExecutionGuestRequest::ImportedMsi(expected) => {
+                let observed: aiw_provider_wsb::ImportedMsiScenarioResult = read_bounded_json(
+                    &context.output_root.join("scenario-result.json"),
+                    64 * 1024,
+                )?;
+                observed
+                    .validate_for_request(expected)
+                    .map_err(|e| RunnerError::Receipt(e.to_string()))?;
+                Some(observed)
+            }
+            ExecutionGuestRequest::Golden(_) => None,
+        })
+    })();
+    let scenario = match scenario {
+        Ok(value) => value,
+        Err(error) => {
+            record_terminal_failure(layout, error.clone())?;
+            return Err(error);
+        }
+    };
     let result = RunResult::new(
         context.plan.run_id.clone(),
         RunOutcome::InsufficientEvidence,
         "provider-time-not-trusted",
         Some(verification.evidence_root_hash.clone()),
         true,
-        "Windows Sandbox W1 lifecycle completed; containment conclusions require later host-side process, token, trace, and canary evidence.",
+        "Approved Windows Sandbox lifecycle completed; containment conclusions require host-side process, token, trace, and canary evidence.",
     )
     .map_err(journal_error)?;
     layout.write_result(&result).map_err(journal_error)?;
@@ -570,12 +629,13 @@ pub(crate) fn execute_wsb_golden_probe(
         sandbox_id: context.binding.session_id,
         provider_sha256: request.provider.sha256.clone(),
         config_sha256: context.binding.config_sha256,
-        request_sha256: context.guest_request.request_sha256,
+        request_sha256: context.guest_request.digest().to_owned(),
         receipt_sha256: verification.receipt_sha256,
         evidence_root_hash: verification.evidence_root_hash,
         workspace: request.workspace.clone(),
         workspace_identity_sha256: request.workspace_identity_sha256.clone(),
         cleanup_complete: true,
+        scenario,
     })
 }
 
@@ -591,6 +651,46 @@ pub fn start_approved_windows_sandbox_golden_probe(
     expected_guest_agent_sha256: &str,
     timeout_seconds: u32,
 ) -> Result<WsbGoldenProbeExecution, RunnerError> {
+    match start_approved_windows_sandbox_inner(
+        workspace_root,
+        project_path,
+        project,
+        expected_guest_agent_sha256,
+        timeout_seconds,
+        false,
+    )? {
+        WsbApprovedExecution::GoldenProbe(result) => Ok(result),
+        WsbApprovedExecution::ImportedMsi(_) => Err(RunnerError::ApprovalBinding),
+    }
+}
+
+#[cfg(windows)]
+pub fn start_approved_windows_sandbox(
+    workspace_root: &Path,
+    project_path: &Path,
+    project: &Project,
+    expected_guest_agent_sha256: &str,
+    timeout_seconds: u32,
+) -> Result<WsbApprovedExecution, RunnerError> {
+    start_approved_windows_sandbox_inner(
+        workspace_root,
+        project_path,
+        project,
+        expected_guest_agent_sha256,
+        timeout_seconds,
+        true,
+    )
+}
+
+#[cfg(windows)]
+fn start_approved_windows_sandbox_inner(
+    workspace_root: &Path,
+    project_path: &Path,
+    project: &Project,
+    expected_guest_agent_sha256: &str,
+    timeout_seconds: u32,
+    allow_msi: bool,
+) -> Result<WsbApprovedExecution, RunnerError> {
     let mut held = preparation::open_verified_windows_sandbox_preparation(
         workspace_root,
         project,
@@ -602,6 +702,9 @@ pub fn start_approved_windows_sandbox_golden_probe(
     held.revalidate_imported()
         .map_err(|error| RunnerError::Preparation(error.to_string()))?;
     let artifacts = held.artifacts.clone();
+    if artifacts.receipt.msi.is_some() && !allow_msi {
+        return Err(RunnerError::ApprovalBinding);
+    }
     let layout = RunLayout::new(held.workspace().root_path(), &artifacts.receipt.run_id)
         .map_err(journal_error)?;
     if layout.read_plan().map_err(journal_error)? != artifacts.run_plan {
@@ -609,7 +712,12 @@ pub fn start_approved_windows_sandbox_golden_probe(
     }
 
     let request = WsbGoldenProbeStart {
-        schema_version: "aiw.dev/wsb-golden-probe-start/v0alpha2".to_owned(),
+        schema_version: if artifacts.receipt.msi.is_some() {
+            "aiw.dev/wsb-imported-msi-start/v0alpha1"
+        } else {
+            "aiw.dev/wsb-golden-probe-start/v0alpha2"
+        }
+        .to_owned(),
         run_root: artifacts.receipt.workspace.root.final_path.clone(),
         project_path: project_path.to_string_lossy().into_owned(),
         wsb_plan: artifacts.wsb_plan.clone(),
@@ -618,6 +726,7 @@ pub fn start_approved_windows_sandbox_golden_probe(
         workspace: artifacts.receipt.workspace.clone(),
         workspace_identity_sha256: artifacts.receipt.workspace_identity_sha256.clone(),
         timeout_seconds,
+        msi: artifacts.receipt.msi.clone(),
     };
     let approval = layout.read_approval().map_err(journal_error)?;
     if !matches!(
@@ -639,14 +748,33 @@ pub fn start_approved_windows_sandbox_golden_probe(
         }),
         plan: artifacts.wsb_plan,
     };
-    execute_wsb_golden_probe(
+    let result = execute_wsb_golden_probe(
         &request,
         &readiness,
         &layout,
         &process,
         &AlreadyHeldProviderLease,
         held.workspace(),
-    )
+    )?;
+    if request.msi.is_some() {
+        let scenario = result.scenario.ok_or(RunnerError::Drift)?;
+        Ok(WsbApprovedExecution::ImportedMsi(WsbImportedMsiExecution {
+            schema_version: "aiw.dev/wsb-imported-msi-execution/v0alpha1".to_owned(),
+            run_id: result.run_id,
+            sandbox_id: result.sandbox_id,
+            provider_sha256: result.provider_sha256,
+            config_sha256: result.config_sha256,
+            request_sha256: result.request_sha256,
+            receipt_sha256: result.receipt_sha256,
+            evidence_root_hash: result.evidence_root_hash,
+            workspace: result.workspace,
+            workspace_identity_sha256: result.workspace_identity_sha256,
+            cleanup_complete: result.cleanup_complete,
+            scenario,
+        }))
+    } else {
+        Ok(WsbApprovedExecution::GoldenProbe(result))
+    }
 }
 
 /// Reconciles one persisted Windows Sandbox transaction. The caller supplies
@@ -827,6 +955,12 @@ fn recovery_workspace(
                 workspace,
                 workspace_identity_sha256,
                 ..
+            }
+            | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
+                provider_sha256,
+                workspace,
+                workspace_identity_sha256,
+                ..
             } => Some((
                 provider_sha256.as_str(),
                 workspace.as_ref(),
@@ -875,12 +1009,14 @@ fn remove_recovery_request(
         return Ok(());
     }
     ensure_ordinary_file(&path)?;
-    let current: GuestRequest = read_bounded_json(&path, 64 * 1024)?;
-    if current.request_sha256 != transaction.request_sha256
+    let current: ExecutionGuestRequest = read_bounded_json(&path, 64 * 1024)?;
+    current.validate()?;
+    let (run_id, sandbox_id, config_sha256) = current.binding();
+    if current.digest() != transaction.request_sha256
         || request_hash(&current)? != transaction.request_sha256
-        || current.run_id != transaction.run_id
-        || current.sandbox_id != transaction.session_id
-        || current.config_sha256 != transaction.config_sha256
+        || run_id != transaction.run_id
+        || sandbox_id != transaction.session_id
+        || config_sha256 != transaction.config_sha256
     {
         return Err(RunnerError::Drift);
     }
@@ -951,7 +1087,7 @@ struct ExecutionContext {
     lifecycle: WindowsSandboxCliLifecyclePlan,
     output_root: PathBuf,
     request_path: PathBuf,
-    guest_request: GuestRequest,
+    guest_request: ExecutionGuestRequest,
     completion: WindowsSandboxCompletionExpectation,
     binding: SessionBinding,
 }
@@ -1025,20 +1161,41 @@ fn prepare_execution(
     {
         return Err(RunnerError::Drift);
     }
-    let guest_request = GuestRequest::new(
+    let guest_request = if let Some(msi) = &request.msi {
+        revalidate_identity(&msi.staged_payload)?;
+        ExecutionGuestRequest::ImportedMsi(
+            aiw_provider_wsb::ImportedMsiGuestRequest::new(
+                &plan.run_id,
+                &session_id,
+                &rendered.sha256,
+                &request.guest_agent.sha256,
+                msi.scenario.clone(),
+                &msi.staged_payload.sha256,
+                msi.staged_payload.size_bytes,
+                &msi.import_receipt_sha256,
+            )
+            .map_err(|e| RunnerError::Preparation(e.to_string()))?,
+        )
+    } else {
+        ExecutionGuestRequest::Golden(GuestRequest::new(
+            &plan.run_id,
+            &session_id,
+            &rendered.sha256,
+            &request.guest_agent.sha256,
+            &output.sandbox_folder,
+        )?)
+    };
+    let mut completion = completion_expectation(
         &plan.run_id,
         &session_id,
         &rendered.sha256,
         &request.guest_agent.sha256,
-        &output.sandbox_folder,
-    )?;
-    let completion = completion_expectation(
-        &plan.run_id,
-        &session_id,
-        &rendered.sha256,
-        &request.guest_agent.sha256,
-        &guest_request.request_sha256,
+        guest_request.digest(),
     );
+    if request.msi.is_some() {
+        completion.artifacts[0].path = "scenario-result.json".to_owned();
+        completion.artifacts[0].role = aiw_evidence::ArtifactRole::ScenarioResults;
+    }
     let binding = SessionBinding {
         run_id: plan.run_id.clone(),
         plan_hash: plan.hash().map_err(journal_error)?,
@@ -1046,7 +1203,7 @@ fn prepare_execution(
         provider_sha256: request.provider.sha256.clone(),
         config_sha256: rendered.sha256,
         session_id,
-        request_sha256: guest_request.request_sha256.clone(),
+        request_sha256: guest_request.digest().to_owned(),
         workspace_identity_sha256: request.workspace_identity_sha256.clone(),
         recovery: Some(SessionRecoveryBinding {
             workspace: request.workspace.clone(),
@@ -1409,15 +1566,19 @@ fn connect_exact_session(
     Ok(())
 }
 
-fn prepare_request_artifact(path: &Path, expected: &GuestRequest) -> Result<(), RunnerError> {
+fn prepare_request_artifact(
+    path: &Path,
+    expected: &ExecutionGuestRequest,
+) -> Result<(), RunnerError> {
+    expected.validate()?;
     let pending = request_pending_path(path)?;
     if pending.exists() {
         validate_staging_file(&pending)?;
         fs::remove_file(&pending).map_err(|_| RunnerError::Drift)?;
     }
     if path.exists() {
-        let current: GuestRequest = read_bounded_json(path, 64 * 1024)?;
-        if current != *expected || request_hash(&current)? != current.request_sha256 {
+        let current: ExecutionGuestRequest = read_bounded_json(path, 64 * 1024)?;
+        if current != *expected || request_hash(&current)? != current.digest() {
             return Err(RunnerError::Drift);
         }
         ensure_ordinary_file(path)?;
@@ -1429,7 +1590,7 @@ fn prepare_request_artifact(path: &Path, expected: &GuestRequest) -> Result<(), 
 fn publish_request(
     path: &Path,
     pending: &Path,
-    expected: &GuestRequest,
+    expected: &ExecutionGuestRequest,
 ) -> Result<(), RunnerError> {
     let mut bytes = serde_json::to_vec(expected).map_err(|_| RunnerError::Drift)?;
     bytes.push(b'\n');
@@ -1449,7 +1610,7 @@ fn publish_request(
     fs::remove_file(pending).map_err(|_| RunnerError::Drift)
 }
 
-fn remove_owned_request(path: &Path, expected: &GuestRequest) -> Result<(), RunnerError> {
+fn remove_owned_request(path: &Path, expected: &ExecutionGuestRequest) -> Result<(), RunnerError> {
     let pending = request_pending_path(path)?;
     if pending.exists() {
         validate_staging_file(&pending)?;
@@ -1459,8 +1620,8 @@ fn remove_owned_request(path: &Path, expected: &GuestRequest) -> Result<(), Runn
         return Ok(());
     }
     ensure_ordinary_file(path)?;
-    let current: GuestRequest = read_bounded_json(path, 64 * 1024)?;
-    if current != *expected || request_hash(&current)? != current.request_sha256 {
+    let current: ExecutionGuestRequest = read_bounded_json(path, 64 * 1024)?;
+    if current != *expected || request_hash(&current)? != current.digest() {
         return Err(RunnerError::Drift);
     }
     fs::remove_file(path).map_err(|_| RunnerError::Drift)
@@ -1589,6 +1750,44 @@ struct GuestRequest {
     receipt_path: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+enum ExecutionGuestRequest {
+    Golden(GuestRequest),
+    ImportedMsi(aiw_provider_wsb::ImportedMsiGuestRequest),
+}
+
+impl ExecutionGuestRequest {
+    fn digest(&self) -> &str {
+        match self {
+            Self::Golden(v) => &v.request_sha256,
+            Self::ImportedMsi(v) => &v.request_sha256,
+        }
+    }
+    fn binding(&self) -> (&str, &str, &str) {
+        match self {
+            Self::Golden(v) => (&v.run_id, &v.sandbox_id, &v.config_sha256),
+            Self::ImportedMsi(v) => (&v.run_id, &v.sandbox_id, &v.config_sha256),
+        }
+    }
+    fn validate(&self) -> Result<(), RunnerError> {
+        match self {
+            Self::Golden(v) => {
+                if v.schema_version != GUEST_REQUEST_SCHEMA
+                    || v.token_path != "token.json"
+                    || v.evidence_log_path != "evidence.jsonl"
+                    || v.receipt_path != "completion.json"
+                    || request_hash(v)? != v.request_sha256
+                {
+                    return Err(RunnerError::Drift);
+                }
+                Ok(())
+            }
+            Self::ImportedMsi(v) => v.validate().map_err(|_| RunnerError::Drift),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct GuestFailureDiagnostic {
@@ -1622,7 +1821,7 @@ impl GuestRequest {
     }
 }
 
-fn request_hash(value: &GuestRequest) -> Result<String, RunnerError> {
+fn request_hash(value: &impl Serialize) -> Result<String, RunnerError> {
     let mut json = serde_json::to_value(value).map_err(|_| RunnerError::Drift)?;
     json["requestSha256"] = serde_json::Value::String(String::new());
     let bytes = aiw_evidence::canonical_json_bytes(&json).map_err(|_| RunnerError::Drift)?;
@@ -1642,11 +1841,31 @@ fn ensure_approval(
         [
             PlannedAction::AssessHost,
             PlannedAction::PrepareWorkspace,
-            PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. },
+            PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. }
+                | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. },
             PlannedAction::CollectEvidence,
         ]
     ) {
         return Err(RunnerError::ApprovalBinding);
+    }
+    match (&plan.actions[2], &request.msi) {
+        (PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. }, None) => {}
+        (
+            PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
+                import_receipt_sha256,
+                application_sha256,
+                scenario_sha256,
+                ..
+            },
+            Some(msi),
+        ) if import_receipt_sha256 == &msi.import_receipt_sha256
+            && application_sha256 == &msi.staged_payload.sha256
+            && scenario_sha256 == &msi.scenario_sha256 =>
+        {
+            msi.validate(&request.workspace)
+                .map_err(|_| RunnerError::ApprovalBinding)?;
+        }
+        _ => return Err(RunnerError::ApprovalBinding),
     }
     let wsb_hash = canonical_hash(&request.wsb_plan)?;
     let workspace_hash = canonical_hash(&request.workspace)?;
@@ -1660,6 +1879,14 @@ fn ensure_approval(
                 guest_agent_sha256,
                 workspace,
                 workspace_identity_sha256,
+            }
+            | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+                ..
             } => Some((
                 sandbox_plan_sha256,
                 provider_sha256,
@@ -1687,7 +1914,12 @@ fn validate_start(
     request: &WsbGoldenProbeStart,
     readiness: &WindowsSandboxReadiness,
 ) -> Result<(), RunnerError> {
-    if request.schema_version != "aiw.dev/wsb-golden-probe-start/v0alpha2"
+    let schema = if request.msi.is_some() {
+        "aiw.dev/wsb-imported-msi-start/v0alpha1"
+    } else {
+        "aiw.dev/wsb-golden-probe-start/v0alpha2"
+    };
+    if request.schema_version != schema
         || request.workspace.validate().is_err()
         || !fixed_lower_hex(&request.workspace_identity_sha256, 64)
         || canonical_hash(&request.workspace).ok().as_ref()
@@ -2384,6 +2616,7 @@ mod tests {
             workspace_identity_sha256,
             wsb_plan,
             timeout_seconds: 1,
+            msi: None,
         };
         let plan = RunPlan::new(
             "w1-run",
@@ -3436,7 +3669,7 @@ mod tests {
         let request = request_for(&start);
         let path = request_path(&start);
         let pending = request_pending_path(&path).unwrap();
-        publish_request(&path, &pending, &request).unwrap();
+        publish_request(&path, &pending, &ExecutionGuestRequest::Golden(request)).unwrap();
         fs::write(&pending, b"partial").unwrap();
         let fake = success_process(&start);
         execute_wsb_golden_probe(&start, &readiness, &layout, &fake, &TestLease::default())
@@ -3652,6 +3885,7 @@ mod tests {
             workspace: artifacts.receipt.workspace,
             workspace_identity_sha256: artifacts.receipt.workspace_identity_sha256,
             timeout_seconds: 180,
+            msi: None,
         };
         let native = NativeWsbProcess {
             state: Mutex::new(NativeWsbState {
