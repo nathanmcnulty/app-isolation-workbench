@@ -3988,3 +3988,6 @@ mod tests {
         fs::remove_dir_all(root_path).unwrap();
     }
 }
+
+#[cfg(all(test, windows))]
+mod live_msi_recovery_tests;
