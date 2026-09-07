@@ -9,6 +9,11 @@ pub use windows_platform::{
 };
 
 #[cfg(windows)]
+pub use guest_msi::{
+    GuestMsiExecutionError, GuestMsiExecutionObservation, execute_fixed_notepad_plus_plus_msi,
+};
+
+#[cfg(windows)]
 #[doc(hidden)]
 pub use windows_platform::{
     WindowsSandboxRecoveryLease, WsbRecoveryDisposition, WsbRecoveryObservation,
@@ -128,6 +133,9 @@ mod exact_dispose;
 
 #[cfg(windows)]
 mod windows_platform;
+
+#[cfg(windows)]
+mod guest_msi;
 
 #[cfg(windows)]
 mod workspace;

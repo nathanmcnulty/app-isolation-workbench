@@ -42,6 +42,7 @@ windows = { version = "0.62.2", features = [
     "Win32_System_SystemServices",
     "Win32_System_WindowsProgramming",
     "Win32_System_WinRT",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 
 # This crate is the sole WSB-specific native boundary. Unsafe blocks are kept

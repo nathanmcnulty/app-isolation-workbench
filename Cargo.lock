@@ -68,12 +68,14 @@ dependencies = [
  "aiw-evidence",
  "aiw-provider-wsb",
  "aiw-token",
+ "aiw-windows-platform",
  "anyhow",
  "clap",
  "hex",
  "serde",
  "serde_json",
  "sha2",
+ "windows",
 ]
 
 [[package]]

@@ -142,7 +142,6 @@ impl ImportedMsiGuestRequest {
 #[serde(rename_all = "camelCase")]
 pub enum ImportedMsiScenarioStatus {
     Succeeded,
-    Failed,
 }
 
 #[derive(Debug, Clone, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -160,6 +159,7 @@ pub struct ImportedMsiScenarioResult {
     pub status: ImportedMsiScenarioStatus,
     pub install_exit_code: i32,
     pub launch_process_id: u32,
+    pub launch_exit_code: i32,
     pub process_observed: bool,
     pub graceful_close_requested: bool,
     pub process_closed: bool,
@@ -170,6 +170,7 @@ impl ImportedMsiScenarioResult {
         request: &ImportedMsiGuestRequest,
         install_exit_code: i32,
         launch_process_id: u32,
+        launch_exit_code: i32,
     ) -> Result<Self, ImportedMsiRequestError> {
         let value = Self {
             schema_version: IMPORTED_MSI_SCENARIO_RESULT_SCHEMA_VERSION.to_owned(),
@@ -184,6 +185,7 @@ impl ImportedMsiScenarioResult {
             status: ImportedMsiScenarioStatus::Succeeded,
             install_exit_code,
             launch_process_id,
+            launch_exit_code,
             process_observed: true,
             graceful_close_requested: true,
             process_closed: true,
@@ -205,6 +207,7 @@ impl ImportedMsiScenarioResult {
             || self.status != ImportedMsiScenarioStatus::Succeeded
             || self.install_exit_code != 0
             || self.launch_process_id == 0
+            || self.launch_exit_code != 0
             || !self.process_observed
             || !self.graceful_close_requested
             || !self.process_closed
@@ -229,6 +232,7 @@ impl ImportedMsiScenarioResult {
             || self.scenario_id != request.scenario.scenario_id
             || self.scenario_sha256 != request.scenario_sha256
             || self.installer_sha256 != request.installer_sha256
+            || self.launch_exit_code != request.scenario.expected_exit_code
         {
             return Err(ImportedMsiRequestError::ResultBindingMismatch);
         }
@@ -239,6 +243,7 @@ impl ImportedMsiScenarioResult {
         matches!(self.status, ImportedMsiScenarioStatus::Succeeded)
             && self.install_exit_code == 0
             && self.launch_process_id != 0
+            && self.launch_exit_code == 0
             && self.process_observed
             && self.graceful_close_requested
             && self.process_closed
@@ -338,7 +343,7 @@ mod tests {
             request.request_sha256,
             request.recompute_request_sha256().unwrap()
         );
-        ImportedMsiScenarioResult::succeeded(&request, 0, 42).unwrap();
+        ImportedMsiScenarioResult::succeeded(&request, 0, 42, 0).unwrap();
     }
 
     #[test]
@@ -351,14 +356,14 @@ mod tests {
         );
 
         let request = request();
-        let mut result = ImportedMsiScenarioResult::succeeded(&request, 0, 42).unwrap();
+        let mut result = ImportedMsiScenarioResult::succeeded(&request, 0, 42, 0).unwrap();
         result.process_closed = false;
         assert_eq!(
             result.validate(),
             Err(ImportedMsiRequestError::InvalidResult)
         );
 
-        let mut result = ImportedMsiScenarioResult::succeeded(&request, 0, 42).unwrap();
+        let mut result = ImportedMsiScenarioResult::succeeded(&request, 0, 42, 0).unwrap();
         result.run_id = "other-run".to_owned();
         assert_eq!(
             result.validate_for_request(&request),

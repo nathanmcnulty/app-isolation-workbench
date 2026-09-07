@@ -7,15 +7,16 @@
 
 use std::{
     fs::{self, File, OpenOptions},
-    io::{Read, Write},
+    io::{Read, Seek, SeekFrom, Write},
     path::{Component, Path, PathBuf},
     process::ExitCode,
 };
 
 use aiw_evidence::{ArtifactRole, EvidenceEvent, EvidenceLog, canonical_json_bytes};
 use aiw_provider_wsb::{
-    CompletionArtifact, CompletionStatus, WINDOWS_SANDBOX_COMPLETION_RECEIPT_SCHEMA_VERSION,
-    WindowsSandboxCompletionReceipt,
+    CompletionArtifact, CompletionStatus, IMPORTED_MSI_GUEST_REQUEST_SCHEMA_VERSION,
+    ImportedMsiGuestRequest, ImportedMsiScenarioResult,
+    WINDOWS_SANDBOX_COMPLETION_RECEIPT_SCHEMA_VERSION, WindowsSandboxCompletionReceipt,
 };
 use aiw_token::collect_current_process_token;
 use anyhow::{Context, Result, bail};
@@ -50,6 +51,11 @@ struct GoldenProbeRequest {
     receipt_path: String,
 }
 
+enum GuestRequest {
+    Golden(Box<GoldenProbeRequest>),
+    ImportedMsi(Box<ImportedMsiGuestRequest>),
+}
+
 fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
@@ -63,15 +69,31 @@ fn main() -> ExitCode {
 fn run() -> Result<()> {
     let cli = Cli::parse();
     let request = read_request(&cli.request)?;
-    validate_request(&request)?;
-    if request.request_sha256 != request_hash(&request)? {
-        bail!("guest request hash does not match its approved binding")
-    }
-    match execute_request(&request) {
-        Ok(()) => Ok(()),
-        Err(error) => {
-            let _ = write_failure_diagnostic(&request, &error);
-            Err(error)
+    match request {
+        GuestRequest::Golden(request) => {
+            validate_request(&request)?;
+            if request.request_sha256 != request_hash(&request)? {
+                bail!("guest request hash does not match its approved binding")
+            }
+            match execute_request(&request) {
+                Ok(()) => Ok(()),
+                Err(error) => {
+                    let _ = write_failure_diagnostic(&request, &error);
+                    Err(error)
+                }
+            }
+        }
+        GuestRequest::ImportedMsi(request) => {
+            request
+                .validate()
+                .map_err(|error| anyhow::anyhow!("imported MSI request is invalid: {error}"))?;
+            match execute_imported_msi_request(&request) {
+                Ok(()) => Ok(()),
+                Err(error) => {
+                    let _ = write_imported_msi_failure_diagnostic(&request, &error);
+                    Err(error)
+                }
+            }
         }
     }
 }
@@ -133,6 +155,88 @@ fn execute_request(request: &GoldenProbeRequest) -> Result<()> {
     write_receipt_last(&receipt_path, &receipt)
 }
 
+fn execute_imported_msi_request(request: &ImportedMsiGuestRequest) -> Result<()> {
+    let actual_agent_hash = hash_file(&std::env::current_exe().context("resolve agent identity")?)?;
+    if actual_agent_hash != request.agent_sha256 {
+        bail!("guest agent identity does not match the approved request")
+    }
+
+    // Hold the exact mapped installer handle before starting execution.  On
+    // Windows the handle permits other readers (msiexec) but not replacement,
+    // deletion, or writes while the scenario is in progress.
+    let mut installer = HeldInstaller::open(
+        Path::new(&request.installer_path),
+        &request.installer_sha256,
+        request.installer_size_bytes,
+    )?;
+    let root = PathBuf::from(&request.output_root);
+    ensure_output_root(&root)?;
+    installer.revalidate()?;
+
+    #[cfg(windows)]
+    let observation = aiw_windows_platform::execute_fixed_notepad_plus_plus_msi(&request.scenario)
+        .map_err(|error| anyhow::anyhow!("fixed imported-MSI execution failed: {error}"))?;
+    #[cfg(not(windows))]
+    let observation =
+        { bail!("the imported-MSI guest profile only executes inside Windows Sandbox") };
+
+    installer.revalidate()?;
+    let result = ImportedMsiScenarioResult::succeeded(
+        request,
+        observation.install_exit_code,
+        observation.launch_process_id,
+        observation.launch_exit_code,
+    )?;
+    result.validate_for_request(request).map_err(|error| {
+        anyhow::anyhow!("guest produced an invalid imported-MSI result: {error}")
+    })?;
+    let result_path = output_path(&root, &request.scenario_result_path)?;
+    let evidence_path = output_path(&root, &request.evidence_log_path)?;
+    let receipt_path = output_path(&root, &request.receipt_path)?;
+    write_new_json(&result_path, &result)?;
+
+    let mut evidence = EvidenceLog::new();
+    evidence.append(EvidenceEvent {
+        observed_utc: "guest-agent-time-not-trusted".to_owned(),
+        kind: "importedMsiScenario".to_owned(),
+        source: "aiw-guest-agent".to_owned(),
+        payload: serde_json::to_value(&result)?,
+    })?;
+    let mut bytes = Vec::new();
+    for record in evidence.records() {
+        serde_json::to_writer(&mut bytes, record)?;
+        bytes.push(b'\n');
+    }
+    write_new_bytes(&evidence_path, &bytes)?;
+
+    let receipt = WindowsSandboxCompletionReceipt {
+        schema_version: WINDOWS_SANDBOX_COMPLETION_RECEIPT_SCHEMA_VERSION.to_owned(),
+        run_id: request.run_id.clone(),
+        sandbox_id: request.sandbox_id.clone(),
+        config_sha256: request.config_sha256.clone(),
+        request_sha256: request.request_sha256.clone(),
+        agent_sha256: request.agent_sha256.clone(),
+        status: CompletionStatus::Succeeded,
+        exit_code: 0,
+        evidence_root_hash: evidence.manifest()?.root_hash,
+        artifacts: vec![
+            completion_artifact(
+                &result_path,
+                &request.scenario_result_path,
+                ArtifactRole::ScenarioResults,
+                "application/json",
+            )?,
+            completion_artifact(
+                &evidence_path,
+                &request.evidence_log_path,
+                ArtifactRole::EvidenceLog,
+                "application/x-ndjson",
+            )?,
+        ],
+    };
+    write_receipt_last(&receipt_path, &receipt)
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct GuestFailureDiagnostic {
@@ -154,14 +258,117 @@ fn write_failure_diagnostic(request: &GoldenProbeRequest, error: &anyhow::Error)
     )
 }
 
-fn read_request(path: &Path) -> Result<GoldenProbeRequest> {
+fn write_imported_msi_failure_diagnostic(
+    request: &ImportedMsiGuestRequest,
+    error: &anyhow::Error,
+) -> Result<()> {
+    let root = PathBuf::from(&request.output_root);
+    let summary: String = format!("{error:#}").chars().take(2048).collect();
+    write_new_json(
+        &root.join("guest-failure.json"),
+        &GuestFailureDiagnostic {
+            schema_version: "aiw.dev/wsb-guest-failure/v0alpha1",
+            code: "AIW_GUEST_AGENT_FAILED",
+            summary,
+        },
+    )
+}
+
+struct HeldInstaller {
+    path: PathBuf,
+    file: File,
+    sha256: String,
+    size_bytes: u64,
+}
+
+impl HeldInstaller {
+    fn open(path: &Path, sha256: &str, size_bytes: u64) -> Result<Self> {
+        let metadata = ordinary_installer_metadata(path)?;
+        if metadata.len() != size_bytes {
+            bail!("held installer size does not match the approved request")
+        }
+        let file = open_installer_read_held(path)?;
+        let mut value = Self {
+            path: path.to_owned(),
+            file,
+            sha256: sha256.to_owned(),
+            size_bytes,
+        };
+        value.revalidate()?;
+        Ok(value)
+    }
+
+    fn revalidate(&mut self) -> Result<()> {
+        let metadata = ordinary_installer_metadata(&self.path)?;
+        let held_metadata = self.file.metadata()?;
+        if metadata.len() != self.size_bytes || held_metadata.len() != self.size_bytes {
+            bail!("held installer size changed from the approved request")
+        }
+        self.file.seek(SeekFrom::Start(0))?;
+        let mut digest = Sha256::new();
+        let mut buffer = [0_u8; 64 * 1024];
+        loop {
+            let count = self.file.read(&mut buffer)?;
+            if count == 0 {
+                break;
+            }
+            digest.update(&buffer[..count]);
+        }
+        if hex::encode(digest.finalize()) != self.sha256 {
+            bail!("held installer hash does not match the approved request")
+        }
+        Ok(())
+    }
+}
+
+fn ordinary_installer_metadata(path: &Path) -> Result<fs::Metadata> {
+    let metadata = fs::symlink_metadata(path).context("inspect staged MSI")?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() || has_reparse_point(&metadata) {
+        bail!("staged MSI is not an ordinary file")
+    }
+    Ok(metadata)
+}
+
+#[cfg(windows)]
+fn open_installer_read_held(path: &Path) -> Result<File> {
+    use std::os::windows::fs::OpenOptionsExt as _;
+    use windows::Win32::Storage::FileSystem::FILE_SHARE_READ;
+
+    OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ.0)
+        .open(path)
+        .context("open staged MSI with a held read handle")
+}
+
+#[cfg(not(windows))]
+fn open_installer_read_held(path: &Path) -> Result<File> {
+    File::open(path).context("open staged MSI")
+}
+
+fn read_request(path: &Path) -> Result<GuestRequest> {
     let file = File::open(path).context("open guest request")?;
     let mut bytes = Vec::new();
     file.take(MAX_REQUEST_BYTES + 1).read_to_end(&mut bytes)?;
     if bytes.len() as u64 > MAX_REQUEST_BYTES {
         bail!("guest request exceeds its fixed size bound")
     }
-    serde_json::from_slice(&bytes).context("parse strict guest request")
+    let value: serde_json::Value =
+        serde_json::from_slice(&bytes).context("parse strict guest request")?;
+    match value
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_str)
+    {
+        Some(REQUEST_SCHEMA) => serde_json::from_value(value)
+            .map(Box::new)
+            .map(GuestRequest::Golden)
+            .context("parse strict golden-probe request"),
+        Some(IMPORTED_MSI_GUEST_REQUEST_SCHEMA_VERSION) => serde_json::from_value(value)
+            .map(Box::new)
+            .map(GuestRequest::ImportedMsi)
+            .context("parse strict imported-MSI request"),
+        _ => bail!("unsupported guest request schema"),
+    }
 }
 
 fn validate_request(request: &GoldenProbeRequest) -> Result<()> {
@@ -346,6 +553,7 @@ fn hash_file(path: &Path) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aiw_provider_wsb::CompiledMsiScenario;
 
     fn test_root(name: &str) -> PathBuf {
         let root =
@@ -373,6 +581,49 @@ mod tests {
         assert!(!staging.exists());
         assert!(write_new_bytes(&target, b"replacement").is_err());
         assert_eq!(fs::read(&target).unwrap(), b"complete\n");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn imported_msi_request_dispatches_without_execution() {
+        let root = test_root("imported-request");
+        let request_path = root.join("request.json");
+        let request = ImportedMsiGuestRequest::new(
+            "run-1",
+            "11111111-1111-1111-1111-111111111111",
+            "b".repeat(64),
+            "c".repeat(64),
+            CompiledMsiScenario {
+                schema_version: "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha1".to_owned(),
+                profile: "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha1".to_owned(),
+                scenario_id: "first-run".to_owned(),
+                application_sha256: "a".repeat(64),
+                installer_path: r"C:\AIW\Tools\application.msi".to_owned(),
+                install_arguments: vec![
+                    "/i".to_owned(),
+                    r"C:\AIW\Tools\application.msi".to_owned(),
+                    "/qn".to_owned(),
+                    "/norestart".to_owned(),
+                ],
+                install_timeout_seconds: 120,
+                launch_path: r"C:\Program Files\Notepad++\notepad++.exe".to_owned(),
+                launch_arguments: Vec::new(),
+                process_image: "notepad++.exe".to_owned(),
+                process_wait_timeout_seconds: 30,
+                graceful_close_timeout_seconds: 15,
+                expected_exit_code: 0,
+            },
+            "a".repeat(64),
+            1024,
+            "d".repeat(64),
+        )
+        .unwrap();
+        fs::write(&request_path, serde_json::to_vec(&request).unwrap()).unwrap();
+
+        assert!(matches!(
+            read_request(&request_path).unwrap(),
+            GuestRequest::ImportedMsi(request) if request.validate().is_ok()
+        ));
         fs::remove_dir_all(root).unwrap();
     }
 }
