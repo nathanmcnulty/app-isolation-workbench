@@ -63,6 +63,49 @@ fn canonical_hash<T: Serialize>(value: &T) -> String {
     hex::encode(Sha256::digest(canonical_json_bytes(&value).unwrap()))
 }
 
+#[test]
+fn typed_msi_compilation_emits_bound_review_and_rejects_unknown_scenario() {
+    let project_path = repo_path("examples/notepad-plus-plus-msi.aiw.yaml");
+    let project_bytes = fs::read(&project_path).unwrap();
+    let project: Project = serde_yaml::from_slice(&project_bytes).unwrap();
+    let result = Command::new(aiw())
+        .args(["provider", "compile-msi-scenario", "--project"])
+        .arg(&project_path)
+        .args(["--scenario", "install-launch-close"])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(result.stderr.is_empty());
+    let review = parse_one_json(&result.stdout);
+    assert_eq!(
+        review["projectRevisionSha256"],
+        project_revision_hash(&project).unwrap()
+    );
+    assert_eq!(
+        review["scenarioSha256"],
+        canonical_hash(&review["scenario"])
+    );
+    assert_eq!(review["scenario"]["processWaitTimeoutSeconds"], 30);
+    assert_eq!(fs::read(&project_path).unwrap(), project_bytes);
+
+    let rejected = Command::new(aiw())
+        .args(["provider", "compile-msi-scenario", "--project"])
+        .arg(&project_path)
+        .args(["--scenario", "unsupported"])
+        .output()
+        .unwrap();
+    assert!(!rejected.status.success());
+    assert!(rejected.stdout.is_empty());
+    assert_eq!(
+        parse_one_json(&rejected.stderr)["code"],
+        "AIW_MSI_SCENARIO_REJECTED"
+    );
+}
+
 fn write_plan(path: &Path, project_path: &Path, hash: Option<String>) {
     let project: Project = serde_yaml::from_slice(&fs::read(project_path).unwrap()).unwrap();
     let revision_hash = hash.unwrap_or_else(|| project_revision_hash(&project).unwrap());
