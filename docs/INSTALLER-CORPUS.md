@@ -26,15 +26,21 @@ Every inspected EXE's PE wrapper header reports x86 (`0x14c`), including files n
 
 ## Intake behavior exposed by this corpus
 
-The current native `application inspect` path accepted only `vs_BuildTools.exe`, including a cache-only embedded signature observation. It rejected the other six before signature inspection because their named streams violate the current unnamed-stream-only policy. All six contain `SmartScreen`; the two Notepad++ files and Signal also contain `Zone.Identifier`. Stream names do not establish that their contents are authentic or safe.
+The initial native `application inspect` path accepted only `vs_BuildTools.exe`, including a cache-only embedded signature observation. It rejected the other six before signature inspection because their named streams violated the then-current unnamed-stream-only policy. All six contain `SmartScreen`; the two Notepad++ files and Signal also contain `Zone.Identifier`. Stream names do not establish that their contents are authentic or safe.
 
 Separate passive Windows version-resource/signature observations reported valid signatures for Bambu (Shanghai Lunkuo Technology), DriveManager (SK hynix), and the Signal/ChatGPT/VS wrappers (Microsoft). Those observations do not satisfy AIW's protected intake authority or bind the eventual downloaded payload. Raw stream contents, referrer URLs, and browsing history were not exported.
 
-Next intake work must distinguish read-only source inventory from execution/import eligibility. Define a bounded provenance policy for download metadata, retain original files and origin information, and record any deliberate transformation in the external receipt. Do not silently strip streams or broadly allow arbitrary named streams. Until that work is implemented, these six originals remain rejected by protected intake.
+### Validated metadata intake (2026-09-08)
+
+All seven originals subsequently passed `application inspect`, explicit `application import --archive-download-metadata`, and independent `application verify-import`. The [download metadata policy](DOWNLOAD-METADATA-INTAKE.md) archives exact supported stream bytes as protected sidecars, binds them in the receipt, and creates a normalized unnamed-stream payload for later approved Sandbox execution. The six affected files produced v0alpha3 receipts; the streamless VS bootstrapper retained v0alpha2.
+
+Before/after inspection confirmed unchanged source file identities, payload hashes, metadata names, lengths, and hashes for every original. Raw metadata bytes are retained only in local protected sidecars; reports contain hashes, not origin URLs. This establishes intake, not installer execution or application compatibility. Unknown streams remain rejected, and default import still requires unnamed-stream-only sources.
+
+The local proof is `aiw-download-intake-20260907-235847` under the testing user's temporary directory: `summary.json`, per-file external receipts and inspections, and protected `intakes/fixture-00` through `fixture-06`. No installers were downloaded for this validation.
 
 ## Profile sequence
 
-1. Establish the standard-user MSI baseline and address source metadata handling. Add the Notepad++ EXE path to isolate installer-profile changes while reusing the document workflow.
+1. Establish the standard-user MSI baseline now that source metadata intake is implemented. Add the Notepad++ EXE path to isolate installer-profile changes while reusing the document workflow.
 2. Add DriveManager install/UI/close as an elevation/device-dependency case; add Bambu's bounded local-file workflow as the richer positive candidate. Neither is assumed compatible with AppContainer.
 3. Acquire and pin a direct Signal desktop payload for install/first-run coverage. Treat authenticated messaging as a separately declared scenario requiring dedicated test identities.
 4. Add Store-wrapper and Visual Studio acquisition profiles after the offline worker path. Acquisition and application execution are separate stages with separate network policies and payload identities. A downloader blocked offline is not evidence that the application is incompatible.

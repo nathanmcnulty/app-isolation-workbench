@@ -105,7 +105,7 @@ Three preceding development attempts failed without accepted evidence and verifi
 
 Independent review also led to per-message PID checks, retained document ancestry, and bounded capture/read diagnostics. Synthetic tests verify that normal atomic saved-file replacement works while a Scenario-directory rename is blocked. The v2 retained report remains readable with new observations absent; the v3 report passes repeated deterministic output and unchanged-workspace checks. No installer or application was executed on the host, and no hosted CI run was scheduled for this benchmark.
 
-## Stage-progress benchmark � 2026-09-07
+## Stage-progress benchmark — 2026-09-07
 
 The updated static guest passed a fresh approved Windows Sandbox run in 80.09 seconds. All nine native stages reported passed: before-install capture, installation, after-install capture, document preparation, process launch, document open/verification, edit/save/byte verification, graceful close/job cleanup, and after-use capture. The run verified exact Sandbox cleanup and no remaining host sessions. The scoped file report again contained 215 installation additions and seven use-time additions, with complete roots.
 
@@ -118,3 +118,21 @@ The updated static guest passed a fresh approved Windows Sandbox run in 80.09 se
 - Local readable/JSON exports: `%TEMP%\aiw-notepad-stage-assessment.md` and `.json`.
 
 The current report and the previous v3 report without a stage event both passed retained-workspace repeatability, wrong-binding, unexpected-output, and unchanged-inventory checks. The earlier failed editor fixture also passed the unsuccessful-report regression. Caught-failure stage progress was tested locally using synthetic failed receipts, including tampered evidence, contradictory successful status, unexpected files, and failure at every stage; no new live application failure was induced. One live Sandbox run and no hosted CI runs were used for this slice.
+
+## Original-download intake to report benchmark — 2026-09-08
+
+The supplied original MSI, including `SmartScreen` and `Zone.Identifier`, passed explicit metadata archiving and protected intake verification without modifying the original. Its v0alpha3 import receipt supplied the normalized payload to the existing approved Sandbox scenario. The live test completed in 140.75 seconds with all nine stages passed, matching saved-document bytes, exact-session cleanup, and no remaining Sandbox sessions.
+
+The v0alpha4 assessment reports `downloadMetadataPolicy: archiveForSandbox`. Markdown states that the tested payload has no named streams and the run does not test the original download's Mark-of-the-Web or SmartScreen handling. This remains an elevated-in-worker application exercise with insufficient evidence for an isolation verdict; a standard-user baseline and application-level boundary comparison are still required.
+
+- Original MSI SHA-256: `c29cbe1a9aaef322cc3f316ceeabe8a8071b18441a5e3c3ec348069739e59e80`
+- Intake proof: `%TEMP%\aiw-download-intake-20260907-235847`
+- Workspace: `%TEMP%\aiw-msi-live-23956-1788851283228469600`
+- Approved guest SHA-256: `c0b7ad637af79981623756d5226d5885395f59e738f9de43f5bde9c7f0490b2e`
+- Request SHA-256: `70abd9a150fe8b4be147dcc552edd5a8d0e47d42bc3715c44da935080c1181e8`
+- Receipt SHA-256: `cdc5939af92315d15f6340326992ad5eeb0d0526d069facba58d18674979ca1a`
+- Evidence root: `35efc73d5ecc34c61327706cda4adc2b7aaed3d7a798df054c1cb0eb020ea6aa`
+- Sandbox ID: `122ea952-52c8-64f5-6532-5e900cf4b8f0`
+- Local exports: `%TEMP%\aiw-download-assessment.md` and `.json`.
+
+The previous completed v0alpha3 report still verifies with its original receipt serialization. CLI, probe, runner and native suites passed, including source/ADS writer exclusion, metadata bounds, sidecar replacement/removal/addition/hardlinks, and schema downgrade. The extended-only Windows path regression, workspace Clippy, Rust 1.85 all-target check, formatting and governance checks passed. This slice used one live Sandbox run and no hosted CI.
