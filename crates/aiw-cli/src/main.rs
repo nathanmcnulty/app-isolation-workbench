@@ -441,6 +441,8 @@ enum RunCommand {
         project: PathBuf,
         #[arg(long)]
         guest_agent_sha256: String,
+        #[arg(long, value_enum, default_value_t = AssessmentReportFormat::Json)]
+        format: AssessmentReportFormat,
     },
     /// Start only the already-approved, hash-bound Windows Sandbox preparation profile.
     /// No arbitrary command, script, policy fragment, or provider verb is accepted.
@@ -507,6 +509,12 @@ enum ProviderCommand {
         #[arg(long)]
         binary: String,
     },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum AssessmentReportFormat {
+    Json,
+    Markdown,
 }
 
 #[derive(Debug, Args)]
@@ -1453,6 +1461,7 @@ fn run(command: Command) -> Result<()> {
                 run_id,
                 project,
                 guest_agent_sha256,
+                format,
             } => {
                 let loaded = read_project(&project)?;
                 #[cfg(windows)]
@@ -1469,11 +1478,17 @@ fn run(command: Command) -> Result<()> {
                             source
                         })
                     })?;
-                    write_json(&report)
+                    match format {
+                        AssessmentReportFormat::Json => write_json(&report),
+                        AssessmentReportFormat::Markdown => {
+                            print!("{}", report.to_markdown());
+                            Ok(())
+                        }
+                    }
                 }
                 #[cfg(not(windows))]
                 {
-                    let _ = (root, loaded, guest_agent_sha256);
+                    let _ = (root, loaded, guest_agent_sha256, format);
                     Err(anyhow!(RunOperationUnavailable {
                         code: "AIW_WINDOWS_REQUIRED",
                         summary: "retained Windows workspace verification requires Windows",

@@ -62,6 +62,49 @@ fn completed_msi_report_is_readonly_and_rejects_drift() {
         report.application_token.as_ref().unwrap().token.process_id,
         report.scenario.launch_process_id
     );
+    let preparation: aiw_runner::WsbPreparationReceipt =
+        serde_json::from_slice(&fs::read(root.join("preparation.json")).unwrap()).unwrap();
+    if preparation
+        .msi
+        .unwrap()
+        .scenario
+        .requires_application_exercise()
+    {
+        assert_eq!(
+            report.schema_version,
+            "aiw.dev/wsb-msi-assessment-report/v0alpha2"
+        );
+        let behavior = report
+            .behavior
+            .as_ref()
+            .expect("v3 report must retain functional evidence");
+        assert!(
+            behavior.functional_exercise.opened_document
+                && behavior.functional_exercise.saved_document
+        );
+        assert!(
+            !report
+                .installation_file_changes
+                .as_ref()
+                .unwrap()
+                .diffs
+                .is_empty()
+        );
+        assert!(report.exercise_file_changes.is_some());
+        assert!(
+            report
+                .missing_evidence
+                .contains(&AssessmentEvidenceGap::FilesystemRegistryChanges)
+        );
+    } else {
+        assert_eq!(
+            report.schema_version,
+            "aiw.dev/wsb-msi-assessment-report/v0alpha1"
+        );
+        assert!(report.behavior.is_none());
+        assert!(report.installation_file_changes.is_none());
+        assert!(report.exercise_file_changes.is_none());
+    }
     let repeated = report_windows_sandbox_msi(&root, run_id, &project, &guest_hash).unwrap();
     assert_eq!(
         serde_json::to_vec(&report).unwrap(),

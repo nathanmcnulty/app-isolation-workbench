@@ -4456,3 +4456,5 @@ mod tests {
 
 #[cfg(all(test, windows))]
 mod live_msi_recovery_tests;
+
+mod assessment_report_markdown;
