@@ -26,6 +26,12 @@ The [fixture record](FIXTURE-NOTEPAD-PLUS-PLUS-8.9.8.md) records dated live proo
 | Broad collectors/general scenario engine before diverse applications | Add a second real application and a controlled fixture; extract primitives used by both | Expose Notepad++ assumptions without inventing an arbitrary command platform. |
 | Large UI/release milestone at the end | Ship CLI, reports, and contribution fixtures with each capability; add UI over stable services | Community usefulness comes from working capabilities. |
 
+## Supplied installer corpus
+
+The [installer inventory](INSTALLER-CORPUS.md) now makes profile selection concrete: Notepad++ EXE/MSI controls, DriveManager for elevation/device dependencies, Bambu for a richer local-file workflow, and Signal/ChatGPT/Visual Studio for acquisition dependencies. Signal and ChatGPT are Store wrappers in this folder; DriveManager is an SK hynix disk utility. Do not select fixtures solely by installer size or apparent UI simplicity.
+
+The corpus also exposes an immediate intake requirement: ordinary download metadata streams currently block six of seven files. Add bounded source/provenance observations and an explicit import policy without silently stripping originals or weakening arbitrary-stream rejection. Separate networked payload acquisition from offline application assessment; bind downloaded payloads, not just launcher hashes. These are prerequisites for using the affected fixtures, not reasons to enable networking on the existing offline profile.
+
 ## Benchmark 1 - comparable application evidence (next)
 
 **Deliverable:** a repeatable function report with an ordinary in-worker baseline, packaging-relevant state observations, and explicit comparison eligibility.
