@@ -84,3 +84,9 @@ AIW fails closed. Unsupported or degraded behavior is not converted into a succe
 - Learning or applying broad allow rules without review.
 - Treating guest telemetry or a guest-authored receipt as tamper-proof.
 - General-purpose privileged automation, arbitrary local-AI tool hosting, fleet management, enterprise compliance certification, or background application management.
+
+### Download metadata normalization
+
+Explicit `--archive-download-metadata` intake preserves supported source stream bytes in protected sidecars and binds them in the external receipt. The source remains unchanged. Stream names are an allowlist, not an authenticity or safety assertion; raw bytes are not parsed or emitted in reports. Unknown names, ambiguous inventories, oversized streams, writers, and identity/content drift fail closed. Origin URLs may be present in the local protected sidecars, so these files are not public report artifacts.
+
+The normalized payload intentionally has no named streams. Later approved execution assesses that payload inside the fixed worker; it does not measure Mark-of-the-Web, Attachment Manager, or SmartScreen behavior on the original download. Reports identify this policy. Import grants no host execution permission, signature trust, or generalized installer support. Workspace and disposal stream policies remain unchanged.

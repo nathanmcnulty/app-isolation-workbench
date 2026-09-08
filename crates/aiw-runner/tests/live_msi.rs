@@ -143,6 +143,30 @@ fn live_imported_msi_install_observe_close_and_cleanup() {
     let report =
         aiw_runner::report_windows_sandbox_msi(&root, layout.run_id(), &project, &guest_hash)
             .unwrap();
+    let intake: aiw_probe::ApplicationFileImportReceipt = serde_json::from_slice(
+        &fs::read(PathBuf::from(
+            std::env::var_os("AIW_LIVE_MSI_RECEIPT").unwrap(),
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        report.download_metadata_policy,
+        intake
+            .download_metadata_archive
+            .map(|archive| archive.policy)
+    );
+    if report.download_metadata_policy.is_some() {
+        assert_eq!(
+            report.schema_version,
+            "aiw.dev/wsb-msi-assessment-report/v0alpha4"
+        );
+        assert!(
+            report
+                .to_markdown()
+                .contains("does not test the original download")
+        );
+    }
     let stages = report
         .stage_progress
         .as_ref()

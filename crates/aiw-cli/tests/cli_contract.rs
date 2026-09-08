@@ -453,6 +453,85 @@ fn protected_file_import_is_receipt_last_create_new_and_read_only_verifiable() {
     assert_eq!(rejected_error["stage"], "applicationImportVerification");
 }
 
+#[cfg(windows)]
+#[test]
+fn downloaded_import_requires_explicit_archiving_and_preserves_metadata() {
+    let temp = TempDir::new();
+    let source = temp.path().join("download.exe");
+    fs::copy(aiw(), &source).unwrap();
+    let stream = format!("{}:Zone.Identifier", source.display());
+    let origin = b"[ZoneTransfer]\r\nZoneId=3\r\nHostUrl=https://example.invalid/private\r\n";
+    fs::write(&stream, origin).unwrap();
+    let inspect = Command::new(aiw())
+        .args(["application", "inspect", "--kind", "exe", "--source"])
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(
+        inspect.status.success(),
+        "{}",
+        String::from_utf8_lossy(&inspect.stderr)
+    );
+    let observed = parse_one_json(&inspect.stdout);
+    assert_eq!(
+        observed["fileAuthority"]["downloadMetadata"][0]["name"],
+        "Zone.Identifier"
+    );
+    assert!(!String::from_utf8_lossy(&inspect.stdout).contains("example.invalid/private"));
+    let invoke = |explicit: bool| {
+        let mut command = Command::new(aiw());
+        command
+            .args(["application", "import", "--kind", "exe", "--source"])
+            .arg(&source)
+            .args(["--intake-parent"])
+            .arg(temp.path())
+            .args(["--intake-id", "download-intake"]);
+        if explicit {
+            command.arg("--archive-download-metadata");
+        }
+        command.output().unwrap()
+    };
+    assert!(!invoke(false).status.success());
+    assert!(!temp.path().join("download-intake").exists());
+    let imported = invoke(true);
+    assert!(
+        imported.status.success(),
+        "{}",
+        String::from_utf8_lossy(&imported.stderr)
+    );
+    let receipt = parse_one_json(&imported.stdout);
+    assert_eq!(
+        receipt["schemaVersion"],
+        "aiw.dev/application-file-import-receipt/v0alpha3"
+    );
+    assert_eq!(
+        receipt["downloadMetadataArchive"]["policy"],
+        "archiveForSandbox"
+    );
+    assert_eq!(fs::read(&stream).unwrap(), origin);
+    assert_eq!(
+        fs::read(
+            receipt["downloadMetadataArchive"]["entries"][0]["identity"]["finalPath"]
+                .as_str()
+                .unwrap()
+        )
+        .unwrap(),
+        origin
+    );
+    let receipt_path = temp.path().join("receipt.json");
+    fs::write(&receipt_path, imported.stdout).unwrap();
+    let verified = Command::new(aiw())
+        .args(["application", "verify-import", "--receipt"])
+        .arg(&receipt_path)
+        .output()
+        .unwrap();
+    assert!(
+        verified.status.success(),
+        "{}",
+        String::from_utf8_lossy(&verified.stderr)
+    );
+}
+
 #[test]
 fn protected_portable_import_is_json_only_and_read_only_verifiable() {
     let temp = TempDir::new();

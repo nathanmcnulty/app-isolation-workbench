@@ -4081,6 +4081,7 @@ mod tests {
         };
         aiw_probe::ApplicationFileImportReceipt {
             schema_version: aiw_probe::APPLICATION_FILE_IMPORT_RECEIPT_SCHEMA.to_owned(),
+            download_metadata_archive: None,
             intake_id: "intake-one".to_owned(),
             source_kind: aiw_probe::ApplicationInspectionKind::Msi,
             source: aiw_probe::ApplicationFileAuthority {
@@ -4090,6 +4091,7 @@ mod tests {
                 sha256: sha256.clone(),
                 link_count: 1,
                 only_unnamed_data_stream: true,
+                download_metadata: Vec::new(),
             },
             intake_root,
             intake_root_eas: eas.clone(),

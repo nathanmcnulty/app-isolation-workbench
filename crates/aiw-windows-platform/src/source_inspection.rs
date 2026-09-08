@@ -820,7 +820,7 @@ fn verify_download_metadata_streams(
     if actual
         .iter()
         .map(|(name, size_bytes)| (*name, *size_bytes))
-        .ne(expected.into_iter())
+        .ne(expected)
     {
         return Err(SourceInspectionError::Drift);
     }

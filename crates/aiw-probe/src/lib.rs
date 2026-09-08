@@ -13,6 +13,10 @@ use thiserror::Error;
 
 const APPLICATION_INSPECTION_SCHEMA: &str = "aiw.dev/application-inspection/v0alpha1";
 pub const APPLICATION_FILE_AUTHORITY_SCHEMA: &str = "aiw.dev/application-file-authority/v0alpha1";
+pub const APPLICATION_DOWNLOAD_AUTHORITY_SCHEMA: &str =
+    "aiw.dev/application-file-authority/v0alpha2";
+pub const APPLICATION_DOWNLOAD_IMPORT_RECEIPT_SCHEMA: &str =
+    "aiw.dev/application-file-import-receipt/v0alpha3";
 pub const APPLICATION_FILE_IMPORT_RECEIPT_SCHEMA: &str =
     "aiw.dev/application-file-import-receipt/v0alpha2";
 pub const APPLICATION_FILE_IMPORT_VERIFICATION_SCHEMA: &str =
@@ -82,6 +86,38 @@ pub struct ApplicationFileAuthority {
     pub sha256: String,
     pub link_count: u32,
     pub only_unnamed_data_stream: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub download_metadata: Vec<ApplicationDownloadMetadataEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApplicationDownloadMetadataEntry {
+    pub name: String,
+    pub size_bytes: u64,
+    pub sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArchivedDownloadMetadata {
+    pub source: ApplicationDownloadMetadataEntry,
+    pub relative_path: String,
+    pub identity: WindowsFileIdentity,
+    pub eas: ApplicationFileEaAuthority,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum DownloadMetadataPolicy {
+    ArchiveForSandbox,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DownloadMetadataArchive {
+    pub policy: DownloadMetadataPolicy,
+    pub entries: Vec<ArchivedDownloadMetadata>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -107,6 +143,8 @@ pub struct ApplicationFileImportReceipt {
     pub intake_id: String,
     pub source_kind: ApplicationInspectionKind,
     pub source: ApplicationFileAuthority,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub download_metadata_archive: Option<DownloadMetadataArchive>,
     pub intake_root: WindowsFileIdentity,
     pub intake_root_eas: ApplicationFileEaAuthority,
     pub source_directory: WindowsFileIdentity,

@@ -77,6 +77,7 @@ impl WsbMsiAssessmentReport {
                 out.push_str(&format!("- {}\n", cell(scenario)));
             }
         }
+        append_download_metadata_policy(&mut out, self.download_metadata_policy.as_ref());
         out.push_str(&format!("\n## Evidence identity\n\n- Installer SHA-256: {}\n- Guest-agent SHA-256: {}\n- Scenario SHA-256: {}\n- Completion receipt SHA-256: {}\n- Evidence root: {}\n\nThe JSON report retains the complete observations and file-change lists. Failed or recovered attempts without accepted evidence are not promoted into this completed assessment report.\n", cell(&self.scenario.installer_sha256), cell(&self.scenario.agent_sha256), cell(&self.scenario.scenario_sha256), cell(&self.receipt_sha256), cell(&self.evidence_root_hash)));
         out
     }
@@ -124,6 +125,7 @@ impl WsbMsiUnsuccessfulReport {
                 out.push_str(&format!("> {}\n", cell(summary)));
             }
         }
+        append_download_metadata_policy(&mut out, self.download_metadata_policy.as_ref());
         out.push_str(&format!("\n## Attempt identity\n\n- Session ID: {}\n- Project revision SHA-256: {}\n- Installer SHA-256: {}\n- Guest-agent SHA-256: {}\n- Scenario SHA-256: {}\n- Request SHA-256: {}\n\nOnly a fully verified failed receipt can supply the stage progress above. Other guest output cannot establish an accepted compatibility assessment, application token, or file-change claim.\n", cell(&self.session_id), cell(&self.project_revision_sha256), cell(&self.installer_sha256), cell(&self.guest_agent_sha256), cell(&self.scenario_sha256), cell(&self.request_sha256)));
         out
     }
@@ -244,6 +246,15 @@ fn cell(value: &str) -> String {
         }
     }
     escaped
+}
+
+fn append_download_metadata_policy(
+    out: &mut String,
+    policy: Option<&aiw_probe::DownloadMetadataPolicy>,
+) {
+    if policy.is_some() {
+        out.push_str("\nDownload metadata policy: **archive for Sandbox**. Supported source streams were preserved as protected intake sidecars. The tested payload has no named streams; this run does not test the original download's Mark-of-the-Web or SmartScreen handling.\n");
+    }
 }
 
 #[cfg(test)]

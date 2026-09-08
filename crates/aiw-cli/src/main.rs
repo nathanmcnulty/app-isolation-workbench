@@ -56,8 +56,8 @@ use aiw_windows_platform::assess_windows_sandbox;
 use aiw_windows_platform::{HeldApplicationFile, HeldPortableDirectory, SourceInspectionError};
 #[cfg(windows)]
 use aiw_windows_platform::{
-    PortableImportError, SourceImportError, import_application_file, import_portable_directory,
-    verify_application_file_import, verify_portable_directory_import,
+    PortableImportError, SourceImportError, import_application_file_with_metadata,
+    import_portable_directory, verify_application_file_import, verify_portable_directory_import,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use clap::error::ErrorKind;
@@ -122,6 +122,9 @@ enum ApplicationCommand {
         intake_parent: PathBuf,
         #[arg(long)]
         intake_id: String,
+        /// Preserve supported download streams as protected sidecars and normalize the payload for approved Sandbox execution.
+        #[arg(long)]
+        archive_download_metadata: bool,
     },
     /// Verify a protected file intake without modifying or repairing it.
     VerifyImport {
@@ -936,7 +939,7 @@ fn run(command: Command) -> Result<()> {
                 #[cfg(windows)]
                 let held_file = matches!(kind, ApplicationKindArg::Msi | ApplicationKindArg::Exe)
                     .then(|| {
-                        HeldApplicationFile::open(&source)
+                        HeldApplicationFile::open_with_download_metadata(&source)
                             .map_err(|source| anyhow!(ApplicationAuthorityFailed { source }))
                     })
                     .transpose()?;
@@ -966,12 +969,18 @@ fn run(command: Command) -> Result<()> {
                         .map_err(|source| anyhow!(ApplicationAuthorityFailed { source }))?;
                     inspection.canonical_path = observed.canonical_path.clone();
                     inspection.file_authority = Some(ApplicationFileAuthority {
-                        schema_version: APPLICATION_FILE_AUTHORITY_SCHEMA.to_owned(),
+                        schema_version: if observed.download_metadata.is_empty() {
+                            APPLICATION_FILE_AUTHORITY_SCHEMA
+                        } else {
+                            aiw_probe::APPLICATION_DOWNLOAD_AUTHORITY_SCHEMA
+                        }
+                        .to_owned(),
                         identity: observed.identity.clone(),
                         size_bytes: observed.size_bytes,
                         sha256: observed.sha256.clone(),
                         link_count: observed.link_count,
                         only_unnamed_data_stream: observed.only_unnamed_data_stream,
+                        download_metadata: observed.download_metadata.clone(),
                     });
                     inspection.limitations.retain(|value| {
                         !value.starts_with("Authenticode signer and trust")
@@ -1026,12 +1035,17 @@ fn run(command: Command) -> Result<()> {
                 kind,
                 intake_parent,
                 intake_id,
+                archive_download_metadata,
             } => {
                 #[cfg(windows)]
                 {
                     let inspection_kind: ApplicationInspectionKind = kind.into();
-                    let held = HeldApplicationFile::open(&source)
-                        .map_err(|source| anyhow!(ApplicationAuthorityFailed { source }))?;
+                    let held = if archive_download_metadata {
+                        HeldApplicationFile::open_with_download_metadata(&source)
+                    } else {
+                        HeldApplicationFile::open(&source)
+                    }
+                    .map_err(|source| anyhow!(ApplicationAuthorityFailed { source }))?;
                     let inspection = inspect_application_source(&source, inspection_kind)
                         .map_err(|source| anyhow!(ApplicationInspectionFailed { source }))?;
                     if inspection.sha256.as_deref() != Some(&held.observation().sha256)
@@ -1041,19 +1055,30 @@ fn run(command: Command) -> Result<()> {
                             source: SourceInspectionError::Drift,
                         }));
                     }
-                    let receipt =
-                        import_application_file(&intake_parent, &intake_id, inspection_kind, &held)
-                            .map_err(|source| {
-                                anyhow!(SourceImportFailed {
-                                    source,
-                                    verification: false,
-                                })
-                            })?;
+                    let receipt = import_application_file_with_metadata(
+                        &intake_parent,
+                        &intake_id,
+                        inspection_kind,
+                        &held,
+                        archive_download_metadata,
+                    )
+                    .map_err(|source| {
+                        anyhow!(SourceImportFailed {
+                            source,
+                            verification: false,
+                        })
+                    })?;
                     write_json(&receipt)
                 }
                 #[cfg(not(windows))]
                 {
-                    let _ = (source, kind, intake_parent, intake_id);
+                    let _ = (
+                        source,
+                        kind,
+                        intake_parent,
+                        intake_id,
+                        archive_download_metadata,
+                    );
                     bail!("protected application import requires Windows")
                 }
             }

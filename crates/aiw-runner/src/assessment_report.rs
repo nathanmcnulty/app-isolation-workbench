@@ -10,6 +10,8 @@ pub struct WsbMsiAssessmentReport {
     pub project_revision_sha256: String,
     pub outcome: RunOutcome,
     pub recorded_cleanup_verified: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub download_metadata_policy: Option<aiw_probe::DownloadMetadataPolicy>,
     pub receipt_sha256: String,
     pub evidence_root_hash: String,
     pub scenario: aiw_provider_wsb::ImportedMsiScenarioResult,
@@ -89,6 +91,8 @@ pub struct WsbMsiUnsuccessfulReport {
     pub project_revision_sha256: String,
     pub outcome: RunOutcome,
     pub recorded_cleanup_verified: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub download_metadata_policy: Option<aiw_probe::DownloadMetadataPolicy>,
     pub session_id: String,
     pub request_sha256: String,
     pub installer_sha256: String,
@@ -331,11 +335,21 @@ pub fn report_windows_sandbox_msi_run(
         revalidate()?;
         return Ok(WsbMsiRunReport::UnsuccessfulAttempt(Box::new(
             WsbMsiUnsuccessfulReport {
-                schema_version: "aiw.dev/wsb-msi-unsuccessful-report/v0alpha2".to_owned(),
+                schema_version: if msi.import_receipt.download_metadata_archive.is_some() {
+                    "aiw.dev/wsb-msi-unsuccessful-report/v0alpha3"
+                } else {
+                    "aiw.dev/wsb-msi-unsuccessful-report/v0alpha2"
+                }
+                .to_owned(),
                 run_id: run_id.to_owned(),
                 project_revision_sha256: artifacts.receipt.project_revision_sha256.clone(),
                 outcome: before.result.outcome,
                 recorded_cleanup_verified: true,
+                download_metadata_policy: msi
+                    .import_receipt
+                    .download_metadata_archive
+                    .as_ref()
+                    .map(|archive| archive.policy.clone()),
                 session_id: transaction.session_id.clone(),
                 request_sha256: request.request_sha256.clone(),
                 installer_sha256: msi.staged_payload.sha256.clone(),
@@ -423,7 +437,9 @@ pub fn report_windows_sandbox_msi_run(
     revalidate()?;
     Ok(WsbMsiRunReport::CompletedAssessment(Box::new(
         WsbMsiAssessmentReport {
-            schema_version: if stage_progress.is_some() {
+            schema_version: if msi.import_receipt.download_metadata_archive.is_some() {
+                "aiw.dev/wsb-msi-assessment-report/v0alpha4"
+            } else if stage_progress.is_some() {
                 "aiw.dev/wsb-msi-assessment-report/v0alpha3"
             } else if behavior.is_some() {
                 "aiw.dev/wsb-msi-assessment-report/v0alpha2"
@@ -435,6 +451,11 @@ pub fn report_windows_sandbox_msi_run(
             project_revision_sha256: artifacts.receipt.project_revision_sha256,
             outcome: RunOutcome::InsufficientEvidence,
             recorded_cleanup_verified: true,
+            download_metadata_policy: msi
+                .import_receipt
+                .download_metadata_archive
+                .as_ref()
+                .map(|archive| archive.policy.clone()),
             receipt_sha256: verified.receipt_sha256,
             evidence_root_hash: verified.evidence_root_hash,
             missing_evidence: evidence_gaps(project),

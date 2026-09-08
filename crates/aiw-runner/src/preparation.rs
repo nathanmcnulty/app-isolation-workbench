@@ -139,8 +139,11 @@ impl WsbMsiApplication {
             .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
         let receipt_bytes = serde_json::to_vec(&self.import_receipt)
             .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
-        if self.import_receipt.schema_version != aiw_probe::APPLICATION_FILE_IMPORT_RECEIPT_SCHEMA
-            || self.import_receipt.source_kind != aiw_probe::ApplicationInspectionKind::Msi
+        if !matches!(
+            self.import_receipt.schema_version.as_str(),
+            aiw_probe::APPLICATION_FILE_IMPORT_RECEIPT_SCHEMA
+                | aiw_probe::APPLICATION_DOWNLOAD_IMPORT_RECEIPT_SCHEMA
+        ) || self.import_receipt.source_kind != aiw_probe::ApplicationInspectionKind::Msi
             || hex::encode(Sha256::digest(receipt_bytes)) != self.import_receipt_sha256
             || canonical_hash(&self.scenario)? != self.scenario_sha256
             || self.scenario.application_sha256 != self.import_receipt.sha256
@@ -2364,6 +2367,7 @@ mod tests {
             schema_version: aiw_probe::APPLICATION_FILE_IMPORT_RECEIPT_SCHEMA.to_owned(),
             intake_id: intake_id.to_owned(),
             source_kind: aiw_probe::ApplicationInspectionKind::Msi,
+            download_metadata_archive: None,
             source: aiw_probe::ApplicationFileAuthority {
                 schema_version: aiw_probe::APPLICATION_FILE_AUTHORITY_SCHEMA.to_owned(),
                 identity: identity(r"C:\source\application.msi", '4'),
@@ -2371,6 +2375,7 @@ mod tests {
                 sha256: sha256.clone(),
                 link_count: 1,
                 only_unnamed_data_stream: true,
+                download_metadata: Vec::new(),
             },
             intake_root,
             intake_root_eas: eas.clone(),
