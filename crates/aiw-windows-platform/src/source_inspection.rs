@@ -839,7 +839,11 @@ fn open_download_metadata_stream(
     let source = source_path.to_str().ok_or_else(|| {
         SourceInspectionError::InvalidPath("final source path is not Unicode".to_owned())
     })?;
-    let stream_path = format!("{source}:{name}:$DATA");
+    // `final_path` deliberately removes the extended local-path prefix for
+    // ordinary identity comparisons. Restore it here before appending ADS
+    // syntax so a valid trailing-dot or trailing-space source component is
+    // not normalized into a different file by Win32 path parsing.
+    let stream_path = format!(r"\\?\{source}:{name}:$DATA");
     OpenOptions::new()
         .access_mode(
             FILE_READ_DATA.0
@@ -1263,6 +1267,29 @@ mod tests {
             Err(SourceInspectionError::Busy)
         ));
         drop(writer);
+    }
+
+    #[test]
+    fn download_metadata_reopens_extended_only_source_path() {
+        let root = Root::new();
+        let extended_directory = PathBuf::from(format!(r"\\?\{}\downloaded. ", root.0.display()));
+        fs::create_dir(&extended_directory).unwrap();
+        let path = extended_directory.join("payload.exe");
+        fs::write(&path, b"payload").unwrap();
+        fs::write(
+            format!("{}:Zone.Identifier:$DATA", path.display()),
+            b"[ZoneTransfer]\r\nZoneId=3\r\n",
+        )
+        .unwrap();
+
+        let held = HeldApplicationFile::open_with_download_metadata(&path).unwrap();
+        assert_eq!(
+            held.observation().download_metadata[0].name,
+            ZONE_IDENTIFIER_STREAM
+        );
+        held.revalidate().unwrap();
+        drop(held);
+        fs::remove_dir_all(&extended_directory).unwrap();
     }
 
     #[test]
