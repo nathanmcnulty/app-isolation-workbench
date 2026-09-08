@@ -9,9 +9,13 @@
 //! exact-ID `connect`, and exact-ID `stop` argument arrays. It has no shell, elevation, command,
 //! script, URL, or arbitrary policy API.
 
+mod assessment_report;
 #[cfg(windows)]
 mod discard;
 mod preparation;
+#[cfg(windows)]
+pub use assessment_report::report_windows_sandbox_msi;
+pub use assessment_report::{AssessmentEvidenceGap, WsbMsiAssessmentReport};
 mod session;
 
 pub use preparation::{

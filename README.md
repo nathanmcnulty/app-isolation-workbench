@@ -18,6 +18,7 @@ AIW is pre-alpha. The W0 contracts, fixed Windows Sandbox golden probe, and appr
 | Windows Sandbox preparation | `prepare-wsb`, `prepare-wsb-msi`, `verify-prepared-wsb`, and `import-prepared-wsb` bind a fixed agent, provider, protected workspace, plans, and import provenance before separate approval. |
 | Public execution and recovery | `run start` dispatches the imported and explicitly approved golden probe or fixed Notepad++ MSI profile. `run recover` reconciles and, if needed, stops only the persisted session. Neither accepts arbitrary execution authority. |
 | Evidence | The golden probe returns token evidence; the MSI profile returns bound install/observe/close results and a launched-root token snapshot. Both verify completion and exact cleanup and remain `insufficientEvidence` for containment. |
+| Assessment report | `run report-wsb-msi` reverifies a retained completed MSI run and lists guest observations, original requirements, and missing baseline/isolation evidence. See [report semantics](docs/ASSESSMENT-REPORT.md). |
 | Workspace discard | Exact-object revocation, depublish, disposition, and terminal receipt transactions exist privately for the fixed preparation tree. Public discard and general intake cleanup are not implemented. |
 | Other providers | MXC is a pinned, non-executing planning adapter. |
 

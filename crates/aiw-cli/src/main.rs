@@ -431,6 +431,17 @@ enum RunCommand {
         #[arg(long)]
         requested_at: String,
     },
+    /// Reverify a completed MSI workspace and report observed evidence and gaps without mutation.
+    ReportWsbMsi {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        run_id: String,
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        guest_agent_sha256: String,
+    },
     /// Start only the already-approved, hash-bound Windows Sandbox preparation profile.
     /// No arbitrary command, script, policy fragment, or provider verb is accepted.
     Start {
@@ -510,6 +521,7 @@ enum SchemaKind {
     ImportedMsiScenarioResult,
     WsbApprovedExecution,
     MsiApplicationToken,
+    WsbMsiAssessmentReport,
     CompiledMsiScenario,
     MsiScenarioCompilation,
     ApplicationFileAuthority,
@@ -720,6 +732,18 @@ impl std::fmt::Display for RunRecoveryFailed {
 }
 
 impl std::error::Error for RunRecoveryFailed {}
+
+#[derive(Debug)]
+struct RunReportFailed {
+    run_id: String,
+    source: RunnerError,
+}
+impl std::fmt::Display for RunReportFailed {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.source.fmt(formatter)
+    }
+}
+impl std::error::Error for RunReportFailed {}
 
 #[derive(Debug)]
 struct RunStartFailed {
@@ -1423,6 +1447,42 @@ fn run(command: Command) -> Result<()> {
                 let cancellation = layout.request_cancellation(requested_by, requested_at)?;
                 write_json(&cancellation)
             }
+            RunCommand::ReportWsbMsi {
+                root,
+                run_id,
+                project,
+                guest_agent_sha256,
+            } => {
+                let loaded = read_project(&project)?;
+                #[cfg(windows)]
+                {
+                    let report = aiw_runner::report_windows_sandbox_msi(
+                        &root,
+                        &run_id,
+                        &loaded.project,
+                        &guest_agent_sha256,
+                    )
+                    .map_err(|source| {
+                        anyhow!(RunReportFailed {
+                            run_id: run_id.clone(),
+                            source
+                        })
+                    })?;
+                    write_json(&report)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (root, loaded, guest_agent_sha256);
+                    Err(anyhow!(RunOperationUnavailable {
+                        code: "AIW_WINDOWS_REQUIRED",
+                        summary: "retained Windows workspace verification requires Windows",
+                        stage: "wsbReport",
+                        remediation: "Read the retained workspace on its original Windows host.",
+                        detail: "No files or provider state were changed.",
+                        run_id,
+                    }))
+                }
+            }
             RunCommand::Start {
                 root,
                 run_id,
@@ -1513,6 +1573,9 @@ fn run(command: Command) -> Result<()> {
             }
             SchemaKind::ImportedMsiScenarioResult => {
                 write_json(&schema_for!(aiw_provider_wsb::ImportedMsiScenarioResult))
+            }
+            SchemaKind::WsbMsiAssessmentReport => {
+                write_json(&schema_for!(aiw_runner::WsbMsiAssessmentReport))
             }
             SchemaKind::MsiApplicationToken => {
                 write_json(&schema_for!(aiw_provider_wsb::ImportedMsiApplicationToken))
@@ -2236,6 +2299,14 @@ fn emit_anyhow_error(error: &anyhow::Error) {
             run_id: Some(error.run_id.clone()),
             retryable: start_error_is_retryable(&error.source),
             remediation: "Preserve the run directory and provider state, resolve the reported authority or drift condition, and retry the same run recovery command.".to_owned(),
+            detail: error.source.to_string().chars().take(512).collect(),
+        });
+    } else if let Some(error) = error.downcast_ref::<RunReportFailed>() {
+        emit_error(&ErrorEnvelope {
+            code: "AIW_WSB_REPORT_REJECTED".to_owned(),
+            summary: "retained MSI evidence could not be verified".to_owned(),
+            stage: "wsbReport".to_owned(), run_id: Some(error.run_id.clone()), retryable: false,
+            remediation: "Preserve the workspace; inspect run status and the original project and guest-agent hash. Reporting does not repair state.".to_owned(),
             detail: error.source.to_string().chars().take(512).collect(),
         });
     } else if let Some(error) = error.downcast_ref::<RunStartFailed>() {

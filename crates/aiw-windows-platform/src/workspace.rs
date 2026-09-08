@@ -955,6 +955,14 @@ impl HeldRunWorkspace {
         reopen_bound_directory(&self.root, leaf, &self.evidence.owner_sid, acl_policy)
     }
 
+    pub fn reopen_root_file_readonly(
+        &self,
+        leaf: &str,
+    ) -> Result<BoundWorkspaceFile, WorkspaceError> {
+        self.revalidate()?;
+        reopen_bound_file_readonly(&self.root, leaf, &self.evidence.owner_sid)
+    }
+
     pub fn reopen_root_file(&self, leaf: &str) -> Result<BoundWorkspaceFile, WorkspaceError> {
         self.revalidate()?;
         reopen_bound_file(&self.root, leaf, &self.evidence.owner_sid)
