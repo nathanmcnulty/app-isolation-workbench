@@ -2437,6 +2437,19 @@ pub(crate) fn source_directory_entries(
     Ok(entries)
 }
 
+/// Enumerates the long names of a read-held directory for read-only evidence.
+///
+/// Exact disposal rejects any 8.3 alias because that contract must address
+/// children by one fixed spelling.  The guest filesystem snapshot never opens
+/// aliases and records only the extended long-name view, so an otherwise
+/// ordinary legacy alias is not an incomplete observation by itself.  Callers
+/// still must reject their own case collisions before using these names.
+pub(crate) fn filesystem_capture_directory_entries(
+    file: &File,
+) -> Result<Vec<DirectoryEntry>, ExactDisposeError> {
+    extended_directory_entries(file)
+}
+
 pub(crate) fn exact_directory_entry(
     file: &File,
     expected_name: &str,
