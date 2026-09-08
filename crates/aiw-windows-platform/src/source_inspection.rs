@@ -14,9 +14,10 @@ use std::os::windows::io::{AsRawHandle, FromRawHandle};
 use std::path::{Path, PathBuf};
 
 use aiw_probe::{
-    PORTABLE_DIRECTORY_AUTHORITY_SCHEMA, PORTABLE_MANIFEST_SCHEMA, PortableContentEntry,
-    PortableContentEntryKind, PortableContentManifest, PortableDirectoryAuthority,
-    PortableEntryAuthority, ReadinessState, WindowsFileIdentity,
+    ApplicationDownloadMetadataEntry, PORTABLE_DIRECTORY_AUTHORITY_SCHEMA,
+    PORTABLE_MANIFEST_SCHEMA, PortableContentEntry, PortableContentEntryKind,
+    PortableContentManifest, PortableDirectoryAuthority, PortableEntryAuthority, ReadinessState,
+    WindowsFileIdentity,
 };
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -38,13 +39,16 @@ use windows::Win32::Storage::FileSystem::{
 use windows::core::PCWSTR;
 
 use crate::exact_dispose::{
-    DirectoryEntry, ExactDisposeError, StableFileId, basic_info, file_size, hash_file,
-    reject_case_sensitive_directory, source_directory_entries, stable_id, standard_info,
+    DirectoryEntry, ExactDisposeError, StableFileId, basic_info, enumerate_file_streams, file_size,
+    hash_file, reject_case_sensitive_directory, source_directory_entries, stable_id, standard_info,
     verify_stream_policy,
 };
 use crate::workspace::{final_path, is_fixed_volume, same_path, verify_local_acl_volume};
 
 const MAX_SOURCE_FILE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+const MAX_DOWNLOAD_METADATA_STREAM_BYTES: u64 = 64 * 1024;
+const ZONE_IDENTIFIER_STREAM: &str = "Zone.Identifier";
+const SMARTSCREEN_STREAM: &str = "SmartScreen";
 const MAX_PORTABLE_ENTRIES: usize = 10_000;
 const MAX_PORTABLE_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 const MAX_PORTABLE_DEPTH: usize = 64;
@@ -118,6 +122,7 @@ pub struct SourceFileObservation {
     pub sha256: String,
     pub link_count: u32,
     pub only_unnamed_data_stream: bool,
+    pub download_metadata: Vec<ApplicationDownloadMetadataEntry>,
 }
 
 #[derive(Debug)]
@@ -125,6 +130,13 @@ pub struct HeldApplicationFile {
     file: File,
     source_path: PathBuf,
     observation: SourceFileObservation,
+    download_metadata: Vec<HeldDownloadMetadata>,
+}
+
+#[derive(Debug)]
+struct HeldDownloadMetadata {
+    entry: ApplicationDownloadMetadataEntry,
+    file: File,
 }
 
 #[derive(Debug)]
@@ -211,6 +223,20 @@ pub enum SourceInspectionError {
 
 impl HeldApplicationFile {
     pub fn open(path: &Path) -> Result<Self, SourceInspectionError> {
+        Self::open_inner(path, false)
+    }
+
+    /// Opens one downloaded EXE or MSI while retaining only the bounded,
+    /// reviewed download-metadata streams. The default `open` policy remains
+    /// unnamed-data-only.
+    pub fn open_with_download_metadata(path: &Path) -> Result<Self, SourceInspectionError> {
+        Self::open_inner(path, true)
+    }
+
+    fn open_inner(
+        path: &Path,
+        allow_download_metadata: bool,
+    ) -> Result<Self, SourceInspectionError> {
         if !path.is_absolute() || path.as_os_str().is_empty() {
             return Err(SourceInspectionError::InvalidPath(
                 "path must be absolute and nonempty".to_owned(),
@@ -237,11 +263,28 @@ impl HeldApplicationFile {
                 "opened source is not on a fixed volume".to_owned(),
             ));
         }
-        let observation = observe(&file, &held_path)?;
+        let base = observe_base(&file, &held_path)?;
+        let download_metadata = if allow_download_metadata {
+            hold_download_metadata(&file, &held_path, &base)?
+        } else {
+            Vec::new()
+        };
+        let metadata_entries = download_metadata
+            .iter()
+            .map(|metadata| metadata.entry.clone())
+            .collect::<Vec<_>>();
+        if allow_download_metadata {
+            verify_download_metadata_streams(&file, base.size_bytes, &metadata_entries)?;
+        } else {
+            verify_stream_policy(&file, false, base.size_bytes)
+                .map_err(|error| SourceInspectionError::StreamPolicy(error.to_string()))?;
+        }
+        let observation = observation_with_metadata(base, metadata_entries);
         Ok(Self {
             file,
             source_path: held_path,
             observation,
+            download_metadata,
         })
     }
 
@@ -255,9 +298,24 @@ impl HeldApplicationFile {
         if !same_path(&current_path, &self.source_path) {
             return Err(SourceInspectionError::Drift);
         }
-        let current = observe(&self.file, &current_path)?;
+        let current = observe(
+            &self.file,
+            &current_path,
+            &self.observation.download_metadata,
+        )?;
         if current != self.observation {
             return Err(SourceInspectionError::Drift);
+        }
+        let default_id = stable_id(&self.file).map_err(native)?;
+        for metadata in &self.download_metadata {
+            if stable_id(&metadata.file).map_err(native)? != default_id
+                || file_size(&metadata.file).map_err(native)? != metadata.entry.size_bytes
+                || hex::encode(
+                    hash_file(&metadata.file, metadata.entry.size_bytes).map_err(native)?,
+                ) != metadata.entry.sha256
+            {
+                return Err(SourceInspectionError::Drift);
+            }
         }
         Ok(())
     }
@@ -297,6 +355,31 @@ impl HeldApplicationFile {
         }
         destination.flush().map_err(native)?;
         destination.sync_all().map_err(native)?;
+        self.revalidate()
+    }
+
+    /// Copies one retained download-metadata stream into a newly-created
+    /// ordinary sidecar. This never writes a stream back onto a payload.
+    pub(crate) fn copy_download_metadata_to(
+        &self,
+        name: &str,
+        destination: &mut File,
+    ) -> Result<(), SourceInspectionError> {
+        if destination.metadata().map_err(native)?.len() != 0 {
+            return Err(SourceInspectionError::InvalidShape);
+        }
+        self.revalidate()?;
+        let metadata = self
+            .download_metadata
+            .iter()
+            .find(|metadata| metadata.entry.name == name)
+            .ok_or_else(|| {
+                SourceInspectionError::PolicyRejected("metadata stream is absent".to_owned())
+            })?;
+        copy_held_file(&metadata.file, metadata.entry.size_bytes, destination)?;
+        if file_size(destination).map_err(native)? != metadata.entry.size_bytes {
+            return Err(SourceInspectionError::Drift);
+        }
         self.revalidate()
     }
 }
@@ -596,7 +679,17 @@ fn observe_portable_object(
     }
 }
 
-fn observe(file: &File, path: &Path) -> Result<SourceFileObservation, SourceInspectionError> {
+fn observe(
+    file: &File,
+    path: &Path,
+    download_metadata: &[ApplicationDownloadMetadataEntry],
+) -> Result<SourceFileObservation, SourceInspectionError> {
+    let base = observe_base(file, path)?;
+    verify_download_metadata_streams(file, base.size_bytes, download_metadata)?;
+    Ok(observation_with_metadata(base, download_metadata.to_vec()))
+}
+
+fn observe_base(file: &File, path: &Path) -> Result<SourceFileObservation, SourceInspectionError> {
     let before = basic_info(file).map_err(native)?;
     let standard = standard_info(file).map_err(native)?;
     if before.dwFileAttributes & FORBIDDEN_SOURCE_ATTRIBUTES != 0 || standard.NumberOfLinks != 1 {
@@ -606,8 +699,6 @@ fn observe(file: &File, path: &Path) -> Result<SourceFileObservation, SourceInsp
     if size_bytes > MAX_SOURCE_FILE_BYTES {
         return Err(SourceInspectionError::BoundsExceeded);
     }
-    verify_stream_policy(file, false, size_bytes)
-        .map_err(|error| SourceInspectionError::StreamPolicy(error.to_string()))?;
     let id = stable_id(file).map_err(native)?;
     let sha256 = hex::encode(hash_file(file, size_bytes).map_err(native)?);
     let after = basic_info(file).map_err(native)?;
@@ -634,7 +725,133 @@ fn observe(file: &File, path: &Path) -> Result<SourceFileObservation, SourceInsp
         sha256,
         link_count: standard.NumberOfLinks,
         only_unnamed_data_stream: true,
+        download_metadata: Vec::new(),
     })
+}
+
+fn observation_with_metadata(
+    mut observation: SourceFileObservation,
+    download_metadata: Vec<ApplicationDownloadMetadataEntry>,
+) -> SourceFileObservation {
+    observation.only_unnamed_data_stream = download_metadata.is_empty();
+    observation.download_metadata = download_metadata;
+    observation
+}
+
+fn hold_download_metadata(
+    file: &File,
+    source_path: &Path,
+    observation: &SourceFileObservation,
+) -> Result<Vec<HeldDownloadMetadata>, SourceInspectionError> {
+    let default_id = stable_id(file).map_err(native)?;
+    let streams = enumerate_file_streams(file, false)
+        .map_err(|error| SourceInspectionError::StreamPolicy(error.to_string()))?;
+    let names = allowed_download_metadata_names(&streams, observation.size_bytes)?;
+    let mut held = Vec::with_capacity(names.len());
+    for (name, size_bytes) in names {
+        let stream = open_download_metadata_stream(source_path, name)?;
+        if stable_id(&stream).map_err(native)? != default_id
+            || file_size(&stream).map_err(native)? != size_bytes
+        {
+            return Err(SourceInspectionError::Drift);
+        }
+        let sha256 = hex::encode(hash_file(&stream, size_bytes).map_err(native)?);
+        held.push(HeldDownloadMetadata {
+            entry: ApplicationDownloadMetadataEntry {
+                name: name.to_owned(),
+                size_bytes,
+                sha256,
+            },
+            file: stream,
+        });
+    }
+    let entries = held
+        .iter()
+        .map(|metadata| metadata.entry.clone())
+        .collect::<Vec<_>>();
+    verify_download_metadata_streams(file, observation.size_bytes, &entries)?;
+    Ok(held)
+}
+
+fn allowed_download_metadata_names(
+    streams: &[(String, u64)],
+    expected_default_size: u64,
+) -> Result<Vec<(&'static str, u64)>, SourceInspectionError> {
+    let mut names = Vec::new();
+    let mut default_count = 0;
+    for (stream_name, size_bytes) in streams {
+        match stream_name.as_str() {
+            "::$DATA" if *size_bytes == expected_default_size => default_count += 1,
+            ":Zone.Identifier:$DATA" if *size_bytes <= MAX_DOWNLOAD_METADATA_STREAM_BYTES => {
+                names.push((ZONE_IDENTIFIER_STREAM, *size_bytes));
+            }
+            ":SmartScreen:$DATA" if *size_bytes <= MAX_DOWNLOAD_METADATA_STREAM_BYTES => {
+                names.push((SMARTSCREEN_STREAM, *size_bytes));
+            }
+            _ => {
+                return Err(SourceInspectionError::StreamPolicy(
+                    "source has an unsupported, malformed, or oversized data stream".to_owned(),
+                ));
+            }
+        }
+    }
+    if default_count != 1 || names.len() > 2 || names.windows(2).any(|pair| pair[0].0 == pair[1].0)
+    {
+        return Err(SourceInspectionError::StreamPolicy(
+            "source data stream list is ambiguous".to_owned(),
+        ));
+    }
+    names.sort_by_key(|(name, _)| *name);
+    Ok(names)
+}
+
+fn verify_download_metadata_streams(
+    file: &File,
+    default_size: u64,
+    expected: &[ApplicationDownloadMetadataEntry],
+) -> Result<(), SourceInspectionError> {
+    let streams = enumerate_file_streams(file, false)
+        .map_err(|error| SourceInspectionError::StreamPolicy(error.to_string()))?;
+    let actual = allowed_download_metadata_names(&streams, default_size)?;
+    let expected = expected
+        .iter()
+        .map(|entry| (entry.name.as_str(), entry.size_bytes))
+        .collect::<Vec<_>>();
+    if actual
+        .iter()
+        .map(|(name, size_bytes)| (*name, *size_bytes))
+        .ne(expected.into_iter())
+    {
+        return Err(SourceInspectionError::Drift);
+    }
+    Ok(())
+}
+
+fn open_download_metadata_stream(
+    source_path: &Path,
+    name: &str,
+) -> Result<File, SourceInspectionError> {
+    if !matches!(name, ZONE_IDENTIFIER_STREAM | SMARTSCREEN_STREAM) {
+        return Err(SourceInspectionError::PolicyRejected(
+            "download metadata name is not allowlisted".to_owned(),
+        ));
+    }
+    let source = source_path.to_str().ok_or_else(|| {
+        SourceInspectionError::InvalidPath("final source path is not Unicode".to_owned())
+    })?;
+    let stream_path = format!("{source}:{name}:$DATA");
+    OpenOptions::new()
+        .access_mode(
+            FILE_READ_DATA.0
+                | FILE_READ_ATTRIBUTES.0
+                | FILE_READ_EA.0
+                | READ_CONTROL.0
+                | SYNCHRONIZE.0,
+        )
+        .share_mode(FILE_SHARE_READ.0)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
+        .open(stream_path)
+        .map_err(open_error)
 }
 
 fn open_relative(
@@ -955,6 +1172,97 @@ mod tests {
             HeldApplicationFile::open(&streamed),
             Err(SourceInspectionError::StreamPolicy(_))
         ));
+    }
+
+    #[test]
+    fn download_metadata_is_held_hashed_and_copied_without_unblocking_payload() {
+        let root = Root::new();
+        let path = root.0.join("downloaded.exe");
+        fs::write(&path, b"downloaded-payload").unwrap();
+        fs::write(
+            format!("{}:Zone.Identifier:$DATA", path.display()),
+            b"[ZoneTransfer]\r\nZoneId=3\r\n",
+        )
+        .unwrap();
+        fs::write(format!("{}:SmartScreen:$DATA", path.display()), b"Anaheim").unwrap();
+
+        assert!(matches!(
+            HeldApplicationFile::open(&path),
+            Err(SourceInspectionError::StreamPolicy(_))
+        ));
+        let held = HeldApplicationFile::open_with_download_metadata(&path).unwrap();
+        assert!(!held.observation().only_unnamed_data_stream);
+        assert_eq!(
+            held.observation()
+                .download_metadata
+                .iter()
+                .map(|entry| entry.name.as_str())
+                .collect::<Vec<_>>(),
+            vec![SMARTSCREEN_STREAM, ZONE_IDENTIFIER_STREAM]
+        );
+        assert!(
+            OpenOptions::new()
+                .write(true)
+                .open(format!("{}:Zone.Identifier:$DATA", path.display()))
+                .is_err()
+        );
+        assert!(fs::rename(&path, root.0.join("replacement.exe")).is_err());
+
+        let sidecar = root.0.join("zone-identifier.bin");
+        let mut destination = File::create(&sidecar).unwrap();
+        held.copy_download_metadata_to(ZONE_IDENTIFIER_STREAM, &mut destination)
+            .unwrap();
+        drop(destination);
+        assert_eq!(
+            fs::read(&sidecar).unwrap(),
+            b"[ZoneTransfer]\r\nZoneId=3\r\n"
+        );
+        held.revalidate().unwrap();
+    }
+
+    #[test]
+    fn download_metadata_rejects_unknown_oversized_and_busy_streams() {
+        let root = Root::new();
+        let unknown = root.0.join("unknown.exe");
+        fs::write(&unknown, b"payload").unwrap();
+        fs::write(
+            format!("{}:unexpected:$DATA", unknown.display()),
+            b"untrusted",
+        )
+        .unwrap();
+        assert!(matches!(
+            HeldApplicationFile::open_with_download_metadata(&unknown),
+            Err(SourceInspectionError::StreamPolicy(_))
+        ));
+
+        let oversized = root.0.join("oversized.exe");
+        fs::write(&oversized, b"payload").unwrap();
+        fs::write(
+            format!("{}:Zone.Identifier:$DATA", oversized.display()),
+            vec![b'x'; (MAX_DOWNLOAD_METADATA_STREAM_BYTES + 1) as usize],
+        )
+        .unwrap();
+        assert!(matches!(
+            HeldApplicationFile::open_with_download_metadata(&oversized),
+            Err(SourceInspectionError::StreamPolicy(_))
+        ));
+
+        let busy = root.0.join("busy.exe");
+        fs::write(&busy, b"payload").unwrap();
+        fs::write(
+            format!("{}:Zone.Identifier:$DATA", busy.display()),
+            b"ZoneId=3",
+        )
+        .unwrap();
+        let writer = OpenOptions::new()
+            .write(true)
+            .open(format!("{}:Zone.Identifier:$DATA", busy.display()))
+            .unwrap();
+        assert!(matches!(
+            HeldApplicationFile::open_with_download_metadata(&busy),
+            Err(SourceInspectionError::Busy)
+        ));
+        drop(writer);
     }
 
     #[test]

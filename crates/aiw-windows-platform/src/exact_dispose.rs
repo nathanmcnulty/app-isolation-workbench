@@ -2320,25 +2320,7 @@ pub(crate) fn verify_stream_policy(
     directory: bool,
     expected_size: u64,
 ) -> Result<(), ExactDisposeError> {
-    let mut buffer = vec![0_u64; STREAM_BUFFER_BYTES / size_of::<u64>()];
-    let result = unsafe {
-        GetFileInformationByHandleEx(
-            raw_handle(file),
-            FileStreamInfo,
-            buffer.as_mut_ptr().cast(),
-            STREAM_BUFFER_BYTES as u32,
-        )
-    };
-    if let Err(error) = result {
-        if WIN32_ERROR::from_error(&error) == Some(ERROR_HANDLE_EOF) && directory {
-            return Ok(());
-        }
-        return Err(native(
-            "GetFileInformationByHandleEx(FileStreamInfo)",
-            error,
-        ));
-    }
-    let streams = parse_streams(as_bytes(&buffer))?;
+    let streams = enumerate_file_streams(file, directory)?;
     if directory {
         if streams.is_empty() {
             Ok(())
@@ -2354,6 +2336,34 @@ pub(crate) fn verify_stream_policy(
             "file stream policy requires only the unnamed data stream".into(),
         ))
     }
+}
+
+/// Enumerate the bounded, exact stream names and logical sizes attached to a
+/// held file. Callers must impose their own narrow allowlist; this helper does
+/// not relax the ordinary workspace stream policy.
+pub(crate) fn enumerate_file_streams(
+    file: &File,
+    directory: bool,
+) -> Result<Vec<(String, u64)>, ExactDisposeError> {
+    let mut buffer = vec![0_u64; STREAM_BUFFER_BYTES / size_of::<u64>()];
+    let result = unsafe {
+        GetFileInformationByHandleEx(
+            raw_handle(file),
+            FileStreamInfo,
+            buffer.as_mut_ptr().cast(),
+            STREAM_BUFFER_BYTES as u32,
+        )
+    };
+    if let Err(error) = result {
+        if WIN32_ERROR::from_error(&error) == Some(ERROR_HANDLE_EOF) && directory {
+            return Ok(Vec::new());
+        }
+        return Err(native(
+            "GetFileInformationByHandleEx(FileStreamInfo)",
+            error,
+        ));
+    }
+    parse_streams(as_bytes(&buffer))
 }
 
 fn parse_streams(bytes: &[u8]) -> Result<Vec<(String, u64)>, ExactDisposeError> {
