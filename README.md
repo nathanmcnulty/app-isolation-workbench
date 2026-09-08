@@ -1,11 +1,11 @@
 # App Isolation Workbench
 
-App Isolation Workbench (AIW) is free, open-source research software for assessing existing Windows applications under stronger isolation boundaries. The product has two milestones:
+App Isolation Workbench (AIW) is free, open-source research software for assessing existing Windows applications under stronger isolation boundaries. The product evolves through two capability stages:
 
 1. **Workbench v1** assesses MSI, EXE, and portable-directory applications, compares ordinary and isolated execution, records inspectable evidence, makes deterministic recommendations, and replays validated profiles on demand.
 2. **Studio v1** retains Workbench and adds first-party MSIX/AppContainer authoring, narrowly scoped remediation, signing, and final-package validation.
 
-The delivery sequence is `contracts -> live runner -> evidence/scenarios -> recommendations/launch -> Workbench -> package authoring -> package validation -> Studio`.
+The delivery loop is `Assess -> Adapt -> Package -> Validate`. We will complete it for a narrow application class before expanding every provider and collector. The [roadmap](docs/ROADMAP.md) prioritizes a standard-user baseline, one measured isolation candidate, a reviewed adaptation and reusable launch, then the first validated package; experimental providers do not block that loop.
 
 ## Current status
 
@@ -17,8 +17,8 @@ AIW is pre-alpha. The W0 contracts, fixed Windows Sandbox golden probe, and appr
 | Signature observation | MSI/EXE inspection validates embedded Authenticode against the held file using cache-only whole-chain policy. Signer identity, timestamp, and installer-aware metadata are not yet recorded. Signature observation is not execution approval. |
 | Windows Sandbox preparation | `prepare-wsb`, `prepare-wsb-msi`, `verify-prepared-wsb`, and `import-prepared-wsb` bind a fixed agent, provider, protected workspace, plans, and import provenance before separate approval. |
 | Public execution and recovery | `run start` dispatches the imported and explicitly approved golden probe or fixed Notepad++ MSI profile. `run recover` reconciles and, if needed, stops only the persisted session. Neither accepts arbitrary execution authority. |
-| Evidence | The golden probe returns token evidence; the MSI profile returns bound install/open/edit/save/close results, a launched-root token snapshot, and scoped filesystem changes. Both verify completion and exact cleanup and remain `insufficientEvidence` for containment. |
-| Assessment report | `run report-wsb-msi` reverifies a retained completed MSI run and exports JSON or readable Markdown with guest function results, installation/use file changes, original requirements, and missing baseline/isolation evidence. See [report semantics](docs/ASSESSMENT-REPORT.md). |
+| Evidence | The MSI profile returns bound install/open/edit/save/close results, a launched-root token snapshot, scoped filesystem changes, and stage progress. The current workload is elevated inside Sandbox. Function results remain distinct from a complete containment verdict. |
+| Assessment report | `run report-wsb-msi` exports reverified completed observations; `run report-wsb-msi-run` also reports terminal failures with receipt-bound stages when available. JSON/Markdown preserve function results, file changes, requirements, and missing baseline/isolation evidence. See [report semantics](docs/ASSESSMENT-REPORT.md). |
 | Workspace discard | Exact-object revocation, depublish, disposition, and terminal receipt transactions exist privately for the fixed preparation tree. Public discard and general intake cleanup are not implemented. |
 | Other providers | MXC is a pinned, non-executing planning adapter. |
 
