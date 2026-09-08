@@ -1,4 +1,7 @@
-use crate::{AssessmentEvidenceGap, WsbMsiAssessmentReport};
+use crate::{
+    AssessmentEvidenceGap, UnverifiedGuestDiagnostic, WsbMsiAssessmentReport, WsbMsiRunReport,
+    WsbMsiUnsuccessfulReport,
+};
 use aiw_provider_wsb::{ApplicationFileRoot, FilesystemDiffKind, FilesystemSnapshotDiffResult};
 
 impl WsbMsiAssessmentReport {
@@ -72,6 +75,45 @@ impl WsbMsiAssessmentReport {
             }
         }
         out.push_str(&format!("\n## Evidence identity\n\n- Installer SHA-256: {}\n- Guest-agent SHA-256: {}\n- Scenario SHA-256: {}\n- Completion receipt SHA-256: {}\n- Evidence root: {}\n\nThe JSON report retains the complete observations and file-change lists. Failed or recovered attempts without accepted evidence are not promoted into this completed assessment report.\n", cell(&self.scenario.installer_sha256), cell(&self.scenario.agent_sha256), cell(&self.scenario.scenario_sha256), cell(&self.receipt_sha256), cell(&self.evidence_root_hash)));
+        out
+    }
+}
+
+impl WsbMsiRunReport {
+    pub fn to_markdown(&self) -> String {
+        match self {
+            Self::CompletedAssessment(report) => report.to_markdown(),
+            Self::UnsuccessfulAttempt(report) => report.to_markdown(),
+        }
+    }
+}
+
+impl WsbMsiUnsuccessfulReport {
+    pub fn to_markdown(&self) -> String {
+        let mut out = format!(
+            "# Notepad++ Windows Sandbox unsuccessful attempt\n\nRun: {}\n\nRecorded outcome: **{:?}**. No accepted application evidence is available. Application functions are **not verified**; this does not establish application incompatibility.\n\nRecorded exact-session cleanup verified: **{}**. This historical record is not a current-session query.\n\n## Recorded provider lifecycle\n\n| Sequence | State | Reason code |\n|---|---|---|\n",
+            cell(&self.run_id),
+            self.outcome,
+            self.recorded_cleanup_verified,
+        );
+        for transition in &self.lifecycle {
+            out.push_str(&format!(
+                "| {} | {:?} | {} |\n",
+                transition.sequence,
+                transition.state,
+                cell(&transition.reason_code)
+            ));
+        }
+        out.push_str("\n## Unverified guest diagnostic\n\n");
+        match &self.guest_diagnostic {
+            UnverifiedGuestDiagnostic::Absent => out.push_str("No guest diagnostic was present when reporting. The recorded lifecycle does not identify the failing application stage.\n"),
+            UnverifiedGuestDiagnostic::Rejected => out.push_str("The guest diagnostic was unreadable, unsafe, malformed, or exceeded its bounds. Its contents were not included.\n"),
+            UnverifiedGuestDiagnostic::Available { summary } => {
+                out.push_str("The following message is untrusted guest output read at report time. It has no completion-receipt or evidence-chain binding and cannot prove that any application stage passed.\n\n");
+                out.push_str(&format!("> {}\n", cell(summary)));
+            }
+        }
+        out.push_str(&format!("\n## Attempt identity\n\n- Session ID: {}\n- Project revision SHA-256: {}\n- Installer SHA-256: {}\n- Guest-agent SHA-256: {}\n- Scenario SHA-256: {}\n- Request SHA-256: {}\n\nOther guest outputs are not inspected or accepted by this unsuccessful-attempt report. No evidence root, application token, functional result, or file-change claim is inferred from them.\n", cell(&self.session_id), cell(&self.project_revision_sha256), cell(&self.installer_sha256), cell(&self.guest_agent_sha256), cell(&self.scenario_sha256), cell(&self.request_sha256)));
         out
     }
 }

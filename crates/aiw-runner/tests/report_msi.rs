@@ -105,6 +105,15 @@ fn completed_msi_report_is_readonly_and_rejects_drift() {
         assert!(report.installation_file_changes.is_none());
         assert!(report.exercise_file_changes.is_none());
     }
+    let aiw_runner::WsbMsiRunReport::CompletedAssessment(general) =
+        aiw_runner::report_windows_sandbox_msi_run(&root, run_id, &project, &guest_hash).unwrap()
+    else {
+        panic!("completed assessment downgraded");
+    };
+    assert_eq!(
+        serde_json::to_vec(&report).unwrap(),
+        serde_json::to_vec(&general).unwrap()
+    );
     let repeated = report_windows_sandbox_msi(&root, run_id, &project, &guest_hash).unwrap();
     assert_eq!(
         serde_json::to_vec(&report).unwrap(),
@@ -131,5 +140,74 @@ fn completed_msi_report_is_readonly_and_rejects_drift() {
     eprintln!(
         "MSI_ASSESSMENT_REPORT={}",
         serde_json::to_string(&report).unwrap()
+    );
+}
+
+#[test]
+#[ignore = "reads a retained failed MSI fixture; creates only one temporary fake completion; never starts Sandbox"]
+fn unsuccessful_msi_report_is_readonly_and_never_promotes_guest_outputs() {
+    use aiw_runner::{UnverifiedGuestDiagnostic, WsbMsiRunReport, report_windows_sandbox_msi_run};
+    let root = std::path::PathBuf::from(std::env::var_os("AIW_REPORT_WORKSPACE").unwrap());
+    let project_path = std::env::var_os("AIW_REPORT_PROJECT").unwrap();
+    let guest_hash = std::env::var("AIW_REPORT_GUEST_SHA256").unwrap();
+    let project: aiw_schema::Project =
+        serde_json::from_slice(&fs::read(project_path).unwrap()).unwrap();
+    let run_id = root.file_name().unwrap().to_str().unwrap();
+    let mut before = BTreeMap::new();
+    inventory(&root, &root, &mut before);
+    let report = report_windows_sandbox_msi_run(&root, run_id, &project, &guest_hash).unwrap();
+    let WsbMsiRunReport::UnsuccessfulAttempt(attempt) = &report else {
+        panic!("failure promoted to assessment");
+    };
+    assert_eq!(attempt.outcome, aiw_orchestrator::RunOutcome::Failed);
+    assert!(attempt.recorded_cleanup_verified);
+    assert_eq!(
+        attempt.lifecycle.last().unwrap().state,
+        aiw_runner::SessionTransactionState::CleanupVerified
+    );
+    assert!(matches!(
+        attempt.guest_diagnostic,
+        UnverifiedGuestDiagnostic::Available { .. }
+    ));
+    let bytes = serde_json::to_vec(&report).unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    for field in [
+        "evidenceRootHash",
+        "receiptSha256",
+        "applicationToken",
+        "behavior",
+        "scenario",
+        "installationFileChanges",
+    ] {
+        assert!(value["report"].get(field).is_none());
+    }
+    assert!(
+        report
+            .to_markdown()
+            .contains("functions are **not verified**")
+    );
+    assert!(report_windows_sandbox_msi(&root, run_id, &project, &guest_hash).is_err());
+    assert!(report_windows_sandbox_msi_run(&root, run_id, &project, &"0".repeat(64)).is_err());
+    let mut foreign = project.clone();
+    foreign.metadata.name = "foreign-project".to_owned();
+    assert!(report_windows_sandbox_msi_run(&root, run_id, &foreign, &guest_hash).is_err());
+    let extra = root.join("output/completion.json");
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&extra)
+        .unwrap();
+    file.write_all(br#"{"successful":true,"evidenceRootHash":"unaccepted"}"#)
+        .unwrap();
+    drop(file);
+    let repeated = report_windows_sandbox_msi_run(&root, run_id, &project, &guest_hash);
+    fs::remove_file(&extra).unwrap();
+    assert_eq!(bytes, serde_json::to_vec(&repeated.unwrap()).unwrap());
+    let mut after = BTreeMap::new();
+    inventory(&root, &root, &mut after);
+    assert_eq!(before, after);
+    eprintln!(
+        "MSI_UNSUCCESSFUL_REPORT={}",
+        String::from_utf8(bytes).unwrap()
     );
 }

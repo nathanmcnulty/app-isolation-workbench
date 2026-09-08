@@ -44,3 +44,22 @@ Local validation passed: 55 orchestrator tests, 62 runner tests (four opt-in tes
 The v3 live fixture passed install/open/edit/save/close and exact cleanup. Its retained v2-schema assessment report was produced twice with identical JSON and an unchanged workspace inventory; wrong project/hash and unexpected-output inputs were rejected. The report shows 215 installation additions and seven use-time roaming-app-data additions, with all snapshot roots complete. Legacy v2 execution still produces the historical report with behavior/diff fields absent. See [the measured benchmark](FIXTURE-NOTEPAD-PLUS-PLUS-8.9.8.md#functional-document-and-file-change-benchmark--2026-09-07).
 
 The slice passed 31 provider tests and an integration run with 230 passing tests (16 opt-in/helper tests ignored). Seven focused native guest tests and the retained-report tests were run after the native corrections. Formatting, governance, CLI schema/compilation/export checks, warning-denied Clippy, and Rust 1.85 workspace/all-target compatibility passed. These are local results; hosted CI was not run.
+
+## Unsuccessful terminal attempts
+
+`run report-wsb-msi-run` reports either a completed assessment or an unsuccessful terminal attempt. It takes the same root, run ID, project, independently supplied guest-agent hash, and JSON/Markdown format as `report-wsb-msi`. JSON uses a `reportKind` discriminator (`completedAssessment` or `unsuccessfulAttempt`) and a `report` object. The original `report-wsb-msi` command continues to reject unsuccessful attempts.
+
+```powershell
+aiw run report-wsb-msi-run --root <retained-workspace> --run-id <run-id> --project <approved-project.json> --guest-agent-sha256 <approved-sha256> --format markdown
+aiw schema wsb-msi-run-report
+```
+
+An unsuccessful report requires a committed failed/cancelled result with no accepted evidence root, exact-session cleanup recorded in both the run result and session transaction, no pending transaction publication or request file, and the original project/preparation/input/request bindings. It uses the same held-file and repeated journal/transaction verification as the completed report. Reporting does not start, stop, recover, or query a Sandbox and does not write to the retained workspace.
+
+The report includes the recorded provider lifecycle and an optional `guest-failure.json` message. The message is explicitly **unverified guest output read at report time**: it has no completion-receipt or evidence-chain binding, can be absent or rejected, and cannot establish that an application stage passed or that the application is incompatible. Reading is bounded, rejects a final reparse point/non-file, and retains a handle denying writes/deletion while reporting. Control characters and Markdown markup are sanitized for presentation. No document contents are requested by this report.
+
+Other guest files are not read or accepted on the unsuccessful path, even if they resemble a successful completion. The unsuccessful schema contains no accepted evidence root, token, scenario result, or file-change fields. Malformed optional diagnostics do not erase independently validated lifecycle information; invalid host commitments reject the report.
+
+This first slice covers terminal failed/cancelled attempts after recorded cleanup. Pre-start failures, active/interrupted runs, pending recovery, and independently verified per-stage progress still need a lifecycle/progress reporting extension. Such runs are rejected here rather than reported as cleaned up. The provider lifecycle describes start/cleanup transitions, not application-stage completion.
+
+Validation of this extension used the retained failed editor-input fixture and the successful v3 fixture. Both reports were repeatable with unchanged workspace inventories. A fake successful completion placed in the failed fixture did not change its unsuccessful report; the test removed only its own create-new file. Wrong project/agent hashes were rejected, and the strict assessment command still rejected the failed attempt. Unit coverage checks absent, malformed, oversized, and non-file diagnostics, control-character sanitation, and write/delete denial while the diagnostic handle is retained. Runner/CLI tests, warning-denied workspace Clippy, Rust 1.85 all-target compatibility, formatting, governance, and CLI JSON/Markdown/schema checks passed locally. No new Sandbox or CI run was needed.

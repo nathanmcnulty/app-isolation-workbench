@@ -13,9 +13,12 @@ mod assessment_report;
 #[cfg(windows)]
 mod discard;
 mod preparation;
+pub use assessment_report::{
+    AssessmentEvidenceGap, UnverifiedGuestDiagnostic, WsbMsiAssessmentReport, WsbMsiRunReport,
+    WsbMsiUnsuccessfulReport,
+};
 #[cfg(windows)]
-pub use assessment_report::report_windows_sandbox_msi;
-pub use assessment_report::{AssessmentEvidenceGap, WsbMsiAssessmentReport};
+pub use assessment_report::{report_windows_sandbox_msi, report_windows_sandbox_msi_run};
 mod session;
 
 pub use preparation::{
@@ -2352,7 +2355,15 @@ fn wait_for_receipt(
 }
 
 fn read_guest_failure_diagnostic(path: &Path) -> Result<String, RunnerError> {
-    let diagnostic: GuestFailureDiagnostic = read_bounded_json(path, MAX_GUEST_FAILURE_DIAGNOSTIC)?;
+    parse_guest_failure_diagnostic(&read_bounded_bytes(path, MAX_GUEST_FAILURE_DIAGNOSTIC)?)
+}
+
+fn parse_guest_failure_diagnostic(bytes: &[u8]) -> Result<String, RunnerError> {
+    if bytes.len() as u64 > MAX_GUEST_FAILURE_DIAGNOSTIC {
+        return Err(RunnerError::Drift);
+    }
+    let diagnostic: GuestFailureDiagnostic =
+        serde_json::from_slice(bytes).map_err(|_| RunnerError::Drift)?;
     if diagnostic.schema_version != "aiw.dev/wsb-guest-failure/v0alpha1"
         || diagnostic.code != "AIW_GUEST_AGENT_FAILED"
         || diagnostic.summary.is_empty()

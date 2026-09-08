@@ -444,6 +444,19 @@ enum RunCommand {
         #[arg(long, value_enum, default_value_t = AssessmentReportFormat::Json)]
         format: AssessmentReportFormat,
     },
+    /// Report a terminal MSI assessment or an unsuccessful attempt after verified cleanup.
+    ReportWsbMsiRun {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        run_id: String,
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        guest_agent_sha256: String,
+        #[arg(long, value_enum, default_value_t = AssessmentReportFormat::Json)]
+        format: AssessmentReportFormat,
+    },
     /// Start only the already-approved, hash-bound Windows Sandbox preparation profile.
     /// No arbitrary command, script, policy fragment, or provider verb is accepted.
     Start {
@@ -531,6 +544,7 @@ enum SchemaKind {
     MsiApplicationToken,
     ImportedMsiBehaviorEvidence,
     WsbMsiAssessmentReport,
+    WsbMsiRunReport,
     CompiledMsiScenario,
     MsiScenarioCompilation,
     ApplicationFileAuthority,
@@ -1499,6 +1513,49 @@ fn run(command: Command) -> Result<()> {
                     }))
                 }
             }
+            RunCommand::ReportWsbMsiRun {
+                root,
+                run_id,
+                project,
+                guest_agent_sha256,
+                format,
+            } => {
+                let loaded = read_project(&project)?;
+                #[cfg(windows)]
+                {
+                    let report = aiw_runner::report_windows_sandbox_msi_run(
+                        &root,
+                        &run_id,
+                        &loaded.project,
+                        &guest_agent_sha256,
+                    )
+                    .map_err(|source| {
+                        anyhow!(RunReportFailed {
+                            run_id: run_id.clone(),
+                            source
+                        })
+                    })?;
+                    match format {
+                        AssessmentReportFormat::Json => write_json(&report),
+                        AssessmentReportFormat::Markdown => {
+                            print!("{}", report.to_markdown());
+                            Ok(())
+                        }
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (root, loaded, guest_agent_sha256, format);
+                    Err(anyhow!(RunOperationUnavailable {
+                        code: "AIW_WINDOWS_REQUIRED",
+                        summary: "retained Windows workspace verification requires Windows",
+                        stage: "wsbReport",
+                        remediation: "Read the retained workspace on its original Windows host.",
+                        detail: "No files or provider state were changed.",
+                        run_id,
+                    }))
+                }
+            }
             RunCommand::Start {
                 root,
                 run_id,
@@ -1593,6 +1650,7 @@ fn run(command: Command) -> Result<()> {
             SchemaKind::WsbMsiAssessmentReport => {
                 write_json(&schema_for!(aiw_runner::WsbMsiAssessmentReport))
             }
+            SchemaKind::WsbMsiRunReport => write_json(&schema_for!(aiw_runner::WsbMsiRunReport)),
             SchemaKind::ImportedMsiBehaviorEvidence => {
                 write_json(&schema_for!(aiw_provider_wsb::ImportedMsiBehaviorEvidence))
             }
