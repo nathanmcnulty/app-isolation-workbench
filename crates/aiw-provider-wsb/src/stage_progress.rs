@@ -116,9 +116,11 @@ impl ImportedMsiStageProgress {
     }
 
     pub fn successful(&self) -> bool {
-        self.stages
-            .iter()
-            .all(|stage| stage.status == MsiStageStatus::Passed)
+        self.validate_shape().is_ok()
+            && self
+                .stages
+                .iter()
+                .all(|stage| stage.status == MsiStageStatus::Passed)
     }
 }
 
@@ -142,13 +144,6 @@ fn validate_statuses(stages: &[MsiStageResult]) -> Result<(), String> {
             MsiStageStatus::NotReached => {}
             MsiStageStatus::Passed => {}
         }
-    }
-    if failed
-        && !stages
-            .iter()
-            .any(|stage| stage.status == MsiStageStatus::NotReached)
-    {
-        return Err("failed stage must be followed by not-reached stages".to_owned());
     }
     Ok(())
 }
@@ -223,9 +218,6 @@ pub fn verify_imported_msi_stage_progress(
             .map_err(|error| format!("invalid imported MSI stage progress: {error}"))?;
         current.validate_for_request(request)?;
         observation = Some(current);
-    }
-    if observation.is_none() && request.scenario.requires_application_exercise() {
-        return Err("approved MSI profile requires stage progress evidence".to_owned());
     }
     Ok(observation)
 }
@@ -330,6 +322,17 @@ mod tests {
     }
 
     #[test]
+    fn accepts_failure_at_every_stage_including_final_stage() {
+        let request = request();
+        for index in 0..MsiExecutionStage::ORDERED.len() {
+            let progress = ImportedMsiStageProgress::new(&request, stages(Some(index)))
+                .expect("each single failed prefix is valid");
+            assert!(!progress.successful());
+            assert_eq!(progress.stages[index].status, MsiStageStatus::Failed);
+        }
+    }
+
+    #[test]
     fn rejects_bad_order_statuses_and_bindings() {
         let request = request();
         let mut value = stages(None);
@@ -358,6 +361,33 @@ mod tests {
             progress
         );
         assert!(verify_imported_msi_stage_progress(&bytes, &"f".repeat(64), &request).is_err());
+
+        let mut v3_without_progress = EvidenceLog::new();
+        v3_without_progress
+            .append(EvidenceEvent {
+                observed_utc: "2026-09-07T00:00:00Z".into(),
+                kind: "otherEvent".into(),
+                source: "aiw-guest-agent".into(),
+                payload: serde_json::json!({}),
+            })
+            .unwrap();
+        let v3_root = v3_without_progress.manifest().unwrap().root_hash;
+        let v3_bytes = v3_without_progress
+            .records()
+            .iter()
+            .map(|record| {
+                let mut line = serde_json::to_vec(record).unwrap();
+                line.push(b'\n');
+                line
+            })
+            .fold(Vec::new(), |mut bytes, line| {
+                bytes.extend(line);
+                bytes
+            });
+        assert_eq!(
+            verify_imported_msi_stage_progress(&v3_bytes, &v3_root, &request).unwrap(),
+            None
+        );
 
         let legacy = crate::ImportedMsiGuestRequest::new(
             "legacy",
