@@ -4,6 +4,7 @@ mod application_token;
 mod completion;
 mod imported_msi;
 mod scenario;
+mod stage_progress;
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -37,6 +38,12 @@ pub use imported_msi::{
 pub use scenario::{
     CompiledMsiScenario, FixedDocumentExercise, ScenarioCompileError,
     compile_notepad_plus_plus_msi_scenario,
+};
+pub use stage_progress::{
+    IMPORTED_MSI_FAILED_ATTEMPT_SCHEMA, IMPORTED_MSI_FAILED_ATTEMPT_SCHEMA_VERSION,
+    IMPORTED_MSI_STAGE_PROGRESS_EVENT, IMPORTED_MSI_STAGE_PROGRESS_SCHEMA,
+    IMPORTED_MSI_STAGE_PROGRESS_SCHEMA_VERSION, ImportedMsiFailedAttempt, ImportedMsiStageProgress,
+    MsiExecutionStage, MsiStageResult, MsiStageStatus, verify_imported_msi_stage_progress,
 };
 
 pub const WINDOWS_SANDBOX_PLAN_SCHEMA_VERSION: &str = "aiw.dev/windows-sandbox-plan/v0alpha1";
