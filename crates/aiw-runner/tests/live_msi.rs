@@ -114,7 +114,7 @@ fn live_imported_msi_install_observe_close_and_cleanup() {
     assert!(result.scenario.successful());
     assert_eq!(
         result.schema_version,
-        "aiw.dev/wsb-imported-msi-execution/v0alpha2"
+        "aiw.dev/wsb-imported-msi-execution/v0alpha3"
     );
     let token = result
         .application_token
@@ -122,6 +122,21 @@ fn live_imported_msi_install_observe_close_and_cleanup() {
         .expect("approved profile requires application token");
     assert_eq!(token.token.process_id, result.scenario.launch_process_id);
     assert_eq!(token.request_sha256, result.request_sha256);
+    let behavior = result
+        .behavior
+        .as_ref()
+        .expect("approved profile requires functional and filesystem observations");
+    assert!(behavior.functional_exercise.opened_document);
+    assert!(behavior.functional_exercise.saved_document);
+    assert_eq!(
+        behavior.functional_exercise.expected_sha256,
+        behavior.functional_exercise.observed_sha256
+    );
+    assert!(behavior.before_install.entries.is_empty());
+    assert!(!behavior.after_install.entries.is_empty());
+    assert!(behavior.before_install.issues.is_empty());
+    assert!(behavior.after_install.issues.is_empty());
+    assert!(behavior.after_exercise.issues.is_empty());
     assert_eq!(result.scenario.install_exit_code, 0);
     assert_eq!(result.scenario.launch_exit_code, 0);
     assert!(result.cleanup_complete);

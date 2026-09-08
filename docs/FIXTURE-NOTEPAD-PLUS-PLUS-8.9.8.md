@@ -81,3 +81,26 @@ The v0alpha2 compiled profile passed a fresh approved MSI install/observe/close 
 | Evidence root | `6533bbd868701d13610911ea31fab6a98c8bf1805eda9e7c29c398580f066c0c` |
 
 Installation and launched-process exit codes were both zero. The host verified the receipt, reverified the token event's evidence root and request/PID bindings, and returned execution v0alpha2 with `applicationToken`. Exact cleanup succeeded, request removal was verified, no Sandbox sessions remained, and assessment stayed `insufficientEvidence`. The prepared workspace remains under `%TEMP%\aiw-msi-live-19192-1788819016541089200`; the log is `%TEMP%\aiw-msi-token-live.log`. No installer ran on the host and no CI was triggered.
+
+## Functional document and file-change benchmark — 2026-09-07
+
+The approved v3 MSI scenario passed a live Windows Sandbox run in 82.52 seconds. Notepad++ opened the fixed text document, exposed the expected initial content, accepted the replacement text and Enter key, exposed the expected edited content, saved the exact expected bytes, and closed with exit code zero. Installation also returned zero. Exact Sandbox cleanup completed, the request was removed, and the host session inventory was empty. The terminal assessment remains `insufficientEvidence` for containment; these are guest-reported functional observations.
+
+The three bounded snapshots were complete: zero files before installation, 215 after installation, and 222 after use. The retained report identifies 215 installation additions and seven use-time additions under guest roaming application data: `config.xml`, `contextMenu.xml`, `langs.xml`, `plugins/Config/converter.ini`, `session.xml`, `shortcuts.xml`, and `stylers.xml`. There were no reported modifications/removals or incomplete roots. This identifies installed payload versus initial user-state files to investigate for packaging; registry changes and dependencies outside the fixed roots were not captured.
+
+Evidence identity:
+
+- Run/workspace: `%TEMP%\aiw-msi-live-15696-1788832809534382900`
+- Session: `294bca6c-eee3-19e0-0c32-a4b1027acdf3`
+- MSI SHA-256: `c29cbe1a9aaef322cc3f316ceeabe8a8071b18441a5e3c3ec348069739e59e80`
+- Static guest SHA-256: `1afe4be4b5e5cba5169c14e7d569b25895a5d26289c466f09947aadad2768188`
+- Request SHA-256: `8c750c075b62c451e64f690b58a363dcc44bb36fd91832ff7899d39a7cebed0f`
+- Completion receipt SHA-256: `24fabe898970dbb20f40f0be58965af7838eba6d89295d7f0554cfeedc0addb1`
+- Evidence root: `ecd05c392be9508d42b32d0328f71601f7e70445ed83081f8b431ecf002610c4`
+- Expected/observed saved-document SHA-256: `55666bc7399b14c1cdb77f1e0261e3b6f09e49aec11cda7de1685d73b8a7c9fc`
+- Live log: `%TEMP%\aiw-behavior-live-v4.log`
+- Retained-report verification: `%TEMP%\aiw-behavior-retained-report-test.log`
+
+Three preceding development attempts failed without accepted evidence and verified cleanup. One exposed a startup message timeout; bounded readiness retries resolved it. Subsequent diagnostics showed that Scintilla ignored control characters sent as `WM_CHAR`: the editor had the 46 printable bytes but no CR/LF. Sending Enter through the normal key-message path produced the expected 48 bytes. The harness now independently checks editor content before Save and the retained file afterward. This was a test-driver issue, not evidence of application incompatibility.
+
+Independent review also led to per-message PID checks, retained document ancestry, and bounded capture/read diagnostics. Synthetic tests verify that normal atomic saved-file replacement works while a Scenario-directory rename is blocked. The v2 retained report remains readable with new observations absent; the v3 report passes repeated deterministic output and unchanged-workspace checks. No installer or application was executed on the host, and no hosted CI run was scheduled for this benchmark.

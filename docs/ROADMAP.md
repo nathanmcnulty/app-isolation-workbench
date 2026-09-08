@@ -59,6 +59,12 @@ The first typed MSI scenario compiler is available locally through `provider com
 
 **Exit gate:** the complete Workbench acceptance suite passes on supported Windows 11 24H2 x64 without arbitrary execution or hidden telemetry.
 
+## Next assessment capability slices
+
+The fixed v3 Notepad++ scenario now exercises a document open/edit/save/close sequence and records scoped installation/use file changes. Retained reports reverify these observations and export JSON or Markdown while preserving missing evidence. Community development proceeds through capabilities; an admin feedback round is not a prerequisite.
+
+The next useful slices are stage-specific failed/partial attempt reporting, registry/dependency observations, and a disposable ordinary baseline with comparable function results. Then broaden the typed application profiles and lifecycle tests, add deterministic comparison/launch, and use verified change/dependency evidence to inform package recipes. A guest UI-driver failure must remain distinct from a measured application incompatibility. Scoped file diffs alone do not justify an isolation recommendation or a reproducible package.
+
 ## Studio v1
 
 ### S0 — Studio contracts and handoff
