@@ -6043,6 +6043,25 @@ mod tests {
         assert_eq!(error.code.as_ref(), "AIW_RUN_NOT_TERMINAL");
         assert_eq!(tree_snapshot(&root, &root), before);
 
+        let interrupted = RunLayout::new(&root, "run-two").unwrap();
+        let interrupted_plan = plan("run-two");
+        interrupted.create(&interrupted_plan).unwrap();
+        let interrupted_approval =
+            ApprovalRecord::for_plan(&interrupted_plan, "admin", "2026-08-27T00:01:00Z").unwrap();
+        {
+            let _lock = interrupted.acquire_lock("test").unwrap();
+            let hash = hash_value(&interrupted_approval).unwrap();
+            interrupted
+                .append_record(
+                    artifact_event(RunEventKind::ApprovalIntent, "now", "intent", &hash).unwrap(),
+                )
+                .unwrap();
+        }
+        let before_interrupted = tree_snapshot(&root, &root);
+        let error = interrupted.completed_snapshot().unwrap_err();
+        assert_eq!(error.code.as_ref(), "AIW_RUN_NOT_TERMINAL");
+        assert_eq!(tree_snapshot(&root, &root), before_interrupted);
+
         approve(&layout, &expected_plan);
         let result = success("run-one");
         layout.write_result(&result).unwrap();
