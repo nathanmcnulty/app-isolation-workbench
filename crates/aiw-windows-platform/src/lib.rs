@@ -10,7 +10,8 @@ pub use windows_platform::{
 
 #[cfg(windows)]
 pub use guest_msi::{
-    GuestMsiExecutionError, GuestMsiExecutionObservation, execute_fixed_notepad_plus_plus_msi,
+    GuestMsiExecutionError, GuestMsiExecutionObservation, GuestMsiFilesystemObservation,
+    execute_fixed_notepad_plus_plus_msi,
 };
 
 #[cfg(windows)]

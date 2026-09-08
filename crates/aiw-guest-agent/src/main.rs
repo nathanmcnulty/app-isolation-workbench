@@ -214,10 +214,42 @@ fn execute_imported_msi_request(request: &ImportedMsiGuestRequest) -> Result<()>
         source: "aiw-guest-agent".to_owned(),
         payload: serde_json::to_value(&token)?,
     })?;
+    match (
+        observation.functional_exercise,
+        observation.filesystem_observations,
+    ) {
+        (Some(functional_exercise), Some(files)) => {
+            let behavior = aiw_provider_wsb::ImportedMsiBehaviorEvidence {
+                schema_version: aiw_provider_wsb::IMPORTED_MSI_BEHAVIOR_SCHEMA.to_owned(),
+                run_id: request.run_id.clone(),
+                sandbox_id: request.sandbox_id.clone(),
+                request_sha256: request.request_sha256.clone(),
+                scenario_sha256: request.scenario_sha256.clone(),
+                functional_exercise,
+                before_install: files.before_install,
+                after_install: files.after_install,
+                after_exercise: files.after_exercise,
+            };
+            behavior
+                .validate_for(request, &result)
+                .map_err(anyhow::Error::msg)?;
+            evidence.append(EvidenceEvent {
+                observed_utc: "guest-agent-time-not-trusted".to_owned(),
+                kind: aiw_provider_wsb::IMPORTED_MSI_BEHAVIOR_EVENT.to_owned(),
+                source: "aiw-guest-agent".to_owned(),
+                payload: serde_json::to_value(&behavior)?,
+            })?;
+        }
+        (None, None) if !request.scenario.requires_application_exercise() => {}
+        _ => bail!("guest did not produce all approved application observations"),
+    }
     let mut bytes = Vec::new();
     for record in evidence.records() {
         serde_json::to_writer(&mut bytes, record)?;
         bytes.push(b'\n');
+    }
+    if bytes.len() > aiw_provider_wsb::MAX_APPLICATION_EVIDENCE_BYTES {
+        bail!("guest application evidence exceeded its bound");
     }
     write_new_bytes(&evidence_path, &bytes)?;
 
@@ -624,6 +656,7 @@ mod tests {
                 process_wait_timeout_seconds: 30,
                 graceful_close_timeout_seconds: 15,
                 expected_exit_code: 0,
+                document_exercise: None,
             },
             "a".repeat(64),
             1024,
