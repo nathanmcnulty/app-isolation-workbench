@@ -78,26 +78,7 @@ pub fn verify_msi_application_token(
     request: &ImportedMsiGuestRequest,
     result: &ImportedMsiScenarioResult,
 ) -> Result<Option<ImportedMsiApplicationToken>, String> {
-    if bytes.len() > 1024 * 1024 {
-        return Err("application evidence log exceeds its bound".to_owned());
-    }
-    let mut records = Vec::<EvidenceRecord>::new();
-    for line in bytes.split(|byte| *byte == b'\n') {
-        if line.iter().all(u8::is_ascii_whitespace) {
-            continue;
-        }
-        if records.len() >= 128 || line.len() > 64 * 1024 {
-            return Err("application evidence record exceeds its bound".to_owned());
-        }
-        records.push(
-            serde_json::from_slice(line)
-                .map_err(|e| format!("invalid application evidence: {e}"))?,
-        );
-    }
-    let manifest = verify_records(&records).map_err(|e| e.to_string())?;
-    if records.is_empty() || manifest.root_hash != expected_root {
-        return Err("application evidence differs from verified completion".to_owned());
-    }
+    let records = verified_application_records(bytes, expected_root)?;
     result
         .validate_for_request(request)
         .map_err(|e| e.to_string())?;
@@ -119,4 +100,33 @@ pub fn verify_msi_application_token(
         return Err("approved MSI profile requires application token evidence".to_owned());
     }
     Ok(observation)
+}
+
+/// Shared bound and root verification for guest application observation events.
+pub const MAX_APPLICATION_EVIDENCE_BYTES: usize = 8 * 1024 * 1024;
+pub(crate) fn verified_application_records(
+    bytes: &[u8],
+    expected_root: &str,
+) -> Result<Vec<EvidenceRecord>, String> {
+    if bytes.len() > MAX_APPLICATION_EVIDENCE_BYTES {
+        return Err("application evidence log exceeds its bound".to_owned());
+    }
+    let mut records = Vec::<EvidenceRecord>::new();
+    for line in bytes.split(|byte| *byte == b'\n') {
+        if line.iter().all(u8::is_ascii_whitespace) {
+            continue;
+        }
+        if records.len() >= 128 || line.len() > MAX_APPLICATION_EVIDENCE_BYTES {
+            return Err("application evidence record exceeds its bound".to_owned());
+        }
+        records.push(
+            serde_json::from_slice(line)
+                .map_err(|e| format!("invalid application evidence: {e}"))?,
+        );
+    }
+    let manifest = verify_records(&records).map_err(|e| e.to_string())?;
+    if records.is_empty() || manifest.root_hash != expected_root {
+        return Err("application evidence differs from verified completion".to_owned());
+    }
+    Ok(records)
 }

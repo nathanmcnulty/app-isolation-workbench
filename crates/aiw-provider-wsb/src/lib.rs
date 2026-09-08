@@ -871,3 +871,5 @@ pub use runtime_observations::{
     IMPORTED_MSI_BEHAVIOR_SCHEMA, IMPORTED_MSI_BEHAVIOR_SCHEMA_VERSION,
     ImportedMsiBehaviorEvidence, diff_filesystem_snapshots, verify_imported_msi_behavior,
 };
+
+pub use application_token::MAX_APPLICATION_EVIDENCE_BYTES;

@@ -15,6 +15,12 @@ pub struct WsbMsiAssessmentReport {
     pub scenario: aiw_provider_wsb::ImportedMsiScenarioResult,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub application_token: Option<aiw_provider_wsb::ImportedMsiApplicationToken>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub behavior: Option<aiw_provider_wsb::ImportedMsiBehaviorEvidence>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub installation_file_changes: Option<aiw_provider_wsb::FilesystemSnapshotDiffResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exercise_file_changes: Option<aiw_provider_wsb::FilesystemSnapshotDiffResult>,
     pub requested_assertions: aiw_schema::Assertions,
     pub requested_isolation: aiw_schema::IsolationIntent,
     pub unmeasured_scenarios: Vec<String>,
@@ -158,6 +164,9 @@ pub fn report_windows_sandbox_msi(
     let mut historical = compiled;
     historical.schema_version = msi.scenario.schema_version.clone();
     historical.profile = msi.scenario.profile.clone();
+    if !historical.requires_application_exercise() {
+        historical.document_exercise = None;
+    }
     historical
         .validate()
         .map_err(|e| RunnerError::Preparation(e.to_string()))?;
@@ -211,6 +220,8 @@ pub fn report_windows_sandbox_msi(
     );
     expectation.artifacts[0].path = "scenario-result.json".to_owned();
     expectation.artifacts[0].role = aiw_evidence::ArtifactRole::ScenarioResults;
+    expectation.artifacts[1].maximum_bytes =
+        aiw_provider_wsb::MAX_APPLICATION_EVIDENCE_BYTES as u64;
     use std::os::windows::fs::OpenOptionsExt;
     let output_files = ["completion.json", "scenario-result.json", "evidence.jsonl"]
         .into_iter()
@@ -238,13 +249,38 @@ pub fn report_windows_sandbox_msi(
     scenario
         .validate_for_request(&request)
         .map_err(|e| RunnerError::Receipt(e.to_string()))?;
+    let evidence_bytes = read_bounded_bytes(
+        &held.output_path().join("evidence.jsonl"),
+        aiw_provider_wsb::MAX_APPLICATION_EVIDENCE_BYTES as u64,
+    )?;
     let application_token = aiw_provider_wsb::verify_msi_application_token(
-        &read_bounded_bytes(&held.output_path().join("evidence.jsonl"), 1024 * 1024)?,
+        &evidence_bytes,
         &verified.evidence_root_hash,
         &request,
         &scenario,
     )
     .map_err(RunnerError::Receipt)?;
+    let behavior = aiw_provider_wsb::verify_imported_msi_behavior(
+        &evidence_bytes,
+        &verified.evidence_root_hash,
+        &request,
+        &scenario,
+    )
+    .map_err(RunnerError::Receipt)?;
+    let installation_file_changes = behavior
+        .as_ref()
+        .map(|value| {
+            aiw_provider_wsb::diff_filesystem_snapshots(&value.before_install, &value.after_install)
+        })
+        .transpose()
+        .map_err(RunnerError::Receipt)?;
+    let exercise_file_changes = behavior
+        .as_ref()
+        .map(|value| {
+            aiw_provider_wsb::diff_filesystem_snapshots(&value.after_install, &value.after_exercise)
+        })
+        .transpose()
+        .map_err(RunnerError::Receipt)?;
     // Re-read commitments to reject concurrent changes without repairing them.
     held.revalidate().map_err(|_| RunnerError::Drift)?;
     for file in &root_files {
@@ -265,7 +301,12 @@ pub fn report_windows_sandbox_msi(
         return Err(RunnerError::Drift);
     }
     Ok(WsbMsiAssessmentReport {
-        schema_version: "aiw.dev/wsb-msi-assessment-report/v0alpha1".to_owned(),
+        schema_version: if behavior.is_some() {
+            "aiw.dev/wsb-msi-assessment-report/v0alpha2"
+        } else {
+            "aiw.dev/wsb-msi-assessment-report/v0alpha1"
+        }
+        .to_owned(),
         run_id: run_id.to_owned(),
         project_revision_sha256: artifacts.receipt.project_revision_sha256,
         outcome: RunOutcome::InsufficientEvidence,
@@ -281,6 +322,9 @@ pub fn report_windows_sandbox_msi(
             .collect(),
         scenario,
         application_token,
+        behavior,
+        installation_file_changes,
+        exercise_file_changes,
         requested_assertions: project.assertions.clone(),
         requested_isolation: project.isolation_intent.clone(),
     })

@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use aiw_evidence::{EvidenceRecord, verify_records};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -15,9 +14,6 @@ pub const DOCUMENT_EXERCISE_PATH: &str = r"C:\AIW\Scenario\document.txt";
 pub const DOCUMENT_INITIAL_TEXT: &str = "AIW initial document.\r\n";
 pub const DOCUMENT_EXPECTED_TEXT: &str = "AIW application isolation document round-trip.\r\n";
 
-const MAX_EVIDENCE_BYTES: usize = 8 * 1024 * 1024;
-const MAX_EVIDENCE_RECORDS: usize = 128;
-const MAX_EVIDENCE_RECORD_BYTES: usize = 8 * 1024 * 1024;
 const MAX_SNAPSHOT_ENTRIES: usize = 4096;
 const MAX_SNAPSHOT_FILE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_SNAPSHOT_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
@@ -174,7 +170,8 @@ impl ImportedMsiBehaviorEvidence {
         result
             .validate_for_request(request)
             .map_err(|error| error.to_string())?;
-        if self.schema_version != IMPORTED_MSI_BEHAVIOR_SCHEMA
+        if !request.scenario.requires_application_exercise()
+            || self.schema_version != IMPORTED_MSI_BEHAVIOR_SCHEMA
             || self.run_id != request.run_id
             || self.sandbox_id != request.sandbox_id
             || self.request_sha256 != request.request_sha256
@@ -267,26 +264,7 @@ pub fn verify_imported_msi_behavior(
     request: &ImportedMsiGuestRequest,
     result: &ImportedMsiScenarioResult,
 ) -> Result<Option<ImportedMsiBehaviorEvidence>, String> {
-    if bytes.len() > MAX_EVIDENCE_BYTES {
-        return Err("application evidence log exceeds its bound".to_owned());
-    }
-    let mut records = Vec::<EvidenceRecord>::new();
-    for line in bytes.split(|byte| *byte == b'\n') {
-        if line.iter().all(u8::is_ascii_whitespace) {
-            continue;
-        }
-        if records.len() >= MAX_EVIDENCE_RECORDS || line.len() > MAX_EVIDENCE_RECORD_BYTES {
-            return Err("application evidence record exceeds its bound".to_owned());
-        }
-        records.push(
-            serde_json::from_slice(line)
-                .map_err(|error| format!("invalid application evidence: {error}"))?,
-        );
-    }
-    let manifest = verify_records(&records).map_err(|error| error.to_string())?;
-    if records.is_empty() || manifest.root_hash != expected_root {
-        return Err("application evidence differs from verified completion".to_owned());
-    }
+    let records = crate::application_token::verified_application_records(bytes, expected_root)?;
     result
         .validate_for_request(request)
         .map_err(|error| error.to_string())?;
@@ -334,6 +312,8 @@ fn validate_file_entry(entry: &ApplicationFileEntry) -> Result<(), String> {
                 || segment == "."
                 || segment == ".."
                 || segment.contains(':')
+                || segment.ends_with([' ', '.'])
+                || is_reserved_device_name(segment)
                 || segment.chars().any(char::is_control)
         })
         || entry.size_bytes > MAX_SNAPSHOT_FILE_BYTES
@@ -342,6 +322,21 @@ fn validate_file_entry(entry: &ApplicationFileEntry) -> Result<(), String> {
         return Err("application filesystem entry is invalid".to_owned());
     }
     Ok(())
+}
+
+fn is_reserved_device_name(segment: &str) -> bool {
+    let stem = segment
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_uppercase();
+    matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || stem
+            .strip_prefix("COM")
+            .or_else(|| stem.strip_prefix("LPT"))
+            .is_some_and(|suffix| {
+                suffix.len() == 1 && suffix.as_bytes()[0].is_ascii_digit() && suffix != "0"
+            })
 }
 
 fn entry_key(entry: &ApplicationFileEntry) -> (u8, String) {
@@ -403,6 +398,41 @@ mod tests {
         ImportedMsiScenarioResult::succeeded(request, 0, 42, 0).unwrap()
     }
 
+    fn request_with_profile(
+        schema_version: &str,
+        profile: &str,
+        document_exercise: Option<crate::FixedDocumentExercise>,
+    ) -> ImportedMsiGuestRequest {
+        let mut request = request();
+        request.scenario.schema_version = schema_version.to_owned();
+        request.scenario.profile = profile.to_owned();
+        request.scenario.document_exercise = document_exercise;
+        request.scenario_sha256 = request.scenario.canonical_sha256().unwrap();
+        request.request_sha256 = request.request_sha256().unwrap();
+        request.validate().unwrap();
+        request
+    }
+
+    fn legacy_request() -> ImportedMsiGuestRequest {
+        request_with_profile(
+            "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha1",
+            "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha1",
+            None,
+        )
+    }
+
+    fn v3_request() -> ImportedMsiGuestRequest {
+        request_with_profile(
+            "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha3",
+            "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha3",
+            Some(crate::FixedDocumentExercise {
+                document_path: DOCUMENT_EXERCISE_PATH.into(),
+                initial_sha256: sha256_text(DOCUMENT_INITIAL_TEXT),
+                expected_sha256: sha256_text(DOCUMENT_EXPECTED_TEXT),
+            }),
+        )
+    }
+
     fn entry(root: ApplicationFileRoot, path: &str, hash: char) -> ApplicationFileEntry {
         ApplicationFileEntry {
             root,
@@ -446,14 +476,19 @@ mod tests {
     }
 
     fn evidence_bytes(value: &ImportedMsiBehaviorEvidence) -> (Vec<u8>, String) {
-        let mut log = EvidenceLog::new();
-        log.append(EvidenceEvent {
+        evidence_bytes_for_events(vec![EvidenceEvent {
             observed_utc: "2026-09-07T00:00:00Z".into(),
             kind: IMPORTED_MSI_BEHAVIOR_EVENT.into(),
             source: "aiw-guest-agent".into(),
             payload: serde_json::to_value(value).unwrap(),
-        })
-        .unwrap();
+        }])
+    }
+
+    fn evidence_bytes_for_events(events: Vec<EvidenceEvent>) -> (Vec<u8>, String) {
+        let mut log = EvidenceLog::new();
+        for event in events {
+            log.append(event).unwrap();
+        }
         let root = log.manifest().unwrap().root_hash;
         let bytes = log
             .records()
@@ -469,12 +504,12 @@ mod tests {
 
     #[test]
     fn verifies_bound_behavior_and_legacy_absence() {
-        let request = request();
-        let result = result(&request);
+        let request = v3_request();
+        let scenario_result = result(&request);
         let value = behavior(&request);
         let (bytes, root) = evidence_bytes(&value);
         assert_eq!(
-            verify_imported_msi_behavior(&bytes, &root, &request, &result).unwrap(),
+            verify_imported_msi_behavior(&bytes, &root, &request, &scenario_result).unwrap(),
             Some(value)
         );
 
@@ -488,10 +523,40 @@ mod tests {
         .unwrap();
         let root = log.manifest().unwrap().root_hash;
         let bytes = serde_json::to_vec(log.records().first().unwrap()).unwrap();
+        let v2 = super::tests::request();
+        let v2_result = result(&v2);
         assert_eq!(
-            verify_imported_msi_behavior(&bytes, &root, &request, &result).unwrap(),
+            verify_imported_msi_behavior(&bytes, &root, &v2, &v2_result).unwrap(),
             None
         );
+        let injected = behavior(&v2);
+        let (injected_bytes, injected_root) = evidence_bytes(&injected);
+        assert!(
+            verify_imported_msi_behavior(&injected_bytes, &injected_root, &v2, &v2_result).is_err()
+        );
+        let legacy = legacy_request();
+        let legacy_result = result(&legacy);
+        assert_eq!(
+            verify_imported_msi_behavior(&bytes, &root, &legacy, &legacy_result).unwrap(),
+            None
+        );
+
+        let current = v3_request();
+        let current_result = result(&current);
+        assert!(verify_imported_msi_behavior(&bytes, &root, &current, &current_result).is_err());
+
+        let value = behavior(&request);
+        let event = |source: &str| EvidenceEvent {
+            observed_utc: "2026-09-07T00:00:00Z".into(),
+            kind: IMPORTED_MSI_BEHAVIOR_EVENT.into(),
+            source: source.into(),
+            payload: serde_json::to_value(&value).unwrap(),
+        };
+        let (bytes, root) =
+            evidence_bytes_for_events(vec![event("aiw-guest-agent"), event("aiw-guest-agent")]);
+        assert!(verify_imported_msi_behavior(&bytes, &root, &request, &scenario_result).is_err());
+        let (bytes, root) = evidence_bytes_for_events(vec![event("foreign-agent")]);
+        assert!(verify_imported_msi_behavior(&bytes, &root, &request, &scenario_result).is_err());
     }
 
     #[test]
@@ -548,8 +613,12 @@ mod tests {
             entry(ApplicationFileRoot::Installation, "A.TXT", 'b'),
         ];
         assert!(invalid.validate().is_err());
+        for path in ["alias.", "alias ", "CON.txt", "Lpt1.log"] {
+            invalid.entries = vec![entry(ApplicationFileRoot::Installation, path, 'a')];
+            assert!(invalid.validate().is_err(), "{path}");
+        }
 
-        let request = request();
+        let request = v3_request();
         let result = result(&request);
         let value = behavior(&request);
         let (bytes, root) = evidence_bytes(&value);
@@ -561,6 +630,54 @@ mod tests {
         );
         assert!(verify_imported_msi_behavior(&bytes, &"f".repeat(64), &request, &result).is_err());
         assert_eq!(root.len(), 64);
+    }
+
+    #[test]
+    fn rejects_oversized_logs_unknown_schema_and_malformed_hashes() {
+        let request = v3_request();
+        let result = result(&request);
+        let value = behavior(&request);
+        let (bytes, root) = evidence_bytes(&value);
+        let mut record: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        record["schemaVersion"] = serde_json::json!("unknown");
+        let unknown = serde_json::to_vec(&record).unwrap();
+        assert!(verify_imported_msi_behavior(&unknown, &root, &request, &result).is_err());
+
+        record["schemaVersion"] = serde_json::json!(aiw_evidence::EVIDENCE_RECORD_SCHEMA_VERSION);
+        record["hash"] = serde_json::json!("a".repeat(64));
+        let malformed = serde_json::to_vec(&record).unwrap();
+        assert!(verify_imported_msi_behavior(&malformed, &root, &request, &result).is_err());
+        assert!(
+            verify_imported_msi_behavior(
+                &vec![b'x'; crate::MAX_APPLICATION_EVIDENCE_BYTES + 1],
+                &root,
+                &request,
+                &result
+            )
+            .is_err()
+        );
+
+        let mut log = EvidenceLog::new();
+        for sequence in 0..=128 {
+            log.append(EvidenceEvent {
+                observed_utc: format!("2026-09-07T00:00:{sequence:02}Z"),
+                kind: "otherEvent".into(),
+                source: "aiw-guest-agent".into(),
+                payload: serde_json::json!({"sequence": sequence}),
+            })
+            .unwrap();
+        }
+        let root = log.manifest().unwrap().root_hash;
+        let bytes = log
+            .records()
+            .iter()
+            .map(|record| serde_json::to_vec(record).unwrap())
+            .fold(Vec::new(), |mut bytes, record| {
+                bytes.extend_from_slice(&record);
+                bytes.push(b'\n');
+                bytes
+            });
+        assert!(verify_imported_msi_behavior(&bytes, &root, &request, &result).is_err());
     }
 
     #[test]

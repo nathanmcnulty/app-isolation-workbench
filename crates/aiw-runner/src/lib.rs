@@ -104,6 +104,8 @@ pub struct WsbGoldenProbeExecution {
     scenario: Option<aiw_provider_wsb::ImportedMsiScenarioResult>,
     #[serde(skip)]
     application_token: Option<aiw_provider_wsb::ImportedMsiApplicationToken>,
+    #[serde(skip)]
+    behavior: Option<aiw_provider_wsb::ImportedMsiBehaviorEvidence>,
 }
 
 /// Common receipt-correlated lifecycle result. Application observations remain
@@ -125,6 +127,8 @@ pub struct WsbImportedMsiExecution {
     pub scenario: aiw_provider_wsb::ImportedMsiScenarioResult,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub application_token: Option<aiw_provider_wsb::ImportedMsiApplicationToken>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub behavior: Option<aiw_provider_wsb::ImportedMsiBehaviorEvidence>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -609,19 +613,30 @@ pub(crate) fn execute_wsb_golden_probe(
                 observed
                     .validate_for_request(expected)
                     .map_err(|e| RunnerError::Receipt(e.to_string()))?;
+                let evidence_bytes = read_bounded_bytes(
+                    &context.output_root.join("evidence.jsonl"),
+                    aiw_provider_wsb::MAX_APPLICATION_EVIDENCE_BYTES as u64,
+                )?;
                 let token = aiw_provider_wsb::verify_msi_application_token(
-                    &read_bounded_bytes(&context.output_root.join("evidence.jsonl"), 1024 * 1024)?,
+                    &evidence_bytes,
                     &verification.evidence_root_hash,
                     expected,
                     &observed,
                 )
                 .map_err(RunnerError::Receipt)?;
-                (Some(observed), token)
+                let behavior = aiw_provider_wsb::verify_imported_msi_behavior(
+                    &evidence_bytes,
+                    &verification.evidence_root_hash,
+                    expected,
+                    &observed,
+                )
+                .map_err(RunnerError::Receipt)?;
+                (Some(observed), token, behavior)
             }
-            ExecutionGuestRequest::Golden(_) => (None, None),
+            ExecutionGuestRequest::Golden(_) => (None, None, None),
         })
     })();
-    let (scenario, application_token) = match scenario {
+    let (scenario, application_token, behavior) = match scenario {
         Ok(value) => value,
         Err(error) => {
             record_terminal_failure(layout, error.clone())?;
@@ -652,6 +667,7 @@ pub(crate) fn execute_wsb_golden_probe(
         cleanup_complete: true,
         scenario,
         application_token,
+        behavior,
     })
 }
 
@@ -775,7 +791,9 @@ fn start_approved_windows_sandbox_inner(
     if request.msi.is_some() {
         let scenario = result.scenario.ok_or(RunnerError::Drift)?;
         Ok(WsbApprovedExecution::ImportedMsi(WsbImportedMsiExecution {
-            schema_version: if result.application_token.is_some() {
+            schema_version: if result.behavior.is_some() {
+                "aiw.dev/wsb-imported-msi-execution/v0alpha3"
+            } else if result.application_token.is_some() {
                 "aiw.dev/wsb-imported-msi-execution/v0alpha2"
             } else {
                 "aiw.dev/wsb-imported-msi-execution/v0alpha1"
@@ -793,6 +811,7 @@ fn start_approved_windows_sandbox_inner(
             cleanup_complete: result.cleanup_complete,
             scenario,
             application_token: result.application_token,
+            behavior: result.behavior,
         }))
     } else {
         Ok(WsbApprovedExecution::GoldenProbe(result))
@@ -1217,6 +1236,8 @@ fn prepare_execution(
     if request.msi.is_some() {
         completion.artifacts[0].path = "scenario-result.json".to_owned();
         completion.artifacts[0].role = aiw_evidence::ArtifactRole::ScenarioResults;
+        completion.artifacts[1].maximum_bytes =
+            aiw_provider_wsb::MAX_APPLICATION_EVIDENCE_BYTES as u64;
     }
     let binding = SessionBinding {
         run_id: plan.run_id.clone(),
@@ -4196,6 +4217,7 @@ mod tests {
     fn write_valid_msi_completion(
         start: &WsbGoldenProbeStart,
         scenario_result: aiw_provider_wsb::ImportedMsiScenarioResult,
+        include_behavior: bool,
     ) {
         let rendered = render_config(&start.wsb_plan).unwrap();
         let request = msi_request_for(start);
@@ -4240,6 +4262,39 @@ mod tests {
                 payload: serde_json::to_value(token).unwrap(),
             })
             .unwrap();
+        if include_behavior && request.scenario.requires_application_exercise() {
+            let empty = aiw_provider_wsb::ApplicationFilesystemSnapshot {
+                entries: vec![],
+                issues: vec![],
+            };
+            let expected = hex::encode(Sha256::digest(
+                aiw_provider_wsb::DOCUMENT_EXPECTED_TEXT.as_bytes(),
+            ));
+            let behavior = aiw_provider_wsb::ImportedMsiBehaviorEvidence {
+                schema_version: aiw_provider_wsb::IMPORTED_MSI_BEHAVIOR_SCHEMA.to_owned(),
+                run_id: request.run_id.clone(),
+                sandbox_id: request.sandbox_id.clone(),
+                request_sha256: request.request_sha256.clone(),
+                scenario_sha256: request.scenario_sha256.clone(),
+                functional_exercise: aiw_provider_wsb::FunctionalExercise {
+                    opened_document: true,
+                    saved_document: true,
+                    expected_sha256: expected.clone(),
+                    observed_sha256: expected,
+                },
+                before_install: empty.clone(),
+                after_install: empty.clone(),
+                after_exercise: empty,
+            };
+            evidence
+                .append(aiw_evidence::EvidenceEvent {
+                    observed_utc: "guest-time-not-trusted".to_owned(),
+                    kind: aiw_provider_wsb::IMPORTED_MSI_BEHAVIOR_EVENT.to_owned(),
+                    source: "aiw-guest-agent".to_owned(),
+                    payload: serde_json::to_value(behavior).unwrap(),
+                })
+                .unwrap();
+        }
         let mut evidence_bytes = Vec::new();
         for record in evidence.records() {
             serde_json::to_writer(&mut evidence_bytes, record).unwrap();
@@ -4302,8 +4357,36 @@ mod tests {
             empty_list(),
         ])
         .with_start_action(Box::new(move || {
-            write_valid_msi_completion(&output_start, scenario_result)
+            write_valid_msi_completion(&output_start, scenario_result, true)
         }))
+    }
+
+    #[test]
+    fn imported_msi_missing_required_behavior_fails_after_verified_cleanup() {
+        let (_root, layout, start, readiness) = setup_msi();
+        let request = msi_request_for(&start);
+        let valid =
+            aiw_provider_wsb::ImportedMsiScenarioResult::succeeded(&request, 0, 42, 0).unwrap();
+        let output_start = start.clone();
+        let fake =
+            successful_msi_process(&start, valid.clone()).with_start_action(Box::new(move || {
+                write_valid_msi_completion(&output_start, valid, false);
+            }));
+        let error =
+            execute_wsb_golden_probe(&start, &readiness, &layout, &fake, &TestLease::default())
+                .unwrap_err();
+        assert!(
+            matches!(error, RunnerError::Receipt(detail) if detail.contains("requires functional exercise evidence"))
+        );
+        assert_eq!(
+            observe_wsb_session_status(&layout).unwrap().status,
+            WsbSessionDisposition::Clean
+        );
+        assert!(!request_path(&start).exists());
+        let result = layout.read_result().unwrap();
+        assert_eq!(result.outcome, RunOutcome::Failed);
+        assert!(result.cleanup_complete);
+        assert!(result.evidence_root.is_none());
     }
 
     #[test]
