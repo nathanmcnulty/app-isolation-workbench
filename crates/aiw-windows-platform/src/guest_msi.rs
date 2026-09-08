@@ -75,40 +75,181 @@ pub enum GuestMsiExecutionError {
     WindowIdentity(String),
 }
 
+/// The fixed v0alpha3 guest profile's observable execution boundaries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuestMsiStage {
+    BeforeInstallCapture,
+    Install,
+    AfterInstallCapture,
+    PrepareDocument,
+    Launch,
+    OpenDocument,
+    EditSaveDocument,
+    Close,
+    AfterExerciseCapture,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuestMsiStageStatus {
+    Passed,
+    Failed,
+    NotReached,
+}
+
+#[derive(Debug)]
+pub struct GuestMsiAttempt {
+    pub result: Result<GuestMsiExecutionObservation, GuestMsiExecutionError>,
+    pub stages: Vec<(GuestMsiStage, GuestMsiStageStatus)>,
+}
+
+const V3_STAGES: [GuestMsiStage; 9] = [
+    GuestMsiStage::BeforeInstallCapture,
+    GuestMsiStage::Install,
+    GuestMsiStage::AfterInstallCapture,
+    GuestMsiStage::PrepareDocument,
+    GuestMsiStage::Launch,
+    GuestMsiStage::OpenDocument,
+    GuestMsiStage::EditSaveDocument,
+    GuestMsiStage::Close,
+    GuestMsiStage::AfterExerciseCapture,
+];
+
+struct StageRecorder {
+    stages: Vec<(GuestMsiStage, GuestMsiStageStatus)>,
+    current: Option<usize>,
+}
+
+impl StageRecorder {
+    fn for_scenario(records_stages: bool) -> Self {
+        Self {
+            stages: if records_stages {
+                V3_STAGES
+                    .into_iter()
+                    .map(|stage| (stage, GuestMsiStageStatus::NotReached))
+                    .collect()
+            } else {
+                Vec::new()
+            },
+            current: None,
+        }
+    }
+
+    fn run<T>(
+        &mut self,
+        stage: GuestMsiStage,
+        operation: impl FnOnce() -> Result<T, GuestMsiExecutionError>,
+    ) -> Result<T, GuestMsiExecutionError> {
+        self.begin(stage);
+        self.finish(operation())
+    }
+
+    fn begin(&mut self, stage: GuestMsiStage) {
+        let Some(index) = self
+            .stages
+            .iter()
+            .position(|(candidate, _)| *candidate == stage)
+        else {
+            return;
+        };
+        debug_assert!(self.current.is_none());
+        debug_assert_eq!(self.stages[index].1, GuestMsiStageStatus::NotReached);
+        debug_assert!(
+            self.stages[..index]
+                .iter()
+                .all(|(_, status)| *status == GuestMsiStageStatus::Passed)
+        );
+        self.current = Some(index);
+    }
+
+    fn finish<T>(
+        &mut self,
+        result: Result<T, GuestMsiExecutionError>,
+    ) -> Result<T, GuestMsiExecutionError> {
+        if let Some(index) = self.current.take() {
+            self.stages[index].1 = if result.is_ok() {
+                GuestMsiStageStatus::Passed
+            } else {
+                GuestMsiStageStatus::Failed
+            };
+        }
+        result
+    }
+}
+
 /// Executes only the validated Notepad++ MSI profile.  Each child starts
 /// suspended and is assigned to a kill-on-close job before it can run.  Every
 /// success and failure path terminates and verifies the assigned process tree.
 pub fn execute_fixed_notepad_plus_plus_msi(
     scenario: &CompiledMsiScenario,
 ) -> Result<GuestMsiExecutionObservation, GuestMsiExecutionError> {
-    scenario
-        .validate()
-        .map_err(|error| GuestMsiExecutionError::Scenario(error.to_string()))?;
+    execute_fixed_notepad_plus_plus_msi_attempt(scenario).result
+}
 
+/// Executes the fixed profile and retains its reached native stages when an
+/// operation fails.  Stage claims exist only for the v0alpha3 document profile.
+pub fn execute_fixed_notepad_plus_plus_msi_attempt(
+    scenario: &CompiledMsiScenario,
+) -> GuestMsiAttempt {
+    if let Err(error) = scenario.validate() {
+        return GuestMsiAttempt {
+            result: Err(GuestMsiExecutionError::Scenario(error.to_string())),
+            stages: Vec::new(),
+        };
+    }
+
+    let mut stages = StageRecorder::for_scenario(scenario.requires_application_exercise());
+    let result = execute_validated_fixed_notepad_plus_plus_msi(scenario, &mut stages);
+    GuestMsiAttempt {
+        result,
+        stages: stages.stages,
+    }
+}
+
+fn execute_validated_fixed_notepad_plus_plus_msi(
+    scenario: &CompiledMsiScenario,
+    stages: &mut StageRecorder,
+) -> Result<GuestMsiExecutionObservation, GuestMsiExecutionError> {
     let before_install = scenario
         .requires_application_exercise()
-        .then(crate::snapshot_fixed_notepad_files);
-    let installer = GuestProcess::start(MSIEXEC_PATH, &scenario.install_arguments)?;
-    let install_exit_code = installer.wait_for_exit(Duration::from_secs(u64::from(
-        scenario.install_timeout_seconds,
-    )));
-    let install_cleanup = if install_exit_code.is_ok() {
-        installer.verify_empty_after_success()
-    } else {
-        installer.cleanup()
-    };
-    let install_exit_code = complete_process_operation(install_exit_code, install_cleanup)?;
-    if install_exit_code != scenario.expected_exit_code {
-        return Err(GuestMsiExecutionError::Process(format!(
-            "fixed msiexec exited with {install_exit_code}"
+        .then(|| {
+            // Capture issues are represented in the snapshot and do not make the
+            // bounded capture attempt itself fail.
+            stages.run(GuestMsiStage::BeforeInstallCapture, || {
+                Ok(crate::snapshot_fixed_notepad_files())
+            })
+        })
+        .transpose()?;
+    let install_exit_code = stages.run(GuestMsiStage::Install, || {
+        let installer = GuestProcess::start(MSIEXEC_PATH, &scenario.install_arguments)?;
+        let install_exit_code = installer.wait_for_exit(Duration::from_secs(u64::from(
+            scenario.install_timeout_seconds,
         )));
-    }
+        let install_cleanup = if install_exit_code.is_ok() {
+            installer.verify_empty_after_success()
+        } else {
+            installer.cleanup()
+        };
+        let install_exit_code = complete_process_operation(install_exit_code, install_cleanup)?;
+        if install_exit_code != scenario.expected_exit_code {
+            return Err(GuestMsiExecutionError::Process(format!(
+                "fixed msiexec exited with {install_exit_code}"
+            )));
+        }
+        Ok(install_exit_code)
+    })?;
 
     let after_install = scenario
         .requires_application_exercise()
-        .then(crate::snapshot_fixed_notepad_files);
+        .then(|| {
+            stages.run(GuestMsiStage::AfterInstallCapture, || {
+                Ok(crate::snapshot_fixed_notepad_files())
+            })
+        })
+        .transpose()?;
     let document_exercise = if scenario.requires_application_exercise() {
-        Some(prepare_fixed_document_exercise(scenario)?)
+        Some(stages.run(GuestMsiStage::PrepareDocument, || {
+            prepare_fixed_document_exercise(scenario)
+        })?)
     } else {
         None
     };
@@ -116,34 +257,68 @@ pub fn execute_fixed_notepad_plus_plus_msi(
         .as_ref()
         .map(|_| vec![DOCUMENT_EXERCISE_PATH.to_owned()])
         .unwrap_or_default();
-    let application = GuestProcess::start(&scenario.launch_path, &launch_arguments)?;
+    let application = stages.run(GuestMsiStage::Launch, || {
+        GuestProcess::start(&scenario.launch_path, &launch_arguments)
+    })?;
     let launch_process_id = application.process_id;
-    let operation = (|| {
-        let window = application.wait_for_window(Duration::from_secs(u64::from(
-            scenario.process_wait_timeout_seconds,
-        )))?;
-        let mut window_process_id = 0;
-        unsafe { GetWindowThreadProcessId(window, Some(&mut window_process_id)) };
-        if window_process_id != application.process_id {
-            return Err(GuestMsiExecutionError::Process(
-                "observed application window changed owner".to_owned(),
-            ));
-        }
-        let application_token =
-            collect_process_token(application.process.as_handle()).map_err(|error| {
-                GuestMsiExecutionError::Process(format!(
-                    "collect launched application token failed: {error}"
-                ))
+    let pre_close = (|| {
+        let (window, application_token, editor) =
+            stages.run(GuestMsiStage::OpenDocument, || {
+                let window = application.wait_for_window(Duration::from_secs(u64::from(
+                    scenario.process_wait_timeout_seconds,
+                )))?;
+                let mut window_process_id = 0;
+                unsafe { GetWindowThreadProcessId(window, Some(&mut window_process_id)) };
+                if window_process_id != application.process_id {
+                    return Err(GuestMsiExecutionError::Process(
+                        "observed application window changed owner".to_owned(),
+                    ));
+                }
+                let application_token = collect_process_token(application.process.as_handle())
+                    .map_err(|error| {
+                        GuestMsiExecutionError::Process(format!(
+                            "collect launched application token failed: {error}"
+                        ))
+                    })?;
+                if application_token.process_id != application.process_id {
+                    return Err(GuestMsiExecutionError::Process(
+                        "collected application token changed process identity".to_owned(),
+                    ));
+                }
+                let editor = document_exercise
+                    .as_ref()
+                    .map(|_| {
+                        wait_for_ready_document_editor(
+                            window,
+                            application.process_id,
+                            EDITOR_LOOKUP_TIMEOUT,
+                        )
+                    })
+                    .transpose()?;
+                Ok((window, application_token, editor))
             })?;
-        if application_token.process_id != application.process_id {
-            return Err(GuestMsiExecutionError::Process(
-                "collected application token changed process identity".to_owned(),
-            ));
-        }
         let functional_exercise = document_exercise
             .as_ref()
-            .map(|plan| exercise_fixed_document(window, application.process_id, plan))
+            .zip(editor)
+            .map(|(plan, editor)| {
+                stages.run(GuestMsiStage::EditSaveDocument, || {
+                    edit_save_fixed_document(window, application.process_id, editor, plan)
+                })
+            })
             .transpose()?;
+        Ok((window, application_token, functional_exercise))
+    })();
+    let (window, application_token, functional_exercise) = match pre_close {
+        Ok(value) => value,
+        Err(error) => {
+            return match complete_process_operation::<()>(Err(error), application.cleanup()) {
+                Err(error) => Err(error),
+                Ok(()) => unreachable!("failed application operation cannot succeed"),
+            };
+        }
+    };
+    stages.begin(GuestMsiStage::Close);
+    let operation = (|| {
         require_visible_process_window(window, application.process_id, "Notepad++ main window")?;
         unsafe { PostMessageW(Some(window), WM_CLOSE, WPARAM(0), LPARAM(0)) }.map_err(|error| {
             GuestMsiExecutionError::Process(format!("WM_CLOSE failed: {error}"))
@@ -161,25 +336,26 @@ pub fn execute_fixed_notepad_plus_plus_msi(
                 .revalidate()
                 .map_err(GuestMsiExecutionError::Process)?;
         }
-        Ok((exit_code, application_token, functional_exercise))
+        Ok(exit_code)
     })();
     let cleanup = if operation.is_ok() {
         application.verify_empty_after_success()
     } else {
         application.cleanup()
     };
-    let (launch_exit_code, application_token, functional_exercise) =
-        complete_process_operation(operation, cleanup)?;
+    let launch_exit_code = stages.finish(complete_process_operation(operation, cleanup))?;
     let filesystem_observations =
-        before_install
-            .zip(after_install)
-            .map(
-                |(before_install, after_install)| GuestMsiFilesystemObservation {
-                    before_install,
-                    after_install,
-                    after_exercise: crate::snapshot_fixed_notepad_files(),
-                },
-            );
+        if let Some((before_install, after_install)) = before_install.zip(after_install) {
+            Some(GuestMsiFilesystemObservation {
+                before_install,
+                after_install,
+                after_exercise: stages.run(GuestMsiStage::AfterExerciseCapture, || {
+                    Ok(crate::snapshot_fixed_notepad_files())
+                })?,
+            })
+        } else {
+            None
+        };
     Ok(GuestMsiExecutionObservation {
         install_exit_code,
         launch_process_id,
@@ -212,12 +388,12 @@ fn prepare_fixed_document_exercise(
     })
 }
 
-fn exercise_fixed_document(
+fn edit_save_fixed_document(
     main_window: HWND,
     process_id: u32,
+    editor: HWND,
     plan: &ExercisePlan,
 ) -> Result<FunctionalExercise, GuestMsiExecutionError> {
-    let editor = wait_for_ready_document_editor(main_window, process_id, EDITOR_LOOKUP_TIMEOUT)?;
     // HWNDs are reusable. Check both handles immediately before the input
     // sequence, rather than relying on the observations used for readiness.
     require_visible_process_window(main_window, process_id, "Notepad++ main window")?;
@@ -935,5 +1111,60 @@ mod tests {
         let mut altered = exercise;
         altered.document_path = r"C:\AIW\Scenario\other.txt".to_owned();
         assert!(validate_fixed_document_contract(&altered).is_err());
+    }
+
+    #[test]
+    fn stage_recorder_keeps_a_passed_prefix_and_one_failed_stage() {
+        let mut stages = StageRecorder::for_scenario(true);
+        stages
+            .run(GuestMsiStage::BeforeInstallCapture, || Ok(()))
+            .expect("capture stage must pass");
+        stages
+            .run(GuestMsiStage::Install, || Ok(()))
+            .expect("install stage must pass");
+        let error = stages
+            .run(GuestMsiStage::AfterInstallCapture, || {
+                Err::<(), _>(GuestMsiExecutionError::Process("capture failed".to_owned()))
+            })
+            .expect_err("capture failure must be retained");
+        assert!(matches!(error, GuestMsiExecutionError::Process(_)));
+        assert_eq!(
+            stages.stages,
+            vec![
+                (
+                    GuestMsiStage::BeforeInstallCapture,
+                    GuestMsiStageStatus::Passed
+                ),
+                (GuestMsiStage::Install, GuestMsiStageStatus::Passed),
+                (
+                    GuestMsiStage::AfterInstallCapture,
+                    GuestMsiStageStatus::Failed
+                ),
+                (
+                    GuestMsiStage::PrepareDocument,
+                    GuestMsiStageStatus::NotReached
+                ),
+                (GuestMsiStage::Launch, GuestMsiStageStatus::NotReached),
+                (GuestMsiStage::OpenDocument, GuestMsiStageStatus::NotReached),
+                (
+                    GuestMsiStage::EditSaveDocument,
+                    GuestMsiStageStatus::NotReached
+                ),
+                (GuestMsiStage::Close, GuestMsiStageStatus::NotReached),
+                (
+                    GuestMsiStage::AfterExerciseCapture,
+                    GuestMsiStageStatus::NotReached
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn legacy_stage_recorder_makes_no_claims() {
+        let mut stages = StageRecorder::for_scenario(false);
+        stages
+            .run(GuestMsiStage::Install, || Ok(()))
+            .expect("legacy operation must remain usable");
+        assert!(stages.stages.is_empty());
     }
 }
