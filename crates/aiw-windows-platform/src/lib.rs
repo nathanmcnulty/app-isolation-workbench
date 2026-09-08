@@ -18,6 +18,9 @@ pub use guest_msi::{
 pub use guest_filesystem::snapshot_fixed_notepad_files;
 
 #[cfg(windows)]
+pub(crate) use guest_document::FixedGuestDocument;
+
+#[cfg(windows)]
 #[doc(hidden)]
 pub use windows_platform::{
     WindowsSandboxRecoveryLease, WsbRecoveryDisposition, WsbRecoveryObservation,
@@ -140,6 +143,9 @@ mod windows_platform;
 
 #[cfg(windows)]
 mod guest_msi;
+
+#[cfg(windows)]
+mod guest_document;
 
 #[cfg(windows)]
 mod guest_filesystem;
