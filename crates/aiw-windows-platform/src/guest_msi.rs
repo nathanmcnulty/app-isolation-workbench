@@ -33,7 +33,7 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumChildWindows, EnumWindows, GetClassNameW, GetWindowThreadProcessId, IsWindowVisible,
     PostMessageW, SMTO_ABORTIFHUNG, SMTO_BLOCK, SMTO_ERRORONEXIT, SendMessageTimeoutW, WM_CHAR,
-    WM_CLOSE, WM_COMMAND, WM_GETTEXT,
+    WM_CLOSE, WM_COMMAND, WM_GETTEXT, WM_KEYDOWN, WM_KEYUP,
 };
 use windows::core::{BOOL, PCWSTR, PWSTR};
 
@@ -234,9 +234,13 @@ fn exercise_fixed_document(
         LPARAM(0),
         COMMAND_TIMEOUT,
     )?;
-    // WM_CHAR reaches Scintilla's InsertCharacter directly; send both raw
-    // CRLF characters rather than assuming the VK_RETURN keydown path ran.
-    let replacement: Vec<u16> = DOCUMENT_EXPECTED_TEXT.encode_utf16().collect();
+    // Scintilla suppresses control WM_CHAR messages after a consumed keydown.
+    // Type the printable fixed body, then exercise Enter through its normal
+    // key path; the exact editor and saved CRLF bytes are still verified.
+    let body = DOCUMENT_EXPECTED_TEXT.strip_suffix("\r\n").ok_or_else(|| {
+        GuestMsiExecutionError::Scenario("fixed text must end in CRLF".to_owned())
+    })?;
+    let replacement: Vec<u16> = body.encode_utf16().collect();
     if replacement.is_empty() || replacement.len() > MAX_EXERCISE_TEXT_CODE_UNITS {
         return Err(GuestMsiExecutionError::Process(
             "fixed replacement text exceeded its bound".to_owned(),
@@ -251,6 +255,32 @@ fn exercise_fixed_document(
             LPARAM(0),
             CHARACTER_TIMEOUT,
         )?;
+    }
+    // VK_RETURN, scan code 0x1c, repeat count one; key-up sets the previous
+    // and transition state bits. No global keyboard state is synthesized.
+    send_window_message(
+        editor,
+        process_id,
+        WM_KEYDOWN,
+        WPARAM(0x0d),
+        LPARAM(0x001c0001),
+        COMMAND_TIMEOUT,
+    )?;
+    send_window_message(
+        editor,
+        process_id,
+        WM_KEYUP,
+        WPARAM(0x0d),
+        LPARAM(0xc01c0001),
+        COMMAND_TIMEOUT,
+    )?;
+    let edited = read_window_text(editor, process_id, COMMAND_TIMEOUT)?;
+    if edited != DOCUMENT_EXPECTED_TEXT {
+        return Err(GuestMsiExecutionError::Process(format!(
+            "fixed editor content mismatch after input: observed {}; expected {}",
+            text_shape(&edited),
+            text_shape(DOCUMENT_EXPECTED_TEXT),
+        )));
     }
     send_window_message(
         main_window,
@@ -462,6 +492,8 @@ fn window_message_phase(message: u32, wparam: WPARAM) -> &'static str {
     match message {
         WM_GETTEXT => "WM_GETTEXT",
         WM_CHAR => "WM_CHAR",
+        WM_KEYDOWN => "WM_KEYDOWN/Enter",
+        WM_KEYUP => "WM_KEYUP/Enter",
         WM_COMMAND if wparam.0 == usize::from(NOTEPAD_PLUS_PLUS_SAVE_COMMAND) => "WM_COMMAND/Save",
         WM_COMMAND if wparam.0 == usize::from(NOTEPAD_PLUS_PLUS_SELECT_ALL_COMMAND) => {
             "WM_COMMAND/SelectAll"
@@ -491,12 +523,25 @@ fn wait_for_document_sha256(
             }
         }
         if Instant::now() >= deadline {
-            return Err(GuestMsiExecutionError::Process(
-                "fixed document did not save the expected bytes before timeout".to_owned(),
-            ));
+            return Err(GuestMsiExecutionError::Process(format!(
+                "fixed document did not save the expected bytes before timeout: {}",
+                plan.document
+                    .describe_observed()
+                    .unwrap_or_else(|e| format!("unavailable: {e}"))
+            )));
         }
         thread::sleep(Duration::from_millis(25));
     }
+}
+
+fn text_shape(text: &str) -> String {
+    format!(
+        "bytes={}, sha256={}, CR={}, LF={}",
+        text.len(),
+        sha256(text.as_bytes()),
+        text.bytes().filter(|b| *b == b'\r').count(),
+        text.bytes().filter(|b| *b == b'\n').count()
+    )
 }
 
 fn sha256(bytes: &[u8]) -> String {

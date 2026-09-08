@@ -140,6 +140,40 @@ impl FixedGuestDocument {
         Ok(Some(observed))
     }
 
+    /// Bounded, content-free diagnostics for a failed fixed-text save.
+    pub(crate) fn describe_observed(&self) -> Result<String, String> {
+        self.revalidate()?;
+        let Some(file) = open_relative_file(&self.scenario, DOCUMENT_LEAF, FILE_READ_DATA.0)?
+        else {
+            return Ok("file absent".to_owned());
+        };
+        let before = file_information(&file)?;
+        if !ordinary_file(&before) {
+            return Err("file is not ordinary".to_owned());
+        }
+        let length = file_length(&before);
+        if length > 256 {
+            return Ok(format!("bytes={length}, exceeds diagnostic bound"));
+        }
+        let mut bytes = Vec::new();
+        (&file)
+            .take(257)
+            .read_to_end(&mut bytes)
+            .map_err(|e| e.to_string())?;
+        if bytes.len() as u64 != length
+            || !same_file_information(&before, &file_information(&file)?)
+        {
+            return Err("file changed during diagnostic".to_owned());
+        }
+        Ok(format!(
+            "bytes={length}, sha256={}, CR={}, LF={}, UTF8BOM={}",
+            sha256(&bytes),
+            bytes.iter().filter(|b| **b == b'\r').count(),
+            bytes.iter().filter(|b| **b == b'\n').count(),
+            bytes.starts_with(&[0xef, 0xbb, 0xbf])
+        ))
+    }
+
     /// Verifies that the fixed `C:\AIW\Scenario` pathname still names the
     /// retained ordinary directory.  The caller invokes this after the UI
     /// process exits, and `observe_expected` invokes it before opening the
@@ -563,6 +597,17 @@ mod tests {
         );
 
         let path = root.join(SCENARIO_LEAF).join(DOCUMENT_LEAF);
+        let diagnostic = document
+            .describe_observed()
+            .expect("bounded initial diagnostic");
+        assert!(diagnostic.contains(&sha256(DOCUMENT_INITIAL_TEXT.as_bytes())));
+        assert!(diagnostic.contains("CR=1, LF=1"));
+        assert!(!diagnostic.contains(DOCUMENT_INITIAL_TEXT));
+        std::fs::write(&path, vec![b'x'; 257]).expect("oversize diagnostic fixture");
+        assert_eq!(
+            document.describe_observed().unwrap(),
+            "bytes=257, exceeds diagnostic bound"
+        );
         let replacement = path.with_extension("replacement");
         std::fs::write(&replacement, DOCUMENT_EXPECTED_TEXT)
             .expect("fixture application replacement should write");
