@@ -318,6 +318,7 @@ mod tests {
             process_wait_timeout_seconds: 30,
             graceful_close_timeout_seconds: 15,
             expected_exit_code: 0,
+            document_exercise: None,
         }
     }
 

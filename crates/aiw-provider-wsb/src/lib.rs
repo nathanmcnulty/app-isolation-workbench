@@ -35,7 +35,8 @@ pub use imported_msi::{
     ImportedMsiScenarioStatus,
 };
 pub use scenario::{
-    CompiledMsiScenario, ScenarioCompileError, compile_notepad_plus_plus_msi_scenario,
+    CompiledMsiScenario, FixedDocumentExercise, ScenarioCompileError,
+    compile_notepad_plus_plus_msi_scenario,
 };
 
 pub const WINDOWS_SANDBOX_PLAN_SCHEMA_VERSION: &str = "aiw.dev/windows-sandbox-plan/v0alpha1";
@@ -860,3 +861,13 @@ mod tests {
 
 #[cfg(test)]
 mod application_token_tests;
+
+mod runtime_observations;
+pub use runtime_observations::{
+    ApplicationFileEntry, ApplicationFileRoot, ApplicationFilesystemSnapshot,
+    DOCUMENT_EXERCISE_PATH, DOCUMENT_EXPECTED_TEXT, DOCUMENT_INITIAL_TEXT, FilesystemCaptureIssue,
+    FilesystemCaptureIssueReason, FilesystemDiffKind, FilesystemSnapshotDiff,
+    FilesystemSnapshotDiffResult, FunctionalExercise, IMPORTED_MSI_BEHAVIOR_EVENT,
+    IMPORTED_MSI_BEHAVIOR_SCHEMA, IMPORTED_MSI_BEHAVIOR_SCHEMA_VERSION,
+    ImportedMsiBehaviorEvidence, diff_filesystem_snapshots, verify_imported_msi_behavior,
+};
