@@ -1,6 +1,6 @@
 use crate::{
-    AssessmentEvidenceGap, UnverifiedGuestDiagnostic, WsbMsiAssessmentReport, WsbMsiRunReport,
-    WsbMsiUnsuccessfulReport,
+    AssessmentEvidenceGap, FailureProgressEvidence, UnverifiedGuestDiagnostic,
+    WsbMsiAssessmentReport, WsbMsiRunReport, WsbMsiUnsuccessfulReport,
 };
 use aiw_provider_wsb::{ApplicationFileRoot, FilesystemDiffKind, FilesystemSnapshotDiffResult};
 
@@ -53,6 +53,9 @@ impl WsbMsiAssessmentReport {
         if let Some(token) = &self.application_token {
             out.push_str(&format!("\nLaunched guest process: PID {}, {:?} integrity, elevated {}, AppContainer {}. This root-process token does not satisfy independent host or descendant checks.\n", token.token.process_id, token.token.integrity.level, token.token.is_elevated, token.token.is_app_container));
         }
+        if let Some(progress) = &self.stage_progress {
+            append_stages(&mut out, progress);
+        }
         out.push_str("\n## Filesystem changes\n\nScope: the Notepad++ installation directory and its guest roaming/local application-data directories. Entries contain paths, sizes, and hashes; contents and registry changes are not captured.\n");
         append_changes(
             &mut out,
@@ -104,17 +107,49 @@ impl WsbMsiUnsuccessfulReport {
                 cell(&transition.reason_code)
             ));
         }
+        match &self.failure_progress {
+            FailureProgressEvidence::Absent => out.push_str("\nNo receipt-bound stage progress was retained.\n"),
+            FailureProgressEvidence::Rejected => out.push_str("\n**Stage progress rejected:** the completion or its artifacts could not be verified as a bound failed attempt. No stage results are inferred.\n"),
+            FailureProgressEvidence::Verified(verified) => {
+                append_stages(&mut out, &verified.attempt.progress);
+                out.push_str(&format!("\nReceipt-bound failure diagnostic (guest-reported):\n\n> {}\n\nFailed receipt SHA-256: {}\n\nFailed-attempt evidence root: {}\n", cell(&verified.attempt.diagnostic), cell(&verified.receipt_sha256), cell(&verified.evidence_root_hash)));
+            }
+        }
         out.push_str("\n## Unverified guest diagnostic\n\n");
         match &self.guest_diagnostic {
-            UnverifiedGuestDiagnostic::Absent => out.push_str("No guest diagnostic was present when reporting. The recorded lifecycle does not identify the failing application stage.\n"),
+            UnverifiedGuestDiagnostic::Absent => out.push_str("No separate unverified guest diagnostic was present when reporting.\n"),
             UnverifiedGuestDiagnostic::Rejected => out.push_str("The guest diagnostic was unreadable, unsafe, malformed, or exceeded its bounds. Its contents were not included.\n"),
             UnverifiedGuestDiagnostic::Available { summary } => {
                 out.push_str("The following message is untrusted guest output read at report time. It has no completion-receipt or evidence-chain binding and cannot prove that any application stage passed.\n\n");
                 out.push_str(&format!("> {}\n", cell(summary)));
             }
         }
-        out.push_str(&format!("\n## Attempt identity\n\n- Session ID: {}\n- Project revision SHA-256: {}\n- Installer SHA-256: {}\n- Guest-agent SHA-256: {}\n- Scenario SHA-256: {}\n- Request SHA-256: {}\n\nOther guest outputs are not inspected or accepted by this unsuccessful-attempt report. No evidence root, application token, functional result, or file-change claim is inferred from them.\n", cell(&self.session_id), cell(&self.project_revision_sha256), cell(&self.installer_sha256), cell(&self.guest_agent_sha256), cell(&self.scenario_sha256), cell(&self.request_sha256)));
+        out.push_str(&format!("\n## Attempt identity\n\n- Session ID: {}\n- Project revision SHA-256: {}\n- Installer SHA-256: {}\n- Guest-agent SHA-256: {}\n- Scenario SHA-256: {}\n- Request SHA-256: {}\n\nOnly a fully verified failed receipt can supply the stage progress above. Other guest output cannot establish an accepted compatibility assessment, application token, or file-change claim.\n", cell(&self.session_id), cell(&self.project_revision_sha256), cell(&self.installer_sha256), cell(&self.guest_agent_sha256), cell(&self.scenario_sha256), cell(&self.request_sha256)));
         out
+    }
+}
+
+fn append_stages(out: &mut String, progress: &aiw_provider_wsb::ImportedMsiStageProgress) {
+    use aiw_provider_wsb::{MsiExecutionStage as Stage, MsiStageStatus as Status};
+    out.push_str("\n## Scenario stage progress\n\nThese guest-reported observations are bound to the completion receipt. A failed stage can reflect an installer, application, or test-driver failure; it is not an incompatibility verdict. A completed capture stage does not guarantee complete filesystem coverage.\n\n| Stage | Guest-reported result |\n|---|---|\n");
+    for result in &progress.stages {
+        let stage = match result.stage {
+            Stage::BeforeInstallCapture => "Capture before installation",
+            Stage::Install => "Install application",
+            Stage::AfterInstallCapture => "Capture installed files",
+            Stage::PrepareDocument => "Prepare test document",
+            Stage::Launch => "Launch application process",
+            Stage::OpenDocument => "Open and verify document",
+            Stage::EditSaveDocument => "Edit, save, and verify bytes",
+            Stage::Close => "Close application and verify job cleanup",
+            Stage::AfterExerciseCapture => "Capture files after use",
+        };
+        let status = match result.status {
+            Status::Passed => "Passed",
+            Status::Failed => "Failed",
+            Status::NotReached => "Not reached",
+        };
+        out.push_str(&format!("| {stage} | {status} |\n"));
     }
 }
 

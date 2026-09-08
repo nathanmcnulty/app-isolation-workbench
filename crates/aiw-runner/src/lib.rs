@@ -14,8 +14,8 @@ mod assessment_report;
 mod discard;
 mod preparation;
 pub use assessment_report::{
-    AssessmentEvidenceGap, UnverifiedGuestDiagnostic, WsbMsiAssessmentReport, WsbMsiRunReport,
-    WsbMsiUnsuccessfulReport,
+    AssessmentEvidenceGap, FailureProgressEvidence, UnverifiedGuestDiagnostic,
+    VerifiedMsiFailureProgress, WsbMsiAssessmentReport, WsbMsiRunReport, WsbMsiUnsuccessfulReport,
 };
 #[cfg(windows)]
 pub use assessment_report::{report_windows_sandbox_msi, report_windows_sandbox_msi_run};
@@ -634,6 +634,20 @@ pub(crate) fn execute_wsb_golden_probe(
                     &observed,
                 )
                 .map_err(RunnerError::Receipt)?;
+                let stages = aiw_provider_wsb::verify_imported_msi_stage_progress(
+                    &evidence_bytes,
+                    &verification.evidence_root_hash,
+                    expected,
+                )
+                .map_err(RunnerError::Receipt)?;
+                if stages
+                    .as_ref()
+                    .is_some_and(|progress| !progress.successful())
+                {
+                    return Err(RunnerError::Receipt(
+                        "successful result has failed stage progress".to_owned(),
+                    ));
+                }
                 (Some(observed), token, behavior)
             }
             ExecutionGuestRequest::Golden(_) => (None, None, None),

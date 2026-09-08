@@ -140,6 +140,20 @@ fn live_imported_msi_install_observe_close_and_cleanup() {
     assert_eq!(result.scenario.install_exit_code, 0);
     assert_eq!(result.scenario.launch_exit_code, 0);
     assert!(result.cleanup_complete);
+    let report =
+        aiw_runner::report_windows_sandbox_msi(&root, layout.run_id(), &project, &guest_hash)
+            .unwrap();
+    let stages = report
+        .stage_progress
+        .as_ref()
+        .expect("current guest emits stage progress");
+    assert!(stages.successful());
+    assert_eq!(stages.stages.len(), 9);
+    eprintln!(
+        "MSI_STAGE_PROGRESS={}",
+        serde_json::to_string(stages).unwrap()
+    );
+
     assert!(!root.join("tools/request.json").exists());
     assert_eq!(
         layout.read_result().unwrap().outcome,

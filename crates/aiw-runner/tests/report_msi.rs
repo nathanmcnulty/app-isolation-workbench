@@ -72,7 +72,11 @@ fn completed_msi_report_is_readonly_and_rejects_drift() {
     {
         assert_eq!(
             report.schema_version,
-            "aiw.dev/wsb-msi-assessment-report/v0alpha2"
+            if report.stage_progress.is_some() {
+                "aiw.dev/wsb-msi-assessment-report/v0alpha3"
+            } else {
+                "aiw.dev/wsb-msi-assessment-report/v0alpha2"
+            }
         );
         let behavior = report
             .behavior
@@ -202,7 +206,17 @@ fn unsuccessful_msi_report_is_readonly_and_never_promotes_guest_outputs() {
     drop(file);
     let repeated = report_windows_sandbox_msi_run(&root, run_id, &project, &guest_hash);
     fs::remove_file(&extra).unwrap();
-    assert_eq!(bytes, serde_json::to_vec(&repeated.unwrap()).unwrap());
+    let repeated = repeated.unwrap();
+    let WsbMsiRunReport::UnsuccessfulAttempt(repeated) = repeated else {
+        panic!("fake completion promoted failure");
+    };
+    assert!(matches!(
+        repeated.failure_progress,
+        aiw_runner::FailureProgressEvidence::Rejected
+    ));
+    let mut repeated_json = serde_json::to_value(&*repeated).unwrap();
+    repeated_json["failureProgress"] = value["report"]["failureProgress"].clone();
+    assert_eq!(value["report"], repeated_json);
     let mut after = BTreeMap::new();
     inventory(&root, &root, &mut after);
     assert_eq!(before, after);

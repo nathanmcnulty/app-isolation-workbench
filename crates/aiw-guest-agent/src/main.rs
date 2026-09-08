@@ -90,7 +90,9 @@ fn run() -> Result<()> {
             match execute_imported_msi_request(&request) {
                 Ok(()) => Ok(()),
                 Err(error) => {
-                    let _ = write_imported_msi_failure_diagnostic(&request, &error);
+                    if !error.is::<PublishedMsiFailure>() {
+                        let _ = write_imported_msi_failure_diagnostic(&request, &error);
+                    }
                     Err(error)
                 }
             }
@@ -155,6 +157,7 @@ fn execute_request(request: &GoldenProbeRequest) -> Result<()> {
     write_receipt_last(&receipt_path, &receipt)
 }
 
+#[cfg(windows)]
 fn execute_imported_msi_request(request: &ImportedMsiGuestRequest) -> Result<()> {
     let actual_agent_hash = hash_file(&std::env::current_exe().context("resolve agent identity")?)?;
     if actual_agent_hash != request.agent_sha256 {
@@ -173,14 +176,44 @@ fn execute_imported_msi_request(request: &ImportedMsiGuestRequest) -> Result<()>
     ensure_output_root(&root)?;
     installer.revalidate()?;
 
-    #[cfg(windows)]
-    let observation = aiw_windows_platform::execute_fixed_notepad_plus_plus_msi(&request.scenario)
-        .map_err(|error| anyhow::anyhow!("fixed imported-MSI execution failed: {error}"))?;
-    #[cfg(not(windows))]
-    let observation =
-        { bail!("the imported-MSI guest profile only executes inside Windows Sandbox") };
-
+    let attempt =
+        aiw_windows_platform::execute_fixed_notepad_plus_plus_msi_attempt(&request.scenario);
     installer.revalidate()?;
+    let progress = if request.scenario.requires_application_exercise() {
+        Some(
+            aiw_provider_wsb::ImportedMsiStageProgress::new(
+                request,
+                stage_results(&attempt.stages),
+            )
+            .map_err(anyhow::Error::msg)?,
+        )
+    } else {
+        None
+    };
+    let observation = match attempt.result {
+        Ok(observation) => observation,
+        Err(error) => {
+            if let Some(progress) = progress {
+                let diagnostic: String = error
+                    .to_string()
+                    .chars()
+                    .take(2048)
+                    .map(|c| if c.is_control() { ' ' } else { c })
+                    .collect();
+                let failed =
+                    aiw_provider_wsb::ImportedMsiFailedAttempt::from_progress(progress, diagnostic)
+                        .map_err(anyhow::Error::msg)?;
+                failed
+                    .validate_for_request(request)
+                    .map_err(anyhow::Error::msg)?;
+                let mut evidence = EvidenceLog::new();
+                append_stage_progress(&mut evidence, &failed.progress)?;
+                publish_msi_result(request, &failed, evidence, CompletionStatus::Failed)?;
+                return Err(PublishedMsiFailure(error.to_string()).into());
+            }
+            bail!("fixed imported-MSI execution failed: {error}");
+        }
+    };
     let result = ImportedMsiScenarioResult::succeeded(
         request,
         observation.install_exit_code,
@@ -190,11 +223,6 @@ fn execute_imported_msi_request(request: &ImportedMsiGuestRequest) -> Result<()>
     result.validate_for_request(request).map_err(|error| {
         anyhow::anyhow!("guest produced an invalid imported-MSI result: {error}")
     })?;
-    let result_path = output_path(&root, &request.scenario_result_path)?;
-    let evidence_path = output_path(&root, &request.evidence_log_path)?;
-    let receipt_path = output_path(&root, &request.receipt_path)?;
-    write_new_json(&result_path, &result)?;
-
     let mut evidence = EvidenceLog::new();
     evidence.append(EvidenceEvent {
         observed_utc: "guest-agent-time-not-trusted".to_owned(),
@@ -243,6 +271,44 @@ fn execute_imported_msi_request(request: &ImportedMsiGuestRequest) -> Result<()>
         (None, None) if !request.scenario.requires_application_exercise() => {}
         _ => bail!("guest did not produce all approved application observations"),
     }
+    if let Some(progress) = &progress {
+        if !progress.successful() {
+            bail!("successful MSI result has incomplete stage progress");
+        }
+        append_stage_progress(&mut evidence, progress)?;
+    }
+    publish_msi_result(request, &result, evidence, CompletionStatus::Succeeded)
+}
+
+#[cfg(not(windows))]
+fn execute_imported_msi_request(_request: &ImportedMsiGuestRequest) -> Result<()> {
+    bail!("the imported-MSI guest profile only executes inside Windows Sandbox")
+}
+
+fn append_stage_progress(
+    evidence: &mut EvidenceLog,
+    progress: &aiw_provider_wsb::ImportedMsiStageProgress,
+) -> Result<()> {
+    evidence.append(EvidenceEvent {
+        observed_utc: "guest-agent-time-not-trusted".to_owned(),
+        kind: aiw_provider_wsb::IMPORTED_MSI_STAGE_PROGRESS_EVENT.to_owned(),
+        source: "aiw-guest-agent".to_owned(),
+        payload: serde_json::to_value(progress)?,
+    })?;
+    Ok(())
+}
+
+fn publish_msi_result(
+    request: &ImportedMsiGuestRequest,
+    result: &impl Serialize,
+    evidence: EvidenceLog,
+    status: CompletionStatus,
+) -> Result<()> {
+    let root = PathBuf::from(&request.output_root);
+    let result_path = output_path(&root, &request.scenario_result_path)?;
+    let evidence_path = output_path(&root, &request.evidence_log_path)?;
+    let receipt_path = output_path(&root, &request.receipt_path)?;
+    write_new_json(&result_path, result)?;
     let mut bytes = Vec::new();
     for record in evidence.records() {
         serde_json::to_writer(&mut bytes, record)?;
@@ -260,8 +326,12 @@ fn execute_imported_msi_request(request: &ImportedMsiGuestRequest) -> Result<()>
         config_sha256: request.config_sha256.clone(),
         request_sha256: request.request_sha256.clone(),
         agent_sha256: request.agent_sha256.clone(),
-        status: CompletionStatus::Succeeded,
-        exit_code: 0,
+        status,
+        exit_code: if status == CompletionStatus::Succeeded {
+            0
+        } else {
+            1
+        },
         evidence_root_hash: evidence.manifest()?.root_hash,
         artifacts: vec![
             completion_artifact(
@@ -671,4 +741,45 @@ mod tests {
         ));
         fs::remove_dir_all(root).unwrap();
     }
+}
+
+#[derive(Debug)]
+struct PublishedMsiFailure(String);
+impl std::fmt::Display for PublishedMsiFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "failed MSI attempt published: {}", self.0)
+    }
+}
+impl std::error::Error for PublishedMsiFailure {}
+
+#[cfg(windows)]
+fn stage_results(
+    stages: &[(
+        aiw_windows_platform::GuestMsiStage,
+        aiw_windows_platform::GuestMsiStageStatus,
+    )],
+) -> Vec<aiw_provider_wsb::MsiStageResult> {
+    use aiw_provider_wsb::{MsiExecutionStage, MsiStageResult, MsiStageStatus};
+    use aiw_windows_platform::{GuestMsiStage, GuestMsiStageStatus};
+    stages
+        .iter()
+        .map(|(stage, status)| MsiStageResult {
+            stage: match stage {
+                GuestMsiStage::BeforeInstallCapture => MsiExecutionStage::BeforeInstallCapture,
+                GuestMsiStage::Install => MsiExecutionStage::Install,
+                GuestMsiStage::AfterInstallCapture => MsiExecutionStage::AfterInstallCapture,
+                GuestMsiStage::PrepareDocument => MsiExecutionStage::PrepareDocument,
+                GuestMsiStage::Launch => MsiExecutionStage::Launch,
+                GuestMsiStage::OpenDocument => MsiExecutionStage::OpenDocument,
+                GuestMsiStage::EditSaveDocument => MsiExecutionStage::EditSaveDocument,
+                GuestMsiStage::Close => MsiExecutionStage::Close,
+                GuestMsiStage::AfterExerciseCapture => MsiExecutionStage::AfterExerciseCapture,
+            },
+            status: match status {
+                GuestMsiStageStatus::Passed => MsiStageStatus::Passed,
+                GuestMsiStageStatus::Failed => MsiStageStatus::Failed,
+                GuestMsiStageStatus::NotReached => MsiStageStatus::NotReached,
+            },
+        })
+        .collect()
 }

@@ -104,3 +104,17 @@ Evidence identity:
 Three preceding development attempts failed without accepted evidence and verified cleanup. One exposed a startup message timeout; bounded readiness retries resolved it. Subsequent diagnostics showed that Scintilla ignored control characters sent as `WM_CHAR`: the editor had the 46 printable bytes but no CR/LF. Sending Enter through the normal key-message path produced the expected 48 bytes. The harness now independently checks editor content before Save and the retained file afterward. This was a test-driver issue, not evidence of application incompatibility.
 
 Independent review also led to per-message PID checks, retained document ancestry, and bounded capture/read diagnostics. Synthetic tests verify that normal atomic saved-file replacement works while a Scenario-directory rename is blocked. The v2 retained report remains readable with new observations absent; the v3 report passes repeated deterministic output and unchanged-workspace checks. No installer or application was executed on the host, and no hosted CI run was scheduled for this benchmark.
+
+## Stage-progress benchmark — 2026-09-07
+
+The updated static guest passed a fresh approved Windows Sandbox run in 80.09 seconds. All nine native stages reported passed: before-install capture, installation, after-install capture, document preparation, process launch, document open/verification, edit/save/byte verification, graceful close/job cleanup, and after-use capture. The run verified exact Sandbox cleanup and no remaining host sessions. The scoped file report again contained 215 installation additions and seven use-time additions, with complete roots.
+
+- Workspace: `%TEMP%\aiw-msi-live-14964-1788843480881488100`
+- Approved guest SHA-256: `c0b7ad637af79981623756d5226d5885395f59e738f9de43f5bde9c7f0490b2e`
+- Request SHA-256: `cbaf8f6b2cccc3802c200a9dbc042a12cd6286e36a3916a5573de9f7ac2a44a4`
+- Receipt SHA-256: `e37f44f76fc239929f46a0fc884cbac2ffa40f3353e8ce91256cd66924398453`
+- Evidence root: `2f915cf32c6c401100054a116706f3d11545951679ed2e3df275c84707e780c1`
+- Sandbox ID: `1ce01ef1-b168-3b46-2203-b9b29dc36f82`
+- Local readable/JSON exports: `%TEMP%\aiw-notepad-stage-assessment.md` and `.json`.
+
+The current report and the previous v3 report without a stage event both passed retained-workspace repeatability, wrong-binding, unexpected-output, and unchanged-inventory checks. The earlier failed editor fixture also passed the unsuccessful-report regression. Caught-failure stage progress was tested locally using synthetic failed receipts, including tampered evidence, contradictory successful status, unexpected files, and failure at every stage; no new live application failure was induced. One live Sandbox run and no hosted CI runs were used for this slice.

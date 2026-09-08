@@ -18,6 +18,8 @@ pub struct WsbMsiAssessmentReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub behavior: Option<aiw_provider_wsb::ImportedMsiBehaviorEvidence>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub stage_progress: Option<aiw_provider_wsb::ImportedMsiStageProgress>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub installation_file_changes: Option<aiw_provider_wsb::FilesystemSnapshotDiffResult>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exercise_file_changes: Option<aiw_provider_wsb::FilesystemSnapshotDiffResult>,
@@ -94,6 +96,24 @@ pub struct WsbMsiUnsuccessfulReport {
     pub scenario_sha256: String,
     pub lifecycle: Vec<SessionTransition>,
     pub guest_diagnostic: UnverifiedGuestDiagnostic,
+    pub failure_progress: FailureProgressEvidence,
+}
+
+/// Correlated failed-run observations; never an accepted compatibility verdict.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(tag = "status", content = "evidence", rename_all = "camelCase")]
+pub enum FailureProgressEvidence {
+    Absent,
+    Rejected,
+    Verified(Box<VerifiedMsiFailureProgress>),
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VerifiedMsiFailureProgress {
+    pub receipt_sha256: String,
+    pub evidence_root_hash: String,
+    pub attempt: aiw_provider_wsb::ImportedMsiFailedAttempt,
 }
 
 /// This optional file has no completion receipt or evidence-chain binding.
@@ -290,30 +310,6 @@ pub fn report_windows_sandbox_msi_run(
         }
         Ok(())
     };
-    if matches!(
-        before.result.outcome,
-        RunOutcome::Failed | RunOutcome::Cancelled
-    ) {
-        let (guest_diagnostic, _diagnostic_handle) =
-            read_unverified_diagnostic(&held.output_path().join("guest-failure.json"));
-        revalidate()?;
-        return Ok(WsbMsiRunReport::UnsuccessfulAttempt(Box::new(
-            WsbMsiUnsuccessfulReport {
-                schema_version: "aiw.dev/wsb-msi-unsuccessful-report/v0alpha1".to_owned(),
-                run_id: run_id.to_owned(),
-                project_revision_sha256: artifacts.receipt.project_revision_sha256.clone(),
-                outcome: before.result.outcome,
-                recorded_cleanup_verified: true,
-                session_id: transaction.session_id.clone(),
-                request_sha256: request.request_sha256.clone(),
-                installer_sha256: msi.staged_payload.sha256.clone(),
-                guest_agent_sha256: expected_guest_agent_sha256.to_owned(),
-                scenario_sha256: request.scenario_sha256.clone(),
-                lifecycle: transaction.transitions.clone(),
-                guest_diagnostic,
-            },
-        )));
-    }
     let mut expectation = completion_expectation(
         run_id,
         &request.sandbox_id,
@@ -325,6 +321,32 @@ pub fn report_windows_sandbox_msi_run(
     expectation.artifacts[0].role = aiw_evidence::ArtifactRole::ScenarioResults;
     expectation.artifacts[1].maximum_bytes =
         aiw_provider_wsb::MAX_APPLICATION_EVIDENCE_BYTES as u64;
+    if matches!(
+        before.result.outcome,
+        RunOutcome::Failed | RunOutcome::Cancelled
+    ) {
+        let (guest_diagnostic, _diagnostic_handle) =
+            read_unverified_diagnostic(&held.output_path().join("guest-failure.json"));
+        let failure_progress = read_failure_progress(&held.output_path(), &expectation, &request);
+        revalidate()?;
+        return Ok(WsbMsiRunReport::UnsuccessfulAttempt(Box::new(
+            WsbMsiUnsuccessfulReport {
+                schema_version: "aiw.dev/wsb-msi-unsuccessful-report/v0alpha2".to_owned(),
+                run_id: run_id.to_owned(),
+                project_revision_sha256: artifacts.receipt.project_revision_sha256.clone(),
+                outcome: before.result.outcome,
+                recorded_cleanup_verified: true,
+                session_id: transaction.session_id.clone(),
+                request_sha256: request.request_sha256.clone(),
+                installer_sha256: msi.staged_payload.sha256.clone(),
+                guest_agent_sha256: expected_guest_agent_sha256.to_owned(),
+                scenario_sha256: request.scenario_sha256.clone(),
+                lifecycle: transaction.transitions.clone(),
+                guest_diagnostic,
+                failure_progress,
+            },
+        )));
+    }
     use std::os::windows::fs::OpenOptionsExt;
     let _output_files = ["completion.json", "scenario-result.json", "evidence.jsonl"]
         .into_iter()
@@ -370,6 +392,20 @@ pub fn report_windows_sandbox_msi_run(
         &scenario,
     )
     .map_err(RunnerError::Receipt)?;
+    let stage_progress = aiw_provider_wsb::verify_imported_msi_stage_progress(
+        &evidence_bytes,
+        &verified.evidence_root_hash,
+        &request,
+    )
+    .map_err(RunnerError::Receipt)?;
+    if stage_progress
+        .as_ref()
+        .is_some_and(|progress| !progress.successful())
+    {
+        return Err(RunnerError::Receipt(
+            "successful assessment has failed stage progress".to_owned(),
+        ));
+    }
     let installation_file_changes = behavior
         .as_ref()
         .map(|value| {
@@ -387,7 +423,9 @@ pub fn report_windows_sandbox_msi_run(
     revalidate()?;
     Ok(WsbMsiRunReport::CompletedAssessment(Box::new(
         WsbMsiAssessmentReport {
-            schema_version: if behavior.is_some() {
+            schema_version: if stage_progress.is_some() {
+                "aiw.dev/wsb-msi-assessment-report/v0alpha3"
+            } else if behavior.is_some() {
                 "aiw.dev/wsb-msi-assessment-report/v0alpha2"
             } else {
                 "aiw.dev/wsb-msi-assessment-report/v0alpha1"
@@ -409,6 +447,7 @@ pub fn report_windows_sandbox_msi_run(
             scenario,
             application_token,
             behavior,
+            stage_progress,
             installation_file_changes,
             exercise_file_changes,
             requested_assertions: project.assertions.clone(),
@@ -508,5 +547,250 @@ mod tests {
             UnverifiedGuestDiagnostic::Rejected
         ));
         fs::remove_dir(&path).unwrap();
+    }
+}
+
+#[cfg(windows)]
+fn read_failure_progress(
+    output: &Path,
+    expectation: &WindowsSandboxCompletionExpectation,
+    request: &aiw_provider_wsb::ImportedMsiGuestRequest,
+) -> FailureProgressEvidence {
+    match fs::symlink_metadata(output.join("completion.json")) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return FailureProgressEvidence::Absent;
+        }
+        Err(_) => return FailureProgressEvidence::Rejected,
+        Ok(_) => {}
+    }
+    match verify_failed_msi_progress(output, expectation, request) {
+        Ok(verified) => FailureProgressEvidence::Verified(Box::new(verified)),
+        Err(_) => FailureProgressEvidence::Rejected,
+    }
+}
+
+#[cfg(windows)]
+fn verify_failed_msi_progress(
+    output: &Path,
+    expectation: &WindowsSandboxCompletionExpectation,
+    request: &aiw_provider_wsb::ImportedMsiGuestRequest,
+) -> Result<VerifiedMsiFailureProgress, RunnerError> {
+    use std::os::windows::fs::OpenOptionsExt;
+    // Keep all receipt-bound bytes immutable through parsing and comparison.
+    let _files = ["completion.json", "scenario-result.json", "evidence.jsonl"]
+        .into_iter()
+        .map(|leaf| {
+            let path = output.join(leaf);
+            ensure_ordinary_file(&path)?;
+            OpenOptions::new()
+                .read(true)
+                .share_mode(1)
+                .custom_flags(0x00200000)
+                .open(path)
+                .map_err(|_| RunnerError::Drift)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let verified = verify_completion_receipt(output, expectation)
+        .map_err(|e| RunnerError::Receipt(e.to_string()))?;
+    if verified.successful || verified.status != aiw_provider_wsb::CompletionStatus::Failed {
+        return Err(RunnerError::Receipt(
+            "unsuccessful report requires a failed receipt".to_owned(),
+        ));
+    }
+    let attempt: aiw_provider_wsb::ImportedMsiFailedAttempt =
+        read_bounded_json(&output.join("scenario-result.json"), 64 * 1024)?;
+    attempt
+        .validate_for_request(request)
+        .map_err(RunnerError::Receipt)?;
+    let bytes = read_bounded_bytes(
+        &output.join("evidence.jsonl"),
+        aiw_provider_wsb::MAX_APPLICATION_EVIDENCE_BYTES as u64,
+    )?;
+    let progress = aiw_provider_wsb::verify_imported_msi_stage_progress(
+        &bytes,
+        &verified.evidence_root_hash,
+        request,
+    )
+    .map_err(RunnerError::Receipt)?;
+    if progress.as_ref() != Some(&attempt.progress) {
+        return Err(RunnerError::Receipt(
+            "failed artifact and evidence progress differ".to_owned(),
+        ));
+    }
+    Ok(VerifiedMsiFailureProgress {
+        receipt_sha256: verified.receipt_sha256,
+        evidence_root_hash: verified.evidence_root_hash,
+        attempt,
+    })
+}
+
+#[cfg(all(test, windows))]
+mod failure_progress_tests {
+    use super::*;
+    use aiw_evidence::{ArtifactRole, EvidenceEvent, EvidenceLog};
+    use aiw_provider_wsb::{
+        CompletionArtifact, CompletionStatus, ImportedMsiFailedAttempt, ImportedMsiGuestRequest,
+        MsiExecutionStage, MsiStageResult, MsiStageStatus, WindowsSandboxCompletionReceipt,
+    };
+
+    #[test]
+    fn failed_progress_requires_bound_receipt_matching_artifacts_and_failed_status() {
+        let project: Project = serde_yaml::from_str(include_str!(
+            "../../../examples/notepad-plus-plus-msi.aiw.yaml"
+        ))
+        .unwrap();
+        let scenario = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
+            &project,
+            "install-launch-close",
+        )
+        .unwrap();
+        let request = ImportedMsiGuestRequest::new(
+            "failed-stage-test",
+            "12345678-1234-abcd-9876-1234567890ab",
+            "a".repeat(64),
+            "b".repeat(64),
+            scenario.clone(),
+            &scenario.application_sha256,
+            1024,
+            "c".repeat(64),
+        )
+        .unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "aiw-failed-progress-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&root).unwrap();
+        let stages = MsiExecutionStage::ORDERED
+            .into_iter()
+            .enumerate()
+            .map(|(index, stage)| MsiStageResult {
+                stage,
+                status: if index < 6 {
+                    MsiStageStatus::Passed
+                } else if index == 6 {
+                    MsiStageStatus::Failed
+                } else {
+                    MsiStageStatus::NotReached
+                },
+            })
+            .collect();
+        let attempt =
+            ImportedMsiFailedAttempt::new(&request, stages, "fixed editor mismatch").unwrap();
+        let mut log = EvidenceLog::new();
+        log.append(EvidenceEvent {
+            observed_utc: "untrusted-time".to_owned(),
+            kind: aiw_provider_wsb::IMPORTED_MSI_STAGE_PROGRESS_EVENT.to_owned(),
+            source: "aiw-guest-agent".to_owned(),
+            payload: serde_json::to_value(&attempt.progress).unwrap(),
+        })
+        .unwrap();
+        let mut bytes = Vec::new();
+        for record in log.records() {
+            serde_json::to_writer(&mut bytes, record).unwrap();
+            bytes.push(b'\n');
+        }
+        fs::write(root.join("evidence.jsonl"), &bytes).unwrap();
+        fs::write(
+            root.join("scenario-result.json"),
+            serde_json::to_vec(&attempt).unwrap(),
+        )
+        .unwrap();
+        let artifacts = [
+            (
+                "scenario-result.json",
+                ArtifactRole::ScenarioResults,
+                "application/json",
+            ),
+            (
+                "evidence.jsonl",
+                ArtifactRole::EvidenceLog,
+                "application/x-ndjson",
+            ),
+        ]
+        .into_iter()
+        .map(|(path, role, media_type)| {
+            let bytes = fs::read(root.join(path)).unwrap();
+            CompletionArtifact {
+                path: path.to_owned(),
+                role,
+                media_type: media_type.to_owned(),
+                size_bytes: bytes.len() as u64,
+                sha256: hex::encode(Sha256::digest(bytes)),
+            }
+        })
+        .collect();
+        let mut receipt = WindowsSandboxCompletionReceipt {
+            schema_version: aiw_provider_wsb::WINDOWS_SANDBOX_COMPLETION_RECEIPT_SCHEMA_VERSION
+                .to_owned(),
+            run_id: request.run_id.clone(),
+            sandbox_id: request.sandbox_id.clone(),
+            config_sha256: request.config_sha256.clone(),
+            request_sha256: request.request_sha256.clone(),
+            agent_sha256: request.agent_sha256.clone(),
+            status: CompletionStatus::Failed,
+            exit_code: 1,
+            evidence_root_hash: log.manifest().unwrap().root_hash,
+            artifacts,
+        };
+        let mut expectation = completion_expectation(
+            &request.run_id,
+            &request.sandbox_id,
+            &request.config_sha256,
+            &request.agent_sha256,
+            &request.request_sha256,
+        );
+        expectation.artifacts[0].path = "scenario-result.json".to_owned();
+        expectation.artifacts[0].role = ArtifactRole::ScenarioResults;
+        fs::write(
+            root.join("completion.json"),
+            serde_json::to_vec(&receipt).unwrap(),
+        )
+        .unwrap();
+        let verified = verify_failed_msi_progress(&root, &expectation, &request).unwrap();
+        assert_eq!(verified.attempt, attempt);
+        assert_eq!(
+            verified.attempt.progress.stages[6].status,
+            MsiStageStatus::Failed
+        );
+        assert!(matches!(
+            read_failure_progress(&root, &expectation, &request),
+            FailureProgressEvidence::Verified(_)
+        ));
+        fs::write(root.join("evidence.jsonl"), b"tampered").unwrap();
+        assert!(matches!(
+            read_failure_progress(&root, &expectation, &request),
+            FailureProgressEvidence::Rejected
+        ));
+        fs::write(root.join("evidence.jsonl"), &bytes).unwrap();
+        receipt.status = CompletionStatus::Succeeded;
+        receipt.exit_code = 0;
+        fs::write(
+            root.join("completion.json"),
+            serde_json::to_vec(&receipt).unwrap(),
+        )
+        .unwrap();
+        assert!(verify_failed_msi_progress(&root, &expectation, &request).is_err());
+        receipt.status = CompletionStatus::Failed;
+        receipt.exit_code = 1;
+        fs::write(
+            root.join("completion.json"),
+            serde_json::to_vec(&receipt).unwrap(),
+        )
+        .unwrap();
+        fs::write(root.join("guest-failure.json"), b"unexpected").unwrap();
+        assert!(verify_failed_msi_progress(&root, &expectation, &request).is_err());
+        for name in [
+            "guest-failure.json",
+            "completion.json",
+            "scenario-result.json",
+            "evidence.jsonl",
+        ] {
+            fs::remove_file(root.join(name)).unwrap();
+        }
+        fs::remove_dir(&root).unwrap();
     }
 }
