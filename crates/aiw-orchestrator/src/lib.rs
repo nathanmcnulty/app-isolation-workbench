@@ -2078,6 +2078,56 @@ impl RunLayout {
         })
     }
 
+    /// Reads a terminal run without taking a lock, repairing a journal, or
+    /// creating any missing storage.  The status is observed both before and
+    /// after the artifact reads so a concurrent lifecycle change is reported
+    /// instead of producing a mixed snapshot.
+    pub fn completed_snapshot(&self) -> Result<CompletedRunSnapshot, AiwError> {
+        let initial = self.status()?;
+        let RecoveryStatus::Terminal {
+            result: initial_result,
+            ..
+        } = initial
+        else {
+            return Err(run_error(
+                "AIW_RUN_NOT_TERMINAL",
+                "run has not reached a committed terminal state",
+                "snapshot",
+                &self.run_id,
+            ));
+        };
+
+        let plan = self.read_plan_locked()?;
+        let approval = self.read_approval_locked()?;
+        let result = self.read_result_locked()?;
+        if result != initial_result {
+            return Err(run_error(
+                "AIW_RUN_SNAPSHOT_CONFLICT",
+                "terminal result changed while reading the snapshot",
+                "snapshot",
+                &self.run_id,
+            ));
+        }
+
+        let confirmed = self.status()?;
+        match confirmed {
+            RecoveryStatus::Terminal {
+                result: confirmed_result,
+                ..
+            } if confirmed_result == result => Ok(CompletedRunSnapshot {
+                plan,
+                approval,
+                result,
+            }),
+            _ => Err(run_error(
+                "AIW_RUN_SNAPSHOT_CONFLICT",
+                "run lifecycle changed while reading the snapshot",
+                "snapshot",
+                &self.run_id,
+            )),
+        }
+    }
+
     /// Holds the run lock across external intent publication and internal
     /// revocation. The returned guard exposes no ordinary lifecycle mutation.
     #[doc(hidden)]
@@ -3549,6 +3599,16 @@ pub enum RecoveryStatus {
         result: RunResult,
         last_sequence: u64,
     },
+}
+
+/// The immutable lifecycle artifacts for a run whose terminal journal commit
+/// is currently visible.  This is an in-process view only; callers that need
+/// a wire representation should serialize the individual validated artifacts.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompletedRunSnapshot {
+    pub plan: RunPlan,
+    pub approval: ApprovalRecord,
+    pub result: RunResult,
 }
 
 fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
@@ -5696,6 +5756,30 @@ mod tests {
     fn layout(root: &Path, run_id: &str) -> RunLayout {
         RunLayout::new(root, run_id).unwrap()
     }
+
+    fn tree_snapshot(path: &Path, root: &Path) -> Vec<(String, Option<Vec<u8>>)> {
+        let mut entries = fs::read_dir(path)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect::<Vec<_>>();
+        entries.sort();
+        let mut snapshot = Vec::new();
+        for entry in entries {
+            let relative = entry
+                .strip_prefix(root)
+                .unwrap()
+                .to_string_lossy()
+                .into_owned();
+            if entry.is_dir() {
+                snapshot.push((relative, None));
+                snapshot.extend(tree_snapshot(&entry, root));
+            } else {
+                snapshot.push((relative, Some(fs::read(&entry).unwrap())));
+            }
+        }
+        snapshot
+    }
+
     fn approve(layout: &RunLayout, plan: &RunPlan) {
         layout
             .write_approval(
@@ -5918,6 +6002,92 @@ mod tests {
                 ..
             }
         ));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn completed_snapshot_is_read_only_and_returns_terminal_artifacts() {
+        let root = root();
+        let layout = layout(&root, "run-one");
+        let expected_plan = plan("run-one");
+        let expected_result = success("run-one");
+        layout.create(&expected_plan).unwrap();
+        approve(&layout, &expected_plan);
+        layout.write_result(&expected_result).unwrap();
+        let before = tree_snapshot(&root, &root);
+
+        let snapshot = layout.completed_snapshot().unwrap();
+
+        assert_eq!(snapshot.plan, expected_plan);
+        assert_eq!(
+            snapshot.approval,
+            ApprovalRecord::for_plan(&expected_plan, "admin", "2026-08-27T00:01:00Z").unwrap()
+        );
+        assert_eq!(snapshot.result, expected_result);
+        assert_eq!(tree_snapshot(&root, &root), before);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn completed_snapshot_requires_current_terminal_artifacts() {
+        let root = root();
+        let missing = layout(&root, "missing");
+        assert!(missing.completed_snapshot().is_err());
+        assert!(!root.join("runs").exists());
+
+        let layout = layout(&root, "run-one");
+        let expected_plan = plan("run-one");
+        layout.create(&expected_plan).unwrap();
+        let before = tree_snapshot(&root, &root);
+        let error = layout.completed_snapshot().unwrap_err();
+        assert_eq!(error.code.as_ref(), "AIW_RUN_NOT_TERMINAL");
+        assert_eq!(tree_snapshot(&root, &root), before);
+
+        approve(&layout, &expected_plan);
+        let result = success("run-one");
+        layout.write_result(&result).unwrap();
+        let approval_bytes = fs::read(layout.approval_path()).unwrap();
+        let mut changed_approval =
+            ApprovalRecord::for_plan(&expected_plan, "different-admin", "2026-08-27T00:01:00Z")
+                .unwrap();
+        changed_approval.plan_hash = expected_plan.hash().unwrap();
+        fs::write(
+            layout.approval_path(),
+            serde_json::to_vec(&changed_approval).unwrap(),
+        )
+        .unwrap();
+        let error = layout.completed_snapshot().unwrap_err();
+        assert_eq!(error.code.as_ref(), "AIW_ARTIFACT_TAMPERED");
+        fs::write(layout.approval_path(), approval_bytes).unwrap();
+
+        let mut changed = result.clone();
+        changed.summary = "tampered".to_owned();
+        fs::write(layout.result_path(), serde_json::to_vec(&changed).unwrap()).unwrap();
+        let error = layout.completed_snapshot().unwrap_err();
+        assert_eq!(error.code.as_ref(), "AIW_ARTIFACT_TAMPERED");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn completed_snapshot_validates_current_windows_sandbox_import() {
+        let root = root();
+        let layout = layout(&root, "run-one");
+        let expected_plan = wsb_plan("run-one");
+        let receipt = wsb_import(&expected_plan);
+        layout
+            .create_or_verify_pending_wsb_import(&expected_plan, &receipt)
+            .unwrap();
+        approve(&layout, &expected_plan);
+        let expected_result = success("run-one");
+        layout.write_result(&expected_result).unwrap();
+        let before = tree_snapshot(&root, &root);
+
+        let snapshot = layout.completed_snapshot().unwrap();
+
+        assert_eq!(snapshot.plan, expected_plan);
+        assert_eq!(snapshot.result, expected_result);
+        assert_eq!(snapshot.approval.plan_hash, expected_plan.hash().unwrap());
+        assert_eq!(tree_snapshot(&root, &root), before);
         fs::remove_dir_all(root).unwrap();
     }
 
