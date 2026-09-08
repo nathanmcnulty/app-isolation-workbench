@@ -221,6 +221,22 @@ fn snapshot_roots(
     roots: &[(ApplicationFileRoot, Result<PathBuf, ()>)],
     limits: CaptureLimits,
 ) -> ApplicationFilesystemSnapshot {
+    snapshot_roots_with(roots, limits, open_root)
+}
+
+#[cfg(test)]
+fn snapshot_fixture_roots(
+    roots: &[(ApplicationFileRoot, Result<PathBuf, ()>)],
+    limits: CaptureLimits,
+) -> ApplicationFilesystemSnapshot {
+    snapshot_roots_with(roots, limits, open_fixture_root)
+}
+
+fn snapshot_roots_with(
+    roots: &[(ApplicationFileRoot, Result<PathBuf, ()>)],
+    limits: CaptureLimits,
+    open: fn(&Path) -> Result<Option<File>, FilesystemCaptureIssueReason>,
+) -> ApplicationFilesystemSnapshot {
     let mut state = CaptureState::new(limits);
     for (root, path) in roots {
         if state.expired() {
@@ -231,7 +247,7 @@ fn snapshot_roots(
             state.incomplete(*root, FilesystemCaptureIssueReason::Unreadable);
             continue;
         };
-        let directory = match open_root(path) {
+        let directory = match open(path) {
             Ok(Some(directory)) => directory,
             Ok(None) => continue,
             Err(reason) => {
@@ -247,6 +263,28 @@ fn snapshot_roots(
         }
     }
     state.finish()
+}
+
+#[cfg(test)]
+fn open_fixture_root(path: &Path) -> Result<Option<File>, FilesystemCaptureIssueReason> {
+    let file = match OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ.0)
+        .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
+        .open(path)
+    {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err(FilesystemCaptureIssueReason::Unreadable),
+    };
+    let info = basic_info(&file).map_err(|_| FilesystemCaptureIssueReason::Unreadable)?;
+    if is_reparse_attributes(info.dwFileAttributes) {
+        return Err(FilesystemCaptureIssueReason::ReparsePoint);
+    }
+    if info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0 == 0 {
+        return Err(FilesystemCaptureIssueReason::Unreadable);
+    }
+    Ok(Some(file))
 }
 
 fn open_root(path: &Path) -> Result<Option<File>, FilesystemCaptureIssueReason> {
@@ -604,7 +642,7 @@ mod tests {
             (ApplicationFileRoot::Installation, Ok(root.clone())),
             (ApplicationFileRoot::LocalAppData, Ok(missing)),
         ];
-        let snapshot = snapshot_roots(&roots, FIXED_LIMITS);
+        let snapshot = snapshot_fixture_roots(&roots, FIXED_LIMITS);
         assert_eq!(snapshot.entries.len(), 1);
         assert_eq!(snapshot.entries[0].path, "plugins/NppExport.dll");
         assert!(snapshot.issues.is_empty());
@@ -618,7 +656,7 @@ mod tests {
         std::fs::create_dir_all(&root).expect("fixture directory should exist");
         std::fs::write(root.join("é.txt"), b"fixture").expect("fixture file should exist");
         let roots = [(ApplicationFileRoot::Installation, Ok(root.clone()))];
-        let snapshot = snapshot_roots(&roots, FIXED_LIMITS);
+        let snapshot = snapshot_fixture_roots(&roots, FIXED_LIMITS);
         assert!(snapshot.entries.is_empty());
         assert!(snapshot.issues.iter().any(|issue| {
             issue.root == ApplicationFileRoot::Installation
@@ -634,7 +672,7 @@ mod tests {
         std::fs::write(root.join("oversized.txt"), b"two bytes")
             .expect("fixture file should exist");
         let roots = [(ApplicationFileRoot::Installation, Ok(root.clone()))];
-        let snapshot = snapshot_roots(
+        let snapshot = snapshot_fixture_roots(
             &roots,
             CaptureLimits {
                 maximum_files: 1,
@@ -666,7 +704,7 @@ mod tests {
         std::fs::write(leaf.join("inside.txt"), b"fixture")
             .expect("deep fixture file should exist");
         let roots = [(ApplicationFileRoot::Installation, Ok(root.clone()))];
-        let snapshot = snapshot_roots(&roots, FIXED_LIMITS);
+        let snapshot = snapshot_fixture_roots(&roots, FIXED_LIMITS);
         assert!(snapshot.entries.is_empty());
         assert!(snapshot.issues.iter().any(|issue| {
             issue.root == ApplicationFileRoot::Installation

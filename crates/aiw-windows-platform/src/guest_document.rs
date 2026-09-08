@@ -96,7 +96,7 @@ pub(crate) struct FixedGuestDocument {
 
 impl FixedGuestDocument {
     pub(crate) fn prepare() -> Result<Self, String> {
-        Self::prepare_under(Path::new(FIXED_ROOT))
+        Self::prepare_with_ancestors(held_directory_chain(Path::new(FIXED_ROOT))?)
     }
 
     pub(crate) fn observe_expected(&self) -> Result<Option<String>, String> {
@@ -198,8 +198,12 @@ impl FixedGuestDocument {
         Ok(())
     }
 
+    #[cfg(test)]
     fn prepare_under(root: &Path) -> Result<Self, String> {
-        let mut ancestors = held_directory_chain(root)?;
+        Self::prepare_with_ancestors(vec![open_fixture_root(root)?])
+    }
+
+    fn prepare_with_ancestors(mut ancestors: Vec<File>) -> Result<Self, String> {
         let root = ancestors
             .last()
             .ok_or_else(|| "fixed document root chain was empty".to_owned())?;
@@ -219,6 +223,20 @@ impl FixedGuestDocument {
             expected_sha256: sha256(DOCUMENT_EXPECTED_TEXT.as_bytes()),
         })
     }
+}
+
+#[cfg(test)]
+fn open_fixture_root(path: &Path) -> Result<File, String> {
+    let root = OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ.0)
+        .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
+        .open(path)
+        .map_err(|error| format!("open owned document fixture root failed: {error}"))?;
+    if !ordinary_directory(&file_information(&root)?) {
+        return Err("owned document fixture root is not an ordinary directory".to_owned());
+    }
+    Ok(root)
 }
 
 fn rehold_scenario_for_replace(aiw: &File, scenario: File) -> Result<File, String> {
