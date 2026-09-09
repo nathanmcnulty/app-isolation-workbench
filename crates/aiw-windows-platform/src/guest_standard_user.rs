@@ -373,7 +373,7 @@ fn query_fixed<T: Copy>(
     let mut value = std::mem::MaybeUninit::<T>::uninit();
     let mut returned = 0;
     // SAFETY: output is valid for T and the caller selects a fixed-size class.
-    if !unsafe {
+    if unsafe {
         GetTokenInformation(
             token,
             class,
@@ -408,7 +408,7 @@ fn query_variable(
     let mut buffer = vec![0_usize; words];
     let mut returned = required;
     // SAFETY: usize storage has sufficient alignment and is at least required bytes.
-    if !unsafe {
+    if unsafe {
         GetTokenInformation(
             token,
             class,
@@ -512,6 +512,7 @@ fn last_error(operation: &str) -> GuestMsiExecutionError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn standard_user_paths_are_the_reviewed_fixed_profile() {
