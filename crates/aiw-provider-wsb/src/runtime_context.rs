@@ -26,14 +26,17 @@ pub struct StandardUserRuntimeContext {
 
 impl StandardUserRuntimeContext {
     pub fn validate(&self) -> Result<(), String> {
-        if self.user_sid.is_empty()
+        if !valid_account_sid(&self.user_sid)
             || self.administrators_enabled
-            || !valid_fixed_path(&self.profile_path)
-            || !same_path(&self.profile_path, STANDARD_USER_PROFILE_PATH)
-            || !valid_fixed_path(&self.roaming_app_data)
-            || !valid_fixed_path(&self.local_app_data)
-            || !is_descendant(&self.roaming_app_data, &self.profile_path)
-            || !is_descendant(&self.local_app_data, &self.profile_path)
+            || !self
+                .profile_path
+                .eq_ignore_ascii_case(STANDARD_USER_PROFILE_PATH)
+            || !self
+                .roaming_app_data
+                .eq_ignore_ascii_case(r"C:\Users\AiwStandardUser\AppData\Roaming")
+            || !self
+                .local_app_data
+                .eq_ignore_ascii_case(r"C:\Users\AiwStandardUser\AppData\Local")
         {
             return Err("standard-user runtime context has invalid identity or paths".to_owned());
         }
@@ -101,7 +104,9 @@ impl ImportedMsiRuntimeContext {
             || token.is_elevated
             || token.elevation_type != ElevationType::Default
             || token.integrity.level != IntegrityLevel::Medium
-            || !(0x2000..=0x20ff).contains(&token.integrity.rid)
+            || token.integrity.rid != 0x2000
+            || token.integrity.sid != "S-1-16-8192"
+            || !token.capabilities.is_empty()
         {
             return Err(
                 "imported MSI runtime context is not a bounded standard-user observation"
@@ -119,6 +124,9 @@ pub fn verify_imported_msi_runtime_context(
     result: &ImportedMsiScenarioResult,
     application_token: Option<&ImportedMsiApplicationToken>,
 ) -> Result<Option<ImportedMsiRuntimeContext>, String> {
+    result
+        .validate_for_request(request)
+        .map_err(|e| e.to_string())?;
     let records = verified_application_records(bytes, expected_root)?;
     let mut observation = None;
     for record in records
@@ -152,26 +160,16 @@ pub fn verify_msi_runtime_context(
     verify_imported_msi_runtime_context(bytes, expected_root, request, result, application_token)
 }
 
-fn valid_fixed_path(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    bytes.len() >= 3
-        && bytes[0].is_ascii_alphabetic()
-        && bytes[1] == b':'
-        && bytes[2] == b'\\'
-        && !value.contains(['\0', '\r', '\n', '\t', '/', '%'])
-        && value.split('\\').skip(1).all(|part| {
-            !part.is_empty() && part != "." && part != ".." && !part.ends_with([' ', '.'])
+fn valid_account_sid(value: &str) -> bool {
+    let Some(account) = value.strip_prefix("S-1-5-21-") else {
+        return false;
+    };
+    let parts: Vec<_> = account.split('-').collect();
+    parts.len() == 4
+        && parts.iter().all(|part| {
+            part.parse::<u32>()
+                .is_ok_and(|number| number.to_string() == *part)
         })
-}
-
-fn same_path(left: &str, right: &str) -> bool {
-    left.trim_end_matches('\\')
-        .eq_ignore_ascii_case(right.trim_end_matches('\\'))
-}
-
-fn is_descendant(path: &str, parent: &str) -> bool {
-    let prefix = format!("{}\\", parent.trim_end_matches('\\'));
-    path.len() > prefix.len() && path[..prefix.len()].eq_ignore_ascii_case(&prefix)
 }
 
 #[cfg(test)]
