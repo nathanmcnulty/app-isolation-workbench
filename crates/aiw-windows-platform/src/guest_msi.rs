@@ -28,8 +28,9 @@ use windows::Win32::System::JobObjects::{
     QueryInformationJobObject, SetInformationJobObject, TerminateJobObject,
 };
 use windows::Win32::System::Threading::{
-    CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, GetExitCodeProcess,
-    PROCESS_INFORMATION, ResumeThread, STARTUPINFOW, TerminateProcess, WaitForSingleObject,
+    CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, GetCurrentThreadId,
+    GetExitCodeProcess, PROCESS_INFORMATION, ResumeThread, STARTUPINFOW, TerminateProcess,
+    WaitForSingleObject,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumChildWindows, EnumWindows, GetClassNameW, GetWindowThreadProcessId, IsWindowVisible,
@@ -53,6 +54,54 @@ unsafe extern "system" {
         startup_info: *const STARTUPINFOW,
         process_information: *mut PROCESS_INFORMATION,
     ) -> BOOL;
+}
+
+#[link(name = "User32")]
+unsafe extern "system" {
+    fn GetThreadDesktop(thread_id: u32) -> HANDLE;
+    fn GetProcessWindowStation() -> HANDLE;
+    fn GetUserObjectInformationW(
+        object: HANDLE,
+        index: i32,
+        information: *mut c_void,
+        length: u32,
+        needed: *mut u32,
+    ) -> BOOL;
+    fn WaitForInputIdle(process: HANDLE, milliseconds: u32) -> u32;
+}
+
+// Names identify only the guest UI context; no window titles or document text.
+fn user_object_name(object: HANDLE) -> String {
+    let mut name = [0u16; 128];
+    let mut needed = 0;
+    if object.is_invalid()
+        || !unsafe {
+            GetUserObjectInformationW(
+                object,
+                2,
+                name.as_mut_ptr().cast(),
+                std::mem::size_of_val(&name) as u32,
+                &mut needed,
+            )
+        }
+        .as_bool()
+    {
+        return format!("unavailable:{}", unsafe { GetLastError() }.0);
+    }
+    let length = name
+        .iter()
+        .position(|unit| *unit == 0)
+        .unwrap_or(name.len());
+    String::from_utf16_lossy(&name[..length])
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '\\') {
+                c
+            } else {
+                '?'
+            }
+        })
+        .collect()
 }
 
 const MSIEXEC_PATH: &str = r"C:\Windows\System32\msiexec.exe";
@@ -828,6 +877,7 @@ struct GuestProcess {
     job: ScenarioJob,
     process: OwnedHandle,
     process_id: u32,
+    initial_thread_id: u32,
 }
 
 impl GuestProcess {
@@ -902,6 +952,7 @@ impl GuestProcess {
             job,
             process,
             process_id: information.dwProcessId,
+            initial_thread_id: information.dwThreadId,
         })
     }
 
@@ -961,6 +1012,7 @@ impl GuestProcess {
             job,
             process,
             process_id: information.dwProcessId,
+            initial_thread_id: information.dwThreadId,
         })
     }
 
@@ -1016,6 +1068,7 @@ impl GuestProcess {
             let mut context = WindowSearch {
                 process_id: self.process_id,
                 window: None,
+                matching_windows: 0,
             };
             unsafe {
                 EnumWindows(
@@ -1043,9 +1096,15 @@ impl GuestProcess {
                 }
             }
             if Instant::now() >= deadline {
-                return Err(GuestMsiExecutionError::Process(
-                    "Notepad++ window was not observed before timeout".to_owned(),
-                ));
+                return Err(GuestMsiExecutionError::Process(format!(
+                    "Notepad++ window was not observed before timeout; pid={}, windows={}, inputIdle={}, station={}, agentDesktop={}, childDesktop={}",
+                    self.process_id,
+                    context.matching_windows,
+                    unsafe { WaitForInputIdle(raw_handle(&self.process), 0) },
+                    user_object_name(unsafe { GetProcessWindowStation() }),
+                    user_object_name(unsafe { GetThreadDesktop(GetCurrentThreadId()) }),
+                    user_object_name(unsafe { GetThreadDesktop(self.initial_thread_id) }),
+                )));
             }
             thread::sleep(Duration::from_millis(25));
         }
@@ -1166,12 +1225,16 @@ impl ScenarioJob {
 struct WindowSearch {
     process_id: u32,
     window: Option<HWND>,
+    matching_windows: u32,
 }
 
 unsafe extern "system" fn find_window_for_process(window: HWND, value: LPARAM) -> BOOL {
     let context = unsafe { &mut *(value.0 as *mut WindowSearch) };
     let mut process_id = 0u32;
     unsafe { GetWindowThreadProcessId(window, Some(&mut process_id)) };
+    if process_id == context.process_id {
+        context.matching_windows = context.matching_windows.saturating_add(1);
+    }
     if process_id == context.process_id
         && context.window.is_none()
         && unsafe { IsWindowVisible(window) }.as_bool()
