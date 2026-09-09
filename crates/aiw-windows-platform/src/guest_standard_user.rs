@@ -21,13 +21,9 @@ use windows::Win32::System::Threading::{GetCurrentProcessId, GetProcessId, OpenP
 use windows::core::PWSTR;
 
 use crate::GuestMsiExecutionError;
-use aiw_provider_wsb::{
-    STANDARD_USER_ACCOUNT_NAME, STANDARD_USER_PROFILE_PATH, StandardUserRuntimeContext,
-};
+use aiw_provider_wsb::{STANDARD_USER_ACCOUNT_NAME, StandardUserRuntimeContext};
 
 pub const STANDARD_USER_DOCUMENT_ROOT: &str = r"C:\Users\AiwStandardUser\AppData\Local\AIW";
-const STANDARD_USER_ROAMING_APP_DATA: &str = r"C:\Users\AiwStandardUser\AppData\Roaming";
-const STANDARD_USER_LOCAL_APP_DATA: &str = r"C:\Users\AiwStandardUser\AppData\Local";
 
 const USER_PRIV_USER: u32 = 1;
 const UF_SCRIPT: u32 = 1;
@@ -41,9 +37,24 @@ const TOKEN_QUERY_ACCESS: u32 = 0x8;
 const SE_PRIVILEGE_ENABLED: u32 = 0x2;
 const ERROR_NOT_ALL_ASSIGNED: u32 = 1300;
 
-#[repr(C)] #[derive(Clone, Copy)] struct Luid { low: u32, high: i32 }
-#[repr(C)] #[derive(Clone, Copy)] struct LuidAndAttributes { luid: Luid, attributes: u32 }
-#[repr(C)] #[derive(Clone, Copy)] struct TokenPrivilegesOne { count: u32, privilege: LuidAndAttributes }
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Luid {
+    low: u32,
+    high: i32,
+}
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct LuidAndAttributes {
+    luid: Luid,
+    attributes: u32,
+}
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct TokenPrivilegesOne {
+    count: u32,
+    privilege: LuidAndAttributes,
+}
 
 #[repr(C)]
 struct UserInfo1 {
@@ -95,7 +106,14 @@ unsafe extern "system" {
     fn ImpersonateLoggedOnUser(token: HANDLE) -> i32;
     fn RevertToSelf() -> i32;
     fn LookupPrivilegeValueW(system: PWSTR, name: PWSTR, luid: *mut Luid) -> i32;
-    fn AdjustTokenPrivileges(token: HANDLE, disable_all: i32, new_state: *const TokenPrivilegesOne, buffer_length: u32, previous_state: *mut TokenPrivilegesOne, return_length: *mut u32) -> i32;
+    fn AdjustTokenPrivileges(
+        token: HANDLE,
+        disable_all: i32,
+        new_state: *const TokenPrivilegesOne,
+        buffer_length: u32,
+        previous_state: *mut TokenPrivilegesOne,
+        return_length: *mut u32,
+    ) -> i32;
 }
 #[link(name = "Userenv")]
 unsafe extern "system" {
@@ -152,7 +170,8 @@ impl StandardUserSession {
         let token = unsafe { OwnedHandle::from_raw_handle(token.0) };
         let user_sid = validate_standard_token(raw_handle(&token))?;
 
-        let profile_privileges = ScopedPrivileges::enable(&["SeBackupPrivilege", "SeRestorePrivilege"])?;
+        let profile_privileges =
+            ScopedPrivileges::enable(&["SeBackupPrivilege", "SeRestorePrivilege"])?;
         let mut profile_info = ProfileInfoW {
             size: size_of::<ProfileInfoW>() as u32,
             flags: 0,
@@ -206,7 +225,6 @@ impl StandardUserSession {
             .validate()
             .map_err(GuestMsiExecutionError::Process)?;
         Ok(session)
-
     }
 
     pub(crate) fn token(&self) -> HANDLE {
@@ -303,31 +321,91 @@ impl StandardUserSession {
     }
 }
 
-pub(crate) struct ScopedPrivileges { token: OwnedHandle, previous: Vec<TokenPrivilegesOne> }
+pub(crate) struct ScopedPrivileges {
+    token: OwnedHandle,
+    previous: Vec<TokenPrivilegesOne>,
+}
 
 impl ScopedPrivileges {
     pub(crate) fn enable(names: &[&str]) -> Result<Self, GuestMsiExecutionError> {
         let mut raw = HANDLE::default();
         // SAFETY: current-process pseudo handle is accepted and output is valid.
-        unsafe { OpenProcessToken(windows::Win32::System::Threading::GetCurrentProcess(), windows::Win32::Security::TOKEN_ACCESS_MASK(TOKEN_QUERY_ACCESS | TOKEN_ADJUST_PRIVILEGES), &mut raw) }
-            .map_err(|e| GuestMsiExecutionError::Process(format!("OpenProcessToken privileges failed: {e}")))?;
+        unsafe {
+            OpenProcessToken(
+                windows::Win32::System::Threading::GetCurrentProcess(),
+                windows::Win32::Security::TOKEN_ACCESS_MASK(
+                    TOKEN_QUERY_ACCESS | TOKEN_ADJUST_PRIVILEGES,
+                ),
+                &mut raw,
+            )
+        }
+        .map_err(|e| {
+            GuestMsiExecutionError::Process(format!("OpenProcessToken privileges failed: {e}"))
+        })?;
         let token = unsafe { OwnedHandle::from_raw_handle(raw.0) };
-        let mut previous = Vec::with_capacity(names.len());
+        let mut guard = Self {
+            token,
+            previous: Vec::with_capacity(names.len()),
+        };
         for name in names {
             let mut luid = Luid { low: 0, high: 0 };
             let mut name_w = wide(name)?;
-            if unsafe { LookupPrivilegeValueW(PWSTR::null(), PWSTR(name_w.as_mut_ptr()), &mut luid) } == 0 { return Err(last_error("LookupPrivilegeValueW")); }
-            let requested = TokenPrivilegesOne { count: 1, privilege: LuidAndAttributes { luid, attributes: SE_PRIVILEGE_ENABLED } };
-            let mut prior = TokenPrivilegesOne { count: 0, privilege: LuidAndAttributes { luid, attributes: 0 } };
+            if unsafe {
+                LookupPrivilegeValueW(PWSTR::null(), PWSTR(name_w.as_mut_ptr()), &mut luid)
+            } == 0
+            {
+                return Err(last_error("LookupPrivilegeValueW"));
+            }
+            let requested = TokenPrivilegesOne {
+                count: 1,
+                privilege: LuidAndAttributes {
+                    luid,
+                    attributes: SE_PRIVILEGE_ENABLED,
+                },
+            };
+            let mut prior = TokenPrivilegesOne {
+                count: 0,
+                privilege: LuidAndAttributes {
+                    luid,
+                    attributes: 0,
+                },
+            };
             let mut returned = 0;
             // AdjustTokenPrivileges may succeed while reporting partial assignment
             // through last-error, so clear stale state immediately before it.
             unsafe { SetLastError(windows::Win32::Foundation::WIN32_ERROR(0)) };
-            if unsafe { AdjustTokenPrivileges(raw_handle(&token), 0, &requested, size_of::<TokenPrivilegesOne>() as u32, &mut prior, &mut returned) } == 0 || unsafe { GetLastError() }.0 == ERROR_NOT_ALL_ASSIGNED { return Err(last_error("AdjustTokenPrivileges enable")); }
-            if returned != size_of::<TokenPrivilegesOne>() as u32 || prior.count != 1 { return Err(GuestMsiExecutionError::Process("AdjustTokenPrivileges returned malformed prior state".to_owned())); }
-            previous.push(prior);
+            if unsafe {
+                AdjustTokenPrivileges(
+                    raw_handle(&guard.token),
+                    0,
+                    &requested,
+                    size_of::<TokenPrivilegesOne>() as u32,
+                    &mut prior,
+                    &mut returned,
+                )
+            } == 0
+                || unsafe { GetLastError() }.0 == ERROR_NOT_ALL_ASSIGNED
+            {
+                return Err(last_error("AdjustTokenPrivileges enable"));
+            }
+            // Already-enabled privileges have no changed entry to restore.
+            if prior.count == 0
+                && returned >= 4
+                && returned <= size_of::<TokenPrivilegesOne>() as u32
+            {
+                continue;
+            }
+            if returned != size_of::<TokenPrivilegesOne>() as u32
+                || prior.count != 1
+                || prior.privilege.luid.low != luid.low
+                || prior.privilege.luid.high != luid.high
+            {
+                // A change may have occurred but its restoration authority is invalid.
+                std::process::abort();
+            }
+            guard.previous.push(prior);
         }
-        Ok(Self { token, previous })
+        Ok(guard)
     }
 }
 
@@ -336,19 +414,32 @@ impl Drop for ScopedPrivileges {
         for prior in self.previous.iter().rev() {
             // SAFETY: each value is the exact prior state returned for this token.
             unsafe { SetLastError(windows::Win32::Foundation::WIN32_ERROR(0)) };
-            let ok = unsafe { AdjustTokenPrivileges(raw_handle(&self.token), 0, prior, 0, std::ptr::null_mut(), std::ptr::null_mut()) } != 0;
-            if !ok || unsafe { GetLastError() }.0 == ERROR_NOT_ALL_ASSIGNED { std::process::abort(); }
+            let ok = unsafe {
+                AdjustTokenPrivileges(
+                    raw_handle(&self.token),
+                    0,
+                    prior,
+                    0,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                )
+            } != 0;
+            if !ok || unsafe { GetLastError() }.0 == ERROR_NOT_ALL_ASSIGNED {
+                std::process::abort();
+            }
         }
     }
 }
 
-struct ImpersonationGuard { active: bool }
+struct ImpersonationGuard {
+    active: bool,
+}
 
 impl ImpersonationGuard {
     fn revert(mut self) -> Result<(), GuestMsiExecutionError> {
         // SAFETY: this guard is constructed only after ImpersonateLoggedOnUser succeeds.
         if unsafe { RevertToSelf() } == 0 {
-            return Err(last_error("RevertToSelf"));
+            std::process::abort();
         }
         self.active = false;
         Ok(())
@@ -358,8 +449,10 @@ impl ImpersonationGuard {
 impl Drop for ImpersonationGuard {
     fn drop(&mut self) {
         if self.active {
-            // SAFETY: best-effort unwinding cleanup for this thread's exact impersonation.
-            let _ = unsafe { RevertToSelf() };
+            // Never publish or unwind into other guest operations with uncertain identity.
+            if unsafe { RevertToSelf() } == 0 {
+                std::process::abort();
+            }
         }
     }
 }
@@ -670,7 +763,7 @@ fn query_variable(
 }
 
 fn cast<'a, T>(buffer: &'a [usize], operation: &str) -> Result<&'a T, GuestMsiExecutionError> {
-    if buffer.len() * size_of::<usize>() < size_of::<T>() {
+    if std::mem::size_of_val(buffer) < size_of::<T>() {
         return Err(GuestMsiExecutionError::Process(format!(
             "{operation} returned a short token buffer"
         )));
@@ -680,7 +773,7 @@ fn cast<'a, T>(buffer: &'a [usize], operation: &str) -> Result<&'a T, GuestMsiEx
 }
 
 fn group_count(buffer: &[usize]) -> Result<usize, GuestMsiExecutionError> {
-    if buffer.len() * size_of::<usize>() < size_of::<u32>() {
+    if std::mem::size_of_val(buffer) < size_of::<u32>() {
         return Err(GuestMsiExecutionError::Process(
             "TokenGroups returned no count".to_owned(),
         ));
@@ -705,7 +798,7 @@ fn groups_list(
                 })?,
         )
         .ok_or_else(|| GuestMsiExecutionError::Process("TokenGroups size overflow".to_owned()))?;
-    if buffer.len() * size_of::<usize>() < needed {
+    if std::mem::size_of_val(buffer) < needed {
         return Err(GuestMsiExecutionError::Process(
             "TokenGroups count exceeded returned buffer".to_owned(),
         ));
@@ -772,7 +865,6 @@ fn last_error(operation: &str) -> GuestMsiExecutionError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
     fn native_token_queries_accept_successful_fixed_and_variable_results() {
@@ -817,22 +909,5 @@ mod tests {
         assert!(parse_environment_paths(&duplicate).is_err());
         let missing: Vec<u16> = "APPDATA=C:\\Roaming\0\0".encode_utf16().collect();
         assert!(parse_environment_paths(&missing).is_err());
-    }
-
-    #[test]
-    fn standard_user_paths_are_the_reviewed_fixed_profile() {
-        assert_eq!(STANDARD_USER_PROFILE_PATH, r"C:\Users\AiwStandardUser");
-        assert_eq!(
-            STANDARD_USER_ROAMING_APP_DATA,
-            format!(r"{STANDARD_USER_PROFILE_PATH}\AppData\Roaming")
-        );
-        assert_eq!(
-            STANDARD_USER_LOCAL_APP_DATA,
-            format!(r"{STANDARD_USER_PROFILE_PATH}\AppData\Local")
-        );
-        assert_eq!(
-            PathBuf::from(STANDARD_USER_DOCUMENT_ROOT).join("Scenario\\document.txt"),
-            PathBuf::from(r"C:\Users\AiwStandardUser\AppData\Local\AIW\Scenario\document.txt")
-        );
     }
 }
