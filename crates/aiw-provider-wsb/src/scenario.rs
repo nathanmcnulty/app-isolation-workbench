@@ -17,9 +17,9 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 pub const COMPILED_MSI_SCENARIO_SCHEMA_VERSION: &str =
-    "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha4";
+    "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha5";
 pub const NOTEPAD_PLUS_PLUS_MSI_PROFILE: &str =
-    "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha4";
+    "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha5";
 
 const NOTEPAD_PLUS_PLUS_ENTRYPOINT_ID: &str = "notepad-plus-plus";
 const NOTEPAD_PLUS_PLUS_ENTRYPOINT_PATH: &str = "notepad++.exe";
@@ -89,15 +89,23 @@ impl CompiledMsiScenario {
         let legacy_exercise = self.schema_version
             == "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha3"
             && self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha3";
+        let standard_user_legacy = self.schema_version
+            == "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha4"
+            && self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha4";
         let legacy = self.schema_version
             == "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha1"
             && self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha1";
-        if !(current || legacy_exercise || token_profile || legacy)
+        if !(current || standard_user_legacy || legacy_exercise || token_profile || legacy)
             || (current
                 && self.document_exercise.as_ref() != Some(&FixedDocumentExercise::standard_user()))
             || (legacy_exercise
                 && self.document_exercise.as_ref() != Some(&FixedDocumentExercise::legacy()))
-            || (!current && !legacy_exercise && self.document_exercise.is_some())
+            || ((current || standard_user_legacy)
+                && self.document_exercise.as_ref() != Some(&FixedDocumentExercise::standard_user()))
+            || (!current
+                && !standard_user_legacy
+                && !legacy_exercise
+                && self.document_exercise.is_some())
             || !valid_id(&self.scenario_id)
             || !lower_hex_sha256(&self.application_sha256)
             || self.installer_path != STAGED_INSTALLER_PATH
@@ -126,15 +134,22 @@ impl CompiledMsiScenario {
     pub fn requires_application_token(&self) -> bool {
         self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha3"
+            || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha4"
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha2"
     }
 
     pub fn requires_application_exercise(&self) -> bool {
         self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha3"
+            || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha4"
     }
 
     pub fn requires_standard_user(&self) -> bool {
+        self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
+            || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha4"
+    }
+
+    pub fn requires_registry_observations(&self) -> bool {
         self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
     }
 

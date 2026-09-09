@@ -3,6 +3,7 @@
 mod application_token;
 mod completion;
 mod imported_msi;
+mod registry_observations;
 mod runtime_context;
 mod scenario;
 mod stage_progress;
@@ -35,6 +36,14 @@ pub use imported_msi::{
     IMPORTED_MSI_GUEST_REQUEST_SCHEMA_VERSION, IMPORTED_MSI_SCENARIO_RESULT_SCHEMA_VERSION,
     ImportedMsiGuestRequest, ImportedMsiRequestError, ImportedMsiScenarioResult,
     ImportedMsiScenarioStatus,
+};
+pub use registry_observations::{
+    ApplicationRegistryRoot, ApplicationRegistrySnapshot, IMPORTED_MSI_REGISTRY_EVENT,
+    IMPORTED_MSI_REGISTRY_SCHEMA, IMPORTED_MSI_REGISTRY_SCHEMA_VERSION,
+    ImportedMsiRegistryEvidence, RegistryCaptureIssue, RegistryCaptureIssueReason,
+    RegistryDiffKind, RegistryKeyDiff, RegistryKeyEntry, RegistryScope, RegistrySnapshotDiff,
+    RegistryValueDiff, RegistryValueEntry, RegistryView, diff_registry_snapshots,
+    verify_msi_registry_evidence,
 };
 pub use runtime_context::{
     IMPORTED_MSI_RUNTIME_CONTEXT_EVENT, IMPORTED_MSI_RUNTIME_CONTEXT_SCHEMA,
