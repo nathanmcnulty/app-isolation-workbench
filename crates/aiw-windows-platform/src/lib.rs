@@ -18,6 +18,7 @@ pub use guest_msi::{
 #[cfg(windows)]
 pub use guest_filesystem::snapshot_fixed_notepad_files;
 
+
 #[cfg(windows)]
 pub(crate) use guest_document::FixedGuestDocument;
 
@@ -151,6 +152,9 @@ mod guest_document;
 
 #[cfg(windows)]
 mod guest_filesystem;
+
+#[cfg(windows)]
+mod guest_standard_user;
 
 #[cfg(windows)]
 mod workspace;

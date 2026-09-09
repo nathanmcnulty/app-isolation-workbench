@@ -194,6 +194,30 @@ pub fn snapshot_fixed_notepad_files() -> ApplicationFilesystemSnapshot {
     snapshot_roots(&roots, FIXED_LIMITS)
 }
 
+/// Captures the fixed installation root and the two profile roots selected by
+/// the standard-user launch boundary.  Paths are native-owned and only used
+/// for the reviewed Notepad++ profile.
+pub(crate) fn snapshot_fixed_notepad_files_for_user(
+    roaming_app_data: &Path,
+    local_app_data: &Path,
+) -> ApplicationFilesystemSnapshot {
+    let roots = [
+        (
+            ApplicationFileRoot::Installation,
+            Ok(PathBuf::from(INSTALLATION_ROOT)),
+        ),
+        (
+            ApplicationFileRoot::RoamingAppData,
+            Ok(roaming_app_data.join(APPLICATION_DIRECTORY)),
+        ),
+        (
+            ApplicationFileRoot::LocalAppData,
+            Ok(local_app_data.join(APPLICATION_DIRECTORY)),
+        ),
+    ];
+    snapshot_roots(&roots, FIXED_LIMITS)
+}
+
 fn application_data_root(variable: &str) -> Result<PathBuf, ()> {
     let value = std::env::var_os(variable).ok_or(())?;
     let path = PathBuf::from(value);

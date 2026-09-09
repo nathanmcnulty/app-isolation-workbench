@@ -3,6 +3,7 @@
 //! process-launch API.
 
 use std::ffi::OsStr;
+use std::ffi::c_void;
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsHandle as _, FromRawHandle, OwnedHandle};
 use std::path::Path;
@@ -11,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use aiw_provider_wsb::{
     CompiledMsiScenario, DOCUMENT_EXERCISE_PATH, DOCUMENT_EXPECTED_TEXT, DOCUMENT_INITIAL_TEXT,
-    FixedDocumentExercise, FunctionalExercise,
+    FixedDocumentExercise, FunctionalExercise, StandardUserRuntimeContext,
 };
 use aiw_token::{TokenEvidence, collect_process_token};
 use sha2::{Digest, Sha256};
@@ -37,6 +38,24 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{BOOL, PCWSTR, PWSTR};
 
+use crate::guest_standard_user::StandardUserSession;
+
+#[link(name = "Advapi32")]
+unsafe extern "system" {
+    fn CreateProcessWithTokenW(
+        token: HANDLE,
+        logon_flags: u32,
+        application_name: PCWSTR,
+        command_line: PWSTR,
+        creation_flags: u32,
+        environment: *const c_void,
+        current_directory: PCWSTR,
+        startup_info: *const STARTUPINFOW,
+        process_information: *mut PROCESS_INFORMATION,
+    ) -> BOOL;
+}
+
+
 const MSIEXEC_PATH: &str = r"C:\Windows\System32\msiexec.exe";
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
 const EDITOR_LOOKUP_TIMEOUT: Duration = Duration::from_secs(15);
@@ -56,6 +75,7 @@ pub struct GuestMsiExecutionObservation {
     pub application_token: TokenEvidence,
     pub functional_exercise: Option<FunctionalExercise>,
     pub filesystem_observations: Option<GuestMsiFilesystemObservation>,
+    pub standard_user_context: Option<StandardUserRuntimeContext>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -209,16 +229,21 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
     scenario: &CompiledMsiScenario,
     stages: &mut StageRecorder,
 ) -> Result<GuestMsiExecutionObservation, GuestMsiExecutionError> {
-    let before_install = scenario
-        .requires_application_exercise()
-        .then(|| {
-            // Capture issues are represented in the snapshot and do not make the
-            // bounded capture attempt itself fail.
-            stages.run(GuestMsiStage::BeforeInstallCapture, || {
-                Ok(crate::snapshot_fixed_notepad_files())
-            })
-        })
-        .transpose()?;
+    let (standard_user, before_install) = if scenario.requires_standard_user() {
+        stages.run(GuestMsiStage::BeforeInstallCapture, || {
+            let standard_user = StandardUserSession::establish()?;
+            // Capture issues are observation data, not failed capture attempts.
+            let snapshot = crate::guest_filesystem::snapshot_fixed_notepad_files_for_user(
+                standard_user.roaming_app_data(),
+                standard_user.local_app_data(),
+            );
+            Ok((Some(standard_user), Some(snapshot)))
+        })?
+    } else {
+        (None, scenario.requires_application_exercise().then(|| {
+            stages.run(GuestMsiStage::BeforeInstallCapture, || Ok(crate::snapshot_fixed_notepad_files()))
+        }).transpose()?)
+    };
     let install_exit_code = stages.run(GuestMsiStage::Install, || {
         let installer = GuestProcess::start(MSIEXEC_PATH, &scenario.install_arguments)?;
         let install_exit_code = installer.wait_for_exit(Duration::from_secs(u64::from(
@@ -242,23 +267,28 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
         .requires_application_exercise()
         .then(|| {
             stages.run(GuestMsiStage::AfterInstallCapture, || {
-                Ok(crate::snapshot_fixed_notepad_files())
+                Ok(if let Some(standard_user) = &standard_user {
+                    crate::guest_filesystem::snapshot_fixed_notepad_files_for_user(
+                        standard_user.roaming_app_data(), standard_user.local_app_data())
+                } else { crate::snapshot_fixed_notepad_files() })
             })
         })
         .transpose()?;
     let document_exercise = if scenario.requires_application_exercise() {
         Some(stages.run(GuestMsiStage::PrepareDocument, || {
-            prepare_fixed_document_exercise(scenario)
+            prepare_fixed_document_exercise(scenario, standard_user.as_ref())
         })?)
     } else {
         None
     };
     let launch_arguments = document_exercise
         .as_ref()
-        .map(|_| vec![DOCUMENT_EXERCISE_PATH.to_owned()])
+        .map(|plan| vec![plan.document_path.clone()])
         .unwrap_or_default();
     let application = stages.run(GuestMsiStage::Launch, || {
-        GuestProcess::start(&scenario.launch_path, &launch_arguments)
+        if let Some(standard_user) = &standard_user {
+            GuestProcess::start_standard_user(&scenario.launch_path, &launch_arguments, standard_user)
+        } else { GuestProcess::start(&scenario.launch_path, &launch_arguments) }
     })?;
     let launch_process_id = application.process_id;
     let pre_close = (|| {
@@ -350,7 +380,10 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
                 before_install,
                 after_install,
                 after_exercise: stages.run(GuestMsiStage::AfterExerciseCapture, || {
-                    Ok(crate::snapshot_fixed_notepad_files())
+                    Ok(if let Some(standard_user) = &standard_user {
+                        crate::guest_filesystem::snapshot_fixed_notepad_files_for_user(
+                            standard_user.roaming_app_data(), standard_user.local_app_data())
+                    } else { crate::snapshot_fixed_notepad_files() })
                 })?,
             })
         } else {
@@ -363,28 +396,43 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
         application_token,
         functional_exercise,
         filesystem_observations,
+        standard_user_context: standard_user.as_ref().map(|value| value.context().clone()),
     })
 }
 
 struct ExercisePlan {
     expected_sha256: String,
     document: crate::FixedGuestDocument,
+    document_path: String,
 }
 
 fn prepare_fixed_document_exercise(
     scenario: &CompiledMsiScenario,
+    standard_user: Option<&StandardUserSession>,
 ) -> Result<ExercisePlan, GuestMsiExecutionError> {
     let exercise = scenario.document_exercise.as_ref().ok_or_else(|| {
         GuestMsiExecutionError::Scenario(
             "current fixed scenario did not bind its document exercise".to_owned(),
         )
     })?;
-    let expected_sha256 = validate_fixed_document_contract(exercise)?;
-
-    let document = crate::FixedGuestDocument::prepare().map_err(GuestMsiExecutionError::Process)?;
+    let expected_path = if scenario.requires_standard_user() {
+        aiw_provider_wsb::STANDARD_USER_DOCUMENT_EXERCISE_PATH
+    } else {
+        DOCUMENT_EXERCISE_PATH
+    };
+    let expected_sha256 = validate_fixed_document_contract(exercise, expected_path)?;
+    let document = if let Some(standard_user) = standard_user {
+        standard_user.impersonate(|| {
+            crate::FixedGuestDocument::prepare_at(standard_user.document_root())
+                .map_err(GuestMsiExecutionError::Process)
+        })?
+    } else {
+        crate::FixedGuestDocument::prepare().map_err(GuestMsiExecutionError::Process)?
+    };
     Ok(ExercisePlan {
         expected_sha256,
         document,
+        document_path: expected_path.to_owned(),
     })
 }
 
@@ -726,10 +774,11 @@ fn sha256(bytes: &[u8]) -> String {
 
 fn validate_fixed_document_contract(
     exercise: &FixedDocumentExercise,
+    expected_path: &str,
 ) -> Result<String, GuestMsiExecutionError> {
     let initial_sha256 = sha256(DOCUMENT_INITIAL_TEXT.as_bytes());
     let expected_sha256 = sha256(DOCUMENT_EXPECTED_TEXT.as_bytes());
-    if exercise.document_path != DOCUMENT_EXERCISE_PATH
+    if exercise.document_path != expected_path
         || exercise.initial_sha256 != initial_sha256
         || exercise.expected_sha256 != expected_sha256
     {
@@ -761,6 +810,54 @@ struct GuestProcess {
 }
 
 impl GuestProcess {
+    fn start_standard_user(
+        path: &str,
+        arguments: &[String],
+        standard_user: &StandardUserSession,
+    ) -> Result<Self, GuestMsiExecutionError> {
+        let executable = Path::new(path);
+        let parent = executable.parent().ok_or_else(|| GuestMsiExecutionError::Process("fixed executable does not have a parent".to_owned()))?;
+        let command_line = aiw_windows_command_line::join_arguments(
+            std::iter::once(path).chain(arguments.iter().map(String::as_str)),
+        );
+        let executable_wide = wide(path)?;
+        let parent_wide = wide_os(parent.as_os_str())?;
+        let mut command_line_wide = wide(&command_line)?;
+        let job = ScenarioJob::create()?;
+        let startup = STARTUPINFOW { cb: std::mem::size_of::<STARTUPINFOW>() as u32, ..Default::default() };
+        let mut information = PROCESS_INFORMATION::default();
+        // SAFETY: the token, explicit user environment, fixed executable and
+        // writable command line remain valid for this call.  A null desktop
+        // requests the inherited guest desktop, whose target-user ACE is added
+        // by CreateProcessWithTokenW.
+        if unsafe { CreateProcessWithTokenW(
+            standard_user.token(), 0, PCWSTR(executable_wide.as_ptr()),
+            PWSTR(command_line_wide.as_mut_ptr()),
+            (CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT).0,
+            standard_user.environment(), PCWSTR(parent_wide.as_ptr()), &startup, &mut information,
+        ) }.0 == 0 {
+            return Err(GuestMsiExecutionError::Process(format!(
+                "CreateProcessWithTokenW failed: {}", windows::core::Error::from_thread()
+            )));
+        }
+        let process = unsafe { OwnedHandle::from_raw_handle(information.hProcess.0) };
+        let thread = unsafe { OwnedHandle::from_raw_handle(information.hThread.0) };
+        if let Err(error) = standard_user.validate_suspended_child(process.as_handle()) {
+            let cleanup = terminate_unassigned_process(&process);
+            return Err(GuestMsiExecutionError::Process(format!("standard-user child token validation failed: {error}; cleanup={cleanup:?}")));
+        }
+        if let Err(error) = unsafe { AssignProcessToJobObject(job.raw(), raw_handle(&process)) } {
+            let cleanup = terminate_unassigned_process(&process);
+            return Err(GuestMsiExecutionError::Process(format!("AssignProcessToJobObject failed: {error}; cleanup={cleanup:?}")));
+        }
+        if unsafe { ResumeThread(raw_handle(&thread)) } == u32::MAX {
+            let cleanup = job.terminate_and_verify_empty();
+            return Err(GuestMsiExecutionError::Process(format!("ResumeThread failed; cleanup={cleanup:?}")));
+        }
+        drop(thread);
+        Ok(Self { job, process, process_id: information.dwProcessId })
+    }
+
     fn start(path: &str, arguments: &[String]) -> Result<Self, GuestMsiExecutionError> {
         let executable = Path::new(path);
         let parent = executable.parent().ok_or_else(|| {
@@ -1104,13 +1201,13 @@ mod tests {
     fn fixed_document_contract_accepts_only_the_reviewed_values() {
         let exercise = fixed_exercise();
         assert_eq!(
-            validate_fixed_document_contract(&exercise).expect("fixed exercise must validate"),
+            validate_fixed_document_contract(&exercise, DOCUMENT_EXERCISE_PATH).expect("fixed exercise must validate"),
             sha256(DOCUMENT_EXPECTED_TEXT.as_bytes())
         );
 
         let mut altered = exercise;
         altered.document_path = r"C:\AIW\Scenario\other.txt".to_owned();
-        assert!(validate_fixed_document_contract(&altered).is_err());
+        assert!(validate_fixed_document_contract(&altered, DOCUMENT_EXERCISE_PATH).is_err());
     }
 
     #[test]

@@ -99,6 +99,13 @@ impl FixedGuestDocument {
         Self::prepare_with_ancestors(held_directory_chain(Path::new(FIXED_ROOT))?)
     }
 
+    /// Prepares the same fixed document contract below a native-selected
+    /// profile root.  This remains crate-private so callers cannot turn the
+    /// document primitive into a general path writer.
+    pub(crate) fn prepare_at(root: &Path) -> Result<Self, String> {
+        Self::prepare_with_ancestors(held_directory_chain(root)?)
+    }
+
     pub(crate) fn observe_expected(&self) -> Result<Option<String>, String> {
         self.revalidate()?;
         let document = match open_relative_file(&self.scenario, DOCUMENT_LEAF, FILE_READ_DATA.0)? {
