@@ -678,7 +678,18 @@ mod tests {
         let request = v5_request();
         let result = ImportedMsiScenarioResult::succeeded(&request, 0, 42, 0).unwrap();
         let context = runtime(&request, &result);
-        let payload = serde_json::to_value(evidence(&request, &result, &context)).unwrap();
+        let payload = serde_json::to_value(ImportedMsiRegistryEvidence {
+            schema_version: IMPORTED_MSI_REGISTRY_SCHEMA_VERSION.into(),
+            run_id: request.run_id.clone(),
+            sandbox_id: request.sandbox_id.clone(),
+            request_sha256: request.request_sha256.clone(),
+            scenario_sha256: request.scenario_sha256.clone(),
+            user_sid: context.context.user_sid.clone(),
+            before_install: snapshot(),
+            after_install: snapshot(),
+            after_exercise: snapshot(),
+        })
+        .unwrap();
         let (bytes, root) = log_bytes(vec![("aiw-guest-agent", payload.clone())]);
         assert!(
             verify_msi_registry_evidence(&bytes, &root, &request, &result, Some(&context))
