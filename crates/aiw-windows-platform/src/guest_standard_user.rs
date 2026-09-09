@@ -226,13 +226,10 @@ impl StandardUserSession {
         }
         let guard = ImpersonationGuard { active: true };
         let result = operation();
-        if let Err(revert) = guard.revert() {
-            return Err(match result {
-                Ok(_) => revert,
-                Err(error) => GuestMsiExecutionError::Process(format!(
-                    "{error}; RevertToSelf also failed: {revert}"
-                )),
-            });
+        if guard.revert().is_err() {
+            // A normal error receipt would be unsafe while this thread may
+            // still impersonate the target user.
+            std::process::abort();
         }
         result
     }
@@ -260,11 +257,17 @@ impl StandardUserSession {
                 "suspended child SID differed from the created standard user".to_owned(),
             ));
         }
-        let child_session: u32 = query_fixed(
-            raw_handle(&child_token),
-            windows::Win32::Security::TokenSessionId,
-            "TokenSessionId",
-        )?;
+        let evidence = aiw_token::collect_process_token(process).map_err(|error| {
+            GuestMsiExecutionError::Process(format!(
+                "collect suspended standard-user child token failed: {error}"
+            ))
+        })?;
+        self.context.validate_token(&evidence).map_err(|error| {
+            GuestMsiExecutionError::Process(format!(
+                "suspended standard-user child token violated the published runtime contract: {error}"
+            ))
+        })?;
+        let child_session: u32 = query_fixed(raw_handle(&child_token), windows::Win32::Security::TokenSessionId, "TokenSessionId")?;
         let mut current_session = 0;
         // SAFETY: both process ids are queried by the documented API.
         if unsafe { ProcessIdToSessionId(GetCurrentProcessId(), &mut current_session) } == 0
