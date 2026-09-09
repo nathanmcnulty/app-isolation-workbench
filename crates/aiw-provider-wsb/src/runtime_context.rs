@@ -175,6 +175,104 @@ fn valid_account_sid(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{CompiledMsiScenario, FixedDocumentExercise};
+    use aiw_evidence::{EvidenceEvent, EvidenceLog};
+    use aiw_token::{IntegrityEvidence, TOKEN_EVIDENCE_SCHEMA_VERSION};
+    use sha2::{Digest, Sha256};
+
+    fn request() -> ImportedMsiGuestRequest {
+        let scenario = CompiledMsiScenario {
+            schema_version: "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha4".into(),
+            profile: "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha4".into(),
+            scenario_id: "first-run".into(),
+            application_sha256: "a".repeat(64),
+            installer_path: r"C:\AIW\Tools\application.msi".into(),
+            install_arguments: vec![
+                "/i".into(),
+                r"C:\AIW\Tools\application.msi".into(),
+                "/qn".into(),
+                "/norestart".into(),
+            ],
+            install_timeout_seconds: 120,
+            launch_path: r"C:\Program Files\Notepad++\notepad++.exe".into(),
+            launch_arguments: vec![],
+            process_image: "notepad++.exe".into(),
+            process_wait_timeout_seconds: 30,
+            graceful_close_timeout_seconds: 15,
+            expected_exit_code: 0,
+            document_exercise: Some(FixedDocumentExercise {
+                document_path: crate::STANDARD_USER_DOCUMENT_EXERCISE_PATH.into(),
+                initial_sha256: hex::encode(Sha256::digest(
+                    crate::DOCUMENT_INITIAL_TEXT.as_bytes(),
+                )),
+                expected_sha256: hex::encode(Sha256::digest(
+                    crate::DOCUMENT_EXPECTED_TEXT.as_bytes(),
+                )),
+            }),
+        };
+        ImportedMsiGuestRequest::new(
+            "run-one",
+            "11111111-1111-1111-1111-111111111111",
+            "b".repeat(64),
+            "c".repeat(64),
+            scenario,
+            "a".repeat(64),
+            1024,
+            "d".repeat(64),
+        )
+        .unwrap()
+    }
+
+    fn token(pid: u32) -> aiw_token::TokenEvidence {
+        aiw_token::TokenEvidence {
+            schema_version: TOKEN_EVIDENCE_SCHEMA_VERSION.into(),
+            process_id: pid,
+            token_type: TokenType::Primary,
+            impersonation_level: None,
+            is_app_container: false,
+            app_container_sid: None,
+            user_sid: "S-1-5-21-1-2-3-4".into(),
+            integrity: IntegrityEvidence {
+                sid: "S-1-16-8192".into(),
+                rid: 8192,
+                level: IntegrityLevel::Medium,
+            },
+            elevation_type: ElevationType::Default,
+            is_elevated: false,
+            capabilities: vec![],
+            restricted_sid_count: 0,
+        }
+    }
+
+    fn context() -> StandardUserRuntimeContext {
+        StandardUserRuntimeContext {
+            user_sid: "S-1-5-21-1-2-3-4".into(),
+            profile_path: STANDARD_USER_PROFILE_PATH.into(),
+            roaming_app_data: r"C:\Users\AiwStandardUser\AppData\Roaming".into(),
+            local_app_data: r"C:\Users\AiwStandardUser\AppData\Local".into(),
+            administrators_enabled: false,
+        }
+    }
+
+    fn log_bytes(payloads: Vec<serde_json::Value>) -> (Vec<u8>, String) {
+        let mut log = EvidenceLog::new();
+        for payload in payloads {
+            log.append(EvidenceEvent {
+                observed_utc: "2026-09-08T00:00:00Z".into(),
+                kind: IMPORTED_MSI_RUNTIME_CONTEXT_EVENT.into(),
+                source: "aiw-guest-agent".into(),
+                payload,
+            })
+            .unwrap();
+        }
+        let root = log.manifest().unwrap().root_hash;
+        let mut bytes = Vec::new();
+        for record in log.records() {
+            serde_json::to_writer(&mut bytes, record).unwrap();
+            bytes.push(b'\n');
+        }
+        (bytes, root)
+    }
 
     #[test]
     fn context_rejects_arbitrary_profile_and_traversal() {
@@ -186,5 +284,46 @@ mod tests {
             administrators_enabled: false,
         };
         assert!(context.validate().is_err());
+    }
+
+    #[test]
+    fn successful_event_round_trip_and_missing_v4_event_are_strict() {
+        let request = request();
+        let result = ImportedMsiScenarioResult::succeeded(&request, 0, 42, 0).unwrap();
+        let token = ImportedMsiApplicationToken::new(&request, &result, token(42)).unwrap();
+        let event = ImportedMsiRuntimeContext::new(&request, &result, &token, context()).unwrap();
+        let (bytes, root) = log_bytes(vec![serde_json::to_value(&event).unwrap()]);
+        assert!(
+            verify_msi_runtime_context(&bytes, &root, &request, &result, Some(&token))
+                .unwrap()
+                .is_some()
+        );
+        let (empty, empty_root) = log_bytes(vec![]);
+        assert!(
+            verify_msi_runtime_context(&empty, &empty_root, &request, &result, Some(&token))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn wrong_identity_token_and_context_values_fail_without_panicking() {
+        let request = request();
+        let result = ImportedMsiScenarioResult::succeeded(&request, 0, 42, 0).unwrap();
+        let token = ImportedMsiApplicationToken::new(&request, &result, token(42)).unwrap();
+        for mutate in [
+            |c: &mut StandardUserRuntimeContext| c.user_sid = "S-1-5-21-1-2-3-5".into(),
+            |c: &mut StandardUserRuntimeContext| c.profile_path = r"C:\Users\Other".into(),
+            |c: &mut StandardUserRuntimeContext| {
+                c.local_app_data = r"C:\Users\AiwStandardUser\AppData\Local\..\Other".into()
+            },
+            |c: &mut StandardUserRuntimeContext| c.administrators_enabled = true,
+        ] {
+            let mut value = context();
+            mutate(&mut value);
+            assert!(ImportedMsiRuntimeContext::new(&request, &result, &token, value).is_err());
+        }
+        let mut high = token.clone();
+        high.token.is_elevated = true;
+        assert!(ImportedMsiRuntimeContext::new(&request, &result, &high, context()).is_err());
     }
 }
