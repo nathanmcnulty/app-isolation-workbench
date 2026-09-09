@@ -136,3 +136,36 @@ The v0alpha4 assessment reports `downloadMetadataPolicy: archiveForSandbox`. Mar
 - Local exports: `%TEMP%\aiw-download-assessment.md` and `.json`.
 
 The previous completed v0alpha3 report still verifies with its original receipt serialization. CLI, probe, runner and native suites passed, including source/ADS writer exclusion, metadata bounds, sidecar replacement/removal/addition/hardlinks, and schema downgrade. The extended-only Windows path regression, workspace Clippy, Rust 1.85 all-target check, formatting and governance checks passed. This slice used one live Sandbox run and no hosted CI.
+
+## Standard-user application benchmark — 2026-09-08
+
+The v0alpha4 scenario passed twice in fresh Windows Sandbox sessions (104.26 and 80.46 seconds). Installation used the elevated guest agent; application launch, open, edit, save and close used `AiwStandardUser`, with a verified non-elevated primary token at Medium integrity (RID 8192), no enabled Administrators membership, and the exact user profile/application-data paths. All nine stages passed, saved-document bytes matched, and exact-session cleanup left no remaining Sandbox sessions.
+
+Both retained JSON/Markdown reports independently verify as v0alpha5. Each records 215 installation additions and seven use-time additions with no incomplete scoped roots. The installation snapshots match across runs. Only `roamingAppData/session.xml` differs in after-use file observations; raw evidence is retained without normalization. Function outcomes and expected/observed document hashes match. These checks do not implement general comparison eligibility or establish an application-level isolation verdict: the report correctly remains `insufficientEvidence`.
+
+- MSI SHA-256: `c29cbe1a9aaef322cc3f316ceeabe8a8071b18441a5e3c3ec348069739e59e80`
+- Static guest SHA-256: `c44ab2a73f2a0a397741530a1bb91f9bc44daf96b2275d5fcad01f18a6ec5de3`
+- Scenario SHA-256: `7d11ba01e584fe6fabad527b034bee7f9b2bde3badd8d8907f0b681e9b98d3b8`
+- Expected/observed saved-document SHA-256: `55666bc7399b14c1cdb77f1e0261e3b6f09e49aec11cda7de1685d73b8a7c9fc`
+
+### Retained run `aiw-msi-live-21684-1788917901188393000`
+
+- Workspace: `%TEMP%\aiw-msi-live-21684-1788917901188393000`
+- Exports: `%TEMP%\aiw-msi-live-21684-1788917901188393000.report.json` and `.report.md`
+- Sandbox ID: `f5e01ff7-8304-bef5-8cfc-e8de5c9a11cf`
+- Request SHA-256: `2cfcfc2453394911969ea5fdb6275c845f62907ec9408f82cfd238e5b7dcd058`
+- Receipt SHA-256: `c6ea8927f5e54e80a81b384e0c11b51d601d3309683df5ab87ee33be45bd4672`
+- Evidence root: `a6ba86a352ee7f341724033fc622a188bbb676e7151148ea2dabc418a14e8934`
+
+### Retained run `aiw-msi-live-19852-1788918038813792000`
+
+- Workspace: `%TEMP%\aiw-msi-live-19852-1788918038813792000`
+- Exports: `%TEMP%\aiw-msi-live-19852-1788918038813792000.report.json` and `.report.md`
+- Sandbox ID: `b9fc33ec-2d88-ee6b-4318-51f08d48c55f`
+- Request SHA-256: `40113c34f5ff74b8fabb6c4d83dd3ebc3e8ac0f96aebf56f209b16c1affe4642`
+- Receipt SHA-256: `4cc63878e8414cb28d4c5334a40afefe9e94de0064818d25e33ffeb602a28f11`
+- Evidence root: `d4646aa38c5e8c60f2fc7ef0f2a842f425e0f377c929a96d7d4e929640d51771`
+
+Six preceding development attempts exposed worker setup/driver issues, not established application incompatibility; all cleaned up their Sandbox sessions. Fixes included creating the fresh user's document root, allowing ordinary profile file sharing while preventing Scenario-directory renames, and checking the physical process session rather than trusting only TokenSessionId. The final launcher uses one-use credentials with CreateProcessWithLogonW and bounded guest-only window-station/desktop grants. The child remains suspended until identity/session validation and job assignment complete. Account, profile and GUI grants live only for the disposable worker's lifetime.
+
+The historical elevated v0alpha3 run still exports its original v0alpha4 report unchanged. Focused tests, independent native review, workspace Clippy, Rust 1.85 all-target checking, formatting and governance validation passed. All installer/application execution remained inside Windows Sandbox. No hosted CI runs were scheduled. Registry/dependency evidence, a second application/control fixture, comparison eligibility and reusable isolated launch remain future work.

@@ -1,6 +1,6 @@
 # Roadmap
 
-Revised 2026-09-07 against the implemented runner and current Microsoft documentation. This replaces the former W0-W5/S0-S4 ordering; those labels remain historical references, not release dependencies.
+Revised 2026-09-08 against the implemented runner and current Microsoft documentation. This replaces the former W0-W5/S0-S4 ordering; those labels remain historical references, not release dependencies.
 
 The goal is a free community tool that answers **which tested application functions work under which measured isolation configuration**, helps an administrator adapt the application, and produces a launch profile or package that passes the same tests. Workbench evolves into Studio when authoring is useful; this is one product.
 
@@ -14,7 +14,7 @@ Deliver **Assess -> Adapt -> Package -> Validate** for a narrow application clas
 - Receipt-bound passed/failed/not-reached stages for completed and caught-failure scenarios; JSON/Markdown retained reports that reject drift and preserve missing evidence.
 - Portable comparison/evidence primitives and an MXC planning adapter. These are not a live baseline/candidate comparison or an executable MXC provider.
 
-The [fixture record](FIXTURE-NOTEPAD-PLUS-PLUS-8.9.8.md) records dated live proof. The current workload runs elevated inside Windows Sandbox: useful containment-lab evidence, but not a standard-user desktop compatibility baseline. Registry/dependency capture, reusable isolated launch, and package generation remain unimplemented. Public workspace discard is unfinished; the private fixed-tree disposal proof is not general intake/MSI workspace cleanup.
+The [fixture record](FIXTURE-NOTEPAD-PLUS-PLUS-8.9.8.md) records dated live proof. The current v4 workload installs with the elevated guest agent, then exercises the application as a verified standard user inside Windows Sandbox. Two clean repetitions passed the fixed document workflow. Historical elevated configurations remain separately readable. This is an in-worker function baseline, not a general endpoint compatibility claim. Registry/dependency capture, reusable isolated launch, and package generation remain unimplemented. Public workspace discard is unfinished; the private fixed-tree disposal proof is not general intake/MSI workspace cleanup.
 
 ## Changes in direction
 
@@ -36,7 +36,7 @@ The corpus exposed an intake requirement now addressed by [explicit download met
 
 **Deliverable:** a repeatable function report with an ordinary in-worker baseline, packaging-relevant state observations, and explicit comparison eligibility.
 
-1. Separate privileged installation from standard-user application execution inside the disposable worker. Record the actual workload identity/token. Bind app-data paths and user-registry capture to that account, not implicitly to the collector's account. Preserve the elevated fixture as its own configuration.
+1. **Implemented and live-tested:** separate privileged installation from standard-user application execution, record actual identity/token/profile, and bind application-data file capture to that account. Preserve the elevated fixture as its own configuration. User-registry capture remains part of step 2; comparison eligibility is still pending.
 2. Add bounded, profile-selected registry snapshots and static dependency hints alongside file observations. Record key/value identity, type, size/hash, registry view, phase, and incompleteness; raw values require an explicit capture policy. Distinguish installed state, observed runtime use, static references, and unresolved dependencies. A changed file/key or PE import alone does not prove a required dependency.
 3. Add a second real application profile and a project-owned control fixture with expected success, denial, child-process, and failure cases. Use clean repetitions to identify unstable state; retain raw evidence and version normalization rules. Never hide a difference merely to make comparisons pass.
 4. Report interrupted/pre-start/recovery states observationally, without repairing state or inferring uncommitted guest progress. Add a bounded local retained-run index when needed for summaries; it is rebuildable and never execution authority.
@@ -50,6 +50,8 @@ General tracing, every installer type, printing, networking, updates, and reboot
 **Deliverable:** the same approved workflow under an ordinary baseline and one application-level isolation candidate, with an explainable function matrix.
 
 Start with a bounded classic AppContainer feasibility implementation using documented profile/process APIs and the existing native authority layer. Prove the control fixture, then an appropriate real application. Unpackaged AppContainer launch is documented, so an MSIX converter need not precede this experiment. This is a proposed implementation path, not a claim that Notepad++ will work unchanged. See [Launch an AppContainer](https://learn.microsoft.com/en-us/windows/win32/secauthz/implementing-an-appcontainer) and [MSIX AppContainer apps](https://learn.microsoft.com/en-us/windows/msix/msix-container).
+
+Also evaluate Microsoft's newly documented [experimental process-in-sandbox APIs](https://learn.microsoft.com/en-us/windows/win32/secauthz/createprocessinsandbox) as a bounded alternative implementation. They offer a declarative AppContainer specification and an alternate-user entry point, but currently have an experimental ABI, no public header/schema source on the documentation page, and no precise minimum Windows build. First verify exports, specification availability and a project-owned control fixture inside a disposable worker. Keep the documented classic AppContainer path available; the presence of `processmodel.dll` alone is not a supported-provider result.
 
 End the feasibility slice with a recorded supported/unsupported result for the exact fixture and environment. If a real application cannot run, preserve the control-fixture evidence and identify whether the limitation is in the adapter, driver, or still unknown. Choose the next application/candidate explicitly; do not leave the whole roadmap waiting on one AppContainer experiment or silently fall back to a weaker mode.
 
