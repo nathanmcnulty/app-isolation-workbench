@@ -93,6 +93,7 @@ unsafe extern "system" {
     fn UnloadUserProfile(token: HANDLE, profile: HANDLE) -> i32;
     fn CreateEnvironmentBlock(environment: *mut *mut c_void, token: HANDLE, inherit: i32) -> i32;
     fn DestroyEnvironmentBlock(environment: *mut c_void) -> i32;
+    fn GetUserProfileDirectoryW(token: HANDLE, profile_dir: PWSTR, size: *mut u32) -> i32;
 }
 #[link(name = "Kernel32")]
 unsafe extern "system" {
@@ -163,15 +164,29 @@ impl StandardUserSession {
             let _ = unsafe { UnloadUserProfile(raw_handle(&token), profile_info.profile) };
             return Err(last_error("CreateEnvironmentBlock"));
         }
+        let profile_path = user_profile_directory(raw_handle(&token))?;
+        let (environment_profile, roaming_app_data, local_app_data) = environment_paths(environment)?;
+        if profile_path != STANDARD_USER_PROFILE_PATH
+            || environment_profile != STANDARD_USER_PROFILE_PATH
+            || roaming_app_data != STANDARD_USER_ROAMING_APP_DATA
+            || local_app_data != STANDARD_USER_LOCAL_APP_DATA
+        {
+            // SAFETY: both values came from the successful calls immediately above.
+            let _ = unsafe { DestroyEnvironmentBlock(environment) };
+            let _ = unsafe { UnloadUserProfile(raw_handle(&token), profile_info.profile) };
+            return Err(GuestMsiExecutionError::Process(
+                "standard-user profile or environment did not match the fixed runtime paths".to_owned(),
+            ));
+        }
         Ok(Self {
             token,
             profile: profile_info.profile,
             environment,
             context: StandardUserRuntimeContext {
                 user_sid,
-                profile_path: STANDARD_USER_PROFILE_PATH.to_owned(),
-                roaming_app_data: STANDARD_USER_ROAMING_APP_DATA.to_owned(),
-                local_app_data: STANDARD_USER_LOCAL_APP_DATA.to_owned(),
+                profile_path,
+                roaming_app_data,
+                local_app_data,
                 administrators_enabled: false,
             },
         })
@@ -209,14 +224,13 @@ impl StandardUserSession {
         if unsafe { ImpersonateLoggedOnUser(raw_handle(&self.token)) } == 0 {
             return Err(last_error("ImpersonateLoggedOnUser"));
         }
+        let guard = ImpersonationGuard { active: true };
         let result = operation();
-        // SAFETY: this thread established the impersonation immediately above.
-        if unsafe { RevertToSelf() } == 0 {
+        if let Err(revert) = guard.revert() {
             return Err(match result {
-                Ok(_) => last_error("RevertToSelf"),
+                Ok(_) => revert,
                 Err(error) => GuestMsiExecutionError::Process(format!(
-                    "{error}; RevertToSelf also failed: {}",
-                    windows::core::Error::from_thread()
+                    "{error}; RevertToSelf also failed: {revert}"
                 )),
             });
         }
@@ -262,6 +276,26 @@ impl StandardUserSession {
             ));
         }
         Ok(())
+    }
+}
+
+struct ImpersonationGuard { active: bool }
+
+impl ImpersonationGuard {
+    fn revert(mut self) -> Result<(), GuestMsiExecutionError> {
+        // SAFETY: this guard is constructed only after ImpersonateLoggedOnUser succeeds.
+        if unsafe { RevertToSelf() } == 0 { return Err(last_error("RevertToSelf")); }
+        self.active = false;
+        Ok(())
+    }
+}
+
+impl Drop for ImpersonationGuard {
+    fn drop(&mut self) {
+        if self.active {
+            // SAFETY: best-effort unwinding cleanup for this thread's exact impersonation.
+            let _ = unsafe { RevertToSelf() };
+        }
     }
 }
 
@@ -327,11 +361,58 @@ fn random_password() -> Result<Vec<u16>, GuestMsiExecutionError> {
         )));
     }
     let mut password = Vec::with_capacity(bytes.len() + 1);
-    for byte in bytes {
-        password.push(u16::from(b'a' + (byte % 26)));
+    const UPPER: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ";
+    const LOWER: &[u8] = b"abcdefghijkmnopqrstuvwxyz";
+    const DIGIT: &[u8] = b"23456789";
+    const SYMBOL: &[u8] = b"!@#$%^&*";
+    let classes = [UPPER, LOWER, DIGIT, SYMBOL];
+    for (index, byte) in bytes.into_iter().enumerate() {
+        let class = if index < classes.len() { classes[index] } else { b"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*" };
+        password.push(u16::from(class[usize::from(byte) % class.len()]));
     }
     password.push(0);
     Ok(password)
+}
+
+fn user_profile_directory(token: HANDLE) -> Result<String, GuestMsiExecutionError> {
+    let mut size = 0_u32;
+    // SAFETY: documented size-query call.
+    let _ = unsafe { GetUserProfileDirectoryW(token, PWSTR::null(), &mut size) };
+    if size == 0 || size > 32_768 {
+        return Err(last_error("GetUserProfileDirectoryW size"));
+    }
+    let mut buffer = vec![0_u16; size as usize];
+    // SAFETY: buffer has the returned character capacity.
+    if unsafe { GetUserProfileDirectoryW(token, PWSTR(buffer.as_mut_ptr()), &mut size) } == 0 {
+        return Err(last_error("GetUserProfileDirectoryW"));
+    }
+    let nul = buffer.iter().position(|value| *value == 0).ok_or_else(|| GuestMsiExecutionError::Process("GetUserProfileDirectoryW returned unterminated data".to_owned()))?;
+    String::from_utf16(&buffer[..nul]).map_err(|_| GuestMsiExecutionError::Process("GetUserProfileDirectoryW returned invalid UTF-16".to_owned()))
+}
+
+fn environment_paths(environment: *mut c_void) -> Result<(String, String, String), GuestMsiExecutionError> {
+    if environment.is_null() { return Err(GuestMsiExecutionError::Process("CreateEnvironmentBlock returned null".to_owned())); }
+    // SAFETY: CreateEnvironmentBlock returns a double-NUL-terminated UTF-16 block.
+    let values = unsafe { std::slice::from_raw_parts(environment.cast::<u16>(), 32_768) };
+    let mut profile = None;
+    let mut roaming = None;
+    let mut local = None;
+    let mut start = 0;
+    while start < values.len() {
+        let end = values[start..].iter().position(|value| *value == 0).map(|offset| start + offset).ok_or_else(|| GuestMsiExecutionError::Process("environment block exceeded bound".to_owned()))?;
+        if end == start { break; }
+        let entry = String::from_utf16(&values[start..end]).map_err(|_| GuestMsiExecutionError::Process("environment block contained invalid UTF-16".to_owned()))?;
+        if let Some((key, value)) = entry.split_once('=') {
+            match key.to_ascii_uppercase().as_str() {
+                "USERPROFILE" => profile = Some(value.to_owned()),
+                "APPDATA" => roaming = Some(value.to_owned()),
+                "LOCALAPPDATA" => local = Some(value.to_owned()),
+                _ => {}
+            }
+        }
+        start = end + 1;
+    }
+    Ok((profile.ok_or_else(|| GuestMsiExecutionError::Process("target environment lacked USERPROFILE".to_owned()))?, roaming.ok_or_else(|| GuestMsiExecutionError::Process("target environment lacked APPDATA".to_owned()))?, local.ok_or_else(|| GuestMsiExecutionError::Process("target environment lacked LOCALAPPDATA".to_owned()))?))
 }
 
 fn validate_standard_token(token: HANDLE) -> Result<String, GuestMsiExecutionError> {
@@ -362,17 +443,25 @@ fn validate_standard_token(token: HANDLE) -> Result<String, GuestMsiExecutionErr
         ));
     }
     let groups = query_variable(token, TokenGroups, "TokenGroups")?;
+    let mut has_builtin_users = false;
     if group_count(&groups)? != 0 {
         // A fresh local user is allowed to have ordinary groups, but never the
         // built-in Administrators SID.  The account's default Users group is
         // intentionally not treated as an elevation signal.
         for group in groups_list(&groups)? {
-            if sid_string(group.Sid)? == "S-1-5-32-544" {
+            let sid = sid_string(group.Sid)?;
+            if sid == "S-1-5-32-545" { has_builtin_users = true; }
+            if sid == "S-1-5-32-544" {
                 return Err(GuestMsiExecutionError::Process(
                     "standard user token included the built-in Administrators group".to_owned(),
                 ));
             }
         }
+    }
+    if !has_builtin_users {
+        return Err(GuestMsiExecutionError::Process(
+            "fresh standard user was not a member of the built-in Users group".to_owned(),
+        ));
     }
     let user = query_variable(token, TokenUser, "TokenUser")?;
     let user = cast::<TOKEN_USER>(&user, "TokenUser")?;
