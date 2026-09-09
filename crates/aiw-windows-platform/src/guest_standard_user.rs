@@ -308,14 +308,18 @@ impl StandardUserSession {
             "TokenSessionId",
         )?;
         let mut current_session = 0;
-        // SAFETY: both process ids are queried by the documented API.
-        if unsafe { ProcessIdToSessionId(GetCurrentProcessId(), &mut current_session) } == 0
-            || unsafe { GetProcessId(HANDLE(process.as_raw_handle())) } == 0
+        let mut actual_child_session = 0;
+        let child_pid = unsafe { GetProcessId(HANDLE(process.as_raw_handle())) };
+        // Bind the physical process session as well as the token's session.
+        if child_pid == 0
+            || unsafe { ProcessIdToSessionId(GetCurrentProcessId(), &mut current_session) } == 0
+            || unsafe { ProcessIdToSessionId(child_pid, &mut actual_child_session) } == 0
             || child_session != current_session
+            || actual_child_session != current_session
         {
-            return Err(GuestMsiExecutionError::Process(
-                "suspended child was not bound to the guest interactive session".to_owned(),
-            ));
+            return Err(GuestMsiExecutionError::Process(format!(
+                "suspended child session mismatch: agent={current_session}, process={actual_child_session}, token={child_session}"
+            )));
         }
         Ok(())
     }

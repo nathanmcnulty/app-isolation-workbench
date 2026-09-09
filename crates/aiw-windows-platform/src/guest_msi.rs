@@ -60,6 +60,8 @@ unsafe extern "system" {
 unsafe extern "system" {
     fn GetThreadDesktop(thread_id: u32) -> HANDLE;
     fn GetProcessWindowStation() -> HANDLE;
+    fn OpenDesktopW(name: PCWSTR, flags: u32, inherit: BOOL, desired_access: u32) -> HANDLE;
+    fn CloseDesktop(desktop: HANDLE) -> BOOL;
     fn GetUserObjectInformationW(
         object: HANDLE,
         index: i32,
@@ -936,6 +938,30 @@ impl GuestProcess {
                 "standard-user child token validation failed: {error}; cleanup={cleanup:?}"
             )));
         }
+        let desktop_access = standard_user.impersonate(|| {
+            let name = wide("Default")?;
+            // Read-only access preflight: no desktop switch or ACL mutation.
+            unsafe { SetLastError(ERROR_SUCCESS) };
+            let desktop = unsafe { OpenDesktopW(PCWSTR(name.as_ptr()), 0, BOOL(0), 0x00c3) };
+            if desktop.is_invalid() {
+                return Err(GuestMsiExecutionError::Process(format!(
+                    "standard-user Default desktop access failed: {}",
+                    unsafe { GetLastError() }.0
+                )));
+            }
+            if !unsafe { CloseDesktop(desktop) }.as_bool() {
+                return Err(GuestMsiExecutionError::Process(
+                    "close desktop access probe failed".to_owned(),
+                ));
+            }
+            Ok(())
+        });
+        if let Err(error) = desktop_access {
+            let cleanup = terminate_unassigned_process(&process);
+            return Err(GuestMsiExecutionError::Process(format!(
+                "{error}; cleanup={cleanup:?}"
+            )));
+        }
         if let Err(error) = unsafe { AssignProcessToJobObject(job.raw(), raw_handle(&process)) } {
             let cleanup = terminate_unassigned_process(&process);
             return Err(GuestMsiExecutionError::Process(format!(
@@ -1107,10 +1133,11 @@ impl GuestProcess {
                     GetExitCodeThread(raw_handle(&self.initial_thread), &mut thread_exit)
                 };
                 return Err(GuestMsiExecutionError::Process(format!(
-                    "Notepad++ window was not observed before timeout; pid={}, windows={}, inputIdle={input_idle}/{input_idle_error}, threadExit={thread_exit}/{}, station={}, agentDesktop={}, childDesktop={}",
+                    "Notepad++ window was not observed before timeout; pid={}, windows={}, inputIdle={input_idle}/{input_idle_error}, threadExit={thread_exit}/{}, jobProcesses={:?}, station={}, agentDesktop={}, childDesktop={}",
                     self.process_id,
                     context.matching_windows,
                     thread_query.is_ok(),
+                    self.job.active_processes(),
                     user_object_name(unsafe { GetProcessWindowStation() }),
                     user_object_name(unsafe { GetThreadDesktop(GetCurrentThreadId()) }),
                     user_object_name(unsafe { GetThreadDesktop(self.initial_thread_id) }),
