@@ -64,15 +64,17 @@ fn completed_msi_report_is_readonly_and_rejects_drift() {
     );
     let preparation: aiw_runner::WsbPreparationReceipt =
         serde_json::from_slice(&fs::read(root.join("preparation.json")).unwrap()).unwrap();
-    if preparation
-        .msi
-        .unwrap()
-        .scenario
-        .requires_application_exercise()
-    {
+    let prepared_scenario = preparation.msi.unwrap().scenario;
+    if prepared_scenario.requires_application_exercise() {
         assert_eq!(
             report.schema_version,
-            if report.stage_progress.is_some() {
+            if report.registry_evidence.is_some() {
+                "aiw.dev/wsb-msi-assessment-report/v0alpha6"
+            } else if report.standard_user_context.is_some() {
+                "aiw.dev/wsb-msi-assessment-report/v0alpha5"
+            } else if report.download_metadata_policy.is_some() {
+                "aiw.dev/wsb-msi-assessment-report/v0alpha4"
+            } else if report.stage_progress.is_some() {
                 "aiw.dev/wsb-msi-assessment-report/v0alpha3"
             } else {
                 "aiw.dev/wsb-msi-assessment-report/v0alpha2"
@@ -95,6 +97,30 @@ fn completed_msi_report_is_readonly_and_rejects_drift() {
                 .is_empty()
         );
         assert!(report.exercise_file_changes.is_some());
+        if prepared_scenario.requires_registry_observations() {
+            let registry = report
+                .registry_evidence
+                .as_ref()
+                .expect("v5 report must retain registry evidence");
+            assert_eq!(
+                registry.user_sid,
+                report
+                    .standard_user_context
+                    .as_ref()
+                    .expect("v5 report requires standard-user context")
+                    .context
+                    .user_sid
+            );
+            registry.before_install.validate().unwrap();
+            registry.after_install.validate().unwrap();
+            registry.after_exercise.validate().unwrap();
+            assert!(report.installation_registry_changes.is_some());
+            assert!(report.exercise_registry_changes.is_some());
+        } else {
+            assert!(report.registry_evidence.is_none());
+            assert!(report.installation_registry_changes.is_none());
+            assert!(report.exercise_registry_changes.is_none());
+        }
         assert!(
             report
                 .missing_evidence

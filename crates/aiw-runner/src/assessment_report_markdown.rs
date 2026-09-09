@@ -73,7 +73,7 @@ impl WsbMsiAssessmentReport {
             "Application exercise",
             self.exercise_file_changes.as_ref(),
         );
-        out.push_str("\n## Registry changes\n\nScope: `HKLM\\Software\\Notepad++` and the exact standard-user `HKU\\<SID>\\Software\\Notepad++`, each through the 64-bit and 32-bit views. Entries retain keys and value metadata (name, type, size, and SHA-256), never raw registry values. Product registration, MSI dependency records, and uninstall registration are outside this scope. Snapshot comparison is non-atomic; incomplete scopes are explicitly omitted from change rows.\n");
+        out.push_str("\n## Registry changes\n\nScope: `HKLM\\Software\\Notepad++` and the exact standard-user `HKU\\<SID>\\Software\\Notepad++`, each through the 64-bit and 32-bit views. Entries retain keys and value metadata (name, type, size, and SHA-256), never raw registry values. The 32-bit and 64-bit views can share backing keys, so counts are observations per view rather than unique physical dependencies. Product registration, MSI dependency records, and uninstall registration are outside this scope. Snapshot comparison is non-atomic; incomplete scopes are explicitly omitted from change rows.\n");
         append_registry_changes(
             &mut out,
             "Installation",
