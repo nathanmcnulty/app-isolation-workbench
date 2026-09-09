@@ -96,8 +96,6 @@ impl CompiledMsiScenario {
             == "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha1"
             && self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha1";
         if !(current || standard_user_legacy || legacy_exercise || token_profile || legacy)
-            || (current
-                && self.document_exercise.as_ref() != Some(&FixedDocumentExercise::standard_user()))
             || (legacy_exercise
                 && self.document_exercise.as_ref() != Some(&FixedDocumentExercise::legacy()))
             || ((current || standard_user_legacy)

@@ -300,6 +300,9 @@ pub fn verify_msi_registry_evidence(
     result: &ImportedMsiScenarioResult,
     context: Option<&ImportedMsiRuntimeContext>,
 ) -> Result<Option<ImportedMsiRegistryEvidence>, String> {
+    result
+        .validate_for_request(request)
+        .map_err(|e| e.to_string())?;
     let records = verified_application_records(bytes, expected_root)?;
     let mut found = None;
     for record in records
@@ -770,7 +773,18 @@ mod tests {
                 .is_none()
         );
         let context = runtime(&request, &result);
-        let payload = serde_json::to_value(evidence(&request, &result, &context)).unwrap();
+        let payload = serde_json::to_value(ImportedMsiRegistryEvidence {
+            schema_version: IMPORTED_MSI_REGISTRY_SCHEMA_VERSION.into(),
+            run_id: request.run_id.clone(),
+            sandbox_id: request.sandbox_id.clone(),
+            request_sha256: request.request_sha256.clone(),
+            scenario_sha256: request.scenario_sha256.clone(),
+            user_sid: context.context.user_sid.clone(),
+            before_install: snapshot(),
+            after_install: snapshot(),
+            after_exercise: snapshot(),
+        })
+        .unwrap();
         let (present, present_root) = log_bytes(vec![("aiw-guest-agent", payload)]);
         assert!(
             verify_msi_registry_evidence(
