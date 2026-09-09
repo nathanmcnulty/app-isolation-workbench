@@ -4,8 +4,9 @@
 //! handle from `C:\` through `C:\AIW\Scenario`, opens children relative to
 //! those handles, and refuses reparse objects before the UI process starts.
 //! `C:\` and `C:\AIW` deny write/delete sharing. The retained `Scenario`
-//! handle permits write/delete sharing because a normal atomic document save
-//! replaces a child entry; it is revalidated by stable identity against the
+//! handle permits write sharing because a normal atomic document save
+//! replaces a child entry, but denies delete sharing to protect its own name.
+//! It is revalidated by stable identity against the
 //! share-read-held `AIW` parent before and after application use.
 
 use std::ffi::c_void;
@@ -109,7 +110,10 @@ impl FixedGuestDocument {
         let parent = root
             .parent()
             .ok_or_else(|| "fixed AIW parent is absent".to_owned())?;
-        Self::prepare_with_fresh_aiw(held_directory_chain(parent)?)
+        Self::prepare_with_fresh_aiw(held_directory_chain_with_sharing(
+            parent,
+            FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0,
+        )?)
     }
 
     fn prepare_with_fresh_aiw(mut ancestors: Vec<File>) -> Result<Self, String> {
@@ -269,13 +273,13 @@ fn rehold_scenario_for_replace(aiw: &File, scenario: File) -> Result<File, Strin
     let original = file_information(&scenario)?;
     // The initial Scenario handle needs FILE_ADD_FILE to create document.txt.
     // A one-call relay permits that original desired access while converting to
-    // the long-lived read/write/delete-share handle below. The held AIW directory
+    // the long-lived read/write-share handle below. The held AIW directory
     // keeps the Scenario namespace from being renamed during this conversion.
     let relay = open_relative_directory(
         aiw,
         SCENARIO_LEAF,
         0,
-        FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0 | FILE_SHARE_DELETE.0,
+        FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0,
     )?
     .ok_or_else(|| "fixed document Scenario disappeared while reducing authority".to_owned())?;
     let relay_info = file_information(&relay)?;
@@ -287,7 +291,7 @@ fn rehold_scenario_for_replace(aiw: &File, scenario: File) -> Result<File, Strin
         aiw,
         SCENARIO_LEAF,
         0,
-        FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0 | FILE_SHARE_DELETE.0,
+        FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0,
     )?
     .ok_or_else(|| "fixed document Scenario disappeared after reducing authority".to_owned())?;
     let retained_info = file_information(&retained)?;
@@ -299,6 +303,13 @@ fn rehold_scenario_for_replace(aiw: &File, scenario: File) -> Result<File, Strin
 }
 
 fn held_directory_chain(path: &Path) -> Result<Vec<File>, String> {
+    held_directory_chain_with_sharing(path, FILE_SHARE_READ.0)
+}
+
+// Profile ancestors are shared application state. Permit write opens while
+// retaining every directory with delete sharing denied, so their names cannot
+// be replaced. The owned AIW directory retains the stricter read-only sharing.
+fn held_directory_chain_with_sharing(path: &Path, share_access: u32) -> Result<Vec<File>, String> {
     let value = path
         .to_str()
         .ok_or_else(|| "fixed document root path was not Unicode".to_owned())?;
@@ -313,7 +324,7 @@ fn held_directory_chain(path: &Path) -> Result<Vec<File>, String> {
         return Err("fixed document root path was not a safe C drive path".to_owned());
     }
     let components: Vec<_> = value.split('\\').skip(1).collect();
-    let mut current = open_absolute_c_root()?;
+    let mut current = open_absolute_c_root(share_access)?;
     let mut ancestors = Vec::new();
     ancestors.push(current);
     for (index, component) in components.iter().enumerate() {
@@ -326,7 +337,7 @@ fn held_directory_chain(path: &Path) -> Result<Vec<File>, String> {
             ancestors.last().expect("C root was retained"),
             component,
             extra_access,
-            FILE_SHARE_READ.0,
+            share_access,
         )?
         .ok_or_else(|| format!("fixed document ancestor is absent: {component}"))?;
         ancestors.push(current);
@@ -334,10 +345,10 @@ fn held_directory_chain(path: &Path) -> Result<Vec<File>, String> {
     Ok(ancestors)
 }
 
-fn open_absolute_c_root() -> Result<File, String> {
+fn open_absolute_c_root(share_access: u32) -> Result<File, String> {
     let root = OpenOptions::new()
         .read(true)
-        .share_mode(FILE_SHARE_READ.0)
+        .share_mode(share_access)
         .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
         .open(r"C:\")
         .map_err(|error| format!("open fixed document C root failed: {error}"))?;
@@ -703,6 +714,43 @@ mod tests {
             std::fs::read(&path).unwrap(),
             DOCUMENT_EXPECTED_TEXT.as_bytes()
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn profile_ancestors_allow_application_writes_but_reject_rename() {
+        let root = fixture_root();
+        std::fs::create_dir(&root).unwrap();
+        let open_application_parent = || {
+            OpenOptions::new()
+                .access_mode(FILE_ADD_SUBDIRECTORY.0 | FILE_ADD_FILE.0)
+                .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0 | FILE_SHARE_DELETE.0)
+                .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
+                .open(&root)
+        };
+        let strict = open_fixture_root(&root).unwrap();
+        assert!(open_application_parent().is_err());
+        drop(strict);
+        let shared = OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0)
+            .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
+            .open(&root)
+            .unwrap();
+        let document = FixedGuestDocument::prepare_with_fresh_aiw(vec![shared]).unwrap();
+        let application_parent = open_application_parent().unwrap();
+        std::fs::create_dir(root.join("Notepad++")).unwrap();
+        assert!(std::fs::rename(&root, root.with_extension("moved")).is_err());
+        assert!(std::fs::rename(root.join("AIW"), root.join("moved-AIW")).is_err());
+        assert!(
+            std::fs::rename(
+                root.join("AIW").join("Scenario"),
+                root.join("moved-Scenario")
+            )
+            .is_err()
+        );
+        drop(application_parent);
+        drop(document);
         std::fs::remove_dir_all(root).unwrap();
     }
 
