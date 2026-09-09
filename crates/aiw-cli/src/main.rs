@@ -546,6 +546,8 @@ enum SchemaKind {
     WsbApprovedExecution,
     MsiApplicationToken,
     MsiRuntimeContext,
+    #[value(name = "msi-registry")]
+    MsiRegistry,
     ImportedMsiBehaviorEvidence,
     WsbMsiAssessmentReport,
     WsbMsiRunReport,
@@ -1690,6 +1692,9 @@ fn run(command: Command) -> Result<()> {
             }
             SchemaKind::MsiRuntimeContext => {
                 write_json(&schema_for!(aiw_provider_wsb::ImportedMsiRuntimeContext))
+            }
+            SchemaKind::MsiRegistry => {
+                write_json(&schema_for!(aiw_provider_wsb::ImportedMsiRegistryEvidence))
             }
             SchemaKind::MsiApplicationToken => {
                 write_json(&schema_for!(aiw_provider_wsb::ImportedMsiApplicationToken))

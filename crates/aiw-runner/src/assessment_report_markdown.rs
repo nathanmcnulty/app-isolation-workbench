@@ -2,7 +2,10 @@ use crate::{
     AssessmentEvidenceGap, FailureProgressEvidence, UnverifiedGuestDiagnostic,
     WsbMsiAssessmentReport, WsbMsiRunReport, WsbMsiUnsuccessfulReport,
 };
-use aiw_provider_wsb::{ApplicationFileRoot, FilesystemDiffKind, FilesystemSnapshotDiffResult};
+use aiw_provider_wsb::{
+    ApplicationFileRoot, ApplicationRegistryRoot, FilesystemDiffKind, FilesystemSnapshotDiffResult,
+    RegistryDiffKind, RegistryScope, RegistrySnapshotDiff, RegistryView,
+};
 
 impl WsbMsiAssessmentReport {
     /// Human-readable rendering of an already reverified report. This does not
@@ -59,7 +62,7 @@ impl WsbMsiAssessmentReport {
         if let Some(progress) = &self.stage_progress {
             append_stages(&mut out, progress);
         }
-        out.push_str("\n## Filesystem changes\n\nScope: the Notepad++ installation directory and its guest roaming/local application-data directories. Entries contain paths, sizes, and hashes; contents and registry changes are not captured.\n");
+        out.push_str("\n## Filesystem changes\n\nScope: the Notepad++ installation directory and its guest roaming/local application-data directories. Entries contain paths, sizes, and hashes; contents are not captured.\n");
         append_changes(
             &mut out,
             "Installation",
@@ -69,6 +72,17 @@ impl WsbMsiAssessmentReport {
             &mut out,
             "Application exercise",
             self.exercise_file_changes.as_ref(),
+        );
+        out.push_str("\n## Registry changes\n\nScope: `HKLM\\Software\\Notepad++` and the exact standard-user `HKU\\<SID>\\Software\\Notepad++`, each through the 64-bit and 32-bit views. Entries retain keys and value metadata (name, type, size, and SHA-256), never raw registry values. Product registration, MSI dependency records, and uninstall registration are outside this scope. Snapshot comparison is non-atomic; incomplete scopes are explicitly omitted from change rows.\n");
+        append_registry_changes(
+            &mut out,
+            "Installation",
+            self.installation_registry_changes.as_ref(),
+        );
+        append_registry_changes(
+            &mut out,
+            "Application exercise",
+            self.exercise_registry_changes.as_ref(),
         );
         out.push_str("\nThese changes identify files to investigate for packaging. They do not establish a complete package recipe or dependencies outside the captured roots.\n\n## Unresolved assessment evidence\n\n");
         for gap in &self.missing_evidence {
@@ -141,13 +155,13 @@ fn append_stages(out: &mut String, progress: &aiw_provider_wsb::ImportedMsiStage
         let stage = match result.stage {
             Stage::BeforeInstallCapture => "Capture before installation",
             Stage::Install => "Install application",
-            Stage::AfterInstallCapture => "Capture installed files",
+            Stage::AfterInstallCapture => "Capture installed state",
             Stage::PrepareDocument => "Prepare test document",
             Stage::Launch => "Launch application process",
             Stage::OpenDocument => "Open and verify document",
             Stage::EditSaveDocument => "Edit, save, and verify bytes",
             Stage::Close => "Close application and verify job cleanup",
-            Stage::AfterExerciseCapture => "Capture files after use",
+            Stage::AfterExerciseCapture => "Capture state after use",
         };
         let status = match result.status {
             Status::Passed => "Passed",
@@ -206,6 +220,132 @@ fn append_changes(out: &mut String, title: &str, changes: Option<&FilesystemSnap
                 changes.diffs.len() - 100
             ));
         }
+    }
+}
+
+fn append_registry_changes(out: &mut String, title: &str, changes: Option<&RegistrySnapshotDiff>) {
+    out.push_str(&format!("\n### {title}\n\n"));
+    let Some(changes) = changes else {
+        out.push_str("Not measured by this scenario version.\n");
+        return;
+    };
+    let added = changes
+        .key_changes
+        .iter()
+        .filter(|change| change.kind == RegistryDiffKind::Added)
+        .count()
+        + changes
+            .value_changes
+            .iter()
+            .filter(|change| change.kind == RegistryDiffKind::Added)
+            .count();
+    let removed = changes
+        .key_changes
+        .iter()
+        .filter(|change| change.kind == RegistryDiffKind::Removed)
+        .count()
+        + changes
+            .value_changes
+            .iter()
+            .filter(|change| change.kind == RegistryDiffKind::Removed)
+            .count();
+    let modified = changes
+        .key_changes
+        .iter()
+        .filter(|change| change.kind == RegistryDiffKind::Modified)
+        .count()
+        + changes
+            .value_changes
+            .iter()
+            .filter(|change| change.kind == RegistryDiffKind::Modified)
+            .count();
+    out.push_str(&format!(
+        "{added} added, {modified} modified, {removed} removed in complete scopes.\n"
+    ));
+    for scope in &changes.incomplete_scopes {
+        out.push_str(&format!(
+            "\n**Incomplete capture: {}.** Changes for this scope are omitted.\n",
+            registry_scope_label(*scope)
+        ));
+    }
+    if !changes.key_changes.is_empty() {
+        out.push_str("\nKey changes:\n\n| Change | Scope | Relative key |\n|---|---|---|\n");
+        for change in changes.key_changes.iter().take(100) {
+            out.push_str(&format!(
+                "| {:?} | {} | {} |\n",
+                change.kind,
+                registry_scope_label(RegistryScope {
+                    root: change.entry.root,
+                    view: change.entry.view,
+                }),
+                registry_path_label(&change.entry.path)
+            ));
+        }
+        if changes.key_changes.len() > 100 {
+            out.push_str(&format!(
+                "\n{} additional key changes are in the JSON report.\n",
+                changes.key_changes.len() - 100
+            ));
+        }
+    }
+    if !changes.value_changes.is_empty() {
+        out.push_str("\nValue changes:\n\n| Change | Scope | Relative key | Value name | Type | Size | SHA-256 |\n|---|---|---|---|---:|---:|---|\n");
+        for change in changes.value_changes.iter().take(100) {
+            if let Some(value) = change.after.as_ref().or(change.before.as_ref()) {
+                out.push_str(&format!(
+                    "| {:?} | {} | {} | {} | {} | {} | {} |\n",
+                    change.kind,
+                    registry_scope_label(RegistryScope {
+                        root: value.root,
+                        view: value.view,
+                    }),
+                    registry_path_label(&value.path),
+                    registry_value_name_label(&value.name),
+                    value.value_type,
+                    value.size_bytes,
+                    cell(&value.sha256),
+                ));
+            }
+        }
+        if changes.value_changes.len() > 100 {
+            out.push_str(&format!(
+                "\n{} additional value changes are in the JSON report.\n",
+                changes.value_changes.len() - 100
+            ));
+        }
+    }
+}
+
+fn registry_scope_label(scope: RegistryScope) -> &'static str {
+    match (scope.root, scope.view) {
+        (ApplicationRegistryRoot::MachineApplication, RegistryView::Registry64) => {
+            "Machine application, 64-bit view"
+        }
+        (ApplicationRegistryRoot::MachineApplication, RegistryView::Registry32) => {
+            "Machine application, 32-bit view"
+        }
+        (ApplicationRegistryRoot::UserApplication, RegistryView::Registry64) => {
+            "Standard-user application, 64-bit view"
+        }
+        (ApplicationRegistryRoot::UserApplication, RegistryView::Registry32) => {
+            "Standard-user application, 32-bit view"
+        }
+    }
+}
+
+fn registry_path_label(path: &str) -> String {
+    if path.is_empty() {
+        "(root)".to_owned()
+    } else {
+        cell(path)
+    }
+}
+
+fn registry_value_name_label(name: &str) -> String {
+    if name.is_empty() {
+        "(Default)".to_owned()
+    } else {
+        cell(name)
     }
 }
 
@@ -280,5 +420,49 @@ mod tests {
         );
         assert!(out.contains("Incomplete capture: Installation"));
         assert!(out.contains("Changes for this root are omitted"));
+    }
+
+    #[test]
+    fn registry_markdown_is_metadata_only_and_escaped() {
+        use aiw_provider_wsb::{
+            RegistryKeyDiff, RegistryKeyEntry, RegistryValueDiff, RegistryValueEntry,
+        };
+        let scope = RegistryScope {
+            root: ApplicationRegistryRoot::MachineApplication,
+            view: RegistryView::Registry64,
+        };
+        let mut out = String::new();
+        append_registry_changes(
+            &mut out,
+            "Installation",
+            Some(&RegistrySnapshotDiff {
+                key_changes: vec![RegistryKeyDiff {
+                    kind: RegistryDiffKind::Added,
+                    entry: RegistryKeyEntry {
+                        root: scope.root,
+                        view: scope.view,
+                        path: "[key]|<markup>".to_owned(),
+                    },
+                }],
+                value_changes: vec![RegistryValueDiff {
+                    kind: RegistryDiffKind::Modified,
+                    before: None,
+                    after: Some(RegistryValueEntry {
+                        root: scope.root,
+                        view: scope.view,
+                        path: String::new(),
+                        name: String::new(),
+                        value_type: 1,
+                        size_bytes: 4,
+                        sha256: "a".repeat(64),
+                    }),
+                }],
+                incomplete_scopes: vec![scope],
+            }),
+        );
+        assert!(out.contains("\\[key\\]\\|&lt;markup&gt;"));
+        assert!(out.contains("(root)"));
+        assert!(out.contains("(Default)"));
+        assert!(out.contains("Incomplete capture: Machine application, 64-bit view"));
     }
 }

@@ -114,7 +114,7 @@ fn live_imported_msi_install_observe_close_and_cleanup() {
     assert!(result.scenario.successful());
     assert_eq!(
         result.schema_version,
-        "aiw.dev/wsb-imported-msi-execution/v0alpha4"
+        "aiw.dev/wsb-imported-msi-execution/v0alpha5"
     );
     let token = result
         .application_token
@@ -131,6 +131,17 @@ fn live_imported_msi_install_observe_close_and_cleanup() {
     assert_eq!(runtime.context.user_sid, token.token.user_sid);
     assert_eq!(runtime.context.profile_path, r"C:\Users\AiwStandardUser");
     assert!(!runtime.context.administrators_enabled);
+    let registry = result
+        .registry_evidence
+        .as_ref()
+        .expect("v5 scenario requires registry evidence");
+    assert_eq!(registry.user_sid, runtime.context.user_sid);
+    registry.before_install.validate().unwrap();
+    registry.after_install.validate().unwrap();
+    registry.after_exercise.validate().unwrap();
+    assert!(registry.before_install.issues.is_empty());
+    assert!(registry.after_install.issues.is_empty());
+    assert!(registry.after_exercise.issues.is_empty());
     let behavior = result
         .behavior
         .as_ref()
@@ -165,11 +176,11 @@ fn live_imported_msi_install_observe_close_and_cleanup() {
             .download_metadata_archive
             .map(|archive| archive.policy)
     );
+    assert_eq!(
+        report.schema_version,
+        "aiw.dev/wsb-msi-assessment-report/v0alpha6"
+    );
     if report.download_metadata_policy.is_some() {
-        assert_eq!(
-            report.schema_version,
-            "aiw.dev/wsb-msi-assessment-report/v0alpha5"
-        );
         assert!(
             report
                 .to_markdown()
@@ -177,6 +188,10 @@ fn live_imported_msi_install_observe_close_and_cleanup() {
         );
     }
     assert!(report.standard_user_context.is_some());
+    assert!(report.registry_evidence.is_some());
+    assert!(report.installation_registry_changes.is_some());
+    assert!(report.exercise_registry_changes.is_some());
+    assert!(report.to_markdown().contains("Registry changes"));
     assert!(report.to_markdown().contains("Standard-user runtime"));
     let stages = report
         .stage_progress

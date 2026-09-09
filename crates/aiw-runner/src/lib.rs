@@ -111,6 +111,8 @@ pub struct WsbGoldenProbeExecution {
     behavior: Option<aiw_provider_wsb::ImportedMsiBehaviorEvidence>,
     #[serde(skip)]
     standard_user_context: Option<aiw_provider_wsb::ImportedMsiRuntimeContext>,
+    #[serde(skip)]
+    registry_evidence: Option<aiw_provider_wsb::ImportedMsiRegistryEvidence>,
 }
 
 /// Common receipt-correlated lifecycle result. Application observations remain
@@ -136,6 +138,8 @@ pub struct WsbImportedMsiExecution {
     pub behavior: Option<aiw_provider_wsb::ImportedMsiBehaviorEvidence>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub standard_user_context: Option<aiw_provider_wsb::ImportedMsiRuntimeContext>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registry_evidence: Option<aiw_provider_wsb::ImportedMsiRegistryEvidence>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -639,6 +643,14 @@ pub(crate) fn execute_wsb_golden_probe(
                     token.as_ref(),
                 )
                 .map_err(RunnerError::Receipt)?;
+                let registry_evidence = aiw_provider_wsb::verify_msi_registry_evidence(
+                    &evidence_bytes,
+                    &verification.evidence_root_hash,
+                    expected,
+                    &observed,
+                    standard_user_context.as_ref(),
+                )
+                .map_err(RunnerError::Receipt)?;
                 let behavior = aiw_provider_wsb::verify_imported_msi_behavior(
                     &evidence_bytes,
                     &verification.evidence_root_hash,
@@ -660,18 +672,25 @@ pub(crate) fn execute_wsb_golden_probe(
                         "successful result has failed stage progress".to_owned(),
                     ));
                 }
-                (Some(observed), token, behavior, standard_user_context)
+                (
+                    Some(observed),
+                    token,
+                    behavior,
+                    standard_user_context,
+                    registry_evidence,
+                )
             }
-            ExecutionGuestRequest::Golden(_) => (None, None, None, None),
+            ExecutionGuestRequest::Golden(_) => (None, None, None, None, None),
         })
     })();
-    let (scenario, application_token, behavior, standard_user_context) = match scenario {
-        Ok(value) => value,
-        Err(error) => {
-            record_terminal_failure(layout, error.clone())?;
-            return Err(error);
-        }
-    };
+    let (scenario, application_token, behavior, standard_user_context, registry_evidence) =
+        match scenario {
+            Ok(value) => value,
+            Err(error) => {
+                record_terminal_failure(layout, error.clone())?;
+                return Err(error);
+            }
+        };
     let result = RunResult::new(
         context.plan.run_id.clone(),
         RunOutcome::InsufficientEvidence,
@@ -698,6 +717,7 @@ pub(crate) fn execute_wsb_golden_probe(
         application_token,
         behavior,
         standard_user_context,
+        registry_evidence,
     })
 }
 
@@ -821,7 +841,9 @@ fn start_approved_windows_sandbox_inner(
     if request.msi.is_some() {
         let scenario = result.scenario.ok_or(RunnerError::Drift)?;
         Ok(WsbApprovedExecution::ImportedMsi(WsbImportedMsiExecution {
-            schema_version: if result.standard_user_context.is_some() {
+            schema_version: if result.registry_evidence.is_some() {
+                "aiw.dev/wsb-imported-msi-execution/v0alpha5"
+            } else if result.standard_user_context.is_some() {
                 "aiw.dev/wsb-imported-msi-execution/v0alpha4"
             } else if result.behavior.is_some() {
                 "aiw.dev/wsb-imported-msi-execution/v0alpha3"
@@ -845,6 +867,7 @@ fn start_approved_windows_sandbox_inner(
             application_token: result.application_token,
             behavior: result.behavior,
             standard_user_context: result.standard_user_context,
+            registry_evidence: result.registry_evidence,
         }))
     } else {
         Ok(WsbApprovedExecution::GoldenProbe(result))
@@ -4257,10 +4280,73 @@ mod tests {
         .unwrap()
     }
 
+    fn registry_snapshot(include_install: bool) -> aiw_provider_wsb::ApplicationRegistrySnapshot {
+        use aiw_provider_wsb::{
+            ApplicationRegistryRoot as Root, RegistryKeyEntry, RegistryValueEntry,
+            RegistryView as View,
+        };
+        let mut keys = vec![
+            RegistryKeyEntry {
+                root: Root::MachineApplication,
+                view: View::Registry64,
+                path: String::new(),
+            },
+            RegistryKeyEntry {
+                root: Root::MachineApplication,
+                view: View::Registry32,
+                path: String::new(),
+            },
+            RegistryKeyEntry {
+                root: Root::UserApplication,
+                view: View::Registry64,
+                path: String::new(),
+            },
+            RegistryKeyEntry {
+                root: Root::UserApplication,
+                view: View::Registry32,
+                path: String::new(),
+            },
+        ];
+        let mut values = Vec::new();
+        if include_install {
+            keys.insert(
+                1,
+                RegistryKeyEntry {
+                    root: Root::MachineApplication,
+                    view: View::Registry64,
+                    path: "Install".to_owned(),
+                },
+            );
+            values.push(RegistryValueEntry {
+                root: Root::MachineApplication,
+                view: View::Registry64,
+                path: "Install".to_owned(),
+                name: "DisplayName".to_owned(),
+                value_type: 1,
+                size_bytes: 20,
+                sha256: "a".repeat(64),
+            });
+        }
+        aiw_provider_wsb::ApplicationRegistrySnapshot {
+            keys,
+            values,
+            absent_roots: vec![],
+            issues: vec![],
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    enum RegistryFixture {
+        Valid,
+        Missing,
+        Tampered,
+    }
+
     fn write_valid_msi_completion(
         start: &WsbGoldenProbeStart,
         scenario_result: aiw_provider_wsb::ImportedMsiScenarioResult,
         include_behavior: bool,
+        registry_fixture: RegistryFixture,
     ) {
         let rendered = render_config(&start.wsb_plan).unwrap();
         let request = msi_request_for(start);
@@ -4305,7 +4391,7 @@ mod tests {
                 payload: serde_json::to_value(&token).unwrap(),
             })
             .unwrap();
-        if request.scenario.requires_standard_user() {
+        let runtime = if request.scenario.requires_standard_user() {
             let runtime = aiw_provider_wsb::ImportedMsiRuntimeContext::new(
                 &request,
                 &valid_result,
@@ -4324,7 +4410,36 @@ mod tests {
                     observed_utc: "guest-time-not-trusted".to_owned(),
                     kind: aiw_provider_wsb::IMPORTED_MSI_RUNTIME_CONTEXT_EVENT.to_owned(),
                     source: "aiw-guest-agent".to_owned(),
-                    payload: serde_json::to_value(runtime).unwrap(),
+                    payload: serde_json::to_value(&runtime).unwrap(),
+                })
+                .unwrap();
+            Some(runtime)
+        } else {
+            None
+        };
+        if request.scenario.requires_registry_observations()
+            && !matches!(registry_fixture, RegistryFixture::Missing)
+        {
+            let mut registry = aiw_provider_wsb::ImportedMsiRegistryEvidence::new(
+                &request,
+                &valid_result,
+                runtime
+                    .as_ref()
+                    .expect("v5 profile requires standard-user runtime"),
+                registry_snapshot(false),
+                registry_snapshot(true),
+                registry_snapshot(true),
+            )
+            .unwrap();
+            if matches!(registry_fixture, RegistryFixture::Tampered) {
+                registry.user_sid = "S-1-5-21-foreign".to_owned();
+            }
+            evidence
+                .append(aiw_evidence::EvidenceEvent {
+                    observed_utc: "guest-time-not-trusted".to_owned(),
+                    kind: aiw_provider_wsb::IMPORTED_MSI_REGISTRY_EVENT.to_owned(),
+                    source: "aiw-guest-agent".to_owned(),
+                    payload: serde_json::to_value(registry).unwrap(),
                 })
                 .unwrap();
         }
@@ -4423,7 +4538,7 @@ mod tests {
             empty_list(),
         ])
         .with_start_action(Box::new(move || {
-            write_valid_msi_completion(&output_start, scenario_result, true)
+            write_valid_msi_completion(&output_start, scenario_result, true, RegistryFixture::Valid)
         }))
     }
 
@@ -4436,7 +4551,7 @@ mod tests {
         let output_start = start.clone();
         let fake =
             successful_msi_process(&start, valid.clone()).with_start_action(Box::new(move || {
-                write_valid_msi_completion(&output_start, valid, false);
+                write_valid_msi_completion(&output_start, valid, false, RegistryFixture::Valid);
             }));
         let error =
             execute_wsb_golden_probe(&start, &readiness, &layout, &fake, &TestLease::default())
@@ -4483,6 +4598,42 @@ mod tests {
     }
 
     #[test]
+    fn imported_msi_v5_rejects_missing_or_tampered_registry_evidence_after_cleanup() {
+        for fixture in [RegistryFixture::Missing, RegistryFixture::Tampered] {
+            let (_root, layout, start, readiness) = setup_msi();
+            let request = msi_request_for(&start);
+            assert!(request.scenario.requires_registry_observations());
+            let valid =
+                aiw_provider_wsb::ImportedMsiScenarioResult::succeeded(&request, 0, 42, 0).unwrap();
+            let id = deterministic_sandbox_id("w1-run");
+            let output_start = start.clone();
+            let fake = FakeProcess::new(vec![
+                empty_list(),
+                started(&id),
+                list_with(&id, "running"),
+                list_with(&id, "running"),
+                stopped(&id),
+                empty_list(),
+            ])
+            .with_start_action(Box::new(move || {
+                write_valid_msi_completion(&output_start, valid, true, fixture)
+            }));
+            let error =
+                execute_wsb_golden_probe(&start, &readiness, &layout, &fake, &TestLease::default())
+                    .unwrap_err();
+            assert!(matches!(error, RunnerError::Receipt(_)));
+            assert_eq!(
+                observe_wsb_session_status(&layout).unwrap().status,
+                WsbSessionDisposition::Clean
+            );
+            let result = layout.read_result().unwrap();
+            assert_eq!(result.outcome, RunOutcome::Failed);
+            assert!(result.cleanup_complete);
+            assert!(result.evidence_root.is_none());
+        }
+    }
+
+    #[test]
     fn imported_msi_validated_request_and_staging_are_cleaned_on_retry() {
         let (_root, layout, start, readiness) = setup_msi();
         let request = msi_request_for(&start);
@@ -4511,6 +4662,7 @@ mod tests {
                 .process_id,
             42
         );
+        assert!(execution.registry_evidence.is_some());
         assert!(!path.exists());
         assert!(!pending.exists());
         assert_eq!(

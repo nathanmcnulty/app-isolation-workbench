@@ -58,6 +58,12 @@ pub struct WsbMsiAssessmentReport {
     pub installation_file_changes: Option<aiw_provider_wsb::FilesystemSnapshotDiffResult>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exercise_file_changes: Option<aiw_provider_wsb::FilesystemSnapshotDiffResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registry_evidence: Option<aiw_provider_wsb::ImportedMsiRegistryEvidence>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub installation_registry_changes: Option<aiw_provider_wsb::RegistrySnapshotDiff>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exercise_registry_changes: Option<aiw_provider_wsb::RegistrySnapshotDiff>,
     pub requested_assertions: aiw_schema::Assertions,
     pub requested_isolation: aiw_schema::IsolationIntent,
     pub unmeasured_scenarios: Vec<String>,
@@ -422,6 +428,14 @@ pub fn report_windows_sandbox_msi_run(
         application_token.as_ref(),
     )
     .map_err(RunnerError::Receipt)?;
+    let registry_evidence = aiw_provider_wsb::verify_msi_registry_evidence(
+        &evidence_bytes,
+        &verified.evidence_root_hash,
+        &request,
+        &scenario,
+        standard_user_context.as_ref(),
+    )
+    .map_err(RunnerError::Receipt)?;
     let behavior = aiw_provider_wsb::verify_imported_msi_behavior(
         &evidence_bytes,
         &verified.evidence_root_hash,
@@ -457,10 +471,26 @@ pub fn report_windows_sandbox_msi_run(
         })
         .transpose()
         .map_err(RunnerError::Receipt)?;
+    let installation_registry_changes = registry_evidence
+        .as_ref()
+        .map(|value| {
+            aiw_provider_wsb::diff_registry_snapshots(&value.before_install, &value.after_install)
+        })
+        .transpose()
+        .map_err(RunnerError::Receipt)?;
+    let exercise_registry_changes = registry_evidence
+        .as_ref()
+        .map(|value| {
+            aiw_provider_wsb::diff_registry_snapshots(&value.after_install, &value.after_exercise)
+        })
+        .transpose()
+        .map_err(RunnerError::Receipt)?;
     revalidate()?;
     Ok(WsbMsiRunReport::CompletedAssessment(Box::new(
         WsbMsiAssessmentReport {
-            schema_version: if standard_user_context.is_some() {
+            schema_version: if registry_evidence.is_some() {
+                "aiw.dev/wsb-msi-assessment-report/v0alpha6"
+            } else if standard_user_context.is_some() {
                 "aiw.dev/wsb-msi-assessment-report/v0alpha5"
             } else if msi.import_receipt.download_metadata_archive.is_some() {
                 "aiw.dev/wsb-msi-assessment-report/v0alpha4"
@@ -497,6 +527,9 @@ pub fn report_windows_sandbox_msi_run(
             stage_progress,
             installation_file_changes,
             exercise_file_changes,
+            registry_evidence,
+            installation_registry_changes,
+            exercise_registry_changes,
             requested_assertions: project.assertions.clone(),
             requested_isolation: project.isolation_intent.clone(),
         },
