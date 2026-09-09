@@ -134,10 +134,9 @@ impl ApplicationRegistrySnapshot {
         let mut previous_value = None;
         for value in &self.values {
             validate_path(&value.path)?;
-            if value.name.is_empty()
-                || value.name.len() > 256
+            if value.name.len() > 256
                 || !value.name.is_ascii()
-                || value.name.chars().any(|c| c.is_control() || c == '\\')
+                || value.name.bytes().any(|c| !(0x20..=0x7e).contains(&c))
             {
                 return Err("invalid registry value name".into());
             }
@@ -474,7 +473,7 @@ fn validate_path(path: &str) -> Result<(), String> {
     if path.len() > 1024
         || !path.is_ascii()
         || path.split('\\').count() > MAX_DEPTH
-        || path.contains(['\0', '\r', '\n', '\t', '/'])
+        || path.chars().any(|c| c.is_control() || c == '/')
         || (!path.is_empty()
             && path
                 .split('\\')
@@ -488,6 +487,9 @@ fn validate_path(path: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{CompiledMsiScenario, FixedDocumentExercise, ImportedMsiRuntimeContext};
+    use aiw_evidence::{EvidenceEvent, EvidenceLog};
+    use sha2::{Digest, Sha256};
 
     fn snapshot() -> ApplicationRegistrySnapshot {
         ApplicationRegistrySnapshot {
@@ -505,6 +507,106 @@ mod tests {
         }
     }
 
+    fn v5_request() -> ImportedMsiGuestRequest {
+        let scenario = CompiledMsiScenario {
+            schema_version: "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha5".into(),
+            profile: "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha5".into(),
+            scenario_id: "first-run".into(),
+            application_sha256: "a".repeat(64),
+            installer_path: r"C:\AIW\Tools\application.msi".into(),
+            install_arguments: vec![
+                "/i".into(),
+                r"C:\AIW\Tools\application.msi".into(),
+                "/qn".into(),
+                "/norestart".into(),
+            ],
+            install_timeout_seconds: 120,
+            launch_path: r"C:\Program Files\Notepad++\notepad++.exe".into(),
+            launch_arguments: vec![],
+            process_image: "notepad++.exe".into(),
+            process_wait_timeout_seconds: 30,
+            graceful_close_timeout_seconds: 15,
+            expected_exit_code: 0,
+            document_exercise: Some(FixedDocumentExercise {
+                document_path: crate::STANDARD_USER_DOCUMENT_EXERCISE_PATH.into(),
+                initial_sha256: hex::encode(Sha256::digest(
+                    crate::DOCUMENT_INITIAL_TEXT.as_bytes(),
+                )),
+                expected_sha256: hex::encode(Sha256::digest(
+                    crate::DOCUMENT_EXPECTED_TEXT.as_bytes(),
+                )),
+            }),
+        };
+        ImportedMsiGuestRequest::new(
+            "run-one",
+            "11111111-1111-1111-1111-111111111111",
+            "b".repeat(64),
+            "c".repeat(64),
+            scenario,
+            "a".repeat(64),
+            1024,
+            "d".repeat(64),
+        )
+        .unwrap()
+    }
+
+    fn runtime(
+        request: &ImportedMsiGuestRequest,
+        result: &ImportedMsiScenarioResult,
+    ) -> ImportedMsiRuntimeContext {
+        ImportedMsiRuntimeContext {
+            schema_version: crate::IMPORTED_MSI_RUNTIME_CONTEXT_SCHEMA_VERSION.into(),
+            run_id: request.run_id.clone(),
+            sandbox_id: request.sandbox_id.clone(),
+            request_sha256: request.request_sha256.clone(),
+            scenario_sha256: request.scenario_sha256.clone(),
+            process_id: result.launch_process_id,
+            context: crate::StandardUserRuntimeContext {
+                user_sid: "S-1-5-21-1-2-3-4".into(),
+                profile_path: crate::STANDARD_USER_PROFILE_PATH.into(),
+                roaming_app_data: r"C:\Users\AiwStandardUser\AppData\Roaming".into(),
+                local_app_data: r"C:\Users\AiwStandardUser\AppData\Local".into(),
+                administrators_enabled: false,
+            },
+        }
+    }
+
+    fn log_bytes(events: Vec<(&str, serde_json::Value)>) -> (Vec<u8>, String) {
+        let mut log = EvidenceLog::new();
+        for (source, payload) in events {
+            log.append(EvidenceEvent {
+                observed_utc: "2026-09-09T00:00:00Z".into(),
+                kind: IMPORTED_MSI_REGISTRY_EVENT.into(),
+                source: source.into(),
+                payload,
+            })
+            .unwrap();
+        }
+        let root = log.manifest().unwrap().root_hash;
+        let mut bytes = Vec::new();
+        for record in log.records() {
+            serde_json::to_writer(&mut bytes, record).unwrap();
+            bytes.push(b'\n');
+        }
+        (bytes, root)
+    }
+
+    fn evidence(
+        request: &ImportedMsiGuestRequest,
+        result: &ImportedMsiScenarioResult,
+        context: &ImportedMsiRuntimeContext,
+    ) -> ImportedMsiRegistryEvidence {
+        ImportedMsiRegistryEvidence::new(
+            request,
+            result,
+            context,
+            snapshot(),
+            snapshot(),
+            snapshot(),
+        )
+        .unwrap()
+    }
+
     #[test]
     fn validates_all_scopes_and_metadata_only_values() {
         let mut value = snapshot();
@@ -517,6 +619,15 @@ mod tests {
             size_bytes: 4,
             sha256: "a".repeat(64),
         });
+        value.values.push(RegistryValueEntry {
+            root: ApplicationRegistryRoot::UserApplication,
+            view: RegistryView::Registry32,
+            path: String::new(),
+            name: String::new(),
+            value_type: 1,
+            size_bytes: 0,
+            sha256: "b".repeat(64),
+        });
         value.validate().unwrap();
     }
 
@@ -524,6 +635,9 @@ mod tests {
     fn rejects_missing_scope_parent_value_and_bounds() {
         let mut value = snapshot();
         value.keys.pop();
+        assert!(value.validate().is_err());
+        let mut value = snapshot();
+        value.keys[0].path = "bad\u{0001}path".into();
         assert!(value.validate().is_err());
         let mut value = snapshot();
         value.keys.push(RegistryKeyEntry {
@@ -557,5 +671,105 @@ mod tests {
         let diff = diff_registry_snapshots(&before, &after).unwrap();
         assert_eq!(diff.incomplete_scopes.len(), 1);
         assert!(diff.key_changes.is_empty());
+    }
+
+    #[test]
+    fn verifier_binds_current_event_and_rejects_missing_foreign_duplicate_and_tamper() {
+        let request = v5_request();
+        let result = ImportedMsiScenarioResult::succeeded(&request, 0, 42, 0).unwrap();
+        let context = runtime(&request, &result);
+        let payload = serde_json::to_value(evidence(&request, &result, &context)).unwrap();
+        let (bytes, root) = log_bytes(vec![("aiw-guest-agent", payload.clone())]);
+        assert!(
+            verify_msi_registry_evidence(&bytes, &root, &request, &result, Some(&context))
+                .unwrap()
+                .is_some()
+        );
+        let (empty, empty_root) = log_bytes(vec![]);
+        assert!(
+            verify_msi_registry_evidence(&empty, &empty_root, &request, &result, Some(&context))
+                .is_err()
+        );
+        let (foreign, foreign_root) = log_bytes(vec![("other", payload.clone())]);
+        assert!(
+            verify_msi_registry_evidence(
+                &foreign,
+                &foreign_root,
+                &request,
+                &result,
+                Some(&context)
+            )
+            .is_err()
+        );
+        let (duplicate, duplicate_root) = log_bytes(vec![
+            ("aiw-guest-agent", payload.clone()),
+            ("aiw-guest-agent", payload),
+        ]);
+        assert!(
+            verify_msi_registry_evidence(
+                &duplicate,
+                &duplicate_root,
+                &request,
+                &result,
+                Some(&context)
+            )
+            .is_err()
+        );
+        let mut tampered = serde_json::to_value(evidence(&request, &result, &context)).unwrap();
+        tampered["userSid"] = serde_json::json!("S-1-5-21-1-2-3-5");
+        let (tampered_bytes, tampered_root) = log_bytes(vec![("aiw-guest-agent", tampered)]);
+        assert!(
+            verify_msi_registry_evidence(
+                &tampered_bytes,
+                &tampered_root,
+                &request,
+                &result,
+                Some(&context)
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn legacy_v4_event_is_absent_but_present_registry_event_is_rejected() {
+        let mut request = v5_request();
+        request.scenario.schema_version =
+            "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha4".into();
+        request.scenario.profile = "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha4".into();
+        request.scenario_sha256 = request.scenario.canonical_sha256().unwrap();
+        request.request_sha256 = request.request_sha256().unwrap();
+        let result = ImportedMsiScenarioResult::succeeded(&request, 0, 42, 0).unwrap();
+        let mut log = EvidenceLog::new();
+        log.append(EvidenceEvent {
+            observed_utc: "2026-09-09T00:00:00Z".into(),
+            kind: "legacyEvidence".into(),
+            source: "aiw-guest-agent".into(),
+            payload: serde_json::json!({"ok": true}),
+        })
+        .unwrap();
+        let root = log.manifest().unwrap().root_hash;
+        let mut empty = Vec::new();
+        for record in log.records() {
+            serde_json::to_writer(&mut empty, record).unwrap();
+            empty.push(b'\n');
+        }
+        assert!(
+            verify_msi_registry_evidence(&empty, &root, &request, &result, None)
+                .unwrap()
+                .is_none()
+        );
+        let context = runtime(&request, &result);
+        let payload = serde_json::to_value(evidence(&request, &result, &context)).unwrap();
+        let (present, present_root) = log_bytes(vec![("aiw-guest-agent", payload)]);
+        assert!(
+            verify_msi_registry_evidence(
+                &present,
+                &present_root,
+                &request,
+                &result,
+                Some(&context)
+            )
+            .is_err()
+        );
     }
 }
