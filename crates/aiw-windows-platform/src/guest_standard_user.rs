@@ -3,6 +3,7 @@
 //! the disposable Sandbox and never derives a restricted token from the
 //! elevated guest agent.
 
+use std::cell::Cell;
 use std::ffi::{OsStr, c_void};
 use std::mem::size_of;
 use std::os::windows::ffi::OsStrExt;
@@ -128,8 +129,29 @@ unsafe extern "system" {
     fn ProcessIdToSessionId(process_id: u32, session_id: *mut u32) -> i32;
 }
 
+/// Never formatted, cloned or published. The one-use launch secret remains
+/// inside the disposable guest and is erased immediately after logon launch.
+pub(crate) struct GuestPassword(Vec<u16>);
+
+impl GuestPassword {
+    pub(crate) fn as_ptr(&self) -> *const u16 {
+        self.0.as_ptr()
+    }
+}
+
+impl Drop for GuestPassword {
+    fn drop(&mut self) {
+        for unit in &mut self.0 {
+            // SAFETY: each pointer refers to a live, exclusively borrowed unit.
+            unsafe { std::ptr::write_volatile(unit, 0) };
+        }
+        std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 pub(crate) struct StandardUserSession {
     token: OwnedHandle,
+    password: Cell<Option<GuestPassword>>,
     profile: HANDLE,
     environment: *mut c_void,
     context: StandardUserRuntimeContext,
@@ -141,12 +163,8 @@ impl StandardUserSession {
     /// always rejected: accepting it would turn this into account adoption.
     pub(crate) fn establish() -> Result<Self, GuestMsiExecutionError> {
         let mut user_name = wide(STANDARD_USER_ACCOUNT_NAME)?;
-        let mut password = random_password()?;
-        let created = create_user(&mut user_name, &mut password);
-        if let Err(error) = created {
-            password.fill(0);
-            return Err(error);
-        }
+        let mut password = GuestPassword(random_password()?);
+        create_user(&mut user_name, &mut password.0)?;
 
         let mut token = HANDLE::default();
         let domain = wide(".")?;
@@ -156,13 +174,12 @@ impl StandardUserSession {
             LogonUserW(
                 PWSTR(user_name.as_mut_ptr()),
                 PWSTR(domain.as_ptr() as *mut u16),
-                PWSTR(password.as_mut_ptr()),
+                PWSTR(password.0.as_mut_ptr()),
                 2, // LOGON32_LOGON_INTERACTIVE
                 0, // LOGON32_PROVIDER_DEFAULT
                 &mut token,
             )
         };
-        password.fill(0);
         if logged_on == 0 {
             return Err(last_error("LogonUserW"));
         }
@@ -198,6 +215,7 @@ impl StandardUserSession {
         // Own both native allocations before any fallible decoding or path checks.
         let mut session = Self {
             token,
+            password: Cell::new(Some(password)),
             profile: profile_info.profile,
             environment,
             context: StandardUserRuntimeContext {
@@ -225,6 +243,14 @@ impl StandardUserSession {
             .validate()
             .map_err(GuestMsiExecutionError::Process)?;
         Ok(session)
+    }
+
+    pub(crate) fn take_password(&self) -> Result<GuestPassword, GuestMsiExecutionError> {
+        self.password.take().ok_or_else(|| {
+            GuestMsiExecutionError::Process(
+                "standard-user launch credentials have already been consumed".to_owned(),
+            )
+        })
     }
 
     pub(crate) fn token(&self) -> HANDLE {

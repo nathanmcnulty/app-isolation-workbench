@@ -147,6 +147,8 @@ mod windows_platform;
 mod guest_msi;
 
 #[cfg(windows)]
+mod guest_desktop;
+#[cfg(windows)]
 mod guest_document;
 
 #[cfg(windows)]

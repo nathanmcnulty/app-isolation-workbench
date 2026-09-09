@@ -39,12 +39,14 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{BOOL, PCWSTR, PWSTR};
 
-use crate::guest_standard_user::{ScopedPrivileges, StandardUserSession};
+use crate::guest_standard_user::StandardUserSession;
 
 #[link(name = "Advapi32")]
 unsafe extern "system" {
-    fn CreateProcessWithTokenW(
-        token: HANDLE,
+    fn CreateProcessWithLogonW(
+        user_name: PCWSTR,
+        domain: PCWSTR,
+        password: PCWSTR,
         logon_flags: u32,
         application_name: PCWSTR,
         command_line: PWSTR,
@@ -905,14 +907,19 @@ impl GuestProcess {
             ..Default::default()
         };
         let mut information = PROCESS_INFORMATION::default();
-        let _impersonate_privilege = ScopedPrivileges::enable(&["SeImpersonatePrivilege"])?;
-        // SAFETY: the token, explicit user environment, fixed executable and
-        // writable command line remain valid for this call.  A null desktop
-        // requests the inherited guest desktop, whose target-user ACE is added
-        // by CreateProcessWithTokenW.
-        if unsafe {
-            CreateProcessWithTokenW(
-                standard_user.token(),
+        let user_name = wide(aiw_provider_wsb::STANDARD_USER_ACCOUNT_NAME)?;
+        let domain = wide(".")?;
+        crate::guest_desktop::grant_standard_user_desktop_access(
+            &standard_user.context().user_sid,
+        )?;
+        let password = standard_user.take_password()?;
+        // SAFETY: the one-use credentials, loaded profile/environment and fixed
+        // executable buffers remain valid through the synchronous logon call.
+        let created = unsafe {
+            CreateProcessWithLogonW(
+                PCWSTR(user_name.as_ptr()),
+                PCWSTR(domain.as_ptr()),
+                PCWSTR(password.as_ptr()),
                 0,
                 PCWSTR(executable_wide.as_ptr()),
                 PWSTR(command_line_wide.as_mut_ptr()),
@@ -922,12 +929,12 @@ impl GuestProcess {
                 &startup,
                 &mut information,
             )
-        }
-        .0 == 0
-        {
+        };
+        let launch_error = windows::core::Error::from_thread();
+        drop(password);
+        if created.0 == 0 {
             return Err(GuestMsiExecutionError::Process(format!(
-                "CreateProcessWithTokenW failed: {}",
-                windows::core::Error::from_thread()
+                "CreateProcessWithLogonW failed: {launch_error}"
             )));
         }
         let process = unsafe { OwnedHandle::from_raw_handle(information.hProcess.0) };
