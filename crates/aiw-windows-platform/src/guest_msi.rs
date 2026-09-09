@@ -128,6 +128,7 @@ pub struct GuestMsiExecutionObservation {
     pub functional_exercise: Option<FunctionalExercise>,
     pub filesystem_observations: Option<GuestMsiFilesystemObservation>,
     pub standard_user_context: Option<StandardUserRuntimeContext>,
+    pub registry_observations: Option<GuestMsiRegistryObservation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,6 +136,40 @@ pub struct GuestMsiFilesystemObservation {
     pub before_install: aiw_provider_wsb::ApplicationFilesystemSnapshot,
     pub after_install: aiw_provider_wsb::ApplicationFilesystemSnapshot,
     pub after_exercise: aiw_provider_wsb::ApplicationFilesystemSnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuestMsiRegistryObservation {
+    pub before_install: aiw_provider_wsb::ApplicationRegistrySnapshot,
+    pub after_install: aiw_provider_wsb::ApplicationRegistrySnapshot,
+    pub after_exercise: aiw_provider_wsb::ApplicationRegistrySnapshot,
+}
+
+struct GuestCapture {
+    files: aiw_provider_wsb::ApplicationFilesystemSnapshot,
+    registry: Option<aiw_provider_wsb::ApplicationRegistrySnapshot>,
+}
+
+fn capture_application_state(
+    scenario: &CompiledMsiScenario,
+    standard_user: Option<&StandardUserSession>,
+) -> GuestCapture {
+    let files = if let Some(user) = standard_user {
+        crate::guest_filesystem::snapshot_fixed_notepad_files_for_user(
+            user.roaming_app_data(),
+            user.local_app_data(),
+        )
+    } else {
+        crate::snapshot_fixed_notepad_files()
+    };
+    let registry = scenario.requires_registry_observations().then(|| {
+        crate::guest_registry::snapshot_fixed_notepad_registry(
+            standard_user
+                .expect("validated registry profile requires standard user")
+                .context(),
+        )
+    });
+    GuestCapture { files, registry }
 }
 
 #[derive(Debug, Error)]
@@ -285,10 +320,7 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
         stages.run(GuestMsiStage::BeforeInstallCapture, || {
             let standard_user = StandardUserSession::establish()?;
             // Capture issues are observation data, not failed capture attempts.
-            let snapshot = crate::guest_filesystem::snapshot_fixed_notepad_files_for_user(
-                standard_user.roaming_app_data(),
-                standard_user.local_app_data(),
-            );
+            let snapshot = capture_application_state(scenario, Some(&standard_user));
             Ok((Some(standard_user), Some(snapshot)))
         })?
     } else {
@@ -298,7 +330,7 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
                 .requires_application_exercise()
                 .then(|| {
                     stages.run(GuestMsiStage::BeforeInstallCapture, || {
-                        Ok(crate::snapshot_fixed_notepad_files())
+                        Ok(capture_application_state(scenario, None))
                     })
                 })
                 .transpose()?,
@@ -327,14 +359,7 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
         .requires_application_exercise()
         .then(|| {
             stages.run(GuestMsiStage::AfterInstallCapture, || {
-                Ok(if let Some(standard_user) = &standard_user {
-                    crate::guest_filesystem::snapshot_fixed_notepad_files_for_user(
-                        standard_user.roaming_app_data(),
-                        standard_user.local_app_data(),
-                    )
-                } else {
-                    crate::snapshot_fixed_notepad_files()
-                })
+                Ok(capture_application_state(scenario, standard_user.as_ref()))
             })
         })
         .transpose()?;
@@ -444,24 +469,40 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
         application.cleanup()
     };
     let launch_exit_code = stages.finish(complete_process_operation(operation, cleanup))?;
-    let filesystem_observations =
+    let (filesystem_observations, registry_observations) =
         if let Some((before_install, after_install)) = before_install.zip(after_install) {
-            Some(GuestMsiFilesystemObservation {
-                before_install,
-                after_install,
-                after_exercise: stages.run(GuestMsiStage::AfterExerciseCapture, || {
-                    Ok(if let Some(standard_user) = &standard_user {
-                        crate::guest_filesystem::snapshot_fixed_notepad_files_for_user(
-                            standard_user.roaming_app_data(),
-                            standard_user.local_app_data(),
-                        )
-                    } else {
-                        crate::snapshot_fixed_notepad_files()
+            let after_exercise = stages.run(GuestMsiStage::AfterExerciseCapture, || {
+                Ok(capture_application_state(scenario, standard_user.as_ref()))
+            })?;
+            let registry = match (
+                before_install.registry,
+                after_install.registry,
+                after_exercise.registry,
+            ) {
+                (Some(before_install), Some(after_install), Some(after_exercise)) => {
+                    Some(GuestMsiRegistryObservation {
+                        before_install,
+                        after_install,
+                        after_exercise,
                     })
-                })?,
-            })
+                }
+                (None, None, None) if !scenario.requires_registry_observations() => None,
+                _ => {
+                    return Err(GuestMsiExecutionError::Process(
+                        "missing approved registry capture".to_owned(),
+                    ));
+                }
+            };
+            (
+                Some(GuestMsiFilesystemObservation {
+                    before_install: before_install.files,
+                    after_install: after_install.files,
+                    after_exercise: after_exercise.files,
+                }),
+                registry,
+            )
         } else {
-            None
+            (None, None)
         };
     Ok(GuestMsiExecutionObservation {
         install_exit_code,
@@ -470,6 +511,7 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
         application_token,
         functional_exercise,
         filesystem_observations,
+        registry_observations,
         standard_user_context: standard_user.as_ref().map(|value| value.context().clone()),
     })
 }
