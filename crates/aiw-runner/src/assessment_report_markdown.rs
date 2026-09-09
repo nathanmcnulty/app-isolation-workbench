@@ -53,6 +53,9 @@ impl WsbMsiAssessmentReport {
         if let Some(token) = &self.application_token {
             out.push_str(&format!("\nLaunched guest process: PID {}, {:?} integrity, elevated {}, AppContainer {}. This root-process token does not satisfy independent host or descendant checks.\n", token.token.process_id, token.token.integrity.level, token.token.is_elevated, token.token.is_app_container));
         }
+        if let Some(runtime) = &self.standard_user_context {
+            out.push_str(&format!("\nStandard-user runtime: **AiwStandardUser**, SID {}. Profile: {}. Roaming application data: {}. Local application data: {}. Installation used the elevated guest agent; the application used the separately verified standard-user token. These are guest observations, not independent boundary or descendant attestation.\n", cell(&runtime.context.user_sid), cell(&runtime.context.profile_path), cell(&runtime.context.roaming_app_data), cell(&runtime.context.local_app_data)));
+        }
         if let Some(progress) = &self.stage_progress {
             append_stages(&mut out, progress);
         }

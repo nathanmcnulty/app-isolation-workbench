@@ -114,7 +114,7 @@ fn live_imported_msi_install_observe_close_and_cleanup() {
     assert!(result.scenario.successful());
     assert_eq!(
         result.schema_version,
-        "aiw.dev/wsb-imported-msi-execution/v0alpha3"
+        "aiw.dev/wsb-imported-msi-execution/v0alpha4"
     );
     let token = result
         .application_token
@@ -122,6 +122,15 @@ fn live_imported_msi_install_observe_close_and_cleanup() {
         .expect("approved profile requires application token");
     assert_eq!(token.token.process_id, result.scenario.launch_process_id);
     assert_eq!(token.request_sha256, result.request_sha256);
+    assert!(!token.token.is_elevated);
+    assert_eq!(token.token.integrity.rid, 8192);
+    let runtime = result
+        .standard_user_context
+        .as_ref()
+        .expect("standard-user context required");
+    assert_eq!(runtime.context.user_sid, token.token.user_sid);
+    assert_eq!(runtime.context.profile_path, r"C:\Users\AiwStandardUser");
+    assert!(!runtime.context.administrators_enabled);
     let behavior = result
         .behavior
         .as_ref()
@@ -159,7 +168,7 @@ fn live_imported_msi_install_observe_close_and_cleanup() {
     if report.download_metadata_policy.is_some() {
         assert_eq!(
             report.schema_version,
-            "aiw.dev/wsb-msi-assessment-report/v0alpha4"
+            "aiw.dev/wsb-msi-assessment-report/v0alpha5"
         );
         assert!(
             report
@@ -167,6 +176,8 @@ fn live_imported_msi_install_observe_close_and_cleanup() {
                 .contains("does not test the original download")
         );
     }
+    assert!(report.standard_user_context.is_some());
+    assert!(report.to_markdown().contains("Standard-user runtime"));
     let stages = report
         .stage_progress
         .as_ref()

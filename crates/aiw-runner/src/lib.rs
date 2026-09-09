@@ -109,6 +109,8 @@ pub struct WsbGoldenProbeExecution {
     application_token: Option<aiw_provider_wsb::ImportedMsiApplicationToken>,
     #[serde(skip)]
     behavior: Option<aiw_provider_wsb::ImportedMsiBehaviorEvidence>,
+    #[serde(skip)]
+    standard_user_context: Option<aiw_provider_wsb::ImportedMsiRuntimeContext>,
 }
 
 /// Common receipt-correlated lifecycle result. Application observations remain
@@ -132,6 +134,8 @@ pub struct WsbImportedMsiExecution {
     pub application_token: Option<aiw_provider_wsb::ImportedMsiApplicationToken>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub behavior: Option<aiw_provider_wsb::ImportedMsiBehaviorEvidence>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub standard_user_context: Option<aiw_provider_wsb::ImportedMsiRuntimeContext>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -627,6 +631,14 @@ pub(crate) fn execute_wsb_golden_probe(
                     &observed,
                 )
                 .map_err(RunnerError::Receipt)?;
+                let standard_user_context = aiw_provider_wsb::verify_msi_runtime_context(
+                    &evidence_bytes,
+                    &verification.evidence_root_hash,
+                    expected,
+                    &observed,
+                    token.as_ref(),
+                )
+                .map_err(RunnerError::Receipt)?;
                 let behavior = aiw_provider_wsb::verify_imported_msi_behavior(
                     &evidence_bytes,
                     &verification.evidence_root_hash,
@@ -648,12 +660,12 @@ pub(crate) fn execute_wsb_golden_probe(
                         "successful result has failed stage progress".to_owned(),
                     ));
                 }
-                (Some(observed), token, behavior)
+                (Some(observed), token, behavior, standard_user_context)
             }
-            ExecutionGuestRequest::Golden(_) => (None, None, None),
+            ExecutionGuestRequest::Golden(_) => (None, None, None, None),
         })
     })();
-    let (scenario, application_token, behavior) = match scenario {
+    let (scenario, application_token, behavior, standard_user_context) = match scenario {
         Ok(value) => value,
         Err(error) => {
             record_terminal_failure(layout, error.clone())?;
@@ -685,6 +697,7 @@ pub(crate) fn execute_wsb_golden_probe(
         scenario,
         application_token,
         behavior,
+        standard_user_context,
     })
 }
 
@@ -808,7 +821,9 @@ fn start_approved_windows_sandbox_inner(
     if request.msi.is_some() {
         let scenario = result.scenario.ok_or(RunnerError::Drift)?;
         Ok(WsbApprovedExecution::ImportedMsi(WsbImportedMsiExecution {
-            schema_version: if result.behavior.is_some() {
+            schema_version: if result.standard_user_context.is_some() {
+                "aiw.dev/wsb-imported-msi-execution/v0alpha4"
+            } else if result.behavior.is_some() {
                 "aiw.dev/wsb-imported-msi-execution/v0alpha3"
             } else if result.application_token.is_some() {
                 "aiw.dev/wsb-imported-msi-execution/v0alpha2"
@@ -829,6 +844,7 @@ fn start_approved_windows_sandbox_inner(
             scenario,
             application_token: result.application_token,
             behavior: result.behavior,
+            standard_user_context: result.standard_user_context,
         }))
     } else {
         Ok(WsbApprovedExecution::GoldenProbe(result))
@@ -4286,9 +4302,32 @@ mod tests {
                 observed_utc: "guest-time-not-trusted".to_owned(),
                 kind: aiw_provider_wsb::MSI_APPLICATION_TOKEN_EVENT.to_owned(),
                 source: "aiw-guest-agent".to_owned(),
-                payload: serde_json::to_value(token).unwrap(),
+                payload: serde_json::to_value(&token).unwrap(),
             })
             .unwrap();
+        if request.scenario.requires_standard_user() {
+            let runtime = aiw_provider_wsb::ImportedMsiRuntimeContext::new(
+                &request,
+                &valid_result,
+                &token,
+                aiw_provider_wsb::StandardUserRuntimeContext {
+                    user_sid: token.token.user_sid.clone(),
+                    profile_path: r"C:\Users\AiwStandardUser".to_owned(),
+                    roaming_app_data: r"C:\Users\AiwStandardUser\AppData\Roaming".to_owned(),
+                    local_app_data: r"C:\Users\AiwStandardUser\AppData\Local".to_owned(),
+                    administrators_enabled: false,
+                },
+            )
+            .unwrap();
+            evidence
+                .append(aiw_evidence::EvidenceEvent {
+                    observed_utc: "guest-time-not-trusted".to_owned(),
+                    kind: aiw_provider_wsb::IMPORTED_MSI_RUNTIME_CONTEXT_EVENT.to_owned(),
+                    source: "aiw-guest-agent".to_owned(),
+                    payload: serde_json::to_value(runtime).unwrap(),
+                })
+                .unwrap();
+        }
         if include_behavior && request.scenario.requires_application_exercise() {
             let empty = aiw_provider_wsb::ApplicationFilesystemSnapshot {
                 entries: vec![],

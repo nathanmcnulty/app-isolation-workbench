@@ -18,6 +18,8 @@ pub struct WsbMsiAssessmentReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub application_token: Option<aiw_provider_wsb::ImportedMsiApplicationToken>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub standard_user_context: Option<aiw_provider_wsb::ImportedMsiRuntimeContext>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub behavior: Option<aiw_provider_wsb::ImportedMsiBehaviorEvidence>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stage_progress: Option<aiw_provider_wsb::ImportedMsiStageProgress>,
@@ -399,6 +401,14 @@ pub fn report_windows_sandbox_msi_run(
         &scenario,
     )
     .map_err(RunnerError::Receipt)?;
+    let standard_user_context = aiw_provider_wsb::verify_msi_runtime_context(
+        &evidence_bytes,
+        &verified.evidence_root_hash,
+        &request,
+        &scenario,
+        application_token.as_ref(),
+    )
+    .map_err(RunnerError::Receipt)?;
     let behavior = aiw_provider_wsb::verify_imported_msi_behavior(
         &evidence_bytes,
         &verified.evidence_root_hash,
@@ -437,7 +447,9 @@ pub fn report_windows_sandbox_msi_run(
     revalidate()?;
     Ok(WsbMsiRunReport::CompletedAssessment(Box::new(
         WsbMsiAssessmentReport {
-            schema_version: if msi.import_receipt.download_metadata_archive.is_some() {
+            schema_version: if standard_user_context.is_some() {
+                "aiw.dev/wsb-msi-assessment-report/v0alpha5"
+            } else if msi.import_receipt.download_metadata_archive.is_some() {
                 "aiw.dev/wsb-msi-assessment-report/v0alpha4"
             } else if stage_progress.is_some() {
                 "aiw.dev/wsb-msi-assessment-report/v0alpha3"
@@ -467,6 +479,7 @@ pub fn report_windows_sandbox_msi_run(
                 .collect(),
             scenario,
             application_token,
+            standard_user_context,
             behavior,
             stage_progress,
             installation_file_changes,

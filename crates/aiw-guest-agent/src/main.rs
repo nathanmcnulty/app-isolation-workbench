@@ -242,6 +242,19 @@ fn execute_imported_msi_request(request: &ImportedMsiGuestRequest) -> Result<()>
         source: "aiw-guest-agent".to_owned(),
         payload: serde_json::to_value(&token)?,
     })?;
+    if let Some(context) = observation.standard_user_context {
+        let runtime =
+            aiw_provider_wsb::ImportedMsiRuntimeContext::new(request, &result, &token, context)
+                .map_err(anyhow::Error::msg)?;
+        evidence.append(EvidenceEvent {
+            observed_utc: "guest-agent-time-not-trusted".to_owned(),
+            kind: aiw_provider_wsb::IMPORTED_MSI_RUNTIME_CONTEXT_EVENT.to_owned(),
+            source: "aiw-guest-agent".to_owned(),
+            payload: serde_json::to_value(&runtime)?,
+        })?;
+    } else if request.scenario.requires_standard_user() {
+        bail!("guest did not produce the approved standard-user runtime context");
+    }
     match (
         observation.functional_exercise,
         observation.filesystem_observations,
