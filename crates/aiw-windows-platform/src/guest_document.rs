@@ -103,7 +103,26 @@ impl FixedGuestDocument {
     /// profile root.  This remains crate-private so callers cannot turn the
     /// document primitive into a general path writer.
     pub(crate) fn prepare_at(root: &Path) -> Result<Self, String> {
-        Self::prepare_with_ancestors(held_directory_chain(root)?)
+        if root != Path::new(crate::guest_standard_user::STANDARD_USER_DOCUMENT_ROOT) {
+            return Err("standard-user document root is not the fixed profile path".to_owned());
+        }
+        let parent = root
+            .parent()
+            .ok_or_else(|| "fixed AIW parent is absent".to_owned())?;
+        Self::prepare_with_fresh_aiw(held_directory_chain(parent)?)
+    }
+
+    fn prepare_with_fresh_aiw(mut ancestors: Vec<File>) -> Result<Self, String> {
+        let parent = ancestors
+            .last()
+            .ok_or_else(|| "fixed AIW parent was not retained".to_owned())?;
+        // A fresh profile has no AIW directory. Create only this exact child,
+        // relative to its held ordinary Local directory while impersonating the user.
+        // Existing entries are rejected, including an installer-created entry.
+        let aiw = create_relative_directory(parent, "AIW", FILE_SHARE_READ.0)
+            .map_err(|error| relative_error("create fresh standard-user AIW directory", error))?;
+        ancestors.push(aiw);
+        Self::prepare_with_ancestors(ancestors)
     }
 
     pub(crate) fn observe_expected(&self) -> Result<Option<String>, String> {
@@ -652,6 +671,39 @@ mod tests {
             .expect("Scenario should remain bound after document replacement");
         drop(document);
         std::fs::remove_dir_all(root).expect("fixture root should be removed");
+    }
+
+    #[test]
+    fn fresh_profile_root_is_created_once_and_retained_during_save() {
+        let root = fixture_root();
+        std::fs::create_dir(&root).unwrap();
+        let document =
+            FixedGuestDocument::prepare_with_fresh_aiw(vec![open_fixture_root(&root).unwrap()])
+                .unwrap();
+        let path = root.join("AIW").join(SCENARIO_LEAF).join(DOCUMENT_LEAF);
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            DOCUMENT_INITIAL_TEXT.as_bytes()
+        );
+        let replacement = path.with_extension("replacement");
+        std::fs::write(&replacement, DOCUMENT_EXPECTED_TEXT).unwrap();
+        std::fs::rename(&replacement, &path).unwrap();
+        assert_eq!(
+            document.observe_expected().unwrap(),
+            Some(sha256(DOCUMENT_EXPECTED_TEXT.as_bytes()))
+        );
+        assert!(std::fs::rename(root.join("AIW"), root.join("moved")).is_err());
+        drop(document);
+        let error =
+            FixedGuestDocument::prepare_with_fresh_aiw(vec![open_fixture_root(&root).unwrap()])
+                .err()
+                .unwrap();
+        assert!(error.contains("already exists"), "{error}");
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            DOCUMENT_EXPECTED_TEXT.as_bytes()
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

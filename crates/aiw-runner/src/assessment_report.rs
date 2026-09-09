@@ -1,5 +1,36 @@
 use super::*;
 
+#[cfg(windows)]
+fn verify_historical_scenario(
+    project: &Project,
+    recorded: &aiw_provider_wsb::CompiledMsiScenario,
+) -> Result<(), RunnerError> {
+    let compiled =
+        aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(project, &recorded.scenario_id)
+            .map_err(|e| RunnerError::Preparation(e.to_string()))?;
+    // Legacy snapshots keep their original semantics; validate against today's
+    // identical action sequence while preserving their explicit evidence version.
+    let mut historical = compiled;
+    historical.schema_version = recorded.schema_version.clone();
+    historical.profile = recorded.profile.clone();
+    if !historical.requires_application_exercise() {
+        historical.document_exercise = None;
+    } else if !historical.requires_standard_user() {
+        historical
+            .document_exercise
+            .as_mut()
+            .expect("compiler includes fixed exercise")
+            .document_path = aiw_provider_wsb::DOCUMENT_EXERCISE_PATH.to_owned();
+    }
+    historical
+        .validate()
+        .map_err(|e| RunnerError::Preparation(e.to_string()))?;
+    if &historical != recorded {
+        return Err(RunnerError::ApprovalBinding);
+    }
+    Ok(())
+}
+
 /// Reverified, historical candidate observations. This is not a comparison or
 /// a recommendation and does not claim the provider is currently absent.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -236,25 +267,7 @@ pub fn report_windows_sandbox_msi_run(
         .msi
         .as_ref()
         .ok_or(RunnerError::ApprovalBinding)?;
-    let compiled = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
-        project,
-        &msi.scenario.scenario_id,
-    )
-    .map_err(|e| RunnerError::Preparation(e.to_string()))?;
-    // Legacy snapshots keep their original semantics; validate against today's
-    // identical action sequence while preserving their explicit evidence version.
-    let mut historical = compiled;
-    historical.schema_version = msi.scenario.schema_version.clone();
-    historical.profile = msi.scenario.profile.clone();
-    if !historical.requires_application_exercise() {
-        historical.document_exercise = None;
-    }
-    historical
-        .validate()
-        .map_err(|e| RunnerError::Preparation(e.to_string()))?;
-    if historical != msi.scenario {
-        return Err(RunnerError::ApprovalBinding);
-    }
+    verify_historical_scenario(project, &msi.scenario)?;
     let msi_file = held
         .reopen_tools_file_readonly("application.msi")
         .map_err(|_| RunnerError::Drift)?;
@@ -535,6 +548,42 @@ fn read_unverified_diagnostic(path: &Path) -> (UnverifiedGuestDiagnostic, Option
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn historical_profiles_preserve_fixed_paths_and_reject_changed_semantics() {
+        let project: Project = serde_yaml::from_str(include_str!(
+            "../../../examples/notepad-plus-plus-msi.aiw.yaml"
+        ))
+        .unwrap();
+        let current = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
+            &project,
+            "install-launch-close",
+        )
+        .unwrap();
+        for version in 1..=4 {
+            let mut recorded = current.clone();
+            recorded.schema_version =
+                format!("aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha{version}");
+            recorded.profile =
+                format!("aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha{version}");
+            if version < 3 {
+                recorded.document_exercise = None;
+            } else if version == 3 {
+                recorded.document_exercise.as_mut().unwrap().document_path =
+                    aiw_provider_wsb::DOCUMENT_EXERCISE_PATH.to_owned();
+            }
+            let before = recorded.canonical_sha256().unwrap();
+            verify_historical_scenario(&project, &recorded).unwrap();
+            assert_eq!(recorded.canonical_sha256().unwrap(), before);
+            let mut changed = recorded.clone();
+            changed.application_sha256 = "0".repeat(64);
+            assert!(verify_historical_scenario(&project, &changed).is_err());
+            if let Some(exercise) = recorded.document_exercise.as_mut() {
+                exercise.document_path = r"C:\foreign\document.txt".to_owned();
+                assert!(verify_historical_scenario(&project, &recorded).is_err());
+            }
+        }
+    }
 
     #[test]
     fn unverified_diagnostic_is_bounded_ordinary_and_held_readonly() {
