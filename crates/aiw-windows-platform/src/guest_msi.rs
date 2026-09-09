@@ -29,8 +29,8 @@ use windows::Win32::System::JobObjects::{
 };
 use windows::Win32::System::Threading::{
     CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, GetCurrentThreadId,
-    GetExitCodeProcess, PROCESS_INFORMATION, ResumeThread, STARTUPINFOW, TerminateProcess,
-    WaitForSingleObject,
+    GetExitCodeProcess, GetExitCodeThread, PROCESS_INFORMATION, ResumeThread, STARTUPINFOW,
+    TerminateProcess, WaitForSingleObject,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumChildWindows, EnumWindows, GetClassNameW, GetWindowThreadProcessId, IsWindowVisible,
@@ -878,6 +878,7 @@ struct GuestProcess {
     process: OwnedHandle,
     process_id: u32,
     initial_thread_id: u32,
+    initial_thread: OwnedHandle,
 }
 
 impl GuestProcess {
@@ -941,18 +942,19 @@ impl GuestProcess {
                 "AssignProcessToJobObject failed: {error}; cleanup={cleanup:?}"
             )));
         }
-        if unsafe { ResumeThread(raw_handle(&thread)) } == u32::MAX {
+        let previous_suspend_count = unsafe { ResumeThread(raw_handle(&thread)) };
+        if previous_suspend_count != 1 {
             let cleanup = job.terminate_and_verify_empty();
             return Err(GuestMsiExecutionError::Process(format!(
-                "ResumeThread failed; cleanup={cleanup:?}"
+                "ResumeThread returned unexpected suspend count {previous_suspend_count}; cleanup={cleanup:?}"
             )));
         }
-        drop(thread);
         Ok(Self {
             job,
             process,
             process_id: information.dwProcessId,
             initial_thread_id: information.dwThreadId,
+            initial_thread: thread,
         })
     }
 
@@ -1001,18 +1003,19 @@ impl GuestProcess {
                 "AssignProcessToJobObject failed: {error}; cleanup={cleanup:?}"
             )));
         }
-        if unsafe { ResumeThread(raw_handle(&thread)) } == u32::MAX {
+        let previous_suspend_count = unsafe { ResumeThread(raw_handle(&thread)) };
+        if previous_suspend_count != 1 {
             let cleanup = job.terminate_and_verify_empty();
             return Err(GuestMsiExecutionError::Process(format!(
-                "ResumeThread failed; cleanup={cleanup:?}"
+                "ResumeThread returned unexpected suspend count {previous_suspend_count}; cleanup={cleanup:?}"
             )));
         }
-        drop(thread);
         Ok(Self {
             job,
             process,
             process_id: information.dwProcessId,
             initial_thread_id: information.dwThreadId,
+            initial_thread: thread,
         })
     }
 
@@ -1096,11 +1099,18 @@ impl GuestProcess {
                 }
             }
             if Instant::now() >= deadline {
+                unsafe { SetLastError(ERROR_SUCCESS) };
+                let input_idle = unsafe { WaitForInputIdle(raw_handle(&self.process), 0) };
+                let input_idle_error = unsafe { GetLastError() }.0;
+                let mut thread_exit = 0;
+                let thread_query = unsafe {
+                    GetExitCodeThread(raw_handle(&self.initial_thread), &mut thread_exit)
+                };
                 return Err(GuestMsiExecutionError::Process(format!(
-                    "Notepad++ window was not observed before timeout; pid={}, windows={}, inputIdle={}, station={}, agentDesktop={}, childDesktop={}",
+                    "Notepad++ window was not observed before timeout; pid={}, windows={}, inputIdle={input_idle}/{input_idle_error}, threadExit={thread_exit}/{}, station={}, agentDesktop={}, childDesktop={}",
                     self.process_id,
                     context.matching_windows,
-                    unsafe { WaitForInputIdle(raw_handle(&self.process), 0) },
+                    thread_query.is_ok(),
                     user_object_name(unsafe { GetProcessWindowStation() }),
                     user_object_name(unsafe { GetThreadDesktop(GetCurrentThreadId()) }),
                     user_object_name(unsafe { GetThreadDesktop(self.initial_thread_id) }),

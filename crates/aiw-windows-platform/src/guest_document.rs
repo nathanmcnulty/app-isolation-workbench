@@ -327,12 +327,10 @@ fn held_directory_chain_with_sharing(path: &Path, share_access: u32) -> Result<V
     let mut current = open_absolute_c_root(share_access)?;
     let mut ancestors = Vec::new();
     ancestors.push(current);
-    for (index, component) in components.iter().enumerate() {
-        let extra_access = if index + 1 == components.len() {
-            FILE_ADD_SUBDIRECTORY.0 | FILE_ADD_FILE.0
-        } else {
-            0
-        };
+    for component in &components {
+        // Retained ancestors need no write access for relative child creation.
+        // A write-capable handle would reject readers that do not share writes.
+        let extra_access = 0;
         current = open_relative_directory(
             ancestors.last().expect("C root was retained"),
             component,
@@ -731,13 +729,17 @@ mod tests {
         let strict = open_fixture_root(&root).unwrap();
         assert!(open_application_parent().is_err());
         drop(strict);
-        let shared = OpenOptions::new()
+        let shared =
+            held_directory_chain_with_sharing(&root, FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0)
+                .unwrap();
+        let document = FixedGuestDocument::prepare_with_fresh_aiw(shared).unwrap();
+        let read_only_consumer = OpenOptions::new()
             .read(true)
-            .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0)
+            .share_mode(FILE_SHARE_READ.0)
             .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
             .open(&root)
             .unwrap();
-        let document = FixedGuestDocument::prepare_with_fresh_aiw(vec![shared]).unwrap();
+        drop(read_only_consumer);
         let application_parent = open_application_parent().unwrap();
         std::fs::create_dir(root.join("Notepad++")).unwrap();
         assert!(std::fs::rename(&root, root.with_extension("moved")).is_err());
