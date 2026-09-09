@@ -9,7 +9,7 @@ use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsRawHandle, BorrowedHandle, FromRawHandle, OwnedHandle};
 use std::path::Path;
 
-use windows::Win32::Foundation::{GetLastError, HANDLE, HLOCAL, LocalFree};
+use windows::Win32::Foundation::{GetLastError, HANDLE, HLOCAL, LocalFree, SetLastError};
 use windows::Win32::Security::Authorization::ConvertSidToStringSidW;
 use windows::Win32::Security::{
     GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, PSID, TOKEN_ELEVATION,
@@ -320,6 +320,9 @@ impl ScopedPrivileges {
             let requested = TokenPrivilegesOne { count: 1, privilege: LuidAndAttributes { luid, attributes: SE_PRIVILEGE_ENABLED } };
             let mut prior = TokenPrivilegesOne { count: 0, privilege: LuidAndAttributes { luid, attributes: 0 } };
             let mut returned = 0;
+            // AdjustTokenPrivileges may succeed while reporting partial assignment
+            // through last-error, so clear stale state immediately before it.
+            unsafe { SetLastError(windows::Win32::Foundation::WIN32_ERROR(0)) };
             if unsafe { AdjustTokenPrivileges(raw_handle(&token), 0, &requested, size_of::<TokenPrivilegesOne>() as u32, &mut prior, &mut returned) } == 0 || unsafe { GetLastError() }.0 == ERROR_NOT_ALL_ASSIGNED { return Err(last_error("AdjustTokenPrivileges enable")); }
             if returned != size_of::<TokenPrivilegesOne>() as u32 || prior.count != 1 { return Err(GuestMsiExecutionError::Process("AdjustTokenPrivileges returned malformed prior state".to_owned())); }
             previous.push(prior);
@@ -332,6 +335,7 @@ impl Drop for ScopedPrivileges {
     fn drop(&mut self) {
         for prior in self.previous.iter().rev() {
             // SAFETY: each value is the exact prior state returned for this token.
+            unsafe { SetLastError(windows::Win32::Foundation::WIN32_ERROR(0)) };
             let ok = unsafe { AdjustTokenPrivileges(raw_handle(&self.token), 0, prior, 0, std::ptr::null_mut(), std::ptr::null_mut()) } != 0;
             if !ok || unsafe { GetLastError() }.0 == ERROR_NOT_ALL_ASSIGNED { std::process::abort(); }
         }
