@@ -84,7 +84,7 @@ impl WsbMsiAssessmentReport {
             "Application exercise",
             self.exercise_registry_changes.as_ref(),
         );
-        out.push_str("\nThese changes identify files to investigate for packaging. They do not establish a complete package recipe or dependencies outside the captured roots.\n\n## Unresolved assessment evidence\n\n");
+        out.push_str("\nThese changes identify files and settings to investigate for packaging. They do not establish a complete package recipe or dependencies outside the captured roots.\n\n## Unresolved assessment evidence\n\n");
         for gap in &self.missing_evidence {
             out.push_str(&format!("- {}\n", gap_label(*gap)));
         }
@@ -229,39 +229,40 @@ fn append_registry_changes(out: &mut String, title: &str, changes: Option<&Regis
         out.push_str("Not measured by this scenario version.\n");
         return;
     };
-    let added = changes
-        .key_changes
-        .iter()
-        .filter(|change| change.kind == RegistryDiffKind::Added)
-        .count()
-        + changes
-            .value_changes
+    for (label, kinds) in [
+        (
+            "Keys",
+            changes
+                .key_changes
+                .iter()
+                .map(|change| change.kind)
+                .collect::<Vec<_>>(),
+        ),
+        (
+            "Values",
+            changes
+                .value_changes
+                .iter()
+                .map(|change| change.kind)
+                .collect::<Vec<_>>(),
+        ),
+    ] {
+        let added = kinds
             .iter()
-            .filter(|change| change.kind == RegistryDiffKind::Added)
+            .filter(|kind| **kind == RegistryDiffKind::Added)
             .count();
-    let removed = changes
-        .key_changes
-        .iter()
-        .filter(|change| change.kind == RegistryDiffKind::Removed)
-        .count()
-        + changes
-            .value_changes
+        let modified = kinds
             .iter()
-            .filter(|change| change.kind == RegistryDiffKind::Removed)
+            .filter(|kind| **kind == RegistryDiffKind::Modified)
             .count();
-    let modified = changes
-        .key_changes
-        .iter()
-        .filter(|change| change.kind == RegistryDiffKind::Modified)
-        .count()
-        + changes
-            .value_changes
+        let removed = kinds
             .iter()
-            .filter(|change| change.kind == RegistryDiffKind::Modified)
+            .filter(|kind| **kind == RegistryDiffKind::Removed)
             .count();
-    out.push_str(&format!(
-        "{added} added, {modified} modified, {removed} removed in complete scopes.\n"
-    ));
+        out.push_str(&format!(
+            "{label}: {added} added, {modified} modified, {removed} removed in complete scopes.\n\n"
+        ));
+    }
     for scope in &changes.incomplete_scopes {
         out.push_str(&format!(
             "\n**Incomplete capture: {}.** Changes for this scope are omitted.\n",
@@ -289,7 +290,7 @@ fn append_registry_changes(out: &mut String, title: &str, changes: Option<&Regis
         }
     }
     if !changes.value_changes.is_empty() {
-        out.push_str("\nValue changes:\n\n| Change | Scope | Relative key | Value name | Type | Size | SHA-256 |\n|---|---|---|---|---:|---:|---|\n");
+        out.push_str("\nValue changes:\n\n| Change | Scope | Relative key | Value name | Type | Bytes | SHA-256 |\n|---|---|---|---|---:|---:|---|\n");
         for change in changes.value_changes.iter().take(100) {
             if let Some(value) = change.after.as_ref().or(change.before.as_ref()) {
                 out.push_str(&format!(

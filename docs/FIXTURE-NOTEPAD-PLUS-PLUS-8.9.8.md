@@ -169,3 +169,23 @@ Both retained JSON/Markdown reports independently verify as v0alpha5. Each recor
 Six preceding development attempts exposed worker setup/driver issues, not established application incompatibility; all cleaned up their Sandbox sessions. Fixes included creating the fresh user's document root, allowing ordinary profile file sharing while preventing Scenario-directory renames, and checking the physical process session rather than trusting only TokenSessionId. The final launcher uses one-use credentials with CreateProcessWithLogonW and bounded guest-only window-station/desktop grants. The child remains suspended until identity/session validation and job assignment complete. Account, profile and GUI grants live only for the disposable worker's lifetime.
 
 The historical elevated v0alpha3 run still exports its original v0alpha4 report unchanged. Focused tests, independent native review, workspace Clippy, Rust 1.85 all-target checking, formatting and governance validation passed. All installer/application execution remained inside Windows Sandbox. No hosted CI runs were scheduled. Registry/dependency evidence, a second application/control fixture, comparison eligibility and reusable isolated launch remain future work.
+
+## Scoped registry reporting benchmark — 2026-09-09
+
+One fresh v0alpha5 Windows Sandbox scenario passed in 121.18 seconds with all nine stages passed, a verified non-elevated Medium-integrity application token, matching saved-document bytes, exact-session cleanup and no remaining Sandbox sessions. The approved guest collected registry metadata before installation, after installation and after the document workflow. Every phase classified all four fixed machine/user application scopes across the 64-bit and 32-bit views, with no capture issues.
+
+Before installation, all four scopes were absent. Installation added the 64-bit `HKLM\Software\Notepad++` key and its `ContextMenuFolder` value (numeric type 1, 80 bytes, SHA-256 `5b15f2810ef2ebe44c470ddfa39f9e9e18edfb240ecfe465bba45fc642cc4ea7`). The other three scopes remained absent. After the document workflow, these scoped registry observations were unchanged. This records a setting to investigate, not proof that it is a required dependency. Raw registry value contents were not exported.
+
+The v0alpha6 report also retained the existing 215 installation file additions and seven use-time additions, with complete scoped file roots. The report remains `insufficientEvidence` for an overall isolation verdict. MSI product registration, other registry locations, runtime access tracing and application-level boundary comparison are outside this capture.
+
+- Workspace: `%TEMP%\aiw-msi-live-19980-1788938821273910600`
+- Exports: `%TEMP%\aiw-msi-live-19980-1788938821273910600.report.json` and `.report.md`
+- MSI SHA-256: `c29cbe1a9aaef322cc3f316ceeabe8a8071b18441a5e3c3ec348069739e59e80`
+- Static guest SHA-256: `608c4384d31c6d58deec0d7d6b8ffc29200ca4eacc43929abc325a575a3dd0c2`
+- Scenario SHA-256: `f0bea7952afe9c1e98a7918a289f7ad09418e541bf05db4ab49bf341e64dc117`
+- Sandbox ID: `b40a89fd-bd97-672d-cb57-2afe6fb1f650`
+- Request SHA-256: `113bbe6d5d47131623bb85341bfc7da5ce7edac0e27fe701d59b9a94489ee780`
+- Receipt SHA-256: `034547edb761ea1ad9129d040293c84dca087eb152b19d78a61eb46b74b19a80`
+- Evidence root: `4680074efad31ceaa9a54914933e94c08b0672ec89a3ec6a8359e2bf546a950b`
+
+The new retained report passed repeatability, wrong-binding, unexpected-output and unchanged-workspace-inventory checks. The preceding elevated v3 and standard-user v4 fixtures still verify to JSON equal to their archived reports, with their original report versions and no invented registry observations. Provider tests cover mandatory/foreign/duplicate/tampered events, legacy absence, complete and incomplete diffs, default values, case-insensitive duplicates and bounds. Runner tests reject missing or tampered registry evidence after exact cleanup. Native review and local validation passed; this slice used one live Sandbox run and no hosted CI. All application/installer execution stayed inside the disposable worker.

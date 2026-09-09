@@ -117,6 +117,7 @@ try {
         'msi-scenario-compilation',
         'msi-application-token',
         'msi-runtime-context',
+        'msi-registry',
         'wsb-msi-assessment-report',
         'application-file-authority',
         'application-file-import-receipt',

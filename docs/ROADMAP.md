@@ -1,6 +1,6 @@
 # Roadmap
 
-Revised 2026-09-08 against the implemented runner and current Microsoft documentation. This replaces the former W0-W5/S0-S4 ordering; those labels remain historical references, not release dependencies.
+Revised 2026-09-09 against the implemented runner and current Microsoft documentation. This replaces the former W0-W5/S0-S4 ordering; those labels remain historical references, not release dependencies.
 
 The goal is a free community tool that answers **which tested application functions work under which measured isolation configuration**, helps an administrator adapt the application, and produces a launch profile or package that passes the same tests. Workbench evolves into Studio when authoring is useful; this is one product.
 
@@ -14,7 +14,7 @@ Deliver **Assess -> Adapt -> Package -> Validate** for a narrow application clas
 - Receipt-bound passed/failed/not-reached stages for completed and caught-failure scenarios; JSON/Markdown retained reports that reject drift and preserve missing evidence.
 - Portable comparison/evidence primitives and an MXC planning adapter. These are not a live baseline/candidate comparison or an executable MXC provider.
 
-The [fixture record](FIXTURE-NOTEPAD-PLUS-PLUS-8.9.8.md) records dated live proof. The current v4 workload installs with the elevated guest agent, then exercises the application as a verified standard user inside Windows Sandbox. Two clean repetitions passed the fixed document workflow. Historical elevated configurations remain separately readable. This is an in-worker function baseline, not a general endpoint compatibility claim. Registry/dependency capture, reusable isolated launch, and package generation remain unimplemented. Public workspace discard is unfinished; the private fixed-tree disposal proof is not general intake/MSI workspace cleanup.
+The [fixture record](FIXTURE-NOTEPAD-PLUS-PLUS-8.9.8.md) records dated live proof. The current v5 workload installs with the elevated guest agent, then exercises the application as a verified standard user inside Windows Sandbox. Two clean repetitions passed the fixed document workflow. Historical elevated configurations remain separately readable. This is an in-worker function baseline, not a general endpoint compatibility claim. Scoped application registry capture is implemented; installer product registration, broader dependencies, reusable isolated launch and package generation remain unimplemented. Public workspace discard is unfinished; the private fixed-tree disposal proof is not general intake/MSI workspace cleanup.
 
 ## Changes in direction
 
@@ -36,10 +36,10 @@ The corpus exposed an intake requirement now addressed by [explicit download met
 
 **Deliverable:** a repeatable function report with an ordinary in-worker baseline, packaging-relevant state observations, and explicit comparison eligibility.
 
-1. **Implemented and live-tested:** separate privileged installation from standard-user application execution, record actual identity/token/profile, and bind application-data file capture to that account. Preserve the elevated fixture as its own configuration. User-registry capture remains part of step 2; comparison eligibility is still pending.
-2. Add bounded, profile-selected registry snapshots and static dependency hints alongside file observations. Record key/value identity, type, size/hash, registry view, phase, and incompleteness; raw values require an explicit capture policy. Distinguish installed state, observed runtime use, static references, and unresolved dependencies. A changed file/key or PE import alone does not prove a required dependency.
+1. **Implemented and live-tested:** separate privileged installation from standard-user application execution, record actual identity/token/profile, and bind application-data file capture to that account. Preserve the elevated fixture as its own configuration. Scoped user-registry capture now uses the same account; comparison eligibility is still pending.
+2. **Scoped registry snapshots implemented:** machine/user Notepad++ settings in both views, with explicit absence and incomplete-scope diff suppression. Next bind Windows Installer product registration to the approved MSI identity and add static dependency hints alongside file observations. Record key/value identity, type, size/hash, registry view, phase, and incompleteness; raw values require an explicit capture policy. Distinguish installed state, observed runtime use, static references, and unresolved dependencies. A changed file/key or PE import alone does not prove a required dependency.
 3. Add a second real application profile and a project-owned control fixture with expected success, denial, child-process, and failure cases. Use clean repetitions to identify unstable state; retain raw evidence and version normalization rules. Never hide a difference merely to make comparisons pass.
-4. Report interrupted/pre-start/recovery states observationally, without repairing state or inferring uncommitted guest progress. Add a bounded local retained-run index when needed for summaries; it is rebuildable and never execution authority.
+4. Preserve completed file/registry snapshots when a later application stage fails, bound to the failed receipt and stage prefix; missing phases must remain explicitly unmeasured. Current caught failures retain stages but not these successful-run snapshots. Report interrupted/pre-start/recovery states observationally, without repairing state or inferring uncommitted guest progress. Add a bounded local retained-run index when needed for summaries; it is rebuildable and never execution authority.
 
 **Completion criteria:** two clean repetitions of the selected standard-user scenario produce comparable function results; changed inputs, account, scenario, or environment are detected. A second application exercises shared collection/reporting code. Capture gaps remain visible, and a failed control fixture cannot become an application incompatibility claim.
 
