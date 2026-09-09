@@ -676,6 +676,103 @@ mod tests {
         assert!(diff.key_changes.is_empty());
     }
 
+    fn absent_snapshot() -> ApplicationRegistrySnapshot {
+        ApplicationRegistrySnapshot {
+            keys: Vec::new(),
+            values: Vec::new(),
+            absent_roots: all_scopes().to_vec(),
+            issues: Vec::new(),
+        }
+    }
+
+    fn present_snapshot() -> ApplicationRegistrySnapshot {
+        let mut value = snapshot();
+        value.values.push(RegistryValueEntry {
+            root: ApplicationRegistryRoot::MachineApplication,
+            view: RegistryView::Registry64,
+            path: String::new(),
+            name: String::new(),
+            value_type: 1,
+            size_bytes: 4,
+            sha256: "a".repeat(64),
+        });
+        value
+    }
+
+    #[test]
+    fn registry_diff_reports_added_modified_and_removed_keys_and_values() {
+        let absent = absent_snapshot();
+        let present = present_snapshot();
+        let added = diff_registry_snapshots(&absent, &present).unwrap();
+        assert_eq!(added.key_changes.len(), 4);
+        assert_eq!(added.value_changes.len(), 1);
+        assert!(added.value_changes[0].before.is_none());
+
+        let mut changed = present.clone();
+        changed.values[0].value_type = 2;
+        changed.values[0].sha256 = "b".repeat(64);
+        let modified = diff_registry_snapshots(&present, &changed).unwrap();
+        assert_eq!(modified.key_changes.len(), 0);
+        assert_eq!(modified.value_changes.len(), 1);
+        assert_eq!(modified.value_changes[0].kind, RegistryDiffKind::Modified);
+
+        let removed = diff_registry_snapshots(&present, &absent).unwrap();
+        assert_eq!(removed.key_changes.len(), 4);
+        assert_eq!(removed.value_changes.len(), 1);
+        assert!(removed.value_changes[0].after.is_none());
+    }
+
+    #[test]
+    fn registry_diff_suppresses_changes_when_either_phase_is_incomplete() {
+        let before = present_snapshot();
+        let mut after = absent_snapshot();
+        after.issues.push(RegistryCaptureIssue {
+            root: ApplicationRegistryRoot::MachineApplication,
+            view: RegistryView::Registry64,
+            reason: RegistryCaptureIssueReason::Unreadable,
+        });
+        after.absent_roots.retain(|scope| {
+            !(scope.root == ApplicationRegistryRoot::MachineApplication
+                && scope.view == RegistryView::Registry64)
+        });
+        let diff = diff_registry_snapshots(&before, &after).unwrap();
+        assert_eq!(diff.incomplete_scopes.len(), 1);
+        assert!(diff.key_changes.iter().all(|change| !(change.entry.root
+            == ApplicationRegistryRoot::MachineApplication
+            && change.entry.view == RegistryView::Registry64)));
+        assert!(diff.value_changes.is_empty());
+    }
+
+    #[test]
+    fn registry_snapshot_rejects_case_insensitive_duplicates_and_accepts_value_boundary() {
+        let mut duplicate = snapshot();
+        duplicate.keys.push(RegistryKeyEntry {
+            root: ApplicationRegistryRoot::MachineApplication,
+            view: RegistryView::Registry64,
+            path: "A".into(),
+        });
+        duplicate.keys.push(RegistryKeyEntry {
+            root: ApplicationRegistryRoot::MachineApplication,
+            view: RegistryView::Registry64,
+            path: "a".into(),
+        });
+        assert!(duplicate.validate().is_err());
+
+        let mut boundary = snapshot();
+        boundary.values.push(RegistryValueEntry {
+            root: ApplicationRegistryRoot::MachineApplication,
+            view: RegistryView::Registry64,
+            path: String::new(),
+            name: "Boundary".into(),
+            value_type: 3,
+            size_bytes: MAX_VALUE_BYTES,
+            sha256: "c".repeat(64),
+        });
+        boundary.validate().unwrap();
+        boundary.values[0].size_bytes = MAX_VALUE_BYTES + 1;
+        assert!(boundary.validate().is_err());
+    }
+
     #[test]
     fn verifier_binds_current_event_and_rejects_missing_foreign_duplicate_and_tamper() {
         let request = v5_request();
