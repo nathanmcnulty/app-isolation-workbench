@@ -3,6 +3,7 @@
 mod application_token;
 mod completion;
 mod imported_msi;
+mod runtime_context;
 mod scenario;
 mod stage_progress;
 
@@ -34,6 +35,12 @@ pub use imported_msi::{
     IMPORTED_MSI_GUEST_REQUEST_SCHEMA_VERSION, IMPORTED_MSI_SCENARIO_RESULT_SCHEMA_VERSION,
     ImportedMsiGuestRequest, ImportedMsiRequestError, ImportedMsiScenarioResult,
     ImportedMsiScenarioStatus,
+};
+pub use runtime_context::{
+    IMPORTED_MSI_RUNTIME_CONTEXT_EVENT, IMPORTED_MSI_RUNTIME_CONTEXT_SCHEMA,
+    IMPORTED_MSI_RUNTIME_CONTEXT_SCHEMA_VERSION, ImportedMsiRuntimeContext,
+    STANDARD_USER_ACCOUNT_NAME, STANDARD_USER_PROFILE_PATH, StandardUserRuntimeContext,
+    verify_imported_msi_runtime_context, verify_msi_runtime_context,
 };
 pub use scenario::{
     CompiledMsiScenario, FixedDocumentExercise, ScenarioCompileError,
@@ -876,7 +883,8 @@ pub use runtime_observations::{
     FilesystemCaptureIssueReason, FilesystemDiffKind, FilesystemSnapshotDiff,
     FilesystemSnapshotDiffResult, FunctionalExercise, IMPORTED_MSI_BEHAVIOR_EVENT,
     IMPORTED_MSI_BEHAVIOR_SCHEMA, IMPORTED_MSI_BEHAVIOR_SCHEMA_VERSION,
-    ImportedMsiBehaviorEvidence, diff_filesystem_snapshots, verify_imported_msi_behavior,
+    ImportedMsiBehaviorEvidence, STANDARD_USER_DOCUMENT_EXERCISE_PATH, diff_filesystem_snapshots,
+    verify_imported_msi_behavior,
 };
 
 pub use application_token::MAX_APPLICATION_EVIDENCE_BYTES;

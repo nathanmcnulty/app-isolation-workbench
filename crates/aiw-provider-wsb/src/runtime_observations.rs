@@ -11,6 +11,8 @@ pub const IMPORTED_MSI_BEHAVIOR_SCHEMA_VERSION: &str = IMPORTED_MSI_BEHAVIOR_SCH
 pub const IMPORTED_MSI_BEHAVIOR_EVENT: &str = "importedMsiBehavior";
 
 pub const DOCUMENT_EXERCISE_PATH: &str = r"C:\AIW\Scenario\document.txt";
+pub const STANDARD_USER_DOCUMENT_EXERCISE_PATH: &str =
+    r"C:\Users\AiwStandardUser\AppData\Local\AIW\Scenario\document.txt";
 pub const DOCUMENT_INITIAL_TEXT: &str = "AIW initial document.\r\n";
 pub const DOCUMENT_EXPECTED_TEXT: &str = "AIW application isolation document round-trip.\r\n";
 
