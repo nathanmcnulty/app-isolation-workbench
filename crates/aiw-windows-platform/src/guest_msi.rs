@@ -38,7 +38,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{BOOL, PCWSTR, PWSTR};
 
-use crate::guest_standard_user::StandardUserSession;
+use crate::guest_standard_user::{ScopedPrivileges, StandardUserSession};
 
 #[link(name = "Advapi32")]
 unsafe extern "system" {
@@ -852,6 +852,7 @@ impl GuestProcess {
             ..Default::default()
         };
         let mut information = PROCESS_INFORMATION::default();
+        let _impersonate_privilege = ScopedPrivileges::enable(&["SeImpersonatePrivilege"])?;
         // SAFETY: the token, explicit user environment, fixed executable and
         // writable command line remain valid for this call.  A null desktop
         // requests the inherited guest desktop, whose target-user ACE is added
