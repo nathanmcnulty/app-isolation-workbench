@@ -25,6 +25,28 @@ pub struct StandardUserRuntimeContext {
 }
 
 impl StandardUserRuntimeContext {
+    /// The same token policy is checked before native resume and during receipt verification.
+    pub fn validate_token(&self, token: &aiw_token::TokenEvidence) -> Result<(), String> {
+        self.validate()?;
+        if token.schema_version != aiw_token::TOKEN_EVIDENCE_SCHEMA_VERSION
+            || self.user_sid != token.user_sid
+            || token.token_type != TokenType::Primary
+            || token.impersonation_level.is_some()
+            || token.is_app_container
+            || token.app_container_sid.is_some()
+            || token.restricted_sid_count != 0
+            || !token.capabilities.is_empty()
+            || token.is_elevated
+            || token.elevation_type != ElevationType::Default
+            || token.integrity.level != IntegrityLevel::Medium
+            || token.integrity.rid != 0x2000
+            || token.integrity.sid != "S-1-16-8192"
+        {
+            return Err("token is not the expected ordinary standard-user context".to_owned());
+        }
+        Ok(())
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if !valid_account_sid(&self.user_sid)
             || self.administrators_enabled
@@ -95,25 +117,13 @@ impl ImportedMsiRuntimeContext {
             || self.scenario_sha256 != request.scenario_sha256
             || self.process_id != result.launch_process_id
             || self.process_id != token.process_id
-            || self.context.user_sid != token.user_sid
-            || token.token_type != TokenType::Primary
-            || token.impersonation_level.is_some()
-            || token.is_app_container
-            || token.app_container_sid.is_some()
-            || token.restricted_sid_count != 0
-            || token.is_elevated
-            || token.elevation_type != ElevationType::Default
-            || token.integrity.level != IntegrityLevel::Medium
-            || token.integrity.rid != 0x2000
-            || token.integrity.sid != "S-1-16-8192"
-            || !token.capabilities.is_empty()
         {
             return Err(
                 "imported MSI runtime context is not a bounded standard-user observation"
                     .to_owned(),
             );
         }
-        self.context.validate()
+        self.context.validate_token(token)
     }
 }
 
@@ -256,6 +266,13 @@ mod tests {
 
     fn log_bytes(payloads: Vec<serde_json::Value>) -> (Vec<u8>, String) {
         let mut log = EvidenceLog::new();
+        log.append(EvidenceEvent {
+            observed_utc: "2026-09-08T00:00:00Z".into(),
+            kind: "fixtureScenario".into(),
+            source: "aiw-guest-agent".into(),
+            payload: serde_json::json!({}),
+        })
+        .unwrap();
         for payload in payloads {
             log.append(EvidenceEvent {
                 observed_utc: "2026-09-08T00:00:00Z".into(),
@@ -325,5 +342,112 @@ mod tests {
         let mut high = token.clone();
         high.token.is_elevated = true;
         assert!(ImportedMsiRuntimeContext::new(&request, &result, &high, context()).is_err());
+    }
+    #[test]
+    fn runtime_evidence_rejects_conflicts_and_preserves_legacy_absence() {
+        let request = request();
+        let result = ImportedMsiScenarioResult::succeeded(&request, 0, 42, 0).unwrap();
+        let application_token =
+            ImportedMsiApplicationToken::new(&request, &result, token(42)).unwrap();
+        let event =
+            ImportedMsiRuntimeContext::new(&request, &result, &application_token, context())
+                .unwrap();
+        let payload = serde_json::to_value(&event).unwrap();
+        let (bytes, root) = log_bytes(vec![payload.clone(), payload.clone()]);
+        assert!(
+            verify_msi_runtime_context(&bytes, &root, &request, &result, Some(&application_token))
+                .is_err()
+        );
+        let (bytes, root) = log_bytes(vec![payload]);
+        assert!(
+            verify_msi_runtime_context(
+                &bytes,
+                &"0".repeat(64),
+                &request,
+                &result,
+                Some(&application_token)
+            )
+            .is_err()
+        );
+        assert!(verify_msi_runtime_context(&bytes, &root, &request, &result, None).is_err());
+        for mutate in [
+            |e: &mut ImportedMsiRuntimeContext| e.process_id += 1,
+            |e: &mut ImportedMsiRuntimeContext| e.request_sha256 = "f".repeat(64),
+            |e: &mut ImportedMsiRuntimeContext| e.scenario_sha256 = "f".repeat(64),
+            |e: &mut ImportedMsiRuntimeContext| e.run_id = "foreign".into(),
+        ] {
+            let mut changed = event.clone();
+            mutate(&mut changed);
+            let (bytes, root) = log_bytes(vec![serde_json::to_value(changed).unwrap()]);
+            assert!(
+                verify_msi_runtime_context(
+                    &bytes,
+                    &root,
+                    &request,
+                    &result,
+                    Some(&application_token)
+                )
+                .is_err()
+            );
+        }
+        for mutate in [
+            |t: &mut aiw_token::TokenEvidence| t.elevation_type = ElevationType::Limited,
+            |t: &mut aiw_token::TokenEvidence| t.restricted_sid_count = 1,
+            |t: &mut aiw_token::TokenEvidence| {
+                t.is_app_container = true;
+                t.app_container_sid = Some("S-1-15-2-1".into());
+            },
+            |t: &mut aiw_token::TokenEvidence| {
+                t.integrity.rid = 12288;
+                t.integrity.level = IntegrityLevel::High;
+                t.integrity.sid = "S-1-16-12288".into();
+            },
+        ] {
+            let mut changed = application_token.clone();
+            mutate(&mut changed.token);
+            assert!(event.validate_for(&request, &result, &changed).is_err());
+        }
+        let mut scenario = request.scenario.clone();
+        scenario.schema_version = "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha3".into();
+        scenario.profile = "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha3".into();
+        scenario.document_exercise.as_mut().unwrap().document_path =
+            crate::DOCUMENT_EXERCISE_PATH.into();
+        let legacy = ImportedMsiGuestRequest::new(
+            "run-one",
+            &request.sandbox_id,
+            &request.config_sha256,
+            &request.agent_sha256,
+            scenario,
+            "a".repeat(64),
+            1024,
+            "d".repeat(64),
+        )
+        .unwrap();
+        let legacy_result = ImportedMsiScenarioResult::succeeded(&legacy, 0, 42, 0).unwrap();
+        let (empty, empty_root) = log_bytes(vec![]);
+        assert!(
+            verify_msi_runtime_context(&empty, &empty_root, &legacy, &legacy_result, None)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            verify_msi_runtime_context(
+                &bytes,
+                &root,
+                &legacy,
+                &legacy_result,
+                Some(&application_token)
+            )
+            .is_err()
+        );
+        for path in [
+            "💻",
+            "C:\\Users\\AiwStandardUser\\AppData\\Local:secret",
+            "C:\\Users\\AiwStandardUser\\Different",
+        ] {
+            let mut changed = context();
+            changed.local_app_data = path.into();
+            assert!(changed.validate().is_err());
+        }
     }
 }

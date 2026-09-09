@@ -3,7 +3,7 @@
 //! the disposable Sandbox and never derives a restricted token from the
 //! elevated guest agent.
 
-use std::ffi::{c_void, OsStr};
+use std::ffi::{OsStr, c_void};
 use std::mem::size_of;
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsRawHandle, BorrowedHandle, FromRawHandle, OwnedHandle};
@@ -13,21 +13,19 @@ use windows::Win32::Foundation::{HANDLE, HLOCAL, LocalFree};
 use windows::Win32::Security::Authorization::ConvertSidToStringSidW;
 use windows::Win32::Security::{
     GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, PSID, TOKEN_ELEVATION,
-    TOKEN_ELEVATION_TYPE, TOKEN_GROUPS, TOKEN_MANDATORY_LABEL, TOKEN_TYPE, TOKEN_USER,
+    TOKEN_ELEVATION_TYPE, TOKEN_GROUPS, TOKEN_MANDATORY_LABEL, TOKEN_QUERY, TOKEN_TYPE, TOKEN_USER,
     TokenElevation, TokenElevationType, TokenElevationTypeDefault, TokenGroups,
-    TokenIntegrityLevel, TokenType as TokenTypeClass, TokenPrimary, TokenUser,
-    TOKEN_QUERY,
+    TokenIntegrityLevel, TokenPrimary, TokenType as TokenTypeClass, TokenUser,
 };
 use windows::Win32::System::Threading::{GetCurrentProcessId, GetProcessId, OpenProcessToken};
 use windows::core::PWSTR;
 
+use crate::GuestMsiExecutionError;
 use aiw_provider_wsb::{
     STANDARD_USER_ACCOUNT_NAME, STANDARD_USER_PROFILE_PATH, StandardUserRuntimeContext,
 };
-use crate::GuestMsiExecutionError;
 
-pub const STANDARD_USER_DOCUMENT_ROOT: &str =
-    r"C:\Users\AiwStandardUser\AppData\Local\AIW";
+pub const STANDARD_USER_DOCUMENT_ROOT: &str = r"C:\Users\AiwStandardUser\AppData\Local\AIW";
 const STANDARD_USER_ROAMING_APP_DATA: &str = r"C:\Users\AiwStandardUser\AppData\Roaming";
 const STANDARD_USER_LOCAL_APP_DATA: &str = r"C:\Users\AiwStandardUser\AppData\Local";
 
@@ -231,21 +229,37 @@ impl StandardUserSession {
     ) -> Result<(), GuestMsiExecutionError> {
         let mut child_token = HANDLE::default();
         // SAFETY: process is the exact child handle retained by the launcher.
-        unsafe { OpenProcessToken(HANDLE(process.as_raw_handle()), TOKEN_QUERY, &mut child_token) }
-            .map_err(|error| GuestMsiExecutionError::Process(format!("OpenProcessToken child failed: {error}")))?;
+        unsafe {
+            OpenProcessToken(
+                HANDLE(process.as_raw_handle()),
+                TOKEN_QUERY,
+                &mut child_token,
+            )
+        }
+        .map_err(|error| {
+            GuestMsiExecutionError::Process(format!("OpenProcessToken child failed: {error}"))
+        })?;
         let child_token = unsafe { OwnedHandle::from_raw_handle(child_token.0) };
         let child_sid = validate_standard_token(raw_handle(&child_token))?;
         if child_sid != self.context.user_sid {
-            return Err(GuestMsiExecutionError::Process("suspended child SID differed from the created standard user".to_owned()));
+            return Err(GuestMsiExecutionError::Process(
+                "suspended child SID differed from the created standard user".to_owned(),
+            ));
         }
-        let child_session: u32 = query_fixed(raw_handle(&child_token), windows::Win32::Security::TokenSessionId, "TokenSessionId")?;
+        let child_session: u32 = query_fixed(
+            raw_handle(&child_token),
+            windows::Win32::Security::TokenSessionId,
+            "TokenSessionId",
+        )?;
         let mut current_session = 0;
         // SAFETY: both process ids are queried by the documented API.
         if unsafe { ProcessIdToSessionId(GetCurrentProcessId(), &mut current_session) } == 0
             || unsafe { GetProcessId(HANDLE(process.as_raw_handle())) } == 0
             || child_session != current_session
         {
-            return Err(GuestMsiExecutionError::Process("suspended child was not bound to the guest interactive session".to_owned()));
+            return Err(GuestMsiExecutionError::Process(
+                "suspended child was not bound to the guest interactive session".to_owned(),
+            ));
         }
         Ok(())
     }
@@ -445,11 +459,22 @@ fn group_count(buffer: &[usize]) -> Result<usize, GuestMsiExecutionError> {
     Ok(unsafe { *buffer.as_ptr().cast::<u32>() } as usize)
 }
 
-fn groups_list(buffer: &[usize]) -> Result<&[windows::Win32::Security::SID_AND_ATTRIBUTES], GuestMsiExecutionError> {
+fn groups_list(
+    buffer: &[usize],
+) -> Result<&[windows::Win32::Security::SID_AND_ATTRIBUTES], GuestMsiExecutionError> {
     let count = group_count(buffer)?;
     let groups = cast::<TOKEN_GROUPS>(buffer, "TokenGroups")?;
-    let start = size_of::<TOKEN_GROUPS>() - size_of::<windows::Win32::Security::SID_AND_ATTRIBUTES>();
-    let needed = start.checked_add(count.checked_mul(size_of::<windows::Win32::Security::SID_AND_ATTRIBUTES>()).ok_or_else(|| GuestMsiExecutionError::Process("TokenGroups count overflow".to_owned()))?).ok_or_else(|| GuestMsiExecutionError::Process("TokenGroups size overflow".to_owned()))?;
+    let start =
+        size_of::<TOKEN_GROUPS>() - size_of::<windows::Win32::Security::SID_AND_ATTRIBUTES>();
+    let needed = start
+        .checked_add(
+            count
+                .checked_mul(size_of::<windows::Win32::Security::SID_AND_ATTRIBUTES>())
+                .ok_or_else(|| {
+                    GuestMsiExecutionError::Process("TokenGroups count overflow".to_owned())
+                })?,
+        )
+        .ok_or_else(|| GuestMsiExecutionError::Process("TokenGroups size overflow".to_owned()))?;
     if buffer.len() * size_of::<usize>() < needed {
         return Err(GuestMsiExecutionError::Process(
             "TokenGroups count exceeded returned buffer".to_owned(),
@@ -481,11 +506,13 @@ fn sid_rid(sid: PSID) -> Result<u32, GuestMsiExecutionError> {
 fn sid_string(sid: PSID) -> Result<String, GuestMsiExecutionError> {
     let mut output = PWSTR::null();
     // SAFETY: token-sourced SID and output storage follow the API contract.
-    unsafe { ConvertSidToStringSidW(sid, &mut output) }
-        .map_err(|error| GuestMsiExecutionError::Process(format!("ConvertSidToStringSidW failed: {error}")))?;
+    unsafe { ConvertSidToStringSidW(sid, &mut output) }.map_err(|error| {
+        GuestMsiExecutionError::Process(format!("ConvertSidToStringSidW failed: {error}"))
+    })?;
     // SAFETY: successful conversion returns a NUL-terminated LocalAlloc string.
-    let text = unsafe { output.to_string() }
-        .map_err(|error| GuestMsiExecutionError::Process(format!("token SID was not Unicode: {error}")));
+    let text = unsafe { output.to_string() }.map_err(|error| {
+        GuestMsiExecutionError::Process(format!("token SID was not Unicode: {error}"))
+    });
     // SAFETY: ConvertSidToStringSidW allocations are released with LocalFree.
     let _ = unsafe { LocalFree(Some(HLOCAL(output.0.cast()))) };
     text
@@ -506,7 +533,10 @@ fn wide(value: &str) -> Result<Vec<u16>, GuestMsiExecutionError> {
 }
 
 fn last_error(operation: &str) -> GuestMsiExecutionError {
-    GuestMsiExecutionError::Process(format!("{operation} failed: {}", windows::core::Error::from_thread()))
+    GuestMsiExecutionError::Process(format!(
+        "{operation} failed: {}",
+        windows::core::Error::from_thread()
+    ))
 }
 
 #[cfg(test)]
@@ -515,10 +545,47 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
+    fn native_token_queries_accept_successful_fixed_and_variable_results() {
+        let mut handle = HANDLE::default();
+        // Read-only observation of this test process; never creates an account.
+        unsafe {
+            OpenProcessToken(
+                windows::Win32::System::Threading::GetCurrentProcess(),
+                TOKEN_QUERY,
+                &mut handle,
+            )
+        }
+        .unwrap();
+        let held = unsafe { OwnedHandle::from_raw_handle(handle.0) };
+        let kind: TOKEN_TYPE = query_fixed(raw_handle(&held), TokenTypeClass, "TokenType").unwrap();
+        assert_eq!(kind, TokenPrimary);
+        let groups = query_variable(raw_handle(&held), TokenGroups, "TokenGroups").unwrap();
+        assert_eq!(
+            groups_list(&groups).unwrap().len(),
+            group_count(&groups).unwrap()
+        );
+        let user = query_variable(raw_handle(&held), TokenUser, "TokenUser").unwrap();
+        assert!(
+            sid_string(cast::<TOKEN_USER>(&user, "TokenUser").unwrap().User.Sid)
+                .unwrap()
+                .starts_with("S-1-")
+        );
+    }
+
+    #[test]
     fn standard_user_paths_are_the_reviewed_fixed_profile() {
         assert_eq!(STANDARD_USER_PROFILE_PATH, r"C:\Users\AiwStandardUser");
-        assert_eq!(STANDARD_USER_ROAMING_APP_DATA, format!(r"{STANDARD_USER_PROFILE_PATH}\AppData\Roaming"));
-        assert_eq!(STANDARD_USER_LOCAL_APP_DATA, format!(r"{STANDARD_USER_PROFILE_PATH}\AppData\Local"));
-        assert_eq!(PathBuf::from(STANDARD_USER_DOCUMENT_ROOT).join("Scenario\\document.txt"), PathBuf::from(r"C:\Users\AiwStandardUser\AppData\Local\AIW\Scenario\document.txt"));
+        assert_eq!(
+            STANDARD_USER_ROAMING_APP_DATA,
+            format!(r"{STANDARD_USER_PROFILE_PATH}\AppData\Roaming")
+        );
+        assert_eq!(
+            STANDARD_USER_LOCAL_APP_DATA,
+            format!(r"{STANDARD_USER_PROFILE_PATH}\AppData\Local")
+        );
+        assert_eq!(
+            PathBuf::from(STANDARD_USER_DOCUMENT_ROOT).join("Scenario\\document.txt"),
+            PathBuf::from(r"C:\Users\AiwStandardUser\AppData\Local\AIW\Scenario\document.txt")
+        );
     }
 }
