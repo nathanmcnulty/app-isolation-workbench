@@ -36,14 +36,15 @@ use aiw_provider_wsb::{
 };
 use aiw_runner::{
     RunnerError, SessionTransaction, WsbGoldenProbeExecution, WsbGoldenProbeStart,
-    WsbPlanningImportReceipt, WsbPlanningImportResult, WsbPreparationError, WsbPreparationReceipt,
-    WsbRecoveryResult, WsbSessionDisposition, WsbSessionStatus, observe_wsb_session_status,
+    WsbMsiReportSetEntry, WsbMsiReportSetInput, WsbPlanningImportReceipt, WsbPlanningImportResult,
+    WsbPreparationError, WsbPreparationReceipt, WsbRecoveryResult, WsbSessionDisposition,
+    WsbSessionStatus, observe_wsb_session_status,
 };
 #[cfg(windows)]
 use aiw_runner::{
     WsbMsiPreparationInput, import_windows_sandbox_preparation, prepare_windows_sandbox_bundle,
-    prepare_windows_sandbox_msi_bundle, recover_windows_sandbox, start_approved_windows_sandbox,
-    verify_windows_sandbox_preparation,
+    prepare_windows_sandbox_msi_bundle, recover_windows_sandbox, report_windows_sandbox_msi_set,
+    start_approved_windows_sandbox, verify_windows_sandbox_preparation,
 };
 use aiw_schema::{
     LEGACY_PROJECT_SCHEMA_VERSION, LegacyProjectV0Alpha1, ModelPack, PROJECT_SCHEMA_VERSION,
@@ -460,6 +461,13 @@ enum RunCommand {
         #[arg(long, value_enum, default_value_t = AssessmentReportFormat::Json)]
         format: AssessmentReportFormat,
     },
+    /// Reverify a bounded set of retained MSI workspaces without executing or comparing them.
+    ReportWsbMsiSet {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long, value_enum, default_value_t = AssessmentReportFormat::Json)]
+        format: AssessmentReportFormat,
+    },
     /// Start only the already-approved, hash-bound Windows Sandbox preparation profile.
     /// No arbitrary command, script, policy fragment, or provider verb is accepted.
     Start {
@@ -551,6 +559,10 @@ enum SchemaKind {
     ImportedMsiBehaviorEvidence,
     WsbMsiAssessmentReport,
     WsbMsiRunReport,
+    #[value(name = "wsb-msi-report-set-input")]
+    WsbMsiReportSetInput,
+    #[value(name = "wsb-msi-report-set")]
+    WsbMsiReportSet,
     ImportedMsiStageProgress,
     ImportedMsiFailedAttempt,
     #[value(name = "msi-failed-snapshots")]
@@ -1588,6 +1600,38 @@ fn run(command: Command) -> Result<()> {
                     }))
                 }
             }
+            RunCommand::ReportWsbMsiSet { input, format } => {
+                let manifest: WsbMsiReportSetInput = read_document(&input, 1024 * 1024)?;
+                manifest.validate().map_err(|error| anyhow!(error))?;
+                #[cfg(windows)]
+                {
+                    let report = report_windows_sandbox_msi_set(&manifest).map_err(|source| {
+                        anyhow!(RunReportFailed {
+                            run_id: "report-set".to_owned(),
+                            source: RunnerError::Receipt(source),
+                        })
+                    })?;
+                    match format {
+                        AssessmentReportFormat::Json => write_json(&report),
+                        AssessmentReportFormat::Markdown => {
+                            print!("{}", report.to_markdown());
+                            Ok(())
+                        }
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (manifest, format);
+                    Err(anyhow!(RunOperationUnavailable {
+                        code: "AIW_WINDOWS_REQUIRED",
+                        summary: "retained Windows workspace verification requires Windows",
+                        stage: "wsbReportSet",
+                        remediation: "Read the retained workspaces on their original Windows host.",
+                        detail: "No files or provider state were changed.",
+                        run_id: input.display().to_string(),
+                    }))
+                }
+            }
             RunCommand::Start {
                 root,
                 run_id,
@@ -1692,6 +1736,10 @@ fn run(command: Command) -> Result<()> {
                 write_json(&schema_for!(aiw_provider_wsb::ImportedMsiFailedSnapshots))
             }
             SchemaKind::WsbMsiRunReport => write_json(&schema_for!(aiw_runner::WsbMsiRunReport)),
+            SchemaKind::WsbMsiReportSetInput => {
+                write_json(&schema_for!(aiw_runner::WsbMsiReportSetInput))
+            }
+            SchemaKind::WsbMsiReportSet => write_json(&schema_for!(aiw_runner::WsbMsiReportSet)),
             SchemaKind::ImportedMsiBehaviorEvidence => {
                 write_json(&schema_for!(aiw_provider_wsb::ImportedMsiBehaviorEvidence))
             }
@@ -2560,6 +2608,27 @@ mod tests {
                 .canonical_sha256()
                 .unwrap()
         );
+    }
+
+    #[test]
+    fn report_set_input_validation_rejects_empty_and_oversized_manifests() {
+        let empty = WsbMsiReportSetInput {
+            schema_version: "aiw.dev/wsb-msi-report-set-input/v0alpha1".to_owned(),
+            entries: vec![],
+        };
+        assert!(empty.validate().is_err());
+        let entry = WsbMsiReportSetEntry {
+            id: "one".to_owned(),
+            workspace_root: PathBuf::from(r"C:\AIW\retained\one"),
+            run_id: "run-one".to_owned(),
+            project_path: PathBuf::from(r"C:\AIW\projects\one.json"),
+            guest_agent_sha256: "a".repeat(64),
+        };
+        let oversized = WsbMsiReportSetInput {
+            schema_version: "aiw.dev/wsb-msi-report-set-input/v0alpha1".to_owned(),
+            entries: vec![entry; 33],
+        };
+        assert!(oversized.validate().is_err());
     }
 
     #[test]
