@@ -84,6 +84,8 @@ aiw schema msi-failed-snapshots
 
 This is terminal stage reporting, not a live streaming journal. A killed guest or interrupted publication cannot prove the last completed stage. Full registry/dependency capture, ordinary-baseline comparison, and broader lifecycle/application profiles remain separate capabilities.
 
+The v6 profile adds a separate receipt-bound `importedMsiProductRegistration` observation for the approved MSI ProductCode. It records only the machine product-registration state before and after installation (`notRegistered`, `advertised`, `installed`, or `unavailable` with a bounded error code). Successful v6 execution and assessment reports use `v0alpha6` and `v0alpha7` respectively; legacy v1-v5 reports preserve absent registration evidence. This is scoped machine-state metadata, not a dependency, compatibility, or isolation claim. The v6 contract is locally schema-tested; no live v6 fixture claim is made here.
+
 Stage-progress validation passed 36 provider tests, 66 runner tests (four opt-in tests ignored), three guest tests, and the native platform suite (143 passed, one ignored). A fresh live run passed all nine stages and exact Sandbox cleanup. Three retained-fixture checks covered current success, historical success without progress, and historical failure. Warning-denied workspace Clippy, Rust 1.85 all-target compatibility, CLI exports/schema generation, formatting, and governance passed locally. The [stage benchmark](FIXTURE-NOTEPAD-PLUS-PLUS-8.9.8.md#stage-progress-benchmark--2026-09-07) records exact identities and distinguishes live proof from synthetic failure tests.
 
 

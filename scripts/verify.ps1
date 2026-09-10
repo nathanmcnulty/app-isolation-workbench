@@ -119,6 +119,7 @@ try {
         'msi-runtime-context',
         'msi-registry',
         'msi-failed-snapshots',
+        'msi-product-registration',
         'wsb-msi-assessment-report',
         'wsb-msi-report-set-input',
         'wsb-msi-report-set',

@@ -112,6 +112,8 @@ pub struct WsbMsiReportSetSummary {
     pub recorded_outcome: aiw_orchestrator::RunOutcome,
     pub recorded_cleanup_verified: bool,
     pub application_token: Option<aiw_provider_wsb::ImportedMsiApplicationToken>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub product_registration: Option<aiw_provider_wsb::ImportedMsiProductRegistrationEvidence>,
     pub failure_evidence: Option<ReportSetFailureEvidence>,
     pub receipt_sha256: Option<String>,
     pub evidence_root_hash: Option<String>,
@@ -192,6 +194,7 @@ fn summarize(name: String, report: WsbMsiRunReport) -> WsbMsiReportSetResult {
                 recorded_outcome: report.outcome,
                 recorded_cleanup_verified: report.recorded_cleanup_verified,
                 application_token: report.application_token,
+                product_registration: report.product_registration,
                 failure_evidence: None,
                 receipt_sha256: Some(report.receipt_sha256),
                 evidence_root_hash: Some(report.evidence_root_hash),
@@ -237,6 +240,7 @@ fn summarize(name: String, report: WsbMsiRunReport) -> WsbMsiReportSetResult {
                 recorded_outcome: report.outcome,
                 recorded_cleanup_verified: report.recorded_cleanup_verified,
                 application_token: None,
+                product_registration: None,
                 failure_evidence: Some(match &report.failure_progress {
                     FailureProgressEvidence::Verified(_) => ReportSetFailureEvidence::Verified,
                     FailureProgressEvidence::Absent => ReportSetFailureEvidence::Absent,
@@ -366,6 +370,16 @@ impl WsbMsiReportSet {
                 out.push_str(&format!("\nObserved application token: integrity {:?}; elevated {}; AppContainer {}. This guest observation does not independently verify an isolation boundary.\n", token.token.integrity.level, token.token.is_elevated, token.token.is_app_container));
             } else {
                 out.push_str("\nApplication token: unmeasured.\n");
+            }
+            if let Some(registration) = &s.product_registration {
+                out.push_str(&format!(
+                    "\nMachine product-registration observation for `{}`: before-install {:?}; after-install {:?}. This is scoped machine state metadata, not a dependency or isolation claim.\n",
+                    cell(&registration.product_code),
+                    registration.before_install,
+                    registration.after_install,
+                ));
+            } else {
+                out.push_str("\nMachine product-registration observation: unmeasured.\n");
             }
             if let Some(status) = s.failure_evidence {
                 out.push_str(&format!("\nFailed-attempt evidence: {status:?}. Completed stages do not verify the full application workflow.\n"));

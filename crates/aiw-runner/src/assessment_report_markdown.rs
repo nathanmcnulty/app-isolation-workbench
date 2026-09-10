@@ -73,7 +73,7 @@ impl WsbMsiAssessmentReport {
             "Application exercise",
             self.exercise_file_changes.as_ref(),
         );
-        out.push_str("\n## Registry changes\n\nScope: `HKLM\\Software\\Notepad++` and the exact standard-user `HKU\\<SID>\\Software\\Notepad++`, each through the 64-bit and 32-bit views. Entries retain keys and value metadata (name, type, size, and SHA-256), never raw registry values. The 32-bit and 64-bit views can share backing keys, so counts are observations per view rather than unique physical dependencies. Product registration, MSI dependency records, and uninstall registration are outside this scope. Snapshot comparison is non-atomic; incomplete scopes are explicitly omitted from change rows.\n");
+        out.push_str("\n## Registry changes\n\nScope: `HKLM\\Software\\Notepad++` and the exact standard-user `HKU\\<SID>\\Software\\Notepad++`, each through the 64-bit and 32-bit views. Entries retain keys and value metadata (name, type, size, and SHA-256), never raw registry values. The 32-bit and 64-bit views can share backing keys, so counts are observations per view rather than unique physical dependencies. MSI dependency records and other uninstall registration remain outside this scope. Snapshot comparison is non-atomic; incomplete scopes are explicitly omitted from change rows.\n");
         append_registry_changes(
             &mut out,
             "Installation",
@@ -84,6 +84,14 @@ impl WsbMsiAssessmentReport {
             "Application exercise",
             self.exercise_registry_changes.as_ref(),
         );
+        if let Some(registration) = &self.product_registration {
+            out.push_str(&format!(
+                "\n## Machine product registration\n\nProduct code: `{}`. Before installation: **{:?}**. After installation: **{:?}**. This is scoped machine state metadata; it is not a dependency or isolation claim.\n",
+                cell(&registration.product_code),
+                registration.before_install,
+                registration.after_install,
+            ));
+        }
         out.push_str("\nThese changes identify files and settings to investigate for packaging. They do not establish a complete package recipe or dependencies outside the captured roots.\n\n## Unresolved assessment evidence\n\n");
         for gap in &self.missing_evidence {
             out.push_str(&format!("- {}\n", gap_label(*gap)));

@@ -23,6 +23,7 @@ cargo run -p aiw-cli -- schema imported-msi-scenario-result
 cargo run -p aiw-cli -- schema msi-runtime-context
 cargo run -p aiw-cli -- schema msi-registry
 cargo run -p aiw-cli -- schema msi-failed-snapshots
+cargo run -p aiw-cli -- schema msi-product-registration
 cargo run -p aiw-cli -- schema wsb-msi-report-set-input
 cargo run -p aiw-cli -- schema wsb-msi-report-set
 cargo run -p aiw-cli -- schema wsb-approved-execution

@@ -122,6 +122,8 @@ pub struct WsbGoldenProbeExecution {
     standard_user_context: Option<aiw_provider_wsb::ImportedMsiRuntimeContext>,
     #[serde(skip)]
     registry_evidence: Option<aiw_provider_wsb::ImportedMsiRegistryEvidence>,
+    #[serde(skip)]
+    product_registration: Option<aiw_provider_wsb::ImportedMsiProductRegistrationEvidence>,
 }
 
 /// Common receipt-correlated lifecycle result. Application observations remain
@@ -149,6 +151,8 @@ pub struct WsbImportedMsiExecution {
     pub standard_user_context: Option<aiw_provider_wsb::ImportedMsiRuntimeContext>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub registry_evidence: Option<aiw_provider_wsb::ImportedMsiRegistryEvidence>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub product_registration: Option<aiw_provider_wsb::ImportedMsiProductRegistrationEvidence>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -660,6 +664,14 @@ pub(crate) fn execute_wsb_golden_probe(
                     standard_user_context.as_ref(),
                 )
                 .map_err(RunnerError::Receipt)?;
+                let product_registration =
+                    aiw_provider_wsb::verify_msi_product_registration_evidence(
+                        &evidence_bytes,
+                        &verification.evidence_root_hash,
+                        expected,
+                        &observed,
+                    )
+                    .map_err(RunnerError::Receipt)?;
                 let behavior = aiw_provider_wsb::verify_imported_msi_behavior(
                     &evidence_bytes,
                     &verification.evidence_root_hash,
@@ -687,19 +699,26 @@ pub(crate) fn execute_wsb_golden_probe(
                     behavior,
                     standard_user_context,
                     registry_evidence,
+                    product_registration,
                 )
             }
-            ExecutionGuestRequest::Golden(_) => (None, None, None, None, None),
+            ExecutionGuestRequest::Golden(_) => (None, None, None, None, None, None),
         })
     })();
-    let (scenario, application_token, behavior, standard_user_context, registry_evidence) =
-        match scenario {
-            Ok(value) => value,
-            Err(error) => {
-                record_terminal_failure(layout, error.clone())?;
-                return Err(error);
-            }
-        };
+    let (
+        scenario,
+        application_token,
+        behavior,
+        standard_user_context,
+        registry_evidence,
+        product_registration,
+    ) = match scenario {
+        Ok(value) => value,
+        Err(error) => {
+            record_terminal_failure(layout, error.clone())?;
+            return Err(error);
+        }
+    };
     let result = RunResult::new(
         context.plan.run_id.clone(),
         RunOutcome::InsufficientEvidence,
@@ -727,6 +746,7 @@ pub(crate) fn execute_wsb_golden_probe(
         behavior,
         standard_user_context,
         registry_evidence,
+        product_registration,
     })
 }
 
@@ -850,7 +870,9 @@ fn start_approved_windows_sandbox_inner(
     if request.msi.is_some() {
         let scenario = result.scenario.ok_or(RunnerError::Drift)?;
         Ok(WsbApprovedExecution::ImportedMsi(WsbImportedMsiExecution {
-            schema_version: if result.registry_evidence.is_some() {
+            schema_version: if result.product_registration.is_some() {
+                "aiw.dev/wsb-imported-msi-execution/v0alpha6"
+            } else if result.registry_evidence.is_some() {
                 "aiw.dev/wsb-imported-msi-execution/v0alpha5"
             } else if result.standard_user_context.is_some() {
                 "aiw.dev/wsb-imported-msi-execution/v0alpha4"
@@ -877,6 +899,7 @@ fn start_approved_windows_sandbox_inner(
             behavior: result.behavior,
             standard_user_context: result.standard_user_context,
             registry_evidence: result.registry_evidence,
+            product_registration: result.product_registration,
         }))
     } else {
         Ok(WsbApprovedExecution::GoldenProbe(result))

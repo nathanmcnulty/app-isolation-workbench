@@ -567,6 +567,8 @@ enum SchemaKind {
     ImportedMsiFailedAttempt,
     #[value(name = "msi-failed-snapshots")]
     MsiFailedSnapshots,
+    #[value(name = "msi-product-registration")]
+    MsiProductRegistration,
     CompiledMsiScenario,
     MsiScenarioCompilation,
     ApplicationFileAuthority,
@@ -1735,6 +1737,9 @@ fn run(command: Command) -> Result<()> {
             SchemaKind::MsiFailedSnapshots => {
                 write_json(&schema_for!(aiw_provider_wsb::ImportedMsiFailedSnapshots))
             }
+            SchemaKind::MsiProductRegistration => write_json(&schema_for!(
+                aiw_provider_wsb::ImportedMsiProductRegistrationEvidence
+            )),
             SchemaKind::WsbMsiRunReport => write_json(&schema_for!(aiw_runner::WsbMsiRunReport)),
             SchemaKind::WsbMsiReportSetInput => {
                 write_json(&schema_for!(aiw_runner::WsbMsiReportSetInput))

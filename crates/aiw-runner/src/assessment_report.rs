@@ -61,6 +61,8 @@ pub struct WsbMsiAssessmentReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub registry_evidence: Option<aiw_provider_wsb::ImportedMsiRegistryEvidence>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub product_registration: Option<aiw_provider_wsb::ImportedMsiProductRegistrationEvidence>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub installation_registry_changes: Option<aiw_provider_wsb::RegistrySnapshotDiff>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exercise_registry_changes: Option<aiw_provider_wsb::RegistrySnapshotDiff>,
@@ -448,6 +450,13 @@ pub fn report_windows_sandbox_msi_run(
         standard_user_context.as_ref(),
     )
     .map_err(RunnerError::Receipt)?;
+    let product_registration = aiw_provider_wsb::verify_msi_product_registration_evidence(
+        &evidence_bytes,
+        &verified.evidence_root_hash,
+        &request,
+        &scenario,
+    )
+    .map_err(RunnerError::Receipt)?;
     let behavior = aiw_provider_wsb::verify_imported_msi_behavior(
         &evidence_bytes,
         &verified.evidence_root_hash,
@@ -500,7 +509,9 @@ pub fn report_windows_sandbox_msi_run(
     revalidate()?;
     Ok(WsbMsiRunReport::CompletedAssessment(Box::new(
         WsbMsiAssessmentReport {
-            schema_version: if registry_evidence.is_some() {
+            schema_version: if product_registration.is_some() {
+                "aiw.dev/wsb-msi-assessment-report/v0alpha7"
+            } else if registry_evidence.is_some() {
                 "aiw.dev/wsb-msi-assessment-report/v0alpha6"
             } else if standard_user_context.is_some() {
                 "aiw.dev/wsb-msi-assessment-report/v0alpha5"
@@ -540,6 +551,7 @@ pub fn report_windows_sandbox_msi_run(
             installation_file_changes,
             exercise_file_changes,
             registry_evidence,
+            product_registration,
             installation_registry_changes,
             exercise_registry_changes,
             requested_assertions: project.assertions.clone(),
