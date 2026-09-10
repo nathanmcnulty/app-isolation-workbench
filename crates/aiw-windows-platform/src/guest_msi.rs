@@ -203,10 +203,19 @@ pub enum GuestMsiStageStatus {
     NotReached,
 }
 
+#[derive(Debug, Default)]
+pub struct GuestMsiRetainedSnapshots {
+    pub capture_context: Option<StandardUserRuntimeContext>,
+    pub before_install: Option<aiw_provider_wsb::FailedSnapshotPhase>,
+    pub after_install: Option<aiw_provider_wsb::FailedSnapshotPhase>,
+    pub after_exercise: Option<aiw_provider_wsb::FailedSnapshotPhase>,
+}
+
 #[derive(Debug)]
 pub struct GuestMsiAttempt {
     pub result: Result<GuestMsiExecutionObservation, GuestMsiExecutionError>,
     pub stages: Vec<(GuestMsiStage, GuestMsiStageStatus)>,
+    pub failed_snapshots: Option<GuestMsiRetainedSnapshots>,
 }
 
 const V3_STAGES: [GuestMsiStage; 9] = [
@@ -224,6 +233,7 @@ const V3_STAGES: [GuestMsiStage; 9] = [
 struct StageRecorder {
     stages: Vec<(GuestMsiStage, GuestMsiStageStatus)>,
     current: Option<usize>,
+    snapshots: Option<GuestMsiRetainedSnapshots>,
 }
 
 impl StageRecorder {
@@ -238,6 +248,42 @@ impl StageRecorder {
                 Vec::new()
             },
             current: None,
+            snapshots: None,
+        }
+    }
+
+    fn retain_capture(
+        &mut self,
+        stage: GuestMsiStage,
+        capture: Option<&GuestCapture>,
+        context: Option<&StandardUserRuntimeContext>,
+    ) {
+        let Some(retained) = &mut self.snapshots else {
+            return;
+        };
+        let Some(capture) = capture else {
+            return;
+        };
+        if !self.stages.iter().any(|(candidate, status)| {
+            *candidate == stage && *status == GuestMsiStageStatus::Passed
+        }) {
+            return;
+        }
+        let Some(registry) = &capture.registry else {
+            return;
+        };
+        let phase = aiw_provider_wsb::FailedSnapshotPhase {
+            files: capture.files.clone(),
+            registry: registry.clone(),
+        };
+        match stage {
+            GuestMsiStage::BeforeInstallCapture => {
+                retained.capture_context = context.cloned();
+                retained.before_install = Some(phase);
+            }
+            GuestMsiStage::AfterInstallCapture => retained.after_install = Some(phase),
+            GuestMsiStage::AfterExerciseCapture => retained.after_exercise = Some(phase),
+            _ => unreachable!("only completed capture stages retain snapshots"),
         }
     }
 
@@ -301,14 +347,24 @@ pub fn execute_fixed_notepad_plus_plus_msi_attempt(
         return GuestMsiAttempt {
             result: Err(GuestMsiExecutionError::Scenario(error.to_string())),
             stages: Vec::new(),
+            failed_snapshots: None,
         };
     }
 
     let mut stages = StageRecorder::for_scenario(scenario.requires_application_exercise());
+    stages.snapshots = scenario
+        .requires_registry_observations()
+        .then(GuestMsiRetainedSnapshots::default);
     let result = execute_validated_fixed_notepad_plus_plus_msi(scenario, &mut stages);
+    let failed_snapshots = if result.is_err() {
+        stages.snapshots
+    } else {
+        None
+    };
     GuestMsiAttempt {
         result,
         stages: stages.stages,
+        failed_snapshots,
     }
 }
 
@@ -336,6 +392,11 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
                 .transpose()?,
         )
     };
+    stages.retain_capture(
+        GuestMsiStage::BeforeInstallCapture,
+        before_install.as_ref(),
+        standard_user.as_ref().map(|user| user.context()),
+    );
     let install_exit_code = stages.run(GuestMsiStage::Install, || {
         let installer = GuestProcess::start(MSIEXEC_PATH, &scenario.install_arguments)?;
         let install_exit_code = installer.wait_for_exit(Duration::from_secs(u64::from(
@@ -363,6 +424,11 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
             })
         })
         .transpose()?;
+    stages.retain_capture(
+        GuestMsiStage::AfterInstallCapture,
+        after_install.as_ref(),
+        None,
+    );
     let document_exercise = if scenario.requires_application_exercise() {
         Some(stages.run(GuestMsiStage::PrepareDocument, || {
             prepare_fixed_document_exercise(scenario, standard_user.as_ref())
@@ -474,6 +540,11 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
             let after_exercise = stages.run(GuestMsiStage::AfterExerciseCapture, || {
                 Ok(capture_application_state(scenario, standard_user.as_ref()))
             })?;
+            stages.retain_capture(
+                GuestMsiStage::AfterExerciseCapture,
+                Some(&after_exercise),
+                None,
+            );
             let registry = match (
                 before_install.registry,
                 after_install.registry,
@@ -1451,6 +1522,72 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn retained_snapshots_only_include_completed_capture_stages() {
+        use aiw_provider_wsb::{
+            ApplicationRegistryRoot as Root, RegistryScope, RegistryView as View,
+        };
+        let capture = GuestCapture {
+            files: aiw_provider_wsb::ApplicationFilesystemSnapshot {
+                entries: vec![],
+                issues: vec![],
+            },
+            registry: Some(aiw_provider_wsb::ApplicationRegistrySnapshot {
+                keys: vec![],
+                values: vec![],
+                issues: vec![],
+                absent_roots: [Root::MachineApplication, Root::UserApplication]
+                    .into_iter()
+                    .flat_map(|root| {
+                        [View::Registry64, View::Registry32]
+                            .into_iter()
+                            .map(move |view| RegistryScope { root, view })
+                    })
+                    .collect(),
+            }),
+        };
+        let context = StandardUserRuntimeContext {
+            user_sid: "S-1-5-21-1-2-3-1000".into(),
+            profile_path: aiw_provider_wsb::STANDARD_USER_PROFILE_PATH.into(),
+            roaming_app_data: r"C:\Users\AiwStandardUser\AppData\Roaming".into(),
+            local_app_data: r"C:\Users\AiwStandardUser\AppData\Local".into(),
+            administrators_enabled: false,
+        };
+        let mut stages = StageRecorder::for_scenario(true);
+        stages.snapshots = Some(GuestMsiRetainedSnapshots::default());
+        stages.retain_capture(
+            GuestMsiStage::BeforeInstallCapture,
+            Some(&capture),
+            Some(&context),
+        );
+        assert!(stages.snapshots.as_ref().unwrap().before_install.is_none());
+        stages
+            .run(GuestMsiStage::BeforeInstallCapture, || Ok(()))
+            .unwrap();
+        stages.retain_capture(
+            GuestMsiStage::BeforeInstallCapture,
+            Some(&capture),
+            Some(&context),
+        );
+        stages.run(GuestMsiStage::Install, || Ok(())).unwrap();
+        assert!(
+            stages
+                .run(GuestMsiStage::AfterInstallCapture, || Err::<(), _>(
+                    GuestMsiExecutionError::Process("capture failed".into())
+                ))
+                .is_err()
+        );
+        stages.retain_capture(GuestMsiStage::AfterInstallCapture, Some(&capture), None);
+        drop(capture);
+        let retained = stages.snapshots.unwrap();
+        assert_eq!(retained.capture_context, Some(context));
+        let phase = retained.before_install.unwrap();
+        phase.files.validate().unwrap();
+        phase.registry.validate().unwrap();
+        assert!(retained.after_install.is_none());
+        assert!(retained.after_exercise.is_none());
     }
 
     #[test]

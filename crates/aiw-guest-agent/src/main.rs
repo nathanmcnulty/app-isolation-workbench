@@ -208,6 +208,31 @@ fn execute_imported_msi_request(request: &ImportedMsiGuestRequest) -> Result<()>
                     .map_err(anyhow::Error::msg)?;
                 let mut evidence = EvidenceLog::new();
                 append_stage_progress(&mut evidence, &failed.progress)?;
+                if let Some(snapshots) = attempt.failed_snapshots {
+                    let snapshots = aiw_provider_wsb::ImportedMsiFailedSnapshots {
+                        schema_version:
+                            aiw_provider_wsb::IMPORTED_MSI_FAILED_SNAPSHOTS_SCHEMA_VERSION
+                                .to_owned(),
+                        run_id: request.run_id.clone(),
+                        sandbox_id: request.sandbox_id.clone(),
+                        request_sha256: request.request_sha256.clone(),
+                        scenario_sha256: request.scenario_sha256.clone(),
+                        capture_context: snapshots.capture_context,
+                        before_install: snapshots.before_install,
+                        after_install: snapshots.after_install,
+                        after_exercise: snapshots.after_exercise,
+                    };
+                    snapshots
+                        .validate_for(request, &failed)
+                        .map_err(anyhow::Error::msg)?;
+                    evidence.append(EvidenceEvent {
+                        observed_utc: "guest-agent-time-not-trusted".to_owned(),
+                        kind: aiw_provider_wsb::IMPORTED_MSI_FAILED_SNAPSHOTS_EVENT.to_owned(),
+                        source: "aiw-guest-agent".to_owned(),
+                        payload: serde_json::to_value(&snapshots)?,
+                    })?;
+                }
+
                 publish_msi_result(request, &failed, evidence, CompletionStatus::Failed)?;
                 return Err(PublishedMsiFailure(error.to_string()).into());
             }

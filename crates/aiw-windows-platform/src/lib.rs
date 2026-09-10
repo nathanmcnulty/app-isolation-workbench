@@ -11,8 +11,9 @@ pub use windows_platform::{
 #[cfg(windows)]
 pub use guest_msi::{
     GuestMsiAttempt, GuestMsiExecutionError, GuestMsiExecutionObservation,
-    GuestMsiFilesystemObservation, GuestMsiRegistryObservation, GuestMsiStage, GuestMsiStageStatus,
-    execute_fixed_notepad_plus_plus_msi, execute_fixed_notepad_plus_plus_msi_attempt,
+    GuestMsiFilesystemObservation, GuestMsiRegistryObservation, GuestMsiRetainedSnapshots,
+    GuestMsiStage, GuestMsiStageStatus, execute_fixed_notepad_plus_plus_msi,
+    execute_fixed_notepad_plus_plus_msi_attempt,
 };
 
 #[cfg(windows)]
