@@ -16,8 +16,16 @@ pub use bambu_report::{
     BambuReportEvidenceStatus, WsbBambuRunReport, render_bambu_run_report_markdown,
 };
 use bambu_report::{add_bambu_artifact_expectation, verify_bambu_output};
+mod application_report_set;
 mod assessment_report;
 mod report_set;
+#[cfg(windows)]
+pub use application_report_set::report_windows_sandbox_set;
+pub use application_report_set::{
+    ApplicationReportFunctions, ReportSetProfile, WSB_REPORT_SET_INPUT_SCHEMA,
+    WSB_REPORT_SET_SCHEMA, WsbReportSet, WsbReportSetEntry, WsbReportSetInput, WsbReportSetResult,
+    WsbReportSetRow,
+};
 #[cfg(windows)]
 pub use report_set::report_windows_sandbox_msi_set;
 pub use report_set::{

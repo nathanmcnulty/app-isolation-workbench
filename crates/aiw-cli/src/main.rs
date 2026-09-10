@@ -493,6 +493,12 @@ enum RunCommand {
         format: AssessmentReportFormat,
     },
     /// Reverify a bounded set of retained MSI workspaces without executing or comparing them.
+    ReportWsbSet {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long, value_enum, default_value_t = AssessmentReportFormat::Json)]
+        format: AssessmentReportFormat,
+    },
     ReportWsbMsiSet {
         #[arg(long)]
         input: PathBuf,
@@ -605,6 +611,8 @@ enum SchemaKind {
     WsbMsiAssessmentReport,
     WsbMsiRunReport,
     #[value(name = "wsb-msi-report-set-input")]
+    WsbReportSetInput,
+    WsbReportSet,
     WsbMsiReportSetInput,
     #[value(name = "wsb-msi-report-set")]
     WsbMsiReportSet,
@@ -1751,6 +1759,39 @@ fn run(command: Command) -> Result<()> {
                     }))
                 }
             }
+            RunCommand::ReportWsbSet { input, format } => {
+                let manifest: aiw_runner::WsbReportSetInput = read_document(&input, 1024 * 1024)?;
+                manifest.validate().map_err(|error| anyhow!(error))?;
+                #[cfg(windows)]
+                {
+                    let report =
+                        aiw_runner::report_windows_sandbox_set(&manifest).map_err(|source| {
+                            anyhow!(RunReportFailed {
+                                run_id: "report-set".to_owned(),
+                                source: RunnerError::Receipt(source),
+                            })
+                        })?;
+                    match format {
+                        AssessmentReportFormat::Json => write_json(&report),
+                        AssessmentReportFormat::Markdown => {
+                            print!("{}", report.to_markdown());
+                            Ok(())
+                        }
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (manifest, format);
+                    Err(anyhow!(RunOperationUnavailable {
+                        code: "AIW_WINDOWS_REQUIRED",
+                        summary: "retained Windows workspace verification requires Windows",
+                        stage: "wsbReportSet",
+                        remediation: "Read the retained workspaces on their original Windows host.",
+                        detail: "No files or provider state were changed.",
+                        run_id: input.display().to_string(),
+                    }))
+                }
+            }
             RunCommand::ReportWsbMsiSet { input, format } => {
                 let manifest: WsbMsiReportSetInput = read_document(&input, 1024 * 1024)?;
                 manifest.validate().map_err(|error| anyhow!(error))?;
@@ -1914,6 +1955,10 @@ fn run(command: Command) -> Result<()> {
                 aiw_provider_wsb::ImportedMsiProductRegistrationEvidence
             )),
             SchemaKind::WsbMsiRunReport => write_json(&schema_for!(aiw_runner::WsbMsiRunReport)),
+            SchemaKind::WsbReportSetInput => {
+                write_json(&schema_for!(aiw_runner::WsbReportSetInput))
+            }
+            SchemaKind::WsbReportSet => write_json(&schema_for!(aiw_runner::WsbReportSet)),
             SchemaKind::WsbMsiReportSetInput => {
                 write_json(&schema_for!(aiw_runner::WsbMsiReportSetInput))
             }

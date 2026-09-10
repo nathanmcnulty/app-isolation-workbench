@@ -127,6 +127,8 @@ try {
         'msi-product-registration',
         'wsb-msi-assessment-report',
         'wsb-msi-report-set-input',
+        'wsb-report-set-input',
+        'wsb-report-set',
         'wsb-msi-report-set',
         'application-file-authority',
         'application-file-import-receipt',

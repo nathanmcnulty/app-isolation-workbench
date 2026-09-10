@@ -271,31 +271,12 @@ fn summarize(name: String, report: WsbMsiRunReport) -> WsbMsiReportSetResult {
 pub fn report_windows_sandbox_msi_set(
     input: &WsbMsiReportSetInput,
 ) -> Result<WsbMsiReportSet, String> {
-    use std::{fs::File, io::Read};
     input.validate()?;
     let mut seen = BTreeSet::new();
     let mut entries = Vec::with_capacity(input.entries.len());
     for entry in &input.entries {
         let read = || -> Result<WsbMsiReportSetResult, ReportSetUnavailableReason> {
-            // Projects are explicit selectors and may live outside the retained workspace.
-            // Bound reads from the opened regular file; the report verifier binds parsed content.
-            let file = File::open(&entry.project_path)
-                .map_err(|_| ReportSetUnavailableReason::ProjectUnreadable)?;
-            let metadata = file
-                .metadata()
-                .map_err(|_| ReportSetUnavailableReason::ProjectUnreadable)?;
-            if !metadata.is_file() || metadata.len() > 1024 * 1024 {
-                return Err(ReportSetUnavailableReason::ProjectUnreadable);
-            }
-            let mut bytes = Vec::new();
-            file.take(1024 * 1024 + 1)
-                .read_to_end(&mut bytes)
-                .map_err(|_| ReportSetUnavailableReason::ProjectUnreadable)?;
-            if bytes.len() > 1024 * 1024 {
-                return Err(ReportSetUnavailableReason::ProjectUnreadable);
-            }
-            let project: aiw_schema::Project = serde_yaml::from_slice(&bytes)
-                .map_err(|_| ReportSetUnavailableReason::ProjectInvalid)?;
+            let project = read_report_project(&entry.project_path)?;
             let report = crate::report_windows_sandbox_msi_run(
                 &entry.workspace_root,
                 &entry.run_id,
@@ -415,6 +396,32 @@ impl WsbMsiReportSet {
         }
         out
     }
+}
+
+#[cfg(windows)]
+pub(crate) fn read_report_project(
+    path: &std::path::Path,
+) -> Result<aiw_schema::Project, ReportSetUnavailableReason> {
+    use std::{fs::File, io::Read};
+    // Projects are explicit selectors and may live outside the retained workspace.
+    // Bound reads from the opened regular file; the report verifier binds parsed content.
+    let file = File::open(path).map_err(|_| ReportSetUnavailableReason::ProjectUnreadable)?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| ReportSetUnavailableReason::ProjectUnreadable)?;
+    if !metadata.is_file() || metadata.len() > 1024 * 1024 {
+        return Err(ReportSetUnavailableReason::ProjectUnreadable);
+    }
+    let mut bytes = Vec::new();
+    file.take(1024 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| ReportSetUnavailableReason::ProjectUnreadable)?;
+    if bytes.len() > 1024 * 1024 {
+        return Err(ReportSetUnavailableReason::ProjectUnreadable);
+    }
+    let project: aiw_schema::Project =
+        serde_yaml::from_slice(&bytes).map_err(|_| ReportSetUnavailableReason::ProjectInvalid)?;
+    Ok(project)
 }
 
 #[cfg(test)]
