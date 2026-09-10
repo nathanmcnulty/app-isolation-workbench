@@ -33,6 +33,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "aiw-control-appcontainer"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "aiw-windows-platform",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "aiw-control-fixture"
 version = "0.1.0-alpha.1"
 dependencies = [

@@ -2,6 +2,7 @@
 members = [
     "crates/aiw-cli",
     "crates/aiw-control-fixture",
+    "crates/aiw-control-appcontainer",
     "crates/aiw-core",
     "crates/aiw-evidence",
     "crates/aiw-orchestrator",

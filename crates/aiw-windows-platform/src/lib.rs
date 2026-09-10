@@ -22,6 +22,11 @@ pub use guest_bambu::{
 };
 
 #[cfg(windows)]
+pub use control_appcontainer::{
+    ControlAppContainerError, ControlAppContainerObservation, execute_fixed_control_appcontainer,
+};
+
+#[cfg(windows)]
 pub use guest_filesystem::snapshot_fixed_notepad_files;
 
 #[cfg(windows)]
@@ -154,6 +159,9 @@ mod guest_msi;
 
 #[cfg(windows)]
 mod guest_bambu;
+
+#[cfg(windows)]
+mod control_appcontainer;
 
 #[cfg(windows)]
 mod guest_desktop;
