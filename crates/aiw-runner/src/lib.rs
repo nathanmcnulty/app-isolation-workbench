@@ -10,6 +10,15 @@
 //! script, URL, or arbitrary policy API.
 
 mod assessment_report;
+mod report_set;
+#[cfg(windows)]
+pub use report_set::report_windows_sandbox_msi_set;
+pub use report_set::{
+    ReportSetFailureEvidence, ReportSetFileChanges, ReportSetFunctions, ReportSetRegistryChanges,
+    ReportSetUnavailableReason, WSB_MSI_REPORT_SET_INPUT_SCHEMA, WSB_MSI_REPORT_SET_SCHEMA,
+    WsbMsiReportSet, WsbMsiReportSetEntry, WsbMsiReportSetInput, WsbMsiReportSetResult,
+    WsbMsiReportSetRow, WsbMsiReportSetSummary,
+};
 #[cfg(windows)]
 mod discard;
 mod preparation;
