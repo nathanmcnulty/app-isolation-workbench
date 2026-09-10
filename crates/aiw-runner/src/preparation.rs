@@ -30,6 +30,8 @@ use thiserror::Error;
 pub const WSB_PREPARATION_RECEIPT_SCHEMA_VERSION: &str = "aiw.dev/wsb-preparation-receipt/v0alpha1";
 pub const WSB_MSI_PREPARATION_RECEIPT_SCHEMA_VERSION: &str =
     "aiw.dev/wsb-preparation-receipt/v0alpha2";
+pub const WSB_BAMBU_PREPARATION_RECEIPT_SCHEMA_VERSION: &str =
+    "aiw.dev/wsb-preparation-receipt/v0alpha3";
 pub const WSB_PLANNING_IMPORT_RESULT_SCHEMA_VERSION: &str =
     "aiw.dev/wsb-planning-import-result/v0alpha1";
 
@@ -39,8 +41,11 @@ const PINNED_CLI_PROTOCOL: &str = "windowsSandboxCli/v0.8.107.0";
 const PINNED_LIST_SCHEMA: &str = "WindowsSandboxEnvironments/Id";
 const GUEST_AGENT_FILE: &str = "aiw-guest-agent.exe";
 const MSI_FILE: &str = "application.msi";
+const BAMBU_FILE: &str = "application.exe";
 const GUEST_MSI_RESULT: &str = r"C:\AIW\Output\scenario-result.json";
 const TRUST_DELTA_MSI: &str = "installs and exercises the approved imported MSI in Windows Sandbox";
+const TRUST_DELTA_BAMBU: &str =
+    "installs and exports the approved Bambu Studio local 3MF scenario in Windows Sandbox";
 const GUEST_TOOLS: &str = r"C:\AIW\Tools";
 const GUEST_OUTPUT: &str = r"C:\AIW\Output";
 const GUEST_AGENT: &str = r"C:\AIW\Tools\aiw-guest-agent.exe";
@@ -116,6 +121,8 @@ pub struct WsbPreparationReceipt {
     pub provider_mutated: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub msi: Option<WsbMsiApplication>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bambu: Option<WsbBambuApplication>,
 }
 
 #[derive(Debug, Clone, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -171,14 +178,70 @@ impl WsbMsiApplication {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WsbBambuApplication {
+    pub import_receipt: aiw_probe::ApplicationFileImportReceipt,
+    pub import_receipt_sha256: String,
+    pub scenario: aiw_provider_wsb::CompiledBambuExportScenario,
+    pub scenario_sha256: String,
+    pub staged_payload: BinaryIdentity,
+    pub staged_identity: WindowsFileIdentity,
+}
+
+impl WsbBambuApplication {
+    pub(crate) fn validate(
+        &self,
+        workspace: &WorkspaceBindingEvidence,
+    ) -> Result<(), WsbPreparationError> {
+        self.scenario
+            .validate()
+            .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+        let receipt_bytes = serde_json::to_vec(&self.import_receipt)
+            .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+        if !matches!(
+            self.import_receipt.schema_version.as_str(),
+            aiw_probe::APPLICATION_FILE_IMPORT_RECEIPT_SCHEMA
+                | aiw_probe::APPLICATION_DOWNLOAD_IMPORT_RECEIPT_SCHEMA
+        ) || self.import_receipt.source_kind != aiw_probe::ApplicationInspectionKind::Exe
+            || hex::encode(Sha256::digest(receipt_bytes)) != self.import_receipt_sha256
+            || canonical_hash(&self.scenario)? != self.scenario_sha256
+            || self.scenario.application_sha256 != self.import_receipt.sha256
+            || self.staged_payload.sha256 != self.import_receipt.sha256
+            || self.staged_payload.size_bytes != self.import_receipt.size_bytes
+            || self.staged_payload.size_bytes == 0
+            || self.staged_payload.size_bytes > 512 * 1024 * 1024
+            || self.staged_payload.version.is_some()
+            || self.staged_payload.signature_status != ReadinessState::Unknown
+            || normalized_windows_path(&self.staged_payload.canonical_path)
+                != format!(
+                    "{}\\{}",
+                    normalized_windows_path(&workspace.tools.final_path),
+                    BAMBU_FILE
+                )
+            || normalized_windows_path(&self.staged_identity.final_path)
+                != normalized_windows_path(&self.staged_payload.canonical_path)
+            || self.staged_identity.volume_serial_number != workspace.tools.volume_serial_number
+        {
+            return Err(WsbPreparationError::Contract(
+                "Bambu preparation bindings are inconsistent".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 impl WsbPreparationReceipt {
     pub fn validate(&self) -> Result<(), WsbPreparationError> {
-        let expected_schema = if self.msi.is_some() {
+        let expected_schema = if self.bambu.is_some() {
+            WSB_BAMBU_PREPARATION_RECEIPT_SCHEMA_VERSION
+        } else if self.msi.is_some() {
             WSB_MSI_PREPARATION_RECEIPT_SCHEMA_VERSION
         } else {
             WSB_PREPARATION_RECEIPT_SCHEMA_VERSION
         };
-        if self.schema_version != expected_schema
+        if self.msi.is_some() && self.bambu.is_some()
+            || self.schema_version != expected_schema
             || self.status != WsbPreparationStatus::PendingApproval
             || self.run_id.is_empty()
             || self.created_at.is_empty()
@@ -240,6 +303,9 @@ impl WsbPreparationReceipt {
         if let Some(msi) = &self.msi {
             msi.validate(&self.workspace)?;
         }
+        if let Some(bambu) = &self.bambu {
+            bambu.validate(&self.workspace)?;
+        }
         Ok(())
     }
 }
@@ -255,10 +321,10 @@ impl PreparedWsbArtifacts {
     pub fn validate(&self) -> Result<(), WsbPreparationError> {
         self.receipt.validate()?;
         let mut profile_plan = self.wsb_plan.clone();
-        if self.receipt.msi.is_some() {
+        if self.receipt.msi.is_some() || self.receipt.bambu.is_some() {
             if profile_plan.probe.output != GUEST_MSI_RESULT {
                 return Err(WsbPreparationError::Contract(
-                    "MSI output path is not fixed".to_owned(),
+                    "imported application output path is not fixed".to_owned(),
                 ));
             }
             profile_plan.probe.output = GUEST_TOKEN.to_owned();
@@ -273,6 +339,8 @@ impl PreparedWsbArtifacts {
                 != [
                     if self.receipt.msi.is_some() {
                         TRUST_DELTA_MSI
+                    } else if self.receipt.bambu.is_some() {
+                        TRUST_DELTA_BAMBU
                     } else {
                         TRUST_DELTA_START
                     }
@@ -304,6 +372,7 @@ impl PreparedWsbArtifacts {
                 PlannedAction::CollectEvidence,
             ] => {
                 self.receipt.msi.is_none()
+                    && self.receipt.bambu.is_none()
                     && sandbox_plan_sha256 == &self.receipt.wsb_plan_sha256
                     && provider_sha256 == &self.receipt.provider.sha256
                     && guest_agent_sha256 == &self.receipt.guest_agent.sha256
@@ -333,6 +402,30 @@ impl PreparedWsbArtifacts {
                     && import_receipt_sha256 == &msi.import_receipt_sha256
                     && application_sha256 == &msi.staged_payload.sha256
                     && scenario_sha256 == &msi.scenario_sha256
+            }),
+            [
+                PlannedAction::AssessHost,
+                PlannedAction::PrepareWorkspace,
+                PlannedAction::ExecuteWindowsSandboxImportedBambuScenario {
+                    sandbox_plan_sha256,
+                    provider_sha256,
+                    guest_agent_sha256,
+                    workspace,
+                    workspace_identity_sha256,
+                    import_receipt_sha256,
+                    application_sha256,
+                    scenario_sha256,
+                },
+                PlannedAction::CollectEvidence,
+            ] => self.receipt.bambu.as_ref().is_some_and(|bambu| {
+                sandbox_plan_sha256 == &self.receipt.wsb_plan_sha256
+                    && provider_sha256 == &self.receipt.provider.sha256
+                    && guest_agent_sha256 == &self.receipt.guest_agent.sha256
+                    && workspace.as_ref() == &self.receipt.workspace
+                    && workspace_identity_sha256 == &self.receipt.workspace_identity_sha256
+                    && import_receipt_sha256 == &bambu.import_receipt_sha256
+                    && application_sha256 == &bambu.staged_payload.sha256
+                    && scenario_sha256 == &bambu.scenario_sha256
             }),
             _ => false,
         };
@@ -465,6 +558,7 @@ pub fn build_wsb_preparation(
         provider_acquired: false,
         provider_mutated: false,
         msi: None,
+        bambu: None,
     };
     let artifacts = PreparedWsbArtifacts {
         run_plan,
@@ -535,6 +629,73 @@ pub fn build_wsb_msi_preparation(
         .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
     artifacts.receipt.schema_version = WSB_MSI_PREPARATION_RECEIPT_SCHEMA_VERSION.to_owned();
     artifacts.receipt.msi = Some(msi);
+    artifacts.validate()?;
+    Ok(artifacts)
+}
+
+pub fn build_wsb_bambu_preparation(
+    run_id: &str,
+    project: &Project,
+    readiness: &WindowsSandboxReadiness,
+    workspace: &WorkspaceBindingEvidence,
+    guest_agent: &BinaryIdentity,
+    created_at: &str,
+    bambu: WsbBambuApplication,
+) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
+    bambu.validate(workspace)?;
+    let compiled = aiw_provider_wsb::compile_bambu_studio_export_scenario(
+        project,
+        &bambu.scenario.scenario_id,
+    )
+    .map_err(|e| WsbPreparationError::Project(e.to_string()))?;
+    if compiled != bambu.scenario {
+        return Err(WsbPreparationError::Project(
+            "compiled scenario differs from project".to_owned(),
+        ));
+    }
+    let mut artifacts = build_wsb_preparation(
+        run_id,
+        project,
+        readiness,
+        workspace,
+        guest_agent,
+        created_at,
+    )?;
+    artifacts.wsb_plan.probe.output = GUEST_MSI_RESULT.to_owned();
+    artifacts.receipt.wsb_plan_sha256 = canonical_hash(&artifacts.wsb_plan)?;
+    artifacts.run_plan = RunPlan::new(
+        run_id,
+        &project.metadata.name,
+        &artifacts.receipt.project_revision_sha256,
+        RunLifecycleKind::Assessment,
+        created_at,
+        vec![
+            PlannedAction::AssessHost,
+            PlannedAction::PrepareWorkspace,
+            PlannedAction::ExecuteWindowsSandboxImportedBambuScenario {
+                sandbox_plan_sha256: artifacts.receipt.wsb_plan_sha256.clone(),
+                provider_sha256: artifacts.receipt.provider.sha256.clone(),
+                guest_agent_sha256: guest_agent.sha256.clone(),
+                workspace: Box::new(workspace.clone()),
+                workspace_identity_sha256: artifacts.receipt.workspace_identity_sha256.clone(),
+                import_receipt_sha256: bambu.import_receipt_sha256.clone(),
+                application_sha256: bambu.staged_payload.sha256.clone(),
+                scenario_sha256: bambu.scenario_sha256.clone(),
+            },
+            PlannedAction::CollectEvidence,
+        ],
+        vec![
+            TRUST_DELTA_BAMBU.to_owned(),
+            TRUST_DELTA_MAPPINGS.to_owned(),
+        ],
+    )
+    .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+    artifacts.receipt.run_plan_sha256 = artifacts
+        .run_plan
+        .hash()
+        .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+    artifacts.receipt.schema_version = WSB_BAMBU_PREPARATION_RECEIPT_SCHEMA_VERSION.to_owned();
+    artifacts.receipt.bambu = Some(bambu);
     artifacts.validate()?;
     Ok(artifacts)
 }
@@ -810,6 +971,24 @@ pub struct WsbMsiPreparationInput<'a> {
 }
 
 #[cfg(windows)]
+pub struct WsbBambuPreparationInput<'a> {
+    pub import_receipt: &'a aiw_probe::ApplicationFileImportReceipt,
+    pub scenario_id: &'a str,
+}
+
+#[cfg(windows)]
+enum WsbPreparationApplicationInput<'a> {
+    Msi(WsbMsiPreparationInput<'a>),
+    Bambu(WsbBambuPreparationInput<'a>),
+}
+
+#[cfg(windows)]
+enum PreparedApplicationScenario {
+    Msi(aiw_provider_wsb::CompiledMsiScenario),
+    Bambu(aiw_provider_wsb::CompiledBambuExportScenario),
+}
+
+#[cfg(windows)]
 pub fn prepare_windows_sandbox_msi_bundle(
     run_id: &str,
     project: &Project,
@@ -827,7 +1006,29 @@ pub fn prepare_windows_sandbox_msi_bundle(
         workspace_parent,
         run_id,
         created_at,
-        Some(msi),
+        Some(WsbPreparationApplicationInput::Msi(msi)),
+    )
+}
+
+#[cfg(windows)]
+pub fn prepare_windows_sandbox_bambu_bundle(
+    run_id: &str,
+    project: &Project,
+    guest_agent_source: &Path,
+    expected_guest_agent_sha256: &str,
+    workspace_parent: &Path,
+    created_at: &str,
+    bambu: WsbBambuPreparationInput<'_>,
+) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
+    prepare_bundle(
+        run_id,
+        project,
+        guest_agent_source,
+        expected_guest_agent_sha256,
+        workspace_parent,
+        run_id,
+        created_at,
+        Some(WsbPreparationApplicationInput::Bambu(bambu)),
     )
 }
 
@@ -841,13 +1042,13 @@ fn prepare_bundle(
     workspace_parent: &Path,
     workspace_leaf: &str,
     created_at: &str,
-    msi_input: Option<WsbMsiPreparationInput<'_>>,
+    application_input: Option<WsbPreparationApplicationInput<'_>>,
 ) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
     use aiw_windows_platform::{HeldRunWorkspace, WorkspaceError, assess_windows_sandbox};
 
     validate_request_contract(run_id, project, created_at)?;
-    let mut held_msi = match &msi_input {
-        Some(input) => {
+    let mut held_application = match &application_input {
+        Some(WsbPreparationApplicationInput::Msi(input)) => {
             let scenario = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
                 project,
                 input.scenario_id,
@@ -864,7 +1065,25 @@ fn prepare_bundle(
             Some((
                 aiw_windows_platform::open_verified_application_file_import(input.import_receipt)
                     .map_err(|e| WsbPreparationError::Contract(e.to_string()))?,
-                scenario,
+                PreparedApplicationScenario::Msi(scenario),
+            ))
+        }
+        Some(WsbPreparationApplicationInput::Bambu(input)) => {
+            let scenario =
+                aiw_provider_wsb::compile_bambu_studio_export_scenario(project, input.scenario_id)
+                    .map_err(|e| WsbPreparationError::Project(e.to_string()))?;
+            if input.import_receipt.source_kind != aiw_probe::ApplicationInspectionKind::Exe
+                || input.import_receipt.sha256 != scenario.application_sha256
+                || input.import_receipt.size_bytes > 512 * 1024 * 1024
+            {
+                return Err(WsbPreparationError::Contract(
+                    "Bambu intake differs from scenario or exceeds size limit".to_owned(),
+                ));
+            }
+            Some((
+                aiw_windows_platform::open_verified_application_file_import(input.import_receipt)
+                    .map_err(|e| WsbPreparationError::Contract(e.to_string()))?,
+                PreparedApplicationScenario::Bambu(scenario),
             ))
         }
         None => None,
@@ -906,9 +1125,24 @@ fn prepare_bundle(
             &guest_agent,
             created_at,
         )?;
-        let held_staged_msi = if let Some((held, scenario)) = &mut held_msi {
+        let held_staged_application = if let Some((held, scenario)) = &mut held_application {
+            let (file_name, expected_receipt) = match (&application_input, &*scenario) {
+                (
+                    Some(WsbPreparationApplicationInput::Msi(input)),
+                    PreparedApplicationScenario::Msi(_),
+                ) => (MSI_FILE, input.import_receipt),
+                (
+                    Some(WsbPreparationApplicationInput::Bambu(input)),
+                    PreparedApplicationScenario::Bambu(_),
+                ) => (BAMBU_FILE, input.import_receipt),
+                _ => {
+                    return Err(WsbPreparationError::Contract(
+                        "application preparation input changed during staging".to_owned(),
+                    ));
+                }
+            };
             let created = workspace
-                .create_tools_file_new(MSI_FILE)
+                .create_tools_file_new(file_name)
                 .map_err(|e| WsbPreparationError::Workspace(e.to_string()))?;
             let staged = held
                 .copy_to(created)
@@ -916,43 +1150,71 @@ fn prepare_bundle(
             let staged_identity = staged.identity().clone();
             drop(staged);
             let staged = workspace
-                .reopen_tools_file_readonly(MSI_FILE)
+                .reopen_tools_file_readonly(file_name)
                 .map_err(|e| WsbPreparationError::Workspace(e.to_string()))?;
-            let input = msi_input.as_ref().expect("held MSI requires input");
             let observed = aiw_windows_platform::HeldApplicationFile::open(staged.final_path())
                 .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
             if staged.identity() != &staged_identity
                 || observed.observation().identity != staged_identity
-                || observed.observation().sha256 != input.import_receipt.sha256
-                || observed.observation().size_bytes != input.import_receipt.size_bytes
+                || observed.observation().sha256 != expected_receipt.sha256
+                || observed.observation().size_bytes != expected_receipt.size_bytes
             {
                 return Err(WsbPreparationError::Contract(
-                    "staged MSI drifted during readonly reopen".to_owned(),
+                    "staged application drifted during readonly reopen".to_owned(),
                 ));
             }
-            let binding = WsbMsiApplication {
-                import_receipt: input.import_receipt.clone(),
-                import_receipt_sha256: held.verification().receipt_sha256.clone(),
-                scenario: scenario.clone(),
-                scenario_sha256: canonical_hash(scenario)?,
-                staged_payload: BinaryIdentity {
-                    canonical_path: provider_path(&staged.final_path().to_string_lossy()),
-                    sha256: input.import_receipt.sha256.clone(),
-                    size_bytes: input.import_receipt.size_bytes,
-                    version: None,
-                    signature_status: ReadinessState::Unknown,
-                },
-                staged_identity: staged.identity().clone(),
-            };
-            artifacts = build_wsb_msi_preparation(
-                run_id,
-                project,
-                &readiness,
-                workspace.evidence(),
-                &guest_agent,
-                created_at,
-                binding,
-            )?;
+            match scenario {
+                PreparedApplicationScenario::Msi(scenario) => {
+                    let binding = WsbMsiApplication {
+                        import_receipt: expected_receipt.clone(),
+                        import_receipt_sha256: held.verification().receipt_sha256.clone(),
+                        scenario: scenario.clone(),
+                        scenario_sha256: canonical_hash(scenario)?,
+                        staged_payload: BinaryIdentity {
+                            canonical_path: provider_path(&staged.final_path().to_string_lossy()),
+                            sha256: expected_receipt.sha256.clone(),
+                            size_bytes: expected_receipt.size_bytes,
+                            version: None,
+                            signature_status: ReadinessState::Unknown,
+                        },
+                        staged_identity: staged.identity().clone(),
+                    };
+                    artifacts = build_wsb_msi_preparation(
+                        run_id,
+                        project,
+                        &readiness,
+                        workspace.evidence(),
+                        &guest_agent,
+                        created_at,
+                        binding,
+                    )?;
+                }
+                PreparedApplicationScenario::Bambu(scenario) => {
+                    let binding = WsbBambuApplication {
+                        import_receipt: expected_receipt.clone(),
+                        import_receipt_sha256: held.verification().receipt_sha256.clone(),
+                        scenario: scenario.clone(),
+                        scenario_sha256: canonical_hash(scenario)?,
+                        staged_payload: BinaryIdentity {
+                            canonical_path: provider_path(&staged.final_path().to_string_lossy()),
+                            sha256: expected_receipt.sha256.clone(),
+                            size_bytes: expected_receipt.size_bytes,
+                            version: None,
+                            signature_status: ReadinessState::Unknown,
+                        },
+                        staged_identity: staged.identity().clone(),
+                    };
+                    artifacts = build_wsb_bambu_preparation(
+                        run_id,
+                        project,
+                        &readiness,
+                        workspace.evidence(),
+                        &guest_agent,
+                        created_at,
+                        binding,
+                    )?;
+                }
+            }
             Some((staged, observed))
         } else {
             None
@@ -966,13 +1228,16 @@ fn prepare_bundle(
             .revalidate()
             .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?;
         ensure_empty_directory(&workspace.output_path())?;
-        require_profile_tools_allowlist(&workspace.tools_path(), artifacts.receipt.msi.is_some())?;
+        require_profile_tools_allowlist(
+            &workspace.tools_path(),
+            application_file_name(&artifacts.receipt),
+        )?;
         require_workspace_allowlist(workspace.root_path(), PreparationWorkspaceState::Building)?;
-        if let Some((held, _)) = &mut held_msi {
+        if let Some((held, _)) = &mut held_application {
             held.revalidate()
                 .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
         }
-        if let Some((file, observed)) = &held_staged_msi {
+        if let Some((file, observed)) = &held_staged_application {
             file.revalidate()
                 .map_err(|e| WsbPreparationError::Workspace(e.to_string()))?;
             observed
@@ -1004,7 +1269,7 @@ pub(crate) struct HeldVerifiedWsbPreparation {
     run_plan_file: std::fs::File,
     wsb_plan_file: std::fs::File,
     _held_agent: HeldGuestAgentSource,
-    held_msi: Option<(
+    held_application: Option<(
         aiw_windows_platform::BoundWorkspaceFile,
         aiw_windows_platform::HeldApplicationFile,
         aiw_windows_platform::HeldVerifiedApplicationFileImport,
@@ -1025,9 +1290,9 @@ impl HeldVerifiedWsbPreparation {
         ensure_empty_directory(&self.workspace.output_path())?;
         require_profile_tools_allowlist(
             &self.workspace.tools_path(),
-            self.artifacts.receipt.msi.is_some(),
+            application_file_name(&self.artifacts.receipt),
         )?;
-        if let Some((file, observed, intake)) = &self.held_msi {
+        if let Some((file, observed, intake)) = &self.held_application {
             intake
                 .revalidate()
                 .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
@@ -1084,9 +1349,10 @@ pub(crate) fn open_verified_windows_sandbox_preparation(
     let mut receipt_file = open_bundle_file(&workspace_root.join(RECEIPT_FILE))?;
     let receipt: WsbPreparationReceipt = read_json_bounded(&mut receipt_file)?;
     receipt.validate()?;
-    if allow_revoking && receipt.msi.is_some() {
+    if allow_revoking && (receipt.msi.is_some() || receipt.bambu.is_some()) {
         return Err(WsbPreparationError::Contract(
-            "private golden discard does not authorize MSI workspace deletion".to_owned(),
+            "private golden discard does not authorize imported application workspace deletion"
+                .to_owned(),
         ));
     }
     require_hash(expected_guest_agent_sha256).map_err(|_| {
@@ -1126,7 +1392,7 @@ pub(crate) fn open_verified_windows_sandbox_preparation(
         .revalidate()
         .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?;
     ensure_empty_directory(&workspace.output_path())?;
-    require_profile_tools_allowlist(&workspace.tools_path(), receipt.msi.is_some())?;
+    require_profile_tools_allowlist(&workspace.tools_path(), application_file_name(&receipt))?;
     let state = if workspace.root_path().join("runs").exists() {
         if !allow_imported {
             return Err(WsbPreparationError::Contract(
@@ -1154,32 +1420,64 @@ pub(crate) fn open_verified_windows_sandbox_preparation(
             "staged guest-agent size differs from the preparation receipt".to_owned(),
         ));
     }
-    let held_msi = if let Some(msi) = &receipt.msi {
-        let intake =
-            aiw_windows_platform::open_verified_application_file_import(&msi.import_receipt)
-                .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
-        let compiled = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
-            project,
-            &msi.scenario.scenario_id,
-        )
-        .map_err(|e| WsbPreparationError::Project(e.to_string()))?;
-        if compiled != msi.scenario {
+    let held_application = if let Some((
+        import_receipt,
+        scenario_matches_project,
+        staged_identity,
+        staged_payload,
+        file_name,
+    )) = receipt
+        .msi
+        .as_ref()
+        .map(|msi| {
+            (
+                &msi.import_receipt,
+                aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
+                    project,
+                    &msi.scenario.scenario_id,
+                )
+                .map(|compiled| compiled == msi.scenario)
+                .map_err(|error| WsbPreparationError::Project(error.to_string())),
+                &msi.staged_identity,
+                &msi.staged_payload,
+                MSI_FILE,
+            )
+        })
+        .or_else(|| {
+            receipt.bambu.as_ref().map(|bambu| {
+                (
+                    &bambu.import_receipt,
+                    aiw_provider_wsb::compile_bambu_studio_export_scenario(
+                        project,
+                        &bambu.scenario.scenario_id,
+                    )
+                    .map(|compiled| compiled == bambu.scenario)
+                    .map_err(|error| WsbPreparationError::Project(error.to_string())),
+                    &bambu.staged_identity,
+                    &bambu.staged_payload,
+                    BAMBU_FILE,
+                )
+            })
+        }) {
+        let intake = aiw_windows_platform::open_verified_application_file_import(import_receipt)
+            .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+        if !scenario_matches_project? {
             return Err(WsbPreparationError::Project(
-                "persisted MSI scenario differs from project".to_owned(),
+                "persisted application scenario differs from project".to_owned(),
             ));
         }
         let file = workspace
-            .reopen_tools_file_readonly(MSI_FILE)
+            .reopen_tools_file_readonly(file_name)
             .map_err(|e| WsbPreparationError::Workspace(e.to_string()))?;
         let observed = aiw_windows_platform::HeldApplicationFile::open(file.final_path())
             .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
-        if file.identity() != &msi.staged_identity
-            || observed.observation().identity != msi.staged_identity
-            || observed.observation().sha256 != msi.staged_payload.sha256
-            || observed.observation().size_bytes != msi.staged_payload.size_bytes
+        if file.identity() != staged_identity
+            || observed.observation().identity != *staged_identity
+            || observed.observation().sha256 != staged_payload.sha256
+            || observed.observation().size_bytes != staged_payload.size_bytes
         {
             return Err(WsbPreparationError::Contract(
-                "staged MSI identity or content drifted".to_owned(),
+                "staged application identity or content drifted".to_owned(),
             ));
         }
         Some((file, observed, intake))
@@ -1221,7 +1519,7 @@ pub(crate) fn open_verified_windows_sandbox_preparation(
         run_plan_file,
         wsb_plan_file,
         _held_agent: held_agent,
-        held_msi,
+        held_application,
         workspace,
     };
     held.revalidate(state)?;
@@ -1265,7 +1563,9 @@ pub fn import_windows_sandbox_preparation(
     )?;
     let run_id = held.artifacts.receipt.run_id.clone();
     let receipt = WsbPlanningImportReceipt {
-        schema_version: if held.artifacts.receipt.msi.is_some() {
+        schema_version: if held.artifacts.receipt.bambu.is_some() {
+            aiw_orchestrator::WSB_BAMBU_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION
+        } else if held.artifacts.receipt.msi.is_some() {
             aiw_orchestrator::WSB_MSI_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION
         } else {
             aiw_orchestrator::WSB_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION
@@ -1543,11 +1843,25 @@ fn ensure_empty_directory(path: &Path) -> Result<(), WsbPreparationError> {
 
 #[cfg(windows)]
 fn require_tools_allowlist(path: &Path) -> Result<(), WsbPreparationError> {
-    require_profile_tools_allowlist(path, false)
+    require_profile_tools_allowlist(path, None)
 }
 
 #[cfg(windows)]
-fn require_profile_tools_allowlist(path: &Path, msi: bool) -> Result<(), WsbPreparationError> {
+fn application_file_name(receipt: &WsbPreparationReceipt) -> Option<&'static str> {
+    if receipt.msi.is_some() {
+        Some(MSI_FILE)
+    } else if receipt.bambu.is_some() {
+        Some(BAMBU_FILE)
+    } else {
+        None
+    }
+}
+
+#[cfg(windows)]
+fn require_profile_tools_allowlist(
+    path: &Path,
+    application_file: Option<&str>,
+) -> Result<(), WsbPreparationError> {
     let mut observed = std::fs::read_dir(path)
         .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?
         .map(|entry| {
@@ -1561,10 +1875,9 @@ fn require_profile_tools_allowlist(path: &Path, msi: bool) -> Result<(), WsbPrep
         })
         .collect::<Result<Vec<_>, _>>()?;
     observed.sort();
-    let valid = if msi {
-        observed.as_slice() == [GUEST_AGENT_FILE, MSI_FILE]
-    } else {
-        observed.is_empty() || observed.as_slice() == [GUEST_AGENT_FILE]
+    let valid = match application_file {
+        Some(application_file) => observed.as_slice() == [GUEST_AGENT_FILE, application_file],
+        None => observed.is_empty() || observed.as_slice() == [GUEST_AGENT_FILE],
     };
     if !valid {
         return Err(WsbPreparationError::Workspace(
@@ -2415,6 +2728,79 @@ mod tests {
             staged_identity: identity(&staged_path, '9'),
             scenario,
         }
+    }
+
+    fn bambu_project() -> Project {
+        let mut value: serde_json::Value =
+            serde_json::from_str(include_str!("../../../examples/bambu-studio-info.json")).unwrap();
+        value["scenarios"][0]["id"] = serde_json::json!("export-3mf");
+        value["scenarios"][0]["description"] =
+            serde_json::json!("Export the fixed local tetrahedron.");
+        serde_json::from_value(value).unwrap()
+    }
+
+    fn fake_bambu_application() -> WsbBambuApplication {
+        let project = bambu_project();
+        let scenario =
+            aiw_provider_wsb::compile_bambu_studio_export_scenario(&project, "export-3mf").unwrap();
+        let mut import_receipt = fake_import_receipt(
+            &aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
+                &msi_project(),
+                "install-launch-close",
+            )
+            .unwrap(),
+        );
+        import_receipt.source_kind = aiw_probe::ApplicationInspectionKind::Exe;
+        import_receipt.sha256 = scenario.application_sha256.clone();
+        import_receipt.source.sha256 = scenario.application_sha256.clone();
+        let import_receipt_sha256 =
+            hex::encode(Sha256::digest(serde_json::to_vec(&import_receipt).unwrap()));
+        let staged_path = format!(r"C:\AIW\run-one\tools\{BAMBU_FILE}");
+        WsbBambuApplication {
+            import_receipt,
+            import_receipt_sha256,
+            scenario_sha256: canonical_hash(&scenario).unwrap(),
+            staged_payload: BinaryIdentity {
+                canonical_path: staged_path.clone(),
+                sha256: scenario.application_sha256.clone(),
+                size_bytes: 1024,
+                version: None,
+                signature_status: ReadinessState::Unknown,
+            },
+            staged_identity: identity(&staged_path, '9'),
+            scenario,
+        }
+    }
+
+    #[test]
+    fn imported_bambu_preparation_binds_the_distinct_profile_and_excludes_msi() {
+        let artifacts = build_wsb_bambu_preparation(
+            "run-one",
+            &bambu_project(),
+            &readiness(),
+            &workspace(),
+            &guest(),
+            "now",
+            fake_bambu_application(),
+        )
+        .unwrap();
+        assert_eq!(
+            artifacts.receipt.schema_version,
+            WSB_BAMBU_PREPARATION_RECEIPT_SCHEMA_VERSION
+        );
+        assert_eq!(
+            artifacts.run_plan.schema,
+            aiw_orchestrator::IMPORTED_BAMBU_RUN_PLAN_SCHEMA_VERSION
+        );
+        assert!(artifacts.receipt.msi.is_none());
+        assert!(artifacts.receipt.bambu.is_some());
+        assert!(matches!(
+            artifacts.run_plan.actions[2],
+            PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { .. }
+        ));
+        let mut conflicting = artifacts.receipt.clone();
+        conflicting.msi = Some(fake_msi_application());
+        assert!(conflicting.validate().is_err());
     }
 
     #[test]

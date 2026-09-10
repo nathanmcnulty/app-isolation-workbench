@@ -40,6 +40,7 @@ use sha2::{Digest, Sha256};
 
 pub const RUN_PLAN_SCHEMA_VERSION: &str = "aiw.dev/run-plan/v0alpha3";
 pub const IMPORTED_MSI_RUN_PLAN_SCHEMA_VERSION: &str = "aiw.dev/run-plan/v0alpha4";
+pub const IMPORTED_BAMBU_RUN_PLAN_SCHEMA_VERSION: &str = "aiw.dev/run-plan/v0alpha5";
 pub const LEGACY_RUN_PLAN_SCHEMA_VERSION: &str = "aiw.dev/run-plan/v0alpha1";
 const APPROVAL_SCHEMA: &str = "aiw.dev/approval-record/v0alpha1";
 const EVENT_SCHEMA: &str = "aiw.dev/run-event/v0alpha1";
@@ -57,6 +58,8 @@ pub const WSB_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION: &str =
     "aiw.dev/wsb-planning-import-receipt/v0alpha1";
 pub const WSB_MSI_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION: &str =
     "aiw.dev/wsb-planning-import-receipt/v0alpha2";
+pub const WSB_BAMBU_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION: &str =
+    "aiw.dev/wsb-planning-import-receipt/v0alpha3";
 const WSB_PLANNING_IMPORT_FILE: &str = "wsb-planning-import.json";
 const ZERO_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 const MAX_TEXT: usize = 4096;
@@ -104,6 +107,16 @@ pub enum PlannedAction {
         workspace_identity_sha256: String,
     },
     ExecuteWindowsSandboxImportedMsiScenario {
+        sandbox_plan_sha256: String,
+        provider_sha256: String,
+        guest_agent_sha256: String,
+        workspace: Box<WorkspaceBindingEvidence>,
+        workspace_identity_sha256: String,
+        import_receipt_sha256: String,
+        application_sha256: String,
+        scenario_sha256: String,
+    },
+    ExecuteWindowsSandboxImportedBambuScenario {
         sandbox_plan_sha256: String,
         provider_sha256: String,
         guest_agent_sha256: String,
@@ -209,6 +222,13 @@ impl RunPlan {
             schema: if actions.iter().any(|action| {
                 matches!(
                     action,
+                    PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { .. }
+                )
+            }) {
+                IMPORTED_BAMBU_RUN_PLAN_SCHEMA_VERSION.into()
+            } else if actions.iter().any(|action| {
+                matches!(
+                    action,
                     PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
                 )
             }) {
@@ -239,7 +259,9 @@ impl RunPlan {
         let schema = value.get("schema").and_then(serde_json::Value::as_str);
         if !matches!(
             schema,
-            Some(RUN_PLAN_SCHEMA_VERSION) | Some(IMPORTED_MSI_RUN_PLAN_SCHEMA_VERSION)
+            Some(RUN_PLAN_SCHEMA_VERSION)
+                | Some(IMPORTED_MSI_RUN_PLAN_SCHEMA_VERSION)
+                | Some(IMPORTED_BAMBU_RUN_PLAN_SCHEMA_VERSION)
         ) {
             return Err(run_error(
                 "AIW_PLAN_SCHEMA_UNSUPPORTED",
@@ -3612,13 +3634,21 @@ pub struct CompletedRunSnapshot {
 }
 
 fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
+    let has_bambu_action = plan.actions.iter().any(|action| {
+        matches!(
+            action,
+            PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { .. }
+        )
+    });
     let has_msi_action = plan.actions.iter().any(|action| {
         matches!(
             action,
             PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
         )
     });
-    let expected_schema = if has_msi_action {
+    let expected_schema = if has_bambu_action {
+        IMPORTED_BAMBU_RUN_PLAN_SCHEMA_VERSION
+    } else if has_msi_action {
         IMPORTED_MSI_RUN_PLAN_SCHEMA_VERSION
     } else {
         RUN_PLAN_SCHEMA_VERSION
@@ -3626,7 +3656,9 @@ fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
     if plan.schema != expected_schema {
         return Err(run_error(
             "AIW_PLAN_SCHEMA_UNSUPPORTED",
-            if has_msi_action {
+            if has_bambu_action {
+                "Bambu Windows Sandbox plans require the imported-scenario schema"
+            } else if has_msi_action {
                 "MSI Windows Sandbox plans require the imported-scenario schema"
             } else {
                 "run plan schema is unsupported or does not match its action profile"
@@ -3740,6 +3772,45 @@ fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
                     ));
                 }
             }
+            PlannedAction::ExecuteWindowsSandboxImportedBambuScenario {
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+                import_receipt_sha256,
+                application_sha256,
+                scenario_sha256,
+            } => {
+                for (field, hash) in [
+                    ("sandboxPlanSha256", sandbox_plan_sha256),
+                    ("providerSha256", provider_sha256),
+                    ("guestAgentSha256", guest_agent_sha256),
+                    ("workspaceIdentitySha256", workspace_identity_sha256),
+                    ("importReceiptSha256", import_receipt_sha256),
+                    ("applicationSha256", application_sha256),
+                    ("scenarioSha256", scenario_sha256),
+                ] {
+                    if !is_hash(hash) {
+                        return Err(run_error(
+                            "AIW_PLAN_BINDING_INVALID",
+                            "Windows Sandbox Bambu scenario binding is invalid",
+                            field,
+                            &plan.run_id,
+                        ));
+                    }
+                }
+                if workspace.validate().is_err()
+                    || hash_value(workspace)? != *workspace_identity_sha256
+                {
+                    return Err(run_error(
+                        "AIW_PLAN_BINDING_INVALID",
+                        "Windows Sandbox workspace evidence is invalid or does not match its hash",
+                        "workspace",
+                        &plan.run_id,
+                    ));
+                }
+            }
             PlannedAction::LaunchValidatedProfile { profile_id } => {
                 validate_id("profileId", profile_id)?
             }
@@ -3773,6 +3844,7 @@ fn is_wsb_action(action: &PlannedAction) -> bool {
         action,
         PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. }
             | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
+            | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { .. }
     )
 }
 
@@ -3809,7 +3881,8 @@ fn wsb_workspace(plan: &RunPlan) -> Result<&WorkspaceBindingEvidence, AiwError> 
     })?;
     match action {
         PlannedAction::ExecuteWindowsSandboxGoldenProbe { workspace, .. }
-        | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { workspace, .. } => {
+        | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { workspace, .. }
+        | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { workspace, .. } => {
             Ok(workspace.as_ref())
         }
         _ => unreachable!("wsb_action only returns WSB profile actions"),
@@ -3857,6 +3930,21 @@ fn validate_wsb_import(receipt: &WsbPlanningImportReceipt, plan: &RunPlan) -> Re
             ..
         } => (
             WSB_MSI_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION,
+            sandbox_plan_sha256,
+            provider_sha256,
+            guest_agent_sha256,
+            workspace,
+            workspace_identity_sha256,
+        ),
+        PlannedAction::ExecuteWindowsSandboxImportedBambuScenario {
+            sandbox_plan_sha256,
+            provider_sha256,
+            guest_agent_sha256,
+            workspace,
+            workspace_identity_sha256,
+            ..
+        } => (
+            WSB_BAMBU_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION,
             sandbox_plan_sha256,
             provider_sha256,
             guest_agent_sha256,
@@ -3920,6 +4008,7 @@ fn action_allowed(lifecycle: RunLifecycleKind, action: &PlannedAction) -> bool {
                 | PlannedAction::ExecuteScenario { .. }
                 | PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. }
                 | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
+                | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { .. }
                 | PlannedAction::CollectEvidence
         ),
         RunLifecycleKind::Launch => matches!(
