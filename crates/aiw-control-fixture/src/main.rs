@@ -68,6 +68,7 @@ enum FixtureResult {
     },
     Child {
         child_process_id: u32,
+        /// Bytes captured by the parent. Stdout is discarded; the token file carries evidence.
         child_stdout_bytes: u64,
         child_token: TokenEvidence,
     },
