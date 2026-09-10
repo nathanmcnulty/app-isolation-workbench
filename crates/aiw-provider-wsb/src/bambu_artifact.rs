@@ -90,6 +90,8 @@ fn read_zip_entries(bytes: &[u8]) -> Result<BTreeMap<String, Vec<u8>>, String> {
         let capacity = usize::try_from(entry.size()).map_err(|_| "3MF ZIP entry size overflow")?;
         let mut value = Vec::with_capacity(capacity);
         entry
+            .by_ref()
+            .take(MAX_ENTRY_BYTES + 1)
             .read_to_end(&mut value)
             .map_err(|error| format!("could not read ZIP entry: {error}"))?;
         if value.len() != capacity {

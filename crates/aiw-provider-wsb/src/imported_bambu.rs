@@ -329,3 +329,89 @@ pub fn verify_bambu_scenario_evidence(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request() -> ImportedBambuGuestRequest {
+        let project =
+            serde_json::from_str(include_str!("../../../examples/bambu-studio-export.json"))
+                .unwrap();
+        let scenario =
+            crate::compile_bambu_studio_export_scenario(&project, "local-file-export").unwrap();
+        ImportedBambuGuestRequest::new(
+            "run-one",
+            "12345678-1234-1234-1234-123456789012",
+            "a".repeat(64),
+            "b".repeat(64),
+            scenario.clone(),
+            scenario.application_sha256,
+            429_037_864,
+            "c".repeat(64),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn approval_binding_rejects_command_fixture_and_request_drift() {
+        let original = request();
+        for field in [
+            "installerPath",
+            "scenarioSha256",
+            "requestSha256",
+            "agentSha256",
+        ] {
+            let mut wire = serde_json::to_value(&original).unwrap();
+            wire[field] = serde_json::json!("changed");
+            let edited: ImportedBambuGuestRequest = serde_json::from_value(wire).unwrap();
+            assert!(edited.validate().is_err(), "accepted {field}");
+        }
+        let mut edited = original.clone();
+        edited.scenario.launch_arguments.push("--slice".to_owned());
+        assert!(edited.recompute_request_sha256().is_err());
+        let mut edited = original;
+        edited.scenario.fixture_sha256 = "d".repeat(64);
+        assert!(edited.recompute_request_sha256().is_err());
+    }
+
+    #[test]
+    fn failed_prefix_cannot_be_promoted_to_export_success() {
+        let request = request();
+        let mut result = ImportedBambuScenarioResult::for_request(&request);
+        result.completed_stages = vec![BambuExecutionStage::Install];
+        result.failed_stage = Some(BambuExecutionStage::PrepareFixture);
+        result.validate_for_request(&request).unwrap();
+        result.status = BambuScenarioStatus::Succeeded;
+        assert!(result.validate_for_request(&request).is_err());
+        result.status = BambuScenarioStatus::Failed;
+        result.artifact_sha256 = Some("a".repeat(64));
+        assert!(result.validate_for_request(&request).is_err());
+        result.artifact_sha256 = None;
+        result.failed_stage = Some(BambuExecutionStage::Export);
+        assert!(result.validate_for_request(&request).is_err());
+    }
+
+    #[test]
+    fn evidence_requires_exact_source_payload_and_external_root() {
+        let request = request();
+        let result = ImportedBambuScenarioResult::for_request(&request);
+        let mut log = aiw_evidence::EvidenceLog::new();
+        log.append(aiw_evidence::EvidenceEvent {
+            observed_utc: "test-clock".to_owned(),
+            kind: BAMBU_SCENARIO_EVENT.to_owned(),
+            source: "aiw-guest-agent".to_owned(),
+            payload: serde_json::to_value(&result).unwrap(),
+        })
+        .unwrap();
+        let bytes = serde_json::to_vec(&log.records()[0]).unwrap();
+        let root = log.manifest().unwrap().root_hash;
+        verify_bambu_scenario_evidence(&bytes, &root, &request, &result).unwrap();
+        assert!(
+            verify_bambu_scenario_evidence(&bytes, &"a".repeat(64), &request, &result).is_err()
+        );
+        let mut changed = result;
+        changed.diagnostic = Some("different error".to_owned());
+        assert!(verify_bambu_scenario_evidence(&bytes, &root, &request, &changed).is_err());
+    }
+}

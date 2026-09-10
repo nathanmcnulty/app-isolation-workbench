@@ -9,6 +9,13 @@
 //! exact-ID `connect`, and exact-ID `stop` argument arrays. It has no shell, elevation, command,
 //! script, URL, or arbitrary policy API.
 
+mod bambu_report;
+#[cfg(windows)]
+pub use bambu_report::report_windows_sandbox_bambu_run;
+pub use bambu_report::{
+    BambuReportEvidenceStatus, WsbBambuRunReport, render_bambu_run_report_markdown,
+};
+use bambu_report::{add_bambu_artifact_expectation, verify_bambu_output};
 mod assessment_report;
 mod report_set;
 #[cfg(windows)]
@@ -33,14 +40,15 @@ mod session;
 pub use preparation::{
     PreparedWsbArtifacts, WSB_MSI_PREPARATION_RECEIPT_SCHEMA_VERSION,
     WSB_PLANNING_IMPORT_RESULT_SCHEMA_VERSION, WSB_PREPARATION_RECEIPT_SCHEMA_VERSION,
-    WsbMsiApplication, WsbPlanningImportDisposition, WsbPlanningImportReceipt,
+    WsbBambuApplication, WsbMsiApplication, WsbPlanningImportDisposition, WsbPlanningImportReceipt,
     WsbPlanningImportResult, WsbPreparationError, WsbPreparationReceipt, WsbPreparationStatus,
     build_wsb_msi_preparation, build_wsb_preparation,
 };
 
 #[cfg(windows)]
 pub use preparation::{
-    WsbMsiPreparationInput, import_windows_sandbox_preparation, prepare_windows_sandbox_bundle,
+    WsbBambuPreparationInput, WsbMsiPreparationInput, import_windows_sandbox_preparation,
+    prepare_windows_sandbox_bambu_bundle, prepare_windows_sandbox_bundle,
     prepare_windows_sandbox_msi_bundle, verify_windows_sandbox_preparation,
 };
 
@@ -96,11 +104,18 @@ pub struct WsbGoldenProbeStart {
     pub timeout_seconds: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub msi: Option<WsbMsiApplication>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bambu: Option<WsbBambuApplication>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WsbGoldenProbeExecution {
+    #[serde(skip)]
+    bambu_observation: Option<(
+        aiw_provider_wsb::ImportedBambuScenarioResult,
+        aiw_provider_wsb::BambuExportArtifact,
+    )>,
     pub schema_version: String,
     pub run_id: String,
     pub sandbox_id: String,
@@ -160,6 +175,25 @@ pub struct WsbImportedMsiExecution {
 pub enum WsbApprovedExecution {
     GoldenProbe(WsbGoldenProbeExecution),
     ImportedMsi(WsbImportedMsiExecution),
+    ImportedBambu(Box<WsbBambuExecution>),
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WsbBambuExecution {
+    pub schema_version: String,
+    pub run_id: String,
+    pub sandbox_id: String,
+    pub provider_sha256: String,
+    pub config_sha256: String,
+    pub request_sha256: String,
+    pub receipt_sha256: String,
+    pub evidence_root_hash: String,
+    pub workspace: WorkspaceBindingEvidence,
+    pub workspace_identity_sha256: String,
+    pub cleanup_complete: bool,
+    pub scenario: aiw_provider_wsb::ImportedBambuScenarioResult,
+    pub artifact: aiw_provider_wsb::BambuExportArtifact,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -299,6 +333,12 @@ pub fn observe_wsb_session_status(layout: &RunLayout) -> Result<WsbSessionStatus
                 ..
             }
             | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
+                provider_sha256,
+                workspace,
+                workspace_identity_sha256,
+                ..
+            }
+            | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario {
                 provider_sha256,
                 workspace,
                 workspace_identity_sha256,
@@ -609,8 +649,31 @@ pub(crate) fn execute_wsb_golden_probe(
         record_terminal_failure(layout, error.clone())?;
         return Err(error);
     }
-    let verification = verify_completion_receipt(&context.output_root, &context.completion)
-        .map_err(|error| RunnerError::Receipt(error.to_string()));
+    let mut bambu_observation = None;
+    let mut bambu_verified = None;
+    if let ExecutionGuestRequest::ImportedBambu(expected) = &context.guest_request {
+        let observed = verify_bambu_output(&context.output_root, &context.completion, expected);
+        match observed {
+            Ok((verified, scenario, Some(artifact))) if scenario.successful() => {
+                bambu_observation = Some((scenario, artifact));
+                bambu_verified = Some(verified);
+            }
+            Ok(_) => {
+                let error = RunnerError::Receipt("Bambu guest reported failure".to_owned());
+                record_terminal_failure(layout, error.clone())?;
+                return Err(error);
+            }
+            Err(error) => {
+                record_terminal_failure(layout, error.clone())?;
+                return Err(error);
+            }
+        }
+    }
+    let verification = match bambu_verified {
+        Some(verified) => Ok(verified),
+        None => verify_completion_receipt(&context.output_root, &context.completion)
+            .map_err(|error| RunnerError::Receipt(error.to_string())),
+    };
     let verification = match verification {
         Ok(value) if value.successful => value,
         Ok(_) => {
@@ -702,7 +765,9 @@ pub(crate) fn execute_wsb_golden_probe(
                     product_registration,
                 )
             }
-            ExecutionGuestRequest::Golden(_) => (None, None, None, None, None, None),
+            ExecutionGuestRequest::Golden(_) | ExecutionGuestRequest::ImportedBambu(_) => {
+                (None, None, None, None, None, None)
+            }
         })
     })();
     let (
@@ -741,6 +806,7 @@ pub(crate) fn execute_wsb_golden_probe(
         workspace: request.workspace.clone(),
         workspace_identity_sha256: request.workspace_identity_sha256.clone(),
         cleanup_complete: true,
+        bambu_observation,
         scenario,
         application_token,
         behavior,
@@ -771,7 +837,9 @@ pub fn start_approved_windows_sandbox_golden_probe(
         false,
     )? {
         WsbApprovedExecution::GoldenProbe(result) => Ok(result),
-        WsbApprovedExecution::ImportedMsi(_) => Err(RunnerError::ApprovalBinding),
+        WsbApprovedExecution::ImportedMsi(_) | WsbApprovedExecution::ImportedBambu(_) => {
+            Err(RunnerError::ApprovalBinding)
+        }
     }
 }
 
@@ -813,7 +881,7 @@ fn start_approved_windows_sandbox_inner(
     held.revalidate_imported()
         .map_err(|error| RunnerError::Preparation(error.to_string()))?;
     let artifacts = held.artifacts.clone();
-    if artifacts.receipt.msi.is_some() && !allow_msi {
+    if (artifacts.receipt.msi.is_some() || artifacts.receipt.bambu.is_some()) && !allow_msi {
         return Err(RunnerError::ApprovalBinding);
     }
     let layout = RunLayout::new(held.workspace().root_path(), &artifacts.receipt.run_id)
@@ -825,6 +893,8 @@ fn start_approved_windows_sandbox_inner(
     let request = WsbGoldenProbeStart {
         schema_version: if artifacts.receipt.msi.is_some() {
             "aiw.dev/wsb-imported-msi-start/v0alpha1"
+        } else if artifacts.receipt.bambu.is_some() {
+            "aiw.dev/wsb-imported-bambu-start/v0alpha1"
         } else {
             "aiw.dev/wsb-golden-probe-start/v0alpha2"
         }
@@ -838,6 +908,7 @@ fn start_approved_windows_sandbox_inner(
         workspace_identity_sha256: artifacts.receipt.workspace_identity_sha256.clone(),
         timeout_seconds,
         msi: artifacts.receipt.msi.clone(),
+        bambu: artifacts.receipt.bambu.clone(),
     };
     let approval = layout.read_approval().map_err(journal_error)?;
     if !matches!(
@@ -867,7 +938,26 @@ fn start_approved_windows_sandbox_inner(
         &AlreadyHeldProviderLease,
         held.workspace(),
     )?;
-    if request.msi.is_some() {
+    if request.bambu.is_some() {
+        let (scenario, artifact) = result.bambu_observation.ok_or(RunnerError::Drift)?;
+        Ok(WsbApprovedExecution::ImportedBambu(Box::new(
+            WsbBambuExecution {
+                schema_version: "aiw.dev/wsb-imported-bambu-execution/v0alpha1".to_owned(),
+                run_id: result.run_id,
+                sandbox_id: result.sandbox_id,
+                provider_sha256: result.provider_sha256,
+                config_sha256: result.config_sha256,
+                request_sha256: result.request_sha256,
+                receipt_sha256: result.receipt_sha256,
+                evidence_root_hash: result.evidence_root_hash,
+                workspace: result.workspace,
+                workspace_identity_sha256: result.workspace_identity_sha256,
+                cleanup_complete: result.cleanup_complete,
+                scenario,
+                artifact,
+            },
+        )))
+    } else if request.msi.is_some() {
         let scenario = result.scenario.ok_or(RunnerError::Drift)?;
         Ok(WsbApprovedExecution::ImportedMsi(WsbImportedMsiExecution {
             schema_version: if result.product_registration.is_some() {
@@ -1090,6 +1180,12 @@ fn recovery_workspace(
                 workspace,
                 workspace_identity_sha256,
                 ..
+            }
+            | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario {
+                provider_sha256,
+                workspace,
+                workspace_identity_sha256,
+                ..
             } => Some((
                 provider_sha256.as_str(),
                 workspace.as_ref(),
@@ -1305,6 +1401,21 @@ fn prepare_execution(
             )
             .map_err(|e| RunnerError::Preparation(e.to_string()))?,
         ))
+    } else if let Some(bambu) = &request.bambu {
+        revalidate_identity(&bambu.staged_payload)?;
+        ExecutionGuestRequest::ImportedBambu(Box::new(
+            aiw_provider_wsb::ImportedBambuGuestRequest::new(
+                &plan.run_id,
+                &session_id,
+                &rendered.sha256,
+                &request.guest_agent.sha256,
+                bambu.scenario.clone(),
+                &bambu.staged_payload.sha256,
+                bambu.staged_payload.size_bytes,
+                &bambu.import_receipt_sha256,
+            )
+            .map_err(|e| RunnerError::Preparation(e.to_string()))?,
+        ))
     } else {
         ExecutionGuestRequest::Golden(Box::new(GuestRequest::new(
             &plan.run_id,
@@ -1321,11 +1432,14 @@ fn prepare_execution(
         &request.guest_agent.sha256,
         guest_request.digest(),
     );
-    if request.msi.is_some() {
+    if request.msi.is_some() || request.bambu.is_some() {
         completion.artifacts[0].path = "scenario-result.json".to_owned();
         completion.artifacts[0].role = aiw_evidence::ArtifactRole::ScenarioResults;
         completion.artifacts[1].maximum_bytes =
             aiw_provider_wsb::MAX_APPLICATION_EVIDENCE_BYTES as u64;
+    }
+    if request.bambu.is_some() {
+        add_bambu_artifact_expectation(&mut completion);
     }
     let binding = SessionBinding {
         run_id: plan.run_id.clone(),
@@ -1891,6 +2005,7 @@ struct GuestRequest {
 enum ExecutionGuestRequest {
     Golden(Box<GuestRequest>),
     ImportedMsi(Box<aiw_provider_wsb::ImportedMsiGuestRequest>),
+    ImportedBambu(Box<aiw_provider_wsb::ImportedBambuGuestRequest>),
 }
 
 impl ExecutionGuestRequest {
@@ -1898,12 +2013,14 @@ impl ExecutionGuestRequest {
         match self {
             Self::Golden(v) => &v.request_sha256,
             Self::ImportedMsi(v) => &v.request_sha256,
+            Self::ImportedBambu(v) => &v.request_sha256,
         }
     }
     fn binding(&self) -> (&str, &str, &str) {
         match self {
             Self::Golden(v) => (&v.run_id, &v.sandbox_id, &v.config_sha256),
             Self::ImportedMsi(v) => (&v.run_id, &v.sandbox_id, &v.config_sha256),
+            Self::ImportedBambu(v) => (&v.run_id, &v.sandbox_id, &v.config_sha256),
         }
     }
     fn validate(&self) -> Result<(), RunnerError> {
@@ -1920,6 +2037,7 @@ impl ExecutionGuestRequest {
                 Ok(())
             }
             Self::ImportedMsi(v) => v.validate().map_err(|_| RunnerError::Drift),
+            Self::ImportedBambu(v) => v.validate().map_err(|_| RunnerError::Drift),
         }
     }
 }
@@ -1978,14 +2096,15 @@ fn ensure_approval(
             PlannedAction::AssessHost,
             PlannedAction::PrepareWorkspace,
             PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. }
-                | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. },
+                | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
+                | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { .. },
             PlannedAction::CollectEvidence,
         ]
     ) {
         return Err(RunnerError::ApprovalBinding);
     }
-    match (&plan.actions[2], &request.msi) {
-        (PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. }, None) => {}
+    match (&plan.actions[2], &request.msi, &request.bambu) {
+        (PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. }, None, None) => {}
         (
             PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
                 import_receipt_sha256,
@@ -1994,11 +2113,29 @@ fn ensure_approval(
                 ..
             },
             Some(msi),
+            None,
         ) if import_receipt_sha256 == &msi.import_receipt_sha256
             && application_sha256 == &msi.staged_payload.sha256
             && scenario_sha256 == &msi.scenario_sha256 =>
         {
             msi.validate(&request.workspace)
+                .map_err(|_| RunnerError::ApprovalBinding)?;
+        }
+        (
+            PlannedAction::ExecuteWindowsSandboxImportedBambuScenario {
+                import_receipt_sha256,
+                application_sha256,
+                scenario_sha256,
+                ..
+            },
+            None,
+            Some(bambu),
+        ) if import_receipt_sha256 == &bambu.import_receipt_sha256
+            && application_sha256 == &bambu.staged_payload.sha256
+            && scenario_sha256 == &bambu.scenario_sha256 =>
+        {
+            bambu
+                .validate(&request.workspace)
                 .map_err(|_| RunnerError::ApprovalBinding)?;
         }
         _ => return Err(RunnerError::ApprovalBinding),
@@ -2017,6 +2154,14 @@ fn ensure_approval(
                 workspace_identity_sha256,
             }
             | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+                ..
+            }
+            | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario {
                 sandbox_plan_sha256,
                 provider_sha256,
                 guest_agent_sha256,
@@ -2052,6 +2197,8 @@ fn validate_start(
 ) -> Result<(), RunnerError> {
     let schema = if request.msi.is_some() {
         "aiw.dev/wsb-imported-msi-start/v0alpha1"
+    } else if request.bambu.is_some() {
+        "aiw.dev/wsb-imported-bambu-start/v0alpha1"
     } else {
         "aiw.dev/wsb-golden-probe-start/v0alpha2"
     };
@@ -2761,6 +2908,7 @@ mod tests {
             wsb_plan,
             timeout_seconds: 1,
             msi: None,
+            bambu: None,
         };
         let plan = RunPlan::new(
             "w1-run",
@@ -4035,6 +4183,7 @@ mod tests {
             workspace_identity_sha256: artifacts.receipt.workspace_identity_sha256,
             timeout_seconds: 180,
             msi: None,
+            bambu: None,
         };
         let native = NativeWsbProcess {
             state: Mutex::new(NativeWsbState {

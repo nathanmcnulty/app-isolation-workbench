@@ -326,6 +326,25 @@ struct RunArgs {
 #[derive(Debug, Subcommand)]
 enum RunCommand {
     /// Stage a verified MSI and fixed typed scenario for separate approval.
+    /// Stage the fixed Bambu export profile for separate approval.
+    PrepareWsbBambu {
+        #[arg(long)]
+        run_id: String,
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        guest_agent: PathBuf,
+        #[arg(long)]
+        guest_agent_sha256: String,
+        #[arg(long)]
+        workspace_parent: PathBuf,
+        #[arg(long)]
+        created_at: String,
+        #[arg(long)]
+        import_receipt: PathBuf,
+        #[arg(long)]
+        scenario: String,
+    },
     PrepareWsbMsi {
         #[arg(long)]
         run_id: String,
@@ -449,6 +468,19 @@ enum RunCommand {
         format: AssessmentReportFormat,
     },
     /// Report a terminal MSI assessment or an unsuccessful attempt after verified cleanup.
+    /// Reverify a retained Bambu export or unsuccessful attempt.
+    ReportWsbBambuRun {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        run_id: String,
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        guest_agent_sha256: String,
+        #[arg(long, value_enum, default_value_t = AssessmentReportFormat::Json)]
+        format: AssessmentReportFormat,
+    },
     ReportWsbMsiRun {
         #[arg(long)]
         root: PathBuf,
@@ -495,6 +527,13 @@ struct ProviderArgs {
 
 #[derive(Debug, Subcommand)]
 enum ProviderCommand {
+    /// Compile the fixed Bambu STL-to-3MF scenario for separate preparation and approval.
+    CompileBambuExportScenario {
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        scenario: String,
+    },
     /// Compile the experimental Bambu STL information profile; execution is not yet supported.
     CompileBambuScenario {
         #[arg(long)]
@@ -578,6 +617,9 @@ enum SchemaKind {
     MsiProductRegistration,
     CompiledMsiScenario,
     CompiledBambuScenario,
+    CompiledBambuExportScenario,
+    ImportedBambuGuestRequest,
+    BambuRunReport,
     BambuScenarioCompilation,
     MsiScenarioCompilation,
     ApplicationFileAuthority,
@@ -1270,6 +1312,51 @@ fn run(command: Command) -> Result<()> {
             HostCommand::Assess => write_json(&assess_windows_sandbox()),
         },
         Command::Run(args) => match args.command {
+            RunCommand::PrepareWsbBambu {
+                run_id,
+                project,
+                guest_agent,
+                guest_agent_sha256,
+                workspace_parent,
+                created_at,
+                import_receipt,
+                scenario,
+            } => {
+                let loaded = read_project(&project)?;
+                let receipt: ApplicationFileImportReceipt =
+                    read_document(&import_receipt, MAX_CONFIG_BYTES)?;
+                #[cfg(windows)]
+                {
+                    let prepared = aiw_runner::prepare_windows_sandbox_bambu_bundle(
+                        &run_id,
+                        &loaded.project,
+                        &guest_agent,
+                        &guest_agent_sha256,
+                        &workspace_parent,
+                        &created_at,
+                        aiw_runner::WsbBambuPreparationInput {
+                            import_receipt: &receipt,
+                            scenario_id: &scenario,
+                        },
+                    )
+                    .map_err(|source| anyhow!(RunPreparationFailed { run_id, source }))?;
+                    write_json(&preparation_result(prepared))
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (
+                        run_id,
+                        loaded,
+                        guest_agent,
+                        guest_agent_sha256,
+                        workspace_parent,
+                        created_at,
+                        receipt,
+                        scenario,
+                    );
+                    bail!("Bambu preparation requires Windows")
+                }
+            }
             RunCommand::PrepareWsbMsi {
                 run_id,
                 project,
@@ -1579,6 +1666,49 @@ fn run(command: Command) -> Result<()> {
                     }))
                 }
             }
+            RunCommand::ReportWsbBambuRun {
+                root,
+                run_id,
+                project,
+                guest_agent_sha256,
+                format,
+            } => {
+                let loaded = read_project(&project)?;
+                #[cfg(windows)]
+                {
+                    let report = aiw_runner::report_windows_sandbox_bambu_run(
+                        &root,
+                        &run_id,
+                        &loaded.project,
+                        &guest_agent_sha256,
+                    )
+                    .map_err(|source| {
+                        anyhow!(RunReportFailed {
+                            run_id: run_id.clone(),
+                            source
+                        })
+                    })?;
+                    match format {
+                        AssessmentReportFormat::Json => write_json(&report),
+                        AssessmentReportFormat::Markdown => {
+                            print!("{}", aiw_runner::render_bambu_run_report_markdown(&report));
+                            Ok(())
+                        }
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (root, loaded, guest_agent_sha256, format);
+                    Err(anyhow!(RunOperationUnavailable {
+                        code: "AIW_WINDOWS_REQUIRED",
+                        summary: "retained Windows workspace verification requires Windows",
+                        stage: "wsbReport",
+                        remediation: "Read the retained workspace on its original Windows host.",
+                        detail: "No files or provider state were changed.",
+                        run_id,
+                    }))
+                }
+            }
             RunCommand::ReportWsbMsiRun {
                 root,
                 run_id,
@@ -1700,6 +1830,19 @@ fn run(command: Command) -> Result<()> {
             }
         },
         Command::Provider(args) => match args.command {
+            ProviderCommand::CompileBambuExportScenario { project, scenario } => {
+                let loaded = read_project(&project)?;
+                let scenario = aiw_provider_wsb::compile_bambu_studio_export_scenario(
+                    &loaded.project,
+                    &scenario,
+                )?;
+                write_json(&serde_json::json!({
+                    "schemaVersion": "aiw.dev/bambu-export-scenario-compilation/v0alpha1",
+                    "projectRevisionSha256": project_revision_hash(&loaded.project)?,
+                    "scenarioSha256": scenario.canonical_sha256()?,
+                    "scenario": scenario,
+                }))
+            }
             ProviderCommand::CompileBambuScenario { project, scenario } => {
                 let loaded = read_project(&project)?;
                 let scenario = compile_bambu_studio_info_scenario(&loaded.project, &scenario)?;
@@ -1793,6 +1936,13 @@ fn run(command: Command) -> Result<()> {
             }
             SchemaKind::CompiledMsiScenario => write_json(&schema_for!(CompiledMsiScenario)),
             SchemaKind::CompiledBambuScenario => write_json(&schema_for!(CompiledBambuScenario)),
+            SchemaKind::CompiledBambuExportScenario => {
+                write_json(&schema_for!(aiw_provider_wsb::CompiledBambuExportScenario))
+            }
+            SchemaKind::ImportedBambuGuestRequest => {
+                write_json(&schema_for!(aiw_provider_wsb::ImportedBambuGuestRequest))
+            }
+            SchemaKind::BambuRunReport => write_json(&schema_for!(aiw_runner::WsbBambuRunReport)),
             SchemaKind::BambuScenarioCompilation => {
                 write_json(&schema_for!(BambuScenarioCompilation))
             }

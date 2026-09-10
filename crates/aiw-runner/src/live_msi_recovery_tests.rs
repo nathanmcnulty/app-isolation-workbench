@@ -78,6 +78,7 @@ fn live_msi_interrupted_completion_rejects_foreign_request_and_recovers() {
         workspace_identity_sha256: artifacts.receipt.workspace_identity_sha256,
         timeout_seconds: 300,
         msi: artifacts.receipt.msi,
+        bambu: None,
     };
     let lease = aiw_windows_platform::acquire_windows_sandbox(&start.provider.sha256).unwrap();
     let readiness = lease.readiness().clone();
