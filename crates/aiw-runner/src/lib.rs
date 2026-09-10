@@ -4553,7 +4553,7 @@ mod tests {
                 .append(aiw_evidence::EvidenceEvent {
                     observed_utc: "guest-time-not-trusted".to_owned(),
                     kind: aiw_provider_wsb::IMPORTED_MSI_PRODUCT_REGISTRATION_EVENT.to_owned(),
-                    source: "test-guest-agent".to_owned(),
+                    source: "aiw-guest-agent".to_owned(),
                     payload: serde_json::to_value(product).unwrap(),
                 })
                 .unwrap();
