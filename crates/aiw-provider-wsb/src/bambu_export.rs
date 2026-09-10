@@ -35,7 +35,7 @@ pub const BAMBU_MAX_ARTIFACT_BYTES: u64 = 1024 * 1024;
 const INSTALL_TIMEOUT_SECONDS: u32 = 300;
 const CLI_TIMEOUT_SECONDS: u32 = 60;
 
-/// Fully resolved, non-executable Bambu Studio smoke scenario. `--export-3mf` uses
+/// Fully resolved Bambu Studio export scenario. Compilation does not execute it. `--export-3mf` uses
 /// the profile-owned fixture; slicing, printing, cloud access, and
 /// hardware discovery remain unmeasured.
 #[derive(Debug, Clone, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]

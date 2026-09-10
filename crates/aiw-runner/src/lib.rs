@@ -112,10 +112,12 @@ pub struct WsbGoldenProbeStart {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WsbGoldenProbeExecution {
     #[serde(skip)]
-    bambu_observation: Option<(
-        aiw_provider_wsb::ImportedBambuScenarioResult,
-        aiw_provider_wsb::BambuExportArtifact,
-    )>,
+    bambu_observation: Option<
+        Box<(
+            aiw_provider_wsb::ImportedBambuScenarioResult,
+            aiw_provider_wsb::BambuExportArtifact,
+        )>,
+    >,
     pub schema_version: String,
     pub run_id: String,
     pub sandbox_id: String,
@@ -655,7 +657,7 @@ pub(crate) fn execute_wsb_golden_probe(
         let observed = verify_bambu_output(&context.output_root, &context.completion, expected);
         match observed {
             Ok((verified, scenario, Some(artifact))) if scenario.successful() => {
-                bambu_observation = Some((scenario, artifact));
+                bambu_observation = Some(Box::new((scenario, artifact)));
                 bambu_verified = Some(verified);
             }
             Ok(_) => {
@@ -939,7 +941,7 @@ fn start_approved_windows_sandbox_inner(
         held.workspace(),
     )?;
     if request.bambu.is_some() {
-        let (scenario, artifact) = result.bambu_observation.ok_or(RunnerError::Drift)?;
+        let (scenario, artifact) = *result.bambu_observation.ok_or(RunnerError::Drift)?;
         Ok(WsbApprovedExecution::ImportedBambu(Box::new(
             WsbBambuExecution {
                 schema_version: "aiw.dev/wsb-imported-bambu-execution/v0alpha1".to_owned(),

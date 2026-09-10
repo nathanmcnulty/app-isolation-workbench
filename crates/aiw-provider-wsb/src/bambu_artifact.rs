@@ -449,10 +449,8 @@ fn require_model_structure(
     {
         return Err("3MF model namespace declarations are not the reviewed values".to_owned());
     }
-    for index in 1..document.len() {
-        let parent = document[index]
-            .parent
-            .ok_or("3MF model has a detached element")?;
+    for (index, element) in document.iter().enumerate().skip(1) {
+        let parent = element.parent.ok_or("3MF model has a detached element")?;
         if parent >= index {
             return Err("3MF model has an invalid element hierarchy".to_owned());
         }

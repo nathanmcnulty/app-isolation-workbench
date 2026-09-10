@@ -467,7 +467,6 @@ enum RunCommand {
         #[arg(long, value_enum, default_value_t = AssessmentReportFormat::Json)]
         format: AssessmentReportFormat,
     },
-    /// Report a terminal MSI assessment or an unsuccessful attempt after verified cleanup.
     /// Reverify a retained Bambu export or unsuccessful attempt.
     ReportWsbBambuRun {
         #[arg(long)]
@@ -2695,6 +2694,16 @@ fn emit_anyhow_error(error: &anyhow::Error) {
             remediation: "Preserve the source, resolve the reported type, path, link, bounds, or drift condition, and retry without executing it.".to_owned(),
             detail: error.source.to_string().chars().take(512).collect(),
         });
+    } else if let Some(error) = error.downcast_ref::<aiw_provider_wsb::BambuExportCompileError>() {
+        emit_error(&ErrorEnvelope {
+            code: "AIW_BAMBU_EXPORT_SCENARIO_REJECTED".to_owned(),
+            summary: "project scenario is outside the approved Bambu export profile".to_owned(),
+            stage: "scenarioCompilation".to_owned(),
+            run_id: None,
+            retryable: false,
+            remediation: "Use the reviewed Bambu export example and fixed installer/fixture bindings; execution requires separate preparation and approval.".to_owned(),
+            detail: error.to_string().chars().take(512).collect(),
+        });
     } else if let Some(error) = error.downcast_ref::<BambuScenarioCompileError>() {
         emit_error(&ErrorEnvelope {
             code: "AIW_BAMBU_SCENARIO_REJECTED".to_owned(),
@@ -2779,6 +2788,22 @@ mod tests {
         assert_eq!(loaded.source_schema_version, PROJECT_SCHEMA_VERSION);
         assert!(validate_project_for_planning(&loaded.project).is_empty());
         assert!(!project_requires_migration_review(&loaded.project));
+    }
+
+    #[test]
+    fn bambu_export_example_uses_a_separate_fixed_command() {
+        let loaded = read_project(&example_path("bambu-studio-export.json")).unwrap();
+        let export = aiw_provider_wsb::compile_bambu_studio_export_scenario(
+            &loaded.project,
+            "local-file-export",
+        )
+        .unwrap();
+        assert_eq!(export.launch_arguments[0], "--export-3mf");
+        assert!(export.launch_arguments[1].ends_with("aiw-tetrahedron.3mf"));
+        assert!(
+            compile_notepad_plus_plus_msi_scenario(&loaded.project, "local-file-export").is_err()
+        );
+        assert_eq!(export.canonical_sha256().unwrap().len(), 64);
     }
 
     #[test]

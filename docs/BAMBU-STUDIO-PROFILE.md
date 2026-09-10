@@ -1,6 +1,47 @@
 # Bambu Studio local-file profile
 
-The second application profile targets the supplied Bambu Studio 02.08.02.60 EXE. It has a typed, non-executing compiler and a project-owned STL fixture. It is not yet accepted by preparation, approved start, guest-agent execution, or retained report sets. Compilation returns `executionSupported: false`; it cannot produce an application compatibility verdict.
+The second application profile targets the supplied Bambu Studio 02.08.02.60 EXE. A separately typed STL-to-3MF export now uses protected preparation, approved Sandbox execution, standard-user launch, artifact verification, and retained JSON/Markdown reporting. The original information-query compiler below remains metadata-only (`executionSupported: false`). Neither profile produces an application compatibility or effective-isolation verdict. Mixed application report sets are a subsequent integration step.
+
+## Approved export and retained reporting
+
+Use [the export project](../examples/bambu-studio-export.json) with a protected intake receipt for the exact installer bytes listed below. Build the guest agent with `scripts/build-guest-agent.ps1` and retain its independently computed hash.
+
+```powershell
+cargo run -p aiw-cli -- provider compile-bambu-export-scenario --project .\examples\bambu-studio-export.json --scenario local-file-export
+cargo run -p aiw-cli -- run prepare-wsb-bambu --run-id <run-id> --project .\examples\bambu-studio-export.json --guest-agent <static-guest-agent> --guest-agent-sha256 <agent-sha256> --workspace-parent <parent> --created-at <timestamp> --import-receipt <protected-intake-receipt> --scenario local-file-export
+```
+
+Import the prepared workspace with `run import-prepared-wsb`, approve its exact plan using the existing approval workflow, then use `run start-approved-wsb`. Preparation alone does not authorize execution. The golden-probe-only start rejects this profile. The EXE has a separate 512 MiB staging limit; MSI limits and contracts retain their meaning.
+
+The fixed export command is:
+
+```text
+bambu-studio.exe --export-3mf C:\Users\AiwStandardUser\AppData\Local\AIW\Scenario\aiw-tetrahedron.3mf C:\Users\AiwStandardUser\AppData\Local\AIW\Scenario\aiw-tetrahedron.stl
+```
+
+The installer runs privileged inside the disposable worker. The application runs under the established standard user, with its suspended process token checked and its job assigned before execution. Networking remains disabled. Four stages are recorded: install, prepare fixture, export, collect artifact. The guest publishes its scenario result and bound evidence event, then publishes the completion receipt last. A failed attempt records a stage prefix and a bounded diagnostic, with no successful artifact identity; its output slot is an empty placeholder.
+
+After exact-session cleanup, the host verifies the approved request, completion receipt, evidence chain, result identity, and 3MF bytes. ZIP entry counts and compressed/expanded byte sizes are bounded; XML entities and ambiguous paths are rejected. The verifier follows the package relationships, component/build references and transforms, and requires the fixture's four vertices and four triangles. Artifact hashes identify that run's output; exports need not be byte-identical. This is a deliberately narrow fixture verifier, not a general 3MF validator.
+
+```powershell
+cargo run -p aiw-cli -- run report-wsb-bambu-run --root <retained-workspace> --run-id <run-id> --project <original-project> --guest-agent-sha256 <original-agent-sha256> --format json
+cargo run -p aiw-cli -- run report-wsb-bambu-run --root <retained-workspace> --run-id <run-id> --project <original-project> --guest-agent-sha256 <original-agent-sha256> --format markdown
+cargo run -p aiw-cli -- schema bambu-run-report
+```
+
+Reporting reopens retained authority and evidence without starting Sandbox or changing the workspace. A successful run requires reverified artifact evidence; changed output is rejected. Failed/cancelled runs distinguish verified failed evidence from absent or rejected evidence. `recordedCleanupVerified` describes the retained transaction, not a fresh provider query. Successful export still has outcome `insufficientEvidence`: baseline/candidate comparison, descendant isolation/canaries, filesystem/registry changes, and slicing/printer/cloud functions remain unmeasured.
+
+## Production validation, 2026-09-09
+
+The approved export passed in one fresh Sandbox: install and export exited 0, all four stages completed, and the exact session's cleanup was verified. The launched process token was medium integrity, not elevated, not AppContainer, with a matching standard-user profile and no enabled Administrators group. The 9,062-byte 3MF contains the expected referenced four-vertex/four-triangle tetrahedron. This demonstrates the fixed workflow inside an outer Sandbox, not an inner isolation candidate.
+
+Retained workspace: `%TEMP%\aiw-bambu-live-10628-1789017156910616800`; the original project and exported reports are sibling `.project.json`, `.report.json`, and `.report.md` files. The production guest agent SHA-256 is `c9e4de9eaaedeb80ee6189badd90548111d702fab38818530ab2547eea83957e`; completion receipt SHA-256 is `a24acdd0d16952c259b1664df90b9318b872db50c3a471e0dbe1a97f50e0f1c0`; evidence root is `e546979313fc03bd248e823cfd565afe3a27cd49c5ee5501390d7a39bcf4b3a7`; artifact SHA-256 is `19a461fea05b8c7f75d0c8a53e08f2d7bf2557ddb2b832d559c4599c40a3eca5`.
+
+The live harness checked golden-only start rejection, approved execution, cleanup, repeatable retained JSON, wrong agent-hash rejection, and artifact-drift rejection/restoration. The final host verifier was also exercised against the retained production output after review tightened XML hierarchy and qualified-attribute checks. Local provider/orchestrator/runner/guest and CLI tests passed, along with Clippy, Rust 1.85 compatibility, formatting, and governance. Existing successful MSI and mixed failed/legacy MSI report fixtures passed retained regression checks without another installation. No hosted CI run was requested for this slice.
+
+To recheck reporting without an installation, set `AIW_BAMBU_REPORT_WORKSPACE`, `AIW_BAMBU_REPORT_PROJECT`, and `AIW_BAMBU_REPORT_GUEST_SHA256`, then run `cargo test -p aiw-runner --test live_bambu retained_bambu_report --locked --offline -- --ignored --exact`. The harness writes exported reports beside the retained workspace. Fresh execution is a separate ignored test requiring `AIW_RUN_LIVE_WSB_BAMBU=1`, `AIW_LIVE_GUEST_AGENT`, `AIW_LIVE_GUEST_AGENT_SHA256`, and `AIW_LIVE_BAMBU_RECEIPT`.
+
+## Metadata-only information query
 
 ```powershell
 cargo run -p aiw-cli -- provider compile-bambu-scenario --project .\examples\bambu-studio-info.json --scenario local-file-info
@@ -56,10 +97,6 @@ All three trials used Windows build 28000 and Sandbox CLI 0.8.107.0. Cleanup was
 
 **Roadmap consequence:** prefer a separate approved STL-to-3MF export profile for the first Bambu functional report. Verify bounded model geometry and package references, not an output hash or empty redirected console text. Keep the current information-query compiler available as metadata-only research intent; its fixed arguments do not silently become the export command. No slicing, cloud account, printer, or additional downloaded runtime was required for this exploratory export.
 
-## Integration requirements
+## Remaining integration
 
-Promote the profile only after the exact installer and fixed CLI workflow have a repeatable disposable-worker proof. Then add an EXE request and preparation path with an explicit payload-size limit sufficient for this 429,037,864-byte source; do not raise the MSI limit or rename old schemas to fit it.
-
-Reuse the existing approval, held-file integrity, session ownership, receipt-last publication, cleanup/recovery, and standard-user launch mechanisms. Add bounded model-information observations that distinguish install completion, target launch, model processing, output capture, and cleanup. Exit 0 alone must not become a model-loading or isolation claim. Retain failed stages and unavailable output independently.
-
-Extend reporting around application-neutral verified observations when there are two concrete consumers. Keep Bambu model processing and Notepad++ editing as distinct function columns; missing functions stay unmeasured. Research scripts and raw exploratory output are not production evidence and cannot be imported as successful retained runs.
+Extend report sets around the two concrete reporting consumers. Keep Bambu export and Notepad++ editing as distinct function columns; missing functions stay unmeasured. Research scripts and raw exploratory output are not production evidence and cannot be imported as successful retained runs. Add clean repetitions and control-fixture coverage before declaring the broader repeatability benchmark complete.

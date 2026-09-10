@@ -9,6 +9,42 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use aiw_orchestrator::{ApprovalRecord, RunLayout, RunOutcome};
 use aiw_runner::{WsbApprovedExecution, WsbBambuPreparationInput};
 
+#[test]
+#[ignore = "reverifies an explicit retained Bambu run without starting Sandbox"]
+fn retained_bambu_report() {
+    let root = PathBuf::from(std::env::var_os("AIW_BAMBU_REPORT_WORKSPACE").unwrap());
+    let project: aiw_schema::Project = serde_json::from_slice(
+        &fs::read(std::env::var_os("AIW_BAMBU_REPORT_PROJECT").unwrap()).unwrap(),
+    )
+    .unwrap();
+    let hash = std::env::var("AIW_BAMBU_REPORT_GUEST_SHA256").unwrap();
+    let run_id = root.file_name().unwrap().to_str().unwrap();
+    let report =
+        aiw_runner::report_windows_sandbox_bambu_run(&root, run_id, &project, &hash).unwrap();
+    assert_eq!(report.outcome, RunOutcome::InsufficientEvidence);
+    assert!(report.recorded_cleanup_verified);
+    assert!(report.scenario.as_ref().unwrap().successful());
+    assert_eq!(report.artifact.as_ref().unwrap().vertex_count, 4);
+    assert_eq!(report.artifact.as_ref().unwrap().triangle_count, 4);
+    assert_eq!(report.requested_assertions, project.assertions);
+    assert!(
+        report
+            .missing_evidence
+            .iter()
+            .any(|gap| gap.contains("target token"))
+    );
+    fs::write(
+        root.with_extension("report.json"),
+        serde_json::to_vec_pretty(&report).unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        root.with_extension("report.md"),
+        aiw_runner::render_bambu_run_report_markdown(&report),
+    )
+    .unwrap();
+}
+
 fn prepare() -> (RunLayout, PathBuf, aiw_schema::Project, String) {
     assert_eq!(std::env::var("AIW_RUN_LIVE_WSB_BAMBU").as_deref(), Ok("1"));
     let guest =

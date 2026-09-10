@@ -171,6 +171,8 @@ pub fn report_windows_sandbox_bambu_run(
         run_id: run_id.to_owned(),
         project_revision_sha256: artifacts.receipt.project_revision_sha256.clone(),
         request_sha256: request.request_sha256.clone(),
+        compiled_scenario: bambu.scenario.clone(),
+        requested_assertions: project.assertions.clone(),
         outcome: before.result.outcome,
         recorded_cleanup_verified: true,
         evidence_status: BambuReportEvidenceStatus::Absent,
@@ -180,6 +182,7 @@ pub fn report_windows_sandbox_bambu_run(
         artifact: None,
         missing_evidence: vec![
             "ordinary baseline".to_owned(),
+            "independent verification of requested assertions (including target token)".to_owned(),
             "application-level isolation comparison".to_owned(),
             "descendant boundary and denial canaries".to_owned(),
             "filesystem and registry changes".to_owned(),
@@ -230,6 +233,8 @@ pub struct WsbBambuRunReport {
     pub run_id: String,
     pub project_revision_sha256: String,
     pub request_sha256: String,
+    pub compiled_scenario: aiw_provider_wsb::CompiledBambuExportScenario,
+    pub requested_assertions: aiw_schema::Assertions,
     pub outcome: RunOutcome,
     pub recorded_cleanup_verified: bool,
     pub evidence_status: BambuReportEvidenceStatus,
@@ -331,6 +336,10 @@ pub fn render_bambu_run_report_markdown(report: &WsbBambuRunReport) -> String {
         "# Bambu Studio Sandbox report\n\nRun: `{}`\n\nOutcome: `{:?}`. Recorded cleanup verified: {}. Evidence: `{:?}`.\n\n",
         report.run_id, report.outcome, report.recorded_cleanup_verified, report.evidence_status
     );
+    text.push_str(&format!(
+        "Installer SHA-256: `{}`. Fixture SHA-256: `{}`.\n\n",
+        report.compiled_scenario.application_sha256, report.compiled_scenario.fixture_sha256
+    ));
     if let Some(scenario) = &report.scenario {
         text.push_str(&format!(
             "Completed stages: `{:?}`. Failed stage: `{:?}`.\n\n",
