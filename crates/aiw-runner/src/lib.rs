@@ -4374,11 +4374,34 @@ mod tests {
         Tampered,
     }
 
+    #[derive(Clone, Copy)]
+    enum ProductRegistrationFixture {
+        Valid,
+        Missing,
+        Tampered,
+    }
+
     fn write_valid_msi_completion(
         start: &WsbGoldenProbeStart,
         scenario_result: aiw_provider_wsb::ImportedMsiScenarioResult,
         include_behavior: bool,
         registry_fixture: RegistryFixture,
+    ) {
+        write_valid_msi_completion_with_product(
+            start,
+            scenario_result,
+            include_behavior,
+            registry_fixture,
+            ProductRegistrationFixture::Valid,
+        );
+    }
+
+    fn write_valid_msi_completion_with_product(
+        start: &WsbGoldenProbeStart,
+        scenario_result: aiw_provider_wsb::ImportedMsiScenarioResult,
+        include_behavior: bool,
+        registry_fixture: RegistryFixture,
+        product_fixture: ProductRegistrationFixture,
     ) {
         let rendered = render_config(&start.wsb_plan).unwrap();
         let request = msi_request_for(start);
@@ -4505,6 +4528,33 @@ mod tests {
                     kind: aiw_provider_wsb::IMPORTED_MSI_BEHAVIOR_EVENT.to_owned(),
                     source: "aiw-guest-agent".to_owned(),
                     payload: serde_json::to_value(behavior).unwrap(),
+                })
+                .unwrap();
+        }
+        if request.scenario.requires_product_registration()
+            && !matches!(product_fixture, ProductRegistrationFixture::Missing)
+        {
+            let mut product = aiw_provider_wsb::ImportedMsiProductRegistrationEvidence {
+                schema_version: aiw_provider_wsb::IMPORTED_MSI_PRODUCT_REGISTRATION_SCHEMA_VERSION
+                    .into(),
+                run_id: request.run_id.clone(),
+                sandbox_id: request.sandbox_id.clone(),
+                request_sha256: request.request_sha256.clone(),
+                scenario_sha256: request.scenario_sha256.clone(),
+                installer_sha256: request.installer_sha256.clone(),
+                product_code: "{01234567-89AB-CDEF-0123-456789ABCDEF}".into(),
+                before_install: aiw_provider_wsb::MsiMachineProductState::NotRegistered,
+                after_install: aiw_provider_wsb::MsiMachineProductState::Installed,
+            };
+            if matches!(product_fixture, ProductRegistrationFixture::Tampered) {
+                product.product_code = "not-a-product-code".into();
+            }
+            evidence
+                .append(aiw_evidence::EvidenceEvent {
+                    observed_utc: "guest-time-not-trusted".to_owned(),
+                    kind: aiw_provider_wsb::IMPORTED_MSI_PRODUCT_REGISTRATION_EVENT.to_owned(),
+                    source: "test-guest-agent".to_owned(),
+                    payload: serde_json::to_value(product).unwrap(),
                 })
                 .unwrap();
         }
@@ -4658,6 +4708,52 @@ mod tests {
                 observe_wsb_session_status(&layout).unwrap().status,
                 WsbSessionDisposition::Clean
             );
+            let result = layout.read_result().unwrap();
+            assert_eq!(result.outcome, RunOutcome::Failed);
+            assert!(result.cleanup_complete);
+            assert!(result.evidence_root.is_none());
+        }
+    }
+
+    #[test]
+    fn imported_msi_v6_rejects_missing_or_tampered_product_registration_after_cleanup() {
+        for fixture in [
+            ProductRegistrationFixture::Missing,
+            ProductRegistrationFixture::Tampered,
+        ] {
+            let (_root, layout, start, readiness) = setup_msi();
+            let request = msi_request_for(&start);
+            assert!(request.scenario.requires_product_registration());
+            let valid =
+                aiw_provider_wsb::ImportedMsiScenarioResult::succeeded(&request, 0, 42, 0).unwrap();
+            let id = deterministic_sandbox_id("w1-run");
+            let output_start = start.clone();
+            let fake = FakeProcess::new(vec![
+                empty_list(),
+                started(&id),
+                list_with(&id, "running"),
+                list_with(&id, "running"),
+                stopped(&id),
+                empty_list(),
+            ])
+            .with_start_action(Box::new(move || {
+                write_valid_msi_completion_with_product(
+                    &output_start,
+                    valid,
+                    true,
+                    RegistryFixture::Valid,
+                    fixture,
+                )
+            }));
+            let error =
+                execute_wsb_golden_probe(&start, &readiness, &layout, &fake, &TestLease::default())
+                    .unwrap_err();
+            assert!(matches!(error, RunnerError::Receipt(_)));
+            assert_eq!(
+                observe_wsb_session_status(&layout).unwrap().status,
+                WsbSessionDisposition::Clean
+            );
+            assert!(!request_path(&start).exists());
             let result = layout.read_result().unwrap();
             assert_eq!(result.outcome, RunOutcome::Failed);
             assert!(result.cleanup_complete);
