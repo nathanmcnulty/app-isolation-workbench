@@ -6,6 +6,7 @@
 |---|---|
 | `round-trip` | Create, read, edit, and re-read a fixed small document |
 | `read-canary` | Bounded read with success, native access denied, missing file, and other errors kept distinct |
+| `read-registry` | Fixed HKLM 64-bit binary canary read; native denied, missing, and other errors stay distinct |
 | `child` | Run the same executable's fixed token mode; bind the child's reported token to its actual PID |
 | `token` | Report the exact process token |
 | `expected-failure` | Deliberately emit a known failure and exit 23 |
@@ -33,7 +34,7 @@ Recheck without starting Sandbox using `./fixtures/control/verify-baseline.ps1 -
 
 ## Next integration
 
-The paired file/child feasibility control below is complete. Add the declared registry control and integrate the result with approved execution and reporting before using it as a production assessment prerequisite. Then exercise an explicit real-application candidate. Application workflow repeatability remains a separate benchmark; matching control results do not prove all applications are repeatable.
+The paired file/registry/child feasibility controls are complete. Integrate them with approved execution/reporting before using them as a production assessment prerequisite, then trial a real-application AppContainer candidate. This does not gate the first packaging slice using the already-approved Windows Sandbox application path.
 
 ## Paired AppContainer research control
 
@@ -48,11 +49,21 @@ The fixed guest driver creates one ordinary user and invokes the project-owned n
 
 The guest verifies both executable hashes before and after the trial. The host retains both executable identities, guest script, exact configuration and provider hashes, result hash, and exact Sandbox cleanup. The launcher records process-job and profile cleanup. The verifier requires the fixed disconnected configuration and two fresh workers with matching normalized observations. These records remain `productionEvidence: false`; they cannot establish real-application compatibility or replace the approved execution/reporting contract.
 
-This experiment covers a file read and a descendant token-file write. The roadmap's first production candidate also requires its declared registry checks and approved evidence integration. Neither registry access nor an inner AppContainer network restriction is measured here; disabling networking on the outer Sandbox does not measure the inner boundary.
+Version 2 also reads the exact `REG_BINARY` value `HKLM\SOFTWARE\AIWControlCanary\Canary` using the explicit 64-bit registry view. The elevated guest creates 29 fixed bytes, grants the ordinary user read access, and excludes package grants. It holds the key and checks its value/type and DACL before and after both runs. The native probe uses bounded queries and distinguishes error 5, missing resources, other errors, and malformed data. See Microsoft's [explicit registry views](https://learn.microsoft.com/en-us/windows/win32/winprog64/accessing-an-alternate-registry-view). Inner network restrictions, arbitrary registry writes, and real-application registry compatibility remain unmeasured.
 
 Recheck retained records with `./fixtures/control/verify-appcontainer.ps1 -Root <retained-root>`. Exercise altered copies with `./fixtures/control/test-verifier.ps1 -Root <retained-root> -AppContainerControl`. Both commands are read-only with respect to the original evidence and start no provider or fixture processes.
 
-### Live paired proof, 2026-09-10
+The current host requires the launcher/guest v2 registry contract. Standalone verification can also pass `-RequireRegistry`. Historical v1 records remain readable with `registryMeasured: false`; they cannot satisfy that requirement.
+
+### Live file/registry/child proof, 2026-09-10
+
+Two fresh workers passed six paired invocations on Windows `10.0.28000.0`. File and registry reads succeeded in the baseline and were denied in AppContainer. Registry denial was native error 5 at `openKey` for the same explicit hive/view/key/value. Root/descendant tokens, bytes, registry value/DACL, process/profile cleanup, and exact worker cleanup all passed.
+
+Proof: `%TEMP%\aiw-control-appcontainer-9c202c2d-1372-4b0a-bd62-9d565268de6f`. Worker IDs: `4c676377-f5ac-4601-9306-ae14e951d3b7` and `2f1742d0-6a83-4ff2-908d-a996fbab551f`. Fixture SHA-256: `e73851d80c3e083cde9e8d6cbea93d6aad22d13a60ca915e22d7fea1e273f140`; launcher SHA-256: `15a45f9dcf3c18e12352d4bdefc52ff28f5207c96869530ae76fe57e541c989f`. The report retains script/configuration hashes and the existing pinned provider commitment.
+
+Thirty altered-copy checks passed, including missing-as-denied, wrong native error, changed view/key/value, baseline data drift, registry value/DACL drift, and a version downgrade. Historical v1 evidence passed its 21 negative checks without acquiring registry coverage. The native probe's two pure tests, workspace Clippy, Rust 1.85, formatting, and governance passed. Independent review found no additional issue. No hosted CI was requested.
+
+### Earlier file/child proof, 2026-09-10
 
 Two fresh workers on Windows `10.0.28000.0` passed the same-user read/child comparison. Baseline root and descendant tokens were medium-integrity ordinary tokens; candidate root and descendant tokens were low-integrity AppContainer tokens with the exact profile SID and no capabilities. The baseline read the fixed canary bytes and the candidate reported native access denied. Both process jobs, the temporary profile, and each exact outer Sandbox session were cleaned up.
 

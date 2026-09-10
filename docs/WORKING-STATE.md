@@ -5,7 +5,7 @@ Updated 2026-09-10. This is a compact handoff, not a run receipt or authorizatio
 ## Where to resume
 
 - Active development branch: `codex/wsb-typed-scenarios`. Locate it with `git worktree list` if this checkout differs. The main checkout has historically been behind this worktree.
-- Latest slice: paired ordinary-user/AppContainer file and child controls, repeated in two fresh Sandboxes. Use `scripts/work-status.ps1` for current HEAD, dirty files, and locally known upstream state.
+- Latest slice: paired ordinary-user/AppContainer file, registry, and child controls, repeated in two fresh Sandboxes. Use `scripts/work-status.ps1` for current HEAD, dirty files, and locally known upstream state.
 - Goal: report tested functions for exact application bytes and measured isolation configurations, then use the evidence for adaptation/repackaging. Free community project; feedback collection is not a development gate.
 
 ## Implemented versus exploratory
@@ -13,12 +13,12 @@ Updated 2026-09-10. This is a compact handoff, not a run receipt or authorizatio
 - Production path: protected intake; approved Windows Sandbox execution and recovery; fixed Notepad++ MSI v6 install/open/edit/save/close as a standard user after privileged install. Bound token, runtime, file/registry, stage, failure-snapshot, and MSI ProductCode observations feed retained JSON/Markdown reports and explicit report sets.
 - Bambu: separate approved EXE export profile, protected staging, standard-user guest execution, stage/failure result, bounded 3MF graph/geometry verification, and retained JSON/Markdown report. Original `--info` compiler remains metadata-only. See the profile document for production validation and exact evidence.
 - Mixed reports: `run report-wsb-set` combines verified MSI and Bambu results with distinct function columns, failures/unavailable entries, and verified-identity deduplication. The retained regression checks deterministic output and unchanged workspace inventories.
-- Development control: baseline document/read/denial/missing/child/failure cases passed twice. A separate same-user AppContainer comparison now passes paired canary read/denial, root/descendant package tokens, process/profile cleanup, and two fresh workers. Retained verification rejects 21 altered candidate records and 11 baseline negatives. See CONTROL-FIXTURE.md. Research records remain excluded from production application reports.
+- Development control: paired file/registry reads and descendants passed in two fresh workers. Token, value/DACL, process/profile, and worker cleanup bindings passed. Version 2 rejects 30 altered records; historical file-only records stay unmeasured for registry. See CONTROL-FIXTURE.md. Research controls remain excluded from production application reports.
 - No application-level baseline/candidate isolation comparison or reusable repackaging capability is complete. Outer Sandbox containment is distinct from an inner application boundary.
 
 ## Next coherent slice
 
-Complete the first candidate's declared registry control, then bring the bounded control and paired descriptor into approved execution/reporting using existing evidence verification. The native fixed launcher establishes classic AppContainer feasibility; do not build another generic command runner. Use OS-reported absolute image paths rather than requiring unnecessary ancestor access for canonicalization. After that, choose and measure an explicit real-application candidate (Notepad++ is the initial hypothesis, not a compatibility claim). Reuse retained evidence for reporting changes. No registry/network restriction, real-application isolation comparison, or reusable repackaging capability is yet complete.
+Start the first packaging capability: a versioned Sandbox bundle for an existing approved typed profile (Notepad++ MSI first). Bind payload hashes, fixed scenario, runtime/data contract, and evidence references. Import/replay must reject drift, use normal preparation and fresh approval, and pass a fresh-worker trial before a validated claim. No arbitrary command/script metadata. AppContainer approved reporting and real-application comparison remain separate follow-ups; they do not block a Sandbox bundle. No inner network restriction or host-launch/reusable package capability is yet complete.
 
 ## Read only what the slice needs
 

@@ -1,6 +1,6 @@
 # Roadmap
 
-Revised 2026-09-09 against the implemented runner and current Microsoft documentation. This replaces the former W0-W5/S0-S4 ordering; those labels remain historical references, not release dependencies.
+Revised 2026-09-10 against the implemented runner and current Microsoft documentation. This replaces the former W0-W5/S0-S4 ordering; those labels remain historical references, not release dependencies.
 
 The goal is a free community tool that answers **which tested application functions work under which measured isolation configuration**, helps an administrator adapt the application, and produces a launch profile or package that passes the same tests. Workbench evolves into Studio when authoring is useful; this is one product.
 
@@ -21,7 +21,7 @@ The [fixture record](FIXTURE-NOTEPAD-PLUS-PLUS-8.9.8.md) records dated live proo
 | Previous ordering | Revised decision | Reason |
 |---|---|---|
 | Complete all assessment evidence before useful conclusions | Report function results, boundary verification, and capture completeness separately | A passing workflow is useful while a broader isolation verdict remains indeterminate. |
-| Windows Sandbox and experimental MXC required before validated launch | Prove one application-level candidate and its replay first | An unfinished second provider must not block the first working mode. |
+| Every isolation provider before reusable launch | Package the approved Sandbox workflow first; develop AppContainer independently | An unfinished provider must not block the first working mode. |
 | Packaging starts only after a completely accepted isolation assessment | Allow evidence-bound experimental recipes; require final validation before calling a package validated | Adaptation or packaging may be necessary to make isolation work. |
 | Broad collectors/general scenario engine before diverse applications | Add a second real application and a controlled fixture; extract primitives used by both | Expose Notepad++ assumptions without inventing an arbitrary command platform. |
 | Large UI/release milestone at the end | Ship CLI, reports, and contribution fixtures with each capability; add UI over stable services | Community usefulness comes from working capabilities. |
@@ -30,7 +30,7 @@ The [fixture record](FIXTURE-NOTEPAD-PLUS-PLUS-8.9.8.md) records dated live proo
 
 The [installer inventory](INSTALLER-CORPUS.md) now makes profile selection concrete: Notepad++ EXE/MSI controls, DriveManager for elevation/device dependencies, Bambu for a richer local-file workflow, and Signal/ChatGPT/Visual Studio for acquisition dependencies. Signal and ChatGPT are Store wrappers in this folder; DriveManager is an SK hynix disk utility. Do not select fixtures solely by installer size or apparent UI simplicity.
 
-[Bambu Studio export](BAMBU-STUDIO-PROFILE.md) is now the second production execution/reporting consumer: a separately typed EXE profile uses approved start, standard-user STL-to-3MF export, bounded package/geometry verification, and retained JSON/Markdown reports. Its information-query compiler remains metadata-only. [Mixed application report sets](REPORT-SETS.md) now preserve distinct function columns and explicit unavailable/failure evidence. The [project-owned control](CONTROL-FIXTURE.md) now passes repeated standard-user/ACL/child/failure development checks in fresh workers. A paired ordinary-user/AppContainer file and child control now also passes in fresh workers; registry checks, real-application repeatability, and approved control integration remain open. Slicing remains a later function with version-sensitive printer/material settings.
+[Bambu Studio export](BAMBU-STUDIO-PROFILE.md) is now the second production execution/reporting consumer: a separately typed EXE profile uses approved start, standard-user STL-to-3MF export, bounded package/geometry verification, and retained JSON/Markdown reports. Its information-query compiler remains metadata-only. [Mixed application report sets](REPORT-SETS.md) now preserve distinct function columns and explicit unavailable/failure evidence. The [project-owned control](CONTROL-FIXTURE.md) now passes repeated standard-user/ACL/child/failure development checks in fresh workers. Paired ordinary-user/AppContainer file, registry, and child controls now pass in fresh workers; real-application repeatability and approved control integration remain open. Slicing remains a later function with version-sensitive printer/material settings.
 
 The corpus exposed an intake requirement now addressed by [explicit download metadata archiving](DOWNLOAD-METADATA-INTAKE.md): all seven supplied files pass protected intake, with source identity and metadata unchanged. Retain this bounded policy when broadening profiles; arbitrary streams remain rejected. Separate networked payload acquisition from offline application assessment; bind downloaded payloads, not just launcher hashes. These are prerequisites for using the affected fixtures, not reasons to enable networking on the existing offline profile.
 
@@ -51,7 +51,7 @@ General tracing, every installer type, printing, networking, updates, and reboot
 
 **Deliverable:** the same approved workflow under an ordinary baseline and one application-level isolation candidate, with an explainable function matrix.
 
-The bounded classic AppContainer feasibility control now passes a same-user file/child comparison in two fresh disposable workers, using documented profile/process APIs in the native authority layer. Complete the declared registry control and approved evidence integration next, then an appropriate real application. Unpackaged AppContainer launch is documented, so an MSIX converter need not precede this experiment. This is not a claim that Notepad++ will work unchanged. See [control proof and limits](CONTROL-FIXTURE.md), [Launch an AppContainer](https://learn.microsoft.com/en-us/windows/win32/secauthz/implementing-an-appcontainer), and [MSIX AppContainer apps](https://learn.microsoft.com/en-us/windows/msix/msix-container).
+The bounded classic AppContainer feasibility control now passes a same-user file/registry/child comparison in two fresh disposable workers, using documented APIs in the native authority layer. Approved evidence integration and a real-application candidate remain next for this provider; they do not block the first Sandbox bundle. Unpackaged AppContainer launch is documented, so an MSIX converter need not precede this experiment. This is not a claim that Notepad++ will work unchanged. See [control proof and limits](CONTROL-FIXTURE.md), [Launch an AppContainer](https://learn.microsoft.com/en-us/windows/win32/secauthz/implementing-an-appcontainer), and [MSIX AppContainer apps](https://learn.microsoft.com/en-us/windows/msix/msix-container).
 
 Also evaluate Microsoft's newly documented [experimental process-in-sandbox APIs](https://learn.microsoft.com/en-us/windows/win32/secauthz/createprocessinsandbox) as a bounded alternative implementation. They offer a declarative AppContainer specification and an alternate-user entry point, but currently have an experimental ABI, no public header/schema source on the documentation page, and no precise minimum Windows build. First verify exports, specification availability and a project-owned control fixture inside a disposable worker. Keep the documented classic AppContainer path available; the presence of `processmodel.dll` alone is not a supported-provider result.
 
@@ -67,7 +67,17 @@ Declare the candidate's minimum check set before approval. For the first AppCont
 
 Reuse `aiw-core` comparison primitives behind verification of bound run evidence. Do not introduce a competing verdict engine or trust caller-constructed summaries.
 
-## Benchmark 3 - adaptation and reusable launch
+## When packaging work starts
+
+Start the first packaging slice with the existing approved Windows Sandbox application workflow. It already has real-application execution and verified reporting; finishing AppContainer reporting is not a prerequisite for a Sandbox bundle. Label the runtime boundary explicitly: this is a disposable-worker application profile, not an inner AppContainer or unrestricted host-launch claim.
+
+For AppContainer packaging, finish its declared control measurements and approved paired reporting, then trial one real application to identify concrete requirements. A failed function with a trustworthy cause can motivate an adaptation; universal application compatibility is not required. Do not add more providers, applications, general tracing, or feedback collection as prerequisites.
+
+Packaging development starts with the inspectable recipe and reusable launch output in Benchmark 3. The first installable distribution follows in Benchmark 4. This lets an admin preserve and replay the exact files, launch settings, data locations, and grants that a trial established before we build broader conversion capabilities.
+
+The next packaging slice should export one versioned Sandbox bundle for an existing typed application profile: exact payload hashes, fixed scenario identifier, runtime/data contract, and source evidence references. Import must reject changed payloads or unsupported fields and go through normal preparation/approval before replay. It must not turn bundle metadata into arbitrary scripts or commands. Prove a fresh-worker replay before presenting the bundle as validated. Installer acquisition and universal conversion remain outside this first slice.
+
+## Benchmark 3 - first packaging capability: recipe and reusable launch
 
 **Deliverable:** an administrator can trial one narrow adaptation and rerun the failing scenario; a working candidate can be replayed through a drift-checked launch profile.
 
