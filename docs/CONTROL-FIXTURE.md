@@ -35,6 +35,21 @@ Recheck without starting Sandbox using `./fixtures/control/verify-baseline.ps1 -
 
 Run these same fixed cases under the first application-level candidate, keeping account, input bytes, and environment commitments explicit. Add parent and descendant token checks and resource-specific baseline/candidate pairing before interpreting a denial as evidence for that candidate. Integrate the control result with approved execution and reporting before using it as a production assessment prerequisite. Application workflow repeatability remains a separate benchmark; matching control results do not prove all applications are repeatable.
 
+## Paired AppContainer research control
+
+```powershell
+./scripts/build-control-fixture.ps1 -AppContainerControl
+./scripts/test-control-sandbox.ps1 -RunDisposableControls -AppContainerControl
+```
+
+The fixed guest driver creates one ordinary user and invokes the project-owned native launcher as that user. The launcher compares an ordinary process with a classic AppContainer process using the same fixture and canary, with no capability SIDs. Microsoft describes this boundary as the intersection of user access and package/capability access in [Implementing an AppContainer](https://learn.microsoft.com/en-us/windows/win32/secauthz/implementing-an-appcontainer).
+
+`C:\AIW\Control\SharedCanary\canary.txt` contains the same fixed 29 bytes used by the baseline control. The ordinary process must read those bytes; the candidate must report native access denied. Both variants also launch a descendant. The retained verifier checks held root tokens, fixture self-reported tokens, descendant PID/user/package relationships, baseline medium integrity, candidate low integrity, and empty capabilities. A separate low-integrity child-output directory receives the specific package SID grant needed for the child token file. That grant does not extend to the canary.
+
+The guest verifies both executable hashes before and after the trial. The host retains both executable identities, guest script, exact configuration and provider hashes, result hash, and exact Sandbox cleanup. The launcher records process-job and profile cleanup. The verifier requires the fixed disconnected configuration and two fresh workers with matching normalized observations. These records remain `productionEvidence: false`; they cannot establish real-application compatibility or replace the approved execution/reporting contract.
+
+Recheck retained records with `./fixtures/control/verify-appcontainer.ps1 -Root <retained-root>`. Exercise altered copies with `./fixtures/control/test-verifier.ps1 -Root <retained-root> -AppContainerControl`. Both commands are read-only with respect to the original evidence and start no provider or fixture processes.
+
 ## Live baseline, 2026-09-10
 
 Two fresh Sandbox sessions passed all seven driver cases on Windows `10.0.28000.0`: administrator read, standard-user document round trip, allowed read, native denied read, missing-file classification, child token binding, and deliberate exit 23. Each exact session was stopped and absence verified. An initial pair also completed the controls; review then added configuration/provider bindings and a fresh pair exercised the final contract. The final proof is `%TEMP%\aiw-control-baseline-a117448b-d3d0-4340-8a6c-40ab1dd2502c`, with JSON/Markdown repeatability reports and both trials' inputs, output, configuration, and journals.
