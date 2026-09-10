@@ -492,13 +492,14 @@ enum RunCommand {
         #[arg(long, value_enum, default_value_t = AssessmentReportFormat::Json)]
         format: AssessmentReportFormat,
     },
-    /// Reverify a bounded set of retained MSI workspaces without executing or comparing them.
+    /// Combine retained Notepad++ and Bambu results without executing or comparing applications.
     ReportWsbSet {
         #[arg(long)]
         input: PathBuf,
         #[arg(long, value_enum, default_value_t = AssessmentReportFormat::Json)]
         format: AssessmentReportFormat,
     },
+    /// Reverify a bounded set of retained MSI workspaces without executing or comparing them.
     ReportWsbMsiSet {
         #[arg(long)]
         input: PathBuf,
@@ -610,9 +611,11 @@ enum SchemaKind {
     ImportedMsiBehaviorEvidence,
     WsbMsiAssessmentReport,
     WsbMsiRunReport,
-    #[value(name = "wsb-msi-report-set-input")]
+    #[value(name = "wsb-report-set-input")]
     WsbReportSetInput,
+    #[value(name = "wsb-report-set")]
     WsbReportSet,
+    #[value(name = "wsb-msi-report-set-input")]
     WsbMsiReportSetInput,
     #[value(name = "wsb-msi-report-set")]
     WsbMsiReportSet,
@@ -2833,6 +2836,18 @@ mod tests {
         assert_eq!(loaded.source_schema_version, PROJECT_SCHEMA_VERSION);
         assert!(validate_project_for_planning(&loaded.project).is_empty());
         assert!(!project_requires_migration_review(&loaded.project));
+    }
+
+    #[test]
+    fn mixed_and_legacy_report_schema_names_are_distinct() {
+        for (kind, expected) in [
+            (SchemaKind::WsbReportSetInput, "wsb-report-set-input"),
+            (SchemaKind::WsbReportSet, "wsb-report-set"),
+            (SchemaKind::WsbMsiReportSetInput, "wsb-msi-report-set-input"),
+            (SchemaKind::WsbMsiReportSet, "wsb-msi-report-set"),
+        ] {
+            assert_eq!(kind.to_possible_value().unwrap().get_name(), expected);
+        }
     }
 
     #[test]

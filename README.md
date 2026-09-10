@@ -74,7 +74,7 @@ All successful commands emit JSON. Diagnostics go to standard error and a nonzer
 
 `provider compile-msi-scenario` produces a strict, versioned Notepad++ MSI install/launch/observe/close plan for review. It does not read the installer, verify an intake, approve a run, or start a process. The example binds the recorded 8.9.8 MSI content hash and uses a placeholder provider identity. `run prepare-wsb-msi` connects verified intake to separate import, approval, and guest execution; see [the scenario integration contract](docs/TYPED-MSI-SCENARIO.md).
 
-The [Bambu Studio export profile](docs/BAMBU-STUDIO-PROFILE.md) now supports protected EXE preparation, approved Sandbox execution as a standard user, and retained JSON/Markdown reporting with bounded 3MF geometry verification. Use `examples/bambu-studio-export.json` and `run report-wsb-bambu-run`. Its original information-query compiler remains metadata-only. Mixed application report sets and application-level isolation comparisons remain future work.
+The [Bambu Studio export profile](docs/BAMBU-STUDIO-PROFILE.md) now supports protected EXE preparation, approved Sandbox execution as a standard user, and retained JSON/Markdown reporting with bounded 3MF geometry verification. Use `examples/bambu-studio-export.json` and `run report-wsb-bambu-run`. Its original information-query compiler remains metadata-only. [Mixed application report sets](docs/REPORT-SETS.md) combine its export results with Notepad++ editing; application-level isolation comparisons remain future work.
 
 ## Local validation
 

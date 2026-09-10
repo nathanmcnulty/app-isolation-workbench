@@ -1,22 +1,23 @@
 # Working state
 
-Updated 2026-09-09. This is a compact handoff, not a run receipt or authorization.
+Updated 2026-09-10. This is a compact handoff, not a run receipt or authorization.
 
 ## Where to resume
 
 - Active development branch: `codex/wsb-typed-scenarios`. Locate it with `git worktree list` if this checkout differs. The main checkout has historically been behind this worktree.
-- Latest slice: approved Bambu export with retained artifact reporting. Use `scripts/work-status.ps1` for current HEAD, dirty files, and locally known upstream state.
+- Latest slice: mixed MSI/Bambu report sets, verified from retained evidence. Use `scripts/work-status.ps1` for current HEAD, dirty files, and locally known upstream state.
 - Goal: report tested functions for exact application bytes and measured isolation configurations, then use the evidence for adaptation/repackaging. Free community project; feedback collection is not a development gate.
 
 ## Implemented versus exploratory
 
 - Production path: protected intake; approved Windows Sandbox execution and recovery; fixed Notepad++ MSI v6 install/open/edit/save/close as a standard user after privileged install. Bound token, runtime, file/registry, stage, failure-snapshot, and MSI ProductCode observations feed retained JSON/Markdown reports and explicit report sets.
 - Bambu: separate approved EXE export profile, protected staging, standard-user guest execution, stage/failure result, bounded 3MF graph/geometry verification, and retained JSON/Markdown report. Original `--info` compiler remains metadata-only. See the profile document for production validation and exact evidence.
+- Mixed reports: `run report-wsb-set` combines verified MSI and Bambu results with distinct function columns, failures/unavailable entries, and verified-identity deduplication. The retained regression checks deterministic output and unchanged workspace inventories.
 - No application-level baseline/candidate isolation comparison or reusable repackaging capability is complete. Outer Sandbox containment is distinct from an inner application boundary.
 
 ## Next coherent slice
 
-Integrate the two concrete report consumers into explicit mixed application report sets, with separate editor-round-trip and STL-export columns, deduplicated verified identities, and missing/failure evidence preserved. Then close benchmark repeatability/control-fixture gaps before the first ordinary-baseline/AppContainer comparison. Reuse retained evidence for reporting checks; a report change does not require another installation. No slicing/printer/cloud support is implied.
+Close benchmark repeatability/control-fixture gaps before the first ordinary-baseline/AppContainer comparison. Build a bounded project-owned control with expected success, denial, child-process and failure cases; then prove the control under the candidate before interpreting a real application failure. Reuse retained evidence for reporting checks; a report change does not require another installation. No slicing/printer/cloud support is implied.
 
 ## Read only what the slice needs
 
@@ -24,7 +25,7 @@ Integrate the two concrete report consumers into explicit mixed application repo
 - [Roadmap](ROADMAP.md): benchmark completion criteria and later isolation/adaptation work.
 - [Report sets](REPORT-SETS.md), [assessment reports](ASSESSMENT-REPORT.md): existing verified reporting contracts.
 - [Notepad++ fixture](FIXTURE-NOTEPAD-PLUS-PLUS-8.9.8.md), [MSI ProductCode observation](MSI-PRODUCT-REGISTRATION.md): existing live controls and retained evidence.
-- Code entry points: provider `scenario.rs`/`bambu_export.rs`/`imported_bambu.rs`/`bambu_artifact.rs`; runner `preparation.rs`/`lib.rs`/`bambu_report.rs`/`report_set.rs`; guest-agent `main.rs`; native `guest_bambu.rs`/`guest_standard_user.rs`.
+- Code entry points: provider `scenario.rs`/`bambu_export.rs`/`imported_bambu.rs`/`bambu_artifact.rs`; runner `preparation.rs`/`lib.rs`/`bambu_report.rs`/`application_report_set.rs`/`report_set.rs`; guest-agent `main.rs`; native `guest_bambu.rs`/`guest_standard_user.rs`.
 
 ## Operational constraints
 

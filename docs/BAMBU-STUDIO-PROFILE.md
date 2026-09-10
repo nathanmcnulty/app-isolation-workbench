@@ -1,6 +1,6 @@
 # Bambu Studio local-file profile
 
-The second application profile targets the supplied Bambu Studio 02.08.02.60 EXE. A separately typed STL-to-3MF export now uses protected preparation, approved Sandbox execution, standard-user launch, artifact verification, and retained JSON/Markdown reporting. The original information-query compiler below remains metadata-only (`executionSupported: false`). Neither profile produces an application compatibility or effective-isolation verdict. Mixed application report sets are a subsequent integration step.
+The second application profile targets the supplied Bambu Studio 02.08.02.60 EXE. A separately typed STL-to-3MF export now uses protected preparation, approved Sandbox execution, standard-user launch, artifact verification, and retained JSON/Markdown reporting. The original information-query compiler below remains metadata-only (`executionSupported: false`). Neither profile produces an application compatibility or effective-isolation verdict. [Mixed application report sets](REPORT-SETS.md) combine both production reporting profiles.
 
 ## Approved export and retained reporting
 
@@ -99,4 +99,4 @@ All three trials used Windows build 28000 and Sandbox CLI 0.8.107.0. Cleanup was
 
 ## Remaining integration
 
-Extend report sets around the two concrete reporting consumers. Keep Bambu export and Notepad++ editing as distinct function columns; missing functions stay unmeasured. Research scripts and raw exploratory output are not production evidence and cannot be imported as successful retained runs. Add clean repetitions and control-fixture coverage before declaring the broader repeatability benchmark complete.
+Mixed report sets now combine the two concrete reporting consumers. Keep Bambu export and Notepad++ editing as distinct function columns; missing functions stay unmeasured. Research scripts and raw exploratory output are not production evidence and cannot be imported as successful retained runs. Add clean repetitions and control-fixture coverage before declaring the broader repeatability benchmark complete.
