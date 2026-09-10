@@ -23,6 +23,7 @@ const EDITED_DOCUMENT: &[u8] = b"AIW control fixture edited document\r\n";
 const MAX_CANARY_BYTES: u64 = 1024;
 const MAX_CHILD_STDOUT_BYTES: u64 = 16 * 1024;
 const CHILD_TIMEOUT: Duration = Duration::from_secs(10);
+const CHILD_CLEANUP_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Copy, ValueEnum, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -199,7 +200,9 @@ fn read_canary(path: &Path) -> CanaryOutcome {
             size_bytes: bytes.len() as u64,
             sha256: sha256(&bytes),
         },
-        Err(error) if error.raw_os_error() == Some(5) => CanaryOutcome::AccessDenied,
+        Err(error) if cfg!(windows) && error.raw_os_error() == Some(5) => {
+            CanaryOutcome::AccessDenied
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => CanaryOutcome::NotFound,
         Err(error) => CanaryOutcome::Error {
             raw_os_error: error.raw_os_error(),
@@ -226,19 +229,27 @@ fn child(root: &Path) -> Result<FixtureResult, String> {
         .checked_add(CHILD_TIMEOUT)
         .ok_or("child timeout overflowed monotonic clock")?;
     let exit = loop {
-        match child
-            .try_wait()
-            .map_err(|error| format!("observe fixed child failed: {error}"))?
-        {
-            Some(status) => break status,
-            None if Instant::now() >= deadline => {
-                child
-                    .kill()
-                    .map_err(|error| format!("terminate timed out fixed child failed: {error}"))?;
-                let _ = child.wait();
-                return Err("fixed child timed out and was terminated".to_owned());
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() >= deadline => {
+                let cleanup = terminate_child_bounded(&mut child);
+                return match cleanup {
+                    Ok(()) => Err("fixed child timed out and was terminated".to_owned()),
+                    Err(cleanup) => Err(format!(
+                        "fixed child timed out; containment cleanup also failed: {cleanup}"
+                    )),
+                };
             }
-            None => thread::sleep(Duration::from_millis(10)),
+            Ok(None) => thread::sleep(Duration::from_millis(10)),
+            Err(error) => {
+                let cleanup = terminate_child_bounded(&mut child);
+                return match cleanup {
+                    Ok(()) => Err(format!("observe fixed child failed: {error}")),
+                    Err(cleanup) => Err(format!(
+                        "observe fixed child failed: {error}; containment cleanup also failed: {cleanup}"
+                    )),
+                };
+            }
         }
     };
     if !exit.success() {
@@ -256,6 +267,27 @@ fn child(root: &Path) -> Result<FixtureResult, String> {
         child_stdout_bytes: 0,
         child_token,
     })
+}
+
+fn terminate_child_bounded(child: &mut std::process::Child) -> Result<(), String> {
+    match child.kill() {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {}
+        Err(error) => return Err(format!("terminate fixed child failed: {error}")),
+    }
+    let deadline = Instant::now()
+        .checked_add(CHILD_CLEANUP_TIMEOUT)
+        .ok_or("child cleanup timeout overflowed monotonic clock")?;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return Ok(()),
+            Ok(None) if Instant::now() >= deadline => {
+                return Err("fixed child remained active after termination deadline".to_owned());
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(10)),
+            Err(error) => return Err(format!("observe fixed child cleanup failed: {error}")),
+        }
+    }
 }
 
 fn write_child_token(root: &Path) -> Result<FixtureResult, String> {
