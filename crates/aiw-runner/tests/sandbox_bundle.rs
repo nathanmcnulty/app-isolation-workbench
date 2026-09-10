@@ -109,6 +109,15 @@ fn bundle_relocation_and_drift_rejection_without_executing_payload() {
     }
     fs::write(&path, original).unwrap();
     let application = relocated.join("app.msi");
+    let original_payload = fs::read(&application).unwrap();
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&application)
+        .unwrap()
+        .set_len(128 * 1024 * 1024 + 1)
+        .unwrap();
+    assert!(verify().is_err(), "accepted oversized payload");
+    fs::write(&application, original_payload).unwrap();
     fs::rename(&application, root.join("moved-payload.msi")).unwrap();
     fs::hard_link(root.join("moved-payload.msi"), &application).unwrap();
     assert!(verify().is_err(), "accepted multiply linked payload");

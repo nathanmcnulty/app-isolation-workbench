@@ -5,7 +5,7 @@ Updated 2026-09-10. This is a compact handoff, not a run receipt or authorizatio
 ## Where to resume
 
 - Active development branch: `codex/wsb-typed-scenarios`. Locate it with `git worktree list` if this checkout differs. The main checkout has historically been behind this worktree.
-- Latest slice: paired ordinary-user/AppContainer file, registry, and child controls, repeated in two fresh Sandboxes. Use `scripts/work-status.ps1` for current HEAD, dirty files, and locally known upstream state.
+- Latest slice: first reusable Notepad++ MSI Sandbox bundle, exported, relocated, imported into fresh protected intake, and replayed through approved execution in a fresh Sandbox. Use `scripts/work-status.ps1` for current HEAD, dirty files, and locally known upstream state.
 - Goal: report tested functions for exact application bytes and measured isolation configurations, then use the evidence for adaptation/repackaging. Free community project; feedback collection is not a development gate.
 
 ## Implemented versus exploratory
@@ -14,15 +14,16 @@ Updated 2026-09-10. This is a compact handoff, not a run receipt or authorizatio
 - Bambu: separate approved EXE export profile, protected staging, standard-user guest execution, stage/failure result, bounded 3MF graph/geometry verification, and retained JSON/Markdown report. Original `--info` compiler remains metadata-only. See the profile document for production validation and exact evidence.
 - Mixed reports: `run report-wsb-set` combines verified MSI and Bambu results with distinct function columns, failures/unavailable entries, and verified-identity deduplication. The retained regression checks deterministic output and unchanged workspace inventories.
 - Development control: paired file/registry reads and descendants passed in two fresh workers. Token, value/DACL, process/profile, and worker cleanup bindings passed. Version 2 rejects 30 altered records; historical file-only records stay unmeasured for registry. See CONTROL-FIXTURE.md. Research controls remain excluded from production application reports.
-- No application-level baseline/candidate isolation comparison or reusable repackaging capability is complete. Outer Sandbox containment is distinct from an inner application boundary.
+- Packaging: `package export-wsb-msi`, `package verify`, and `package import` carry exact MSI bytes and a fixed recipe, with an independently supplied manifest hash. Replay passes the existing standard-user document workflow and report checks. This is a reusable assessment bundle; interactive launch, persistent data, MSI/MSIX conversion, and application-level baseline/candidate isolation comparison remain open. Outer Sandbox containment is distinct from an inner application boundary.
 
 ## Next coherent slice
 
-Start the first packaging capability: a versioned Sandbox bundle for an existing approved typed profile (Notepad++ MSI first). Bind payload hashes, fixed scenario, runtime/data contract, and evidence references. Import/replay must reject drift, use normal preparation and fresh approval, and pass a fresh-worker trial before a validated claim. No arbitrary command/script metadata. AppContainer approved reporting and real-application comparison remain separate follow-ups; they do not block a Sandbox bundle. No inner network restriction or host-launch/reusable package capability is yet complete.
+Bind bundle provenance to the resulting verified report, so an administrator can see which exact package was replayed and what passed without manually joining the import record to its run. Preserve fresh approval and payload/scenario bindings; historical source evidence must not become a replay verdict. Then extend the recipe toward an explicit interactive launch and data lifecycle. AppContainer approved reporting and real-application comparison remain separate follow-ups; they do not block Sandbox packaging. No inner network restriction or host-launch capability is complete.
 
 ## Read only what the slice needs
 
 - [Execution control and retained proof](CONTROL-FIXTURE.md): fixed fixture, driver, normalizer and negative tests.
+- [Sandbox bundles](SANDBOX-BUNDLES.md): commands, file contract, first fresh-worker replay, and remaining packaging scope.
 - [Bambu profile and actual research results](BAMBU-STUDIO-PROFILE.md): hashes, exact command, limitations, retained research location.
 - [Roadmap](ROADMAP.md): benchmark completion criteria and later isolation/adaptation work.
 - [Report sets](REPORT-SETS.md), [assessment reports](ASSESSMENT-REPORT.md): existing verified reporting contracts.

@@ -132,6 +132,17 @@ fn open_bundle(dir: &Path, expected: &str) -> Result<HeldBundle, SandboxBundleEr
         ));
     }
     inventory(dir)?;
+    for (leaf, limit) in [
+        (MANIFEST_FILE, 65536),
+        (PROJECT_FILE, 524288),
+        (APPLICATION_FILE, 128 * 1024 * 1024),
+    ] {
+        let metadata = fs::symlink_metadata(dir.join(leaf))
+            .map_err(|e| SandboxBundleError::Io(e.to_string()))?;
+        if !metadata.is_file() || metadata.len() > limit {
+            return Err(contract_error("bundle file exceeds profile bound"));
+        }
+    }
     let directory = HeldPortableDirectory::open(dir).map_err(native)?;
     let manifest_file = HeldApplicationFile::open(&dir.join(MANIFEST_FILE)).map_err(native)?;
     let project_file = HeldApplicationFile::open(&dir.join(PROJECT_FILE)).map_err(native)?;
@@ -251,6 +262,7 @@ fn validate(
         || x.project_sha256 != hash(p)
         || x.application_sha256 != s.application_sha256
         || x.application_size_bytes == 0
+        || x.application_size_bytes > 128 * 1024 * 1024
         || !valid_hash(&x.source_import_receipt_sha256)
     {
         return Err(contract_error("semantic binding"));

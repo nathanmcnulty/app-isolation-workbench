@@ -23,3 +23,17 @@ Use new output files when saving the import result. Keep intake and run workspac
 The supported workflow installs inside a disposable Windows Sandbox, then runs the standard-user document open/edit/save/close checks. The session is stopped after the test; there is no persistent application installation or personal-document preservation contract. The new run's verified report is the authority for what worked. Source evidence references and a successful bundle verification cannot substitute for that report.
 
 The bundle format admits no additional commands, scripts, host mappings, or runtime grants. Changed bytes, unsupported recipes, extra files, and unsafe file shapes must be rejected before preparation. New versions or profiles require explicit support, not interpretation of arbitrary manifest instructions. Download metadata normalization from the source intake is provenance; replaying the packaged bytes does not test the original download's SmartScreen behavior.
+
+## Recorded replay, 2026-09-10
+
+`live_packaged_msi_import_replay_and_cleanup` passed in a fresh Sandbox after export, ordinary file-copy relocation, and fresh protected intake import. The MSI installed successfully; the application ran as the verified standard user and opened, edited, saved, and closed the document. All nine stages, expected document hash, filesystem/registry observations, MSI registration, retained report validation, and exact worker cleanup passed. The overall assessment still reports insufficient evidence for an inner application-isolation claim.
+
+- Application: Notepad++ 8.9.8 x64 MSI, SHA-256 `c29cbe1a9aaef322cc3f316ceeabe8a8071b18441a5e3c3ec348069739e59e80`.
+- Bundle manifest: `0be45c2665ddf6a8aa63393cb9638099e575287c4d466e2ce490e9559c830608`.
+- Guest agent: `b63101b2906849c7660ab162ca768a6415d6d28d7132b27adbfe6c609eb4342e`.
+- Scenario: Notepad++ MSI v6, SHA-256 `f7e600d8823b7c3f327a437e45517172f2d210b7eeed699f43ef3b70b6e50645`.
+- Local evidence workspace: `%TEMP%\aiw-msi-live-11100-1789082137454847600`; bundle and relocated bundle use the same stem with `-bundle` and `-bundle-relocated`; the adjacent `.bundle-import.json` records fresh import provenance. Full test log: `%TEMP%\aiw-package-live-2.log`.
+
+Automated file-only checks cover relocation, no-overwrite export, fresh intake identity, wrong manifest hash, payload/project/manifest drift, unsupported rehashed manifest fields, extra files, oversized payload, and hardlinks. These checks never execute their synthetic payload.
+
+The bundle manifest is not yet a first-class field in the run report. Preserve the import record alongside the exported manifest and new run evidence; automatic package-to-report provenance is the next slice. This proof covers the fixed ephemeral workflow only, not uninstall/update, interactive launch, persistent personal data, or MSIX conversion.
