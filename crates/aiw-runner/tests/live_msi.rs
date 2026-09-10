@@ -49,10 +49,12 @@ fn prepare_with_bundle(bundle: bool) -> (RunLayout, PathBuf, aiw_schema::Project
         for leaf in ["manifest.aiw", "project.aiw", "app.msi"] {
             fs::copy(bundle_root.join(leaf), relocated.join(leaf)).unwrap();
         }
+        let intake_parent = parent.join(format!("{run_id}-intakes"));
+        fs::create_dir(&intake_parent).unwrap();
         let imported = aiw_runner::import_notepad_plus_plus_msi_bundle(
             &relocated,
-            &parent,
-            &format!("{run_id}-bundle-intake"),
+            &intake_parent,
+            "replay",
             &exported.manifest_sha256,
         )
         .unwrap();

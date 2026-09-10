@@ -18,7 +18,7 @@ $imported.project | ConvertTo-Json -Depth 64 | Set-Content .\replay-project.json
 $imported.importReceipt | ConvertTo-Json -Depth 64 | Set-Content .\replay-intake.json
 ```
 
-Use new output files when saving the import result. Continue with `run prepare-wsb-msi`, using the imported project and receipt, the fixed scenario, and a separately verified current guest agent. Import that preparation and review its fresh plan before approval and start. Export, bundle verification, and intake import execute neither the installer nor the application.
+Use new output files when saving the import result. Keep intake and run workspaces under separate parent directories (for example, `C:\AIW\intakes` and `C:\AIW\runs`): preparation holds the intake parent against writes while staging. Continue with `run prepare-wsb-msi`, using the imported project and receipt, the fixed scenario, and a separately verified current guest agent. Import that preparation and review its fresh plan before approval and start. Export, bundle verification, and intake import execute neither the installer nor the application. Failed exports can leave an incomplete output directory; use a new bundle ID when retrying.
 
 The supported workflow installs inside a disposable Windows Sandbox, then runs the standard-user document open/edit/save/close checks. The session is stopped after the test; there is no persistent application installation or personal-document preservation contract. The new run's verified report is the authority for what worked. Source evidence references and a successful bundle verification cannot substitute for that report.
 
