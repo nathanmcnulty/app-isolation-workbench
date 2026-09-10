@@ -2,6 +2,8 @@
 
 Read-only inventory on 2026-09-07 of the user-supplied `%USERPROFILE%\Downloads\installers` folder. No installer was executed, downloaded, unblocked, copied, or modified. These are candidate fixtures, not supported application profiles or successful installation results. Passive fingerprints below are not protected intake receipts.
 
+Subsequent 2026-09-09 [Bambu feasibility trials](BAMBU-STUDIO-PROFILE.md) used its verified protected intake inside disposable Windows Sandbox sessions. Silent offline installation and standard-user local STL-to-3MF export completed; bounded artifact inspection found the expected tetrahedron mesh. This supersedes the inventory's untested Bambu installation status, but approved production execution/reporting remains unimplemented. The original installers were not executed on the host.
+
 | File | MiB | Observed classification | Proposed coverage |
 |---|---:|---|---|
 | `Bambu_Studio_win-v02.08.02.60.exe` | 409.16 | Large EXE; bundled payload candidate, offline install unverified | Local model import/slice/save workflow first; printer/cloud integration separate |

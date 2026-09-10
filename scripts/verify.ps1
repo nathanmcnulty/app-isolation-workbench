@@ -118,6 +118,8 @@ try {
     foreach ($schemaKind in @(
         'compiled-msi-scenario',
         'msi-scenario-compilation',
+        'compiled-bambu-scenario',
+        'bambu-scenario-compilation',
         'msi-application-token',
         'msi-runtime-context',
         'msi-registry',
