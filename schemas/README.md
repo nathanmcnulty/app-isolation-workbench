@@ -22,6 +22,7 @@ cargo run -p aiw-cli -- schema imported-msi-guest-request
 cargo run -p aiw-cli -- schema imported-msi-scenario-result
 cargo run -p aiw-cli -- schema msi-runtime-context
 cargo run -p aiw-cli -- schema msi-registry
+cargo run -p aiw-cli -- schema msi-failed-snapshots
 cargo run -p aiw-cli -- schema wsb-approved-execution
 cargo run -p aiw-cli -- schema run-plan-v0alpha4
 cargo run -p aiw-cli -- schema windows-sandbox-cli-lifecycle-plan
@@ -38,3 +39,5 @@ Checked-in schema snapshots will be added when the first external consumer is in
 `wsb-msi-assessment-report` describes the read-only retained-run assessment report, including recorded cleanup, original project requirements, guest observations, and explicit missing evidence.
 
 `msi-registry` describes the v5 profile's phase-bound registry metadata observations. It binds the actual runtime SID and represents empty keys, default values, absent roots and incomplete scopes explicitly. See [capture scope and limits](../docs/REGISTRY-CAPTURE.md).
+
+`msi-failed-snapshots` describes the optional receipt-bound v5 failure event. It contains only completed filesystem/registry capture phases and metadata; absent phases remain unmeasured, legacy failed receipts remain unchanged, and `captureContext` identifies the capture account rather than asserting the launched application token.

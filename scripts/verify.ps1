@@ -118,6 +118,7 @@ try {
         'msi-application-token',
         'msi-runtime-context',
         'msi-registry',
+        'msi-failed-snapshots',
         'wsb-msi-assessment-report',
         'application-file-authority',
         'application-file-import-receipt',

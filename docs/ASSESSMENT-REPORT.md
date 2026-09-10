@@ -72,11 +72,14 @@ On success, `importedMsiStageProgress` is an additional event in the existing re
 
 On a caught native scenario failure, the guest publishes exactly three files: `scenario-result.json` containing a strict failed-attempt record (progress plus a bounded diagnostic), `evidence.jsonl` containing the matching progress event, and finally `completion.json` with failed status/nonzero exit. It does not append an extra diagnostic file after the receipt. A failure before valid progress exists, or during publication, can still leave only the older unverified diagnostic/partial output.
 
-After recorded exact cleanup, `report-wsb-msi-run` independently verifies the failed receipt, exact output allowlist, artifact hashes, event chain, request/scenario bindings, failed status, and equality between the artifact and event progress. `failureProgress` distinguishes absent, rejected, and verified observations. Verified failure records include the failed receipt hash and evidence root for correlation; the run remains failed/cancelled and does not acquire an accepted successful evidence root. Failed/cancelled reports use schema `v0alpha2`. A valid-looking successful receipt is rejected on this path.
+After recorded exact cleanup, `report-wsb-msi-run` independently verifies the failed receipt, exact output allowlist, artifact hashes, event chain, request/scenario bindings, failed status, and equality between the artifact and event progress. `failureProgress` distinguishes absent, rejected, and verified observations. Verified failure records include the failed receipt hash and evidence root for correlation; the run remains failed/cancelled and does not acquire an accepted successful evidence root. Legacy failed/cancelled reports retain schema `v0alpha2` (or `v0alpha3` when download metadata is present); reports with retained failed snapshots use `v0alpha4`. A valid-looking successful receipt is rejected on this path.
+
+For v5 scenarios, a separate optional `importedMsiFailedSnapshots` event can retain the metadata-only filesystem and registry snapshots whose capture stages completed before the failure. The runner verifies the event against the failed receipt and stage prefix, then reports `v0alpha4` with installation diffs only when both before/after-install phases exist. Exercise diffs remain absent when the application-exercise capture was not reached. Missing phases are explicitly unmeasured; legacy failed receipts without this event remain readable and do not gain inferred snapshots. `captureContext` identifies the account that performed the capture and is not an application-token claim. Raw file contents and registry values are never retained or rendered.
 
 ```powershell
 aiw schema imported-msi-stage-progress
 aiw schema imported-msi-failed-attempt
+aiw schema msi-failed-snapshots
 ```
 
 This is terminal stage reporting, not a live streaming journal. A killed guest or interrupted publication cannot prove the last completed stage. Full registry/dependency capture, ordinary-baseline comparison, and broader lifecycle/application profiles remain separate capabilities.

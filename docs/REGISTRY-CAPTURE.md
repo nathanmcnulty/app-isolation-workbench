@@ -18,6 +18,8 @@ The separate `importedMsiRegistry` event binds all three phases and the runtime 
 
 The completed report includes raw metadata snapshots and installation/use diffs. Diffs suppress scopes incomplete in either compared phase and list those scopes separately. Historical reports omit these fields; absence means unmeasured. Function results remain separate from the overall isolation verdict, which still requires independent boundary evidence and an eligible baseline/candidate comparison.
 
+When a v5 run fails after one or more capture stages, the separate `importedMsiFailedSnapshots` event may retain the completed filesystem and registry phases under the failed receipt. It uses the same metadata-only policy and explicit incomplete-scope handling. The report remains an unsuccessful attempt: it can expose installation changes when both installation phases exist, while missing later phases remain unmeasured. Its `captureContext` describes the capture account and does not attest the launched application token. Older failed receipts without this event remain valid historical records without inferred registry observations.
+
 ## Native API basis
 
 The collector uses [RegOpenKeyExW](https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regopenkeyexw) with explicit registry views and link handling. Microsoft describes [registry symbolic links](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rrp/d5ce9dcc-1f90-4f5a-b076-cc1d2c9b4195) and the [Windows Installer uninstall registration contract](https://learn.microsoft.com/en-us/windows/win32/msi/uninstall-registry-key). Live fixture results, rather than API availability alone, establish what this implementation measured.
