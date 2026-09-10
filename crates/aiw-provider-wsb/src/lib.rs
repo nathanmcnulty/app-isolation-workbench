@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod application_token;
+mod bambu_scenario;
 mod completion;
 mod failure_snapshots;
 mod imported_msi;
@@ -24,6 +25,13 @@ use thiserror::Error;
 pub use application_token::{
     ImportedMsiApplicationToken, MSI_APPLICATION_TOKEN_EVENT, MSI_APPLICATION_TOKEN_SCHEMA,
     verify_msi_application_token,
+};
+pub use bambu_scenario::{
+    BAMBU_STUDIO_APPLICATION_SHA256, BAMBU_STUDIO_ENTRYPOINT_ID, BAMBU_STUDIO_ENTRYPOINT_PATH,
+    BAMBU_STUDIO_INFO_FIXTURE_PATH, BAMBU_STUDIO_INFO_FIXTURE_SHA256, BAMBU_STUDIO_INFO_PROFILE,
+    BAMBU_STUDIO_INSTALLED_PATH, BAMBU_STUDIO_STAGED_INSTALLER_PATH, BambuScenarioCompileError,
+    COMPILED_BAMBU_SCENARIO_SCHEMA_VERSION, CompiledBambuScenario,
+    compile_bambu_studio_info_scenario,
 };
 
 pub use completion::{

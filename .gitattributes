@@ -5,6 +5,7 @@
 *.lock text eol=lf
 *.md text eol=lf
 *.json text eol=lf
+*.stl text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
 .gitattributes text eol=lf
