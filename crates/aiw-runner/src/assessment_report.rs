@@ -157,6 +157,16 @@ pub struct VerifiedMsiFailureProgress {
     pub receipt_sha256: String,
     pub evidence_root_hash: String,
     pub attempt: aiw_provider_wsb::ImportedMsiFailedAttempt,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshots: Option<aiw_provider_wsb::ImportedMsiFailedSnapshots>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub installation_file_changes: Option<aiw_provider_wsb::FilesystemSnapshotDiffResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exercise_file_changes: Option<aiw_provider_wsb::FilesystemSnapshotDiffResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub installation_registry_changes: Option<aiw_provider_wsb::RegistrySnapshotDiff>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exercise_registry_changes: Option<aiw_provider_wsb::RegistrySnapshotDiff>,
 }
 
 /// This optional file has no completion receipt or evidence-chain binding.
@@ -356,7 +366,9 @@ pub fn report_windows_sandbox_msi_run(
         revalidate()?;
         return Ok(WsbMsiRunReport::UnsuccessfulAttempt(Box::new(
             WsbMsiUnsuccessfulReport {
-                schema_version: if msi.import_receipt.download_metadata_archive.is_some() {
+                schema_version: if failure_progress_has_snapshots(&failure_progress) {
+                    "aiw.dev/wsb-msi-unsuccessful-report/v0alpha4"
+                } else if msi.import_receipt.download_metadata_archive.is_some() {
                     "aiw.dev/wsb-msi-unsuccessful-report/v0alpha3"
                 } else {
                     "aiw.dev/wsb-msi-unsuccessful-report/v0alpha2"
@@ -733,11 +745,74 @@ fn verify_failed_msi_progress(
             "failed artifact and evidence progress differ".to_owned(),
         ));
     }
+    let snapshots = aiw_provider_wsb::verify_msi_failed_snapshots(
+        &bytes,
+        &verified.evidence_root_hash,
+        request,
+        &attempt,
+    )
+    .map_err(RunnerError::Receipt)?;
+    let (
+        installation_file_changes,
+        exercise_file_changes,
+        installation_registry_changes,
+        exercise_registry_changes,
+    ) = match snapshots.as_ref() {
+        Some(value) => (
+            value
+                .before_install
+                .as_ref()
+                .zip(value.after_install.as_ref())
+                .map(|(before, after)| {
+                    aiw_provider_wsb::diff_filesystem_snapshots(&before.files, &after.files)
+                })
+                .transpose()
+                .map_err(RunnerError::Receipt)?,
+            value
+                .after_install
+                .as_ref()
+                .zip(value.after_exercise.as_ref())
+                .map(|(before, after)| {
+                    aiw_provider_wsb::diff_filesystem_snapshots(&before.files, &after.files)
+                })
+                .transpose()
+                .map_err(RunnerError::Receipt)?,
+            value
+                .before_install
+                .as_ref()
+                .zip(value.after_install.as_ref())
+                .map(|(before, after)| {
+                    aiw_provider_wsb::diff_registry_snapshots(&before.registry, &after.registry)
+                })
+                .transpose()
+                .map_err(RunnerError::Receipt)?,
+            value
+                .after_install
+                .as_ref()
+                .zip(value.after_exercise.as_ref())
+                .map(|(before, after)| {
+                    aiw_provider_wsb::diff_registry_snapshots(&before.registry, &after.registry)
+                })
+                .transpose()
+                .map_err(RunnerError::Receipt)?,
+        ),
+        None => (None, None, None, None),
+    };
     Ok(VerifiedMsiFailureProgress {
         receipt_sha256: verified.receipt_sha256,
         evidence_root_hash: verified.evidence_root_hash,
         attempt,
+        snapshots,
+        installation_file_changes,
+        exercise_file_changes,
+        installation_registry_changes,
+        exercise_registry_changes,
     })
+}
+
+#[cfg(windows)]
+fn failure_progress_has_snapshots(progress: &FailureProgressEvidence) -> bool {
+    matches!(progress, FailureProgressEvidence::Verified(value) if value.snapshots.is_some())
 }
 
 #[cfg(all(test, windows))]

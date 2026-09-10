@@ -131,6 +131,22 @@ impl WsbMsiUnsuccessfulReport {
             FailureProgressEvidence::Verified(verified) => {
                 append_stages(&mut out, &verified.attempt.progress);
                 out.push_str(&format!("\nReceipt-bound failure diagnostic (guest-reported):\n\n> {}\n\nFailed receipt SHA-256: {}\n\nFailed-attempt evidence root: {}\n", cell(&verified.attempt.diagnostic), cell(&verified.receipt_sha256), cell(&verified.evidence_root_hash)));
+                if let Some(snapshots) = &verified.snapshots {
+                    out.push_str("\n## Retained failed-run snapshots\n\nThese receipt-bound snapshots retain metadata only: file contents and raw registry values are never included. A phase is shown as missing when the failed run did not complete that capture stage.\n\n");
+                    for (label, present) in [
+                        ("Before installation", snapshots.before_install.is_some()),
+                        ("After installation", snapshots.after_install.is_some()),
+                        ("After application exercise", snapshots.after_exercise.is_some()),
+                    ] {
+                        out.push_str(&format!("- {label}: {}\n", if present { "retained" } else { "missing" }));
+                    }
+                    out.push_str("\n### Retained filesystem changes\n");
+                    append_changes(&mut out, "Installation", verified.installation_file_changes.as_ref());
+                    append_changes(&mut out, "Application exercise", verified.exercise_file_changes.as_ref());
+                    out.push_str("\n### Retained registry changes\n");
+                    append_registry_changes(&mut out, "Installation", verified.installation_registry_changes.as_ref());
+                    append_registry_changes(&mut out, "Application exercise", verified.exercise_registry_changes.as_ref());
+                }
             }
         }
         out.push_str("\n## Unverified guest diagnostic\n\n");
