@@ -112,7 +112,7 @@ impl WsbMsiRunReport {
 impl WsbMsiUnsuccessfulReport {
     pub fn to_markdown(&self) -> String {
         let mut out = format!(
-            "# Notepad++ Windows Sandbox unsuccessful attempt\n\nRun: {}\n\nRecorded outcome: **{:?}**. No accepted application evidence is available. Application functions are **not verified**; this does not establish application incompatibility.\n\nRecorded exact-session cleanup verified: **{}**. This historical record is not a current-session query.\n\n## Recorded provider lifecycle\n\n| Sequence | State | Reason code |\n|---|---|---|\n",
+            "# Notepad++ Windows Sandbox unsuccessful attempt\n\nRun: {}\n\nRecorded outcome: **{:?}**. No completed application assessment is available. Application functions are **not verified**; this does not establish application incompatibility.\n\nRecorded exact-session cleanup verified: **{}**. This historical record is not a current-session query.\n\n## Recorded provider lifecycle\n\n| Sequence | State | Reason code |\n|---|---|---|\n",
             cell(&self.run_id),
             self.outcome,
             self.recorded_cleanup_verified,
@@ -140,12 +140,15 @@ impl WsbMsiUnsuccessfulReport {
                     ] {
                         out.push_str(&format!("- {label}: {}\n", if present { "retained" } else { "missing" }));
                     }
+                    if let Some(context) = &snapshots.capture_context {
+                        out.push_str(&format!("\nCapture account: SID {}; profile {}; roaming application data {}; local application data {}. These are capture-account observations, not the launched application token.\n", cell(&context.user_sid), cell(&context.profile_path), cell(&context.roaming_app_data), cell(&context.local_app_data)));
+                    }
                     out.push_str("\n### Retained filesystem changes\n");
-                    append_changes(&mut out, "Installation", verified.installation_file_changes.as_ref());
-                    append_changes(&mut out, "Application exercise", verified.exercise_file_changes.as_ref());
+                    append_failed_changes(&mut out, "Installation", verified.installation_file_changes.as_ref(), snapshots.before_install.is_some() && snapshots.after_install.is_some());
+                    append_failed_changes(&mut out, "Application exercise", verified.exercise_file_changes.as_ref(), snapshots.after_install.is_some() && snapshots.after_exercise.is_some());
                     out.push_str("\n### Retained registry changes\n");
-                    append_registry_changes(&mut out, "Installation", verified.installation_registry_changes.as_ref());
-                    append_registry_changes(&mut out, "Application exercise", verified.exercise_registry_changes.as_ref());
+                    append_failed_registry_changes(&mut out, "Installation", verified.installation_registry_changes.as_ref(), snapshots.before_install.is_some() && snapshots.after_install.is_some());
+                    append_failed_registry_changes(&mut out, "Application exercise", verified.exercise_registry_changes.as_ref(), snapshots.after_install.is_some() && snapshots.after_exercise.is_some());
                 }
             }
         }
@@ -161,6 +164,36 @@ impl WsbMsiUnsuccessfulReport {
         append_download_metadata_policy(&mut out, self.download_metadata_policy.as_ref());
         out.push_str(&format!("\n## Attempt identity\n\n- Session ID: {}\n- Project revision SHA-256: {}\n- Installer SHA-256: {}\n- Guest-agent SHA-256: {}\n- Scenario SHA-256: {}\n- Request SHA-256: {}\n\nOnly a fully verified failed receipt can supply the stage progress above. Other guest output cannot establish an accepted compatibility assessment, application token, or file-change claim.\n", cell(&self.session_id), cell(&self.project_revision_sha256), cell(&self.installer_sha256), cell(&self.guest_agent_sha256), cell(&self.scenario_sha256), cell(&self.request_sha256)));
         out
+    }
+}
+
+fn append_failed_changes(
+    out: &mut String,
+    title: &str,
+    changes: Option<&FilesystemSnapshotDiffResult>,
+    phases_complete: bool,
+) {
+    if !phases_complete {
+        out.push_str(&format!(
+            "\n### {title}\n\nNot measured: required capture phases did not complete.\n"
+        ));
+    } else {
+        append_changes(out, title, changes);
+    }
+}
+
+fn append_failed_registry_changes(
+    out: &mut String,
+    title: &str,
+    changes: Option<&RegistrySnapshotDiff>,
+    phases_complete: bool,
+) {
+    if !phases_complete {
+        out.push_str(&format!(
+            "\n### {title}\n\nNot measured: required capture phases did not complete.\n"
+        ));
+    } else {
+        append_registry_changes(out, title, changes);
     }
 }
 
