@@ -223,6 +223,59 @@ fn live_imported_msi_install_observe_close_and_cleanup() {
 }
 
 #[test]
+#[ignore = "runs the controlled instrumented guest failure inside Windows Sandbox; requires explicit live env inputs and a guest that fails after installation capture"]
+fn live_imported_msi_failed_run_retains_install_snapshots_only() {
+    let (layout, project_path, project, guest_hash) = prepare();
+    let root = layout
+        .run_dir()
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let result = aiw_runner::start_approved_windows_sandbox(
+        &root,
+        &project_path,
+        &project,
+        &guest_hash,
+        300,
+    );
+    assert!(
+        result.is_err(),
+        "controlled guest failure must remain failed"
+    );
+    let report =
+        aiw_runner::report_windows_sandbox_msi_run(&root, layout.run_id(), &project, &guest_hash)
+            .unwrap();
+    let aiw_runner::WsbMsiRunReport::UnsuccessfulAttempt(attempt) = report else {
+        panic!("failed execution was promoted to an assessment");
+    };
+    assert_eq!(attempt.outcome, RunOutcome::Failed);
+    assert!(attempt.recorded_cleanup_verified);
+    let aiw_runner::FailureProgressEvidence::Verified(progress) = attempt.failure_progress else {
+        panic!("controlled failure did not retain a verified failed receipt");
+    };
+    let snapshots = progress.snapshots.expect("failed snapshots retained");
+    assert!(snapshots.before_install.is_some());
+    assert!(snapshots.after_install.is_some());
+    assert!(snapshots.after_exercise.is_none());
+    assert!(snapshots.capture_context.is_some());
+    assert!(progress.installation_file_changes.is_some());
+    assert!(progress.installation_registry_changes.is_some());
+    assert!(progress.exercise_file_changes.is_none());
+    assert!(progress.exercise_registry_changes.is_none());
+    assert_eq!(
+        attempt.schema_version,
+        "aiw.dev/wsb-msi-unsuccessful-report/v0alpha4"
+    );
+    assert!(
+        aiw_windows_platform::assess_windows_sandbox()
+            .current_session_ids
+            .is_empty()
+    );
+}
+
+#[test]
 #[ignore = "native preparation/approval tamper proof; no installer or Sandbox is started"]
 fn live_imported_msi_tamper_rejects_before_start() {
     let (layout, project_path, project, guest_hash) = prepare();
