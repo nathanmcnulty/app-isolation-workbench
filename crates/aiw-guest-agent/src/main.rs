@@ -14,9 +14,11 @@ use std::{
 
 use aiw_evidence::{ArtifactRole, EvidenceEvent, EvidenceLog, canonical_json_bytes};
 use aiw_provider_wsb::{
-    CompletionArtifact, CompletionStatus, IMPORTED_MSI_GUEST_REQUEST_SCHEMA_VERSION,
-    ImportedMsiGuestRequest, ImportedMsiScenarioResult,
-    WINDOWS_SANDBOX_COMPLETION_RECEIPT_SCHEMA_VERSION, WindowsSandboxCompletionReceipt,
+    BambuExecutionStage, BambuScenarioStatus, CompletionArtifact, CompletionStatus,
+    IMPORTED_BAMBU_GUEST_REQUEST_SCHEMA_VERSION, IMPORTED_MSI_GUEST_REQUEST_SCHEMA_VERSION,
+    ImportedBambuGuestRequest, ImportedBambuScenarioResult, ImportedMsiGuestRequest,
+    ImportedMsiScenarioResult, WINDOWS_SANDBOX_COMPLETION_RECEIPT_SCHEMA_VERSION,
+    WindowsSandboxCompletionReceipt,
 };
 use aiw_token::collect_current_process_token;
 use anyhow::{Context, Result, bail};
@@ -54,6 +56,7 @@ struct GoldenProbeRequest {
 enum GuestRequest {
     Golden(Box<GoldenProbeRequest>),
     ImportedMsi(Box<ImportedMsiGuestRequest>),
+    ImportedBambu(Box<ImportedBambuGuestRequest>),
 }
 
 fn main() -> ExitCode {
@@ -92,6 +95,20 @@ fn run() -> Result<()> {
                 Err(error) => {
                     if !error.is::<PublishedMsiFailure>() {
                         let _ = write_imported_msi_failure_diagnostic(&request, &error);
+                    }
+                    Err(error)
+                }
+            }
+        }
+        GuestRequest::ImportedBambu(request) => {
+            request
+                .validate()
+                .map_err(|error| anyhow::anyhow!("imported Bambu request is invalid: {error}"))?;
+            match execute_imported_bambu_request(&request) {
+                Ok(()) => Ok(()),
+                Err(error) => {
+                    if !error.is::<PublishedBambuFailure>() {
+                        let _ = write_imported_bambu_failure_diagnostic(&request, &error);
                     }
                     Err(error)
                 }
@@ -378,6 +395,244 @@ fn execute_imported_msi_request(_request: &ImportedMsiGuestRequest) -> Result<()
     bail!("the imported-MSI guest profile only executes inside Windows Sandbox")
 }
 
+#[cfg(windows)]
+fn execute_imported_bambu_request(request: &ImportedBambuGuestRequest) -> Result<()> {
+    let root = PathBuf::from(&request.output_root);
+    ensure_output_root(&root)?;
+    let actual_agent_hash = hash_file(&std::env::current_exe().context("resolve agent identity")?)?;
+    if actual_agent_hash != request.agent_sha256 {
+        return publish_bambu_failure(
+            request,
+            Vec::new(),
+            BambuExecutionStage::Install,
+            "guest agent identity does not match the approved request",
+        );
+    }
+
+    let mut installer = match HeldInstaller::open(
+        Path::new(&request.installer_path),
+        &request.installer_sha256,
+        request.installer_size_bytes,
+    ) {
+        Ok(installer) => installer,
+        Err(error) => {
+            return publish_bambu_failure(
+                request,
+                Vec::new(),
+                BambuExecutionStage::Install,
+                &format!("held Bambu installer rejected: {error:#}"),
+            );
+        }
+    };
+    if let Err(error) = installer.revalidate() {
+        return publish_bambu_failure(
+            request,
+            Vec::new(),
+            BambuExecutionStage::Install,
+            &format!("held Bambu installer failed pre-execution revalidation: {error:#}"),
+        );
+    }
+    let attempt = aiw_windows_platform::execute_fixed_bambu_export_attempt(&request.scenario);
+    if let Err(error) = installer.revalidate() {
+        return publish_bambu_failure(
+            request,
+            Vec::new(),
+            BambuExecutionStage::Install,
+            &format!("held Bambu installer changed after execution: {error:#}"),
+        );
+    }
+
+    let artifact_path = output_path(&root, aiw_provider_wsb::BAMBU_EXPORT_ARTIFACT_PATH)?;
+    let (result, artifact_bytes, status) = match attempt.result {
+        Ok(observation) => {
+            let mut result = ImportedBambuScenarioResult::for_request(request);
+            result.status = BambuScenarioStatus::Succeeded;
+            result.completed_stages = attempt.completed_stages;
+            result.failed_stage = None;
+            result.diagnostic = None;
+            result.install_exit_code = Some(observation.install_exit_code);
+            result.launch_process_id = Some(observation.launch_process_id);
+            result.launch_exit_code = Some(observation.launch_exit_code);
+            result.application_token = Some(observation.application_token);
+            result.standard_user_context = Some(observation.standard_user_context);
+            result.artifact_sha256 = Some(hex::encode(Sha256::digest(&observation.artifact_bytes)));
+            result.artifact_size_bytes = Some(observation.artifact_bytes.len() as u64);
+            (
+                result,
+                observation.artifact_bytes,
+                CompletionStatus::Succeeded,
+            )
+        }
+        Err(error) => {
+            let failed_stage = attempt.failed_stage.unwrap_or(BambuExecutionStage::Install);
+            let result =
+                failed_bambu_result(request, attempt.completed_stages, failed_stage, &error);
+            (result, Vec::new(), CompletionStatus::Failed)
+        }
+    };
+    result
+        .validate_for_request(request)
+        .map_err(|error| anyhow::anyhow!("guest produced an invalid Bambu result: {error}"))?;
+    let mut evidence = EvidenceLog::new();
+    evidence.append(EvidenceEvent {
+        observed_utc: "guest-agent-time-not-trusted".to_owned(),
+        kind: aiw_provider_wsb::BAMBU_SCENARIO_EVENT.to_owned(),
+        source: "aiw-guest-agent".to_owned(),
+        payload: serde_json::to_value(&result)?,
+    })?;
+    let evidence_bytes = evidence_bytes(&evidence)?;
+    let root_hash = evidence.manifest()?.root_hash;
+    aiw_provider_wsb::verify_bambu_scenario_evidence(&evidence_bytes, &root_hash, request, &result)
+        .map_err(|error| {
+            anyhow::anyhow!("guest Bambu evidence failed self-verification: {error}")
+        })?;
+    publish_bambu_result(
+        request,
+        &result,
+        &evidence_bytes,
+        &artifact_path,
+        &artifact_bytes,
+        evidence,
+        status,
+    )
+    .map_err(|error| {
+        if status == CompletionStatus::Failed {
+            anyhow::anyhow!(PublishedBambuFailure(error.to_string()))
+        } else {
+            error
+        }
+    })
+}
+
+#[cfg(not(windows))]
+fn execute_imported_bambu_request(_request: &ImportedBambuGuestRequest) -> Result<()> {
+    bail!("the imported-Bambu guest profile only executes inside Windows Sandbox")
+}
+
+fn failed_bambu_result(
+    request: &ImportedBambuGuestRequest,
+    completed_stages: Vec<BambuExecutionStage>,
+    failed_stage: BambuExecutionStage,
+    diagnostic: &str,
+) -> ImportedBambuScenarioResult {
+    let mut result = ImportedBambuScenarioResult::for_request(request);
+    result.completed_stages = completed_stages;
+    result.failed_stage = Some(failed_stage);
+    result.diagnostic = Some(bounded_diagnostic(diagnostic));
+    result
+}
+
+fn bounded_diagnostic(value: &str) -> String {
+    value
+        .chars()
+        .filter_map(|character| (!character.is_control()).then_some(character).or(Some(' ')))
+        .take(2048)
+        .collect()
+}
+
+fn evidence_bytes(evidence: &EvidenceLog) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    for record in evidence.records() {
+        serde_json::to_writer(&mut bytes, record)?;
+        bytes.push(b'\n');
+    }
+    if bytes.len() > aiw_provider_wsb::MAX_APPLICATION_EVIDENCE_BYTES {
+        bail!("guest Bambu evidence exceeded its fixed bound")
+    }
+    Ok(bytes)
+}
+
+fn publish_bambu_failure(
+    request: &ImportedBambuGuestRequest,
+    completed_stages: Vec<BambuExecutionStage>,
+    failed_stage: BambuExecutionStage,
+    diagnostic: &str,
+) -> Result<()> {
+    let result = failed_bambu_result(request, completed_stages, failed_stage, diagnostic);
+    result
+        .validate_for_request(request)
+        .map_err(|error| anyhow::anyhow!("guest produced an invalid Bambu failure: {error}"))?;
+    let mut evidence = EvidenceLog::new();
+    evidence.append(EvidenceEvent {
+        observed_utc: "guest-agent-time-not-trusted".to_owned(),
+        kind: aiw_provider_wsb::BAMBU_SCENARIO_EVENT.to_owned(),
+        source: "aiw-guest-agent".to_owned(),
+        payload: serde_json::to_value(&result)?,
+    })?;
+    let evidence_bytes = evidence_bytes(&evidence)?;
+    let root_hash = evidence.manifest()?.root_hash;
+    aiw_provider_wsb::verify_bambu_scenario_evidence(&evidence_bytes, &root_hash, request, &result)
+        .map_err(|error| {
+            anyhow::anyhow!("guest Bambu evidence failed self-verification: {error}")
+        })?;
+    let root = PathBuf::from(&request.output_root);
+    let artifact_path = output_path(&root, aiw_provider_wsb::BAMBU_EXPORT_ARTIFACT_PATH)?;
+    publish_bambu_result(
+        request,
+        &result,
+        &evidence_bytes,
+        &artifact_path,
+        &[],
+        evidence,
+        CompletionStatus::Failed,
+    )
+    .map_err(|error| anyhow::anyhow!(PublishedBambuFailure(error.to_string())))
+}
+
+fn publish_bambu_result(
+    request: &ImportedBambuGuestRequest,
+    result: &ImportedBambuScenarioResult,
+    evidence_bytes: &[u8],
+    artifact_path: &Path,
+    artifact_bytes: &[u8],
+    evidence: EvidenceLog,
+    status: CompletionStatus,
+) -> Result<()> {
+    let root = PathBuf::from(&request.output_root);
+    let result_path = output_path(&root, &request.scenario_result_path)?;
+    let evidence_path = output_path(&root, &request.evidence_log_path)?;
+    let receipt_path = output_path(&root, &request.receipt_path)?;
+    write_new_json(&result_path, result)?;
+    write_new_bytes(&evidence_path, evidence_bytes)?;
+    write_new_raw_bytes(artifact_path, artifact_bytes)?;
+    let receipt = WindowsSandboxCompletionReceipt {
+        schema_version: WINDOWS_SANDBOX_COMPLETION_RECEIPT_SCHEMA_VERSION.to_owned(),
+        run_id: request.run_id.clone(),
+        sandbox_id: request.sandbox_id.clone(),
+        config_sha256: request.config_sha256.clone(),
+        request_sha256: request.request_sha256.clone(),
+        agent_sha256: request.agent_sha256.clone(),
+        status,
+        exit_code: if status == CompletionStatus::Succeeded {
+            0
+        } else {
+            1
+        },
+        evidence_root_hash: evidence.manifest()?.root_hash,
+        artifacts: vec![
+            completion_artifact(
+                &result_path,
+                &request.scenario_result_path,
+                ArtifactRole::ScenarioResults,
+                "application/json",
+            )?,
+            completion_artifact(
+                &evidence_path,
+                &request.evidence_log_path,
+                ArtifactRole::EvidenceLog,
+                "application/x-ndjson",
+            )?,
+            completion_artifact(
+                artifact_path,
+                aiw_provider_wsb::BAMBU_EXPORT_ARTIFACT_PATH,
+                ArtifactRole::ScenarioResults,
+                "model/3mf",
+            )?,
+        ],
+    };
+    write_receipt_last(&receipt_path, &receipt)
+}
+
 fn append_stage_progress(
     evidence: &mut EvidenceLog,
     progress: &aiw_provider_wsb::ImportedMsiStageProgress,
@@ -481,6 +736,22 @@ fn write_imported_msi_failure_diagnostic(
     )
 }
 
+fn write_imported_bambu_failure_diagnostic(
+    request: &ImportedBambuGuestRequest,
+    error: &anyhow::Error,
+) -> Result<()> {
+    let root = PathBuf::from(&request.output_root);
+    let summary = bounded_diagnostic(&format!("{error:#}"));
+    write_new_json(
+        &root.join("guest-failure.json"),
+        &GuestFailureDiagnostic {
+            schema_version: "aiw.dev/wsb-guest-failure/v0alpha1",
+            code: "AIW_GUEST_AGENT_FAILED",
+            summary,
+        },
+    )
+}
+
 struct HeldInstaller {
     path: PathBuf,
     file: File,
@@ -574,6 +845,10 @@ fn read_request(path: &Path) -> Result<GuestRequest> {
             .map(Box::new)
             .map(GuestRequest::ImportedMsi)
             .context("parse strict imported-MSI request"),
+        Some(IMPORTED_BAMBU_GUEST_REQUEST_SCHEMA_VERSION) => serde_json::from_value(value)
+            .map(Box::new)
+            .map(GuestRequest::ImportedBambu)
+            .context("parse strict imported-Bambu request"),
         _ => bail!("unsupported guest request schema"),
     }
 }
@@ -661,6 +936,14 @@ fn write_new_json(value: &Path, serializable: &impl Serialize) -> Result<()> {
 }
 
 fn write_new_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
+    write_new_bytes_with_suffix(path, bytes, true)
+}
+
+fn write_new_raw_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
+    write_new_bytes_with_suffix(path, bytes, false)
+}
+
+fn write_new_bytes_with_suffix(path: &Path, bytes: &[u8], newline: bool) -> Result<()> {
     if bytes.len() >= MAX_OUTPUT_ARTIFACT_BYTES {
         bail!("guest output artifact exceeds its fixed size bound")
     }
@@ -680,7 +963,9 @@ fn write_new_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
         .create_new(true)
         .open(&staging)?;
     file.write_all(bytes)?;
-    file.write_all(b"\n")?;
+    if newline {
+        file.write_all(b"\n")?;
+    }
     file.sync_all()?;
     drop(file);
     match fs::hard_link(&staging, path) {
@@ -844,6 +1129,15 @@ impl std::fmt::Display for PublishedMsiFailure {
     }
 }
 impl std::error::Error for PublishedMsiFailure {}
+
+#[derive(Debug)]
+struct PublishedBambuFailure(String);
+impl std::fmt::Display for PublishedBambuFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "failed Bambu attempt published: {}", self.0)
+    }
+}
+impl std::error::Error for PublishedBambuFailure {}
 
 #[cfg(windows)]
 fn stage_results(
