@@ -1035,10 +1035,46 @@ mod failure_progress_tests {
         assert!(verified.exercise_file_changes.is_none());
         assert!(verified.installation_registry_changes.is_some());
         assert!(verified.exercise_registry_changes.is_none());
+        let snapshot_receipt = receipt.clone();
+        let snapshot_bytes = bytes.clone();
         assert!(matches!(
             read_failure_progress(&root, &expectation, &request),
             FailureProgressEvidence::Verified(_)
         ));
+        let mut legacy_log = EvidenceLog::new();
+        legacy_log
+            .append(EvidenceEvent {
+                observed_utc: "untrusted-time".to_owned(),
+                kind: aiw_provider_wsb::IMPORTED_MSI_STAGE_PROGRESS_EVENT.to_owned(),
+                source: "aiw-guest-agent".to_owned(),
+                payload: serde_json::to_value(&attempt.progress).unwrap(),
+            })
+            .unwrap();
+        let mut legacy_bytes = Vec::new();
+        for record in legacy_log.records() {
+            serde_json::to_writer(&mut legacy_bytes, record).unwrap();
+            legacy_bytes.push(b'\n');
+        }
+        fs::write(root.join("evidence.jsonl"), &legacy_bytes).unwrap();
+        receipt.evidence_root_hash = legacy_log.manifest().unwrap().root_hash;
+        receipt.artifacts[1].size_bytes = legacy_bytes.len() as u64;
+        receipt.artifacts[1].sha256 = hex::encode(Sha256::digest(&legacy_bytes));
+        fs::write(
+            root.join("completion.json"),
+            serde_json::to_vec(&receipt).unwrap(),
+        )
+        .unwrap();
+        let legacy_verified = verify_failed_msi_progress(&root, &expectation, &request).unwrap();
+        assert!(legacy_verified.snapshots.is_none());
+        assert!(legacy_verified.installation_file_changes.is_none());
+        assert!(legacy_verified.installation_registry_changes.is_none());
+        fs::write(root.join("evidence.jsonl"), &snapshot_bytes).unwrap();
+        receipt = snapshot_receipt.clone();
+        fs::write(
+            root.join("completion.json"),
+            serde_json::to_vec(&receipt).unwrap(),
+        )
+        .unwrap();
         let mut missing_after_install = snapshots.clone();
         missing_after_install.after_install = None;
         let mut missing_log = EvidenceLog::new();
@@ -1076,6 +1112,13 @@ mod failure_progress_tests {
             read_failure_progress(&root, &expectation, &request),
             FailureProgressEvidence::Rejected
         ));
+        fs::write(root.join("evidence.jsonl"), &snapshot_bytes).unwrap();
+        receipt = snapshot_receipt;
+        fs::write(
+            root.join("completion.json"),
+            serde_json::to_vec(&receipt).unwrap(),
+        )
+        .unwrap();
         fs::write(root.join("evidence.jsonl"), b"tampered").unwrap();
         assert!(matches!(
             read_failure_progress(&root, &expectation, &request),
