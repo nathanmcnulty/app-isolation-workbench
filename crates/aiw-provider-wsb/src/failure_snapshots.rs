@@ -114,8 +114,9 @@ impl ImportedMsiFailedSnapshots {
     }
 }
 
-/// Reverify failure-path snapshots against the completion root. Legacy failed
-/// attempts have no separate snapshot event; v5 attempts require exactly one.
+/// Reverify failure-path snapshots against the completion root. This optional
+/// retention event is absent from older receipts, including v5 failure receipts
+/// produced before snapshot collection was added.
 pub fn verify_msi_failed_snapshots(
     bytes: &[u8],
     expected_root: &str,
@@ -136,9 +137,6 @@ pub fn verify_msi_failed_snapshots(
             .map_err(|error| format!("invalid imported MSI failed snapshots: {error}"))?;
         snapshots.validate_for(request, attempt)?;
         found = Some(snapshots);
-    }
-    if found.is_none() && request.scenario.requires_registry_observations() {
-        return Err("v5 profile requires failed snapshot evidence".into());
     }
     Ok(found)
 }
@@ -385,7 +383,9 @@ mod tests {
     }
 
     #[test]
-    fn legacy_absence_is_preserved() {
+    fn v5_and_legacy_absence_are_preserved_as_unmeasured() {
+        let current = request("aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha5");
+        let current_attempt = ImportedMsiFailedAttempt::new(&current, stages(1), "failed").unwrap();
         let legacy = request("aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha4");
         let attempt = ImportedMsiFailedAttempt::new(&legacy, stages(1), "failed").unwrap();
         let (bytes, root) = evidence(vec![EvidenceEvent {
@@ -396,6 +396,10 @@ mod tests {
         }]);
         assert_eq!(
             verify_msi_failed_snapshots(&bytes, &root, &legacy, &attempt).unwrap(),
+            None
+        );
+        assert_eq!(
+            verify_msi_failed_snapshots(&bytes, &root, &current, &current_attempt).unwrap(),
             None
         );
     }
