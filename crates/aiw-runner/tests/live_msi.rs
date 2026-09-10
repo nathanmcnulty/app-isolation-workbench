@@ -10,6 +10,10 @@ use aiw_orchestrator::{ApprovalRecord, RunLayout, RunOutcome};
 use aiw_runner::{WsbApprovedExecution, WsbMsiPreparationInput};
 
 fn prepare() -> (RunLayout, PathBuf, aiw_schema::Project, String) {
+    prepare_with_bundle(false)
+}
+
+fn prepare_with_bundle(bundle: bool) -> (RunLayout, PathBuf, aiw_schema::Project, String) {
     assert_eq!(std::env::var("AIW_RUN_LIVE_WSB_MSI").as_deref(), Ok("1"));
     let guest =
         PathBuf::from(std::env::var_os("AIW_LIVE_GUEST_AGENT").expect("guest agent required"));
@@ -18,9 +22,9 @@ fn prepare() -> (RunLayout, PathBuf, aiw_schema::Project, String) {
     let intake = PathBuf::from(
         std::env::var_os("AIW_LIVE_MSI_RECEIPT").expect("verified MSI receipt required"),
     );
-    let receipt: aiw_probe::ApplicationFileImportReceipt =
+    let mut receipt: aiw_probe::ApplicationFileImportReceipt =
         serde_json::from_slice(&fs::read(intake).unwrap()).unwrap();
-    let project: aiw_schema::Project = serde_yaml::from_str(include_str!(
+    let mut project: aiw_schema::Project = serde_yaml::from_str(include_str!(
         "../../../examples/notepad-plus-plus-msi.aiw.yaml"
     ))
     .unwrap();
@@ -30,6 +34,39 @@ fn prepare() -> (RunLayout, PathBuf, aiw_schema::Project, String) {
         .as_nanos();
     let run_id = format!("aiw-msi-live-{}-{stamp}", std::process::id());
     let parent = std::env::temp_dir().canonicalize().unwrap();
+    if bundle {
+        let exported = aiw_runner::export_notepad_plus_plus_msi_bundle(
+            &parent,
+            &format!("{run_id}-bundle"),
+            &project,
+            "install-launch-close",
+            &receipt,
+        )
+        .unwrap();
+        let bundle_root = parent.join(format!("{run_id}-bundle"));
+        let relocated = parent.join(format!("{run_id}-bundle-relocated"));
+        fs::create_dir(&relocated).unwrap();
+        for leaf in ["manifest.aiw", "project.aiw", "app.msi"] {
+            fs::copy(bundle_root.join(leaf), relocated.join(leaf)).unwrap();
+        }
+        let imported = aiw_runner::import_notepad_plus_plus_msi_bundle(
+            &relocated,
+            &parent,
+            &format!("{run_id}-bundle-intake"),
+            &exported.manifest_sha256,
+        )
+        .unwrap();
+        eprintln!("MSI_PACKAGE_BUNDLE={}", bundle_root.display());
+        eprintln!("MSI_PACKAGE_RELOCATED={}", relocated.display());
+        eprintln!("MSI_PACKAGE_MANIFEST_SHA256={}", exported.manifest_sha256);
+        fs::write(
+            parent.join(format!("{run_id}.bundle-import.json")),
+            serde_json::to_vec(&imported).unwrap(),
+        )
+        .unwrap();
+        receipt = imported.import_receipt;
+        project = imported.project;
+    }
     let project_path = parent.join(format!("{run_id}.project.json"));
     let mut file = OpenOptions::new()
         .write(true)
@@ -87,7 +124,17 @@ fn prepare() -> (RunLayout, PathBuf, aiw_schema::Project, String) {
 #[test]
 #[ignore = "installs and exercises the recorded MSI only inside Windows Sandbox; requires explicit live env inputs"]
 fn live_imported_msi_install_observe_close_and_cleanup() {
-    let (layout, project_path, project, guest_hash) = prepare();
+    exercise(false);
+}
+
+#[test]
+#[ignore = "exports/imports a real MSI bundle and exercises it only inside Sandbox; requires explicit live env inputs"]
+fn live_packaged_msi_import_replay_and_cleanup() {
+    exercise(true);
+}
+
+fn exercise(bundle: bool) {
+    let (layout, project_path, project, guest_hash) = prepare_with_bundle(bundle);
     let root = layout
         .run_dir()
         .parent()
@@ -183,12 +230,14 @@ fn live_imported_msi_install_observe_close_and_cleanup() {
         .unwrap(),
     )
     .unwrap();
-    assert_eq!(
-        report.download_metadata_policy,
+    let expected_policy = if bundle {
+        None
+    } else {
         intake
             .download_metadata_archive
             .map(|archive| archive.policy)
-    );
+    };
+    assert_eq!(report.download_metadata_policy, expected_policy);
     assert_eq!(
         report.schema_version,
         "aiw.dev/wsb-msi-assessment-report/v0alpha7"

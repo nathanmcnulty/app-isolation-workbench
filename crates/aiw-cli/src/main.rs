@@ -85,6 +85,7 @@ struct Cli {
 enum Command {
     Project(ProjectArgs),
     Application(ApplicationArgs),
+    Package(PackageArgs),
     ModelPack(ModelPackArgs),
     Analyst(AnalystArgs),
     Evidence(EvidenceArgs),
@@ -102,6 +103,47 @@ enum Command {
 struct ApplicationArgs {
     #[command(subcommand)]
     command: ApplicationCommand,
+}
+
+#[derive(Debug, Args)]
+struct PackageArgs {
+    #[command(subcommand)]
+    command: PackageCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum PackageCommand {
+    /// Export a reusable fixed Notepad++ MSI Sandbox recipe and payload, without approval.
+    ExportWsbMsi {
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        import_receipt: PathBuf,
+        #[arg(long)]
+        scenario: String,
+        #[arg(long)]
+        output_parent: PathBuf,
+        #[arg(long)]
+        bundle_id: String,
+    },
+    /// Verify exact bundle inventory, payload, and recipe against an independently retained manifest hash.
+    Verify {
+        #[arg(long)]
+        bundle: PathBuf,
+        #[arg(long)]
+        manifest_sha256: String,
+    },
+    /// Create a fresh protected intake from a verified bundle; preparation and approval remain separate.
+    Import {
+        #[arg(long)]
+        bundle: PathBuf,
+        #[arg(long)]
+        manifest_sha256: String,
+        #[arg(long)]
+        intake_parent: PathBuf,
+        #[arg(long)]
+        intake_id: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1025,6 +1067,72 @@ fn main() -> ExitCode {
 
 fn run(command: Command) -> Result<()> {
     match command {
+        Command::Package(args) => match args.command {
+            PackageCommand::ExportWsbMsi {
+                project,
+                import_receipt,
+                scenario,
+                output_parent,
+                bundle_id,
+            } => {
+                #[cfg(windows)]
+                {
+                    let loaded = read_project(&project)?;
+                    let receipt: ApplicationFileImportReceipt =
+                        read_document(&import_receipt, MAX_CONFIG_BYTES)?;
+                    write_json(&aiw_runner::export_notepad_plus_plus_msi_bundle(
+                        &output_parent,
+                        &bundle_id,
+                        &loaded.project,
+                        &scenario,
+                        &receipt,
+                    )?)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (project, import_receipt, scenario, output_parent, bundle_id);
+                    bail!("Sandbox packaging requires Windows")
+                }
+            }
+            PackageCommand::Verify {
+                bundle,
+                manifest_sha256,
+            } => {
+                #[cfg(windows)]
+                {
+                    write_json(&aiw_runner::verify_notepad_plus_plus_msi_bundle(
+                        &bundle,
+                        &manifest_sha256,
+                    )?)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (bundle, manifest_sha256);
+                    bail!("Sandbox packaging requires Windows")
+                }
+            }
+            PackageCommand::Import {
+                bundle,
+                manifest_sha256,
+                intake_parent,
+                intake_id,
+            } => {
+                #[cfg(windows)]
+                {
+                    write_json(&aiw_runner::import_notepad_plus_plus_msi_bundle(
+                        &bundle,
+                        &intake_parent,
+                        &intake_id,
+                        &manifest_sha256,
+                    )?)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (bundle, manifest_sha256, intake_parent, intake_id);
+                    bail!("Sandbox packaging requires Windows")
+                }
+            }
+        },
         Command::Application(args) => match args.command {
             ApplicationCommand::Inspect { source, kind } => {
                 #[cfg(windows)]
@@ -2796,6 +2904,37 @@ fn emit_error(envelope: &impl Serialize) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn package_import_requires_an_independent_manifest_hash() {
+        assert!(
+            super::Cli::try_parse_from([
+                "aiw",
+                "package",
+                "import",
+                "--bundle",
+                "bundle",
+                "--intake-parent",
+                "intakes",
+                "--intake-id",
+                "replay"
+            ])
+            .is_err()
+        );
+        assert!(matches!(
+            super::Cli::try_parse_from([
+                "aiw",
+                "package",
+                "verify",
+                "--bundle",
+                "bundle",
+                "--manifest-sha256",
+                &"a".repeat(64)
+            ])
+            .unwrap()
+            .command,
+            super::Command::Package(_)
+        ));
+    }
     use std::{
         fs,
         path::PathBuf,
