@@ -339,4 +339,39 @@ mod tests {
         value["command"] = serde_json::json!("cmd.exe");
         assert!(serde_json::from_value::<CompiledBambuScenario>(value).is_err());
     }
+
+    #[test]
+    fn edited_review_cannot_hash_changed_authority_or_fixture() {
+        let compiled = compile_bambu_studio_info_scenario(&project(), "local-file-info").unwrap();
+        let wire = serde_json::to_value(compiled).unwrap();
+        for (field, replacement) in [
+            (
+                "installerPath",
+                serde_json::json!(r"C:\Windows\System32\cmd.exe"),
+            ),
+            (
+                "installArguments",
+                serde_json::json!(["/S", "/D=C:\\Windows"]),
+            ),
+            (
+                "launchPath",
+                serde_json::json!(r"C:\AIW\Output\bambu-studio.exe"),
+            ),
+            ("fixturePath", serde_json::json!(r"C:\AIW\Output\other.stl")),
+            ("fixtureSha256", serde_json::json!("a".repeat(64))),
+            ("applicationSha256", serde_json::json!("b".repeat(64))),
+            ("installTimeoutSeconds", serde_json::json!(301)),
+            ("cliTimeoutSeconds", serde_json::json!(0)),
+            ("expectedExitCode", serde_json::json!(1)),
+        ] {
+            let mut changed = wire.clone();
+            changed[field] = replacement;
+            let changed: CompiledBambuScenario = serde_json::from_value(changed).unwrap();
+            assert_eq!(
+                changed.canonical_sha256(),
+                Err(BambuScenarioCompileError::InvalidCompiledProfile),
+                "accepted changed {field}"
+            );
+        }
+    }
 }

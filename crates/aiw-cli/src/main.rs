@@ -28,11 +28,11 @@ use aiw_probe::{
 };
 use aiw_provider_mxc::{MxcGoldenProbePlan, plan_capability_probe, plan_golden_probe};
 use aiw_provider_wsb::{
-    CompiledMsiScenario, ScenarioCompileError, WindowsSandboxCliLifecyclePlan,
-    WindowsSandboxCompletionExpectation, WindowsSandboxCompletionReceipt,
-    WindowsSandboxCompletionVerification, WindowsSandboxPlan,
-    compile_notepad_plus_plus_msi_scenario, plan_cli_lifecycle, render_config,
-    validate_host_mappings, verify_completion_receipt,
+    BambuScenarioCompileError, CompiledBambuScenario, CompiledMsiScenario, ScenarioCompileError,
+    WindowsSandboxCliLifecyclePlan, WindowsSandboxCompletionExpectation,
+    WindowsSandboxCompletionReceipt, WindowsSandboxCompletionVerification, WindowsSandboxPlan,
+    compile_bambu_studio_info_scenario, compile_notepad_plus_plus_msi_scenario, plan_cli_lifecycle,
+    render_config, validate_host_mappings, verify_completion_receipt,
 };
 use aiw_runner::{
     RunnerError, SessionTransaction, WsbGoldenProbeExecution, WsbGoldenProbeStart,
@@ -495,6 +495,13 @@ struct ProviderArgs {
 
 #[derive(Debug, Subcommand)]
 enum ProviderCommand {
+    /// Compile the experimental Bambu STL information profile; execution is not yet supported.
+    CompileBambuScenario {
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        scenario: String,
+    },
     /// Compile the fixed Notepad++ MSI scenario for review without executing it.
     CompileMsiScenario {
         #[arg(long)]
@@ -570,6 +577,8 @@ enum SchemaKind {
     #[value(name = "msi-product-registration")]
     MsiProductRegistration,
     CompiledMsiScenario,
+    CompiledBambuScenario,
+    BambuScenarioCompilation,
     MsiScenarioCompilation,
     ApplicationFileAuthority,
     ApplicationFileImportReceipt,
@@ -639,6 +648,17 @@ struct MsiScenarioCompilation {
     project_revision_sha256: String,
     scenario_sha256: String,
     scenario: CompiledMsiScenario,
+}
+
+/// Review output only. No Bambu preparation, execution, or report path consumes it yet.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct BambuScenarioCompilation {
+    schema_version: &'static str,
+    execution_supported: bool,
+    project_revision_sha256: String,
+    scenario_sha256: String,
+    scenario: CompiledBambuScenario,
 }
 
 #[derive(Debug, Args)]
@@ -1680,6 +1700,17 @@ fn run(command: Command) -> Result<()> {
             }
         },
         Command::Provider(args) => match args.command {
+            ProviderCommand::CompileBambuScenario { project, scenario } => {
+                let loaded = read_project(&project)?;
+                let scenario = compile_bambu_studio_info_scenario(&loaded.project, &scenario)?;
+                write_json(&BambuScenarioCompilation {
+                    schema_version: "aiw.dev/bambu-scenario-compilation/v0alpha1",
+                    execution_supported: false,
+                    project_revision_sha256: project_revision_hash(&loaded.project)?,
+                    scenario_sha256: scenario.canonical_sha256()?,
+                    scenario,
+                })
+            }
             ProviderCommand::CompileMsiScenario { project, scenario } => {
                 let loaded = read_project(&project)?;
                 let scenario = compile_notepad_plus_plus_msi_scenario(&loaded.project, &scenario)?;
@@ -1761,6 +1792,10 @@ fn run(command: Command) -> Result<()> {
                 write_json(&schema_for!(aiw_runner::WsbApprovedExecution))
             }
             SchemaKind::CompiledMsiScenario => write_json(&schema_for!(CompiledMsiScenario)),
+            SchemaKind::CompiledBambuScenario => write_json(&schema_for!(CompiledBambuScenario)),
+            SchemaKind::BambuScenarioCompilation => {
+                write_json(&schema_for!(BambuScenarioCompilation))
+            }
             SchemaKind::MsiScenarioCompilation => write_json(&schema_for!(MsiScenarioCompilation)),
             SchemaKind::ApplicationFileAuthority => {
                 write_json(&schema_for!(ApplicationFileAuthority))
@@ -2510,6 +2545,16 @@ fn emit_anyhow_error(error: &anyhow::Error) {
             remediation: "Preserve the source, resolve the reported type, path, link, bounds, or drift condition, and retry without executing it.".to_owned(),
             detail: error.source.to_string().chars().take(512).collect(),
         });
+    } else if let Some(error) = error.downcast_ref::<BambuScenarioCompileError>() {
+        emit_error(&ErrorEnvelope {
+            code: "AIW_BAMBU_SCENARIO_REJECTED".to_owned(),
+            summary: "project scenario is outside the experimental Bambu profile".to_owned(),
+            stage: "scenarioCompilation".to_owned(),
+            run_id: None,
+            retryable: false,
+            remediation: "Use the reviewed Bambu example and fixed profile; compilation does not enable execution.".to_owned(),
+            detail: error.to_string().chars().take(512).collect(),
+        });
     } else if let Some(error) = error.downcast_ref::<ScenarioCompileError>() {
         emit_error(&ErrorEnvelope {
             code: "AIW_MSI_SCENARIO_REJECTED".to_owned(),
@@ -2584,6 +2629,33 @@ mod tests {
         assert_eq!(loaded.source_schema_version, PROJECT_SCHEMA_VERSION);
         assert!(validate_project_for_planning(&loaded.project).is_empty());
         assert!(!project_requires_migration_review(&loaded.project));
+    }
+
+    #[test]
+    fn bambu_compilation_is_explicitly_non_executable_and_separate_from_msi() {
+        let loaded = read_project(&example_path("bambu-studio-info.json")).unwrap();
+        let scenario =
+            compile_bambu_studio_info_scenario(&loaded.project, "local-file-info").unwrap();
+        assert!(
+            compile_notepad_plus_plus_msi_scenario(&loaded.project, "local-file-info").is_err()
+        );
+        let compilation = BambuScenarioCompilation {
+            schema_version: "aiw.dev/bambu-scenario-compilation/v0alpha1",
+            execution_supported: false,
+            project_revision_sha256: project_revision_hash(&loaded.project).unwrap(),
+            scenario_sha256: scenario.canonical_sha256().unwrap(),
+            scenario,
+        };
+        let wire = serde_json::to_value(compilation).unwrap();
+        assert_eq!(wire["executionSupported"], false);
+        assert_eq!(
+            wire["scenario"]["installArguments"],
+            serde_json::json!(["/S"])
+        );
+        assert_eq!(wire["scenario"]["launchArguments"][0], "--info");
+        assert!(wire.get("outcome").is_none());
+        let npp = read_project(&example_path("notepad-plus-plus-msi.aiw.yaml")).unwrap();
+        assert!(compile_bambu_studio_info_scenario(&npp.project, "install-launch-close").is_err());
     }
 
     #[test]

@@ -71,6 +71,9 @@ try {
     cargo run --quiet --locked -p aiw-cli -- provider compile-msi-scenario --project .\examples\notepad-plus-plus-msi.aiw.yaml --scenario install-launch-close | ConvertFrom-Json | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'typed MSI scenario compilation failed' }
 
+    cargo run --quiet --locked -p aiw-cli -- provider compile-bambu-scenario --project .\examples\bambu-studio-info.json --scenario local-file-info | ConvertFrom-Json | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'typed Bambu scenario compilation failed' }
+
     cargo run --quiet --locked -p aiw-cli -- model-pack validate --path .\examples\model-pack.json | ConvertFrom-Json | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'example model-pack validation failed' }
 
