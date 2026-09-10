@@ -1,6 +1,18 @@
 #![forbid(unsafe_code)]
 
 mod application_token;
+mod bambu_export;
+mod imported_bambu;
+pub use bambu_export::{
+    BAMBU_EXPORT_ARTIFACT_PATH, BAMBU_MAX_ARTIFACT_BYTES, BAMBU_STUDIO_EXPORT_OUTPUT_PATH,
+    BambuExportCompileError, CompiledBambuExportScenario, compile_bambu_studio_export_scenario,
+};
+pub use imported_bambu::{
+    BAMBU_SCENARIO_EVENT, BambuExecutionStage, BambuScenarioStatus,
+    IMPORTED_BAMBU_GUEST_REQUEST_SCHEMA_VERSION, IMPORTED_BAMBU_SCENARIO_RESULT_SCHEMA_VERSION,
+    ImportedBambuGuestRequest, ImportedBambuRequestError, ImportedBambuScenarioResult,
+    verify_bambu_scenario_evidence,
+};
 mod bambu_scenario;
 mod completion;
 mod failure_snapshots;
