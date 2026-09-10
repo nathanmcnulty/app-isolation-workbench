@@ -78,6 +78,8 @@ The experimental [Bambu Studio profile](docs/BAMBU-STUDIO-PROFILE.md) adds `prov
 
 ## Local validation
 
+For focused development, start with `scripts/work-status.ps1` and the [short handoff](docs/WORKING-STATE.md). Use `scripts/check-local.ps1 -Check Format,Provider` for selected local checks with concise results and full logs on disk. See the [development workflow](docs/DEVELOPMENT-WORKFLOW.md); the full verification entry point remains below.
+
 ```powershell
 .\scripts\verify.ps1
 .\scripts\audit-dependencies.ps1
