@@ -55,6 +55,8 @@ pub struct SandboxBundleVerification {
 #[serde(rename_all = "camelCase")]
 pub struct SandboxBundleImport {
     pub verification: SandboxBundleVerification,
+    pub project: Project,
+    pub scenario: CompiledMsiScenario,
     pub import_receipt: ApplicationFileImportReceipt,
 }
 #[cfg(windows)]
@@ -131,6 +133,8 @@ pub fn import_notepad_plus_plus_msi_bundle(
     let import_receipt =
         import_application_file(parent, id, ApplicationInspectionKind::Msi, &source)
             .map_err(native)?;
+    let project = verification.project.clone();
+    let scenario = verification.scenario.clone();
     Ok(SandboxBundleImport {
         verification,
         import_receipt,
