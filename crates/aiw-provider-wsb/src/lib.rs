@@ -2,6 +2,7 @@
 
 mod application_token;
 mod completion;
+mod failure_snapshots;
 mod imported_msi;
 mod registry_observations;
 mod runtime_context;
@@ -31,6 +32,11 @@ pub use completion::{
     WINDOWS_SANDBOX_COMPLETION_VERIFICATION_SCHEMA_VERSION, WindowsSandboxCompletionError,
     WindowsSandboxCompletionExpectation, WindowsSandboxCompletionReceipt,
     WindowsSandboxCompletionVerification, verify_completion_receipt,
+};
+pub use failure_snapshots::{
+    FailedSnapshotPhase, IMPORTED_MSI_FAILED_SNAPSHOTS_EVENT,
+    IMPORTED_MSI_FAILED_SNAPSHOTS_SCHEMA_VERSION, ImportedMsiFailedSnapshots,
+    verify_msi_failed_snapshots,
 };
 pub use imported_msi::{
     IMPORTED_MSI_GUEST_REQUEST_SCHEMA_VERSION, IMPORTED_MSI_SCENARIO_RESULT_SCHEMA_VERSION,
