@@ -112,9 +112,22 @@ fn live_imported_msi_install_observe_close_and_cleanup() {
         panic!("wrong execution profile")
     };
     assert!(result.scenario.successful());
+    let registration = result
+        .product_registration
+        .as_ref()
+        .expect("v6 product registration required");
+    aiw_provider_wsb::validate_msi_product_code(&registration.product_code).unwrap();
+    assert_eq!(
+        registration.before_install,
+        aiw_provider_wsb::MsiMachineProductState::NotRegistered
+    );
+    assert_eq!(
+        registration.after_install,
+        aiw_provider_wsb::MsiMachineProductState::Installed
+    );
     assert_eq!(
         result.schema_version,
-        "aiw.dev/wsb-imported-msi-execution/v0alpha5"
+        "aiw.dev/wsb-imported-msi-execution/v0alpha6"
     );
     let token = result
         .application_token
@@ -178,7 +191,7 @@ fn live_imported_msi_install_observe_close_and_cleanup() {
     );
     assert_eq!(
         report.schema_version,
-        "aiw.dev/wsb-msi-assessment-report/v0alpha6"
+        "aiw.dev/wsb-msi-assessment-report/v0alpha7"
     );
     if report.download_metadata_policy.is_some() {
         assert!(

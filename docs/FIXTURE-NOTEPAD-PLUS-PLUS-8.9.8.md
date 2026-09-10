@@ -213,3 +213,22 @@ The separately built production guest passed the ordinary standard-user install/
 - Completed evidence root: `736853530587aebe15a9c7a572470c8cf128bbd82b2d9dc3ccaf3cdce00d3ba1`
 
 Both retained workspaces passed repeatability, wrong-binding, unexpected-output and unchanged-inventory checks. The older failed standard-user fixture still passes with absent snapshots, and the preceding v5 completed fixture produces the same report payload. Provider tests cover failure-stage prefixes, optional legacy absence, context/bounds and contradictory events; runner tests verify snapshot/diff extraction and reject a semantically missing phase even with consistent evidence hashes. Native capture tests, guest-agent tests, workspace Clippy, Rust 1.85 all-target checks, formatting, schema smoke and governance validation passed. This slice used two live Sandbox runs and no hosted CI. All installer/application execution remained inside disposable Sandbox workers.
+## Machine product-registration benchmark — 2026-09-09
+
+A fresh v6 Sandbox execution completed all nine stages and the standard-user document round trip. The read-only collector extracted ProductCode `{224C0E17-FB79-4AE2-9A47-5556FCEF39C4}` from the approved MSI. The explicit machine-context state changed from `notRegistered` before installation to `installed` afterward. The v0alpha7 retained report independently verified the event, the application token, document bytes, 215 installation file additions, seven use-time additions, and the existing scoped registry observations. Exact-session cleanup was recorded; a subsequent host assessment reported no current Sandbox sessions.
+
+The live harness reached the report assertion after 99.79 seconds and flagged its stale expected v0alpha6 report version. That assertion was updated to v0alpha7. No installer rerun was needed: the retained-workspace test then passed all report/product-state, wrong-binding, unexpected-output, repeatability and unchanged-inventory checks. This distinguishes a test expectation failure from the successful recorded application execution.
+
+- Workspace: `%TEMP%\aiw-msi-live-9340-1789004266038739800`
+- Exports: the workspace path plus `.report.json` and `.report.md`
+- Approved MSI SHA-256: `c29cbe1a9aaef322cc3f316ceeabe8a8071b18441a5e3c3ec348069739e59e80`
+- Static guest SHA-256: `3c0f94864c81fe006d5cf179e487b52e02a565a56933159c0880fedf0021a668`
+- Sandbox ID: `d21fadc2-163e-1503-d6d5-8a28253dbe4f`
+- Scenario SHA-256: `f7e600d8823b7c3f327a437e45517172f2d210b7eeed699f43ef3b70b6e50645`
+- Request SHA-256: `afb6243e26dc35a2ffd2c51c9f8dab023098d35386e15820bffcfe8a925d4744`
+- Receipt SHA-256: `b336283cf6d0edc4613a9caaf19d326b615392f194f6adfe00eed04383677fb3`
+- Evidence root: `ea9ed4abec85db179d66b0f8dc53ca040f2fc4f809f03c3f9f5a756872e5a22d`
+
+A report set mixing this v6 success with the retained v5 controlled failure and older failure also passed its read-only drift/duplicate regression. Previous v5 successful-report JSON and the previous report-set JSON remained unchanged, with no invented registration field. New set exports are `%TEMP%\aiw-product-report-set.json` and `.md`; its explicit selectors are in `.input.json`.
+
+Local validation passed: 55 provider tests, 74 runner tests (four opt-in tests ignored), 19 native guest tests, three guest-agent tests, workspace Clippy, Rust 1.85 all-target checking, schema smoke, formatting and governance. Missing/tampered product events reject after verified cleanup. Fake-fixture source labeling and the old report-version assertion were corrected without weakening the verifiers. One Sandbox execution and no hosted CI were used; all MSI API inspection and application execution stayed in the disposable worker. See [the collection contract and remaining limits](MSI-PRODUCT-REGISTRATION.md).

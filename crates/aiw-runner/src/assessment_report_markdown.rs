@@ -7,6 +7,18 @@ use aiw_provider_wsb::{
     RegistryDiffKind, RegistryScope, RegistrySnapshotDiff, RegistryView,
 };
 
+pub(crate) fn product_state_label(state: &aiw_provider_wsb::MsiMachineProductState) -> String {
+    use aiw_provider_wsb::MsiMachineProductState;
+    match state {
+        MsiMachineProductState::NotRegistered => "Not registered".into(),
+        MsiMachineProductState::Advertised => "Advertised".into(),
+        MsiMachineProductState::Installed => "Installed".into(),
+        MsiMachineProductState::Unavailable { error_code } => {
+            format!("Unavailable (Windows error {error_code})")
+        }
+    }
+}
+
 impl WsbMsiAssessmentReport {
     /// Human-readable rendering of an already reverified report. This does not
     /// independently verify a constructed report or promote guest observations.
@@ -73,7 +85,7 @@ impl WsbMsiAssessmentReport {
             "Application exercise",
             self.exercise_file_changes.as_ref(),
         );
-        out.push_str("\n## Registry changes\n\nScope: `HKLM\\Software\\Notepad++` and the exact standard-user `HKU\\<SID>\\Software\\Notepad++`, each through the 64-bit and 32-bit views. Entries retain keys and value metadata (name, type, size, and SHA-256), never raw registry values. The 32-bit and 64-bit views can share backing keys, so counts are observations per view rather than unique physical dependencies. MSI dependency records and other uninstall registration remain outside this scope. Snapshot comparison is non-atomic; incomplete scopes are explicitly omitted from change rows.\n");
+        out.push_str("\n## Registry changes\n\nScope: `HKLM\\Software\\Notepad++` and the exact standard-user `HKU\\<SID>\\Software\\Notepad++`, each through the 64-bit and 32-bit views. Entries retain keys and value metadata (name, type, size, and SHA-256), never raw registry values. The 32-bit and 64-bit views can share backing keys, so counts are observations per view rather than unique physical dependencies. Product registration, MSI dependency records, and uninstall registration are outside this scope. Snapshot comparison is non-atomic; incomplete scopes are explicitly omitted from change rows.\n");
         append_registry_changes(
             &mut out,
             "Installation",
@@ -86,10 +98,10 @@ impl WsbMsiAssessmentReport {
         );
         if let Some(registration) = &self.product_registration {
             out.push_str(&format!(
-                "\n## Machine product registration\n\nProduct code: `{}`. Before installation: **{:?}**. After installation: **{:?}**. This is scoped machine state metadata; it is not a dependency or isolation claim.\n",
+                "\n## Machine product registration\n\nProduct code: `{}`. Before installation: **{}**. After installation: **{}**. This is scoped machine state metadata; it is not a dependency or isolation claim.\n",
                 cell(&registration.product_code),
-                registration.before_install,
-                registration.after_install,
+                product_state_label(&registration.before_install),
+                product_state_label(&registration.after_install),
             ));
         }
         out.push_str("\nThese changes identify files and settings to investigate for packaging. They do not establish a complete package recipe or dependencies outside the captured roots.\n\n## Unresolved assessment evidence\n\n");

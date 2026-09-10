@@ -6,7 +6,7 @@ The fixed Notepad++ MSI v5 profile adds read-only registry snapshots before inst
 
 Capture is limited to `HKLM\Software\Notepad++` and `HKU\<runtime SID>\Software\Notepad++`, in explicit 64-bit and 32-bit registry views. The runtime SID must match the verified standard-user context and launched root-process token. The collector does not assume that its own `HKCU` belongs to the application user. Settings written only to the elevated installer account's user hive are outside this runtime-user scope. The views can share underlying keys on Windows; report both views without interpreting duplicate observations as separate dependencies.
 
-This does not include Windows Installer product registration. MSI uninstall registration is keyed by ProductCode; the EXE installer's `Uninstall\Notepad++` location is not interchangeable. Capturing MSI registration requires binding the product identity to the approved installer first. Other registry roots, services, drivers, COM registrations, dependencies and runtime access tracing remain outside this slice.
+This does not include Windows Installer product registration. MSI uninstall registration is keyed by ProductCode; the EXE installer's `Uninstall\Notepad++` location is not interchangeable. The v6 profile now collects [machine product registration separately](MSI-PRODUCT-REGISTRATION.md), binding ProductCode to the approved installer before querying its state. Other registry roots, services, drivers, COM registrations, dependencies and runtime access tracing remain outside this slice.
 
 ## Evidence and limits
 

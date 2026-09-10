@@ -373,10 +373,10 @@ impl WsbMsiReportSet {
             }
             if let Some(registration) = &s.product_registration {
                 out.push_str(&format!(
-                    "\nMachine product-registration observation for `{}`: before-install {:?}; after-install {:?}. This is scoped machine state metadata, not a dependency or isolation claim.\n",
+                    "\nMachine product-registration observation for `{}`: before installation {}; after installation {}. This is scoped machine state metadata, not a dependency or isolation claim.\n",
                     cell(&registration.product_code),
-                    registration.before_install,
-                    registration.after_install,
+                    crate::assessment_report_markdown::product_state_label(&registration.before_install),
+                    crate::assessment_report_markdown::product_state_label(&registration.after_install),
                 ));
             } else {
                 out.push_str("\nMachine product-registration observation: unmeasured.\n");

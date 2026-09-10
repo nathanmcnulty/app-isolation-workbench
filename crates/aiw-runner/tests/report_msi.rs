@@ -42,6 +42,23 @@ fn completed_msi_report_is_readonly_and_rejects_drift() {
         aiw_orchestrator::RunOutcome::InsufficientEvidence
     );
     assert!(report.recorded_cleanup_verified);
+    if let Some(product) = &report.product_registration {
+        aiw_provider_wsb::validate_msi_product_code(&product.product_code).unwrap();
+        assert_eq!(product.installer_sha256, report.scenario.installer_sha256);
+        assert_eq!(
+            product.before_install,
+            aiw_provider_wsb::MsiMachineProductState::NotRegistered
+        );
+        assert_eq!(
+            product.after_install,
+            aiw_provider_wsb::MsiMachineProductState::Installed
+        );
+        assert!(
+            report
+                .to_markdown()
+                .contains("Machine product registration")
+        );
+    }
     assert!(
         report
             .missing_evidence
@@ -68,7 +85,9 @@ fn completed_msi_report_is_readonly_and_rejects_drift() {
     if prepared_scenario.requires_application_exercise() {
         assert_eq!(
             report.schema_version,
-            if report.registry_evidence.is_some() {
+            if report.product_registration.is_some() {
+                "aiw.dev/wsb-msi-assessment-report/v0alpha7"
+            } else if report.registry_evidence.is_some() {
                 "aiw.dev/wsb-msi-assessment-report/v0alpha6"
             } else if report.standard_user_context.is_some() {
                 "aiw.dev/wsb-msi-assessment-report/v0alpha5"
