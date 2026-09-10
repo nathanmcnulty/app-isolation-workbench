@@ -1006,7 +1006,7 @@ fn complete_process_operation<T>(
     }
 }
 
-struct GuestProcess {
+pub(crate) struct GuestProcess {
     job: ScenarioJob,
     process: OwnedHandle,
     process_id: u32,
@@ -1015,7 +1015,19 @@ struct GuestProcess {
 }
 
 impl GuestProcess {
-    fn start_standard_user(
+    pub(crate) fn process_id(&self) -> u32 {
+        self.process_id
+    }
+
+    pub(crate) fn collect_token(&self) -> Result<TokenEvidence, GuestMsiExecutionError> {
+        collect_process_token(self.process.as_handle()).map_err(|error| {
+            GuestMsiExecutionError::Process(format!(
+                "collect launched application token failed: {error}"
+            ))
+        })
+    }
+
+    pub(crate) fn start_standard_user(
         path: &str,
         arguments: &[String],
         standard_user: &StandardUserSession,
@@ -1120,7 +1132,7 @@ impl GuestProcess {
         })
     }
 
-    fn start(path: &str, arguments: &[String]) -> Result<Self, GuestMsiExecutionError> {
+    pub(crate) fn start(path: &str, arguments: &[String]) -> Result<Self, GuestMsiExecutionError> {
         let executable = Path::new(path);
         let parent = executable.parent().ok_or_else(|| {
             GuestMsiExecutionError::Process("fixed executable does not have a parent".to_owned())
@@ -1181,7 +1193,7 @@ impl GuestProcess {
         })
     }
 
-    fn wait_for_exit(&self, timeout: Duration) -> Result<i32, GuestMsiExecutionError> {
+    pub(crate) fn wait_for_exit(&self, timeout: Duration) -> Result<i32, GuestMsiExecutionError> {
         let deadline = Instant::now().checked_add(timeout).ok_or_else(|| {
             GuestMsiExecutionError::Process("process timeout overflowed monotonic clock".to_owned())
         })?;
@@ -1283,11 +1295,11 @@ impl GuestProcess {
         }
     }
 
-    fn cleanup(&self) -> Result<(), GuestMsiExecutionError> {
+    pub(crate) fn cleanup(&self) -> Result<(), GuestMsiExecutionError> {
         self.job.terminate_and_verify_empty()
     }
 
-    fn verify_empty_after_success(&self) -> Result<(), GuestMsiExecutionError> {
+    pub(crate) fn verify_empty_after_success(&self) -> Result<(), GuestMsiExecutionError> {
         let deadline = Instant::now().checked_add(CLEANUP_TIMEOUT).ok_or_else(|| {
             GuestMsiExecutionError::Process("cleanup timeout overflowed monotonic clock".to_owned())
         })?;

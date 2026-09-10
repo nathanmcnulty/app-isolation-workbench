@@ -17,6 +17,11 @@ pub use guest_msi::{
 };
 
 #[cfg(windows)]
+pub use guest_bambu::{
+    GuestBambuAttempt, GuestBambuExecutionObservation, execute_fixed_bambu_export_attempt,
+};
+
+#[cfg(windows)]
 pub use guest_filesystem::snapshot_fixed_notepad_files;
 
 #[cfg(windows)]
@@ -146,6 +151,9 @@ mod windows_platform;
 
 #[cfg(windows)]
 mod guest_msi;
+
+#[cfg(windows)]
+mod guest_bambu;
 
 #[cfg(windows)]
 mod guest_desktop;
