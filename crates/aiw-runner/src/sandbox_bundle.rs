@@ -51,7 +51,7 @@ pub struct SandboxBundleVerification {
     pub project: Project,
     pub scenario: CompiledMsiScenario,
 }
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SandboxBundleImport {
     pub verification: SandboxBundleVerification,
