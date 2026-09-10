@@ -10,6 +10,7 @@
 //! script, URL, or arbitrary policy API.
 
 mod bambu_report;
+mod sandbox_bundle;
 #[cfg(windows)]
 pub use bambu_report::report_windows_sandbox_bambu_run;
 pub use bambu_report::{
@@ -60,6 +61,15 @@ pub use preparation::{
     prepare_windows_sandbox_msi_bundle, verify_windows_sandbox_preparation,
 };
 
+pub use sandbox_bundle::{
+    SANDBOX_BUNDLE_MANIFEST_SCHEMA_VERSION, SandboxBundleError, SandboxBundleExport,
+    SandboxBundleImport, SandboxBundleManifest, SandboxBundleVerification,
+};
+#[cfg(windows)]
+pub use sandbox_bundle::{
+    export_notepad_plus_plus_msi_bundle, import_notepad_plus_plus_msi_bundle,
+    verify_notepad_plus_plus_msi_bundle,
+};
 pub use session::{
     SESSION_TRANSACTION_SCHEMA_VERSION, SessionRecoveryBinding, SessionTransaction,
     SessionTransactionState, SessionTransition,
