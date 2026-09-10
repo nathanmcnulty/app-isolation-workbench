@@ -1,5 +1,5 @@
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
     ImportedMsiGuestRequest, ImportedMsiScenarioResult,
@@ -35,7 +35,7 @@ impl<'de> Deserialize<'de> for MsiMachineProductState {
         #[serde(rename_all = "camelCase", deny_unknown_fields)]
         struct Wire {
             status: String,
-            #[serde(default)]
+            #[serde(default, deserialize_with = "present_error_code")]
             error_code: Option<u32>,
         }
 
@@ -50,6 +50,16 @@ impl<'de> Deserialize<'de> for MsiMachineProductState {
             )),
         }
     }
+}
+
+/// Missing `errorCode` means no variant field. A present field must be a number;
+/// accepting JSON null would make a malformed state indistinguishable from a
+/// field that was absent.
+fn present_error_code<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    u32::deserialize(deserializer).map(Some)
 }
 
 /// Receipt-bound product-registration observation for the exact approved MSI.
@@ -287,6 +297,12 @@ mod tests {
         assert!(
             serde_json::from_value::<MsiMachineProductState>(
                 serde_json::json!({"status": "installed", "errorCode": 7})
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<MsiMachineProductState>(
+                serde_json::json!({"status": "installed", "errorCode": null})
             )
             .is_err()
         );
