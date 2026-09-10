@@ -214,7 +214,8 @@ fn verify_root_model(bytes: &[u8]) -> Result<(), String> {
         || attribute(&document[object].attributes, "type") != Some("model")
         || !document[component].raw_attributes.contains("p:path")
         || attribute(&document[component].attributes, "objectid") != Some("1")
-        || attribute(&document[component].attributes, "path") != Some("/3D/Objects/object_1.model")
+        || attribute(&document[component].attributes, "p:path")
+            != Some("/3D/Objects/object_1.model")
         || attribute(&document[component].attributes, "transform") != Some(COMPONENT_TRANSFORM)
         || attribute(&document[item].attributes, "objectid") != Some("2")
         || attribute(&document[item].attributes, "transform") != Some(BUILD_TRANSFORM)
@@ -444,7 +445,7 @@ fn require_model_structure(
             .any(|element| element.parent.is_none())
         || (root_uses_production && !root.raw_attributes.contains("xmlns:p")
             || root_uses_production
-                && attribute(&root.attributes, "p") != Some(PRODUCTION_3MF_NAMESPACE))
+                && attribute(&root.attributes, "xmlns:p") != Some(PRODUCTION_3MF_NAMESPACE))
     {
         return Err("3MF model namespace declarations are not the reviewed values".to_owned());
     }
@@ -537,7 +538,7 @@ fn element_parts(element: &BytesStart<'_>) -> Result<(String, BTreeMap<String, S
     let mut attributes = BTreeMap::new();
     for attribute in element.attributes().with_checks(true) {
         let attribute = attribute.map_err(|error| format!("invalid XML attribute: {error}"))?;
-        let key = std::str::from_utf8(attribute.key.local_name().as_ref())
+        let key = std::str::from_utf8(attribute.key.as_ref())
             .map_err(|_| "3MF XML attribute is not UTF-8")?
             .to_owned();
         let value = attribute
@@ -685,6 +686,11 @@ mod tests {
         let shadowed_namespace =
             ROOT_XML.replacen("<components>", "<components xmlns=\"urn:unreviewed\">", 1);
         assert!(verify_bambu_export(&package_with_models(&shadowed_namespace, LEAF_XML)).is_err());
+
+        let prefixed_object_id = ROOT_XML
+            .replacen("<model ", "<model xmlns:x=\"urn:unreviewed\" ", 1)
+            .replacen("objectid=\"1\"", "x:objectid=\"1\"", 1);
+        assert!(verify_bambu_export(&package_with_models(&prefixed_object_id, LEAF_XML)).is_err());
     }
 
     #[test]
