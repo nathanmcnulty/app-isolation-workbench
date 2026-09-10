@@ -431,7 +431,11 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
     );
     let document_exercise = if scenario.requires_application_exercise() {
         Some(stages.run(GuestMsiStage::PrepareDocument, || {
-            prepare_fixed_document_exercise(scenario, standard_user.as_ref())
+            prepare_fixed_document_exercise(scenario, standard_user.as_ref()).and_then(|_| {
+                Err::<ExercisePlan, _>(GuestMsiExecutionError::Process(
+                    "controlled fixture stop after installation".to_owned(),
+                ))
+            })
         })?)
     } else {
         None
