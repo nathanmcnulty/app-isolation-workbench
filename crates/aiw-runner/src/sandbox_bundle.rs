@@ -137,6 +137,8 @@ pub fn import_notepad_plus_plus_msi_bundle(
     let scenario = verification.scenario.clone();
     Ok(SandboxBundleImport {
         verification,
+        project,
+        scenario,
         import_receipt,
     })
 }
