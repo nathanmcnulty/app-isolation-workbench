@@ -120,6 +120,8 @@ try {
         'msi-registry',
         'msi-failed-snapshots',
         'wsb-msi-assessment-report',
+        'wsb-msi-report-set-input',
+        'wsb-msi-report-set',
         'application-file-authority',
         'application-file-import-receipt',
         'application-file-import-verification',
