@@ -11,9 +11,9 @@ pub use windows_platform::{
 #[cfg(windows)]
 pub use guest_msi::{
     GuestMsiAttempt, GuestMsiExecutionError, GuestMsiExecutionObservation,
-    GuestMsiFilesystemObservation, GuestMsiRegistryObservation, GuestMsiRetainedSnapshots,
-    GuestMsiStage, GuestMsiStageStatus, execute_fixed_notepad_plus_plus_msi,
-    execute_fixed_notepad_plus_plus_msi_attempt,
+    GuestMsiFilesystemObservation, GuestMsiProductRegistrationObservation,
+    GuestMsiRegistryObservation, GuestMsiRetainedSnapshots, GuestMsiStage, GuestMsiStageStatus,
+    execute_fixed_notepad_plus_plus_msi, execute_fixed_notepad_plus_plus_msi_attempt,
 };
 
 #[cfg(windows)]
@@ -155,6 +155,8 @@ mod guest_document;
 #[cfg(windows)]
 mod guest_filesystem;
 
+#[cfg(windows)]
+mod guest_msi_product;
 #[cfg(windows)]
 mod guest_registry;
 

@@ -255,6 +255,31 @@ fn execute_imported_msi_request(request: &ImportedMsiGuestRequest) -> Result<()>
         source: "aiw-guest-agent".to_owned(),
         payload: serde_json::to_value(&result)?,
     })?;
+    if let Some(product) = observation.product_registration {
+        let product = aiw_provider_wsb::ImportedMsiProductRegistrationEvidence {
+            schema_version: aiw_provider_wsb::IMPORTED_MSI_PRODUCT_REGISTRATION_SCHEMA_VERSION
+                .to_owned(),
+            run_id: request.run_id.clone(),
+            sandbox_id: request.sandbox_id.clone(),
+            request_sha256: request.request_sha256.clone(),
+            scenario_sha256: request.scenario_sha256.clone(),
+            installer_sha256: request.installer_sha256.clone(),
+            product_code: product.product_code,
+            before_install: product.before_install,
+            after_install: product.after_install,
+        };
+        product
+            .validate_for(request, &result)
+            .map_err(anyhow::Error::msg)?;
+        evidence.append(EvidenceEvent {
+            observed_utc: "guest-agent-time-not-trusted".to_owned(),
+            kind: aiw_provider_wsb::IMPORTED_MSI_PRODUCT_REGISTRATION_EVENT.to_owned(),
+            source: "aiw-guest-agent".to_owned(),
+            payload: serde_json::to_value(&product)?,
+        })?;
+    } else if request.scenario.requires_product_registration() {
+        bail!("guest did not produce the approved MSI product registration observations");
+    }
     let token = aiw_provider_wsb::ImportedMsiApplicationToken::new(
         request,
         &result,

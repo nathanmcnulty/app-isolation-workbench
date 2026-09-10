@@ -129,6 +129,14 @@ pub struct GuestMsiExecutionObservation {
     pub filesystem_observations: Option<GuestMsiFilesystemObservation>,
     pub standard_user_context: Option<StandardUserRuntimeContext>,
     pub registry_observations: Option<GuestMsiRegistryObservation>,
+    pub product_registration: Option<GuestMsiProductRegistrationObservation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuestMsiProductRegistrationObservation {
+    pub product_code: String,
+    pub before_install: aiw_provider_wsb::MsiMachineProductState,
+    pub after_install: aiw_provider_wsb::MsiMachineProductState,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -372,12 +380,16 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
     scenario: &CompiledMsiScenario,
     stages: &mut StageRecorder,
 ) -> Result<GuestMsiExecutionObservation, GuestMsiExecutionError> {
-    let (standard_user, before_install) = if scenario.requires_standard_user() {
+    let (standard_user, before_install, product_before) = if scenario.requires_standard_user() {
         stages.run(GuestMsiStage::BeforeInstallCapture, || {
+            let product = scenario
+                .requires_product_registration()
+                .then(crate::guest_msi_product::ProductCapture::before_install)
+                .transpose()?;
             let standard_user = StandardUserSession::establish()?;
             // Capture issues are observation data, not failed capture attempts.
             let snapshot = capture_application_state(scenario, Some(&standard_user));
-            Ok((Some(standard_user), Some(snapshot)))
+            Ok((Some(standard_user), Some(snapshot), product))
         })?
     } else {
         (
@@ -390,6 +402,7 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
                     })
                 })
                 .transpose()?,
+            None,
         )
     };
     stages.retain_capture(
@@ -416,10 +429,12 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
         Ok(install_exit_code)
     })?;
 
+    let mut product_registration = None;
     let after_install = scenario
         .requires_application_exercise()
         .then(|| {
             stages.run(GuestMsiStage::AfterInstallCapture, || {
+                product_registration = product_before.map(|product| product.after_install());
                 Ok(capture_application_state(scenario, standard_user.as_ref()))
             })
         })
@@ -583,6 +598,7 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
         functional_exercise,
         filesystem_observations,
         registry_observations,
+        product_registration,
         standard_user_context: standard_user.as_ref().map(|value| value.context().clone()),
     })
 }
