@@ -195,10 +195,14 @@ fn unsuccessful_msi_report_is_readonly_and_never_promotes_guest_outputs() {
         attempt.lifecycle.last().unwrap().state,
         aiw_runner::SessionTransactionState::CleanupVerified
     );
-    assert!(matches!(
-        attempt.guest_diagnostic,
-        UnverifiedGuestDiagnostic::Available { .. }
-    ));
+    match &attempt.guest_diagnostic {
+        UnverifiedGuestDiagnostic::Available { .. } => {}
+        UnverifiedGuestDiagnostic::Absent => assert!(matches!(
+            attempt.failure_progress,
+            aiw_runner::FailureProgressEvidence::Verified(_)
+        )),
+        UnverifiedGuestDiagnostic::Rejected => panic!("fixture diagnostic rejected"),
+    }
     let bytes = serde_json::to_vec(&report).unwrap();
     let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     for field in [
@@ -221,7 +225,7 @@ fn unsuccessful_msi_report_is_readonly_and_never_promotes_guest_outputs() {
     let mut foreign = project.clone();
     foreign.metadata.name = "foreign-project".to_owned();
     assert!(report_windows_sandbox_msi_run(&root, run_id, &foreign, &guest_hash).is_err());
-    let extra = root.join("output/completion.json");
+    let extra = root.join("output/unexpected-completion.json");
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -241,6 +245,17 @@ fn unsuccessful_msi_report_is_readonly_and_never_promotes_guest_outputs() {
         aiw_runner::FailureProgressEvidence::Rejected
     ));
     let mut repeated_json = serde_json::to_value(&*repeated).unwrap();
+    if value["report"]["schemaVersion"] == "aiw.dev/wsb-msi-unsuccessful-report/v0alpha4" {
+        assert_eq!(
+            repeated.schema_version,
+            if repeated.download_metadata_policy.is_some() {
+                "aiw.dev/wsb-msi-unsuccessful-report/v0alpha3"
+            } else {
+                "aiw.dev/wsb-msi-unsuccessful-report/v0alpha2"
+            }
+        );
+        repeated_json["schemaVersion"] = value["report"]["schemaVersion"].clone();
+    }
     repeated_json["failureProgress"] = value["report"]["failureProgress"].clone();
     assert_eq!(value["report"], repeated_json);
     let mut after = BTreeMap::new();

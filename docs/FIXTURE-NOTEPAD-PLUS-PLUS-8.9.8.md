@@ -189,3 +189,27 @@ The v0alpha6 report also retained the existing 215 installation file additions a
 - Evidence root: `4680074efad31ceaa9a54914933e94c08b0672ec89a3ec6a8359e2bf546a950b`
 
 The new retained report passed repeatability, wrong-binding, unexpected-output and unchanged-workspace-inventory checks. The preceding elevated v3 and standard-user v4 fixtures still verify to JSON equal to their archived reports, with their original report versions and no invented registry observations. Provider tests cover mandatory/foreign/duplicate/tampered events, legacy absence, complete and incomplete diffs, default values, case-insensitive duplicates and bounds. Runner tests reject missing or tampered registry evidence after exact cleanup. Native review and local validation passed; this slice used one live Sandbox run and no hosted CI. All application/installer execution stayed inside the disposable worker.
+
+## Failed-capture retention benchmark — 2026-09-09
+
+A controlled guest completed installation and both installation capture phases, then deliberately stopped during document preparation. The live failure test passed in 84.69 seconds. The unsuccessful v0alpha4 report retained 215 installed-file additions and the same machine registry key/ContextMenuFolder value observed in the successful baseline, with no incomplete scoped roots. After-exercise snapshots and diffs were absent; launch and every later stage were not reached. The capture account is recorded without claiming that an application process token was observed. Exact-session cleanup left no Sandbox sessions.
+
+This is a test-driver failure, not evidence of Notepad++ incompatibility. The bounded instrumentation exists only in separate fixture commit `69d76f1`, based on production guest source `3e1e377`: document preparation returns `controlled fixture stop after installation` before application launch. No production fault switch or arbitrary command interface was introduced.
+
+- Failure workspace: `%TEMP%\aiw-msi-live-12864-1788999078887288000`
+- Failure JSON/Markdown exports: the workspace path plus `.report.json` and `.report.md`
+- Instrumented static guest SHA-256: `2b5eba0b39d4232c4be6e56b598743efd598c15b1db799e914a12a32f81d52a1`
+- Sandbox ID: `635bd05d-0524-ff73-5e78-19cc3168c337`
+- Request SHA-256: `e7719a22d807ab4a4fe4fe317b67d803640f5521e377766e8dce96d9b9bf1ec8`
+- Failed receipt SHA-256: `1935151ec13eaf8ec774d6e16b58a41884043604130187fb328852b511dd2dce`
+- Failed evidence root: `d0b274108390f605ff3388b09f1a026a837e3001e243004ec78a93378089543d`
+
+The separately built production guest passed the ordinary standard-user install/open/edit/save/close scenario in 79.09 seconds: all nine stages passed, saved bytes matched, 215 installation and seven use-time file additions were retained, and exact cleanup left no sessions. Its completed report remains v0alpha6 and the overall verdict remains insufficient evidence for application-level isolation.
+
+- Production workspace: `%TEMP%\aiw-msi-live-15136-1788999221878544900`
+- Production JSON/Markdown exports: the workspace path plus `.report.json` and `.report.md`
+- Production static guest SHA-256: `60c51b0508917cdf5d8a02063dfb054c770e511065ea97470593108998db2e74`
+- Completed receipt SHA-256: `e2ceeebfecf5002f71615d3708656a4eccfea4128469a84ddec556dd090de4cb`
+- Completed evidence root: `736853530587aebe15a9c7a572470c8cf128bbd82b2d9dc3ccaf3cdce00d3ba1`
+
+Both retained workspaces passed repeatability, wrong-binding, unexpected-output and unchanged-inventory checks. The older failed standard-user fixture still passes with absent snapshots, and the preceding v5 completed fixture produces the same report payload. Provider tests cover failure-stage prefixes, optional legacy absence, context/bounds and contradictory events; runner tests verify snapshot/diff extraction and reject a semantically missing phase even with consistent evidence hashes. Native capture tests, guest-agent tests, workspace Clippy, Rust 1.85 all-target checks, formatting, schema smoke and governance validation passed. This slice used two live Sandbox runs and no hosted CI. All installer/application execution remained inside disposable Sandbox workers.

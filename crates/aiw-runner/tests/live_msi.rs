@@ -240,6 +240,12 @@ fn live_imported_msi_failed_run_retains_install_snapshots_only() {
         &guest_hash,
         300,
     );
+    if matches!(&result, Err(aiw_runner::RunnerError::RecoveryRequired(_))) {
+        eprintln!(
+            "MSI_LIVE_RECOVERY={:?}",
+            aiw_runner::recover_windows_sandbox(&layout)
+        );
+    }
     assert!(
         result.is_err(),
         "controlled guest failure must remain failed"
@@ -255,12 +261,26 @@ fn live_imported_msi_failed_run_retains_install_snapshots_only() {
     let aiw_runner::FailureProgressEvidence::Verified(progress) = attempt.failure_progress else {
         panic!("controlled failure did not retain a verified failed receipt");
     };
+    assert_eq!(
+        progress.attempt.progress.stages[3],
+        aiw_provider_wsb::MsiStageResult {
+            stage: aiw_provider_wsb::MsiExecutionStage::PrepareDocument,
+            status: aiw_provider_wsb::MsiStageStatus::Failed,
+        }
+    );
     let snapshots = progress.snapshots.expect("failed snapshots retained");
     assert!(snapshots.before_install.is_some());
     assert!(snapshots.after_install.is_some());
     assert!(snapshots.after_exercise.is_none());
     assert!(snapshots.capture_context.is_some());
-    assert!(progress.installation_file_changes.is_some());
+    assert!(
+        !progress
+            .installation_file_changes
+            .as_ref()
+            .unwrap()
+            .diffs
+            .is_empty()
+    );
     assert!(progress.installation_registry_changes.is_some());
     assert!(progress.exercise_file_changes.is_none());
     assert!(progress.exercise_registry_changes.is_none());
