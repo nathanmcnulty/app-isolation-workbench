@@ -27,7 +27,7 @@ use windows::Win32::Security::Authorization::{
 use windows::Win32::Security::Isolation::{CreateAppContainerProfile, DeleteAppContainerProfile};
 use windows::Win32::Security::{
     ACL, DACL_SECURITY_INFORMATION, NO_INHERITANCE, PSECURITY_DESCRIPTOR, PSID,
-    SECURITY_CAPABILITIES,
+    SECURITY_CAPABILITIES, SUB_CONTAINERS_AND_OBJECTS_INHERIT,
 };
 use windows::Win32::Storage::FileSystem::FILE_SHARE_READ;
 use windows::Win32::System::JobObjects::{
@@ -37,10 +37,11 @@ use windows::Win32::System::JobObjects::{
     QueryInformationJobObject, SetInformationJobObject, TerminateJobObject,
 };
 use windows::Win32::System::Threading::{
-    CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, EXTENDED_STARTUPINFO_PRESENT,
-    GetExitCodeProcess, InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
+    CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW,
+    DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess,
+    InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
     PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
-    PROCESS_INFORMATION, ResumeThread, STARTUPINFOEXW, UpdateProcThreadAttribute,
+    PROCESS_INFORMATION, ResumeThread, STARTUPINFOEXW, TerminateProcess, UpdateProcThreadAttribute,
     WaitForSingleObject,
 };
 use windows::core::{PCWSTR, PWSTR};
@@ -48,10 +49,11 @@ use windows::core::{PCWSTR, PWSTR};
 const CONTROL_ROOT: &str = r"C:\AIW\Control";
 const FIXTURE: &str = r"C:\AIW\Control\aiw-control-fixture.exe";
 const CANARY: &str = r"C:\AIW\Control\SharedCanary\canary.txt";
+const CANARY_DIR: &str = r"C:\AIW\Control\SharedCanary";
 const CHILD_DIR: &str = r"C:\AIW\Control\AppContainerChild";
 const CHILD_TOKEN: &str = r"C:\AIW\Control\AppContainerChild\child-token.json";
 const PROFILE_NAME: &str = "AIW.Control.Research.v0alpha1";
-const TIMEOUT: Duration = Duration::from_secs(30);
+const TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_JSON: u64 = 48 * 1024;
 
 #[derive(Debug, Error)]
@@ -69,6 +71,7 @@ pub struct ControlAppContainerObservation {
     pub launcher_token: TokenEvidence,
     pub resource: ResourceObservation,
     pub baseline: ModeObservations,
+    #[serde(rename = "appContainer")]
     pub appcontainer: ModeObservations,
     pub cleanup: CleanupObservation,
 }
@@ -98,6 +101,7 @@ pub struct ModeObservations {
 #[serde(rename_all = "camelCase")]
 pub struct CleanupObservation {
     pub baseline_job_empty: bool,
+    #[serde(rename = "appContainerJobEmpty")]
     pub appcontainer_job_empty: bool,
     pub profile_deleted: bool,
 }
@@ -108,6 +112,7 @@ pub struct FixedFixtureObservation {
     pub process_id: u32,
     pub exit_code: i32,
     pub fixture_token: TokenEvidence,
+    #[serde(rename = "observation")]
     pub report: serde_json::Value,
     pub job_empty: bool,
 }
@@ -121,6 +126,12 @@ struct FixtureWire {
 /// Runs only the reviewed control fixture modes from the fixed guest paths.
 pub fn execute_fixed_control_appcontainer()
 -> Result<ControlAppContainerObservation, ControlAppContainerError> {
+    if !std::env::var("USERNAME")
+        .unwrap_or_default()
+        .eq_ignore_ascii_case("AiwControlUser")
+    {
+        return Err(fixed("fixed disposable control user required"));
+    }
     require_regular_file(Path::new(FIXTURE))?;
     require_empty_directory(Path::new(CHILD_DIR))?;
     let canary = CanaryBinding::open(Path::new(CANARY))?;
@@ -137,11 +148,11 @@ pub fn execute_fixed_control_appcontainer()
     let baseline_read_canary = launch_fixture(
         "read-canary",
         None,
-        Path::new(CONTROL_ROOT),
+        Path::new(CANARY_DIR),
         None,
         &launcher_token.user_sid,
     )?;
-    remove_fixed_result(Path::new(CONTROL_ROOT), "read-canary")?;
+    remove_fixed_result(Path::new(CANARY_DIR), "read-canary")?;
     let baseline_child = launch_fixture(
         "child",
         None,
@@ -157,7 +168,8 @@ pub fn execute_fixed_control_appcontainer()
     })?;
     require_empty_directory(Path::new(CHILD_DIR))?;
 
-    let profile = AppContainerProfile::create_fresh()?;
+    let mut profile = AppContainerProfile::create_fresh()?;
+    let profile_sid = profile.string_sid()?;
     let candidate = (|| {
         grant_package_access(
             Path::new(CONTROL_ROOT),
@@ -170,18 +182,23 @@ pub fn execute_fixed_control_appcontainer()
             (GENERIC_READ | GENERIC_EXECUTE).0,
         )?;
         grant_package_access(
+            Path::new(CANARY_DIR),
+            profile.sid,
+            (GENERIC_READ | GENERIC_EXECUTE).0,
+        )?;
+        grant_package_access(
             Path::new(CHILD_DIR),
             profile.sid,
-            (GENERIC_READ | GENERIC_WRITE).0,
+            (GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE).0,
         )?;
         let read = launch_fixture(
             "read-canary",
             Some(profile.sid),
-            Path::new(CONTROL_ROOT),
+            Path::new(CANARY_DIR),
             Some(profile.sid),
             &launcher_token.user_sid,
         )?;
-        remove_fixed_result(Path::new(CONTROL_ROOT), "read-canary")?;
+        remove_fixed_result(Path::new(CANARY_DIR), "read-canary")?;
         let child = launch_fixture(
             "child",
             Some(profile.sid),
@@ -191,10 +208,14 @@ pub fn execute_fixed_control_appcontainer()
         )?;
         Ok::<_, ControlAppContainerError>((read, child))
     })();
-    let profile_sid = profile.string_sid()?;
     let deleted = profile.delete();
-    let (appcontainer_read_canary, appcontainer_child) = candidate?;
-    deleted?;
+    let (appcontainer_read_canary, appcontainer_child) = match (candidate, deleted) {
+        (Ok(result), Ok(())) => result,
+        (Err(error), cleanup) => {
+            return Err(fixed(format!("{error}; profile cleanup={cleanup:?}")));
+        }
+        (_, Err(error)) => return Err(error),
+    };
     canary.verify_unchanged()?;
     Ok(ControlAppContainerObservation {
         schema_version: "aiw.dev/research/control-appcontainer/v0alpha1".to_owned(),
@@ -254,11 +275,15 @@ fn launch_fixture(
     let fixture_wide = wide(OsStr::new(FIXTURE))?;
     let directory_wide = wide(directory.as_os_str())?;
     let job = Job::create()?;
-    let mut attributes = Attributes::new(if appcontainer.is_some() { 2 } else { 1 })?;
-    attributes.handles(&[output_handle])?;
+    let inherited_handles = [output_handle];
     let mut capabilities = SECURITY_CAPABILITIES::default();
     if let Some(sid) = appcontainer {
         capabilities.AppContainerSid = sid;
+    }
+    // Attribute values must outlive CreateProcessW and deletion of the list.
+    let mut attributes = Attributes::new(if appcontainer.is_some() { 2 } else { 1 })?;
+    attributes.handles(&inherited_handles)?;
+    if appcontainer.is_some() {
         attributes.security_capabilities(&mut capabilities)?;
     }
     let mut startup = STARTUPINFOEXW::default();
@@ -276,7 +301,10 @@ fn launch_fixture(
             None,
             None,
             true,
-            CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT,
+            CREATE_SUSPENDED
+                | CREATE_UNICODE_ENVIRONMENT
+                | EXTENDED_STARTUPINFO_PRESENT
+                | CREATE_NO_WINDOW,
             None,
             PCWSTR(directory_wide.as_ptr()),
             (&startup as *const STARTUPINFOEXW).cast(),
@@ -286,20 +314,22 @@ fn launch_fixture(
     .map_err(|error| fixed(format!("create fixed fixture process failed: {error}")))?;
     let process = unsafe { OwnedHandle::from_raw_handle(info.hProcess.0) };
     let thread = unsafe { OwnedHandle::from_raw_handle(info.hThread.0) };
-    let token = collect_process_token(process.as_handle())
-        .map_err(|error| fixed(format!("collect suspended fixture token failed: {error}")))?;
-    verify_token(&token, info.dwProcessId, expected_sid, expected_user_sid)?;
     if let Err(error) = unsafe {
         AssignProcessToJobObject(
             job.handle(),
             HANDLE(process.as_raw_handle() as isize as *mut _),
         )
     } {
-        let cleanup = job.terminate();
+        // The suspended process is not owned by the job when assignment fails.
+        let cleanup = unsafe { TerminateProcess(info.hProcess, 1) };
+        let waited = wait(info.hProcess, Duration::from_secs(2));
         return Err(fixed(format!(
-            "assign fixture job failed: {error}; cleanup={cleanup:?}"
+            "assign fixture job failed: {error}; cleanup={cleanup:?}; wait={waited:?}"
         )));
     }
+    let token = collect_process_token(process.as_handle())
+        .map_err(|error| fixed(format!("collect suspended fixture token failed: {error}")))?;
+    verify_token(&token, info.dwProcessId, expected_sid, expected_user_sid)?;
     if unsafe { ResumeThread(HANDLE(thread.as_raw_handle() as isize as *mut _)) } == u32::MAX {
         let cleanup = job.terminate();
         return Err(fixed(format!("resume fixture failed; cleanup={cleanup:?}")));
@@ -324,7 +354,14 @@ fn launch_fixture(
         return Err(fixed("fixture JSON token differed from held process token"));
     }
     if code != 0 {
-        return Err(fixed(format!("fixed fixture {mode} exited with {code}")));
+        let detail = report
+            .get("result")
+            .map(ToString::to_string)
+            .unwrap_or_default();
+        let detail: String = detail.chars().take(4096).collect();
+        return Err(fixed(format!(
+            "fixed fixture {mode} exited with {code}: {detail}"
+        )));
     }
     verify_fixture_report(&report, mode, &token, appcontainer.is_some())?;
     Ok(FixedFixtureObservation {
@@ -451,6 +488,7 @@ fn verify_token(
 
 struct AppContainerProfile {
     sid: PSID,
+    deleted: bool,
 }
 impl AppContainerProfile {
     fn create_fresh() -> Result<Self, ControlAppContainerError> {
@@ -464,16 +502,29 @@ impl AppContainerProfile {
             )
         }
         .map_err(|error| fixed(format!("create fresh AppContainer profile failed: {error}")))?;
-        Ok(Self { sid })
+        Ok(Self {
+            sid,
+            deleted: false,
+        })
     }
     fn string_sid(&self) -> Result<String, ControlAppContainerError> {
         sid_string(self.sid)
     }
-    fn delete(self) -> Result<(), ControlAppContainerError> {
+    fn delete(&mut self) -> Result<(), ControlAppContainerError> {
         let name = wide(OsStr::new(PROFILE_NAME))?;
         let result = unsafe { DeleteAppContainerProfile(PCWSTR(name.as_ptr())) };
+        result
+            .map_err(|error| fixed(format!("delete fresh AppContainer profile failed: {error}")))?;
+        self.deleted = true;
+        Ok(())
+    }
+}
+impl Drop for AppContainerProfile {
+    fn drop(&mut self) {
+        if !self.deleted {
+            let _ = self.delete();
+        }
         unsafe { windows::Win32::Security::FreeSid(self.sid) };
-        result.map_err(|error| fixed(format!("delete fresh AppContainer profile failed: {error}")))
     }
 }
 
@@ -482,16 +533,22 @@ fn grant_package_access(
     sid: PSID,
     rights: u32,
 ) -> Result<(), ControlAppContainerError> {
-    let mut entry = EXPLICIT_ACCESS_W::default();
-    entry.grfAccessPermissions = rights;
-    entry.grfAccessMode = GRANT_ACCESS;
-    entry.grfInheritance = NO_INHERITANCE;
-    entry.Trustee = TRUSTEE_W {
-        pMultipleTrustee: core::ptr::null_mut(),
-        MultipleTrusteeOperation: Default::default(),
-        TrusteeForm: TRUSTEE_IS_SID,
-        TrusteeType: TRUSTEE_IS_UNKNOWN,
-        ptstrName: PWSTR(sid.0.cast()),
+    let entry = EXPLICIT_ACCESS_W {
+        grfAccessPermissions: rights,
+        grfAccessMode: GRANT_ACCESS,
+        // Only the fixed child-output directory grants its new token file access.
+        grfInheritance: if path == Path::new(CHILD_DIR) {
+            SUB_CONTAINERS_AND_OBJECTS_INHERIT
+        } else {
+            NO_INHERITANCE
+        },
+        Trustee: TRUSTEE_W {
+            pMultipleTrustee: core::ptr::null_mut(),
+            MultipleTrusteeOperation: Default::default(),
+            TrusteeForm: TRUSTEE_IS_SID,
+            TrusteeType: TRUSTEE_IS_UNKNOWN,
+            ptstrName: PWSTR(sid.0.cast()),
+        },
     };
     let path = wide(path.as_os_str())?;
     let mut existing: *mut ACL = core::ptr::null_mut();
@@ -605,7 +662,7 @@ fn wait(handle: HANDLE, timeout: Duration) -> Result<(), ControlAppContainerErro
 }
 struct Attributes {
     list: LPPROC_THREAD_ATTRIBUTE_LIST,
-    _storage: Vec<u8>,
+    _storage: Vec<usize>,
 }
 impl Attributes {
     fn new(count: usize) -> Result<Self, ControlAppContainerError> {
@@ -613,7 +670,10 @@ impl Attributes {
         unsafe {
             let _ = InitializeProcThreadAttributeList(None, count as u32, None, &mut size);
         }
-        let mut storage = vec![0; size];
+        if size == 0 {
+            return Err(fixed("empty process attribute allocation"));
+        }
+        let mut storage = vec![0usize; size.div_ceil(std::mem::size_of::<usize>())];
         let list = LPPROC_THREAD_ATTRIBUTE_LIST(storage.as_mut_ptr().cast());
         unsafe { InitializeProcThreadAttributeList(Some(list), count as u32, None, &mut size) }
             .map_err(|error| fixed(format!("initialize fixture attributes failed: {error}")))?;
@@ -652,6 +712,11 @@ impl Attributes {
             )
         }
         .map_err(|error| fixed(format!("set AppContainer capabilities failed: {error}")))
+    }
+}
+impl Drop for Attributes {
+    fn drop(&mut self) {
+        unsafe { DeleteProcThreadAttributeList(self.list) };
     }
 }
 fn wide(value: &OsStr) -> Result<Vec<u16>, ControlAppContainerError> {

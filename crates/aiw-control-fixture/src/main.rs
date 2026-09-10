@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
-use std::fs::{self, File, OpenOptions};
+#[cfg(test)]
+use std::fs;
+use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::Path;
 #[cfg(test)]
@@ -214,9 +216,13 @@ fn read_canary(path: &Path) -> CanaryOutcome {
 
 fn child(root: &Path) -> Result<FixtureResult, String> {
     let child_token_path = root.join(CHILD_TOKEN_NAME);
+    // Use the OS-reported image path. Canonicalization can require access to
+    // ancestors outside the package grants even when this image is executable.
     let executable = std::env::current_exe()
-        .and_then(fs::canonicalize)
-        .map_err(|error| format!("canonicalize current fixture executable failed: {error}"))?;
+        .map_err(|error| format!("query current fixture executable failed: {error}"))?;
+    if !executable.is_absolute() {
+        return Err("current fixture executable path was not absolute".to_owned());
+    }
     let mut child = Command::new(executable)
         .args(["--mode", "child-token"])
         .current_dir(root)

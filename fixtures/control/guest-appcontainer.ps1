@@ -17,8 +17,12 @@ try {
     $credential=[pscredential]::new('.\AiwControlUser',$password)
     New-Item -ItemType Directory 'C:\AIW\Control' | Out-Null
     foreach ($name in @('aiw-control-fixture.exe','aiw-control-appcontainer.exe')) { Copy-Item -LiteralPath ('C:\AIW\Input\'+$name) -Destination ('C:\AIW\Control\'+$name) }
-    & icacls.exe 'C:\AIW\Control' /grant 'AiwControlUser:(OI)(CI)M' | Out-Null
+    & icacls.exe 'C:\AIW\Control' /grant 'AiwControlUser:(OI)(CI)F' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Control directory ACL failed' }
+    New-Item -ItemType Directory 'C:\AIW\Control\SharedCanary' | Out-Null
+    [IO.File]::WriteAllText('C:\AIW\Control\SharedCanary\canary.txt','AIW controlled readable bytes')
+    & icacls.exe 'C:\AIW\Control\SharedCanary\canary.txt' /inheritance:r /grant:r 'AiwControlUser:R' '*S-1-5-18:F' '*S-1-5-32-544:F' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Paired canary ACL failed' }
     New-Item -ItemType Directory 'C:\AIW\Control\AppContainerChild' | Out-Null
     & icacls.exe 'C:\AIW\Control\AppContainerChild' /inheritance:r /grant:r 'AiwControlUser:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Child directory ACL failed' }

@@ -33,7 +33,7 @@ Recheck without starting Sandbox using `./fixtures/control/verify-baseline.ps1 -
 
 ## Next integration
 
-Run these same fixed cases under the first application-level candidate, keeping account, input bytes, and environment commitments explicit. Add parent and descendant token checks and resource-specific baseline/candidate pairing before interpreting a denial as evidence for that candidate. Integrate the control result with approved execution and reporting before using it as a production assessment prerequisite. Application workflow repeatability remains a separate benchmark; matching control results do not prove all applications are repeatable.
+The paired file/child feasibility control below is complete. Add the declared registry control and integrate the result with approved execution and reporting before using it as a production assessment prerequisite. Then exercise an explicit real-application candidate. Application workflow repeatability remains a separate benchmark; matching control results do not prove all applications are repeatable.
 
 ## Paired AppContainer research control
 
@@ -48,7 +48,19 @@ The fixed guest driver creates one ordinary user and invokes the project-owned n
 
 The guest verifies both executable hashes before and after the trial. The host retains both executable identities, guest script, exact configuration and provider hashes, result hash, and exact Sandbox cleanup. The launcher records process-job and profile cleanup. The verifier requires the fixed disconnected configuration and two fresh workers with matching normalized observations. These records remain `productionEvidence: false`; they cannot establish real-application compatibility or replace the approved execution/reporting contract.
 
+This experiment covers a file read and a descendant token-file write. The roadmap's first production candidate also requires its declared registry checks and approved evidence integration. Neither registry access nor an inner AppContainer network restriction is measured here; disabling networking on the outer Sandbox does not measure the inner boundary.
+
 Recheck retained records with `./fixtures/control/verify-appcontainer.ps1 -Root <retained-root>`. Exercise altered copies with `./fixtures/control/test-verifier.ps1 -Root <retained-root> -AppContainerControl`. Both commands are read-only with respect to the original evidence and start no provider or fixture processes.
+
+### Live paired proof, 2026-09-10
+
+Two fresh workers on Windows `10.0.28000.0` passed the same-user read/child comparison. Baseline root and descendant tokens were medium-integrity ordinary tokens; candidate root and descendant tokens were low-integrity AppContainer tokens with the exact profile SID and no capabilities. The baseline read the fixed canary bytes and the candidate reported native access denied. Both process jobs, the temporary profile, and each exact outer Sandbox session were cleaned up.
+
+Retained proof: `%TEMP%\aiw-control-appcontainer-d05fadcf-3fa9-423e-a388-2ce3bf2e7f2e`, including JSON/Markdown reports and two complete input/configuration/result/journal sets. Sandbox IDs: `3eb88b5e-2b68-4517-b06e-8773cdf21afc` and `a9d923fb-70f9-4aa1-b54b-7ebcd20fe5db`. Fixture SHA-256: `c18389add2efe2772c52c9b1daafec73228b4f55b4d8c88a0ce5ba756bd5f274`. Launcher SHA-256: `7c58afb802bb6f9a2270989afd56b5e7436c14be87f2448974d28c41abea5154`. Provider and normalized configuration hashes match the baseline proof below. Exact per-worker hashes remain in the report. A later test-only import correction does not change fixture behavior; the retained binaries identify the actual live inputs.
+
+The experiment exposed a driver assumption: canonicalizing the current executable path failed with access denied under the restricted token. The fixture now launches its OS-reported absolute image path directly, without expanding package grants to unrelated ancestors. Both variants use that same fixture. Two failed exploratory workers were also stopped exactly; the second retained the specific canonicalization error and successful profile cleanup. This is useful adaptation evidence about path handling, not a real-application result.
+
+Twenty-one altered-copy checks rejected held/self PID drift, root/child package or user mismatches, unexpected integrity/capabilities, failed baseline reads, missing-file-as-denial, resource drift, incomplete profile/job/Sandbox cleanup, launcher exit/hash changes, duplicate sessions, configuration/provider drift, string-valued cleanup, and linked output directories. The shared baseline verifier also passed eleven negative checks after its binding logic was reused. Fixture unit tests, workspace Clippy/Rust 1.85 checks, final fixture-specific Clippy/Rust 1.85 checks, formatting, and governance passed locally. No hosted CI was requested.
 
 ## Live baseline, 2026-09-10
 

@@ -1,10 +1,13 @@
 #![forbid(unsafe_code)]
 
+#[cfg(windows)]
 use std::io::Write;
 use std::process::ExitCode;
 
+#[cfg(windows)]
 use serde::Serialize;
 
+#[cfg(windows)]
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct FailedControlRecord {
@@ -17,6 +20,10 @@ struct FailedControlRecord {
 
 #[cfg(windows)]
 fn main() -> ExitCode {
+    if std::env::args_os().len() != 1 {
+        write_failed("fixed control launcher accepts no arguments");
+        return ExitCode::FAILURE;
+    }
     match aiw_windows_platform::execute_fixed_control_appcontainer() {
         Ok(observation) => match serde_json::to_vec(&observation) {
             Ok(bytes) if bytes.len() <= 48 * 1024 => {
