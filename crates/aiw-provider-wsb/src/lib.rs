@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
 mod application_token;
+mod bambu_artifact;
+pub use bambu_artifact::{BambuExportArtifact, verify_bambu_export};
 mod bambu_export;
 mod imported_bambu;
 pub use bambu_export::{
