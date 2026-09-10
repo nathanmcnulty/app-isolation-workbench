@@ -46,6 +46,7 @@ name = "aiw-control-fixture"
 version = "0.1.0-alpha.1"
 dependencies = [
  "aiw-token",
+ "aiw-windows-platform",
  "clap",
  "hex",
  "serde",

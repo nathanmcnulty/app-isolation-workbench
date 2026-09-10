@@ -1,6 +1,6 @@
 #requires -Version 7.0
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$Root)
+param([Parameter(Mandatory)][string]$Root, [switch]$RequireRegistry)
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'read-trial.ps1')
 function Assert-Token($Token, [uint32]$ProcessId, [string]$UserSid, [AllowNull()][string]$PackageSid) {
@@ -18,8 +18,11 @@ foreach ($trial in 1,2) {
     $directory=Join-Path $Root "trial-$trial"
     $binding=Read-ControlTrial $directory
     $journal=$binding.journal; $result=$binding.result; $record=$result.observation
+    $registryRequired=$record.schemaVersion -eq 'aiw.dev/research/control-appcontainer/v0alpha2'
+    $version=if ($registryRequired) { 'v0alpha2' } else { 'v0alpha1' }
+    if ($RequireRegistry -and !$registryRequired) { throw 'Registry controls are required for this trial' }
     if ($record.productionEvidence -isnot [bool]) { throw 'Launcher research evidence flag requires a boolean' }
-    if ($result.schemaVersion -ne 'aiw.dev/research/control-appcontainer-guest/v0alpha1' -or $result.launcherExitCode -ne 0 -or $record.schemaVersion -ne 'aiw.dev/research/control-appcontainer/v0alpha1' -or $record.productionEvidence -ne $false) { throw 'AppContainer control completion contract failed' }
+    if ($result.schemaVersion -ne "aiw.dev/research/control-appcontainer-guest/$version" -or $result.launcherExitCode -ne 0 -or $record.schemaVersion -ne "aiw.dev/research/control-appcontainer/$version" -or $record.productionEvidence -ne $false) { throw 'AppContainer control completion contract failed' }
     if ($result.launcherSha256 -ne $journal.launcherSha256 -or (Get-FileHash -LiteralPath (Join-Path $directory 'input\aiw-control-appcontainer.exe')).Hash.ToLowerInvariant() -ne $journal.launcherSha256) { throw 'Launcher identity changed' }
     if ($binding.normalizedConfigSha256 -ne 'f4d93e6552169a3e35dc3df6713d2d17f386923abb0631f6f663a87bcdaa16c1') { throw 'AppContainer control requires the fixed disconnected Sandbox configuration' }
     $session=[guid]::Empty
@@ -32,10 +35,19 @@ foreach ($trial in 1,2) {
     if ($record.profile.name -ne 'AIW.Control.Research.v0alpha1' -or $package -notmatch '^S-1-15-2-(\d+-){6}\d+$' -or $record.profile.deleted -ne $true -or $record.cleanup.profileDeleted -ne $true -or $record.cleanup.baselineJobEmpty -ne $true -or $record.cleanup.appContainerJobEmpty -ne $true) { throw 'Profile identity or process/profile cleanup failed' }
     if ($record.resource.canaryPath -cne 'C:\AIW\Control\SharedCanary\canary.txt' -or $record.resource.sha256 -ne (Hash-Text 'AIW controlled readable bytes') -or $record.resource.sizeBytes -ne 29 -or $record.resource.unchangedAfter -ne $true) { throw 'Paired canary identity failed' }
     $cases=@()
+    $modes=@('readCanary','child')
+    if ($registryRequired) {
+        $registry=$result.registryBinding
+        if ($registry.hive -cne 'HKLM' -or $registry.view -cne 'registry64' -or $registry.key -cne 'SOFTWARE\AIWControlCanary' -or $registry.value -cne 'Canary' -or $registry.valueType -cne 'binary' -or $registry.sizeBytes -ne 29 -or $registry.sha256 -ne (Hash-Text 'AIW controlled registry bytes')) { throw 'Registry resource binding failed' }
+        foreach ($flag in @($registry.valueUnchanged,$registry.aclUnchanged)) {
+            if ($flag -isnot [bool] -or $flag -ne $true) { throw 'Registry resource changed or is unmeasured' }
+        }
+        $modes=@('readCanary','readRegistry','child')
+    }
     foreach ($variant in 'baseline','appContainer') {
         $candidate=$variant -eq 'appContainer'
         $sid=if ($candidate) { $package } else { $null }
-        foreach ($mode in 'readCanary','child') {
+        foreach ($mode in $modes) {
             $invocation=$record.$variant.$mode; $observation=$invocation.observation
             Assert-Token $invocation.fixtureToken $invocation.processId $result.standardUserSid $sid
             Assert-Token $observation.ownProcessToken $invocation.processId $result.standardUserSid $sid
@@ -45,16 +57,23 @@ foreach ($trial in 1,2) {
                 if ($candidate) {
                     if ($outcome.kind -ne 'accessDenied') { throw 'Candidate did not observe native access denied' }
                 } elseif ($outcome.kind -ne 'success' -or $outcome.sha256 -ne $record.resource.sha256 -or $outcome.sizeBytes -ne 29) { throw 'Baseline did not read the same canary bytes' }
+            } elseif ($mode -eq 'readRegistry') {
+                $probe=$observation.result.probe; $outcome=$probe.outcome
+                if ($probe.scope.hive -cne $registry.hive -or $probe.scope.view -cne $registry.view -or $probe.scope.key -cne $registry.key -or $probe.scope.value -cne $registry.value) { throw 'Registry probe used a different resource' }
+                if ($candidate) {
+                    if ($outcome.kind -ne 'accessDenied' -or $outcome.nativeCode -ne 5 -or $outcome.stage -notin @('openKey','querySize','queryValue')) { throw 'Registry candidate lacks native access-denied evidence' }
+                } elseif ($outcome.kind -ne 'success' -or $outcome.sizeBytes -ne 29 -or $outcome.sha256 -ne $registry.sha256) { throw 'Registry baseline failed to read the fixed value' }
             } else {
                 $child=$observation.result
                 Assert-Token $child.childToken $child.childProcessId $result.standardUserSid $sid
                 if ($child.childProcessId -eq $invocation.processId -or $child.childProcessId -eq $result.launcherProcessId -or $child.childStdoutBytes -ne 0) { throw 'Descendant identity/capture mismatch' }
             }
-            $cases += [ordered]@{variant=$variant; mode=$mode; exitCode=$invocation.exitCode; integrity=$invocation.fixtureToken.integrity.level; appContainer=$candidate; readOutcome=$(if ($mode -eq 'readCanary') { $observation.result.outcome.kind } else { $null })}
+            $cases += [ordered]@{variant=$variant; mode=$mode; exitCode=$invocation.exitCode; integrity=$invocation.fixtureToken.integrity.level; appContainer=$candidate; readOutcome=$(if ($mode -eq 'readCanary') { $observation.result.outcome.kind } elseif ($mode -eq 'readRegistry') { $observation.result.probe.outcome.kind } else { $null })}
         }
     }
     $identities+=$session.ToString(); $configurations+=$journal.configSha256
     $normalized += [ordered]@{fixtureSha256=$journal.fixtureSha256; launcherSha256=$journal.launcherSha256; guestScriptSha256=$journal.guestScriptSha256; providerSha256=$journal.providerSha256; normalizedConfigSha256=$binding.normalizedConfigSha256; windowsBuild=$result.windowsBuild; packageSid=$package; canarySha256=$record.resource.sha256; cases=$cases}
+    $normalized[-1].registryMeasured=$registryRequired
 }
 if ($identities[0] -eq $identities[1]) { throw 'Two fresh Sandbox sessions required' }
 if (($normalized[0] | ConvertTo-Json -Depth 16 -Compress) -cne ($normalized[1] | ConvertTo-Json -Depth 16 -Compress)) { throw 'AppContainer control repetitions differ' }

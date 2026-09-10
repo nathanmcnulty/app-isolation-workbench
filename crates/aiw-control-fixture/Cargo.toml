@@ -15,5 +15,8 @@ serde_json.workspace = true
 sha2.workspace = true
 hex.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+aiw-windows-platform.workspace = true
+
 [lints]
 workspace = true

@@ -49,7 +49,7 @@ fn main() -> ExitCode {
 #[cfg(windows)]
 fn write_failed(message: &str) {
     let record = FailedControlRecord {
-        schema_version: "aiw.dev/research/control-appcontainer/v0alpha1",
+        schema_version: "aiw.dev/research/control-appcontainer/v0alpha2",
         production_evidence: false,
         status: "error",
         stage: "launcher",

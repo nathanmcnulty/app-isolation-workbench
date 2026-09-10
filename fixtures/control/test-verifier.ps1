@@ -10,17 +10,30 @@ $verifier=Join-Path $PSScriptRoot $(if ($AppContainerControl) { 'verify-appconta
 $resultPath=Join-Path $copy 'trial-1\output\control-result.json'
 $journalPath=Join-Path $copy 'trial-1\host-journal.json'
 $resultBytes=[IO.File]::ReadAllBytes($resultPath)
+$verificationOptions=@{}
+$registryControls=$AppContainerControl -and (Get-Content $resultPath -Raw | ConvertFrom-Json).schemaVersion -eq 'aiw.dev/research/control-appcontainer-guest/v0alpha2'
+if ($registryControls) { $verificationOptions.RequireRegistry=$true }
 $journalBytes=[IO.File]::ReadAllBytes($journalPath)
 $configPath=Join-Path $copy 'trial-1\configuration.wsb'
 $configBytes=[IO.File]::ReadAllBytes($configPath)
 $passed=@()
 $cases=if ($AppContainerControl) { @('held-root-pid','self-root-pid','wrong-package','child-package','child-user','candidate-medium','candidate-capability','baseline-denied','candidate-missing','resource-drift','profile-cleanup','job-cleanup','launcher-exit','launcher-hash','cleanup','duplicate-session','config-bytes','config-drift','provider-drift') } else { @('root-pid','denial-is-not-missing','child-sid','failure-exit','cleanup','duplicate-session','config-bytes','config-drift','provider-drift') }
 $cases+='cleanup-string-false'
+if ($registryControls) { $cases+=@('registry-missing','registry-native-code','registry-view','registry-key','registry-value','registry-baseline-hash','registry-value-drift','registry-acl-drift','registry-version-downgrade') }
 foreach ($case in $cases) {
     try {
         $result=[Text.Encoding]::UTF8.GetString($resultBytes).TrimStart([char]0xfeff) | ConvertFrom-Json
         $journal=[Text.Encoding]::UTF8.GetString($journalBytes).TrimStart([char]0xfeff) | ConvertFrom-Json
         switch ($case) {
+            registry-missing { $result.observation.appContainer.readRegistry.observation.result.probe.outcome.kind='notFound' }
+            registry-native-code { $result.observation.appContainer.readRegistry.observation.result.probe.outcome.nativeCode=2 }
+            registry-view { $result.observation.appContainer.readRegistry.observation.result.probe.scope.view='registry32' }
+            registry-key { $result.observation.appContainer.readRegistry.observation.result.probe.scope.key='SOFTWARE\DifferentKey' }
+            registry-value { $result.observation.appContainer.readRegistry.observation.result.probe.scope.value='DifferentValue' }
+            registry-baseline-hash { $result.observation.baseline.readRegistry.observation.result.probe.outcome.sha256='0'*64 }
+            registry-value-drift { $result.registryBinding.valueUnchanged=$false }
+            registry-acl-drift { $result.registryBinding.aclUnchanged=$false }
+            registry-version-downgrade { $result.schemaVersion='aiw.dev/research/control-appcontainer-guest/v0alpha1'; $result.observation.schemaVersion='aiw.dev/research/control-appcontainer/v0alpha1' }
             held-root-pid { $result.observation.appContainer.readCanary.fixtureToken.processId=0 }
             self-root-pid { $result.observation.appContainer.readCanary.observation.ownProcessToken.processId=0 }
             wrong-package { $result.observation.appContainer.readCanary.fixtureToken.appContainerSid='S-1-15-2-1-2-3-4-5-6-7' }
@@ -53,7 +66,7 @@ foreach ($case in $cases) {
         $journal.resultSha256=(Get-FileHash -LiteralPath $resultPath).Hash.ToLowerInvariant()
         $journal | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $journalPath
         $rejected=$false
-        try { & $verifier -Root $copy | Out-Null } catch { $rejected=$true }
+        try { & $verifier -Root $copy @verificationOptions | Out-Null } catch { $rejected=$true }
         if (!$rejected) { throw "Verifier accepted negative case: $case" }
         $passed+=$case
     } finally {

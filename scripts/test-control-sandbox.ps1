@@ -91,10 +91,12 @@ for ($iteration=1; $iteration -le 2; $iteration++) {
     if ($result.error -or $result.stage -ne 'finished') { throw "Guest control failed: $($result.error)" }
     Write-Output "CONTROL_TRIAL_$iteration=$($result.stage)"
 }
-& (Join-Path $repo "fixtures\control\$verifier") -Root $root | Set-Content (Join-Path $root 'repeatability.json')
+$verificationOptions=@{}
+if ($AppContainerControl) { $verificationOptions.RequireRegistry=$true }
+& (Join-Path $repo "fixtures\control\$verifier") -Root $root @verificationOptions | Set-Content (Join-Path $root 'repeatability.json')
 $report=Get-Content (Join-Path $root 'repeatability.json') -Raw | ConvertFrom-Json
 if ($AppContainerControl) {
-    @('# Repeated AppContainer controls','','Two fresh disposable workers passed the fixed paired control: the same standard user read the same canary in the baseline and received native access denied in AppContainer. Root and descendant package tokens were checked.','','These are research controls, not approved application compatibility evidence. Full bindings, cleanup, and limitations are retained in repeatability.json.') | Set-Content (Join-Path $root 'repeatability.md')
+    @('# Repeated AppContainer controls','','Two fresh disposable workers passed the fixed paired controls: the same standard user read the file and registry canaries in the baseline and received native access denied in AppContainer. Root and descendant package tokens were checked.','','These are research controls, not approved application compatibility evidence. Full bindings, cleanup, and limitations are retained in repeatability.json.') | Set-Content (Join-Path $root 'repeatability.md')
     Write-Output "CONTROL_REPORT=$root\repeatability.json"
     return
 }

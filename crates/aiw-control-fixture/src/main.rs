@@ -32,6 +32,7 @@ const CHILD_CLEANUP_TIMEOUT: Duration = Duration::from_secs(2);
 enum Mode {
     RoundTrip,
     ReadCanary,
+    ReadRegistry,
     Child,
     Token,
     ExpectedFailure,
@@ -67,6 +68,10 @@ enum FixtureResult {
     },
     ReadCanary {
         outcome: CanaryOutcome,
+    },
+    #[cfg(windows)]
+    ReadRegistry {
+        probe: aiw_windows_platform::ControlRegistryReadProbe,
     },
     Child {
         child_process_id: u32,
@@ -159,6 +164,18 @@ fn run_mode(mode: Mode, root: &Path) -> Result<FixtureResult, String> {
         Mode::ReadCanary => Ok(FixtureResult::ReadCanary {
             outcome: read_canary(&root.join(CANARY_NAME)),
         }),
+        Mode::ReadRegistry => {
+            #[cfg(windows)]
+            {
+                Ok(FixtureResult::ReadRegistry {
+                    probe: aiw_windows_platform::read_fixed_control_registry_canary(),
+                })
+            }
+            #[cfg(not(windows))]
+            {
+                Err("registry control requires Windows".to_owned())
+            }
+        }
         Mode::Child => child(root),
         Mode::Token => Ok(FixtureResult::Token),
         Mode::ExpectedFailure => Ok(FixtureResult::ExpectedFailure {

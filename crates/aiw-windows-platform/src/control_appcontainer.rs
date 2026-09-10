@@ -95,6 +95,7 @@ pub struct ResourceObservation {
 #[serde(rename_all = "camelCase")]
 pub struct ModeObservations {
     pub read_canary: FixedFixtureObservation,
+    pub read_registry: FixedFixtureObservation,
     pub child: FixedFixtureObservation,
 }
 #[derive(Debug, Clone, Serialize)]
@@ -153,6 +154,14 @@ pub fn execute_fixed_control_appcontainer()
         &launcher_token.user_sid,
     )?;
     remove_fixed_result(Path::new(CANARY_DIR), "read-canary")?;
+    let baseline_read_registry = launch_fixture(
+        "read-registry",
+        None,
+        Path::new(CANARY_DIR),
+        None,
+        &launcher_token.user_sid,
+    )?;
+    remove_fixed_result(Path::new(CANARY_DIR), "read-registry")?;
     let baseline_child = launch_fixture(
         "child",
         None,
@@ -199,6 +208,14 @@ pub fn execute_fixed_control_appcontainer()
             &launcher_token.user_sid,
         )?;
         remove_fixed_result(Path::new(CANARY_DIR), "read-canary")?;
+        let registry = launch_fixture(
+            "read-registry",
+            Some(profile.sid),
+            Path::new(CANARY_DIR),
+            Some(profile.sid),
+            &launcher_token.user_sid,
+        )?;
+        remove_fixed_result(Path::new(CANARY_DIR), "read-registry")?;
         let child = launch_fixture(
             "child",
             Some(profile.sid),
@@ -206,19 +223,20 @@ pub fn execute_fixed_control_appcontainer()
             Some(profile.sid),
             &launcher_token.user_sid,
         )?;
-        Ok::<_, ControlAppContainerError>((read, child))
+        Ok::<_, ControlAppContainerError>((read, registry, child))
     })();
     let deleted = profile.delete();
-    let (appcontainer_read_canary, appcontainer_child) = match (candidate, deleted) {
-        (Ok(result), Ok(())) => result,
-        (Err(error), cleanup) => {
-            return Err(fixed(format!("{error}; profile cleanup={cleanup:?}")));
-        }
-        (_, Err(error)) => return Err(error),
-    };
+    let (appcontainer_read_canary, appcontainer_read_registry, appcontainer_child) =
+        match (candidate, deleted) {
+            (Ok(result), Ok(())) => result,
+            (Err(error), cleanup) => {
+                return Err(fixed(format!("{error}; profile cleanup={cleanup:?}")));
+            }
+            (_, Err(error)) => return Err(error),
+        };
     canary.verify_unchanged()?;
     Ok(ControlAppContainerObservation {
-        schema_version: "aiw.dev/research/control-appcontainer/v0alpha1".to_owned(),
+        schema_version: "aiw.dev/research/control-appcontainer/v0alpha2".to_owned(),
         production_evidence: false,
         profile: ProfileObservation {
             name: PROFILE_NAME.to_owned(),
@@ -234,10 +252,12 @@ pub fn execute_fixed_control_appcontainer()
         },
         baseline: ModeObservations {
             read_canary: baseline_read_canary,
+            read_registry: baseline_read_registry,
             child: baseline_child,
         },
         appcontainer: ModeObservations {
             read_canary: appcontainer_read_canary,
+            read_registry: appcontainer_read_registry,
             child: appcontainer_child,
         },
         cleanup: CleanupObservation {
@@ -381,6 +401,7 @@ fn verify_fixture_report(
 ) -> Result<(), ControlAppContainerError> {
     let expected_mode = match mode {
         "read-canary" => "readCanary",
+        "read-registry" => "readRegistry",
         "child" => "child",
         _ => return Err(fixed("unreviewed fixture mode")),
     };
@@ -394,6 +415,22 @@ fn verify_fixture_report(
         .and_then(serde_json::Value::as_object)
         .ok_or_else(|| fixed("fixture report omitted result"))?;
     match mode {
+        "read-registry" => {
+            let expected = if candidate { "accessDenied" } else { "success" };
+            if result.get("status").and_then(serde_json::Value::as_str) != Some("readRegistry")
+                || result
+                    .get("probe")
+                    .and_then(|p| p.get("outcome"))
+                    .and_then(|o| o.get("kind"))
+                    .and_then(serde_json::Value::as_str)
+                    != Some(expected)
+            {
+                return Err(fixed(format!(
+                    "registry control outcome differed from expectation: {}",
+                    serde_json::Value::Object(result.clone())
+                )));
+            }
+        }
         "read-canary" => {
             if result.get("status").and_then(serde_json::Value::as_str) != Some("readCanary") {
                 return Err(fixed("read-canary fixture reported another result"));
