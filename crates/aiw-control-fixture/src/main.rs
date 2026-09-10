@@ -2,7 +2,9 @@
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
 use std::process::{Command, ExitCode, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -50,7 +52,11 @@ struct FixtureReport {
 }
 
 #[derive(Serialize)]
-#[serde(tag = "status", rename_all = "camelCase")]
+#[serde(
+    tag = "status",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 enum FixtureResult {
     RoundTrip {
         initial_sha256: String,
@@ -76,7 +82,11 @@ enum FixtureResult {
 }
 
 #[derive(Serialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 enum CanaryOutcome {
     Success {
         size_bytes: u64,

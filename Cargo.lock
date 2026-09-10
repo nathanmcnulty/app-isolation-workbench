@@ -33,6 +33,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "aiw-control-fixture"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "aiw-token",
+ "clap",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "aiw-core"
 version = "0.1.0-alpha.1"
 dependencies = [
