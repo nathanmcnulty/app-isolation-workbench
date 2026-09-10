@@ -4,6 +4,7 @@ mod application_token;
 mod completion;
 mod failure_snapshots;
 mod imported_msi;
+mod product_registration;
 mod registry_observations;
 mod runtime_context;
 mod scenario;
@@ -42,6 +43,11 @@ pub use imported_msi::{
     IMPORTED_MSI_GUEST_REQUEST_SCHEMA_VERSION, IMPORTED_MSI_SCENARIO_RESULT_SCHEMA_VERSION,
     ImportedMsiGuestRequest, ImportedMsiRequestError, ImportedMsiScenarioResult,
     ImportedMsiScenarioStatus,
+};
+pub use product_registration::{
+    IMPORTED_MSI_PRODUCT_REGISTRATION_EVENT, IMPORTED_MSI_PRODUCT_REGISTRATION_SCHEMA_VERSION,
+    ImportedMsiProductRegistrationEvidence, MsiMachineProductState, validate_msi_product_code,
+    verify_msi_product_registration_evidence,
 };
 pub use registry_observations::{
     ApplicationRegistryRoot, ApplicationRegistrySnapshot, IMPORTED_MSI_REGISTRY_EVENT,

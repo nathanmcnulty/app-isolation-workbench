@@ -17,9 +17,9 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 pub const COMPILED_MSI_SCENARIO_SCHEMA_VERSION: &str =
-    "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha5";
+    "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha6";
 pub const NOTEPAD_PLUS_PLUS_MSI_PROFILE: &str =
-    "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha5";
+    "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha6";
 
 const NOTEPAD_PLUS_PLUS_ENTRYPOINT_ID: &str = "notepad-plus-plus";
 const NOTEPAD_PLUS_PLUS_ENTRYPOINT_PATH: &str = "notepad++.exe";
@@ -83,6 +83,9 @@ impl CompiledMsiScenario {
     pub fn validate(&self) -> Result<(), ScenarioCompileError> {
         let current = self.schema_version == COMPILED_MSI_SCENARIO_SCHEMA_VERSION
             && self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE;
+        let registry_profile = self.schema_version
+            == "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha5"
+            && self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha5";
         let token_profile = self.schema_version
             == "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha2"
             && self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha2";
@@ -95,12 +98,18 @@ impl CompiledMsiScenario {
         let legacy = self.schema_version
             == "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha1"
             && self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha1";
-        if !(current || standard_user_legacy || legacy_exercise || token_profile || legacy)
+        if !(current
+            || registry_profile
+            || standard_user_legacy
+            || legacy_exercise
+            || token_profile
+            || legacy)
             || (legacy_exercise
                 && self.document_exercise.as_ref() != Some(&FixedDocumentExercise::legacy()))
-            || ((current || standard_user_legacy)
+            || ((current || registry_profile || standard_user_legacy)
                 && self.document_exercise.as_ref() != Some(&FixedDocumentExercise::standard_user()))
             || (!current
+                && !registry_profile
                 && !standard_user_legacy
                 && !legacy_exercise
                 && self.document_exercise.is_some())
@@ -131,6 +140,7 @@ impl CompiledMsiScenario {
     /// The versioned profile is part of the approved scenario hash.
     pub fn requires_application_token(&self) -> bool {
         self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
+            || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha5"
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha3"
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha4"
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha2"
@@ -138,16 +148,23 @@ impl CompiledMsiScenario {
 
     pub fn requires_application_exercise(&self) -> bool {
         self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
+            || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha5"
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha3"
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha4"
     }
 
     pub fn requires_standard_user(&self) -> bool {
         self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
+            || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha5"
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha4"
     }
 
     pub fn requires_registry_observations(&self) -> bool {
+        self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
+            || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha5"
+    }
+
+    pub fn requires_product_registration(&self) -> bool {
         self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
     }
 
@@ -368,6 +385,7 @@ mod tests {
             compiled.graceful_close_timeout_seconds,
             GRACEFUL_CLOSE_TIMEOUT_SECONDS
         );
+        assert!(compiled.requires_product_registration());
         let hash = compiled.canonical_sha256().unwrap();
         assert_eq!(hash.len(), 64);
         assert_eq!(compiled.canonical_sha256().unwrap(), hash);
