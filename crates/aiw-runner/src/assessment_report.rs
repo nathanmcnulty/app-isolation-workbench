@@ -820,8 +820,11 @@ mod failure_progress_tests {
     use super::*;
     use aiw_evidence::{ArtifactRole, EvidenceEvent, EvidenceLog};
     use aiw_provider_wsb::{
-        CompletionArtifact, CompletionStatus, ImportedMsiFailedAttempt, ImportedMsiGuestRequest,
-        MsiExecutionStage, MsiStageResult, MsiStageStatus, WindowsSandboxCompletionReceipt,
+        ApplicationFileEntry, ApplicationFileRoot, ApplicationFilesystemSnapshot,
+        ApplicationRegistryRoot, ApplicationRegistrySnapshot, CompletionArtifact, CompletionStatus,
+        FailedSnapshotPhase, ImportedMsiFailedAttempt, ImportedMsiFailedSnapshots,
+        ImportedMsiGuestRequest, MsiExecutionStage, MsiStageResult, MsiStageStatus, RegistryScope,
+        RegistryView, StandardUserRuntimeContext, WindowsSandboxCompletionReceipt,
     };
 
     #[test]
@@ -871,12 +874,83 @@ mod failure_progress_tests {
             .collect();
         let attempt =
             ImportedMsiFailedAttempt::new(&request, stages, "fixed editor mismatch").unwrap();
+        let empty_registry = || ApplicationRegistrySnapshot {
+            keys: vec![],
+            values: vec![],
+            absent_roots: [
+                (
+                    ApplicationRegistryRoot::MachineApplication,
+                    RegistryView::Registry64,
+                ),
+                (
+                    ApplicationRegistryRoot::MachineApplication,
+                    RegistryView::Registry32,
+                ),
+                (
+                    ApplicationRegistryRoot::UserApplication,
+                    RegistryView::Registry64,
+                ),
+                (
+                    ApplicationRegistryRoot::UserApplication,
+                    RegistryView::Registry32,
+                ),
+            ]
+            .into_iter()
+            .map(|(root, view)| RegistryScope { root, view })
+            .collect(),
+            issues: vec![],
+        };
+        let before_install = FailedSnapshotPhase {
+            files: ApplicationFilesystemSnapshot {
+                entries: vec![],
+                issues: vec![],
+            },
+            registry: empty_registry(),
+        };
+        let after_install = FailedSnapshotPhase {
+            files: ApplicationFilesystemSnapshot {
+                entries: vec![ApplicationFileEntry {
+                    root: ApplicationFileRoot::Installation,
+                    path: "installed.txt".to_owned(),
+                    size_bytes: 1,
+                    sha256: "a".repeat(64),
+                }],
+                issues: vec![],
+            },
+            registry: empty_registry(),
+        };
+        let snapshots = ImportedMsiFailedSnapshots {
+            schema_version: aiw_provider_wsb::IMPORTED_MSI_FAILED_SNAPSHOTS_SCHEMA_VERSION
+                .to_owned(),
+            run_id: request.run_id.clone(),
+            sandbox_id: request.sandbox_id.clone(),
+            request_sha256: request.request_sha256.clone(),
+            scenario_sha256: request.scenario_sha256.clone(),
+            capture_context: Some(StandardUserRuntimeContext {
+                user_sid: "S-1-5-21-1-2-3-1001".to_owned(),
+                profile_path: r"C:\Users\AiwStandardUser".to_owned(),
+                roaming_app_data: r"C:\Users\AiwStandardUser\AppData\Roaming".to_owned(),
+                local_app_data: r"C:\Users\AiwStandardUser\AppData\Local".to_owned(),
+                administrators_enabled: false,
+            }),
+            before_install: Some(before_install),
+            after_install: Some(after_install),
+            after_exercise: None,
+        };
+        snapshots.validate_for(&request, &attempt).unwrap();
         let mut log = EvidenceLog::new();
         log.append(EvidenceEvent {
             observed_utc: "untrusted-time".to_owned(),
             kind: aiw_provider_wsb::IMPORTED_MSI_STAGE_PROGRESS_EVENT.to_owned(),
             source: "aiw-guest-agent".to_owned(),
             payload: serde_json::to_value(&attempt.progress).unwrap(),
+        })
+        .unwrap();
+        log.append(EvidenceEvent {
+            observed_utc: "untrusted-time".to_owned(),
+            kind: aiw_provider_wsb::IMPORTED_MSI_FAILED_SNAPSHOTS_EVENT.to_owned(),
+            source: "aiw-guest-agent".to_owned(),
+            payload: serde_json::to_value(&snapshots).unwrap(),
         })
         .unwrap();
         let mut bytes = Vec::new();
@@ -947,9 +1021,60 @@ mod failure_progress_tests {
             verified.attempt.progress.stages[6].status,
             MsiStageStatus::Failed
         );
+        assert!(verified.snapshots.is_some());
+        assert!(verified.installation_file_changes.is_some());
+        assert_eq!(
+            verified
+                .installation_file_changes
+                .as_ref()
+                .unwrap()
+                .diffs
+                .len(),
+            1
+        );
+        assert!(verified.exercise_file_changes.is_none());
+        assert!(verified.installation_registry_changes.is_some());
+        assert!(verified.exercise_registry_changes.is_none());
         assert!(matches!(
             read_failure_progress(&root, &expectation, &request),
             FailureProgressEvidence::Verified(_)
+        ));
+        let mut missing_after_install = snapshots.clone();
+        missing_after_install.after_install = None;
+        let mut missing_log = EvidenceLog::new();
+        missing_log
+            .append(EvidenceEvent {
+                observed_utc: "untrusted-time".to_owned(),
+                kind: aiw_provider_wsb::IMPORTED_MSI_STAGE_PROGRESS_EVENT.to_owned(),
+                source: "aiw-guest-agent".to_owned(),
+                payload: serde_json::to_value(&attempt.progress).unwrap(),
+            })
+            .unwrap();
+        missing_log
+            .append(EvidenceEvent {
+                observed_utc: "untrusted-time".to_owned(),
+                kind: aiw_provider_wsb::IMPORTED_MSI_FAILED_SNAPSHOTS_EVENT.to_owned(),
+                source: "aiw-guest-agent".to_owned(),
+                payload: serde_json::to_value(&missing_after_install).unwrap(),
+            })
+            .unwrap();
+        let mut missing_bytes = Vec::new();
+        for record in missing_log.records() {
+            serde_json::to_writer(&mut missing_bytes, record).unwrap();
+            missing_bytes.push(b'\n');
+        }
+        fs::write(root.join("evidence.jsonl"), &missing_bytes).unwrap();
+        receipt.evidence_root_hash = missing_log.manifest().unwrap().root_hash;
+        receipt.artifacts[1].size_bytes = missing_bytes.len() as u64;
+        receipt.artifacts[1].sha256 = hex::encode(Sha256::digest(&missing_bytes));
+        fs::write(
+            root.join("completion.json"),
+            serde_json::to_vec(&receipt).unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            read_failure_progress(&root, &expectation, &request),
+            FailureProgressEvidence::Rejected
         ));
         fs::write(root.join("evidence.jsonl"), b"tampered").unwrap();
         assert!(matches!(
