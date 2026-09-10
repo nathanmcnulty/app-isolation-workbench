@@ -18,6 +18,8 @@ const ROOT_MODEL_RELS: &str = "3D/_rels/3dmodel.model.rels";
 const LEAF_MODEL: &str = "3D/Objects/object_1.model";
 const MODEL_RELATIONSHIP: &str = "http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel";
 const CORE_3MF_NAMESPACE: &str = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02";
+const PRODUCTION_3MF_NAMESPACE: &str =
+    "http://schemas.microsoft.com/3dmanufacturing/production/2015/06";
 const COMPONENT_TRANSFORM: &str = "1 0 0 0 1 0 0 0 1 0.5 0.5 0.5";
 const BUILD_TRANSFORM: &str = "1 0 0 0 1 0 0 0 1 99.41021 99.41022 0";
 
@@ -200,67 +202,29 @@ fn safe_relationship_target(value: &str) -> bool {
 }
 
 fn verify_root_model(bytes: &[u8]) -> Result<(), String> {
-    let mut object = 0_u8;
-    let mut component = 0_u8;
-    let mut build = 0_u8;
-    let mut item = 0_u8;
-    parse_xml(bytes, |name, attributes, depth| {
-        if depth == 0 {
-            require_core_model_root(name, &attributes)?;
-        }
-        match name {
-            "object" => {
-                if attribute(&attributes, "id") != Some("2")
-                    || attribute(&attributes, "type") != Some("model")
-                {
-                    return Err(
-                        "3MF root model object is not the reviewed component object".to_owned()
-                    );
-                }
-                object = object.checked_add(1).ok_or("too many root model objects")?;
-            }
-            "component" => {
-                if attribute(&attributes, "objectid") != Some("1")
-                    || attribute(&attributes, "path") != Some("/3D/Objects/object_1.model")
-                    || attribute(&attributes, "transform") != Some(COMPONENT_TRANSFORM)
-                {
-                    return Err(
-                        "3MF component does not reference the reviewed leaf mesh and transform"
-                            .to_owned(),
-                    );
-                }
-                component = component
-                    .checked_add(1)
-                    .ok_or("too many root model components")?;
-            }
-            "build" => build = build.checked_add(1).ok_or("too many 3MF build elements")?,
-            "item" => {
-                if attribute(&attributes, "objectid") != Some("2")
-                    || attribute(&attributes, "transform") != Some(BUILD_TRANSFORM)
-                    || attribute(&attributes, "printable") != Some("1")
-                {
-                    return Err(
-                        "3MF build item does not reference the reviewed component and transform"
-                            .to_owned(),
-                    );
-                }
-                item = item.checked_add(1).ok_or("too many 3MF build items")?;
-            }
-            "mesh" | "vertices" | "triangles" | "vertex" | "triangle" => {
-                return Err("3MF root model must not embed an alternate mesh".to_owned());
-            }
-            _ => {}
-        }
-        Ok(())
-    })?;
-    if object == 1 && component == 1 && build == 1 && item == 1 {
-        Ok(())
-    } else {
-        Err(
-            "3MF root model does not contain the reviewed object, component, and build graph"
-                .to_owned(),
-        )
+    let document = parse_model_xml(bytes)?;
+    require_model_structure(&document, true)?;
+    let resources = exactly_one_named_child(&document, 0, "resources")?;
+    let object = exactly_one_child(&document, resources, "object")?;
+    let components = exactly_one_child(&document, object, "components")?;
+    let component = exactly_one_child(&document, components, "component")?;
+    let build = exactly_one_named_child(&document, 0, "build")?;
+    let item = exactly_one_child(&document, build, "item")?;
+    if attribute(&document[object].attributes, "id") != Some("2")
+        || attribute(&document[object].attributes, "type") != Some("model")
+        || !document[component].raw_attributes.contains("p:path")
+        || attribute(&document[component].attributes, "objectid") != Some("1")
+        || attribute(&document[component].attributes, "path") != Some("/3D/Objects/object_1.model")
+        || attribute(&document[component].attributes, "transform") != Some(COMPONENT_TRANSFORM)
+        || attribute(&document[item].attributes, "objectid") != Some("2")
+        || attribute(&document[item].attributes, "transform") != Some(BUILD_TRANSFORM)
+        || attribute(&document[item].attributes, "printable") != Some("1")
+    {
+        return Err(
+            "3MF root model does not contain the reviewed component and build graph".to_owned(),
+        );
     }
+    Ok(())
 }
 
 fn verify_leaf_model(bytes: &[u8]) -> Result<(), String> {
@@ -276,43 +240,47 @@ fn verify_leaf_model(bytes: &[u8]) -> Result<(), String> {
         ("0", "3", "1"),
         ("2", "1", "3"),
     ];
-    let mut object = 0_u8;
-    let mut mesh = 0_u8;
-    let mut build = 0_u8;
-    let mut vertices = Vec::new();
-    let mut triangles = Vec::new();
-    parse_xml(bytes, |name, attributes, depth| {
-        if depth == 0 {
-            require_core_model_root(name, &attributes)?;
-        }
-        match name {
-            "object" => {
-                if attribute(&attributes, "id") != Some("1")
-                    || attribute(&attributes, "type") != Some("model")
-                {
-                    return Err("3MF leaf model object is not the reviewed tetrahedron".to_owned());
-                }
-                object = object.checked_add(1).ok_or("too many leaf model objects")?;
-            }
-            "mesh" => mesh = mesh.checked_add(1).ok_or("too many leaf meshes")?,
-            "vertex" => vertices.push((
-                required_attribute(&attributes, "x")?.to_owned(),
-                required_attribute(&attributes, "y")?.to_owned(),
-                required_attribute(&attributes, "z")?.to_owned(),
-            )),
-            "triangle" => triangles.push((
-                required_attribute(&attributes, "v1")?.to_owned(),
-                required_attribute(&attributes, "v2")?.to_owned(),
-                required_attribute(&attributes, "v3")?.to_owned(),
-            )),
-            "component" | "item" => {
-                return Err("3MF leaf model contains an unexpected reference".to_owned());
-            }
-            "build" => build = build.checked_add(1).ok_or("too many leaf build elements")?,
-            _ => {}
-        }
-        Ok(())
-    })?;
+    let document = parse_model_xml(bytes)?;
+    require_model_structure(&document, false)?;
+    let resources = exactly_one_named_child(&document, 0, "resources")?;
+    let object = exactly_one_child(&document, resources, "object")?;
+    let mesh = exactly_one_child(&document, object, "mesh")?;
+    let vertices_element = exactly_one_named_child(&document, mesh, "vertices")?;
+    let triangles_element = exactly_one_named_child(&document, mesh, "triangles")?;
+    let build = exactly_one_named_child(&document, 0, "build")?;
+    if !children(&document, build).is_empty()
+        || attribute(&document[object].attributes, "id") != Some("1")
+        || attribute(&document[object].attributes, "type") != Some("model")
+    {
+        return Err("3MF leaf model is not the reviewed tetrahedron".to_owned());
+    }
+    let vertices = children_named(&document, vertices_element, "vertex")
+        .into_iter()
+        .map(|index| {
+            Ok((
+                required_attribute(&document[index].attributes, "x")?.to_owned(),
+                required_attribute(&document[index].attributes, "y")?.to_owned(),
+                required_attribute(&document[index].attributes, "z")?.to_owned(),
+            ))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    if children(&document, mesh).len() != 2
+        || children(&document, vertices_element).len() != vertices.len()
+        || children(&document, triangles_element).len()
+            != children_named(&document, triangles_element, "triangle").len()
+    {
+        return Err("3MF leaf mesh has misplaced elements".to_owned());
+    }
+    let triangles = children_named(&document, triangles_element, "triangle")
+        .into_iter()
+        .map(|index| {
+            Ok((
+                required_attribute(&document[index].attributes, "v1")?.to_owned(),
+                required_attribute(&document[index].attributes, "v2")?.to_owned(),
+                required_attribute(&document[index].attributes, "v3")?.to_owned(),
+            ))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
     let expected_vertices: Vec<_> = expected_vertices
         .into_iter()
         .map(|(x, y, z)| (x.to_owned(), y.to_owned(), z.to_owned()))
@@ -321,12 +289,7 @@ fn verify_leaf_model(bytes: &[u8]) -> Result<(), String> {
         .into_iter()
         .map(|(v1, v2, v3)| (v1.to_owned(), v2.to_owned(), v3.to_owned()))
         .collect();
-    if object == 1
-        && mesh == 1
-        && build == 1
-        && vertices == expected_vertices
-        && triangles == expected_triangles
-    {
+    if vertices == expected_vertices && triangles == expected_triangles {
         Ok(())
     } else {
         Err("3MF leaf model is not the reviewed four-vertex, four-triangle tetrahedron".to_owned())
@@ -374,6 +337,193 @@ where
         Ok(())
     } else {
         Err("invalid XML nesting".to_owned())
+    }
+}
+
+struct ModelElement {
+    name: String,
+    attributes: BTreeMap<String, String>,
+    raw_attributes: BTreeSet<String>,
+    parent: Option<usize>,
+}
+
+fn parse_model_xml(bytes: &[u8]) -> Result<Vec<ModelElement>, String> {
+    let mut reader = Reader::from_reader(bytes);
+    reader.config_mut().trim_text(true);
+    let mut buffer = Vec::new();
+    let mut elements = Vec::new();
+    let mut stack = Vec::new();
+    loop {
+        match reader
+            .read_event_into(&mut buffer)
+            .map_err(|error| format!("invalid XML: {error}"))?
+        {
+            Event::Start(element) => {
+                let (name, attributes) = element_parts(&element)?;
+                let raw_attributes = raw_attribute_names(&element)?;
+                let parent = stack.last().copied();
+                reject_namespace_shadow(parent, &raw_attributes)?;
+                let index = elements.len();
+                elements.push(ModelElement {
+                    name,
+                    attributes,
+                    raw_attributes,
+                    parent,
+                });
+                stack.push(index);
+            }
+            Event::Empty(element) => {
+                let (name, attributes) = element_parts(&element)?;
+                let raw_attributes = raw_attribute_names(&element)?;
+                reject_namespace_shadow(stack.last().copied(), &raw_attributes)?;
+                elements.push(ModelElement {
+                    name,
+                    attributes,
+                    raw_attributes,
+                    parent: stack.last().copied(),
+                });
+            }
+            Event::End(_) => {
+                stack.pop().ok_or("invalid XML nesting")?;
+            }
+            Event::DocType(_) | Event::GeneralRef(_) | Event::PI(_) => {
+                return Err(
+                    "3MF XML must not contain DTDs, entities, or processing instructions"
+                        .to_owned(),
+                );
+            }
+            Event::Text(text) if text.as_ref().contains(&b'&') => {
+                return Err("3MF XML must not contain entity references".to_owned());
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buffer.clear();
+    }
+    if stack.is_empty() && !elements.is_empty() {
+        Ok(elements)
+    } else {
+        Err("invalid XML nesting".to_owned())
+    }
+}
+
+fn raw_attribute_names(element: &BytesStart<'_>) -> Result<BTreeSet<String>, String> {
+    let mut names = BTreeSet::new();
+    for attribute in element.attributes().with_checks(true) {
+        let attribute = attribute.map_err(|error| format!("invalid XML attribute: {error}"))?;
+        let name = std::str::from_utf8(attribute.key.as_ref())
+            .map_err(|_| "3MF XML attribute is not UTF-8")?
+            .to_owned();
+        if !names.insert(name) {
+            return Err("3MF XML has duplicate attribute names".to_owned());
+        }
+    }
+    Ok(names)
+}
+
+fn reject_namespace_shadow(
+    parent: Option<usize>,
+    raw_attributes: &BTreeSet<String>,
+) -> Result<(), String> {
+    if parent.is_some() && raw_attributes.iter().any(|name| name.starts_with("xmlns")) {
+        return Err("3MF model must not shadow its reviewed namespaces".to_owned());
+    }
+    Ok(())
+}
+
+fn require_model_structure(
+    document: &[ModelElement],
+    root_uses_production: bool,
+) -> Result<(), String> {
+    let root = document.first().ok_or("3MF model is empty")?;
+    require_core_model_root(&root.name, &root.attributes)?;
+    if root.parent.is_some()
+        || document
+            .iter()
+            .skip(1)
+            .any(|element| element.parent.is_none())
+        || (root_uses_production && !root.raw_attributes.contains("xmlns:p")
+            || root_uses_production
+                && attribute(&root.attributes, "p") != Some(PRODUCTION_3MF_NAMESPACE))
+    {
+        return Err("3MF model namespace declarations are not the reviewed values".to_owned());
+    }
+    for index in 1..document.len() {
+        let parent = document[index]
+            .parent
+            .ok_or("3MF model has a detached element")?;
+        if parent >= index {
+            return Err("3MF model has an invalid element hierarchy".to_owned());
+        }
+    }
+    let root_children = children(document, 0);
+    if root_children.iter().any(|index| {
+        !matches!(
+            document[*index].name.as_str(),
+            "metadata" | "resources" | "build"
+        )
+    }) || root_children
+        .iter()
+        .filter(|index| document[**index].name == "resources")
+        .count()
+        != 1
+        || root_children
+            .iter()
+            .filter(|index| document[**index].name == "build")
+            .count()
+            != 1
+        || root_children
+            .iter()
+            .filter(|index| document[**index].name == "metadata")
+            .any(|index| !children(document, *index).is_empty())
+    {
+        return Err("3MF model has an unexpected root structure".to_owned());
+    }
+    Ok(())
+}
+
+fn children(document: &[ModelElement], parent: usize) -> Vec<usize> {
+    document
+        .iter()
+        .enumerate()
+        .filter_map(|(index, element)| (element.parent == Some(parent)).then_some(index))
+        .collect()
+}
+
+fn children_named(document: &[ModelElement], parent: usize, name: &str) -> Vec<usize> {
+    children(document, parent)
+        .into_iter()
+        .filter(|index| document[*index].name == name)
+        .collect()
+}
+
+fn exactly_one_child(
+    document: &[ModelElement],
+    parent: usize,
+    name: &str,
+) -> Result<usize, String> {
+    let named_children = children_named(document, parent, name);
+    if named_children.len() == 1 && children(document, parent).len() == 1 {
+        Ok(named_children[0])
+    } else {
+        Err(format!(
+            "3MF model must contain exactly one {name} in the reviewed hierarchy"
+        ))
+    }
+}
+
+fn exactly_one_named_child(
+    document: &[ModelElement],
+    parent: usize,
+    name: &str,
+) -> Result<usize, String> {
+    let named_children = children_named(document, parent, name);
+    if named_children.len() == 1 {
+        Ok(named_children[0])
+    } else {
+        Err(format!(
+            "3MF model must contain exactly one {name} in the reviewed hierarchy"
+        ))
     }
 }
 
@@ -434,7 +584,7 @@ mod tests {
     const TYPES: &str = r#"<Types><Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/></Types>"#;
     const ROOT_RELS_XML: &str = r#"<Relationships><Relationship Id="r" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel" Target="/3D/3dmodel.model"/></Relationships>"#;
     const MODEL_RELS_XML: &str = r#"<Relationships><Relationship Id="r" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel" Target="/3D/Objects/object_1.model"/></Relationships>"#;
-    const ROOT_XML: &str = r#"<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><resources><object id="2" type="model"><components><component path="/3D/Objects/object_1.model" objectid="1" transform="1 0 0 0 1 0 0 0 1 0.5 0.5 0.5"/></components></object></resources><build><item objectid="2" printable="1" transform="1 0 0 0 1 0 0 0 1 99.41021 99.41022 0"/></build></model>"#;
+    const ROOT_XML: &str = r#"<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06"><resources><object id="2" type="model"><components><component p:path="/3D/Objects/object_1.model" objectid="1" transform="1 0 0 0 1 0 0 0 1 0.5 0.5 0.5"/></components></object></resources><build><item objectid="2" printable="1" transform="1 0 0 0 1 0 0 0 1 99.41021 99.41022 0"/></build></model>"#;
     const LEAF_XML: &str = r#"<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><resources><object id="1" type="model"><mesh><vertices><vertex x="-0.5" y="-0.5" z="-0.5"/><vertex x="-0.5" y="0.5" z="-0.5"/><vertex x="0.5" y="-0.5" z="-0.5"/><vertex x="-0.5" y="-0.5" z="0.5"/></vertices><triangles><triangle v1="0" v2="1" v3="2"/><triangle v1="0" v2="2" v3="3"/><triangle v1="0" v2="3" v3="1"/><triangle v1="2" v2="1" v3="3"/></triangles></mesh></object></resources><build/></model>"#;
 
     fn package(parts: &[(&str, &[u8])]) -> Vec<u8> {
@@ -453,12 +603,16 @@ mod tests {
     }
 
     fn valid_package() -> Vec<u8> {
+        package_with_models(ROOT_XML, LEAF_XML)
+    }
+
+    fn package_with_models(root: &str, leaf: &str) -> Vec<u8> {
         package(&[
             ("[Content_Types].xml", TYPES.as_bytes()),
             (ROOT_RELS, ROOT_RELS_XML.as_bytes()),
             (ROOT_MODEL_RELS, MODEL_RELS_XML.as_bytes()),
-            (ROOT_MODEL, ROOT_XML.as_bytes()),
-            (LEAF_MODEL, LEAF_XML.as_bytes()),
+            (ROOT_MODEL, root.as_bytes()),
+            (LEAF_MODEL, leaf.as_bytes()),
         ])
     }
 
@@ -518,6 +672,19 @@ mod tests {
         let bytes = package(&[("large.bin", &bomb)]);
         assert!(bytes.len() <= MAX_INPUT_BYTES);
         assert!(verify_bambu_export(&bytes).is_err());
+    }
+
+    #[test]
+    fn rejects_misplaced_mesh_graphs_and_namespace_shadowing() {
+        let misplaced_root = r#"<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06"><resources><object id="2" type="model"/></resources><component p:path="/3D/Objects/object_1.model" objectid="1" transform="1 0 0 0 1 0 0 0 1 0.5 0.5 0.5"/><build><item objectid="2" printable="1" transform="1 0 0 0 1 0 0 0 1 99.41021 99.41022 0"/></build></model>"#;
+        assert!(verify_bambu_export(&package_with_models(misplaced_root, LEAF_XML)).is_err());
+
+        let misplaced_leaf = r#"<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><resources><object id="1" type="model"><mesh/></object></resources><metadata><vertices><vertex x="-0.5" y="-0.5" z="-0.5"/><vertex x="-0.5" y="0.5" z="-0.5"/><vertex x="0.5" y="-0.5" z="-0.5"/><vertex x="-0.5" y="-0.5" z="0.5"/></vertices><triangles><triangle v1="0" v2="1" v3="2"/><triangle v1="0" v2="2" v3="3"/><triangle v1="0" v2="3" v3="1"/><triangle v1="2" v2="1" v3="3"/></triangles></metadata><build/></model>"#;
+        assert!(verify_bambu_export(&package_with_models(ROOT_XML, misplaced_leaf)).is_err());
+
+        let shadowed_namespace =
+            ROOT_XML.replacen("<components>", "<components xmlns=\"urn:unreviewed\">", 1);
+        assert!(verify_bambu_export(&package_with_models(&shadowed_namespace, LEAF_XML)).is_err());
     }
 
     #[test]
