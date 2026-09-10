@@ -36,9 +36,9 @@ use aiw_provider_wsb::{
 };
 use aiw_runner::{
     RunnerError, SessionTransaction, WsbGoldenProbeExecution, WsbGoldenProbeStart,
-    WsbMsiReportSetEntry, WsbMsiReportSetInput, WsbPlanningImportReceipt, WsbPlanningImportResult,
-    WsbPreparationError, WsbPreparationReceipt, WsbRecoveryResult, WsbSessionDisposition,
-    WsbSessionStatus, observe_wsb_session_status,
+    WsbMsiReportSetInput, WsbPlanningImportReceipt, WsbPlanningImportResult, WsbPreparationError,
+    WsbPreparationReceipt, WsbRecoveryResult, WsbSessionDisposition, WsbSessionStatus,
+    observe_wsb_session_status,
 };
 #[cfg(windows)]
 use aiw_runner::{
@@ -2612,6 +2612,8 @@ mod tests {
 
     #[test]
     fn report_set_input_validation_rejects_empty_and_oversized_manifests() {
+        use aiw_runner::WsbMsiReportSetEntry;
+
         let empty = WsbMsiReportSetInput {
             schema_version: "aiw.dev/wsb-msi-report-set-input/v0alpha1".to_owned(),
             entries: vec![],
