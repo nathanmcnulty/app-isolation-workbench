@@ -43,7 +43,7 @@ pub struct SandboxBundleExport {
     pub manifest_sha256: String,
     pub manifest: SandboxBundleManifest,
 }
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SandboxBundleVerification {
     pub manifest_sha256: String,
