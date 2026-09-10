@@ -15,6 +15,7 @@ $configPath=Join-Path $copy 'trial-1\configuration.wsb'
 $configBytes=[IO.File]::ReadAllBytes($configPath)
 $passed=@()
 $cases=if ($AppContainerControl) { @('held-root-pid','self-root-pid','wrong-package','child-package','child-user','candidate-medium','candidate-capability','baseline-denied','candidate-missing','resource-drift','profile-cleanup','job-cleanup','launcher-exit','launcher-hash','cleanup','duplicate-session','config-bytes','config-drift','provider-drift') } else { @('root-pid','denial-is-not-missing','child-sid','failure-exit','cleanup','duplicate-session','config-bytes','config-drift','provider-drift') }
+$cases+='cleanup-string-false'
 foreach ($case in $cases) {
     try {
         $result=[Text.Encoding]::UTF8.GetString($resultBytes).TrimStart([char]0xfeff) | ConvertFrom-Json
@@ -39,6 +40,7 @@ foreach ($case in $cases) {
             child-sid { $result.cases[5].observation.result.childToken.userSid='S-1-5-18' }
             failure-exit { $result.cases[6].exitCode=0 }
             cleanup { $journal.cleanupVerified=$false }
+            cleanup-string-false { $journal.cleanupVerified='false' }
             duplicate-session { $journal.sandboxId=(Get-Content (Join-Path $copy 'trial-2\host-journal.json') -Raw | ConvertFrom-Json).sandboxId }
             provider-drift { $journal.providerSha256='0'*64 }
             {$_ -in 'config-bytes','config-drift'} {
@@ -59,6 +61,24 @@ foreach ($case in $cases) {
         [IO.File]::WriteAllBytes($journalPath,$journalBytes)
         [IO.File]::WriteAllBytes($configPath,$configBytes)
     }
+}
+& $verifier -Root $copy | Out-Null
+$outputPath=Join-Path $copy 'trial-1\output'
+$savedOutput=Join-Path $copy 'trial-1\output-unlinked'
+# Both exact paths are beneath this freshly created test copy. Never move the source evidence.
+foreach ($path in @($outputPath,$savedOutput)) {
+    if (![IO.Path]::GetFullPath($path).StartsWith([IO.Path]::GetFullPath($copy)+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)) { throw 'Test output escaped copied workspace' }
+}
+Move-Item -LiteralPath $outputPath -Destination $savedOutput
+try {
+    New-Item -ItemType Junction -Path $outputPath -Target $savedOutput | Out-Null
+    $rejected=$false
+    try { & $verifier -Root $copy | Out-Null } catch { $rejected=$true }
+    if (!$rejected) { throw 'Verifier accepted a linked output directory' }
+    $passed+='linked-output'
+} finally {
+    if (Test-Path -LiteralPath $outputPath) { Remove-Item -LiteralPath $outputPath -Force }
+    Move-Item -LiteralPath $savedOutput -Destination $outputPath
 }
 & $verifier -Root $copy | Out-Null
 [ordered]@{passed=$true; rejectedCases=$passed; copiedFixture=$copy; originalModified=$false} | ConvertTo-Json

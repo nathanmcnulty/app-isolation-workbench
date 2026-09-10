@@ -83,7 +83,8 @@ for ($iteration=1; $iteration -le 2; $iteration++) {
     }
     if (!$journal.cleanupVerified) { throw 'Exact control session cleanup unverified' }
     $resultPath=Join-Path $outputDirectory 'control-result.json'
-    if ((Get-Item -LiteralPath $resultPath).Length -gt 65536) { throw 'Control result exceeded bounds' }
+    $resultItem=Get-Item -LiteralPath $resultPath
+    if ($resultItem.Length -gt 65536 -or $resultItem.PSIsContainer -or ($resultItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or ((Get-Item -LiteralPath $outputDirectory).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Control result exceeded bounds or is linked/non-file' }
     $journal.resultSha256=(Get-FileHash -LiteralPath $resultPath).Hash.ToLowerInvariant()
     $journal | ConvertTo-Json | Set-Content (Join-Path $trial 'host-journal.json')
     $result=Get-Content $resultPath -Raw | ConvertFrom-Json

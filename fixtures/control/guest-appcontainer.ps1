@@ -34,6 +34,7 @@ try {
         if (!$process.WaitForExit(90000)) { $process.Kill(); $process.WaitForExit(5000) | Out-Null; throw 'AppContainer control deadline exceeded' }
         $result.launcherExitCode=$process.ExitCode
         if ((Get-Item 'C:\AIW\Control\launcher.json').Length -gt 49152 -or (Get-Item 'C:\AIW\Control\launcher.stderr').Length -gt 16384) { throw 'Launcher output exceeded bounds' }
+        $result.launcherStderr=Get-Content 'C:\AIW\Control\launcher.stderr' -Raw
         $result.observation=Get-Content 'C:\AIW\Control\launcher.json' -Raw | ConvertFrom-Json
         if ($process.ExitCode -ne 0) { throw "Launcher failed with exit $($process.ExitCode)" }
     } finally { $process.Dispose() }

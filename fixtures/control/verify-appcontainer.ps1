@@ -7,6 +7,7 @@ function Assert-Token($Token, [uint32]$ProcessId, [string]$UserSid, [AllowNull()
     $candidate=![string]::IsNullOrEmpty($PackageSid)
     $level=if ($candidate) { 'low' } else { 'medium' }
     $rid=if ($candidate) { 4096 } else { 8192 }
+    if ($Token.isElevated -isnot [bool] -or $Token.isAppContainer -isnot [bool] -or $Token.capabilities -isnot [array]) { throw 'Token flags/capabilities require typed observations' }
     if (!$Token -or $Token.schemaVersion -ne 'aiw.dev/token-evidence/v0alpha1' -or $ProcessId -eq 0 -or $Token.processId -ne $ProcessId -or $Token.tokenType -ne 'primary' -or $Token.userSid -ne $UserSid -or $Token.isElevated -ne $false -or $Token.integrity.level -ne $level -or $Token.integrity.rid -ne $rid -or $Token.integrity.sid -ne "S-1-16-$rid" -or $Token.isAppContainer -ne $candidate -or $null -eq $Token.capabilities -or $Token.capabilities.Count -ne 0) { throw 'Control process token failed' }
     if ($candidate) {
         if ($Token.appContainerSid -ne $PackageSid) { throw 'Exact AppContainer SID mismatch' }
@@ -17,6 +18,7 @@ foreach ($trial in 1,2) {
     $directory=Join-Path $Root "trial-$trial"
     $binding=Read-ControlTrial $directory
     $journal=$binding.journal; $result=$binding.result; $record=$result.observation
+    if ($record.productionEvidence -isnot [bool]) { throw 'Launcher research evidence flag requires a boolean' }
     if ($result.schemaVersion -ne 'aiw.dev/research/control-appcontainer-guest/v0alpha1' -or $result.launcherExitCode -ne 0 -or $record.schemaVersion -ne 'aiw.dev/research/control-appcontainer/v0alpha1' -or $record.productionEvidence -ne $false) { throw 'AppContainer control completion contract failed' }
     if ($result.launcherSha256 -ne $journal.launcherSha256 -or (Get-FileHash -LiteralPath (Join-Path $directory 'input\aiw-control-appcontainer.exe')).Hash.ToLowerInvariant() -ne $journal.launcherSha256) { throw 'Launcher identity changed' }
     if ($binding.normalizedConfigSha256 -ne 'f4d93e6552169a3e35dc3df6713d2d17f386923abb0631f6f663a87bcdaa16c1') { throw 'AppContainer control requires the fixed disconnected Sandbox configuration' }
@@ -24,6 +26,9 @@ foreach ($trial in 1,2) {
     if (![guid]::TryParse($journal.sandboxId,[ref]$session) -or $session -eq [guid]::Empty) { throw 'Invalid Sandbox identity' }
     Assert-Token $record.launcherToken $result.launcherProcessId $result.standardUserSid $null
     $package=$record.profile.sid
+    foreach ($flag in @($record.profile.deleted,$record.cleanup.profileDeleted,$record.cleanup.baselineJobEmpty,$record.cleanup.appContainerJobEmpty,$record.resource.unchangedAfter)) {
+        if ($flag -isnot [bool] -or $flag -ne $true) { throw 'Cleanup/resource flags require true boolean observations' }
+    }
     if ($record.profile.name -ne 'AIW.Control.Research.v0alpha1' -or $package -notmatch '^S-1-15-2-(\d+-){6}\d+$' -or $record.profile.deleted -ne $true -or $record.cleanup.profileDeleted -ne $true -or $record.cleanup.baselineJobEmpty -ne $true -or $record.cleanup.appContainerJobEmpty -ne $true) { throw 'Profile identity or process/profile cleanup failed' }
     if ($record.resource.canaryPath -cne 'C:\AIW\Control\SharedCanary\canary.txt' -or $record.resource.sha256 -ne (Hash-Text 'AIW controlled readable bytes') -or $record.resource.sizeBytes -ne 29 -or $record.resource.unchangedAfter -ne $true) { throw 'Paired canary identity failed' }
     $cases=@()

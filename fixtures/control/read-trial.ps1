@@ -1,13 +1,16 @@
 function Hash-Text([string]$Text) { [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($Text))).ToLowerInvariant() }
 function Read-BoundedJson([string]$Path) {
     $item=Get-Item -LiteralPath $Path
-    if ($item.Length -gt 65536 -or $item.PSIsContainer) { throw 'Control record is oversized or not a file' }
+    $parent=Get-Item -LiteralPath (Split-Path -Parent $Path)
+    if ($item.Length -gt 65536 -or $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or ($parent.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Control record is oversized, linked, or not a file' }
     Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
 }
 function Read-ControlTrial([string]$directory) {
     $journal=Read-BoundedJson (Join-Path $directory 'host-journal.json')
     $path=Join-Path $directory 'output\control-result.json'
     $result=Read-BoundedJson $path
+    if ($journal.cleanupVerified -isnot [bool] -or $journal.cleanupVerified -ne $true) { throw 'Exact cleanup requires a true boolean observation' }
+    if ($journal.productionEvidence -isnot [bool] -or $result.productionEvidence -isnot [bool]) { throw 'Research evidence flags require booleans' }
     if ($journal.schemaVersion -ne 'aiw.dev/research/control-host/v0alpha1' -or !$journal.cleanupVerified -or $journal.productionEvidence -ne $false -or $result.productionEvidence -ne $false -or $result.fixtureSha256 -ne $journal.fixtureSha256 -or $result.error -or $result.stage -ne 'finished' -or !$result.windowsBuild -or !$result.standardUserSid) { throw 'Control record binding or completion failed' }
     if ((Get-FileHash $path).Hash.ToLowerInvariant() -ne $journal.resultSha256) { throw 'Control result changed' }
     $configuration=Join-Path $directory 'configuration.wsb'
