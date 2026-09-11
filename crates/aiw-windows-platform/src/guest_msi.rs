@@ -380,31 +380,37 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
     scenario: &CompiledMsiScenario,
     stages: &mut StageRecorder,
 ) -> Result<GuestMsiExecutionObservation, GuestMsiExecutionError> {
-    let (standard_user, before_install, product_before) = if scenario.requires_standard_user() {
-        stages.run(GuestMsiStage::BeforeInstallCapture, || {
-            let product = scenario
-                .requires_product_registration()
-                .then(crate::guest_msi_product::ProductCapture::before_install)
-                .transpose()?;
-            let standard_user = StandardUserSession::establish()?;
-            // Capture issues are observation data, not failed capture attempts.
-            let snapshot = capture_application_state(scenario, Some(&standard_user));
-            Ok((Some(standard_user), Some(snapshot), product))
-        })?
-    } else {
-        (
-            None,
-            scenario
-                .requires_application_exercise()
-                .then(|| {
-                    stages.run(GuestMsiStage::BeforeInstallCapture, || {
-                        Ok(capture_application_state(scenario, None))
+    let (standard_user, before_install, product_before) =
+        if scenario.requires_standard_user() && scenario.requires_application_exercise() {
+            stages.run(GuestMsiStage::BeforeInstallCapture, || {
+                let product = scenario
+                    .requires_product_registration()
+                    .then(crate::guest_msi_product::ProductCapture::before_install)
+                    .transpose()?;
+                let standard_user = StandardUserSession::establish()?;
+                // Capture issues are observation data, not failed capture attempts.
+                let snapshot = capture_application_state(scenario, Some(&standard_user));
+                Ok((Some(standard_user), Some(snapshot), product))
+            })?
+        } else if scenario.requires_standard_user() {
+            // The scratch-only interactive profile uses the same verified fresh
+            // medium-integrity account, but takes no filesystem or registry
+            // observations and creates no guest document.
+            (Some(StandardUserSession::establish()?), None, None)
+        } else {
+            (
+                None,
+                scenario
+                    .requires_application_exercise()
+                    .then(|| {
+                        stages.run(GuestMsiStage::BeforeInstallCapture, || {
+                            Ok(capture_application_state(scenario, None))
+                        })
                     })
-                })
-                .transpose()?,
-            None,
-        )
-    };
+                    .transpose()?,
+                None,
+            )
+        };
     stages.retain_capture(
         GuestMsiStage::BeforeInstallCapture,
         before_install.as_ref(),
@@ -467,42 +473,89 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
         }
     })?;
     let launch_process_id = application.process_id;
-    let pre_close = (|| {
-        let (window, application_token, editor) =
-            stages.run(GuestMsiStage::OpenDocument, || {
-                let window = application.wait_for_window(Duration::from_secs(u64::from(
-                    scenario.process_wait_timeout_seconds,
-                )))?;
-                let mut window_process_id = 0;
-                unsafe { GetWindowThreadProcessId(window, Some(&mut window_process_id)) };
-                if window_process_id != application.process_id {
-                    return Err(GuestMsiExecutionError::Process(
-                        "observed application window changed owner".to_owned(),
-                    ));
-                }
-                let application_token = collect_process_token(application.process.as_handle())
-                    .map_err(|error| {
-                        GuestMsiExecutionError::Process(format!(
-                            "collect launched application token failed: {error}"
-                        ))
-                    })?;
-                if application_token.process_id != application.process_id {
-                    return Err(GuestMsiExecutionError::Process(
-                        "collected application token changed process identity".to_owned(),
-                    ));
-                }
-                let editor = document_exercise
-                    .as_ref()
-                    .map(|_| {
-                        wait_for_ready_document_editor(
-                            window,
-                            application.process_id,
-                            EDITOR_LOOKUP_TIMEOUT,
-                        )
-                    })
-                    .transpose()?;
-                Ok((window, application_token, editor))
+    let ready = stages.run(GuestMsiStage::OpenDocument, || {
+        let window = application.wait_for_window(Duration::from_secs(u64::from(
+            scenario.process_wait_timeout_seconds,
+        )))?;
+        let mut window_process_id = 0;
+        unsafe { GetWindowThreadProcessId(window, Some(&mut window_process_id)) };
+        if window_process_id != application.process_id {
+            return Err(GuestMsiExecutionError::Process(
+                "observed application window changed owner".to_owned(),
+            ));
+        }
+        let application_token =
+            collect_process_token(application.process.as_handle()).map_err(|error| {
+                GuestMsiExecutionError::Process(format!(
+                    "collect launched application token failed: {error}"
+                ))
             })?;
+        if application_token.process_id != application.process_id {
+            return Err(GuestMsiExecutionError::Process(
+                "collected application token changed process identity".to_owned(),
+            ));
+        }
+        let editor = document_exercise
+            .as_ref()
+            .map(|_| {
+                wait_for_ready_document_editor(
+                    window,
+                    application.process_id,
+                    EDITOR_LOOKUP_TIMEOUT,
+                )
+            })
+            .transpose()?;
+        Ok((window, application_token, editor))
+    });
+    let (window, application_token, editor) = match ready {
+        Ok(value) => value,
+        Err(error) => {
+            return match complete_process_operation::<()>(Err(error), application.cleanup()) {
+                Err(error) => Err(error),
+                Ok(()) => unreachable!("failed application operation cannot succeed"),
+            };
+        }
+    };
+
+    if let Some(interactive_session_seconds) = scenario.interactive_session_seconds {
+        // The approved interactive lifetime begins only after the exact
+        // standard-user window and token have been observed. A shorter host
+        // deadline can still cancel the outer Sandbox before this wait ends.
+        let operation = (|| {
+            require_visible_process_window(
+                window,
+                application.process_id,
+                "Notepad++ main window",
+            )?;
+            let exit_code = application
+                .wait_for_exit(Duration::from_secs(u64::from(interactive_session_seconds)))?;
+            if exit_code != scenario.expected_exit_code {
+                return Err(GuestMsiExecutionError::Process(format!(
+                    "Notepad++ exited with {exit_code} during interactive session"
+                )));
+            }
+            Ok(exit_code)
+        })();
+        let cleanup = if operation.is_ok() {
+            application.verify_empty_after_success()
+        } else {
+            application.cleanup()
+        };
+        let launch_exit_code = complete_process_operation(operation, cleanup)?;
+        return Ok(GuestMsiExecutionObservation {
+            install_exit_code,
+            launch_process_id,
+            launch_exit_code,
+            application_token,
+            functional_exercise: None,
+            filesystem_observations: None,
+            registry_observations: None,
+            product_registration: None,
+            standard_user_context: standard_user.as_ref().map(|value| value.context().clone()),
+        });
+    }
+
+    let pre_close = (|| {
         let functional_exercise = document_exercise
             .as_ref()
             .zip(editor)
