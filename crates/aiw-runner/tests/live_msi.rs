@@ -14,6 +14,13 @@ fn prepare() -> (RunLayout, PathBuf, aiw_schema::Project, String) {
 }
 
 fn prepare_with_bundle(bundle: bool) -> (RunLayout, PathBuf, aiw_schema::Project, String) {
+    prepare_profile(bundle, None)
+}
+
+fn prepare_profile(
+    bundle: bool,
+    interactive_seconds: Option<u32>,
+) -> (RunLayout, PathBuf, aiw_schema::Project, String) {
     assert_eq!(std::env::var("AIW_RUN_LIVE_WSB_MSI").as_deref(), Ok("1"));
     let guest =
         PathBuf::from(std::env::var_os("AIW_LIVE_GUEST_AGENT").expect("guest agent required"));
@@ -34,6 +41,15 @@ fn prepare_with_bundle(bundle: bool) -> (RunLayout, PathBuf, aiw_schema::Project
         .as_nanos();
     let run_id = format!("aiw-msi-live-{}-{stamp}", std::process::id());
     let parent = std::env::temp_dir().canonicalize().unwrap();
+    if let Some(seconds) = interactive_seconds {
+        project = serde_yaml::from_str(include_str!(
+            "../../../examples/notepad-plus-plus-interactive.aiw.yaml"
+        ))
+        .unwrap();
+        project.scenarios[0].steps[3] = aiw_schema::ScenarioStep::WaitForUserClose {
+            timeout_seconds: seconds,
+        };
+    }
     if bundle {
         let exported = aiw_runner::export_notepad_plus_plus_msi_bundle(
             &parent,
@@ -93,6 +109,14 @@ fn prepare_with_bundle(bundle: bool) -> (RunLayout, PathBuf, aiw_schema::Project
     )
     .unwrap();
     let root = PathBuf::from(&prepared.receipt.workspace.root.final_path);
+    if let Some(seconds) = interactive_seconds {
+        assert_eq!(
+            prepared.run_plan.lifecycle,
+            aiw_orchestrator::RunLifecycleKind::Launch
+        );
+        assert!(prepared.run_plan.trust_deltas[0].contains(&seconds.to_string()));
+        assert!(prepared.run_plan.trust_deltas[0].contains("discarded"));
+    }
     eprintln!("MSI_LIVE_WORKSPACE={}", root.display());
     aiw_runner::import_windows_sandbox_preparation(
         &root,
@@ -133,6 +157,116 @@ fn live_imported_msi_install_observe_close_and_cleanup() {
 #[ignore = "exports/imports a real MSI bundle and exercises it only inside Sandbox; requires explicit live env inputs"]
 fn live_packaged_msi_import_replay_and_cleanup() {
     exercise(true);
+}
+
+#[test]
+#[ignore = "opens scratch-only Notepad++ in a disposable Sandbox; explicit env selects natural-close or timeout validation"]
+fn live_interactive_msi_session_and_cleanup() {
+    let expect_closed = match std::env::var("AIW_LIVE_INTERACTIVE_EXPECT").as_deref() {
+        Ok("closed") => true,
+        Ok("timeout") => false,
+        _ => panic!("AIW_LIVE_INTERACTIVE_EXPECT must be closed or timeout"),
+    };
+    let seconds = if expect_closed { 120 } else { 30 };
+    let (layout, project_path, project, guest_hash) = prepare_profile(true, Some(seconds));
+    let run_dir = layout.run_dir();
+    let root = run_dir.parent().unwrap().parent().unwrap();
+    let mut changed = project.clone();
+    changed.scenarios[0].steps[3] = aiw_schema::ScenarioStep::WaitForUserClose {
+        timeout_seconds: seconds + 1,
+    };
+    assert!(
+        aiw_runner::start_approved_windows_sandbox(root, &project_path, &changed, &guest_hash, 300)
+            .is_err()
+    );
+    assert!(!root.join("tools/request.json").exists());
+    let result =
+        aiw_runner::start_approved_windows_sandbox(root, &project_path, &project, &guest_hash, 300);
+    if matches!(&result, Err(aiw_runner::RunnerError::RecoveryRequired(_))) {
+        aiw_runner::recover_windows_sandbox(&layout).unwrap();
+    }
+    let report =
+        aiw_runner::report_windows_sandbox_msi_run(root, layout.run_id(), &project, &guest_hash)
+            .unwrap();
+    if expect_closed {
+        let aiw_runner::WsbMsiRunReport::InteractiveSession(session) = &report else {
+            panic!("expected interactive completion: {report:?}");
+        };
+        assert!(result.is_ok());
+        assert!(!session.scenario.graceful_close_requested);
+        assert_eq!(session.session_limit_seconds, seconds);
+        assert!(!session.application_token.token.is_elevated);
+        assert!(session.recorded_cleanup_verified);
+    } else {
+        assert!(result.is_err());
+        let aiw_runner::WsbMsiRunReport::UnsuccessfulAttempt(attempt) = &report else {
+            panic!("timeout promoted to completion");
+        };
+        assert!(attempt.recorded_cleanup_verified);
+        assert_eq!(attempt.outcome, RunOutcome::Failed);
+        assert_eq!(attempt.interactive_session_seconds, Some(seconds));
+        let aiw_runner::UnverifiedGuestDiagnostic::Available { summary } =
+            &attempt.guest_diagnostic
+        else {
+            panic!("expected timeout diagnostic from controlled live trial");
+        };
+        assert!(
+            summary.contains("interactive session wait failed") && summary.contains("timed out"),
+            "{summary}"
+        );
+    }
+    assert!(
+        aiw_runner::report_windows_sandbox_msi(root, layout.run_id(), &project, &guest_hash)
+            .is_err()
+    );
+    assert!(
+        aiw_windows_platform::assess_windows_sandbox()
+            .current_session_ids
+            .is_empty()
+    );
+    let parent = root.parent().unwrap();
+    let imported: aiw_runner::SandboxBundleImport = serde_json::from_slice(
+        &fs::read(parent.join(format!("{}.bundle-import.json", layout.run_id()))).unwrap(),
+    )
+    .unwrap();
+    let packaged = aiw_runner::report_notepad_plus_plus_msi_bundle(
+        &parent.join(format!("{}-bundle-relocated", layout.run_id())),
+        &imported.verification.manifest_sha256,
+        &imported,
+        root,
+        layout.run_id(),
+        &guest_hash,
+    )
+    .unwrap();
+    assert_eq!(
+        packaged.manifest.data_contract,
+        "ephemeralInteractiveScratch"
+    );
+    assert_eq!(
+        serde_json::to_value(&packaged.report).unwrap(),
+        serde_json::to_value(&report).unwrap()
+    );
+    let set = aiw_runner::report_windows_sandbox_msi_set(&aiw_runner::WsbMsiReportSetInput {
+        schema_version: aiw_runner::WSB_MSI_REPORT_SET_INPUT_SCHEMA.into(),
+        entries: vec![aiw_runner::WsbMsiReportSetEntry {
+            id: "interactive".into(),
+            run_id: layout.run_id().into(),
+            workspace_root: root.into(),
+            project_path,
+            guest_agent_sha256: guest_hash,
+        }],
+    })
+    .unwrap();
+    assert!(matches!(
+        set.entries[0].result,
+        aiw_runner::WsbMsiReportSetResult::Unavailable(
+            aiw_runner::ReportSetUnavailableReason::InteractiveSessionNotAssessment
+        )
+    ));
+    eprintln!(
+        "INTERACTIVE_SESSION_REPORT={}",
+        serde_json::to_string(&report).unwrap()
+    );
 }
 
 fn exercise(bundle: bool) {

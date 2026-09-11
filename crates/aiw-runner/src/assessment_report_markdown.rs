@@ -124,6 +124,7 @@ impl WsbMsiRunReport {
     pub fn to_markdown(&self) -> String {
         match self {
             Self::CompletedAssessment(report) => report.to_markdown(),
+            Self::InteractiveSession(report) => report.to_markdown(),
             Self::UnsuccessfulAttempt(report) => report.to_markdown(),
         }
     }
@@ -144,6 +145,9 @@ impl WsbMsiUnsuccessfulReport {
                 transition.state,
                 cell(&transition.reason_code)
             ));
+        }
+        if let Some(seconds) = self.interactive_session_seconds {
+            out.push_str(&format!("\nScratch-only interactive profile; approved lifetime: {seconds} seconds after window readiness. No host document transfer or saved-data preservation was approved. The terminal failure alone does not identify its cause.\n"));
         }
         match &self.failure_progress {
             FailureProgressEvidence::Absent => out.push_str("\nNo receipt-bound stage progress was retained.\n"),

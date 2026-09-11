@@ -210,6 +210,7 @@ mod tests {
             process_wait_timeout_seconds: 30,
             graceful_close_timeout_seconds: 15,
             expected_exit_code: 0,
+            interactive_session_seconds: None,
             document_exercise: Some(FixedDocumentExercise {
                 document_path: crate::STANDARD_USER_DOCUMENT_EXERCISE_PATH.into(),
                 initial_sha256: hex::encode(Sha256::digest(

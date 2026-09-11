@@ -173,7 +173,11 @@ impl ImportedMsiScenarioResult {
         launch_exit_code: i32,
     ) -> Result<Self, ImportedMsiRequestError> {
         let value = Self {
-            schema_version: IMPORTED_MSI_SCENARIO_RESULT_SCHEMA_VERSION.to_owned(),
+            schema_version: if request.scenario.interactive_session_seconds.is_some() {
+                "aiw.dev/windows-sandbox-imported-msi-scenario-result/v0alpha2".to_owned()
+            } else {
+                IMPORTED_MSI_SCENARIO_RESULT_SCHEMA_VERSION.to_owned()
+            },
             run_id: request.run_id.clone(),
             sandbox_id: request.sandbox_id.clone(),
             config_sha256: request.config_sha256.clone(),
@@ -187,7 +191,7 @@ impl ImportedMsiScenarioResult {
             launch_process_id,
             launch_exit_code,
             process_observed: true,
-            graceful_close_requested: true,
+            graceful_close_requested: request.scenario.interactive_session_seconds.is_none(),
             process_closed: true,
         };
         value.validate()?;
@@ -195,7 +199,9 @@ impl ImportedMsiScenarioResult {
     }
 
     pub fn validate(&self) -> Result<(), ImportedMsiRequestError> {
-        if self.schema_version != IMPORTED_MSI_SCENARIO_RESULT_SCHEMA_VERSION
+        let interactive =
+            self.schema_version == "aiw.dev/windows-sandbox-imported-msi-scenario-result/v0alpha2";
+        if (self.schema_version != IMPORTED_MSI_SCENARIO_RESULT_SCHEMA_VERSION && !interactive)
             || !valid_id(&self.run_id)
             || !canonical_sandbox_id(&self.sandbox_id)
             || !lower_hex_sha256(&self.config_sha256)
@@ -209,7 +215,7 @@ impl ImportedMsiScenarioResult {
             || self.launch_process_id == 0
             || self.launch_exit_code != 0
             || !self.process_observed
-            || !self.graceful_close_requested
+            || self.graceful_close_requested == interactive
             || !self.process_closed
         {
             return Err(ImportedMsiRequestError::InvalidResult);
@@ -225,6 +231,9 @@ impl ImportedMsiScenarioResult {
         request.validate()?;
         self.validate()?;
         if self.run_id != request.run_id
+            || (self.schema_version
+                == "aiw.dev/windows-sandbox-imported-msi-scenario-result/v0alpha2")
+                != request.scenario.interactive_session_seconds.is_some()
             || self.sandbox_id != request.sandbox_id
             || self.config_sha256 != request.config_sha256
             || self.request_sha256 != request.request_sha256
@@ -239,13 +248,15 @@ impl ImportedMsiScenarioResult {
         Ok(())
     }
 
-    pub const fn successful(&self) -> bool {
+    pub fn successful(&self) -> bool {
         matches!(self.status, ImportedMsiScenarioStatus::Succeeded)
             && self.install_exit_code == 0
             && self.launch_process_id != 0
             && self.launch_exit_code == 0
             && self.process_observed
-            && self.graceful_close_requested
+            && (self.graceful_close_requested
+                || self.schema_version
+                    == "aiw.dev/windows-sandbox-imported-msi-scenario-result/v0alpha2")
             && self.process_closed
     }
 }
@@ -318,6 +329,7 @@ mod tests {
             process_wait_timeout_seconds: 30,
             graceful_close_timeout_seconds: 15,
             expected_exit_code: 0,
+            interactive_session_seconds: None,
             document_exercise: None,
         }
     }

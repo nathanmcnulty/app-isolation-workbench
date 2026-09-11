@@ -387,6 +387,7 @@ mod tests {
                 process_wait_timeout_seconds: 30,
                 graceful_close_timeout_seconds: 15,
                 expected_exit_code: 0,
+                interactive_session_seconds: None,
                 document_exercise: None,
             },
             "c".repeat(64),

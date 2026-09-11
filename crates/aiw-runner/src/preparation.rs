@@ -44,6 +44,21 @@ const MSI_FILE: &str = "application.msi";
 const BAMBU_FILE: &str = "application.exe";
 const GUEST_MSI_RESULT: &str = r"C:\AIW\Output\scenario-result.json";
 const TRUST_DELTA_MSI: &str = "installs and exercises the approved imported MSI in Windows Sandbox";
+fn msi_trust_delta(msi: &WsbMsiApplication) -> String {
+    match msi.scenario.interactive_session_seconds {
+        Some(seconds) => format!(
+            "opens scratch-only Notepad++ in Windows Sandbox for up to {seconds} seconds after window readiness; all user data is discarded; no host file, clipboard, or network access"
+        ),
+        None => TRUST_DELTA_MSI.to_owned(),
+    }
+}
+fn msi_lifecycle(msi: Option<&WsbMsiApplication>) -> RunLifecycleKind {
+    if msi.is_some_and(|value| value.scenario.interactive_session_seconds.is_some()) {
+        RunLifecycleKind::Launch
+    } else {
+        RunLifecycleKind::Assessment
+    }
+}
 const TRUST_DELTA_BAMBU: &str =
     "installs and exports the approved Bambu Studio local 3MF scenario in Windows Sandbox";
 const GUEST_TOOLS: &str = r"C:\AIW\Tools";
@@ -333,18 +348,17 @@ impl PreparedWsbArtifacts {
         if self.run_plan.run_id != self.receipt.run_id
             || self.run_plan.project_id != self.receipt.project_id
             || self.run_plan.project_revision_hash != self.receipt.project_revision_sha256
-            || self.run_plan.lifecycle != RunLifecycleKind::Assessment
+            || self.run_plan.lifecycle != msi_lifecycle(self.receipt.msi.as_ref())
             || self.run_plan.created_at != self.receipt.created_at
             || self.run_plan.trust_deltas
                 != [
-                    if self.receipt.msi.is_some() {
-                        TRUST_DELTA_MSI
+                    if let Some(msi) = &self.receipt.msi {
+                        msi_trust_delta(msi)
                     } else if self.receipt.bambu.is_some() {
-                        TRUST_DELTA_BAMBU
+                        TRUST_DELTA_BAMBU.to_owned()
                     } else {
-                        TRUST_DELTA_START
-                    }
-                    .to_owned(),
+                        TRUST_DELTA_START.to_owned()
+                    },
                     TRUST_DELTA_MAPPINGS.to_owned(),
                 ]
             || self
@@ -603,7 +617,7 @@ pub fn build_wsb_msi_preparation(
         run_id,
         &project.metadata.name,
         &artifacts.receipt.project_revision_sha256,
-        RunLifecycleKind::Assessment,
+        msi_lifecycle(Some(&msi)),
         created_at,
         vec![
             PlannedAction::AssessHost,
@@ -620,7 +634,7 @@ pub fn build_wsb_msi_preparation(
             },
             PlannedAction::CollectEvidence,
         ],
-        vec![TRUST_DELTA_MSI.to_owned(), TRUST_DELTA_MAPPINGS.to_owned()],
+        vec![msi_trust_delta(&msi), TRUST_DELTA_MAPPINGS.to_owned()],
     )
     .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
     artifacts.receipt.run_plan_sha256 = artifacts

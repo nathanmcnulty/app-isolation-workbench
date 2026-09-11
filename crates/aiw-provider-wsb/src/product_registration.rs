@@ -186,6 +186,7 @@ mod tests {
                 process_wait_timeout_seconds: 30,
                 graceful_close_timeout_seconds: 15,
                 expected_exit_code: 0,
+                interactive_session_seconds: None,
                 document_exercise: match version.rsplit_once('/').map(|(_, value)| value) {
                     Some("v0alpha1") | Some("v0alpha2") => None,
                     Some("v0alpha3") => Some(FixedDocumentExercise {

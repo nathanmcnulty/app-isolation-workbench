@@ -20,6 +20,8 @@ pub const COMPILED_MSI_SCENARIO_SCHEMA_VERSION: &str =
     "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha6";
 pub const NOTEPAD_PLUS_PLUS_MSI_PROFILE: &str =
     "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha6";
+pub const NOTEPAD_PLUS_PLUS_INTERACTIVE_PROFILE: &str =
+    "aiw.dev/windows-sandbox/notepad-plus-plus-interactive/v0alpha1";
 
 const NOTEPAD_PLUS_PLUS_ENTRYPOINT_ID: &str = "notepad-plus-plus";
 const NOTEPAD_PLUS_PLUS_ENTRYPOINT_PATH: &str = "notepad++.exe";
@@ -51,6 +53,8 @@ pub struct CompiledMsiScenario {
     pub expected_exit_code: i32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub document_exercise: Option<FixedDocumentExercise>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interactive_session_seconds: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -83,6 +87,9 @@ impl CompiledMsiScenario {
     pub fn validate(&self) -> Result<(), ScenarioCompileError> {
         let current = self.schema_version == COMPILED_MSI_SCENARIO_SCHEMA_VERSION
             && self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE;
+        let interactive = self.schema_version
+            == "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha7"
+            && self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_PROFILE;
         let registry_profile = self.schema_version
             == "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha5"
             && self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha5";
@@ -99,6 +106,7 @@ impl CompiledMsiScenario {
             == "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha1"
             && self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha1";
         if !(current
+            || interactive
             || registry_profile
             || standard_user_legacy
             || legacy_exercise
@@ -114,6 +122,11 @@ impl CompiledMsiScenario {
                 && !legacy_exercise
                 && self.document_exercise.is_some())
             || !valid_id(&self.scenario_id)
+            || (interactive
+                && !self
+                    .interactive_session_seconds
+                    .is_some_and(|seconds| (30..=600).contains(&seconds)))
+            || (!interactive && self.interactive_session_seconds.is_some())
             || !lower_hex_sha256(&self.application_sha256)
             || self.installer_path != STAGED_INSTALLER_PATH
             || self.install_arguments
@@ -139,7 +152,8 @@ impl CompiledMsiScenario {
 
     /// The versioned profile is part of the approved scenario hash.
     pub fn requires_application_token(&self) -> bool {
-        self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
+        self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_PROFILE
+            || self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha5"
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha3"
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha4"
@@ -154,7 +168,8 @@ impl CompiledMsiScenario {
     }
 
     pub fn requires_standard_user(&self) -> bool {
-        self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
+        self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_PROFILE
+            || self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha5"
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha4"
     }
@@ -236,7 +251,34 @@ pub fn compile_notepad_plus_plus_msi_scenario(
         .iter()
         .find(|scenario| scenario.id == scenario_id)
         .ok_or(ScenarioCompileError::UnsupportedScenario)?;
-    if !valid_id(scenario_id) || !matches_notepad_plus_plus_sequence(&scenario.steps) {
+    let interactive_seconds = match scenario.steps.as_slice() {
+        [
+            ScenarioStep::Install,
+            ScenarioStep::Launch {
+                entrypoint,
+                arguments,
+            },
+            ScenarioStep::WaitForProcess {
+                image,
+                timeout_seconds,
+            },
+            ScenarioStep::WaitForUserClose {
+                timeout_seconds: lifetime,
+            },
+            ScenarioStep::ExpectExitCode { value: 0 },
+        ] if entrypoint == NOTEPAD_PLUS_PLUS_ENTRYPOINT_ID
+            && arguments.is_empty()
+            && image == NOTEPAD_PLUS_PLUS_PROCESS_IMAGE
+            && (1..=60).contains(timeout_seconds)
+            && (30..=600).contains(lifetime) =>
+        {
+            Some(*lifetime)
+        }
+        _ => None,
+    };
+    if !valid_id(scenario_id)
+        || (!matches_notepad_plus_plus_sequence(&scenario.steps) && interactive_seconds.is_none())
+    {
         return Err(ScenarioCompileError::UnsupportedScenario);
     }
     let ScenarioStep::WaitForProcess {
@@ -245,7 +287,7 @@ pub fn compile_notepad_plus_plus_msi_scenario(
     else {
         return Err(ScenarioCompileError::UnsupportedScenario);
     };
-    let compiled = CompiledMsiScenario {
+    let mut compiled = CompiledMsiScenario {
         schema_version: COMPILED_MSI_SCENARIO_SCHEMA_VERSION.to_owned(),
         profile: NOTEPAD_PLUS_PLUS_MSI_PROFILE.to_owned(),
         scenario_id: scenario.id.clone(),
@@ -265,7 +307,13 @@ pub fn compile_notepad_plus_plus_msi_scenario(
         graceful_close_timeout_seconds: GRACEFUL_CLOSE_TIMEOUT_SECONDS,
         expected_exit_code: 0,
         document_exercise: Some(FixedDocumentExercise::standard_user()),
+        interactive_session_seconds: interactive_seconds,
     };
+    if interactive_seconds.is_some() {
+        compiled.schema_version = "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha7".into();
+        compiled.profile = NOTEPAD_PLUS_PLUS_INTERACTIVE_PROFILE.into();
+        compiled.document_exercise = None;
+    }
     compiled.validate()?;
     Ok(compiled)
 }

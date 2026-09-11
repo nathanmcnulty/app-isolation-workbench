@@ -18,8 +18,6 @@ use std::{fs, path::Path};
 use thiserror::Error;
 pub const SANDBOX_BUNDLE_MANIFEST_SCHEMA_VERSION: &str =
     "aiw.dev/sandbox-application-bundle/v0alpha1";
-#[cfg(windows)]
-const PROFILE: &str = "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha6";
 // 8.3-compatible leaves avoid secondary DOS aliases when recipients copy files.
 #[cfg(windows)]
 const MANIFEST_FILE: &str = "manifest.aiw";
@@ -298,9 +296,9 @@ fn make_manifest(
 ) -> Result<SandboxBundleManifest, SandboxBundleError> {
     let x = SandboxBundleManifest {
         schema_version: SANDBOX_BUNDLE_MANIFEST_SCHEMA_VERSION.into(),
-        profile: PROFILE.into(),
+        profile: s.profile.clone(),
         runtime: "windowsSandbox".into(),
-        data_contract: "ephemeralStandardUserDocumentRoundTrip".into(),
+        data_contract: data_contract(s).into(),
         scenario_id: s.scenario_id.clone(),
         scenario_sha256: hash(&canonical(s)?),
         project_sha256: hash(project_bytes),
@@ -322,9 +320,9 @@ fn validate(
     s: &CompiledMsiScenario,
 ) -> Result<(), SandboxBundleError> {
     if x.schema_version != SANDBOX_BUNDLE_MANIFEST_SCHEMA_VERSION
-        || x.profile != PROFILE
+        || x.profile != s.profile
         || x.runtime != "windowsSandbox"
-        || x.data_contract != "ephemeralStandardUserDocumentRoundTrip"
+        || x.data_contract != data_contract(s)
         || x.scenario_id != s.scenario_id
         || x.scenario_sha256 != hash(&canonical(s)?)
         || x.project_sha256 != hash(p)
@@ -341,6 +339,14 @@ fn validate(
 fn canonical<T: Serialize>(x: &T) -> Result<Vec<u8>, SandboxBundleError> {
     canonical_json_bytes(&serde_json::to_value(x).map_err(|e| contract_error(e.to_string()))?)
         .map_err(|e| contract_error(e.to_string()))
+}
+#[cfg(windows)]
+fn data_contract(scenario: &CompiledMsiScenario) -> &'static str {
+    if scenario.interactive_session_seconds.is_some() {
+        "ephemeralInteractiveScratch"
+    } else {
+        "ephemeralStandardUserDocumentRoundTrip"
+    }
 }
 #[cfg(windows)]
 fn hash(b: &[u8]) -> String {

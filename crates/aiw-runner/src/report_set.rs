@@ -96,6 +96,7 @@ pub enum ReportSetUnavailableReason {
     ProjectUnreadable,
     ProjectInvalid,
     EvidenceRejected,
+    InteractiveSessionNotAssessment,
     DuplicateRun,
 }
 
@@ -181,6 +182,9 @@ fn file_summary(diff: &FilesystemSnapshotDiffResult) -> ReportSetFileChanges {
 
 fn summarize(name: String, report: WsbMsiRunReport) -> WsbMsiReportSetResult {
     match report {
+        WsbMsiRunReport::InteractiveSession(_) => WsbMsiReportSetResult::Unavailable(
+            ReportSetUnavailableReason::InteractiveSessionNotAssessment,
+        ),
         WsbMsiRunReport::CompletedAssessment(report) => {
             let scenario = &report.scenario;
             WsbMsiReportSetResult::CompletedScenario(Box::new(WsbMsiReportSetSummary {
@@ -225,6 +229,11 @@ fn summarize(name: String, report: WsbMsiRunReport) -> WsbMsiReportSetResult {
             }))
         }
         WsbMsiRunReport::UnsuccessfulAttempt(report) => {
+            if report.interactive_session_seconds.is_some() {
+                return WsbMsiReportSetResult::Unavailable(
+                    ReportSetUnavailableReason::InteractiveSessionNotAssessment,
+                );
+            }
             let progress = match &report.failure_progress {
                 FailureProgressEvidence::Verified(progress) => Some(progress),
                 _ => None,
@@ -476,6 +485,7 @@ mod tests {
             FailureProgressEvidence::Rejected,
         ] {
             let report = crate::WsbMsiUnsuccessfulReport {
+                interactive_session_seconds: None,
                 schema_version: "legacy".into(),
                 run_id: "run-1".into(),
                 project_revision_sha256: "a".repeat(64),

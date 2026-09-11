@@ -121,12 +121,46 @@ fn evidence_gaps(project: &Project) -> Vec<AssessmentEvidenceGap> {
 #[serde(tag = "reportKind", content = "report", rename_all = "camelCase")]
 pub enum WsbMsiRunReport {
     CompletedAssessment(Box<WsbMsiAssessmentReport>),
+    InteractiveSession(Box<WsbMsiInteractiveReport>),
     UnsuccessfulAttempt(Box<WsbMsiUnsuccessfulReport>),
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct WsbMsiInteractiveReport {
+    pub schema_version: String,
+    pub run_id: String,
+    pub session_limit_seconds: u32,
+    pub recorded_cleanup_verified: bool,
+    pub receipt_sha256: String,
+    pub evidence_root_hash: String,
+    pub scenario: aiw_provider_wsb::ImportedMsiScenarioResult,
+    pub application_token: aiw_provider_wsb::ImportedMsiApplicationToken,
+    pub standard_user_context: aiw_provider_wsb::ImportedMsiRuntimeContext,
+}
+
+impl WsbMsiInteractiveReport {
+    pub fn to_markdown(&self) -> String {
+        format!(
+            "# Notepad++ interactive Sandbox session\n\nRun: {}\n\nThe process exited normally within the {} second limit after window readiness. No document workflow or human interaction is verified. Scratch data is discarded with the worker; no host document transfer is supported.\n\nRecorded exact-session cleanup verified: {}.\n\nInstaller SHA-256: `{}`\n\nScenario SHA-256: `{}`\n\nReceipt SHA-256: `{}`\n\nApplication PID: {}; elevated: {}; integrity RID: {}.\n",
+            self.run_id,
+            self.session_limit_seconds,
+            self.recorded_cleanup_verified,
+            self.scenario.installer_sha256,
+            self.scenario.scenario_sha256,
+            self.receipt_sha256,
+            self.application_token.token.process_id,
+            self.application_token.token.is_elevated,
+            self.application_token.token.integrity.rid
+        )
+    }
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct WsbMsiUnsuccessfulReport {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interactive_session_seconds: Option<u32>,
     pub schema_version: String,
     pub run_id: String,
     pub project_revision_sha256: String,
@@ -190,7 +224,7 @@ pub fn report_windows_sandbox_msi(
 ) -> Result<WsbMsiAssessmentReport, RunnerError> {
     match report_windows_sandbox_msi_run(root, run_id, project, expected_guest_agent_sha256)? {
         WsbMsiRunReport::CompletedAssessment(report) => Ok(*report),
-        WsbMsiRunReport::UnsuccessfulAttempt(_) => Err(RunnerError::Receipt(
+        WsbMsiRunReport::UnsuccessfulAttempt(_) | WsbMsiRunReport::InteractiveSession(_) => Err(RunnerError::Receipt(
             "run has no accepted assessment; use report-wsb-msi-run for unsuccessful attempt diagnostics".to_owned(),
         )),
     }
@@ -387,6 +421,7 @@ pub(crate) fn report_windows_sandbox_msi_run_bound(
         revalidate()?;
         return Ok(WsbMsiRunReport::UnsuccessfulAttempt(Box::new(
             WsbMsiUnsuccessfulReport {
+                interactive_session_seconds: msi.scenario.interactive_session_seconds,
                 schema_version: if failure_progress_has_snapshots(&failure_progress) {
                     "aiw.dev/wsb-msi-unsuccessful-report/v0alpha4"
                 } else if msi.import_receipt.download_metadata_archive.is_some() {
@@ -526,6 +561,30 @@ pub(crate) fn report_windows_sandbox_msi_run_bound(
         .transpose()
         .map_err(RunnerError::Receipt)?;
     revalidate()?;
+    if let Some(session_limit_seconds) = msi.scenario.interactive_session_seconds {
+        if behavior.is_some()
+            || stage_progress.is_some()
+            || registry_evidence.is_some()
+            || product_registration.is_some()
+        {
+            return Err(RunnerError::Receipt(
+                "interactive session contains assessment-only observations".into(),
+            ));
+        }
+        return Ok(WsbMsiRunReport::InteractiveSession(Box::new(
+            WsbMsiInteractiveReport {
+                schema_version: "aiw.dev/wsb-msi-interactive-report/v0alpha1".into(),
+                run_id: run_id.into(),
+                session_limit_seconds,
+                recorded_cleanup_verified: true,
+                receipt_sha256: verified.receipt_sha256,
+                evidence_root_hash: verified.evidence_root_hash,
+                scenario,
+                application_token: application_token.ok_or(RunnerError::ApprovalBinding)?,
+                standard_user_context: standard_user_context.ok_or(RunnerError::ApprovalBinding)?,
+            },
+        )));
+    }
     Ok(WsbMsiRunReport::CompletedAssessment(Box::new(
         WsbMsiAssessmentReport {
             schema_version: if product_registration.is_some() {

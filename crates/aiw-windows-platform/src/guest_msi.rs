@@ -528,7 +528,12 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
                 "Notepad++ main window",
             )?;
             let exit_code = application
-                .wait_for_exit(Duration::from_secs(u64::from(interactive_session_seconds)))?;
+                .wait_for_exit(Duration::from_secs(u64::from(interactive_session_seconds)))
+                .map_err(|error| {
+                    GuestMsiExecutionError::Process(format!(
+                        "interactive session wait failed: {error}"
+                    ))
+                })?;
             if exit_code != scenario.expected_exit_code {
                 return Err(GuestMsiExecutionError::Process(format!(
                     "Notepad++ exited with {exit_code} during interactive session"

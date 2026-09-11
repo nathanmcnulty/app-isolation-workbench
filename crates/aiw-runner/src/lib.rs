@@ -40,7 +40,8 @@ mod discard;
 mod preparation;
 pub use assessment_report::{
     AssessmentEvidenceGap, FailureProgressEvidence, UnverifiedGuestDiagnostic,
-    VerifiedMsiFailureProgress, WsbMsiAssessmentReport, WsbMsiRunReport, WsbMsiUnsuccessfulReport,
+    VerifiedMsiFailureProgress, WsbMsiAssessmentReport, WsbMsiInteractiveReport, WsbMsiRunReport,
+    WsbMsiUnsuccessfulReport,
 };
 #[cfg(windows)]
 pub use assessment_report::{report_windows_sandbox_msi, report_windows_sandbox_msi_run};
@@ -980,7 +981,11 @@ fn start_approved_windows_sandbox_inner(
     } else if request.msi.is_some() {
         let scenario = result.scenario.ok_or(RunnerError::Drift)?;
         Ok(WsbApprovedExecution::ImportedMsi(WsbImportedMsiExecution {
-            schema_version: if result.product_registration.is_some() {
+            schema_version: if scenario.schema_version
+                == "aiw.dev/windows-sandbox-imported-msi-scenario-result/v0alpha2"
+            {
+                "aiw.dev/wsb-interactive-msi-execution/v0alpha1"
+            } else if result.product_registration.is_some() {
                 "aiw.dev/wsb-imported-msi-execution/v0alpha6"
             } else if result.registry_evidence.is_some() {
                 "aiw.dev/wsb-imported-msi-execution/v0alpha5"

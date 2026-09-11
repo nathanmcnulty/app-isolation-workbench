@@ -445,6 +445,9 @@ pub enum ScenarioStep {
         #[serde(default = "default_wait_timeout_seconds", alias = "timeout_seconds")]
         timeout_seconds: u32,
     },
+    WaitForUserClose {
+        timeout_seconds: u32,
+    },
     ObserveFile {
         path: String,
     },
@@ -1546,6 +1549,16 @@ fn validate_scenario_steps(
                         &path,
                         "invalidWait",
                         "process waits require a non-empty image and bounded timeout",
+                    );
+                }
+            }
+            ScenarioStep::WaitForUserClose { timeout_seconds } => {
+                if !(30..=600).contains(timeout_seconds) {
+                    issue(
+                        issues,
+                        &path,
+                        "invalidWait",
+                        "interactive lifetime must be 30 to 600 seconds",
                     );
                 }
             }
