@@ -113,6 +113,23 @@ struct PackageArgs {
 
 #[derive(Debug, Subcommand)]
 enum PackageCommand {
+    /// Match a bundle and its import record to a reverified terminal MSI run, without execution.
+    ReportWsbMsi {
+        #[arg(long)]
+        bundle: PathBuf,
+        #[arg(long)]
+        manifest_sha256: String,
+        #[arg(long)]
+        import_record: PathBuf,
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        run_id: String,
+        #[arg(long)]
+        guest_agent_sha256: String,
+        #[arg(long, value_enum, default_value_t = AssessmentReportFormat::Json)]
+        format: AssessmentReportFormat,
+    },
     /// Export a reusable fixed Notepad++ MSI Sandbox recipe and payload, without approval.
     ExportWsbMsi {
         #[arg(long)]
@@ -1068,6 +1085,49 @@ fn main() -> ExitCode {
 fn run(command: Command) -> Result<()> {
     match command {
         Command::Package(args) => match args.command {
+            PackageCommand::ReportWsbMsi {
+                bundle,
+                manifest_sha256,
+                import_record,
+                root,
+                run_id,
+                guest_agent_sha256,
+                format,
+            } => {
+                #[cfg(windows)]
+                {
+                    let imported: aiw_runner::SandboxBundleImport =
+                        read_document(&import_record, 1024 * 1024)?;
+                    let report = aiw_runner::report_notepad_plus_plus_msi_bundle(
+                        &bundle,
+                        &manifest_sha256,
+                        &imported,
+                        &root,
+                        &run_id,
+                        &guest_agent_sha256,
+                    )?;
+                    match format {
+                        AssessmentReportFormat::Json => write_json(&report),
+                        AssessmentReportFormat::Markdown => {
+                            print!("{}", report.to_markdown());
+                            Ok(())
+                        }
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (
+                        bundle,
+                        manifest_sha256,
+                        import_record,
+                        root,
+                        run_id,
+                        guest_agent_sha256,
+                        format,
+                    );
+                    bail!("Sandbox bundle reporting requires Windows")
+                }
+            }
             PackageCommand::ExportWsbMsi {
                 project,
                 import_receipt,

@@ -1,3 +1,6 @@
+use crate::WsbMsiRunReport;
+#[cfg(windows)]
+use crate::assessment_report::report_windows_sandbox_msi_run_bound;
 #[cfg(windows)]
 use aiw_evidence::canonical_json_bytes;
 #[cfg(windows)]
@@ -13,7 +16,6 @@ use sha2::{Digest, Sha256};
 #[cfg(windows)]
 use std::{fs, path::Path};
 use thiserror::Error;
-#[cfg(windows)] use crate::{WsbMsiRunReport, assessment_report::report_windows_sandbox_msi_run_bound};
 pub const SANDBOX_BUNDLE_MANIFEST_SCHEMA_VERSION: &str =
     "aiw.dev/sandbox-application-bundle/v0alpha1";
 #[cfg(windows)]
@@ -57,21 +59,86 @@ pub struct SandboxBundleExport {
     pub manifest_sha256: String,
     pub manifest: SandboxBundleManifest,
 }
-#[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SandboxBundleVerification {
     pub manifest_sha256: String,
     pub manifest: SandboxBundleManifest,
     pub project: Project,
     pub scenario: CompiledMsiScenario,
 }
-#[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SandboxBundleImport {
     pub verification: SandboxBundleVerification,
     pub project: Project,
     pub scenario: CompiledMsiScenario,
     pub import_receipt: ApplicationFileImportReceipt,
+}
+
+/// A supplied bundle and import record matched to a reverified terminal run.
+/// This does not independently establish when the bundle was exported/imported.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SandboxBundleRunReport {
+    pub schema_version: String,
+    pub manifest_sha256: String,
+    pub manifest: SandboxBundleManifest,
+    pub replay_import_receipt_sha256: String,
+    pub report: WsbMsiRunReport,
+}
+
+impl SandboxBundleRunReport {
+    pub fn to_markdown(&self) -> String {
+        format!(
+            "# Sandbox bundle matched to verified run\n\nManifest SHA-256: `{}`\n\nReplay intake receipt SHA-256: `{}`\n\nSource intake receipt SHA-256: `{}`\n\nRuntime: `{}`; data contract: `{}`.\n\nThe supplied bundle and import record match this retained run. This is not independent proof of import chronology or an additional compatibility verdict. Source download metadata is provenance only.\n\n{}",
+            self.manifest_sha256,
+            self.replay_import_receipt_sha256,
+            self.manifest.source_import_receipt_sha256,
+            self.manifest.runtime,
+            self.manifest.data_contract,
+            self.report.to_markdown(),
+        )
+    }
+}
+
+#[cfg(windows)]
+pub fn report_notepad_plus_plus_msi_bundle(
+    dir: &Path,
+    expected_manifest_sha256: &str,
+    imported: &SandboxBundleImport,
+    workspace: &Path,
+    run_id: &str,
+    guest_hash: &str,
+) -> Result<SandboxBundleRunReport, SandboxBundleError> {
+    let held = open_bundle(dir, expected_manifest_sha256)?;
+    if imported.verification != held.verification
+        || imported.project != held.verification.project
+        || imported.scenario != held.verification.scenario
+        || imported.import_receipt.source_kind != ApplicationInspectionKind::Msi
+        || imported.import_receipt.sha256 != held.verification.manifest.application_sha256
+        || imported.import_receipt.size_bytes != held.verification.manifest.application_size_bytes
+    {
+        return Err(contract_error("import record differs from verified bundle"));
+    }
+    // Compare the exact historical intake and scenario inside the existing
+    // reporter's held preparation boundary. Original intake paths need not exist.
+    let report = report_windows_sandbox_msi_run_bound(
+        workspace,
+        run_id,
+        &imported.project,
+        guest_hash,
+        Some((&imported.import_receipt, &imported.scenario)),
+    )
+    .map_err(|e| contract_error(e.to_string()))?;
+    held.directory.revalidate().map_err(native)?;
+    Ok(SandboxBundleRunReport {
+        schema_version: "aiw.dev/sandbox-bundle-run-report/v0alpha1".into(),
+        manifest_sha256: held.verification.manifest_sha256,
+        manifest: held.verification.manifest,
+        replay_import_receipt_sha256: hash(&canonical(&imported.import_receipt)?),
+        report,
+    })
 }
 #[cfg(windows)]
 pub fn export_notepad_plus_plus_msi_bundle(
@@ -349,4 +416,3 @@ fn write(
 fn native(e: impl std::fmt::Display) -> SandboxBundleError {
     SandboxBundleError::Native(e.to_string())
 }
-

@@ -5,7 +5,7 @@ Updated 2026-09-10. This is a compact handoff, not a run receipt or authorizatio
 ## Where to resume
 
 - Active development branch: `codex/wsb-typed-scenarios`. Locate it with `git worktree list` if this checkout differs. The main checkout has historically been behind this worktree.
-- Latest slice: first reusable Notepad++ MSI Sandbox bundle, exported, relocated, imported into fresh protected intake, and replayed through approved execution in a fresh Sandbox. Use `scripts/work-status.ps1` for current HEAD, dirty files, and locally known upstream state.
+- Latest slice: bundle-to-run JSON/Markdown reports match the verified bundle and exact import receipt/scenario to retained execution evidence. Retained replay regression passes without starting another worker. Use `scripts/work-status.ps1` for current HEAD, dirty files, and locally known upstream state.
 - Goal: report tested functions for exact application bytes and measured isolation configurations, then use the evidence for adaptation/repackaging. Free community project; feedback collection is not a development gate.
 
 ## Implemented versus exploratory
@@ -18,7 +18,7 @@ Updated 2026-09-10. This is a compact handoff, not a run receipt or authorizatio
 
 ## Next coherent slice
 
-Bind bundle provenance to the resulting verified report, so an administrator can see which exact package was replayed and what passed without manually joining the import record to its run. Preserve fresh approval and payload/scenario bindings; historical source evidence must not become a replay verdict. Then extend the recipe toward an explicit interactive launch and data lifecycle. AppContainer approved reporting and real-application comparison remain separate follow-ups; they do not block Sandbox packaging. No inner network restriction or host-launch capability is complete.
+Extend the recipe toward an explicit interactive Sandbox launch and data lifecycle. Start with a fixed supported application and bounded session lifetime; declare which user files enter the worker and how verified outputs can leave before adding persistence. Preserve fresh approval, exact artifact bindings, and explicit cleanup/recovery. Package reports now expose verified bundle/run association through `package report-wsb-msi`; report-set provenance and independent export/import chronology are not implemented. AppContainer approved reporting and real-application comparison remain separate follow-ups; they do not block Sandbox packaging. No inner network restriction or host-launch capability is complete.
 
 ## Read only what the slice needs
 

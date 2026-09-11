@@ -16,6 +16,7 @@ $imported = aiw package import --bundle <bundle-directory> `
   --intake-id notepad-replay | ConvertFrom-Json
 $imported.project | ConvertTo-Json -Depth 64 | Set-Content .\replay-project.json
 $imported.importReceipt | ConvertTo-Json -Depth 64 | Set-Content .\replay-intake.json
+$imported | ConvertTo-Json -Depth 64 | Set-Content .\replay-import.json
 ```
 
 Use new output files when saving the import result. Keep intake and run workspaces under separate parent directories (for example, `C:\AIW\intakes` and `C:\AIW\runs`): preparation holds the intake parent against writes while staging. Continue with `run prepare-wsb-msi`, using the imported project and receipt, the fixed scenario, and a separately verified current guest agent. Import that preparation and review its fresh plan before approval and start. Export, bundle verification, and intake import execute neither the installer nor the application. Failed exports can leave an incomplete output directory; use a new bundle ID when retrying.
@@ -36,4 +37,21 @@ The bundle format admits no additional commands, scripts, host mappings, or runt
 
 Automated file-only checks cover relocation, no-overwrite export, fresh intake identity, wrong manifest hash, payload/project/manifest drift, unsupported rehashed manifest fields, extra files, oversized payload, and hardlinks. These checks never execute their synthetic payload.
 
-The bundle manifest is not yet a first-class field in the run report. Preserve the import record alongside the exported manifest and new run evidence; automatic package-to-report provenance is the next slice. This proof covers the fixed ephemeral workflow only, not uninstall/update, interactive launch, persistent personal data, or MSIX conversion.
+This proof covers the fixed ephemeral workflow only, not uninstall/update, interactive launch, persistent personal data, or MSIX conversion.
+
+## Match a bundle to a verified run report
+
+After the run completes and cleanup is verified, keep the complete import result, then generate JSON or Markdown:
+
+```powershell
+aiw package report-wsb-msi --bundle <bundle-directory> `
+  --manifest-sha256 <exported-hash> --import-record .\replay-import.json `
+  --root <retained-run-workspace> --run-id <run-id> `
+  --guest-agent-sha256 <independently-retained-agent-hash> --format markdown
+```
+
+The `aiw.dev/sandbox-bundle-run-report/v0alpha1` envelope includes the verified manifest, its hash, the replay intake receipt hash, and the existing terminal run report. The verifier matches the project, compiled scenario, exact import receipt (including intake identity), payload size and hash. It holds the bundle through retained-workspace verification; an application hash match alone cannot substitute another intake. The original intake and current provider executable are not required. Bundle files and the retained run evidence must still be available.
+
+This is a verified association of the supplied bundle/import record with the run, not independent proof of when export or import happened. Historical source provenance does not establish replay success. The enclosed report retains its completed/unsuccessful kind, measured functions, failures and evidence gaps. Interrupted or pending-recovery runs reject, and this command never repairs, approves, starts, or reruns anything. Existing standalone and report-set schemas remain unchanged; bundle provenance is currently available through this package report command.
+
+The retained replay above passed the package-report regression without installation or worker startup: deterministic output, unchanged bundle/workspace file inventories, preserved insufficient-evidence verdict, and rejection of a wrong manifest hash, wrong guest hash, changed project/scenario/source provenance, and a different intake identity despite identical application bytes. Local test log: `%TEMP%\aiw-bundle-report-retained.log`.

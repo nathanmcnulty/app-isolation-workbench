@@ -212,7 +212,14 @@ pub fn report_windows_sandbox_msi_run(
 
 #[cfg(windows)]
 pub(crate) fn report_windows_sandbox_msi_run_bound(
-    root: &Path, run_id: &str, project: &Project, expected_guest_agent_sha256: &str, expected: Option<(&aiw_probe::ApplicationFileImportReceipt, &aiw_provider_wsb::CompiledMsiScenario)>,
+    root: &Path,
+    run_id: &str,
+    project: &Project,
+    expected_guest_agent_sha256: &str,
+    expected: Option<(
+        &aiw_probe::ApplicationFileImportReceipt,
+        &aiw_provider_wsb::CompiledMsiScenario,
+    )>,
 ) -> Result<WsbMsiRunReport, RunnerError> {
     if !aiw_schema::validate_project_for_planning(project).is_empty() {
         return Err(RunnerError::ApprovalBinding);
@@ -293,7 +300,11 @@ pub(crate) fn report_windows_sandbox_msi_run_bound(
         .as_ref()
         .ok_or(RunnerError::ApprovalBinding)?;
     verify_historical_scenario(project, &msi.scenario)?;
-    if let Some((receipt, scenario)) = expected { if &msi.import_receipt != receipt || &msi.scenario != scenario { return Err(RunnerError::ApprovalBinding); } }
+    if let Some((receipt, scenario)) = expected {
+        if &msi.import_receipt != receipt || &msi.scenario != scenario {
+            return Err(RunnerError::ApprovalBinding);
+        }
+    }
     let msi_file = held
         .reopen_tools_file_readonly("application.msi")
         .map_err(|_| RunnerError::Drift)?;
@@ -1173,4 +1184,3 @@ mod failure_progress_tests {
         fs::remove_dir(&root).unwrap();
     }
 }
-
