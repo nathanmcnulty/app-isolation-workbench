@@ -6616,7 +6616,7 @@ mod tests {
         let approval = ApprovalRecord::for_plan(&assessment, "operator", "time").unwrap();
         let mut launch = assessment.clone();
         launch.lifecycle = RunLifecycleKind::Launch;
-        launch.validate().unwrap();
+        validate_plan(&launch).unwrap();
         assert_ne!(launch.hash().unwrap(), assessment.hash().unwrap());
         assert!(validate_approval(&approval, &launch).is_err());
     }

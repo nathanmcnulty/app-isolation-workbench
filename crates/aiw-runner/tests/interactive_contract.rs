@@ -14,12 +14,12 @@ fn request(scenario: CompiledMsiScenario) -> ImportedMsiGuestRequest {
     ImportedMsiGuestRequest::new(
         "interactive-test",
         "00112233-4455-6677-8899-aabbccddeeff",
-        &"a".repeat(64),
-        &"b".repeat(64),
+        "a".repeat(64),
+        "b".repeat(64),
         scenario.clone(),
         &scenario.application_sha256,
         100,
-        &"c".repeat(64),
+        "c".repeat(64),
     )
     .unwrap()
 }
