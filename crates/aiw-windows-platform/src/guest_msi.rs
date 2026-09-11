@@ -527,6 +527,19 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
                 application.process_id,
                 "Notepad++ main window",
             )?;
+            // Test fixture only: exercise the normal interactive close path
+            // without claiming that a person interacted with the application.
+            thread::sleep(Duration::from_secs(2));
+            require_visible_process_window(
+                window,
+                application.process_id,
+                "Notepad++ main window",
+            )?;
+            unsafe { PostMessageW(Some(window), WM_CLOSE, WPARAM(0), LPARAM(0)) }.map_err(
+                |error| {
+                    GuestMsiExecutionError::Process(format!("fixture WM_CLOSE failed: {error}"))
+                },
+            )?;
             let exit_code = application
                 .wait_for_exit(Duration::from_secs(u64::from(interactive_session_seconds)))
                 .map_err(|error| {
