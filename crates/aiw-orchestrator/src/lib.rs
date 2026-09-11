@@ -4016,6 +4016,7 @@ fn action_allowed(lifecycle: RunLifecycleKind, action: &PlannedAction) -> bool {
             PlannedAction::AssessHost
                 | PlannedAction::PrepareWorkspace
                 | PlannedAction::LaunchValidatedProfile { .. }
+                | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
                 | PlannedAction::CollectEvidence
         ),
         RunLifecycleKind::Authoring => {
@@ -6607,6 +6608,17 @@ mod tests {
         assert_eq!(error.code.as_ref(), "AIW_WSB_IMPORT_INVALID");
         assert!(!root.join("runs").exists());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn imported_msi_launch_requires_fresh_lifecycle_approval() {
+        let assessment = msi_wsb_plan("run-one");
+        let approval = ApprovalRecord::for_plan(&assessment, "operator", "time").unwrap();
+        let mut launch = assessment.clone();
+        launch.lifecycle = RunLifecycleKind::Launch;
+        launch.validate().unwrap();
+        assert_ne!(launch.hash().unwrap(), assessment.hash().unwrap());
+        assert!(validate_approval(&approval, &launch).is_err());
     }
 
     #[test]
