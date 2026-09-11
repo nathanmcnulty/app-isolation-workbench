@@ -13,6 +13,7 @@ use sha2::{Digest, Sha256};
 #[cfg(windows)]
 use std::{fs, path::Path};
 use thiserror::Error;
+#[cfg(windows)] use crate::{WsbMsiRunReport, assessment_report::report_windows_sandbox_msi_run_bound};
 pub const SANDBOX_BUNDLE_MANIFEST_SCHEMA_VERSION: &str =
     "aiw.dev/sandbox-application-bundle/v0alpha1";
 #[cfg(windows)]
@@ -348,3 +349,4 @@ fn write(
 fn native(e: impl std::fmt::Display) -> SandboxBundleError {
     SandboxBundleError::Native(e.to_string())
 }
+

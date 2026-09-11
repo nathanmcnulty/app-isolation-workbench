@@ -63,12 +63,12 @@ pub use preparation::{
 
 pub use sandbox_bundle::{
     SANDBOX_BUNDLE_MANIFEST_SCHEMA_VERSION, SandboxBundleError, SandboxBundleExport,
-    SandboxBundleImport, SandboxBundleManifest, SandboxBundleVerification,
+    SandboxBundleImport, SandboxBundleManifest, SandboxBundleVerification, SandboxBundleRunReport,
 };
 #[cfg(windows)]
 pub use sandbox_bundle::{
     export_notepad_plus_plus_msi_bundle, import_notepad_plus_plus_msi_bundle,
-    verify_notepad_plus_plus_msi_bundle,
+    verify_notepad_plus_plus_msi_bundle, report_notepad_plus_plus_msi_bundle,
 };
 pub use session::{
     SESSION_TRANSACTION_SCHEMA_VERSION, SessionRecoveryBinding, SessionTransaction,
@@ -4973,3 +4973,4 @@ mod tests {
 mod live_msi_recovery_tests;
 
 mod assessment_report_markdown;
+
