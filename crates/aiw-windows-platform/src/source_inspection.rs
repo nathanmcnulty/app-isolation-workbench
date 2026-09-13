@@ -331,7 +331,7 @@ impl HeldApplicationFile {
         Ok(status)
     }
 
-    pub(crate) fn copy_to(&self, destination: &mut File) -> Result<(), SourceInspectionError> {
+    pub fn copy_to(&self, destination: &mut File) -> Result<(), SourceInspectionError> {
         if destination.metadata().map_err(native)?.len() != 0 {
             return Err(SourceInspectionError::InvalidShape);
         }
@@ -356,6 +356,43 @@ impl HeldApplicationFile {
         destination.flush().map_err(native)?;
         destination.sync_all().map_err(native)?;
         self.revalidate()
+    }
+
+    /// Reads a retained ordinary source through its held handle and verifies
+    /// that the bounded bytes remain stable. Callers choose the smaller
+    /// profile-specific limit; this never follows a path after opening.
+    pub fn read_bounded(&self, maximum_bytes: u64) -> Result<Vec<u8>, SourceInspectionError> {
+        if self.observation.size_bytes > maximum_bytes {
+            return Err(SourceInspectionError::BoundsExceeded);
+        }
+        self.revalidate()?;
+        let mut bytes = Vec::with_capacity(
+            usize::try_from(self.observation.size_bytes)
+                .map_err(|_| SourceInspectionError::BoundsExceeded)?,
+        );
+        let mut offset = 0_u64;
+        let mut buffer = [0_u8; 64 * 1024];
+        while offset < self.observation.size_bytes {
+            let remaining = self.observation.size_bytes - offset;
+            let request = usize::try_from(remaining.min(buffer.len() as u64))
+                .map_err(|_| SourceInspectionError::BoundsExceeded)?;
+            let count = self
+                .file
+                .seek_read(&mut buffer[..request], offset)
+                .map_err(native)?;
+            if count == 0 {
+                return Err(SourceInspectionError::Drift);
+            }
+            bytes.extend_from_slice(&buffer[..count]);
+            offset = offset
+                .checked_add(count as u64)
+                .ok_or(SourceInspectionError::BoundsExceeded)?;
+        }
+        self.revalidate()?;
+        if bytes.len() as u64 != self.observation.size_bytes {
+            return Err(SourceInspectionError::Drift);
+        }
+        Ok(bytes)
     }
 
     /// Copies one retained download-metadata stream into a newly-created

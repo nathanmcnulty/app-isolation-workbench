@@ -41,6 +41,7 @@ fn live_msi_interrupted_completion_rejects_foreign_request_and_recovers() {
         WsbMsiPreparationInput {
             import_receipt: &receipt,
             scenario_id: "install-launch-close",
+            document_input: None,
         },
     )
     .unwrap();

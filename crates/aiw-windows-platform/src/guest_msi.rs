@@ -4,9 +4,12 @@
 
 use std::ffi::OsStr;
 use std::ffi::c_void;
+use std::fs::{File, OpenOptions};
+use std::io::{Read as _, Seek as _, SeekFrom};
 use std::os::windows::ffi::OsStrExt;
+use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
 use std::os::windows::io::{AsHandle as _, FromRawHandle, OwnedHandle};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -130,6 +133,14 @@ pub struct GuestMsiExecutionObservation {
     pub standard_user_context: Option<StandardUserRuntimeContext>,
     pub registry_observations: Option<GuestMsiRegistryObservation>,
     pub product_registration: Option<GuestMsiProductRegistrationObservation>,
+    pub document_transfer: Option<GuestMsiDocumentTransferObservation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuestMsiDocumentTransferObservation {
+    pub input_sha256: String,
+    pub input_size_bytes: u64,
+    pub output_bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -450,6 +461,14 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
         after_install.as_ref(),
         None,
     );
+    let mut interactive_document = if scenario.requires_document_transfer() {
+        Some(prepare_interactive_document(
+            scenario,
+            standard_user.as_ref(),
+        )?)
+    } else {
+        None
+    };
     let document_exercise = if scenario.requires_application_exercise() {
         Some(stages.run(GuestMsiStage::PrepareDocument, || {
             prepare_fixed_document_exercise(scenario, standard_user.as_ref())
@@ -457,9 +476,14 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
     } else {
         None
     };
-    let launch_arguments = document_exercise
+    let launch_arguments = interactive_document
         .as_ref()
         .map(|plan| vec![plan.document_path.clone()])
+        .or_else(|| {
+            document_exercise
+                .as_ref()
+                .map(|plan| vec![plan.document_path.clone()])
+        })
         .unwrap_or_default();
     let application = stages.run(GuestMsiStage::Launch, || {
         if let Some(standard_user) = &standard_user {
@@ -495,16 +519,21 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
                 "collected application token changed process identity".to_owned(),
             ));
         }
-        let editor = document_exercise
-            .as_ref()
-            .map(|_| {
-                wait_for_ready_document_editor(
-                    window,
-                    application.process_id,
-                    EDITOR_LOOKUP_TIMEOUT,
-                )
-            })
-            .transpose()?;
+        let editor = if document_exercise.is_some() {
+            Some(wait_for_ready_document_editor(
+                window,
+                application.process_id,
+                EDITOR_LOOKUP_TIMEOUT,
+            )?)
+        } else if interactive_document.is_some() {
+            Some(wait_for_document_editor(
+                window,
+                application.process_id,
+                EDITOR_LOOKUP_TIMEOUT,
+            )?)
+        } else {
+            None
+        };
         Ok((window, application_token, editor))
     });
     let (window, application_token, editor) = match ready {
@@ -539,14 +568,29 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
                     "Notepad++ exited with {exit_code} during interactive session"
                 )));
             }
-            Ok(exit_code)
+            let document_transfer = if let Some(plan) = interactive_document.as_mut() {
+                plan.input.revalidate()?;
+                let output_bytes = plan
+                    .document
+                    .read_bounded(aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES)
+                    .map_err(GuestMsiExecutionError::Process)?;
+                validate_interactive_document_bytes(&output_bytes)?;
+                Some(GuestMsiDocumentTransferObservation {
+                    input_sha256: plan.input.sha256.clone(),
+                    input_size_bytes: plan.input.size_bytes,
+                    output_bytes,
+                })
+            } else {
+                None
+            };
+            Ok((exit_code, document_transfer))
         })();
         let cleanup = if operation.is_ok() {
             application.verify_empty_after_success()
         } else {
             application.cleanup()
         };
-        let launch_exit_code = complete_process_operation(operation, cleanup)?;
+        let (launch_exit_code, document_transfer) = complete_process_operation(operation, cleanup)?;
         return Ok(GuestMsiExecutionObservation {
             install_exit_code,
             launch_process_id,
@@ -557,6 +601,7 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
             registry_observations: None,
             product_registration: None,
             standard_user_context: standard_user.as_ref().map(|value| value.context().clone()),
+            document_transfer,
         });
     }
 
@@ -658,6 +703,7 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
         registry_observations,
         product_registration,
         standard_user_context: standard_user.as_ref().map(|value| value.context().clone()),
+        document_transfer: None,
     })
 }
 
@@ -665,6 +711,143 @@ struct ExercisePlan {
     expected_sha256: String,
     document: crate::FixedGuestDocument,
     document_path: String,
+}
+
+struct InteractiveDocumentPlan {
+    input: HeldInteractiveDocumentInput,
+    document: crate::FixedGuestDocument,
+    document_path: String,
+}
+
+struct HeldInteractiveDocumentInput {
+    path: PathBuf,
+    file: File,
+    sha256: String,
+    size_bytes: u64,
+}
+
+impl HeldInteractiveDocumentInput {
+    fn open(
+        contract: &aiw_provider_wsb::InteractiveDocumentTransfer,
+    ) -> Result<Self, GuestMsiExecutionError> {
+        let path = PathBuf::from(aiw_provider_wsb::INTERACTIVE_DOCUMENT_INPUT_PATH);
+        let metadata = std::fs::symlink_metadata(&path).map_err(|error| {
+            GuestMsiExecutionError::Process(format!("inspect interactive document input: {error}"))
+        })?;
+        if !metadata.is_file() || metadata.file_attributes() & 0x0400 != 0 {
+            return Err(GuestMsiExecutionError::Process(
+                "interactive document input is not an ordinary file".to_owned(),
+            ));
+        }
+        let file = OpenOptions::new()
+            .read(true)
+            .share_mode(0x0000_0001)
+            .custom_flags(0x0020_0000)
+            .open(&path)
+            .map_err(|error| {
+                GuestMsiExecutionError::Process(format!(
+                    "open interactive document input with a held read handle: {error}"
+                ))
+            })?;
+        let mut value = Self {
+            path,
+            file,
+            sha256: contract.input_sha256.clone(),
+            size_bytes: contract.input_size_bytes,
+        };
+        value.verify()?;
+        Ok(value)
+    }
+
+    fn read_bytes(&mut self) -> Result<Vec<u8>, GuestMsiExecutionError> {
+        let path_metadata = std::fs::symlink_metadata(&self.path).map_err(|error| {
+            GuestMsiExecutionError::Process(format!(
+                "inspect interactive document input path: {error}"
+            ))
+        })?;
+        let metadata = self.file.metadata().map_err(|error| {
+            GuestMsiExecutionError::Process(format!("inspect held interactive input: {error}"))
+        })?;
+        if !path_metadata.is_file()
+            || path_metadata.file_attributes() & 0x0400 != 0
+            || !metadata.is_file()
+            || metadata.file_attributes() & 0x0400 != 0
+            || metadata.len() != self.size_bytes
+            || metadata.len() > aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES
+        {
+            return Err(GuestMsiExecutionError::Process(
+                "held interactive document input identity changed".to_owned(),
+            ));
+        }
+        self.file
+            .seek(SeekFrom::Start(0))
+            .map_err(|error| GuestMsiExecutionError::Process(error.to_string()))?;
+        let mut bytes = Vec::with_capacity(self.size_bytes as usize);
+        (&mut self.file)
+            .take(aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|error| GuestMsiExecutionError::Process(error.to_string()))?;
+        if bytes.len() as u64 != self.size_bytes {
+            return Err(GuestMsiExecutionError::Process(
+                "interactive document input size changed while read".to_owned(),
+            ));
+        }
+        Ok(bytes)
+    }
+
+    fn verify(&mut self) -> Result<(), GuestMsiExecutionError> {
+        let bytes = self.read_bytes()?;
+        validate_interactive_document_bytes(&bytes)?;
+        if sha256(&bytes) != self.sha256 {
+            return Err(GuestMsiExecutionError::Process(
+                "interactive document input hash does not match the approved contract".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn revalidate(&mut self) -> Result<(), GuestMsiExecutionError> {
+        self.verify()
+    }
+}
+
+fn prepare_interactive_document(
+    scenario: &CompiledMsiScenario,
+    standard_user: Option<&StandardUserSession>,
+) -> Result<InteractiveDocumentPlan, GuestMsiExecutionError> {
+    let contract = scenario.interactive_document.as_ref().ok_or_else(|| {
+        GuestMsiExecutionError::Scenario(
+            "interactive document profile has no input contract".to_owned(),
+        )
+    })?;
+    let standard_user = standard_user.ok_or_else(|| {
+        GuestMsiExecutionError::Scenario(
+            "interactive document profile requires the standard-user session".to_owned(),
+        )
+    })?;
+    let mut input = HeldInteractiveDocumentInput::open(contract)?;
+    let initial = input.read_bytes()?;
+    let document = standard_user.impersonate(|| {
+        crate::FixedGuestDocument::prepare_at_with_initial(standard_user.document_root(), &initial)
+            .map_err(GuestMsiExecutionError::Process)
+    })?;
+    Ok(InteractiveDocumentPlan {
+        input,
+        document,
+        document_path: aiw_provider_wsb::STANDARD_USER_DOCUMENT_EXERCISE_PATH.to_owned(),
+    })
+}
+
+fn validate_interactive_document_bytes(bytes: &[u8]) -> Result<(), GuestMsiExecutionError> {
+    if bytes.len() as u64 > aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES
+        || std::str::from_utf8(bytes).is_err()
+        || bytes.contains(&0)
+    {
+        return Err(GuestMsiExecutionError::Scenario(
+            "interactive document must be bounded UTF-8 text without NUL bytes".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 fn prepare_fixed_document_exercise(
@@ -789,6 +972,23 @@ fn wait_for_ready_document_editor(
     process_id: u32,
     timeout: Duration,
 ) -> Result<HWND, GuestMsiExecutionError> {
+    wait_for_document_editor_with_initial(parent, process_id, timeout, Some(DOCUMENT_INITIAL_TEXT))
+}
+
+fn wait_for_document_editor(
+    parent: HWND,
+    process_id: u32,
+    timeout: Duration,
+) -> Result<HWND, GuestMsiExecutionError> {
+    wait_for_document_editor_with_initial(parent, process_id, timeout, None)
+}
+
+fn wait_for_document_editor_with_initial(
+    parent: HWND,
+    process_id: u32,
+    timeout: Duration,
+    expected_initial_text: Option<&str>,
+) -> Result<HWND, GuestMsiExecutionError> {
     let deadline = Instant::now().checked_add(timeout).ok_or_else(|| {
         GuestMsiExecutionError::Process(
             "editor lookup timeout overflowed monotonic clock".to_owned(),
@@ -814,25 +1014,30 @@ fn wait_for_ready_document_editor(
             };
             if let Some(editor) = editor {
                 require_visible_process_window(editor, process_id, "Notepad++ Scintilla editor")?;
-                let initial_text = match read_window_text(
-                    editor,
-                    process_id,
-                    remaining_timeout(deadline)?.min(COMMAND_TIMEOUT),
-                ) {
-                    Ok(initial_text) => initial_text,
-                    Err(error) => {
-                        retry_readiness_error(error, deadline)?;
-                        continue;
-                    }
+                let initial_matches = if let Some(expected) = expected_initial_text {
+                    let initial_text = match read_window_text(
+                        editor,
+                        process_id,
+                        remaining_timeout(deadline)?.min(COMMAND_TIMEOUT),
+                    ) {
+                        Ok(initial_text) => initial_text,
+                        Err(error) => {
+                            retry_readiness_error(error, deadline)?;
+                            continue;
+                        }
+                    };
+                    initial_text == expected
+                } else {
+                    true
                 };
-                if initial_text == DOCUMENT_INITIAL_TEXT {
+                if initial_matches {
                     return Ok(editor);
                 }
             }
         }
         if Instant::now() >= deadline {
             return Err(GuestMsiExecutionError::Process(
-                "Notepad++ did not expose the fixed document title and initial text before timeout"
+                "Notepad++ did not expose the fixed document title and editor before timeout"
                     .to_owned(),
             ));
         }

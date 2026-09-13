@@ -250,21 +250,41 @@ fn execute_imported_msi_request(request: &ImportedMsiGuestRequest) -> Result<()>
                     })?;
                 }
 
-                publish_msi_result(request, &failed, evidence, CompletionStatus::Failed)?;
+                publish_msi_result(request, &failed, evidence, CompletionStatus::Failed, None)?;
                 return Err(PublishedMsiFailure(error.to_string()).into());
             }
             bail!("fixed imported-MSI execution failed: {error}");
         }
     };
-    let result = ImportedMsiScenarioResult::succeeded(
+    let document_transfer = observation.document_transfer.map(|transfer| {
+        let output_sha256 = hex::encode(Sha256::digest(&transfer.output_bytes));
+        (
+            aiw_provider_wsb::ImportedMsiDocumentTransferResult {
+                input_sha256: transfer.input_sha256,
+                input_size_bytes: transfer.input_size_bytes,
+                output_sha256,
+                output_size_bytes: transfer.output_bytes.len() as u64,
+            },
+            transfer.output_bytes,
+        )
+    });
+    let result = ImportedMsiScenarioResult::succeeded_with_document_transfer(
         request,
         observation.install_exit_code,
         observation.launch_process_id,
         observation.launch_exit_code,
+        document_transfer.as_ref().map(|(result, _)| result.clone()),
     )?;
     result.validate_for_request(request).map_err(|error| {
         anyhow::anyhow!("guest produced an invalid imported-MSI result: {error}")
     })?;
+    if let Some((transfer, output_bytes)) = document_transfer.as_ref() {
+        if transfer.output_size_bytes != output_bytes.len() as u64
+            || transfer.output_sha256 != hex::encode(Sha256::digest(output_bytes))
+        {
+            bail!("guest document result does not match the output bytes")
+        }
+    }
     let mut evidence = EvidenceLog::new();
     evidence.append(EvidenceEvent {
         observed_utc: "guest-agent-time-not-trusted".to_owned(),
@@ -387,7 +407,13 @@ fn execute_imported_msi_request(request: &ImportedMsiGuestRequest) -> Result<()>
         }
         append_stage_progress(&mut evidence, progress)?;
     }
-    publish_msi_result(request, &result, evidence, CompletionStatus::Succeeded)
+    publish_msi_result(
+        request,
+        &result,
+        evidence,
+        CompletionStatus::Succeeded,
+        document_transfer.map(|(_, bytes)| bytes),
+    )
 }
 
 #[cfg(not(windows))]
@@ -651,6 +677,7 @@ fn publish_msi_result(
     result: &impl Serialize,
     evidence: EvidenceLog,
     status: CompletionStatus,
+    document_output: Option<Vec<u8>>,
 ) -> Result<()> {
     let root = PathBuf::from(&request.output_root);
     let result_path = output_path(&root, &request.scenario_result_path)?;
@@ -666,7 +693,43 @@ fn publish_msi_result(
         bail!("guest application evidence exceeded its bound");
     }
     write_new_bytes(&evidence_path, &bytes)?;
+    let document_path =
+        if request.scenario.requires_document_transfer() && status == CompletionStatus::Succeeded {
+            let bytes = document_output
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("interactive document output is missing"))?;
+            let path = output_path(&root, "document-output.txt")?;
+            write_new_raw_bytes(&path, bytes)?;
+            Some(path)
+        } else {
+            if document_output.is_some() {
+                bail!("non-transfer MSI profile produced document output")
+            }
+            None
+        };
 
+    let mut artifacts = vec![
+        completion_artifact(
+            &result_path,
+            &request.scenario_result_path,
+            ArtifactRole::ScenarioResults,
+            "application/json",
+        )?,
+        completion_artifact(
+            &evidence_path,
+            &request.evidence_log_path,
+            ArtifactRole::EvidenceLog,
+            "application/x-ndjson",
+        )?,
+    ];
+    if let Some(path) = document_path {
+        artifacts.push(completion_artifact(
+            &path,
+            "document-output.txt",
+            ArtifactRole::ScenarioResults,
+            "text/plain; charset=utf-8",
+        )?);
+    }
     let receipt = WindowsSandboxCompletionReceipt {
         schema_version: WINDOWS_SANDBOX_COMPLETION_RECEIPT_SCHEMA_VERSION.to_owned(),
         run_id: request.run_id.clone(),
@@ -681,20 +744,7 @@ fn publish_msi_result(
             1
         },
         evidence_root_hash: evidence.manifest()?.root_hash,
-        artifacts: vec![
-            completion_artifact(
-                &result_path,
-                &request.scenario_result_path,
-                ArtifactRole::ScenarioResults,
-                "application/json",
-            )?,
-            completion_artifact(
-                &evidence_path,
-                &request.evidence_log_path,
-                ArtifactRole::EvidenceLog,
-                "application/x-ndjson",
-            )?,
-        ],
+        artifacts,
     };
     write_receipt_last(&receipt_path, &receipt)
 }
@@ -1106,6 +1156,7 @@ mod tests {
                 expected_exit_code: 0,
                 interactive_session_seconds: None,
                 document_exercise: None,
+                interactive_document: None,
             },
             "a".repeat(64),
             1024,

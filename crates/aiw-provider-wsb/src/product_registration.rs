@@ -208,6 +208,7 @@ mod tests {
                         )),
                     }),
                 },
+                interactive_document: None,
             },
             "c".repeat(64),
             1024,

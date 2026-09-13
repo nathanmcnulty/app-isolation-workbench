@@ -12,6 +12,8 @@ pub const IMPORTED_MSI_GUEST_REQUEST_SCHEMA_VERSION: &str =
     "aiw.dev/windows-sandbox-imported-msi-guest-request/v0alpha1";
 pub const IMPORTED_MSI_SCENARIO_RESULT_SCHEMA_VERSION: &str =
     "aiw.dev/windows-sandbox-imported-msi-scenario-result/v0alpha1";
+pub const IMPORTED_MSI_DOCUMENT_SCENARIO_RESULT_SCHEMA_VERSION: &str =
+    "aiw.dev/windows-sandbox-imported-msi-scenario-result/v0alpha3";
 
 const STAGED_INSTALLER_PATH: &str = r"C:\AIW\Tools\application.msi";
 const OUTPUT_ROOT: &str = r"C:\AIW\Output";
@@ -163,6 +165,33 @@ pub struct ImportedMsiScenarioResult {
     pub process_observed: bool,
     pub graceful_close_requested: bool,
     pub process_closed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document_transfer: Option<ImportedMsiDocumentTransferResult>,
+}
+
+/// Receipt-bound measurements for the interactive text transfer profile.
+/// The bytes themselves are published as a separate completion artifact so a
+/// host can choose whether and where to export them.
+#[derive(Debug, Clone, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ImportedMsiDocumentTransferResult {
+    pub input_sha256: String,
+    pub input_size_bytes: u64,
+    pub output_sha256: String,
+    pub output_size_bytes: u64,
+}
+
+impl ImportedMsiDocumentTransferResult {
+    pub fn validate(&self) -> Result<(), ImportedMsiRequestError> {
+        if !lower_hex_sha256(&self.input_sha256)
+            || !lower_hex_sha256(&self.output_sha256)
+            || self.input_size_bytes > crate::MAX_INTERACTIVE_DOCUMENT_BYTES
+            || self.output_size_bytes > crate::MAX_INTERACTIVE_DOCUMENT_BYTES
+        {
+            return Err(ImportedMsiRequestError::InvalidResult);
+        }
+        Ok(())
+    }
 }
 
 impl ImportedMsiScenarioResult {
@@ -172,8 +201,26 @@ impl ImportedMsiScenarioResult {
         launch_process_id: u32,
         launch_exit_code: i32,
     ) -> Result<Self, ImportedMsiRequestError> {
+        Self::succeeded_with_document_transfer(
+            request,
+            install_exit_code,
+            launch_process_id,
+            launch_exit_code,
+            None,
+        )
+    }
+
+    pub fn succeeded_with_document_transfer(
+        request: &ImportedMsiGuestRequest,
+        install_exit_code: i32,
+        launch_process_id: u32,
+        launch_exit_code: i32,
+        document_transfer: Option<ImportedMsiDocumentTransferResult>,
+    ) -> Result<Self, ImportedMsiRequestError> {
         let value = Self {
-            schema_version: if request.scenario.interactive_session_seconds.is_some() {
+            schema_version: if request.scenario.requires_document_transfer() {
+                IMPORTED_MSI_DOCUMENT_SCENARIO_RESULT_SCHEMA_VERSION.to_owned()
+            } else if request.scenario.interactive_session_seconds.is_some() {
                 "aiw.dev/windows-sandbox-imported-msi-scenario-result/v0alpha2".to_owned()
             } else {
                 IMPORTED_MSI_SCENARIO_RESULT_SCHEMA_VERSION.to_owned()
@@ -193,6 +240,7 @@ impl ImportedMsiScenarioResult {
             process_observed: true,
             graceful_close_requested: request.scenario.interactive_session_seconds.is_none(),
             process_closed: true,
+            document_transfer,
         };
         value.validate()?;
         Ok(value)
@@ -201,7 +249,11 @@ impl ImportedMsiScenarioResult {
     pub fn validate(&self) -> Result<(), ImportedMsiRequestError> {
         let interactive =
             self.schema_version == "aiw.dev/windows-sandbox-imported-msi-scenario-result/v0alpha2";
-        if (self.schema_version != IMPORTED_MSI_SCENARIO_RESULT_SCHEMA_VERSION && !interactive)
+        let interactive_document =
+            self.schema_version == IMPORTED_MSI_DOCUMENT_SCENARIO_RESULT_SCHEMA_VERSION;
+        if (self.schema_version != IMPORTED_MSI_SCENARIO_RESULT_SCHEMA_VERSION
+            && !interactive
+            && !interactive_document)
             || !valid_id(&self.run_id)
             || !canonical_sandbox_id(&self.sandbox_id)
             || !lower_hex_sha256(&self.config_sha256)
@@ -215,9 +267,17 @@ impl ImportedMsiScenarioResult {
             || self.launch_process_id == 0
             || self.launch_exit_code != 0
             || !self.process_observed
-            || self.graceful_close_requested == interactive
+            || self.graceful_close_requested == (interactive || interactive_document)
             || !self.process_closed
         {
+            return Err(ImportedMsiRequestError::InvalidResult);
+        }
+        if interactive_document {
+            self.document_transfer
+                .as_ref()
+                .ok_or(ImportedMsiRequestError::InvalidResult)?
+                .validate()?;
+        } else if self.document_transfer.is_some() {
             return Err(ImportedMsiRequestError::InvalidResult);
         }
         Ok(())
@@ -230,10 +290,13 @@ impl ImportedMsiScenarioResult {
     ) -> Result<(), ImportedMsiRequestError> {
         request.validate()?;
         self.validate()?;
+        let result_interactive = self.schema_version
+            == "aiw.dev/windows-sandbox-imported-msi-scenario-result/v0alpha2"
+            || self.schema_version == IMPORTED_MSI_DOCUMENT_SCENARIO_RESULT_SCHEMA_VERSION;
         if self.run_id != request.run_id
-            || (self.schema_version
-                == "aiw.dev/windows-sandbox-imported-msi-scenario-result/v0alpha2")
-                != request.scenario.interactive_session_seconds.is_some()
+            || result_interactive != request.scenario.interactive_session_seconds.is_some()
+            || (self.schema_version == IMPORTED_MSI_DOCUMENT_SCENARIO_RESULT_SCHEMA_VERSION)
+                != request.scenario.requires_document_transfer()
             || self.sandbox_id != request.sandbox_id
             || self.config_sha256 != request.config_sha256
             || self.request_sha256 != request.request_sha256
@@ -244,6 +307,22 @@ impl ImportedMsiScenarioResult {
             || self.launch_exit_code != request.scenario.expected_exit_code
         {
             return Err(ImportedMsiRequestError::ResultBindingMismatch);
+        }
+        if request.scenario.requires_document_transfer() {
+            let transfer = self
+                .document_transfer
+                .as_ref()
+                .ok_or(ImportedMsiRequestError::ResultBindingMismatch)?;
+            let contract = request
+                .scenario
+                .interactive_document
+                .as_ref()
+                .ok_or(ImportedMsiRequestError::ResultBindingMismatch)?;
+            if transfer.input_sha256 != contract.input_sha256
+                || transfer.input_size_bytes != contract.input_size_bytes
+            {
+                return Err(ImportedMsiRequestError::ResultBindingMismatch);
+            }
         }
         Ok(())
     }
@@ -256,7 +335,8 @@ impl ImportedMsiScenarioResult {
             && self.process_observed
             && (self.graceful_close_requested
                 || self.schema_version
-                    == "aiw.dev/windows-sandbox-imported-msi-scenario-result/v0alpha2")
+                    == "aiw.dev/windows-sandbox-imported-msi-scenario-result/v0alpha2"
+                || self.schema_version == IMPORTED_MSI_DOCUMENT_SCENARIO_RESULT_SCHEMA_VERSION)
             && self.process_closed
     }
 }
@@ -331,6 +411,7 @@ mod tests {
             expected_exit_code: 0,
             interactive_session_seconds: None,
             document_exercise: None,
+            interactive_document: None,
         }
     }
 
@@ -399,5 +480,49 @@ mod tests {
             ),
             Err(ImportedMsiRequestError::InvalidRequest)
         );
+    }
+
+    #[test]
+    fn transfer_result_is_bound_to_the_typed_input_contract() {
+        let mut request = request();
+        request.scenario.schema_version =
+            crate::COMPILED_MSI_INTERACTIVE_DOCUMENT_SCENARIO_SCHEMA_VERSION.to_owned();
+        request.scenario.profile = crate::NOTEPAD_PLUS_PLUS_INTERACTIVE_DOCUMENT_PROFILE.to_owned();
+        request.scenario.interactive_session_seconds = Some(60);
+        request.scenario.interactive_document = Some(crate::InteractiveDocumentTransfer {
+            input_sha256: "e".repeat(64),
+            input_size_bytes: 7,
+        });
+        request.scenario_sha256 = request.scenario.canonical_sha256().unwrap();
+        request.request_sha256 = request.request_sha256().unwrap();
+        request.validate().unwrap();
+
+        let result = ImportedMsiScenarioResult::succeeded_with_document_transfer(
+            &request,
+            0,
+            42,
+            0,
+            Some(ImportedMsiDocumentTransferResult {
+                input_sha256: "e".repeat(64),
+                input_size_bytes: 7,
+                output_sha256: "f".repeat(64),
+                output_size_bytes: 9,
+            }),
+        )
+        .unwrap();
+        result.validate_for_request(&request).unwrap();
+
+        let mut tampered = result.clone();
+        tampered
+            .document_transfer
+            .as_mut()
+            .unwrap()
+            .input_size_bytes = 8;
+        assert_eq!(
+            tampered.validate_for_request(&request),
+            Err(ImportedMsiRequestError::ResultBindingMismatch)
+        );
+        let missing = ImportedMsiScenarioResult::succeeded(&request, 0, 42, 0);
+        assert_eq!(missing, Err(ImportedMsiRequestError::InvalidResult));
     }
 }

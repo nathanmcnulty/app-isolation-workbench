@@ -1,11 +1,11 @@
 # Working state
 
-Updated 2026-09-10. This is a compact handoff, not a run receipt or authorization.
+Updated 2026-09-12. This is a compact handoff, not a run receipt or authorization.
 
 ## Where to resume
 
 - Active development branch: `codex/wsb-typed-scenarios`. Locate it with `git worktree list` if this checkout differs. The main checkout has historically been behind this worktree.
-- Latest slice: approved scratch-only interactive Notepad++ profile, with bounded natural-exit/timeout handling and distinct session reports. Production timeout and separate controlled-close fixture pass fresh-worker validation. Use `scripts/work-status.ps1` for current HEAD, dirty files, and locally known upstream state.
+- Latest slice: approved scratch-only interactive Notepad++ profile plus bounded text-document transfer reporting. Input is held and copied to a fixed worker path; successful output is receipt-bound and can be explicitly exported once to a new host file. Production timeout and separate controlled-close fixture pass fresh-worker validation. Use `scripts/work-status.ps1` for current HEAD, dirty files, and locally known upstream state.
 - Goal: report tested functions for exact application bytes and measured isolation configurations, then use the evidence for adaptation/repackaging. Free community project; feedback collection is not a development gate.
 
 ## Implemented versus exploratory
@@ -14,11 +14,11 @@ Updated 2026-09-10. This is a compact handoff, not a run receipt or authorizatio
 - Bambu: separate approved EXE export profile, protected staging, standard-user guest execution, stage/failure result, bounded 3MF graph/geometry verification, and retained JSON/Markdown report. Original `--info` compiler remains metadata-only. See the profile document for production validation and exact evidence.
 - Mixed reports: `run report-wsb-set` combines verified MSI and Bambu results with distinct function columns, failures/unavailable entries, and verified-identity deduplication. The retained regression checks deterministic output and unchanged workspace inventories.
 - Development control: paired file/registry reads and descendants passed in two fresh workers. Token, value/DACL, process/profile, and worker cleanup bindings passed. Version 2 rejects 30 altered records; historical file-only records stay unmeasured for registry. See CONTROL-FIXTURE.md. Research controls remain excluded from production application reports.
-- Packaging: `package export-wsb-msi`, `package verify`, and `package import` carry exact MSI bytes and a fixed recipe, with an independently supplied manifest hash. Replay passes the existing standard-user document workflow and report checks. Both the automated assessment recipe and approved scratch-only interactive launch are supported. Personal document transfer, persistent data, MSI/MSIX conversion, and application-level baseline/candidate isolation comparison remain open. Outer Sandbox containment is distinct from an inner application boundary.
+- Packaging: `package export-wsb-msi`, `package verify`, and `package import` carry exact MSI bytes and a fixed recipe, with an independently supplied manifest hash. Replay passes the existing standard-user document workflow and report checks. Both the automated assessment recipe and approved scratch-only interactive launch are supported. The transfer profile accepts one bounded text input and offers explicit receipt-bound export; persistent data, MSI/MSIX conversion, and application-level baseline/candidate isolation comparison remain open. Outer Sandbox containment is distinct from an inner application boundary.
 
 ## Next coherent slice
 
-Add a bounded text-document transfer contract to the scratch-only interactive profile: immutable input copy into the worker, fixed save destination, receipt-bound output bytes, and explicit verified export to a new host file. Do not map personal document folders or silently overwrite originals. Human keyboard/mouse usability remains a manual check; controlled close proves only lifecycle handling. Package reports expose verified bundle/run association through `package report-wsb-msi`; interactive sessions are excluded from assessment matrices. AppContainer approved reporting and real-application comparison remain separate follow-ups. No inner network restriction, persistent application installation, or host-launch capability is complete.
+Next, use the completed transfer report to inform the first inspectable packaging recipe. The transfer profile copies one immutable, bounded UTF-8 input into the worker, verifies the fixed save output against the completion receipt, and exposes it only through an explicit new-file export. Do not map personal document folders or silently overwrite originals. Human keyboard/mouse usability remains a manual check; controlled close proves only lifecycle handling. Package reports expose verified bundle/run association through `package report-wsb-msi`; interactive sessions remain excluded from assessment matrices. AppContainer approved reporting and real-application comparison remain separate follow-ups. No inner network restriction, persistent application installation, or host-launch capability is complete.
 
 ## Read only what the slice needs
 

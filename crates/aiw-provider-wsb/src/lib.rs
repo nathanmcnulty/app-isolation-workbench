@@ -62,9 +62,10 @@ pub use failure_snapshots::{
     verify_msi_failed_snapshots,
 };
 pub use imported_msi::{
+    IMPORTED_MSI_DOCUMENT_SCENARIO_RESULT_SCHEMA_VERSION,
     IMPORTED_MSI_GUEST_REQUEST_SCHEMA_VERSION, IMPORTED_MSI_SCENARIO_RESULT_SCHEMA_VERSION,
-    ImportedMsiGuestRequest, ImportedMsiRequestError, ImportedMsiScenarioResult,
-    ImportedMsiScenarioStatus,
+    ImportedMsiDocumentTransferResult, ImportedMsiGuestRequest, ImportedMsiRequestError,
+    ImportedMsiScenarioResult, ImportedMsiScenarioStatus,
 };
 pub use product_registration::{
     IMPORTED_MSI_PRODUCT_REGISTRATION_EVENT, IMPORTED_MSI_PRODUCT_REGISTRATION_SCHEMA_VERSION,
@@ -86,8 +87,11 @@ pub use runtime_context::{
     verify_imported_msi_runtime_context, verify_msi_runtime_context,
 };
 pub use scenario::{
-    CompiledMsiScenario, FixedDocumentExercise, ScenarioCompileError,
-    compile_notepad_plus_plus_msi_scenario,
+    COMPILED_MSI_INTERACTIVE_DOCUMENT_SCENARIO_SCHEMA_VERSION, CompiledMsiScenario,
+    FixedDocumentExercise, INTERACTIVE_DOCUMENT_INPUT_PATH, INTERACTIVE_DOCUMENT_OUTPUT_PATH,
+    InteractiveDocumentTransfer, MAX_INTERACTIVE_DOCUMENT_BYTES,
+    NOTEPAD_PLUS_PLUS_INTERACTIVE_DOCUMENT_PROFILE, ScenarioCompileError,
+    compile_notepad_plus_plus_msi_scenario, compile_notepad_plus_plus_msi_scenario_with_document,
 };
 pub use stage_progress::{
     IMPORTED_MSI_FAILED_ATTEMPT_SCHEMA, IMPORTED_MSI_FAILED_ATTEMPT_SCHEMA_VERSION,

@@ -264,6 +264,7 @@ mod tests {
                         crate::DOCUMENT_EXPECTED_TEXT.as_bytes(),
                     )),
                 }),
+                interactive_document: None,
             },
             "c".repeat(64),
             1024,

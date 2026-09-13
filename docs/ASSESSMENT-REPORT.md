@@ -14,6 +14,30 @@ The command reads the committed terminal journal, approval/import provenance, pr
 
 Reporting never acquires a provider lease, invokes a provider, repairs a journal, creates run locks, or modifies workspace files. The original intake and currently installed provider are not queried. Retained binaries and the original project must still match their recorded authority. Explicit legacy v1, v2 and v3 profile requests remain readable; all action fields are compared against the supported compiler while retaining the historical evidence-version requirement.
 
+## Interactive document-transfer reports
+
+The typed interactive transfer profile is reported by `run report-wsb-msi-run` as
+`reportKind: interactiveSession` with report schema `v0alpha2`. The report's
+`documentTransfer` records the input and output SHA-256/size commitments. A
+successful completion receipt contains a separate `document-output.txt` artifact;
+the runner verifies its bytes, UTF-8/no-NUL policy, and hash before including the
+transfer record. The default interactive profile remains scratch-only and keeps
+the field absent.
+
+The output stays in the retained worker until an operator explicitly requests a
+new host file:
+
+```powershell
+aiw run export-wsb-msi-document --root <retained-workspace> --run-id <run-id> `
+  --project <approved-project.json> --guest-agent-sha256 <approved-sha256> `
+  --destination <new-absolute-host-file>
+```
+
+Export re-verifies the terminal report and source artifact, refuses existing
+destinations and paths inside the retained workspace, creates one ordinary file,
+and reopens it to verify the exact receipt-bound bytes. It does not map a host
+document into the Sandbox or overwrite an original.
+
 `recordedCleanupVerified` means the persisted transaction and terminal result record verified cleanup. It is not a fresh check of current Sandbox sessions. Reverified guest evidence remains guest-reported rather than independent host evidence. In particular, `applicationToken` may be present while `targetToken` remains in `missingEvidence`: the snapshot does not discharge the project's required isolation assertion. Requested assertions are preserved verbatim and no assertion is silently marked passed.
 
 Missing evidence includes ordinary baseline observations, independent host measurements, filesystem/registry changes, network/UI/IPC observations, persistence/residue, and project-required descendant, canary, backend, capture-completeness, and target-token evidence. `unmeasuredScenarios` lists project scenarios other than the one recorded in this run. This command does not accept arbitrary summaries as verified inputs to the existing descriptive `compare` command.

@@ -7,7 +7,7 @@ The example allows five minutes; `waitForUserClose.timeoutSeconds` accepts 30–
 ## Data and runtime contract
 
 - No user-selected host folders are mapped. Network and clipboard are disabled. The existing fixed tools and untrusted protocol-output mappings remain necessary for verified execution.
-- Guest-profile documents are scratch data and disappear when the worker stops. There is no supported import/export of personal documents, autosave recovery, or persistent application installation.
+- The default profile opens scratch data only; it disappears when the worker stops. An explicit transfer run may copy one bounded UTF-8 text file into the worker and retain one receipt-bound output artifact. It never maps a personal folder, preserves an original, or installs the application persistently.
 - Closing the remote desktop viewer alone is not the recorded application-close contract. Close Notepad++ or use the existing cancellation/recovery commands; the owned worker is stopped and its absence checked.
 - The viewer connects to the existing Sandbox desktop. The application runs as the separately verified standard user on that shared desktop. This is outer Sandbox containment, not AppContainer or a separate desktop security boundary.
 
@@ -37,6 +37,14 @@ aiw run import-prepared-wsb --workspace $workspace --project $project `
 $prepared.runPlan | ConvertTo-Json -Depth 64
 ```
 
+To exercise the bounded document-transfer profile, add `--document-input` to
+`prepare-wsb-msi`. The path must be an existing ordinary file that is absolute,
+canonical, valid UTF-8 with no NUL byte, and at most 1 MiB. The file is copied
+into the worker as the fixed `C:\AIW\Tools\document-input.txt`; the application
+must save the edited bytes to the fixed `C:\AIW\Output\document-output.txt`.
+This changes the compiled scenario and therefore requires its own preparation
+and approval.
+
 Review the plan's `launch` lifecycle, exact scenario binding, lifetime/data warning, and mapped-folder warning before creating approval. Approval is a local immutable record, not an independent administrator attestation. Use a new output file:
 
 ```powershell
@@ -60,7 +68,20 @@ aiw run start --root $workspace --run-id $runId --project $project `
 
 Use `run report-wsb-msi-run` or `package report-wsb-msi`, with `--format json` or `markdown`. Normal exit produces `reportKind: interactiveSession`, including window/process observation, standard-user token/context, the duration limit, and recorded cleanup. It does not prove that a human typed, that a document workflow passed, or that an inner isolation boundary was effective. Timeout/cancellation/errors remain unsuccessful attempts; their duration is identified and guest diagnostics remain explicitly unverified.
 
-The old `report-wsb-msi` assessment-only command rejects interactive sessions. Assessment report sets identify them as `interactiveSessionNotAssessment`, including unsuccessful interactive attempts. The automated v6 document benchmark remains separate and retains its prior wire hashes and evidence semantics.
+The old `report-wsb-msi` assessment-only command rejects interactive sessions. Assessment report sets identify them as `interactiveSessionNotAssessment`, including unsuccessful interactive attempts. A successful transfer report has `schemaVersion: aiw.dev/wsb-msi-interactive-report/v0alpha2`, includes `documentTransfer` input/output hashes and sizes, and verifies the separate `document-output.txt` receipt artifact. The output is not copied to the host automatically. Export it only after reviewing the report:
+
+```powershell
+$destination = Join-Path (Get-Location) 'notepad-plus-plus-output.txt'
+aiw run export-wsb-msi-document --root $workspace --run-id $runId `
+  --project $project --guest-agent-sha256 $guestHash `
+  --destination $destination
+```
+
+Export requires a successful transfer report, creates one new ordinary host
+file, refuses an existing destination, rejects destinations inside the retained
+worker, and reopens the destination to verify the exact receipt-bound bytes.
+The automated v6 document benchmark remains separate and retains its prior wire
+hashes and evidence semantics.
 
 ## Validation
 

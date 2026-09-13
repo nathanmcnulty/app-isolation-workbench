@@ -5,9 +5,17 @@ fn verify_historical_scenario(
     project: &Project,
     recorded: &aiw_provider_wsb::CompiledMsiScenario,
 ) -> Result<(), RunnerError> {
-    let compiled =
+    let compiled = if let Some(document) = recorded.interactive_document.as_ref() {
+        aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario_with_document(
+            project,
+            &recorded.scenario_id,
+            &document.input_sha256,
+            document.input_size_bytes,
+        )
+    } else {
         aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(project, &recorded.scenario_id)
-            .map_err(|e| RunnerError::Preparation(e.to_string()))?;
+    }
+    .map_err(|e| RunnerError::Preparation(e.to_string()))?;
     // Legacy snapshots keep their original semantics; validate against today's
     // identical action sequence while preserving their explicit evidence version.
     let mut historical = compiled;
@@ -137,14 +145,52 @@ pub struct WsbMsiInteractiveReport {
     pub scenario: aiw_provider_wsb::ImportedMsiScenarioResult,
     pub application_token: aiw_provider_wsb::ImportedMsiApplicationToken,
     pub standard_user_context: aiw_provider_wsb::ImportedMsiRuntimeContext,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub document_transfer: Option<aiw_provider_wsb::ImportedMsiDocumentTransferResult>,
+}
+
+pub const WSB_MSI_DOCUMENT_EXPORT_SCHEMA_VERSION: &str = "aiw.dev/wsb-msi-document-export/v0alpha1";
+
+/// A receipt-bound copy of an interactive document output. Export is always
+/// explicit, never overwrites an existing host file, and never maps a host
+/// document path into the worker.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WsbMsiDocumentExport {
+    pub schema_version: String,
+    pub run_id: String,
+    pub receipt_sha256: String,
+    pub scenario_sha256: String,
+    pub source_artifact: String,
+    pub destination: String,
+    pub input_sha256: String,
+    pub input_size_bytes: u64,
+    pub output_sha256: String,
+    pub output_size_bytes: u64,
 }
 
 impl WsbMsiInteractiveReport {
     pub fn to_markdown(&self) -> String {
+        let transfer = self
+            .document_transfer
+            .as_ref()
+            .map(|value| {
+                format!(
+                    "The bounded UTF-8 document transfer is verified. Input {} bytes (`{}`); output {} bytes (`{}`). The output is available only through explicit export of the receipt-bound artifact.",
+                    value.input_size_bytes,
+                    value.input_sha256,
+                    value.output_size_bytes,
+                    value.output_sha256,
+                )
+            })
+            .unwrap_or_else(|| {
+                "No document workflow or human interaction is verified. Scratch data is discarded with the worker; no host document transfer was requested.".to_owned()
+            });
         format!(
-            "# Notepad++ interactive Sandbox session\n\nRun: {}\n\nThe process exited normally within the {} second limit after window readiness. No document workflow or human interaction is verified. Scratch data is discarded with the worker; no host document transfer is supported.\n\nRecorded exact-session cleanup verified: {}.\n\nInstaller SHA-256: `{}`\n\nScenario SHA-256: `{}`\n\nReceipt SHA-256: `{}`\n\nApplication PID: {}; elevated: {}; integrity RID: {}.\n",
+            "# Notepad++ interactive Sandbox session\n\nRun: {}\n\nThe process exited normally within the {} second limit after window readiness. {}\n\nRecorded exact-session cleanup verified: {}.\n\nInstaller SHA-256: `{}`\n\nScenario SHA-256: `{}`\n\nReceipt SHA-256: `{}`\n\nApplication PID: {}; elevated: {}; integrity RID: {}.\n",
             self.run_id,
             self.session_limit_seconds,
+            transfer,
             self.recorded_cleanup_verified,
             self.scenario.installer_sha256,
             self.scenario.scenario_sha256,
@@ -154,6 +200,219 @@ impl WsbMsiInteractiveReport {
             self.application_token.token.integrity.rid
         )
     }
+}
+
+#[cfg(windows)]
+pub fn export_windows_sandbox_msi_document(
+    root: &Path,
+    run_id: &str,
+    project: &Project,
+    expected_guest_agent_sha256: &str,
+    destination: &Path,
+) -> Result<WsbMsiDocumentExport, RunnerError> {
+    use std::os::windows::fs::OpenOptionsExt as _;
+
+    let report =
+        report_windows_sandbox_msi_run(root, run_id, project, expected_guest_agent_sha256)?;
+    let interactive = match report {
+        WsbMsiRunReport::InteractiveSession(report) => *report,
+        WsbMsiRunReport::CompletedAssessment(_) => {
+            return Err(RunnerError::Receipt(
+                "document export requires an interactive session report".to_owned(),
+            ));
+        }
+        WsbMsiRunReport::UnsuccessfulAttempt(_) => {
+            return Err(RunnerError::Receipt(
+                "document export requires a successful interactive session".to_owned(),
+            ));
+        }
+    };
+    let transfer = interactive.document_transfer.ok_or_else(|| {
+        RunnerError::Receipt(
+            "the interactive session did not request receipt-bound document transfer".to_owned(),
+        )
+    })?;
+
+    let preparation: WsbPreparationReceipt =
+        read_bounded_json(&root.join("preparation.json"), 1024 * 1024)?;
+    let held = aiw_windows_platform::HeldRunWorkspace::reopen_bound(&preparation.workspace)
+        .map_err(|error| RunnerError::Preparation(error.to_string()))?;
+    if !same_windows_path(
+        root.canonicalize().map_err(|_| RunnerError::Drift)?,
+        held.root_path(),
+    ) {
+        return Err(RunnerError::Drift);
+    }
+    held.revalidate().map_err(|_| RunnerError::Drift)?;
+
+    let source = held
+        .reopen_output_file("document-output.txt")
+        .map_err(|_| RunnerError::Drift)?;
+    let source_bytes =
+        read_bound_workspace_file(&source, aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES)?;
+    if source_bytes.len() as u64 != transfer.output_size_bytes
+        || hex::encode(Sha256::digest(&source_bytes)) != transfer.output_sha256
+        || std::str::from_utf8(&source_bytes).is_err()
+        || source_bytes.contains(&0)
+    {
+        return Err(RunnerError::Receipt(
+            "retained document output no longer matches the verified report".to_owned(),
+        ));
+    }
+    source.revalidate().map_err(|_| RunnerError::Drift)?;
+    held.revalidate().map_err(|_| RunnerError::Drift)?;
+
+    let destination = canonical_export_destination(destination, held.root_path())?;
+    let mut output = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .custom_flags(0x0020_0000)
+        .open(&destination)
+        .map_err(|error| {
+            RunnerError::Receipt(format!(
+                "cannot create new export destination {}: {error}",
+                destination.display()
+            ))
+        })?;
+    output
+        .write_all(&source_bytes)
+        .map_err(|_| RunnerError::Receipt("export destination write failed".to_owned()))?;
+    output
+        .sync_all()
+        .map_err(|_| RunnerError::Receipt("export destination flush failed".to_owned()))?;
+    drop(output);
+
+    let exported = aiw_windows_platform::HeldApplicationFile::open(&destination)
+        .map_err(|error| RunnerError::Receipt(error.to_string()))?;
+    let exported_bytes = exported
+        .read_bounded(aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES)
+        .map_err(|error| RunnerError::Receipt(error.to_string()))?;
+    if exported_bytes != source_bytes
+        || exported.observation().sha256 != transfer.output_sha256
+        || exported.observation().size_bytes != transfer.output_size_bytes
+    {
+        return Err(RunnerError::Receipt(
+            "export destination did not reverify to the receipt-bound bytes".to_owned(),
+        ));
+    }
+    exported
+        .revalidate()
+        .map_err(|error| RunnerError::Receipt(error.to_string()))?;
+    held.revalidate().map_err(|_| RunnerError::Drift)?;
+
+    Ok(WsbMsiDocumentExport {
+        schema_version: WSB_MSI_DOCUMENT_EXPORT_SCHEMA_VERSION.to_owned(),
+        run_id: interactive.run_id,
+        receipt_sha256: interactive.receipt_sha256,
+        scenario_sha256: interactive.scenario.scenario_sha256,
+        source_artifact: "document-output.txt".to_owned(),
+        destination: destination.to_string_lossy().into_owned(),
+        input_sha256: transfer.input_sha256,
+        input_size_bytes: transfer.input_size_bytes,
+        output_sha256: transfer.output_sha256,
+        output_size_bytes: transfer.output_size_bytes,
+    })
+}
+
+#[cfg(windows)]
+fn read_bound_workspace_file(
+    file: &aiw_windows_platform::BoundWorkspaceFile,
+    maximum_bytes: u64,
+) -> Result<Vec<u8>, RunnerError> {
+    use std::io::Seek as _;
+
+    file.revalidate().map_err(|_| RunnerError::Drift)?;
+    let mut reader = file.as_file().try_clone().map_err(|_| RunnerError::Drift)?;
+    let metadata = reader.metadata().map_err(|_| RunnerError::Drift)?;
+    if !metadata.is_file() || metadata.len() > maximum_bytes {
+        return Err(RunnerError::Drift);
+    }
+    reader
+        .seek(std::io::SeekFrom::Start(0))
+        .map_err(|_| RunnerError::Drift)?;
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    reader
+        .take(maximum_bytes + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| RunnerError::Drift)?;
+    if bytes.len() as u64 > maximum_bytes {
+        return Err(RunnerError::Drift);
+    }
+    file.revalidate().map_err(|_| RunnerError::Drift)?;
+    Ok(bytes)
+}
+
+#[cfg(windows)]
+fn canonical_export_destination(
+    path: &Path,
+    workspace_root: &Path,
+) -> Result<PathBuf, RunnerError> {
+    if !path.is_absolute() {
+        return Err(RunnerError::Receipt(
+            "export destination must be an absolute path".to_owned(),
+        ));
+    }
+    let leaf = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| {
+            RunnerError::Receipt("export destination must have a Unicode file name".to_owned())
+        })?;
+    if leaf.is_empty()
+        || leaf.len() > 255
+        || leaf == "."
+        || leaf == ".."
+        || leaf.ends_with(['.', ' '])
+        || leaf.contains(':')
+        || leaf.chars().any(char::is_control)
+    {
+        return Err(RunnerError::Receipt(
+            "export destination file name is not a safe ordinary file leaf".to_owned(),
+        ));
+    }
+    let supplied_parent = path
+        .parent()
+        .ok_or_else(|| RunnerError::Receipt("export destination parent is missing".to_owned()))?;
+    ensure_ordinary_directory(supplied_parent)?;
+    let parent = supplied_parent
+        .canonicalize()
+        .map_err(|_| RunnerError::Receipt("export destination parent is unavailable".to_owned()))?;
+    ensure_ordinary_directory(&parent)?;
+    ensure_no_reparse_components(&parent)?;
+    let workspace = workspace_root
+        .canonicalize()
+        .map_err(|_| RunnerError::Drift)?;
+    if windows_path_contains(&workspace, &parent) {
+        return Err(RunnerError::Receipt(
+            "export destination must be outside the retained Sandbox workspace".to_owned(),
+        ));
+    }
+    let destination = parent.join(leaf);
+    match fs::symlink_metadata(&destination) {
+        Ok(_) => {
+            return Err(RunnerError::Receipt(
+                "export destination already exists; refusing to overwrite it".to_owned(),
+            ));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return Err(RunnerError::Drift),
+    }
+    Ok(destination)
+}
+
+#[cfg(windows)]
+fn windows_path_contains(parent: &Path, child: &Path) -> bool {
+    let normalize = |path: &Path| {
+        let value = path.to_string_lossy();
+        value
+            .strip_prefix("\\\\?\\")
+            .unwrap_or(value.as_ref())
+            .trim_end_matches(['\\', '/'])
+            .to_ascii_lowercase()
+    };
+    let parent = normalize(parent);
+    let child = normalize(child);
+    child == parent || child.starts_with(&(parent + "\\"))
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -359,6 +618,28 @@ pub(crate) fn report_windows_sandbox_msi_run_bound(
     {
         return Err(RunnerError::Drift);
     }
+    let staged_document = if let Some(expected) = &msi.staged_document {
+        let file = held
+            .reopen_tools_file_readonly("document-input.txt")
+            .map_err(|_| RunnerError::Drift)?;
+        let observed = aiw_windows_platform::HeldApplicationFile::open(file.final_path())
+            .map_err(|_| RunnerError::Drift)?;
+        let bytes = observed
+            .read_bounded(aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES)
+            .map_err(|_| RunnerError::Drift)?;
+        if file.identity() != &expected.staged_identity
+            || observed.observation().identity != expected.staged_identity
+            || observed.observation().sha256 != expected.staged_payload.sha256
+            || observed.observation().size_bytes != expected.staged_payload.size_bytes
+            || std::str::from_utf8(&bytes).is_err()
+            || bytes.contains(&0)
+        {
+            return Err(RunnerError::Drift);
+        }
+        Some((file, observed))
+    } else {
+        None
+    };
     let config = render_config(&artifacts.wsb_plan).map_err(|_| RunnerError::Drift)?;
     let request = aiw_provider_wsb::ImportedMsiGuestRequest::new(
         run_id,
@@ -389,6 +670,10 @@ pub(crate) fn report_windows_sandbox_msi_run_bound(
         agent_observed
             .revalidate()
             .map_err(|_| RunnerError::Drift)?;
+        if let Some((file, observed)) = &staged_document {
+            file.revalidate().map_err(|_| RunnerError::Drift)?;
+            observed.revalidate().map_err(|_| RunnerError::Drift)?;
+        }
         if layout.completed_snapshot().map_err(journal_error)? != before
             || session::inspect_for_recovery(&layout)? != inspection
             || read_bounded_json::<WsbPreparationReceipt>(
@@ -450,8 +735,17 @@ pub(crate) fn report_windows_sandbox_msi_run_bound(
             },
         )));
     }
+    if msi.scenario.requires_document_transfer() {
+        expectation.artifacts.push(CompletionArtifactExpectation {
+            path: "document-output.txt".to_owned(),
+            role: aiw_evidence::ArtifactRole::ScenarioResults,
+            sensitivity: aiw_evidence::DataSensitivity::Internal,
+            media_type: "text/plain; charset=utf-8".to_owned(),
+            maximum_bytes: aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES,
+        });
+    }
     use std::os::windows::fs::OpenOptionsExt;
-    let _output_files = ["completion.json", "scenario-result.json", "evidence.jsonl"]
+    let mut _output_files = ["completion.json", "scenario-result.json", "evidence.jsonl"]
         .into_iter()
         .map(|leaf| {
             let path = held.output_path().join(leaf);
@@ -463,6 +757,17 @@ pub(crate) fn report_windows_sandbox_msi_run_bound(
                 .map_err(|_| RunnerError::Drift)
         })
         .collect::<Result<Vec<_>, _>>()?;
+    if msi.scenario.requires_document_transfer() {
+        let path = held.output_path().join("document-output.txt");
+        ensure_ordinary_file(&path)?;
+        _output_files.push(
+            OpenOptions::new()
+                .read(true)
+                .share_mode(1)
+                .open(path)
+                .map_err(|_| RunnerError::Drift)?,
+        );
+    }
     let verified = verify_completion_receipt(held.output_path(), &expectation)
         .map_err(|e| RunnerError::Receipt(e.to_string()))?;
     if !verified.successful
@@ -532,6 +837,29 @@ pub(crate) fn report_windows_sandbox_msi_run_bound(
             "successful assessment has failed stage progress".to_owned(),
         ));
     }
+    let document_transfer = if msi.scenario.requires_document_transfer() {
+        let transfer = scenario
+            .document_transfer
+            .clone()
+            .ok_or_else(|| RunnerError::Receipt("interactive document result is missing".into()))?;
+        let bytes = read_bounded_bytes(
+            &held.output_path().join("document-output.txt"),
+            aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES,
+        )?;
+        if bytes.len() as u64 != transfer.output_size_bytes
+            || hex::encode(Sha256::digest(&bytes)) != transfer.output_sha256
+            || std::str::from_utf8(&bytes).is_err()
+            || bytes.contains(&0)
+        {
+            return Err(RunnerError::Receipt(
+                "interactive document output is not the receipt-bound bounded UTF-8 artifact"
+                    .into(),
+            ));
+        }
+        Some(transfer)
+    } else {
+        None
+    };
     let installation_file_changes = behavior
         .as_ref()
         .map(|value| {
@@ -573,7 +901,12 @@ pub(crate) fn report_windows_sandbox_msi_run_bound(
         }
         return Ok(WsbMsiRunReport::InteractiveSession(Box::new(
             WsbMsiInteractiveReport {
-                schema_version: "aiw.dev/wsb-msi-interactive-report/v0alpha1".into(),
+                schema_version: if document_transfer.is_some() {
+                    "aiw.dev/wsb-msi-interactive-report/v0alpha2"
+                } else {
+                    "aiw.dev/wsb-msi-interactive-report/v0alpha1"
+                }
+                .into(),
                 run_id: run_id.into(),
                 session_limit_seconds,
                 recorded_cleanup_verified: true,
@@ -582,6 +915,7 @@ pub(crate) fn report_windows_sandbox_msi_run_bound(
                 scenario,
                 application_token: application_token.ok_or(RunnerError::ApprovalBinding)?,
                 standard_user_context: standard_user_context.ok_or(RunnerError::ApprovalBinding)?,
+                document_transfer,
             },
         )));
     }

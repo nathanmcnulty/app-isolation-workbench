@@ -389,6 +389,7 @@ mod tests {
                 expected_exit_code: 0,
                 interactive_session_seconds: None,
                 document_exercise: None,
+                interactive_document: None,
             },
             "c".repeat(64),
             1024,

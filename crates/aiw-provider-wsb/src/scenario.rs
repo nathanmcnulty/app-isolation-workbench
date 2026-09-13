@@ -22,12 +22,19 @@ pub const NOTEPAD_PLUS_PLUS_MSI_PROFILE: &str =
     "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha6";
 pub const NOTEPAD_PLUS_PLUS_INTERACTIVE_PROFILE: &str =
     "aiw.dev/windows-sandbox/notepad-plus-plus-interactive/v0alpha1";
+pub const NOTEPAD_PLUS_PLUS_INTERACTIVE_DOCUMENT_PROFILE: &str =
+    "aiw.dev/windows-sandbox/notepad-plus-plus-interactive-document/v0alpha1";
+pub const COMPILED_MSI_INTERACTIVE_DOCUMENT_SCENARIO_SCHEMA_VERSION: &str =
+    "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha8";
 
 const NOTEPAD_PLUS_PLUS_ENTRYPOINT_ID: &str = "notepad-plus-plus";
 const NOTEPAD_PLUS_PLUS_ENTRYPOINT_PATH: &str = "notepad++.exe";
 const NOTEPAD_PLUS_PLUS_INSTALLED_PATH: &str = r"C:\Program Files\Notepad++\notepad++.exe";
 const NOTEPAD_PLUS_PLUS_PROCESS_IMAGE: &str = "notepad++.exe";
 const STAGED_INSTALLER_PATH: &str = r"C:\AIW\Tools\application.msi";
+pub const INTERACTIVE_DOCUMENT_INPUT_PATH: &str = r"C:\AIW\Tools\document-input.txt";
+pub const INTERACTIVE_DOCUMENT_OUTPUT_PATH: &str = r"C:\AIW\Output\document-output.txt";
+pub const MAX_INTERACTIVE_DOCUMENT_BYTES: u64 = 1024 * 1024;
 const INSTALL_TIMEOUT_SECONDS: u32 = 120;
 const MAX_PROCESS_WAIT_TIMEOUT_SECONDS: u32 = 60;
 const GRACEFUL_CLOSE_TIMEOUT_SECONDS: u32 = 15;
@@ -55,6 +62,28 @@ pub struct CompiledMsiScenario {
     pub document_exercise: Option<FixedDocumentExercise>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interactive_session_seconds: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interactive_document: Option<InteractiveDocumentTransfer>,
+}
+
+/// The only caller supplied value admitted by the interactive transfer
+/// profile.  The guest and output paths remain fixed profile constants.
+#[derive(Debug, Clone, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct InteractiveDocumentTransfer {
+    pub input_sha256: String,
+    pub input_size_bytes: u64,
+}
+
+impl InteractiveDocumentTransfer {
+    pub fn validate(&self) -> Result<(), ScenarioCompileError> {
+        if !lower_hex_sha256(&self.input_sha256)
+            || self.input_size_bytes > MAX_INTERACTIVE_DOCUMENT_BYTES
+        {
+            return Err(ScenarioCompileError::InvalidCompiledProfile);
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -90,6 +119,9 @@ impl CompiledMsiScenario {
         let interactive = self.schema_version
             == "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha7"
             && self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_PROFILE;
+        let interactive_document = self.schema_version
+            == COMPILED_MSI_INTERACTIVE_DOCUMENT_SCENARIO_SCHEMA_VERSION
+            && self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_DOCUMENT_PROFILE;
         let registry_profile = self.schema_version
             == "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha5"
             && self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha5";
@@ -107,6 +139,7 @@ impl CompiledMsiScenario {
             && self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha1";
         if !(current
             || interactive
+            || interactive_document
             || registry_profile
             || standard_user_legacy
             || legacy_exercise
@@ -121,12 +154,19 @@ impl CompiledMsiScenario {
                 && !standard_user_legacy
                 && !legacy_exercise
                 && self.document_exercise.is_some())
+            || ((interactive || interactive_document) && self.document_exercise.is_some())
             || !valid_id(&self.scenario_id)
-            || (interactive
+            || ((interactive || interactive_document)
                 && !self
                     .interactive_session_seconds
                     .is_some_and(|seconds| (30..=600).contains(&seconds)))
-            || (!interactive && self.interactive_session_seconds.is_some())
+            || (!interactive && !interactive_document && self.interactive_session_seconds.is_some())
+            || (interactive_document
+                && self
+                    .interactive_document
+                    .as_ref()
+                    .is_none_or(|value| value.validate().is_err()))
+            || (!interactive_document && self.interactive_document.is_some())
             || !lower_hex_sha256(&self.application_sha256)
             || self.installer_path != STAGED_INSTALLER_PATH
             || self.install_arguments
@@ -153,6 +193,7 @@ impl CompiledMsiScenario {
     /// The versioned profile is part of the approved scenario hash.
     pub fn requires_application_token(&self) -> bool {
         self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_PROFILE
+            || self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_DOCUMENT_PROFILE
             || self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha5"
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha3"
@@ -169,6 +210,7 @@ impl CompiledMsiScenario {
 
     pub fn requires_standard_user(&self) -> bool {
         self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_PROFILE
+            || self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_DOCUMENT_PROFILE
             || self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha5"
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha4"
@@ -181,6 +223,10 @@ impl CompiledMsiScenario {
 
     pub fn requires_product_registration(&self) -> bool {
         self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
+    }
+
+    pub fn requires_document_transfer(&self) -> bool {
+        self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_DOCUMENT_PROFILE
     }
 
     /// Returns the canonical digest used by later plan/approval layers.
@@ -308,12 +354,38 @@ pub fn compile_notepad_plus_plus_msi_scenario(
         expected_exit_code: 0,
         document_exercise: Some(FixedDocumentExercise::standard_user()),
         interactive_session_seconds: interactive_seconds,
+        interactive_document: None,
     };
     if interactive_seconds.is_some() {
         compiled.schema_version = "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha7".into();
         compiled.profile = NOTEPAD_PLUS_PLUS_INTERACTIVE_PROFILE.into();
         compiled.document_exercise = None;
     }
+    compiled.validate()?;
+    Ok(compiled)
+}
+
+/// Compiles the reviewed interactive sequence with one bounded UTF-8 text
+/// document copied into the worker and a receipt-bound output artifact.
+pub fn compile_notepad_plus_plus_msi_scenario_with_document(
+    project: &Project,
+    scenario_id: &str,
+    input_sha256: &str,
+    input_size_bytes: u64,
+) -> Result<CompiledMsiScenario, ScenarioCompileError> {
+    let mut compiled = compile_notepad_plus_plus_msi_scenario(project, scenario_id)?;
+    if compiled.interactive_session_seconds.is_none()
+        || !lower_hex_sha256(input_sha256)
+        || input_size_bytes > MAX_INTERACTIVE_DOCUMENT_BYTES
+    {
+        return Err(ScenarioCompileError::UnsupportedScenario);
+    }
+    compiled.schema_version = COMPILED_MSI_INTERACTIVE_DOCUMENT_SCENARIO_SCHEMA_VERSION.to_owned();
+    compiled.profile = NOTEPAD_PLUS_PLUS_INTERACTIVE_DOCUMENT_PROFILE.to_owned();
+    compiled.interactive_document = Some(InteractiveDocumentTransfer {
+        input_sha256: input_sha256.to_owned(),
+        input_size_bytes,
+    });
     compiled.validate()?;
     Ok(compiled)
 }
@@ -450,6 +522,76 @@ mod tests {
                 .unwrap(),
             hash
         );
+    }
+
+    #[test]
+    fn compiles_the_bounded_interactive_document_profile() {
+        let input = b"hello from the approved worker\r\n";
+        let hash = hex::encode(Sha256::digest(input));
+        let compiled = compile_notepad_plus_plus_msi_scenario_with_document(
+            &interactive_project(),
+            "interactive",
+            &hash,
+            input.len() as u64,
+        )
+        .unwrap();
+        assert_eq!(
+            compiled.profile,
+            NOTEPAD_PLUS_PLUS_INTERACTIVE_DOCUMENT_PROFILE
+        );
+        assert!(compiled.requires_document_transfer());
+        assert!(compiled.requires_standard_user());
+        assert!(compiled.requires_application_token());
+        assert_eq!(compiled.interactive_session_seconds, Some(60));
+        assert_eq!(
+            compiled.interactive_document.as_ref().unwrap().input_sha256,
+            hash
+        );
+        assert_eq!(compiled.canonical_sha256().unwrap().len(), 64);
+    }
+
+    #[test]
+    fn rejects_unbounded_or_noninteractive_document_bindings() {
+        let interactive = interactive_project();
+        assert_eq!(
+            compile_notepad_plus_plus_msi_scenario_with_document(
+                &interactive,
+                "interactive",
+                &"0".repeat(64),
+                MAX_INTERACTIVE_DOCUMENT_BYTES + 1,
+            ),
+            Err(ScenarioCompileError::UnsupportedScenario)
+        );
+        assert_eq!(
+            compile_notepad_plus_plus_msi_scenario_with_document(
+                &project(),
+                "first-run",
+                &"0".repeat(64),
+                1,
+            ),
+            Err(ScenarioCompileError::UnsupportedScenario)
+        );
+    }
+
+    fn interactive_project() -> Project {
+        let mut value = project();
+        value.scenarios[0].id = "interactive".to_owned();
+        value.scenarios[0].steps = vec![
+            ScenarioStep::Install,
+            ScenarioStep::Launch {
+                entrypoint: NOTEPAD_PLUS_PLUS_ENTRYPOINT_ID.to_owned(),
+                arguments: Vec::new(),
+            },
+            ScenarioStep::WaitForProcess {
+                image: NOTEPAD_PLUS_PLUS_PROCESS_IMAGE.to_owned(),
+                timeout_seconds: 30,
+            },
+            ScenarioStep::WaitForUserClose {
+                timeout_seconds: 60,
+            },
+            ScenarioStep::ExpectExitCode { value: 0 },
+        ];
+        value
     }
 
     #[test]

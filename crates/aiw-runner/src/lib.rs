@@ -40,19 +40,22 @@ mod discard;
 mod preparation;
 pub use assessment_report::{
     AssessmentEvidenceGap, FailureProgressEvidence, UnverifiedGuestDiagnostic,
-    VerifiedMsiFailureProgress, WsbMsiAssessmentReport, WsbMsiInteractiveReport, WsbMsiRunReport,
-    WsbMsiUnsuccessfulReport,
+    VerifiedMsiFailureProgress, WSB_MSI_DOCUMENT_EXPORT_SCHEMA_VERSION, WsbMsiAssessmentReport,
+    WsbMsiDocumentExport, WsbMsiInteractiveReport, WsbMsiRunReport, WsbMsiUnsuccessfulReport,
 };
 #[cfg(windows)]
-pub use assessment_report::{report_windows_sandbox_msi, report_windows_sandbox_msi_run};
+pub use assessment_report::{
+    export_windows_sandbox_msi_document, report_windows_sandbox_msi, report_windows_sandbox_msi_run,
+};
 mod session;
 
 pub use preparation::{
-    PreparedWsbArtifacts, WSB_MSI_PREPARATION_RECEIPT_SCHEMA_VERSION,
-    WSB_PLANNING_IMPORT_RESULT_SCHEMA_VERSION, WSB_PREPARATION_RECEIPT_SCHEMA_VERSION,
-    WsbBambuApplication, WsbMsiApplication, WsbPlanningImportDisposition, WsbPlanningImportReceipt,
-    WsbPlanningImportResult, WsbPreparationError, WsbPreparationReceipt, WsbPreparationStatus,
-    build_wsb_msi_preparation, build_wsb_preparation,
+    PreparedWsbArtifacts, WSB_MSI_DOCUMENT_PREPARATION_RECEIPT_SCHEMA_VERSION,
+    WSB_MSI_PREPARATION_RECEIPT_SCHEMA_VERSION, WSB_PLANNING_IMPORT_RESULT_SCHEMA_VERSION,
+    WSB_PREPARATION_RECEIPT_SCHEMA_VERSION, WsbBambuApplication, WsbMsiApplication, WsbMsiDocument,
+    WsbPlanningImportDisposition, WsbPlanningImportReceipt, WsbPlanningImportResult,
+    WsbPreparationError, WsbPreparationReceipt, WsbPreparationStatus, build_wsb_msi_preparation,
+    build_wsb_preparation,
 };
 
 #[cfg(windows)]
@@ -1463,6 +1466,13 @@ fn prepare_execution(
         completion.artifacts[1].maximum_bytes =
             aiw_provider_wsb::MAX_APPLICATION_EVIDENCE_BYTES as u64;
     }
+    if request
+        .msi
+        .as_ref()
+        .is_some_and(|msi| msi.scenario.requires_document_transfer())
+    {
+        add_msi_document_artifact_expectation(&mut completion);
+    }
     if request.bambu.is_some() {
         add_bambu_artifact_expectation(&mut completion);
     }
@@ -2484,6 +2494,16 @@ fn completion_expectation(
             },
         ],
     }
+}
+
+fn add_msi_document_artifact_expectation(expectation: &mut WindowsSandboxCompletionExpectation) {
+    expectation.artifacts.push(CompletionArtifactExpectation {
+        path: "document-output.txt".to_owned(),
+        role: aiw_evidence::ArtifactRole::ScenarioResults,
+        sensitivity: aiw_evidence::DataSensitivity::Internal,
+        media_type: "text/plain; charset=utf-8".to_owned(),
+        maximum_bytes: aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES,
+    });
 }
 fn progress(layout: &RunLayout, detail: &str) -> Result<(), RunnerError> {
     layout
@@ -4405,6 +4425,7 @@ mod tests {
                 volume_serial_number: start.workspace.tools.volume_serial_number.clone(),
                 file_id: "9".repeat(32),
             },
+            staged_document: None,
         };
         start.schema_version = "aiw.dev/wsb-imported-msi-start/v0alpha1".to_owned();
         start.wsb_plan.probe.output = r"C:\AIW\Output\scenario-result.json".to_owned();

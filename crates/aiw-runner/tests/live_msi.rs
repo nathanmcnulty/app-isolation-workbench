@@ -105,6 +105,7 @@ fn prepare_profile(
         WsbMsiPreparationInput {
             import_receipt: &receipt,
             scenario_id: "install-launch-close",
+            document_input: None,
         },
     )
     .unwrap();

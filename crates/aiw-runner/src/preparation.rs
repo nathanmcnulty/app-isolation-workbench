@@ -32,6 +32,8 @@ pub const WSB_MSI_PREPARATION_RECEIPT_SCHEMA_VERSION: &str =
     "aiw.dev/wsb-preparation-receipt/v0alpha2";
 pub const WSB_BAMBU_PREPARATION_RECEIPT_SCHEMA_VERSION: &str =
     "aiw.dev/wsb-preparation-receipt/v0alpha3";
+pub const WSB_MSI_DOCUMENT_PREPARATION_RECEIPT_SCHEMA_VERSION: &str =
+    "aiw.dev/wsb-preparation-receipt/v0alpha4";
 pub const WSB_PLANNING_IMPORT_RESULT_SCHEMA_VERSION: &str =
     "aiw.dev/wsb-planning-import-result/v0alpha1";
 
@@ -149,6 +151,15 @@ pub struct WsbMsiApplication {
     pub scenario_sha256: String,
     pub staged_payload: BinaryIdentity,
     pub staged_identity: WindowsFileIdentity,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub staged_document: Option<WsbMsiDocument>,
+}
+
+#[derive(Debug, Clone, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WsbMsiDocument {
+    pub staged_payload: BinaryIdentity,
+    pub staged_identity: WindowsFileIdentity,
 }
 
 impl WsbMsiApplication {
@@ -188,6 +199,47 @@ impl WsbMsiApplication {
             return Err(WsbPreparationError::Contract(
                 "MSI preparation bindings are inconsistent".to_owned(),
             ));
+        }
+        let transfer = self.scenario.requires_document_transfer();
+        match (transfer, self.staged_document.as_ref()) {
+            (false, None) => {}
+            (true, Some(document)) => {
+                let contract = self.scenario.interactive_document.as_ref().ok_or_else(|| {
+                    WsbPreparationError::Contract(
+                        "interactive document profile has no input contract".to_owned(),
+                    )
+                })?;
+                if document.staged_payload.sha256 != contract.input_sha256
+                    || document.staged_payload.size_bytes != contract.input_size_bytes
+                    || document.staged_payload.size_bytes
+                        > aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES
+                    || document.staged_payload.version.is_some()
+                    || document.staged_payload.signature_status != ReadinessState::Unknown
+                    || normalized_windows_path(&document.staged_payload.canonical_path)
+                        != format!(
+                            "{}\\document-input.txt",
+                            normalized_windows_path(&workspace.tools.final_path)
+                        )
+                    || normalized_windows_path(&document.staged_identity.final_path)
+                        != normalized_windows_path(&document.staged_payload.canonical_path)
+                    || document.staged_identity.volume_serial_number
+                        != workspace.tools.volume_serial_number
+                {
+                    return Err(WsbPreparationError::Contract(
+                        "interactive document preparation bindings are inconsistent".to_owned(),
+                    ));
+                }
+            }
+            (true, None) => {
+                return Err(WsbPreparationError::Contract(
+                    "interactive document profile requires a staged input".to_owned(),
+                ));
+            }
+            (false, Some(_)) => {
+                return Err(WsbPreparationError::Contract(
+                    "non-transfer MSI profile cannot stage an interactive document".to_owned(),
+                ));
+            }
         }
         Ok(())
     }
@@ -251,7 +303,15 @@ impl WsbPreparationReceipt {
         let expected_schema = if self.bambu.is_some() {
             WSB_BAMBU_PREPARATION_RECEIPT_SCHEMA_VERSION
         } else if self.msi.is_some() {
-            WSB_MSI_PREPARATION_RECEIPT_SCHEMA_VERSION
+            if self
+                .msi
+                .as_ref()
+                .is_some_and(|msi| msi.scenario.requires_document_transfer())
+            {
+                WSB_MSI_DOCUMENT_PREPARATION_RECEIPT_SCHEMA_VERSION
+            } else {
+                WSB_MSI_PREPARATION_RECEIPT_SCHEMA_VERSION
+            }
         } else {
             WSB_PREPARATION_RECEIPT_SCHEMA_VERSION
         };
@@ -593,10 +653,16 @@ pub fn build_wsb_msi_preparation(
     msi: WsbMsiApplication,
 ) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
     msi.validate(workspace)?;
-    let compiled = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
-        project,
-        &msi.scenario.scenario_id,
-    )
+    let compiled = if let Some(document) = &msi.staged_document {
+        aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario_with_document(
+            project,
+            &msi.scenario.scenario_id,
+            &document.staged_payload.sha256,
+            document.staged_payload.size_bytes,
+        )
+    } else {
+        aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(project, &msi.scenario.scenario_id)
+    }
     .map_err(|e| WsbPreparationError::Project(e.to_string()))?;
     if compiled != msi.scenario {
         return Err(WsbPreparationError::Project(
@@ -641,7 +707,11 @@ pub fn build_wsb_msi_preparation(
         .run_plan
         .hash()
         .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
-    artifacts.receipt.schema_version = WSB_MSI_PREPARATION_RECEIPT_SCHEMA_VERSION.to_owned();
+    artifacts.receipt.schema_version = if msi.scenario.requires_document_transfer() {
+        WSB_MSI_DOCUMENT_PREPARATION_RECEIPT_SCHEMA_VERSION.to_owned()
+    } else {
+        WSB_MSI_PREPARATION_RECEIPT_SCHEMA_VERSION.to_owned()
+    };
     artifacts.receipt.msi = Some(msi);
     artifacts.validate()?;
     Ok(artifacts)
@@ -982,6 +1052,7 @@ pub fn prepare_windows_sandbox_bundle(
 pub struct WsbMsiPreparationInput<'a> {
     pub import_receipt: &'a aiw_probe::ApplicationFileImportReceipt,
     pub scenario_id: &'a str,
+    pub document_input: Option<&'a Path>,
 }
 
 #[cfg(windows)]
@@ -1061,12 +1132,25 @@ fn prepare_bundle(
     use aiw_windows_platform::{HeldRunWorkspace, WorkspaceError, assess_windows_sandbox};
 
     validate_request_contract(run_id, project, created_at)?;
+    let held_document_input = match &application_input {
+        Some(WsbPreparationApplicationInput::Msi(input)) => input
+            .document_input
+            .map(open_interactive_document_input)
+            .transpose()?,
+        _ => None,
+    };
     let mut held_application = match &application_input {
         Some(WsbPreparationApplicationInput::Msi(input)) => {
-            let scenario = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
-                project,
-                input.scenario_id,
-            )
+            let scenario = if let Some(document) = held_document_input.as_ref() {
+                aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario_with_document(
+                    project,
+                    input.scenario_id,
+                    &document.observation().sha256,
+                    document.observation().size_bytes,
+                )
+            } else {
+                aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(project, input.scenario_id)
+            }
             .map_err(|e| WsbPreparationError::Project(e.to_string()))?;
             if input.import_receipt.source_kind != aiw_probe::ApplicationInspectionKind::Msi
                 || input.import_receipt.sha256 != scenario.application_sha256
@@ -1130,7 +1214,16 @@ fn prepare_bundle(
         ensure_empty_directory(&workspace.output_path())?;
         require_tools_allowlist(&workspace.tools_path())?;
         let (_held_agent, guest_agent) = stage_guest_agent(&mut held_guest_agent, &workspace)?;
-        require_tools_allowlist(&workspace.tools_path())?;
+        let staged_document = if let Some(document) = &held_document_input {
+            Some(stage_interactive_document(document, &workspace)?)
+        } else {
+            None
+        };
+        require_profile_tools_allowlist(
+            &workspace.tools_path(),
+            requested_application_file_name(&application_input),
+            staged_document.is_some(),
+        )?;
         let mut artifacts = build_wsb_preparation(
             run_id,
             project,
@@ -1192,6 +1285,7 @@ fn prepare_bundle(
                             signature_status: ReadinessState::Unknown,
                         },
                         staged_identity: staged.identity().clone(),
+                        staged_document: staged_document.clone(),
                     };
                     artifacts = build_wsb_msi_preparation(
                         run_id,
@@ -1245,10 +1339,16 @@ fn prepare_bundle(
         require_profile_tools_allowlist(
             &workspace.tools_path(),
             application_file_name(&artifacts.receipt),
+            document_file_present(&artifacts.receipt),
         )?;
         require_workspace_allowlist(workspace.root_path(), PreparationWorkspaceState::Building)?;
         if let Some((held, _)) = &mut held_application {
             held.revalidate()
+                .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+        }
+        if let Some(document) = &held_document_input {
+            document
+                .revalidate()
                 .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
         }
         if let Some((file, observed)) = &held_staged_application {
@@ -1288,6 +1388,10 @@ pub(crate) struct HeldVerifiedWsbPreparation {
         aiw_windows_platform::HeldApplicationFile,
         aiw_windows_platform::HeldVerifiedApplicationFileImport,
     )>,
+    held_document: Option<(
+        aiw_windows_platform::BoundWorkspaceFile,
+        aiw_windows_platform::HeldApplicationFile,
+    )>,
     workspace: aiw_windows_platform::HeldRunWorkspace,
 }
 
@@ -1305,11 +1409,19 @@ impl HeldVerifiedWsbPreparation {
         require_profile_tools_allowlist(
             &self.workspace.tools_path(),
             application_file_name(&self.artifacts.receipt),
+            document_file_present(&self.artifacts.receipt),
         )?;
         if let Some((file, observed, intake)) = &self.held_application {
             intake
                 .revalidate()
                 .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+            file.revalidate()
+                .map_err(|e| WsbPreparationError::Workspace(e.to_string()))?;
+            observed
+                .revalidate()
+                .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+        }
+        if let Some((file, observed)) = &self.held_document {
             file.revalidate()
                 .map_err(|e| WsbPreparationError::Workspace(e.to_string()))?;
             observed
@@ -1406,7 +1518,11 @@ pub(crate) fn open_verified_windows_sandbox_preparation(
         .revalidate()
         .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?;
     ensure_empty_directory(&workspace.output_path())?;
-    require_profile_tools_allowlist(&workspace.tools_path(), application_file_name(&receipt))?;
+    require_profile_tools_allowlist(
+        &workspace.tools_path(),
+        application_file_name(&receipt),
+        document_file_present(&receipt),
+    )?;
     let state = if workspace.root_path().join("runs").exists() {
         if !allow_imported {
             return Err(WsbPreparationError::Contract(
@@ -1444,14 +1560,24 @@ pub(crate) fn open_verified_windows_sandbox_preparation(
         .msi
         .as_ref()
         .map(|msi| {
-            (
-                &msi.import_receipt,
+            let compiled = if let Some(document) = &msi.staged_document {
+                aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario_with_document(
+                    project,
+                    &msi.scenario.scenario_id,
+                    &document.staged_payload.sha256,
+                    document.staged_payload.size_bytes,
+                )
+            } else {
                 aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
                     project,
                     &msi.scenario.scenario_id,
                 )
-                .map(|compiled| compiled == msi.scenario)
-                .map_err(|error| WsbPreparationError::Project(error.to_string())),
+            };
+            (
+                &msi.import_receipt,
+                compiled
+                    .map(|compiled| compiled == msi.scenario)
+                    .map_err(|error| WsbPreparationError::Project(error.to_string())),
                 &msi.staged_identity,
                 &msi.staged_payload,
                 MSI_FILE,
@@ -1498,6 +1624,29 @@ pub(crate) fn open_verified_windows_sandbox_preparation(
     } else {
         None
     };
+    let held_document = if let Some(document) = receipt
+        .msi
+        .as_ref()
+        .and_then(|msi| msi.staged_document.as_ref())
+    {
+        let file = workspace
+            .reopen_tools_file_readonly("document-input.txt")
+            .map_err(|e| WsbPreparationError::Workspace(e.to_string()))?;
+        let observed = aiw_windows_platform::HeldApplicationFile::open(file.final_path())
+            .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+        if file.identity() != &document.staged_identity
+            || observed.observation().identity != document.staged_identity
+            || observed.observation().sha256 != document.staged_payload.sha256
+            || observed.observation().size_bytes != document.staged_payload.size_bytes
+        {
+            return Err(WsbPreparationError::Contract(
+                "staged interactive document identity or content drifted".to_owned(),
+            ));
+        }
+        Some((file, observed))
+    } else {
+        None
+    };
     let observed = PreparedWsbArtifacts {
         run_plan,
         wsb_plan,
@@ -1534,6 +1683,7 @@ pub(crate) fn open_verified_windows_sandbox_preparation(
         wsb_plan_file,
         _held_agent: held_agent,
         held_application,
+        held_document,
         workspace,
     };
     held.revalidate(state)?;
@@ -1844,6 +1994,106 @@ fn open_guest_agent_source(
 }
 
 #[cfg(windows)]
+fn open_interactive_document_input(
+    source_path: &Path,
+) -> Result<aiw_windows_platform::HeldApplicationFile, WsbPreparationError> {
+    if !source_path.is_absolute() {
+        return Err(WsbPreparationError::Contract(
+            "interactive document input must be an absolute path".to_owned(),
+        ));
+    }
+    let metadata = std::fs::symlink_metadata(source_path)
+        .map_err(|error| WsbPreparationError::Contract(error.to_string()))?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(WsbPreparationError::Contract(
+            "interactive document input must be an ordinary file".to_owned(),
+        ));
+    }
+    let canonical = source_path
+        .canonicalize()
+        .map_err(|error| WsbPreparationError::Contract(error.to_string()))?;
+    if normalized_windows_path(&source_path.to_string_lossy())
+        != normalized_windows_path(&canonical.to_string_lossy())
+    {
+        return Err(WsbPreparationError::Contract(
+            "interactive document input must be supplied by its canonical path".to_owned(),
+        ));
+    }
+    let held = aiw_windows_platform::HeldApplicationFile::open(&canonical)
+        .map_err(|error| WsbPreparationError::Contract(error.to_string()))?;
+    if held.observation().size_bytes > aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES {
+        return Err(WsbPreparationError::Contract(
+            "interactive document input exceeds its fixed size bound".to_owned(),
+        ));
+    }
+    let bytes = held
+        .read_bounded(aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES)
+        .map_err(|error| WsbPreparationError::Contract(error.to_string()))?;
+    validate_interactive_document_bytes(&bytes)?;
+    if hex::encode(Sha256::digest(&bytes)) != held.observation().sha256 {
+        return Err(WsbPreparationError::Contract(
+            "interactive document input hash changed while it was read".to_owned(),
+        ));
+    }
+    Ok(held)
+}
+
+#[cfg(windows)]
+fn stage_interactive_document(
+    source: &aiw_windows_platform::HeldApplicationFile,
+    workspace: &aiw_windows_platform::HeldRunWorkspace,
+) -> Result<WsbMsiDocument, WsbPreparationError> {
+    let created = workspace
+        .create_tools_file_new("document-input.txt")
+        .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?;
+    let mut destination = created.into_file();
+    source
+        .copy_to(&mut destination)
+        .map_err(|error| WsbPreparationError::Contract(error.to_string()))?;
+    drop(destination);
+    let staged = workspace
+        .reopen_tools_file_readonly("document-input.txt")
+        .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?;
+    let observed = aiw_windows_platform::HeldApplicationFile::open(staged.final_path())
+        .map_err(|error| WsbPreparationError::Contract(error.to_string()))?;
+    let bytes = observed
+        .read_bounded(aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES)
+        .map_err(|error| WsbPreparationError::Contract(error.to_string()))?;
+    validate_interactive_document_bytes(&bytes)?;
+    if observed.observation().sha256 != source.observation().sha256
+        || observed.observation().size_bytes != source.observation().size_bytes
+        || hex::encode(Sha256::digest(&bytes)) != source.observation().sha256
+    {
+        return Err(WsbPreparationError::Contract(
+            "staged interactive document differs from the held source".to_owned(),
+        ));
+    }
+    Ok(WsbMsiDocument {
+        staged_payload: BinaryIdentity {
+            canonical_path: provider_path(&staged.final_path().to_string_lossy()),
+            sha256: observed.observation().sha256.clone(),
+            size_bytes: observed.observation().size_bytes,
+            version: None,
+            signature_status: ReadinessState::Unknown,
+        },
+        staged_identity: staged.identity().clone(),
+    })
+}
+
+#[cfg(windows)]
+fn validate_interactive_document_bytes(bytes: &[u8]) -> Result<(), WsbPreparationError> {
+    if bytes.len() as u64 > aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES
+        || std::str::from_utf8(bytes).is_err()
+        || bytes.contains(&0)
+    {
+        return Err(WsbPreparationError::Contract(
+            "interactive document input must be bounded UTF-8 text without NUL bytes".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
 fn ensure_empty_directory(path: &Path) -> Result<(), WsbPreparationError> {
     let mut entries = std::fs::read_dir(path)
         .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?;
@@ -1857,7 +2107,7 @@ fn ensure_empty_directory(path: &Path) -> Result<(), WsbPreparationError> {
 
 #[cfg(windows)]
 fn require_tools_allowlist(path: &Path) -> Result<(), WsbPreparationError> {
-    require_profile_tools_allowlist(path, None)
+    require_profile_tools_allowlist(path, None, false)
 }
 
 #[cfg(windows)]
@@ -1872,9 +2122,29 @@ fn application_file_name(receipt: &WsbPreparationReceipt) -> Option<&'static str
 }
 
 #[cfg(windows)]
+fn requested_application_file_name(
+    input: &Option<WsbPreparationApplicationInput<'_>>,
+) -> Option<&'static str> {
+    match input {
+        Some(WsbPreparationApplicationInput::Msi(_)) => Some(MSI_FILE),
+        Some(WsbPreparationApplicationInput::Bambu(_)) => Some(BAMBU_FILE),
+        None => None,
+    }
+}
+
+#[cfg(windows)]
+fn document_file_present(receipt: &WsbPreparationReceipt) -> bool {
+    receipt
+        .msi
+        .as_ref()
+        .is_some_and(|msi| msi.staged_document.is_some())
+}
+
+#[cfg(windows)]
 fn require_profile_tools_allowlist(
     path: &Path,
     application_file: Option<&str>,
+    document_file: bool,
 ) -> Result<(), WsbPreparationError> {
     let mut observed = std::fs::read_dir(path)
         .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?
@@ -1889,9 +2159,21 @@ fn require_profile_tools_allowlist(
         })
         .collect::<Result<Vec<_>, _>>()?;
     observed.sort();
-    let valid = match application_file {
-        Some(application_file) => observed.as_slice() == [GUEST_AGENT_FILE, application_file],
-        None => observed.is_empty() || observed.as_slice() == [GUEST_AGENT_FILE],
+    let mut expected = Vec::new();
+    if application_file.is_some() || document_file {
+        expected.push(GUEST_AGENT_FILE);
+    }
+    if let Some(application_file) = application_file {
+        expected.push(application_file);
+    }
+    if document_file {
+        expected.push("document-input.txt");
+    }
+    expected.sort_unstable();
+    let valid = if application_file.is_none() && !document_file {
+        observed.is_empty() || observed == [GUEST_AGENT_FILE]
+    } else {
+        observed == expected
     };
     if !valid {
         return Err(WsbPreparationError::Workspace(
@@ -2741,6 +3023,7 @@ mod tests {
             },
             staged_identity: identity(&staged_path, '9'),
             scenario,
+            staged_document: None,
         }
     }
 

@@ -21,7 +21,7 @@ $imported | ConvertTo-Json -Depth 64 | Set-Content .\replay-import.json
 
 Use new output files when saving the import result. Keep intake and run workspaces under separate parent directories (for example, `C:\AIW\intakes` and `C:\AIW\runs`): preparation holds the intake parent against writes while staging. Continue with `run prepare-wsb-msi`, using the imported project and receipt, the fixed scenario, and a separately verified current guest agent. Import that preparation and review its fresh plan before approval and start. Export, bundle verification, and intake import execute neither the installer nor the application. Failed exports can leave an incomplete output directory; use a new bundle ID when retrying.
 
-The automated workflow installs inside a disposable Windows Sandbox, then runs the standard-user document open/edit/save/close checks. The interactive profile opens a scratch-only editor until normal process exit or its approved deadline. Both stop the worker afterward; neither provides persistent installation or personal-document preservation. The new run's verified report is the authority for its observations. Source evidence references and successful bundle verification cannot substitute for that report.
+The automated workflow installs inside a disposable Windows Sandbox, then runs the standard-user document open/edit/save/close checks. The interactive profile opens a scratch-only editor until normal process exit or its approved deadline. Its optional transfer variant accepts one explicitly selected bounded text file and exposes the verified output only through an explicit new-file export. Both stop the worker afterward; neither provides persistent installation or personal-folder mapping. The new run's verified report is the authority for its observations. Source evidence references and successful bundle verification cannot substitute for that report.
 
 The bundle format admits no additional commands, scripts, host mappings, or runtime grants. Changed bytes, unsupported recipes, extra files, and unsafe file shapes must be rejected before preparation. New versions or profiles require explicit support, not interpretation of arbitrary manifest instructions. Download metadata normalization from the source intake is provenance; replaying the packaged bytes does not test the original download's SmartScreen behavior.
 
@@ -37,7 +37,7 @@ The bundle format admits no additional commands, scripts, host mappings, or runt
 
 Automated file-only checks cover relocation, no-overwrite export, fresh intake identity, wrong manifest hash, payload/project/manifest drift, unsupported rehashed manifest fields, extra files, oversized payload, and hardlinks. These checks never execute their synthetic payload.
 
-This proof covers the fixed ephemeral workflow only, not uninstall/update, interactive launch, persistent personal data, or MSIX conversion.
+This proof covers the fixed ephemeral workflow only, not uninstall/update, human interactive usability, persistent personal data, or MSIX conversion.
 
 ## Match a bundle to a verified run report
 

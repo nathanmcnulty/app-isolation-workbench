@@ -97,7 +97,11 @@ pub(crate) struct FixedGuestDocument {
 
 impl FixedGuestDocument {
     pub(crate) fn prepare() -> Result<Self, String> {
-        Self::prepare_with_ancestors(held_directory_chain(Path::new(FIXED_ROOT))?)
+        Self::prepare_with_ancestors(
+            held_directory_chain(Path::new(FIXED_ROOT))?,
+            DOCUMENT_INITIAL_TEXT.as_bytes(),
+            sha256(DOCUMENT_EXPECTED_TEXT.as_bytes()),
+        )
     }
 
     /// Prepares the same fixed document contract below a native-selected
@@ -110,13 +114,35 @@ impl FixedGuestDocument {
         let parent = root
             .parent()
             .ok_or_else(|| "fixed AIW parent is absent".to_owned())?;
-        Self::prepare_with_fresh_aiw(held_directory_chain_with_sharing(
-            parent,
-            FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0,
-        )?)
+        Self::prepare_with_fresh_aiw(
+            held_directory_chain_with_sharing(parent, FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0)?,
+            DOCUMENT_INITIAL_TEXT.as_bytes(),
+            sha256(DOCUMENT_EXPECTED_TEXT.as_bytes()),
+        )
     }
 
-    fn prepare_with_fresh_aiw(mut ancestors: Vec<File>) -> Result<Self, String> {
+    pub(crate) fn prepare_at_with_initial(
+        root: &Path,
+        initial_bytes: &[u8],
+    ) -> Result<Self, String> {
+        if root != Path::new(crate::guest_standard_user::STANDARD_USER_DOCUMENT_ROOT) {
+            return Err("standard-user document root is not the fixed profile path".to_owned());
+        }
+        let parent = root
+            .parent()
+            .ok_or_else(|| "fixed AIW parent is absent".to_owned())?;
+        Self::prepare_with_fresh_aiw(
+            held_directory_chain_with_sharing(parent, FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0)?,
+            initial_bytes,
+            sha256(initial_bytes),
+        )
+    }
+
+    fn prepare_with_fresh_aiw(
+        mut ancestors: Vec<File>,
+        initial_bytes: &[u8],
+        expected_sha256: String,
+    ) -> Result<Self, String> {
         let parent = ancestors
             .last()
             .ok_or_else(|| "fixed AIW parent was not retained".to_owned())?;
@@ -126,7 +152,7 @@ impl FixedGuestDocument {
         let aiw = create_relative_directory(parent, "AIW", FILE_SHARE_READ.0)
             .map_err(|error| relative_error("create fresh standard-user AIW directory", error))?;
         ancestors.push(aiw);
-        Self::prepare_with_ancestors(ancestors)
+        Self::prepare_with_ancestors(ancestors, initial_bytes, expected_sha256)
     }
 
     pub(crate) fn observe_expected(&self) -> Result<Option<String>, String> {
@@ -204,6 +230,38 @@ impl FixedGuestDocument {
         ))
     }
 
+    /// Reads the fixed working document through its opened handle with an
+    /// explicit byte bound and before/after identity checks.
+    pub(crate) fn read_bounded(&self, maximum_bytes: u64) -> Result<Vec<u8>, String> {
+        self.revalidate()?;
+        let document = open_relative_file(&self.scenario, DOCUMENT_LEAF, FILE_READ_DATA.0)?
+            .ok_or_else(|| "fixed document is absent".to_owned())?;
+        let before = file_information(&document)?;
+        if !ordinary_file(&before) {
+            return Err("fixed document is not an ordinary file".to_owned());
+        }
+        let length = file_length(&before);
+        if length > maximum_bytes {
+            return Err("fixed document exceeds its read bound".to_owned());
+        }
+        let mut bytes = Vec::with_capacity(
+            usize::try_from(length).map_err(|_| "fixed document is too large".to_owned())?,
+        );
+        (&document)
+            .take(maximum_bytes.saturating_add(1))
+            .read_to_end(&mut bytes)
+            .map_err(|error| format!("read fixed document failed: {error}"))?;
+        let after = file_information(&document)?;
+        if bytes.len() as u64 != length
+            || !ordinary_file(&after)
+            || !same_file_information(&before, &after)
+        {
+            return Err("fixed document changed while it was read".to_owned());
+        }
+        self.revalidate()?;
+        Ok(bytes)
+    }
+
     /// Verifies that the fixed `C:\AIW\Scenario` pathname still names the
     /// retained ordinary directory.  The caller invokes this after the UI
     /// process exits, and `observe_expected` invokes it before opening the
@@ -230,17 +288,25 @@ impl FixedGuestDocument {
 
     #[cfg(test)]
     fn prepare_under(root: &Path) -> Result<Self, String> {
-        Self::prepare_with_ancestors(vec![open_fixture_root(root)?])
+        Self::prepare_with_ancestors(
+            vec![open_fixture_root(root)?],
+            DOCUMENT_INITIAL_TEXT.as_bytes(),
+            sha256(DOCUMENT_EXPECTED_TEXT.as_bytes()),
+        )
     }
 
-    fn prepare_with_ancestors(mut ancestors: Vec<File>) -> Result<Self, String> {
+    fn prepare_with_ancestors(
+        mut ancestors: Vec<File>,
+        initial_bytes: &[u8],
+        expected_sha256: String,
+    ) -> Result<Self, String> {
         let root = ancestors
             .last()
             .ok_or_else(|| "fixed document root chain was empty".to_owned())?;
         let scenario = open_or_create_directory(root, SCENARIO_LEAF)?;
         let mut document = create_new_file(&scenario, DOCUMENT_LEAF)?;
         document
-            .write_all(DOCUMENT_INITIAL_TEXT.as_bytes())
+            .write_all(initial_bytes)
             .map_err(|error| format!("write fixed initial document failed: {error}"))?;
         document
             .sync_all()
@@ -250,7 +316,7 @@ impl FixedGuestDocument {
         Ok(Self {
             _ancestors: std::mem::take(&mut ancestors),
             scenario,
-            expected_sha256: sha256(DOCUMENT_EXPECTED_TEXT.as_bytes()),
+            expected_sha256,
         })
     }
 }
@@ -686,9 +752,12 @@ mod tests {
     fn fresh_profile_root_is_created_once_and_retained_during_save() {
         let root = fixture_root();
         std::fs::create_dir(&root).unwrap();
-        let document =
-            FixedGuestDocument::prepare_with_fresh_aiw(vec![open_fixture_root(&root).unwrap()])
-                .unwrap();
+        let document = FixedGuestDocument::prepare_with_fresh_aiw(
+            vec![open_fixture_root(&root).unwrap()],
+            DOCUMENT_INITIAL_TEXT.as_bytes(),
+            sha256(DOCUMENT_EXPECTED_TEXT.as_bytes()),
+        )
+        .unwrap();
         let path = root.join("AIW").join(SCENARIO_LEAF).join(DOCUMENT_LEAF);
         assert_eq!(
             std::fs::read(&path).unwrap(),
@@ -703,10 +772,13 @@ mod tests {
         );
         assert!(std::fs::rename(root.join("AIW"), root.join("moved")).is_err());
         drop(document);
-        let error =
-            FixedGuestDocument::prepare_with_fresh_aiw(vec![open_fixture_root(&root).unwrap()])
-                .err()
-                .unwrap();
+        let error = FixedGuestDocument::prepare_with_fresh_aiw(
+            vec![open_fixture_root(&root).unwrap()],
+            DOCUMENT_INITIAL_TEXT.as_bytes(),
+            sha256(DOCUMENT_EXPECTED_TEXT.as_bytes()),
+        )
+        .err()
+        .unwrap();
         assert!(error.contains("already exists"), "{error}");
         assert_eq!(
             std::fs::read(&path).unwrap(),
@@ -732,7 +804,12 @@ mod tests {
         let shared =
             held_directory_chain_with_sharing(&root, FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0)
                 .unwrap();
-        let document = FixedGuestDocument::prepare_with_fresh_aiw(shared).unwrap();
+        let document = FixedGuestDocument::prepare_with_fresh_aiw(
+            shared,
+            DOCUMENT_INITIAL_TEXT.as_bytes(),
+            sha256(DOCUMENT_EXPECTED_TEXT.as_bytes()),
+        )
+        .unwrap();
         let read_only_consumer = OpenOptions::new()
             .read(true)
             .share_mode(FILE_SHARE_READ.0)

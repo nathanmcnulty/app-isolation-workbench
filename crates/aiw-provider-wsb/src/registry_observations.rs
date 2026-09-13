@@ -540,6 +540,7 @@ mod tests {
                     crate::DOCUMENT_EXPECTED_TEXT.as_bytes(),
                 )),
             }),
+            interactive_document: None,
         };
         ImportedMsiGuestRequest::new(
             "run-one",

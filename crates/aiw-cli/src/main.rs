@@ -421,6 +421,9 @@ enum RunCommand {
         import_receipt: PathBuf,
         #[arg(long)]
         scenario: String,
+        /// Optional absolute canonical UTF-8 text file for the interactive transfer profile.
+        #[arg(long)]
+        document_input: Option<PathBuf>,
     },
     /// Create and verify a fresh Windows Sandbox workspace and approvable plan bundle.
     /// This does not approve, acquire, start, connect, stop, or recover a provider.
@@ -551,6 +554,20 @@ enum RunCommand {
         #[arg(long, value_enum, default_value_t = AssessmentReportFormat::Json)]
         format: AssessmentReportFormat,
     },
+    /// Export a verified interactive document artifact to one new host file.
+    /// Existing destinations and paths inside the retained workspace are rejected.
+    ExportWsbMsiDocument {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        run_id: String,
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        guest_agent_sha256: String,
+        #[arg(long)]
+        destination: PathBuf,
+    },
     /// Combine retained Notepad++ and Bambu results without executing or comparing applications.
     ReportWsbSet {
         #[arg(long)]
@@ -670,6 +687,8 @@ enum SchemaKind {
     ImportedMsiBehaviorEvidence,
     WsbMsiAssessmentReport,
     WsbMsiRunReport,
+    #[value(name = "wsb-msi-document-export")]
+    WsbMsiDocumentExport,
     #[value(name = "wsb-report-set-input")]
     WsbReportSetInput,
     #[value(name = "wsb-report-set")]
@@ -1544,6 +1563,7 @@ fn run(command: Command) -> Result<()> {
                 created_at,
                 import_receipt,
                 scenario,
+                document_input,
             } => {
                 let loaded = read_project(&project)?;
                 let receipt: ApplicationFileImportReceipt =
@@ -1560,6 +1580,7 @@ fn run(command: Command) -> Result<()> {
                         WsbMsiPreparationInput {
                             import_receipt: &receipt,
                             scenario_id: &scenario,
+                            document_input: document_input.as_deref(),
                         },
                     )
                     .map_err(|source| anyhow!(RunPreparationFailed { run_id, source }))?;
@@ -1576,6 +1597,7 @@ fn run(command: Command) -> Result<()> {
                         created_at,
                         receipt,
                         scenario,
+                        document_input,
                     );
                     bail!("MSI preparation requires Windows")
                 }
@@ -1930,6 +1952,44 @@ fn run(command: Command) -> Result<()> {
                     }))
                 }
             }
+            RunCommand::ExportWsbMsiDocument {
+                root,
+                run_id,
+                project,
+                guest_agent_sha256,
+                destination,
+            } => {
+                let loaded = read_project(&project)?;
+                #[cfg(windows)]
+                {
+                    let export = aiw_runner::export_windows_sandbox_msi_document(
+                        &root,
+                        &run_id,
+                        &loaded.project,
+                        &guest_agent_sha256,
+                        &destination,
+                    )
+                    .map_err(|source| {
+                        anyhow!(RunReportFailed {
+                            run_id: run_id.clone(),
+                            source,
+                        })
+                    })?;
+                    write_json(&export)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (root, loaded, guest_agent_sha256, destination);
+                    Err(anyhow!(RunOperationUnavailable {
+                        code: "AIW_WINDOWS_REQUIRED",
+                        summary: "interactive document export requires Windows",
+                        stage: "wsbDocumentExport",
+                        remediation: "Export this exact retained interactive run on its original supported Windows host.",
+                        detail: "No files or provider state were changed.",
+                        run_id,
+                    }))
+                }
+            }
             RunCommand::ReportWsbSet { input, format } => {
                 let manifest: aiw_runner::WsbReportSetInput = read_document(&input, 1024 * 1024)?;
                 manifest.validate().map_err(|error| anyhow!(error))?;
@@ -2112,6 +2172,9 @@ fn run(command: Command) -> Result<()> {
             }
             SchemaKind::WsbMsiAssessmentReport => {
                 write_json(&schema_for!(aiw_runner::WsbMsiAssessmentReport))
+            }
+            SchemaKind::WsbMsiDocumentExport => {
+                write_json(&schema_for!(aiw_runner::WsbMsiDocumentExport))
             }
             SchemaKind::ImportedMsiStageProgress => {
                 write_json(&schema_for!(aiw_provider_wsb::ImportedMsiStageProgress))
