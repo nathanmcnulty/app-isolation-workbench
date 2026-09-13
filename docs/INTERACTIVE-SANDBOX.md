@@ -40,8 +40,11 @@ $prepared.runPlan | ConvertTo-Json -Depth 64
 To exercise the bounded document-transfer profile, add `--document-input` to
 `prepare-wsb-msi`. The path must be an existing ordinary file that is absolute,
 canonical, valid UTF-8 with no NUL byte, and at most 1 MiB. The file is copied
-into the worker as the fixed `C:\AIW\Tools\document-input.txt`; the application
-must save the edited bytes to the fixed `C:\AIW\Output\document-output.txt`.
+into the worker as the fixed `C:\AIW\Tools\document-input.txt`. The editor opens
+its working copy at
+`C:\Users\AiwStandardUser\AppData\Local\AIW\Scenario\document.txt`; save normally
+to that file and close the editor. The guest agent then publishes the verified
+bytes as `C:\AIW\Output\document-output.txt`.
 This changes the compiled scenario and therefore requires its own preparation
 and approval.
 

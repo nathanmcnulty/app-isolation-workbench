@@ -262,10 +262,19 @@ pub fn export_windows_sandbox_msi_document(
     source.revalidate().map_err(|_| RunnerError::Drift)?;
     held.revalidate().map_err(|_| RunnerError::Drift)?;
 
-    let destination = canonical_export_destination(destination, held.root_path())?;
+    // The bounded in-memory bytes are now independently bound to the verified
+    // receipt. Release workspace write-capable directory handles before taking
+    // read-only ancestry holds (the destination may share a workspace parent).
+    let workspace_root = held.root_path().to_owned();
+    drop(source);
+    drop(held);
+
+    let (destination, _destination_ancestors) =
+        canonical_export_destination(destination, &workspace_root)?;
     let mut output = OpenOptions::new()
         .write(true)
         .create_new(true)
+        .share_mode(1)
         .custom_flags(0x0020_0000)
         .open(&destination)
         .map_err(|error| {
@@ -298,7 +307,6 @@ pub fn export_windows_sandbox_msi_document(
     exported
         .revalidate()
         .map_err(|error| RunnerError::Receipt(error.to_string()))?;
-    held.revalidate().map_err(|_| RunnerError::Drift)?;
 
     Ok(WsbMsiDocumentExport {
         schema_version: WSB_MSI_DOCUMENT_EXPORT_SCHEMA_VERSION.to_owned(),
@@ -346,7 +354,7 @@ fn read_bound_workspace_file(
 fn canonical_export_destination(
     path: &Path,
     workspace_root: &Path,
-) -> Result<PathBuf, RunnerError> {
+) -> Result<(PathBuf, Vec<File>), RunnerError> {
     if !path.is_absolute() {
         return Err(RunnerError::Receipt(
             "export destination must be an absolute path".to_owned(),
@@ -378,7 +386,9 @@ fn canonical_export_destination(
         .canonicalize()
         .map_err(|_| RunnerError::Receipt("export destination parent is unavailable".to_owned()))?;
     ensure_ordinary_directory(&parent)?;
-    ensure_no_reparse_components(&parent)?;
+    // Hold every component before using this pathname for a host write. A
+    // metadata-only check permits a parent to become a junction after checking.
+    let ancestors = hold_export_directory_chain(&parent)?;
     let workspace = workspace_root
         .canonicalize()
         .map_err(|_| RunnerError::Drift)?;
@@ -397,7 +407,51 @@ fn canonical_export_destination(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(_) => return Err(RunnerError::Drift),
     }
-    Ok(destination)
+    Ok((destination, ancestors))
+}
+
+#[cfg(windows)]
+fn hold_export_directory_chain(parent: &Path) -> Result<Vec<File>, RunnerError> {
+    use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
+    use std::path::{Component, Prefix};
+
+    let mut path = PathBuf::new();
+    let mut held = Vec::new();
+    for component in parent.components() {
+        match component {
+            Component::Prefix(prefix)
+                if matches!(prefix.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_)) =>
+            {
+                path.push(prefix.as_os_str());
+                continue;
+            }
+            Component::RootDir | Component::Normal(_) => path.push(component.as_os_str()),
+            _ => {
+                return Err(RunnerError::Receipt(
+                    "export requires a canonical local drive path".into(),
+                ));
+            }
+        }
+        let directory = OpenOptions::new()
+            .access_mode(0x0000_0081) // FILE_READ_ATTRIBUTES | FILE_LIST_DIRECTORY
+            .share_mode(1) // Prevent rename, deletion, or reparse mutation of every ancestor.
+            .custom_flags(0x0220_0000) // BACKUP_SEMANTICS | OPEN_REPARSE_POINT
+            .open(&path)
+            .map_err(|_| {
+                RunnerError::Receipt("cannot retain export destination ancestry".into())
+            })?;
+        let metadata = directory.metadata().map_err(|_| RunnerError::Drift)?;
+        if !metadata.is_dir() || metadata.file_attributes() & 0x0400 != 0 {
+            return Err(RunnerError::Receipt(
+                "export destination ancestry contains a reparse point".into(),
+            ));
+        }
+        held.push(directory);
+    }
+    if held.is_empty() {
+        return Err(RunnerError::Drift);
+    }
+    Ok(held)
 }
 
 #[cfg(windows)]
@@ -1017,6 +1071,60 @@ fn read_unverified_diagnostic(path: &Path) -> (UnverifiedGuestDiagnostic, Option
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn export_destination_holds_ancestry_and_refuses_unsafe_targets() {
+        use std::os::windows::fs::OpenOptionsExt as _;
+
+        let root = std::env::temp_dir().join(format!(
+            "aiw-export-destination-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let workspace = root.join("worker");
+        let parent = root.join("exports");
+        fs::create_dir(&root).unwrap();
+        fs::create_dir(&workspace).unwrap();
+        fs::create_dir(&parent).unwrap();
+        let requested = parent.join("result.txt");
+        let (destination, ancestry) = canonical_export_destination(&requested, &workspace).unwrap();
+        assert!(fs::rename(&parent, root.join("redirected")).is_err());
+        assert!(fs::rename(&root, root.with_extension("redirected")).is_err());
+        assert!(
+            OpenOptions::new()
+                .access_mode(0x0000_0002) // FILE_WRITE_DATA, needed for a reparse mutation.
+                .share_mode(7)
+                .custom_flags(0x0220_0000)
+                .open(&parent)
+                .is_err()
+        );
+        let mut created = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .share_mode(1)
+            .open(&destination)
+            .unwrap();
+        created.write_all(b"receipt-bound text").unwrap();
+        assert!(fs::write(&destination, b"replacement").is_err());
+        assert!(fs::remove_file(&destination).is_err());
+        drop(created);
+        assert_eq!(fs::read(&destination).unwrap(), b"receipt-bound text");
+        drop(ancestry);
+        assert!(canonical_export_destination(&requested, &workspace).is_err());
+        assert!(canonical_export_destination(&workspace.join("new.txt"), &workspace).is_err());
+        assert!(
+            canonical_export_destination(&parent.join("result.txt:stream"), &workspace).is_err()
+        );
+        assert!(canonical_export_destination(&parent.join("result.txt."), &workspace).is_err());
+        assert!(canonical_export_destination(Path::new("relative.txt"), &workspace).is_err());
+        fs::remove_file(destination).unwrap();
+        fs::remove_dir(parent).unwrap();
+        fs::remove_dir(workspace).unwrap();
+        fs::remove_dir(root).unwrap();
+    }
 
     #[test]
     fn historical_profiles_preserve_fixed_paths_and_reject_changed_semantics() {

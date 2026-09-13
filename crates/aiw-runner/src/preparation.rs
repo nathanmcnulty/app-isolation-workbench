@@ -47,11 +47,18 @@ const BAMBU_FILE: &str = "application.exe";
 const GUEST_MSI_RESULT: &str = r"C:\AIW\Output\scenario-result.json";
 const TRUST_DELTA_MSI: &str = "installs and exercises the approved imported MSI in Windows Sandbox";
 fn msi_trust_delta(msi: &WsbMsiApplication) -> String {
-    match msi.scenario.interactive_session_seconds {
-        Some(seconds) => format!(
+    match (
+        msi.scenario.interactive_session_seconds,
+        &msi.scenario.interactive_document,
+    ) {
+        (Some(seconds), Some(document)) => format!(
+            "opens Notepad++ in Windows Sandbox for up to {seconds} seconds after window readiness with an approved {} byte UTF-8 document (SHA-256 {}); retains the staged input and receipt-bound output in the run workspace; export requires a separate explicit command; no personal folder mapping, clipboard, or network access",
+            document.input_size_bytes, document.input_sha256,
+        ),
+        (Some(seconds), None) => format!(
             "opens scratch-only Notepad++ in Windows Sandbox for up to {seconds} seconds after window readiness; all user data is discarded; no host file, clipboard, or network access"
         ),
-        None => TRUST_DELTA_MSI.to_owned(),
+        (None, _) => TRUST_DELTA_MSI.to_owned(),
     }
 }
 fn msi_lifecycle(msi: Option<&WsbMsiApplication>) -> RunLifecycleKind {
@@ -1221,7 +1228,7 @@ fn prepare_bundle(
         };
         require_profile_tools_allowlist(
             &workspace.tools_path(),
-            requested_application_file_name(&application_input),
+            None, // The installer is staged only after the base preparation is built.
             staged_document.is_some(),
         )?;
         let mut artifacts = build_wsb_preparation(
@@ -2019,8 +2026,11 @@ fn open_interactive_document_input(
             "interactive document input must be supplied by its canonical path".to_owned(),
         ));
     }
-    let held = aiw_windows_platform::HeldApplicationFile::open(&canonical)
-        .map_err(|error| WsbPreparationError::Contract(error.to_string()))?;
+    let held = aiw_windows_platform::HeldApplicationFile::open_bounded(
+        &canonical,
+        aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES,
+    )
+    .map_err(|error| WsbPreparationError::Contract(error.to_string()))?;
     if held.observation().size_bytes > aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES {
         return Err(WsbPreparationError::Contract(
             "interactive document input exceeds its fixed size bound".to_owned(),
@@ -2118,17 +2128,6 @@ fn application_file_name(receipt: &WsbPreparationReceipt) -> Option<&'static str
         Some(BAMBU_FILE)
     } else {
         None
-    }
-}
-
-#[cfg(windows)]
-fn requested_application_file_name(
-    input: &Option<WsbPreparationApplicationInput<'_>>,
-) -> Option<&'static str> {
-    match input {
-        Some(WsbPreparationApplicationInput::Msi(_)) => Some(MSI_FILE),
-        Some(WsbPreparationApplicationInput::Bambu(_)) => Some(BAMBU_FILE),
-        None => None,
     }
 }
 
@@ -2923,6 +2922,27 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
+    fn tools_allowlist_tracks_document_and_installer_staging_phases() {
+        for installer in [MSI_FILE, BAMBU_FILE] {
+            for document in [false, true] {
+                let temp = TempDir::new("staging-phases");
+                std::fs::write(temp.0.join(GUEST_AGENT_FILE), b"agent").unwrap();
+                if document {
+                    std::fs::write(temp.0.join("document-input.txt"), b"text").unwrap();
+                }
+                require_profile_tools_allowlist(&temp.0, None, document).unwrap();
+                assert!(
+                    require_profile_tools_allowlist(&temp.0, Some(installer), document).is_err()
+                );
+                std::fs::write(temp.0.join(installer), b"installer fixture").unwrap();
+                require_profile_tools_allowlist(&temp.0, Some(installer), document).unwrap();
+                assert!(require_profile_tools_allowlist(&temp.0, None, document).is_err());
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
     fn importable_run_storage_accepts_only_exact_recovery_shapes() {
         let temp = TempDir::new("importable-runs");
         let runs = temp.0.join("runs");
@@ -3157,6 +3177,53 @@ mod tests {
             artifacts.run_plan.hash().unwrap()
         );
         artifacts.validate().unwrap();
+    }
+
+    #[test]
+    fn transfer_preparation_approval_discloses_retained_input_and_output() {
+        let mut project = msi_project();
+        project.scenarios[0].steps[3] = aiw_schema::ScenarioStep::WaitForUserClose {
+            timeout_seconds: 60,
+        };
+        let mut msi = fake_msi_application();
+        msi.scenario = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario_with_document(
+            &project,
+            "install-launch-close",
+            &"e".repeat(64),
+            7,
+        )
+        .unwrap();
+        msi.scenario_sha256 = msi.scenario.canonical_sha256().unwrap();
+        let path = r"C:\AIW\run-one\tools\document-input.txt";
+        msi.staged_document = Some(WsbMsiDocument {
+            staged_payload: BinaryIdentity {
+                canonical_path: path.into(),
+                sha256: "e".repeat(64),
+                size_bytes: 7,
+                version: None,
+                signature_status: ReadinessState::Unknown,
+            },
+            staged_identity: identity(path, 'a'),
+        });
+        let artifacts = build_wsb_msi_preparation(
+            "run-one",
+            &project,
+            &readiness(),
+            &workspace(),
+            &guest(),
+            "now",
+            msi,
+        )
+        .unwrap();
+        let warnings = artifacts.run_plan.trust_deltas.join("\n");
+        assert!(warnings.contains("retains the staged input and receipt-bound output"));
+        assert!(warnings.contains("export requires a separate explicit command"));
+        assert!(warnings.contains(&"e".repeat(64)));
+        assert!(!warnings.contains("all user data is discarded"));
+        assert_eq!(
+            artifacts.receipt.schema_version,
+            WSB_MSI_DOCUMENT_PREPARATION_RECEIPT_SCHEMA_VERSION
+        );
     }
 
     #[test]

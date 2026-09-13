@@ -223,19 +223,25 @@ pub enum SourceInspectionError {
 
 impl HeldApplicationFile {
     pub fn open(path: &Path) -> Result<Self, SourceInspectionError> {
-        Self::open_inner(path, false)
+        Self::open_inner(path, false, None)
+    }
+
+    /// Rejects an oversized held source before hashing or inspecting its data.
+    pub fn open_bounded(path: &Path, maximum_bytes: u64) -> Result<Self, SourceInspectionError> {
+        Self::open_inner(path, false, Some(maximum_bytes))
     }
 
     /// Opens one downloaded EXE or MSI while retaining only the bounded,
     /// reviewed download-metadata streams. The default `open` policy remains
     /// unnamed-data-only.
     pub fn open_with_download_metadata(path: &Path) -> Result<Self, SourceInspectionError> {
-        Self::open_inner(path, true)
+        Self::open_inner(path, true, None)
     }
 
     fn open_inner(
         path: &Path,
         allow_download_metadata: bool,
+        maximum_bytes: Option<u64>,
     ) -> Result<Self, SourceInspectionError> {
         if !path.is_absolute() || path.as_os_str().is_empty() {
             return Err(SourceInspectionError::InvalidPath(
@@ -256,6 +262,11 @@ impl HeldApplicationFile {
             .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
             .open(path)
             .map_err(open_error)?;
+        if maximum_bytes
+            .is_some_and(|limit| file.metadata().map_or(true, |value| value.len() > limit))
+        {
+            return Err(SourceInspectionError::BoundsExceeded);
+        }
         verify_local_acl_volume(&file).map_err(native)?;
         let held_path = final_path(&file).map_err(native)?;
         if !is_fixed_volume(&held_path).map_err(native)? {
@@ -1159,6 +1170,30 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn bounded_open_rejects_oversized_input_before_content_inspection() {
+        let root = Root::new();
+        let path = root.0.join("document.txt");
+        fs::write(&path, b"bounded").unwrap();
+        assert!(matches!(
+            HeldApplicationFile::open_bounded(&path, 6),
+            Err(SourceInspectionError::BoundsExceeded)
+        ));
+        let held = HeldApplicationFile::open_bounded(&path, 7).unwrap();
+        assert_eq!(held.read_bounded(7).unwrap(), b"bounded");
+        assert!(OpenOptions::new().write(true).open(&path).is_err());
+        drop(held);
+        // An empty document remains a valid bounded source.
+        fs::write(&path, b"").unwrap();
+        assert_eq!(
+            HeldApplicationFile::open_bounded(&path, 0)
+                .unwrap()
+                .observation()
+                .size_bytes,
+            0
+        );
     }
 
     #[test]
