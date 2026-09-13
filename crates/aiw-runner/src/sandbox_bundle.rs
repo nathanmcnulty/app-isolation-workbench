@@ -89,7 +89,7 @@ pub struct SandboxBundleRunReport {
 impl SandboxBundleRunReport {
     pub fn to_markdown(&self) -> String {
         format!(
-            "# Sandbox bundle matched to verified run\n\nManifest SHA-256: `{}`\n\nReplay intake receipt SHA-256: `{}`\n\nSource intake receipt SHA-256: `{}`\n\nRuntime: `{}`; data contract: `{}`.\n\nThe supplied bundle and import record match this retained run. This is not independent proof of import chronology or an additional compatibility verdict. Source download metadata is provenance only.\n\n{}",
+            "# Sandbox bundle matched to verified run\n\nManifest SHA-256: `{}`\n\nReplay intake receipt SHA-256: `{}`\n\nSource intake receipt SHA-256: `{}`\n\nRuntime: `{}`; bundle data contract: `{}`.\n\nThe supplied bundle and import record match this retained run's application and recipe. An optional interactive document transfer is separately bound by the run preparation and approval. This is not independent proof of import chronology or an additional compatibility verdict. Source download metadata is provenance only.\n\n{}",
             self.manifest_sha256,
             self.replay_import_receipt_sha256,
             self.manifest.source_import_receipt_sha256,
@@ -119,8 +119,9 @@ pub fn report_notepad_plus_plus_msi_bundle(
     {
         return Err(contract_error("import record differs from verified bundle"));
     }
-    // Compare the exact historical intake and scenario inside the existing
-    // reporter's held preparation boundary. Original intake paths need not exist.
+    // Match the intake and recipe inside the reporter's held preparation boundary.
+    // A document transfer is a separately approved specialization of scratch.
+    // Original intake paths need not exist.
     let report = report_windows_sandbox_msi_run_bound(
         workspace,
         run_id,
@@ -137,6 +138,38 @@ pub fn report_notepad_plus_plus_msi_bundle(
         replay_import_receipt_sha256: hash(&canonical(&imported.import_receipt)?),
         report,
     })
+}
+
+#[cfg(windows)]
+pub(crate) fn verify_prepared_scenario(
+    project: &Project,
+    bundled: &CompiledMsiScenario,
+    prepared: &CompiledMsiScenario,
+) -> Result<(), crate::RunnerError> {
+    // Only the fixed scratch recipe may acquire a document at preparation time.
+    // Recompile both sides rather than removing fields before comparing them.
+    let expected = if let Some(document) = &prepared.interactive_document {
+        if bundled.interactive_session_seconds.is_none()
+            || bundled.requires_document_transfer()
+            || compile_notepad_plus_plus_msi_scenario(project, &bundled.scenario_id).as_ref()
+                != Ok(bundled)
+        {
+            return Err(crate::RunnerError::ApprovalBinding);
+        }
+        aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario_with_document(
+            project,
+            &bundled.scenario_id,
+            &document.input_sha256,
+            document.input_size_bytes,
+        )
+        .map_err(|_| crate::RunnerError::ApprovalBinding)?
+    } else {
+        bundled.clone()
+    };
+    if &expected != prepared {
+        return Err(crate::RunnerError::ApprovalBinding);
+    }
+    Ok(())
 }
 #[cfg(windows)]
 pub fn export_notepad_plus_plus_msi_bundle(

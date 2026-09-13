@@ -250,15 +250,7 @@ pub fn export_windows_sandbox_msi_document(
         .map_err(|_| RunnerError::Drift)?;
     let source_bytes =
         read_bound_workspace_file(&source, aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES)?;
-    if source_bytes.len() as u64 != transfer.output_size_bytes
-        || hex::encode(Sha256::digest(&source_bytes)) != transfer.output_sha256
-        || std::str::from_utf8(&source_bytes).is_err()
-        || source_bytes.contains(&0)
-    {
-        return Err(RunnerError::Receipt(
-            "retained document output no longer matches the verified report".to_owned(),
-        ));
-    }
+    msi_document::verify_bytes(&source_bytes, &transfer)?;
     source.revalidate().map_err(|_| RunnerError::Drift)?;
     held.revalidate().map_err(|_| RunnerError::Drift)?;
 
@@ -628,6 +620,7 @@ pub(crate) fn report_windows_sandbox_msi_run_bound(
     let recovery = transaction.recovery.as_ref().ok_or(RunnerError::Drift)?;
     if inspection.pending_present()
         || transaction.current_state() != SessionTransactionState::CleanupVerified
+        || !crate::start_settled(transaction)
         || transaction.run_id != run_id
         || transaction.plan_hash != artifacts.run_plan.hash().map_err(journal_error)?
         || transaction.project_revision_hash != artifacts.receipt.project_revision_sha256
@@ -648,9 +641,10 @@ pub(crate) fn report_windows_sandbox_msi_run_bound(
         .ok_or(RunnerError::ApprovalBinding)?;
     verify_historical_scenario(project, &msi.scenario)?;
     if let Some((receipt, scenario)) = expected {
-        if &msi.import_receipt != receipt || &msi.scenario != scenario {
+        if &msi.import_receipt != receipt {
             return Err(RunnerError::ApprovalBinding);
         }
+        crate::sandbox_bundle::verify_prepared_scenario(project, scenario, &msi.scenario)?;
     }
     let msi_file = held
         .reopen_tools_file_readonly("application.msi")
@@ -790,13 +784,7 @@ pub(crate) fn report_windows_sandbox_msi_run_bound(
         )));
     }
     if msi.scenario.requires_document_transfer() {
-        expectation.artifacts.push(CompletionArtifactExpectation {
-            path: "document-output.txt".to_owned(),
-            role: aiw_evidence::ArtifactRole::ScenarioResults,
-            sensitivity: aiw_evidence::DataSensitivity::Internal,
-            media_type: "text/plain; charset=utf-8".to_owned(),
-            maximum_bytes: aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES,
-        });
+        add_msi_document_artifact_expectation(&mut expectation);
     }
     use std::os::windows::fs::OpenOptionsExt;
     let mut _output_files = ["completion.json", "scenario-result.json", "evidence.jsonl"]
@@ -833,9 +821,7 @@ pub(crate) fn report_windows_sandbox_msi_run_bound(
     }
     let scenario: aiw_provider_wsb::ImportedMsiScenarioResult =
         read_bounded_json(&held.output_path().join("scenario-result.json"), 64 * 1024)?;
-    scenario
-        .validate_for_request(&request)
-        .map_err(|e| RunnerError::Receipt(e.to_string()))?;
+    let document_transfer = msi_document::verify_output(&held.output_path(), &request, &scenario)?;
     let evidence_bytes = read_bounded_bytes(
         &held.output_path().join("evidence.jsonl"),
         aiw_provider_wsb::MAX_APPLICATION_EVIDENCE_BYTES as u64,
@@ -891,29 +877,6 @@ pub(crate) fn report_windows_sandbox_msi_run_bound(
             "successful assessment has failed stage progress".to_owned(),
         ));
     }
-    let document_transfer = if msi.scenario.requires_document_transfer() {
-        let transfer = scenario
-            .document_transfer
-            .clone()
-            .ok_or_else(|| RunnerError::Receipt("interactive document result is missing".into()))?;
-        let bytes = read_bounded_bytes(
-            &held.output_path().join("document-output.txt"),
-            aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES,
-        )?;
-        if bytes.len() as u64 != transfer.output_size_bytes
-            || hex::encode(Sha256::digest(&bytes)) != transfer.output_sha256
-            || std::str::from_utf8(&bytes).is_err()
-            || bytes.contains(&0)
-        {
-            return Err(RunnerError::Receipt(
-                "interactive document output is not the receipt-bound bounded UTF-8 artifact"
-                    .into(),
-            ));
-        }
-        Some(transfer)
-    } else {
-        None
-    };
     let installation_file_changes = behavior
         .as_ref()
         .map(|value| {

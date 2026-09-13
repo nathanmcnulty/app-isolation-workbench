@@ -63,6 +63,27 @@ fn canonical_hash<T: Serialize>(value: &T) -> String {
     hex::encode(Sha256::digest(canonical_json_bytes(&value).unwrap()))
 }
 
+#[cfg(windows)]
+#[test]
+fn recipe_inspection_failure_preserves_actionable_preparation_diagnostic() {
+    let temp = TempDir::new();
+    let result = Command::new(aiw())
+        .args(["package", "inspect-wsb-msi-recipe", "--root"])
+        .arg(temp.path().join("missing-preparation"))
+        .arg("--project")
+        .arg(repo_path("examples/notepad-plus-plus-msi.aiw.yaml"))
+        .args(["--guest-agent-sha256", &"f".repeat(64)])
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(result.stdout.is_empty());
+    let error = parse_one_json(&result.stderr);
+    assert_eq!(error["code"], "AIW_WSB_RECIPE_INSPECTION_REJECTED");
+    assert_eq!(error["stage"], "wsbRecipeInspection");
+    assert!(error["detail"].as_str().unwrap().contains("preparation"));
+    assert!(error["detail"].as_str().unwrap().chars().count() <= 512);
+}
+
 #[test]
 fn typed_msi_compilation_emits_bound_review_and_rejects_unknown_scenario() {
     let project_path = repo_path("examples/notepad-plus-plus-msi.aiw.yaml");

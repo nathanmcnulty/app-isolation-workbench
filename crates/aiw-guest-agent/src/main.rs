@@ -727,7 +727,7 @@ fn publish_msi_result(
             &path,
             "document-output.txt",
             ArtifactRole::ScenarioResults,
-            "text/plain; charset=utf-8",
+            "text/plain",
         )?);
     }
     let receipt = WindowsSandboxCompletionReceipt {
@@ -1126,11 +1126,8 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
-    #[test]
-    fn imported_msi_request_dispatches_without_execution() {
-        let root = test_root("imported-request");
-        let request_path = root.join("request.json");
-        let request = ImportedMsiGuestRequest::new(
+    fn msi_request() -> ImportedMsiGuestRequest {
+        ImportedMsiGuestRequest::new(
             "run-1",
             "11111111-1111-1111-1111-111111111111",
             "b".repeat(64),
@@ -1162,13 +1159,119 @@ mod tests {
             1024,
             "d".repeat(64),
         )
-        .unwrap();
+        .unwrap()
+    }
+
+    #[test]
+    fn imported_msi_request_dispatches_without_execution() {
+        let root = test_root("imported-request");
+        let request_path = root.join("request.json");
+        let request = msi_request();
         fs::write(&request_path, serde_json::to_vec(&request).unwrap()).unwrap();
 
         assert!(matches!(
             read_request(&request_path).unwrap(),
             GuestRequest::ImportedMsi(request) if request.validate().is_ok()
         ));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn published_transfer_is_accepted_by_the_host_receipt_contract() {
+        use aiw_provider_wsb::{
+            CompletionArtifactExpectation, WindowsSandboxCompletionExpectation,
+        };
+        let root = test_root("transfer-publication");
+        let mut request = msi_request();
+        request.scenario.schema_version =
+            aiw_provider_wsb::COMPILED_MSI_INTERACTIVE_DOCUMENT_SCENARIO_SCHEMA_VERSION.into();
+        request.scenario.profile =
+            aiw_provider_wsb::NOTEPAD_PLUS_PLUS_INTERACTIVE_DOCUMENT_PROFILE.into();
+        request.scenario.interactive_session_seconds = Some(60);
+        request.scenario.interactive_document =
+            Some(aiw_provider_wsb::InteractiveDocumentTransfer {
+                input_sha256: "e".repeat(64),
+                input_size_bytes: 7,
+            });
+        request.scenario_sha256 = request.scenario.canonical_sha256().unwrap();
+        request.request_sha256 = request.request_sha256().unwrap();
+        request.validate().unwrap();
+        let bytes = "edited café".as_bytes();
+        let result = ImportedMsiScenarioResult::succeeded_with_document_transfer(
+            &request,
+            0,
+            42,
+            0,
+            Some(aiw_provider_wsb::ImportedMsiDocumentTransferResult {
+                input_sha256: "e".repeat(64),
+                input_size_bytes: 7,
+                output_sha256: hex::encode(Sha256::digest(bytes)),
+                output_size_bytes: bytes.len() as u64,
+            }),
+        )
+        .unwrap();
+        let mut log = EvidenceLog::new();
+        log.append(aiw_evidence::EvidenceEvent {
+            observed_utc: "fixture".into(),
+            kind: "transfer-fixture".into(),
+            source: "fixture".into(),
+            payload: serde_json::json!({"completed": true}),
+        })
+        .unwrap();
+        // Only redirect publication for this test; no guest execution occurs.
+        request.output_root = root.to_string_lossy().into_owned();
+        publish_msi_result(
+            &request,
+            &result,
+            log,
+            CompletionStatus::Succeeded,
+            Some(bytes.to_vec()),
+        )
+        .unwrap();
+        let expectation = WindowsSandboxCompletionExpectation {
+            schema_version: aiw_provider_wsb::WINDOWS_SANDBOX_COMPLETION_EXPECTATION_SCHEMA_VERSION
+                .into(),
+            run_id: request.run_id.clone(),
+            sandbox_id: request.sandbox_id.clone(),
+            config_sha256: request.config_sha256.clone(),
+            request_sha256: request.request_sha256.clone(),
+            agent_sha256: request.agent_sha256.clone(),
+            receipt_path: "completion.json".into(),
+            evidence_log_path: "evidence.jsonl".into(),
+            content_declaration: aiw_evidence::ContentDeclaration::NoKnownSecrets,
+            artifacts: [
+                (
+                    "scenario-result.json",
+                    ArtifactRole::ScenarioResults,
+                    "application/json",
+                ),
+                (
+                    "evidence.jsonl",
+                    ArtifactRole::EvidenceLog,
+                    "application/x-ndjson",
+                ),
+                (
+                    "document-output.txt",
+                    ArtifactRole::ScenarioResults,
+                    "text/plain",
+                ),
+            ]
+            .into_iter()
+            .map(|(path, role, media_type)| CompletionArtifactExpectation {
+                path: path.into(),
+                role,
+                media_type: media_type.into(),
+                sensitivity: aiw_evidence::DataSensitivity::Internal,
+                maximum_bytes: 1024 * 1024,
+            })
+            .collect(),
+        };
+        assert!(
+            aiw_provider_wsb::verify_completion_receipt(&root, &expectation)
+                .unwrap()
+                .successful
+        );
+        assert_eq!(fs::read(root.join("document-output.txt")).unwrap(), bytes);
         fs::remove_dir_all(root).unwrap();
     }
 }

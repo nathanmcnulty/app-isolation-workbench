@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, IntoRawHandle, OwnedHandle};
@@ -168,6 +168,7 @@ pub struct WindowsSandboxExecutionLease {
     _mutex: ProviderMutex,
     owned_session: Option<CanonicalSandboxId>,
     connection_attempted: bool,
+    diagnostics: Option<File>,
 }
 
 /// Recovery-only authority for one exact persisted Sandbox UUID. This type has
@@ -266,6 +267,65 @@ impl WindowsSandboxRecoveryLease {
 }
 
 impl WindowsSandboxExecutionLease {
+    /// Retain development diagnostics in a caller-created, protected host file.
+    /// Diagnostics are observations only and never authorize session recovery.
+    pub fn retain_diagnostics(&mut self, file: File) {
+        self.diagnostics = Some(file);
+    }
+
+    fn invoke_logged(
+        &self,
+        arguments: &[&str],
+        deadline: Instant,
+        mode: OutputMode,
+    ) -> Result<ProcessOutput, String> {
+        let started = Instant::now();
+        self.log_diagnostic(serde_json::json!({
+            "event": "invocationStarted", "provider": self.provider_path,
+            "arguments": arguments, "sessionId": self.owned_session.as_ref().map(CanonicalSandboxId::as_str),
+            "timeoutMs": deadline.saturating_duration_since(started).as_millis(),
+            "outputCaptured": matches!(mode, OutputMode::Capture),
+        }));
+        let result = invoke_job_bound(
+            &self.provider_path,
+            arguments,
+            deadline,
+            mode,
+            DescendantPolicy::ProviderManaged,
+        );
+        self.log_diagnostic(match &result {
+            Ok(output) => serde_json::json!({
+                "event": "invocationCompleted", "operation": arguments.first(),
+                "elapsedMs": started.elapsed().as_millis(), "exitCode": output.exit_code,
+                "stdout": String::from_utf8_lossy(&output.stdout),
+                "stderr": String::from_utf8_lossy(&output.stderr),
+                "stdoutBytes": output.stdout.len(), "stderrBytes": output.stderr.len(),
+            }),
+            Err(error) => serde_json::json!({
+                "event": "invocationFailed", "operation": arguments.first(),
+                "elapsedMs": started.elapsed().as_millis(), "detail": error,
+            }),
+        });
+        validate_process_output(result?)
+    }
+
+    fn log_diagnostic(&self, mut event: serde_json::Value) {
+        let Some(mut file) = self.diagnostics.as_ref() else {
+            return;
+        };
+        event["schemaVersion"] = "aiw.dev/wsb-provider-diagnostic/v0alpha1".into();
+        event["unixTimeMs"] = serde_json::json!(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()
+                .map(|value| value.as_millis())
+        );
+        // A diagnostic disk failure must not prevent exact-session cleanup.
+        if let Err(error) = writeln!(file, "{event}").and_then(|()| file.sync_data()) {
+            eprintln!("AIW_WSB_DIAGNOSTIC_WRITE_FAILED: {error}");
+        }
+    }
+
     pub fn readiness(&self) -> &WindowsSandboxReadiness {
         &self.readiness
     }
@@ -285,13 +345,9 @@ impl WindowsSandboxExecutionLease {
         &self,
         deadline: Instant,
     ) -> Result<WsbListObservation, WindowsSandboxInvocationError> {
-        let output = invoke_read_only(
-            &self.provider_path,
-            &["list", "--raw"],
-            deadline,
-            DescendantPolicy::ProviderManaged,
-        )
-        .map_err(WindowsSandboxInvocationError::Process)?;
+        let output = self
+            .invoke_logged(&["list", "--raw"], deadline, OutputMode::Capture)
+            .map_err(WindowsSandboxInvocationError::Process)?;
         let session_ids = parse_list_ids_v0_8_107_0(&output.stdout)
             .map_err(WindowsSandboxInvocationError::Protocol)?;
         Ok(WsbListObservation { session_ids })
@@ -340,20 +396,20 @@ impl WindowsSandboxExecutionLease {
         // mutating provider. A production caller must additionally persist its
         // durable transaction before calling this method.
         self.owned_session = Some(sandbox_id.clone());
-        let output = invoke_read_only(
-            &self.provider_path,
-            &[
-                "start",
-                "--raw",
-                "--id",
-                sandbox_id.as_str(),
-                "--config",
-                &rendered.xml,
-            ],
-            deadline,
-            DescendantPolicy::ProviderManaged,
-        )
-        .map_err(WindowsSandboxInvocationError::Process)?;
+        let output = self
+            .invoke_logged(
+                &[
+                    "start",
+                    "--raw",
+                    "--id",
+                    sandbox_id.as_str(),
+                    "--config",
+                    &rendered.xml,
+                ],
+                deadline,
+                OutputMode::Capture,
+            )
+            .map_err(WindowsSandboxInvocationError::Process)?;
         let observed = parse_start_v0_8_107_0(&output.stdout)
             .map_err(WindowsSandboxInvocationError::Protocol)?;
         if observed != sandbox_id.as_str() {
@@ -397,10 +453,10 @@ impl WindowsSandboxExecutionLease {
         // response can still have established the remote-session descendant;
         // cleanup must stop the owned sandbox rather than retrying connect.
         self.connection_attempted = true;
-        invoke_without_output(
-            &self.provider_path,
+        self.invoke_logged(
             &["connect", "--raw", "--id", sandbox_id.as_str()],
             deadline,
+            OutputMode::Discard,
         )
         .map_err(WindowsSandboxInvocationError::Process)?;
         let current = self.list_until(deadline)?;
@@ -433,13 +489,13 @@ impl WindowsSandboxExecutionLease {
                 "this lease has no bound sandbox session".to_owned(),
             )
         })?;
-        let output = invoke_read_only(
-            &self.provider_path,
-            &["stop", "--raw", "--id", sandbox_id.as_str()],
-            deadline,
-            DescendantPolicy::ProviderManaged,
-        )
-        .map_err(WindowsSandboxInvocationError::Process)?;
+        let output = self
+            .invoke_logged(
+                &["stop", "--raw", "--id", sandbox_id.as_str()],
+                deadline,
+                OutputMode::Capture,
+            )
+            .map_err(WindowsSandboxInvocationError::Process)?;
         if !output.stdout.is_empty() {
             return Err(WindowsSandboxInvocationError::Protocol(
                 "stop response must be empty for CLI protocol 0.8.107.0".to_owned(),
@@ -475,6 +531,7 @@ pub fn acquire_windows_sandbox(
         _mutex: authority.mutex,
         owned_session: None,
         connection_attempted: false,
+        diagnostics: None,
     })
 }
 
@@ -1414,23 +1471,6 @@ fn provider_environment() -> Result<Vec<u16>, String> {
     Ok(block)
 }
 
-fn invoke_without_output(path: &Path, arguments: &[&str], deadline: Instant) -> Result<(), String> {
-    let output = invoke_job_bound(
-        path,
-        arguments,
-        deadline,
-        OutputMode::Discard,
-        DescendantPolicy::ProviderManaged,
-    )?;
-    if output.exit_code != 0 {
-        return Err(format!(
-            "AIW_WSB_CLI_FAILED: provider exited with {}.",
-            output.exit_code
-        ));
-    }
-    Ok(())
-}
-
 fn invoke_read_only(
     path: &Path,
     arguments: &[&str],
@@ -1438,10 +1478,15 @@ fn invoke_read_only(
     descendants: DescendantPolicy,
 ) -> Result<ProcessOutput, String> {
     let output = invoke_job_bound(path, arguments, deadline, OutputMode::Capture, descendants)?;
+    validate_process_output(output)
+}
+
+fn validate_process_output(output: ProcessOutput) -> Result<ProcessOutput, String> {
     if output.exit_code != 0 {
         return Err(format!(
-            "AIW_WSB_CLI_FAILED: provider exited with {}; stderr={}",
+            "AIW_WSB_CLI_FAILED: provider exited with {}; stdout={}; stderr={}",
             output.exit_code,
+            bounded_text(&output.stdout),
             bounded_text(&output.stderr)
         ));
     }
@@ -1461,6 +1506,7 @@ fn invoke_job_bound(
     output_mode: OutputMode,
     descendants: DescendantPolicy,
 ) -> Result<ProcessOutput, String> {
+    let invocation_started = Instant::now();
     if Instant::now() >= deadline {
         return Err("AIW_WSB_CLI_TIMEOUT: provider deadline expired before creation.".to_owned());
     }
@@ -1584,18 +1630,35 @@ fn invoke_job_bound(
         Ok(())
     };
     drop(job);
-    early_cleanup?;
-    deadline_cleanup?;
-    final_cleanup?;
+    // Preserve both stream results and cleanup outcomes before propagating any
+    // error. Previously `wait_result?` discarded the only timeout diagnostics.
+    let diagnostic = serde_json::json!({
+        "operation": arguments.first(), "processId": process_information.dwProcessId,
+        "elapsedMs": invocation_started.elapsed().as_millis(),
+        "exitCode": exit_code.as_ref().ok().copied().flatten(),
+        "waitError": wait_result.as_ref().err(), "streamsCompleted": streams_completed,
+        "stdout": stdout.as_ref().ok().map(|bytes| String::from_utf8_lossy(bytes)),
+        "stderr": stderr.as_ref().ok().map(|bytes| String::from_utf8_lossy(bytes)),
+        "stdoutError": stdout.as_ref().err(), "stderrError": stderr.as_ref().err(),
+        "earlyCleanupError": early_cleanup.as_ref().err(),
+        "deadlineCleanupError": deadline_cleanup.as_ref().err(),
+        "finalCleanupError": final_cleanup.as_ref().err(),
+    });
+    let with_diagnostic = |error: String| format!("{error}; diagnostic={diagnostic}");
+    early_cleanup.map_err(&with_diagnostic)?;
+    deadline_cleanup.map_err(&with_diagnostic)?;
+    final_cleanup.map_err(&with_diagnostic)?;
     if root_succeeded && !streams_completed {
-        return Err(
+        return Err(with_diagnostic(
             "AIW_WSB_CLI_PIPE_TIMEOUT: output remained open past the provider deadline.".to_owned(),
-        );
+        ));
     }
-    wait_result?;
-    let exit_code = exit_code?.expect("a successful wait has an exit code");
-    let stdout = stdout?;
-    let stderr = stderr?;
+    wait_result.map_err(&with_diagnostic)?;
+    let exit_code = exit_code
+        .map_err(&with_diagnostic)?
+        .expect("a successful wait has an exit code");
+    let stdout = stdout.map_err(&with_diagnostic)?;
+    let stderr = stderr.map_err(&with_diagnostic)?;
     Ok(ProcessOutput {
         exit_code,
         stdout,
@@ -2171,6 +2234,8 @@ mod tests {
         if !invoked_as_helper("job_helper_parent_hangs_with_descendant") {
             return;
         }
+        println!("AIW_BEFORE_TIMEOUT_STDOUT");
+        eprintln!("AIW_BEFORE_TIMEOUT_STDERR");
         let _ = invoke_test_helper(
             "job_helper_descendant_hangs",
             Duration::from_secs(60),
@@ -2238,12 +2303,28 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.contains("AIW_WSB_CLI_TIMEOUT"), "{error}");
+        assert!(error.contains("processId"), "{error}");
+        assert!(error.contains("earlyCleanupError"), "{error}");
         assert!(
             started.elapsed()
                 < Duration::from_millis(250)
                     + PROCESS_TREE_CLEANUP_TIMEOUT
                     + Duration::from_secs(1)
         );
+    }
+
+    #[test]
+    fn timed_out_provider_retains_partial_output() {
+        // Allow a cold debug helper to initialize before its intentional hang.
+        let error = invoke_test_helper(
+            "job_helper_parent_hangs_with_descendant",
+            Duration::from_secs(10),
+            OutputMode::Capture,
+        )
+        .unwrap_err();
+        assert!(error.contains("AIW_WSB_CLI_TIMEOUT"), "{error}");
+        assert!(error.contains("AIW_BEFORE_TIMEOUT_STDOUT"), "{error}");
+        assert!(error.contains("AIW_BEFORE_TIMEOUT_STDERR"), "{error}");
     }
 
     #[test]

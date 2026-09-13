@@ -33,6 +33,7 @@ cargo run -p aiw-cli -- schema windows-sandbox-completion-expectation
 cargo run -p aiw-cli -- schema windows-sandbox-completion-receipt
 cargo run -p aiw-cli -- schema windows-sandbox-completion-verification
 cargo run -p aiw-cli -- schema mxc-golden-probe-plan
+cargo run -p aiw-cli -- schema wsb-msi-recipe-inspection
 ```
 
 Checked-in schema snapshots will be added when the first external consumer is introduced. At that point, schema drift becomes a required review and compatibility test.

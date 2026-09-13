@@ -27,6 +27,10 @@ The bundle format admits no additional commands, scripts, host mappings, or runt
 
 ## Recorded replay, 2026-09-10
 
+For an inspectable snapshot of a fresh preparation's identities, fixed launch,
+exact Sandbox XML, and data lifetime before approval, see
+[packaging recipe inspection](PACKAGING-RECIPES.md).
+
 `live_packaged_msi_import_replay_and_cleanup` passed in a fresh Sandbox after export, ordinary file-copy relocation, and fresh protected intake import. The MSI installed successfully; the application ran as the verified standard user and opened, edited, saved, and closed the document. All nine stages, expected document hash, filesystem/registry observations, MSI registration, retained report validation, and exact worker cleanup passed. The overall assessment still reports insufficient evidence for an inner application-isolation claim.
 
 - Application: Notepad++ 8.9.8 x64 MSI, SHA-256 `c29cbe1a9aaef322cc3f316ceeabe8a8071b18441a5e3c3ec348069739e59e80`.

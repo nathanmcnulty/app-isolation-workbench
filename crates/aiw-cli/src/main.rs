@@ -113,6 +113,17 @@ struct PackageArgs {
 
 #[derive(Debug, Subcommand)]
 enum PackageCommand {
+    /// Inspect a verified MSI preparation before planning import, approval, or launch.
+    InspectWsbMsiRecipe {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        guest_agent_sha256: String,
+        #[arg(long, value_enum, default_value_t = AssessmentReportFormat::Json)]
+        format: AssessmentReportFormat,
+    },
     /// Match a bundle and its import record to a reverified terminal MSI run, without execution.
     ReportWsbMsi {
         #[arg(long)]
@@ -689,6 +700,7 @@ enum SchemaKind {
     WsbMsiRunReport,
     #[value(name = "wsb-msi-document-export")]
     WsbMsiDocumentExport,
+    WsbMsiRecipeInspection,
     #[value(name = "wsb-report-set-input")]
     WsbReportSetInput,
     #[value(name = "wsb-report-set")]
@@ -978,6 +990,17 @@ impl std::fmt::Display for RunPreparationFailed {
 impl std::error::Error for RunPreparationFailed {}
 
 #[derive(Debug)]
+struct RecipeInspectionFailed(WsbPreparationError);
+
+impl std::fmt::Display for RecipeInspectionFailed {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+impl std::error::Error for RecipeInspectionFailed {}
+
+#[derive(Debug)]
 struct RunPreparationImportFailed {
     run_id: String,
     source: WsbPreparationError,
@@ -1104,6 +1127,35 @@ fn main() -> ExitCode {
 fn run(command: Command) -> Result<()> {
     match command {
         Command::Package(args) => match args.command {
+            PackageCommand::InspectWsbMsiRecipe {
+                root,
+                project,
+                guest_agent_sha256,
+                format,
+            } => {
+                #[cfg(windows)]
+                {
+                    let loaded = read_project(&project)?;
+                    let inspection = aiw_runner::inspect_windows_sandbox_msi_recipe(
+                        &root,
+                        &loaded.project,
+                        &guest_agent_sha256,
+                    )
+                    .map_err(|source| anyhow!(RecipeInspectionFailed(source)))?;
+                    match format {
+                        AssessmentReportFormat::Json => write_json(&inspection),
+                        AssessmentReportFormat::Markdown => {
+                            print!("{}", inspection.to_markdown());
+                            Ok(())
+                        }
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (root, project, guest_agent_sha256, format);
+                    bail!("Sandbox recipe inspection requires Windows")
+                }
+            }
             PackageCommand::ReportWsbMsi {
                 bundle,
                 manifest_sha256,
@@ -2176,6 +2228,9 @@ fn run(command: Command) -> Result<()> {
             SchemaKind::WsbMsiDocumentExport => {
                 write_json(&schema_for!(aiw_runner::WsbMsiDocumentExport))
             }
+            SchemaKind::WsbMsiRecipeInspection => {
+                write_json(&schema_for!(aiw_runner::WsbMsiRecipeInspection))
+            }
             SchemaKind::ImportedMsiStageProgress => {
                 write_json(&schema_for!(aiw_provider_wsb::ImportedMsiStageProgress))
             }
@@ -2958,6 +3013,16 @@ fn emit_anyhow_error(error: &anyhow::Error) {
             retryable: start_error_is_retryable(&error.source),
             remediation: "Preserve the run directory and provider state; inspect readiness, approval binding, drift, and recovery status before retrying.".to_owned(),
             detail: error.source.to_string().chars().take(512).collect(),
+        });
+    } else if let Some(error) = error.downcast_ref::<RecipeInspectionFailed>() {
+        emit_error(&ErrorEnvelope {
+            code: "AIW_WSB_RECIPE_INSPECTION_REJECTED".to_owned(),
+            summary: "MSI preparation could not be inspected".to_owned(),
+            stage: "wsbRecipeInspection".to_owned(),
+            run_id: None,
+            retryable: false,
+            remediation: "Inspect before planning import. Preserve the workspace and resolve the reported identity, readiness, or preparation mismatch; use retained reports for completed runs.".to_owned(),
+            detail: error.0.to_string().chars().take(512).collect(),
         });
     } else if let Some(error) = error.downcast_ref::<RunPreparationFailed>() {
         emit_error(&preparation_error_envelope(error));

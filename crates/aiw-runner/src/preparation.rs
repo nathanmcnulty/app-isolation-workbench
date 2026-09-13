@@ -3180,6 +3180,103 @@ mod tests {
     }
 
     #[test]
+    fn recipe_inspection_binds_settings_and_rejects_inconsistent_preparation() {
+        let artifacts = build_wsb_msi_preparation(
+            "run-one",
+            &msi_project(),
+            &readiness(),
+            &workspace(),
+            &guest(),
+            "now",
+            fake_msi_application(),
+        )
+        .unwrap();
+        let inspect = crate::packaging_recipe::inspect_artifacts;
+        let recipe = inspect(&artifacts).unwrap();
+        assert_eq!(
+            recipe.recipe_sha256,
+            inspect(&artifacts).unwrap().recipe_sha256
+        );
+        assert_eq!(
+            recipe.recipe.working_directory,
+            r"C:\Program Files\Notepad++"
+        );
+        assert_eq!(recipe.recipe.data.mode, "fixedDocumentAssessment");
+        assert!(
+            recipe
+                .recipe
+                .sandbox_config
+                .xml
+                .contains("<Networking>Disable</Networking>")
+        );
+        assert!(
+            recipe
+                .recipe
+                .sandbox_config
+                .xml
+                .contains("<ReadOnly>false</ReadOnly>")
+        );
+        assert_eq!(
+            recipe.recipe.preparation.run_plan_sha256,
+            artifacts.run_plan.hash().unwrap()
+        );
+        for field in ["source", "scenario", "grant", "approval"] {
+            let mut changed = artifacts.clone();
+            match field {
+                "source" => {
+                    changed.receipt.msi.as_mut().unwrap().staged_payload.sha256 = "f".repeat(64)
+                }
+                "scenario" => changed
+                    .receipt
+                    .msi
+                    .as_mut()
+                    .unwrap()
+                    .scenario
+                    .launch_arguments
+                    .push("-plugin".into()),
+                "grant" => changed.wsb_plan.mappings[0].host_folder = r"C:\Users".into(),
+                "approval" => changed.run_plan.trust_deltas.clear(),
+                _ => unreachable!(),
+            }
+            assert!(inspect(&changed).is_err(), "{field}");
+        }
+    }
+
+    #[test]
+    fn recipe_scratch_lifetime_change_changes_inspection_hash() {
+        let inspect = |seconds| {
+            let mut project = msi_project();
+            project.scenarios[0].steps[3] = aiw_schema::ScenarioStep::WaitForUserClose {
+                timeout_seconds: seconds,
+            };
+            let mut msi = fake_msi_application();
+            msi.scenario = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
+                &project,
+                "install-launch-close",
+            )
+            .unwrap();
+            msi.scenario_sha256 = msi.scenario.canonical_sha256().unwrap();
+            let artifacts = build_wsb_msi_preparation(
+                "run-one",
+                &project,
+                &readiness(),
+                &workspace(),
+                &guest(),
+                "now",
+                msi,
+            )
+            .unwrap();
+            crate::packaging_recipe::inspect_artifacts(&artifacts).unwrap()
+        };
+        let short = inspect(30);
+        let long = inspect(60);
+        assert_ne!(short.recipe_sha256, long.recipe_sha256);
+        assert_eq!(short.recipe.data.mode, "ephemeralInteractiveScratch");
+        assert!(short.recipe.data.retained_output_path.is_none());
+        assert!(short.recipe.effective_launch_arguments.is_empty());
+    }
+
+    #[test]
     fn transfer_preparation_approval_discloses_retained_input_and_output() {
         let mut project = msi_project();
         project.scenarios[0].steps[3] = aiw_schema::ScenarioStep::WaitForUserClose {
@@ -3223,6 +3320,23 @@ mod tests {
         assert_eq!(
             artifacts.receipt.schema_version,
             WSB_MSI_DOCUMENT_PREPARATION_RECEIPT_SCHEMA_VERSION
+        );
+        let recipe = crate::packaging_recipe::inspect_artifacts(&artifacts).unwrap();
+        assert_eq!(recipe.recipe.data.mode, "boundedUtf8DocumentTransfer");
+        assert_eq!(recipe.recipe.data.maximum_document_bytes, Some(1024 * 1024));
+        assert!(recipe.recipe.data.retained_output_path.is_some());
+        assert_eq!(
+            recipe.recipe.effective_launch_arguments,
+            [aiw_provider_wsb::STANDARD_USER_DOCUMENT_EXERCISE_PATH]
+        );
+        assert_eq!(
+            recipe
+                .recipe
+                .scenario
+                .interactive_document
+                .unwrap()
+                .input_sha256,
+            "e".repeat(64)
         );
     }
 

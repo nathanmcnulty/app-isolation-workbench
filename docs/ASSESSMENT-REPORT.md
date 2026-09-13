@@ -24,8 +24,8 @@ the runner verifies its bytes, UTF-8/no-NUL policy, and hash before including th
 transfer record. The default interactive profile remains scratch-only and keeps
 the field absent.
 
-The output stays in the retained worker until an operator explicitly requests a
-new host file:
+The output stays in the retained host run workspace until an operator explicitly
+requests a separate host file:
 
 ```powershell
 aiw run export-wsb-msi-document --root <retained-workspace> --run-id <run-id> `

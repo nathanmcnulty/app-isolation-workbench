@@ -1,11 +1,11 @@
 # Working state
 
-Updated 2026-09-12. This is a compact handoff, not a run receipt or authorization.
+Updated 2026-09-13. This is a compact handoff, not a run receipt or authorization.
 
 ## Where to resume
 
 - Active development branch: `codex/wsb-typed-scenarios`. Locate it with `git worktree list` if this checkout differs. The main checkout has historically been behind this worktree.
-- Latest slice: approved scratch-only interactive Notepad++ profile plus bounded text-document transfer reporting. Input is held and copied to a fixed worker path; successful output is receipt-bound and can be explicitly exported once to a new host file. Production timeout and separate controlled-close fixture pass fresh-worker validation. Use `scripts/work-status.ps1` for current HEAD, dirty files, and locally known upstream state.
+- Latest slice: `package inspect-wsb-msi-recipe` exposes a verified pre-import preparation as JSON/Markdown: source/provider/agent bindings, fixed launch, exact Sandbox XML, data lifetime, and gaps. See PACKAGING-RECIPES.md. The preceding production human edit/save/close trial passed on September 13 with retained report, bundle association, exact export, unchanged input, and cleanup verified; see INTERACTIVE-SANDBOX.md. Use `scripts/work-status.ps1` for current HEAD and dirty files.
 - Goal: report tested functions for exact application bytes and measured isolation configurations, then use the evidence for adaptation/repackaging. Free community project; feedback collection is not a development gate.
 
 ## Implemented versus exploratory
@@ -18,12 +18,13 @@ Updated 2026-09-12. This is a compact handoff, not a run receipt or authorizatio
 
 ## Next coherent slice
 
-Next, use the completed transfer report to inform the first inspectable packaging recipe. The transfer profile copies one immutable, bounded UTF-8 input into the worker, verifies the fixed save output against the completion receipt, and exposes it only through an explicit new-file export. Do not map personal document folders or silently overwrite originals. Human keyboard/mouse usability remains a manual check; controlled close proves only lifecycle handling. Package reports expose verified bundle/run association through `package report-wsb-msi`; interactive sessions remain excluded from assessment matrices. AppContainer approved reporting and real-application comparison remain separate follow-ups. No inner network restriction, persistent application installation, or host-launch capability is complete.
+Recipe inspection is implemented; Benchmark 3 remains incomplete. Next implement one narrow adaptation and bind its evidence to a reproducible comparison/replay, including changed authority and affected boundary canaries. Preserve the startup boundary: cold initialization took about 13 minutes and created a late session after timeout; that exact session was stopped. New uncertain starts retain recovery-required state until an observed exact stop; historical false-clean records require manual corroboration. See INTERACTIVE-SANDBOX.md for evidence and migration limits.
 
 ## Read only what the slice needs
 
 - [Execution control and retained proof](CONTROL-FIXTURE.md): fixed fixture, driver, normalizer and negative tests.
 - [Sandbox bundles](SANDBOX-BUNDLES.md): commands, file contract, first fresh-worker replay, and remaining packaging scope.
+- [Packaging recipes](PACKAGING-RECIPES.md): pre-import inspection command, snapshot bindings, and remaining adaptation benchmark.
 - [Interactive Sandbox](INTERACTIVE-SANDBOX.md): scratch-only profile, approval/launch instructions, lifecycle proof, and data limits.
 - [Bambu profile and actual research results](BAMBU-STUDIO-PROFILE.md): hashes, exact command, limitations, retained research location.
 - [Roadmap](ROADMAP.md): benchmark completion criteria and later isolation/adaptation work.

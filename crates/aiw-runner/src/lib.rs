@@ -10,6 +10,7 @@
 //! script, URL, or arbitrary policy API.
 
 mod bambu_report;
+mod packaging_recipe;
 mod sandbox_bundle;
 #[cfg(windows)]
 pub use bambu_report::report_windows_sandbox_bambu_run;
@@ -17,6 +18,11 @@ pub use bambu_report::{
     BambuReportEvidenceStatus, WsbBambuRunReport, render_bambu_run_report_markdown,
 };
 use bambu_report::{add_bambu_artifact_expectation, verify_bambu_output};
+#[cfg(windows)]
+pub use packaging_recipe::inspect_windows_sandbox_msi_recipe;
+pub use packaging_recipe::{
+    WSB_MSI_RECIPE_SCHEMA_VERSION, WsbMsiRecipe, WsbMsiRecipeData, WsbMsiRecipeInspection,
+};
 mod application_report_set;
 mod assessment_report;
 mod report_set;
@@ -37,6 +43,7 @@ pub use report_set::{
 };
 #[cfg(windows)]
 mod discard;
+mod msi_document;
 mod preparation;
 pub use assessment_report::{
     AssessmentEvidenceGap, FailureProgressEvidence, UnverifiedGuestDiagnostic,
@@ -398,6 +405,7 @@ pub fn observe_wsb_session_status(layout: &RunLayout) -> Result<WsbSessionStatus
         .expect("validated transactions contain a transition");
     let clean = !observation.pending_present
         && transition.state == SessionTransactionState::CleanupVerified
+        && start_settled(&transaction)
         && transaction.recovery.is_some();
     Ok(WsbSessionStatus {
         schema_version: WSB_SESSION_STATUS_SCHEMA_VERSION.to_owned(),
@@ -410,6 +418,8 @@ pub fn observe_wsb_session_status(layout: &RunLayout) -> Result<WsbSessionStatus
         current_state: Some(transition.state),
         reason_code: Some(if observation.pending_present {
             "transaction-staging-present".to_owned()
+        } else if !start_settled(&transaction) {
+            "start-completion-unverified".to_owned()
         } else if transaction.recovery.is_none()
             && transition.state == SessionTransactionState::CleanupVerified
         {
@@ -417,6 +427,19 @@ pub fn observe_wsb_session_status(layout: &RunLayout) -> Result<WsbSessionStatus
         } else {
             transition.reason_code.clone()
         }),
+    })
+}
+
+// Killing the CLI does not cancel an asynchronous start in the Sandbox service.
+// An empty list is conclusive only after start acknowledgement or an observed
+// exact-session stop. Otherwise a session can appear minutes after timeout.
+fn start_settled(transaction: &session::SessionTransaction) -> bool {
+    transaction.transitions.iter().any(|transition| {
+        transition.state == SessionTransactionState::Active
+            || matches!(
+                transition.reason_code.as_str(),
+                "cleanup-verified-after-stop" | "recovery-stop-verified"
+            )
     })
 }
 
@@ -721,9 +744,7 @@ pub(crate) fn execute_wsb_golden_probe(
                     &context.output_root.join("scenario-result.json"),
                     64 * 1024,
                 )?;
-                observed
-                    .validate_for_request(expected)
-                    .map_err(|e| RunnerError::Receipt(e.to_string()))?;
+                msi_document::verify_output(&context.output_root, expected, &observed)?;
                 let evidence_bytes = read_bounded_bytes(
                     &context.output_root.join("evidence.jsonl"),
                     aiw_provider_wsb::MAX_APPLICATION_EVIDENCE_BYTES as u64,
@@ -868,6 +889,43 @@ pub fn start_approved_windows_sandbox_golden_probe(
 }
 
 #[cfg(windows)]
+fn create_provider_diagnostics(
+    workspace: &aiw_windows_platform::HeldRunWorkspace,
+    run_id: &str,
+) -> Result<std::fs::File, RunnerError> {
+    use aiw_windows_platform::WorkspaceAclPolicy;
+    // A failed preflight can leave the run Ready. Give each attempt its own
+    // create-only trace so retries preserve diagnostics without adopting files.
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| {
+            RunnerError::Process(format!("provider diagnostics clock failed: {error}"))
+        })?
+        .as_nanos();
+    let leaf = format!("provider-diagnostics-{}-{nonce}.jsonl", std::process::id());
+    let create = || {
+        workspace
+            .reopen_root_directory("runs", WorkspaceAclPolicy::Inherited)?
+            .reopen_directory(run_id, WorkspaceAclPolicy::Inherited)?
+            .create_file_new(&leaf)
+            .map(aiw_windows_platform::CreatedWorkspaceFile::into_file)
+    };
+    let file = create().map_err(|error| {
+        RunnerError::Process(format!("provider diagnostics creation failed: {error}"))
+    })?;
+    eprintln!(
+        "AIW provider diagnostics: {}",
+        workspace
+            .root_path()
+            .join("runs")
+            .join(run_id)
+            .join(leaf)
+            .display()
+    );
+    Ok(file)
+}
+
+#[cfg(windows)]
 pub fn start_approved_windows_sandbox(
     workspace_root: &Path,
     project_path: &Path,
@@ -943,9 +1001,13 @@ fn start_approved_windows_sandbox_inner(
     }
     ensure_approval(&artifacts.run_plan, &approval, &request)?;
 
-    let native_lease =
+    let mut native_lease =
         aiw_windows_platform::acquire_windows_sandbox(&artifacts.receipt.provider.sha256)
             .map_err(native_invocation_error)?;
+    native_lease.retain_diagnostics(create_provider_diagnostics(
+        held.workspace(),
+        layout.run_id(),
+    )?);
     let readiness = native_lease.readiness().clone();
     let process = NativeWsbProcess {
         state: std::sync::Mutex::new(NativeWsbState {
@@ -984,23 +1046,9 @@ fn start_approved_windows_sandbox_inner(
     } else if request.msi.is_some() {
         let scenario = result.scenario.ok_or(RunnerError::Drift)?;
         Ok(WsbApprovedExecution::ImportedMsi(WsbImportedMsiExecution {
-            schema_version: if scenario.schema_version
-                == "aiw.dev/windows-sandbox-imported-msi-scenario-result/v0alpha2"
-            {
-                "aiw.dev/wsb-interactive-msi-execution/v0alpha1"
-            } else if result.product_registration.is_some() {
-                "aiw.dev/wsb-imported-msi-execution/v0alpha6"
-            } else if result.registry_evidence.is_some() {
-                "aiw.dev/wsb-imported-msi-execution/v0alpha5"
-            } else if result.standard_user_context.is_some() {
-                "aiw.dev/wsb-imported-msi-execution/v0alpha4"
-            } else if result.behavior.is_some() {
-                "aiw.dev/wsb-imported-msi-execution/v0alpha3"
-            } else if result.application_token.is_some() {
-                "aiw.dev/wsb-imported-msi-execution/v0alpha2"
-            } else {
-                "aiw.dev/wsb-imported-msi-execution/v0alpha1"
-            }
+            schema_version: msi_execution_schema(
+                &request.msi.as_ref().ok_or(RunnerError::Drift)?.scenario,
+            )
             .to_owned(),
             run_id: result.run_id,
             sandbox_id: result.sandbox_id,
@@ -1066,6 +1114,11 @@ pub fn recover_windows_sandbox(layout: &RunLayout) -> Result<WsbRecoveryResult, 
     store.discard_pending_after_authority(&inspection)?;
 
     if transaction.current_state() == SessionTransactionState::CleanupVerified {
+        if !start_settled(&transaction) {
+            return Err(RunnerError::RecoveryRequired(
+                "historical cleanup did not establish completion of the asynchronous start; preserve the workspace and reconcile the late session".to_owned(),
+            ));
+        }
         let observed = provider
             .verify_bound_absent()
             .map_err(native_recovery_error)?;
@@ -1123,6 +1176,17 @@ pub fn recover_windows_sandbox(layout: &RunLayout) -> Result<WsbRecoveryResult, 
     }
 
     let observed = provider.reconcile().map_err(native_recovery_error)?;
+    if observed.disposition == WsbRecoveryDisposition::AlreadyAbsent && !start_settled(&transaction)
+    {
+        store.transition(
+            SessionTransactionState::RecoveryRequired,
+            "start-completion-unverified",
+        )?;
+        return Err(RunnerError::RecoveryRequired(
+            "the asynchronous start may still be pending; absence alone cannot establish cleanup"
+                .to_owned(),
+        ));
+    }
     workspace
         .revalidate()
         .map_err(|error| RunnerError::RecoveryRequired(error.to_string()))?;
@@ -1144,7 +1208,11 @@ pub fn recover_windows_sandbox(layout: &RunLayout) -> Result<WsbRecoveryResult, 
             .map_err(|error| RunnerError::RecoveryRequired(error.to_string()))?;
         store.transition(
             SessionTransactionState::CleanupVerified,
-            "recovery-cleanup-verified",
+            if start_settled(&transaction) {
+                "recovery-cleanup-verified"
+            } else {
+                "recovery-stop-verified"
+            },
         )?;
     }
     let final_transaction = store
@@ -1571,6 +1639,13 @@ fn finalize_attempt(
     operation_error: Option<&RunnerError>,
 ) -> Result<(), RunnerError> {
     let mut state_error = prepare_cleanup_transaction(store);
+    let acknowledged = match store.load_current() {
+        Ok(transaction) => transaction.as_ref().is_some_and(start_settled),
+        Err(error) => {
+            state_error.get_or_insert(error);
+            false
+        }
+    };
     let provider = Path::new(&request.provider.canonical_path);
     let first = list_sessions(
         process,
@@ -1590,6 +1665,7 @@ fn finalize_attempt(
             .any(|session| session.id == context.binding.session_id),
         Err(_) => true,
     };
+    let mut stop_confirmed = false;
     if should_stop {
         if let Err(error) = stop_exact_session(
             process,
@@ -1599,6 +1675,12 @@ fn finalize_attempt(
             request.timeout_seconds,
         ) {
             observation_error.get_or_insert(error);
+        } else if first.as_ref().is_ok_and(|sessions| {
+            sessions
+                .iter()
+                .any(|session| session.id == context.binding.session_id)
+        }) {
+            stop_confirmed = true;
         }
     }
     let final_sessions = list_sessions(
@@ -1607,7 +1689,8 @@ fn finalize_attempt(
         &context.lifecycle,
         request.timeout_seconds,
     );
-    let physically_verified = !unrelated_observed
+    let physically_verified = (acknowledged || stop_confirmed)
+        && !unrelated_observed
         && final_sessions
             .as_ref()
             .is_ok_and(|sessions| sessions.is_empty());
@@ -1621,7 +1704,9 @@ fn finalize_attempt(
         }
         if let Err(error) = store.transition(
             SessionTransactionState::CleanupVerified,
-            if recovering {
+            if !acknowledged && stop_confirmed {
+                "cleanup-verified-after-stop"
+            } else if recovering {
                 "recovery-cleanup-verified"
             } else {
                 "cleanup-verified"
@@ -1641,12 +1726,15 @@ fn finalize_attempt(
         return Ok(());
     }
 
-    let reason = if unrelated_observed
+    let reason = if !acknowledged && !stop_confirmed {
+        "start-completion-unverified"
+    } else if unrelated_observed
         || final_sessions.as_ref().is_ok_and(|sessions| {
             sessions
                 .iter()
                 .any(|session| session.id != context.binding.session_id)
-        }) {
+        })
+    {
         "unrelated-session-observed"
     } else if final_sessions.as_ref().is_ok_and(|sessions| {
         sessions
@@ -1718,6 +1806,7 @@ fn terminalize_verified_wsb_recovery(
         RunnerError::RecoveryRequired("session cleanup transaction is missing".to_owned())
     })?;
     if transaction.current_state() != SessionTransactionState::CleanupVerified
+        || !start_settled(&transaction)
         || transaction.recovery.is_none()
     {
         return Err(RunnerError::RecoveryRequired(
@@ -2496,12 +2585,33 @@ fn completion_expectation(
     }
 }
 
+#[cfg(windows)]
+fn msi_execution_schema(scenario: &aiw_provider_wsb::CompiledMsiScenario) -> &'static str {
+    if scenario.requires_document_transfer() {
+        "aiw.dev/wsb-interactive-msi-execution/v0alpha2"
+    } else if scenario.interactive_session_seconds.is_some() {
+        "aiw.dev/wsb-interactive-msi-execution/v0alpha1"
+    } else if scenario.requires_product_registration() {
+        "aiw.dev/wsb-imported-msi-execution/v0alpha6"
+    } else if scenario.requires_registry_observations() {
+        "aiw.dev/wsb-imported-msi-execution/v0alpha5"
+    } else if scenario.requires_standard_user() {
+        "aiw.dev/wsb-imported-msi-execution/v0alpha4"
+    } else if scenario.requires_application_exercise() {
+        "aiw.dev/wsb-imported-msi-execution/v0alpha3"
+    } else if scenario.requires_application_token() {
+        "aiw.dev/wsb-imported-msi-execution/v0alpha2"
+    } else {
+        "aiw.dev/wsb-imported-msi-execution/v0alpha1"
+    }
+}
+
 fn add_msi_document_artifact_expectation(expectation: &mut WindowsSandboxCompletionExpectation) {
     expectation.artifacts.push(CompletionArtifactExpectation {
         path: "document-output.txt".to_owned(),
         role: aiw_evidence::ArtifactRole::ScenarioResults,
         sensitivity: aiw_evidence::DataSensitivity::Internal,
-        media_type: "text/plain; charset=utf-8".to_owned(),
+        media_type: "text/plain".to_owned(),
         maximum_bytes: aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES,
     });
 }
@@ -2672,6 +2782,8 @@ fn journal_error(error: aiw_orchestrator::AiwError) -> RunnerError {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(windows)]
+    mod interactive_transfer;
     use super::*;
     use std::{
         collections::{BTreeMap, VecDeque},
@@ -3274,7 +3386,11 @@ mod tests {
             .transition(SessionTransactionState::CleanupVerified, "cleanup-verified")
             .unwrap();
         let clean = observe_wsb_session_status(&layout).unwrap();
-        assert_eq!(clean.status, WsbSessionDisposition::Clean);
+        assert_eq!(clean.status, WsbSessionDisposition::RecoveryRequired);
+        assert_eq!(
+            clean.reason_code.as_deref(),
+            Some("start-completion-unverified")
+        );
 
         let directory = layout.run_dir().join("wsb-session-transaction");
         let pending = directory.join("00000000000000000005.json.pending");
@@ -3700,6 +3816,39 @@ mod tests {
         execute_wsb_golden_probe(&start, &readiness, &layout, &fake, &TestLease::default())
             .unwrap();
         assert!(layout.result_path().exists());
+    }
+
+    #[test]
+    fn late_start_keeps_recovery_required_until_the_session_is_observed_and_stopped() {
+        let (_root, layout, start, readiness) = setup();
+        let id = deterministic_sandbox_id("w1-run");
+        let failed = FakeProcess::new(vec![
+            empty_list(),
+            Err(RunnerError::ProviderFailure),
+            empty_list(),
+            empty_list(),
+        ]);
+        assert!(matches!(
+            execute_wsb_golden_probe(&start, &readiness, &layout, &failed, &TestLease::default()),
+            Err(RunnerError::RecoveryRequired(_))
+        ));
+        assert!(request_path(&start).exists());
+        assert!(!layout.result_path().exists());
+        let absent = FakeProcess::new(vec![empty_list(), empty_list()]);
+        assert!(matches!(
+            recover_wsb_session(&start, &readiness, &layout, &absent, &TestLease::default()),
+            Err(RunnerError::RecoveryRequired(_))
+        ));
+        assert!(request_path(&start).exists());
+        let late = FakeProcess::new(vec![list_with(&id, "running"), stopped(&id), empty_list()]);
+        let recovered =
+            recover_wsb_session(&start, &readiness, &layout, &late, &TestLease::default()).unwrap();
+        assert!(start_settled(&recovered));
+        assert_eq!(
+            observe_wsb_session_status(&layout).unwrap().status,
+            WsbSessionDisposition::Clean
+        );
+        assert!(!request_path(&start).exists());
     }
 
     #[test]
@@ -4377,6 +4526,17 @@ mod tests {
         WsbGoldenProbeStart,
         WindowsSandboxReadiness,
     ) {
+        setup_msi_profile(None)
+    }
+
+    fn setup_msi_profile(
+        document: Option<&[u8]>,
+    ) -> (
+        Root,
+        RunLayout,
+        WsbGoldenProbeStart,
+        WindowsSandboxReadiness,
+    ) {
         let (root, old_layout, mut start, readiness) = setup();
         let project_path = PathBuf::from(&start.project_path);
         let project_source = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -4397,14 +4557,40 @@ mod tests {
         } else {
             panic!("MSI fixture did not contain an MSI application source");
         }
+        if document.is_some() {
+            project.scenarios[0].steps[3] = aiw_schema::ScenarioStep::WaitForUserClose {
+                timeout_seconds: 60,
+            };
+        }
         fs::write(&project_path, serde_yaml::to_string(&project).unwrap()).unwrap();
         let staged_payload = identity(&msi_path);
         let staged_path = msi_path.to_string_lossy().into_owned();
-        let scenario = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
-            &project,
-            "install-launch-close",
-        )
+        let scenario = if let Some(bytes) = document {
+            aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario_with_document(
+                &project,
+                "install-launch-close",
+                &hex::encode(Sha256::digest(bytes)),
+                bytes.len() as u64,
+            )
+        } else {
+            aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
+                &project,
+                "install-launch-close",
+            )
+        }
         .unwrap();
+        let staged_document = document.map(|bytes| {
+            let path = root.0.join("tools/document-input.txt");
+            fs::write(&path, bytes).unwrap();
+            WsbMsiDocument {
+                staged_payload: identity(&path),
+                staged_identity: aiw_probe::WindowsFileIdentity {
+                    final_path: path.to_string_lossy().into_owned(),
+                    volume_serial_number: start.workspace.tools.volume_serial_number.clone(),
+                    file_id: "a".repeat(32),
+                },
+            }
+        });
         let import_receipt = fake_msi_import_receipt(&scenario, msi_bytes.len() as u64);
         let import_receipt_sha256 =
             hex::encode(Sha256::digest(serde_json::to_vec(&import_receipt).unwrap()));
@@ -4425,7 +4611,7 @@ mod tests {
                 volume_serial_number: start.workspace.tools.volume_serial_number.clone(),
                 file_id: "9".repeat(32),
             },
-            staged_document: None,
+            staged_document,
         };
         start.schema_version = "aiw.dev/wsb-imported-msi-start/v0alpha1".to_owned();
         start.wsb_plan.probe.output = r"C:\AIW\Output\scenario-result.json".to_owned();
@@ -4437,7 +4623,11 @@ mod tests {
             "w1-run",
             project.metadata.name.clone(),
             project_revision_hash(&project).unwrap(),
-            aiw_orchestrator::RunLifecycleKind::Assessment,
+            if document.is_some() {
+                aiw_orchestrator::RunLifecycleKind::Launch
+            } else {
+                aiw_orchestrator::RunLifecycleKind::Assessment
+            },
             "now",
             vec![
                 PlannedAction::AssessHost,
@@ -4598,6 +4788,24 @@ mod tests {
         registry_fixture: RegistryFixture,
         product_fixture: ProductRegistrationFixture,
     ) {
+        write_msi_completion(
+            start,
+            scenario_result,
+            include_behavior,
+            registry_fixture,
+            product_fixture,
+            None,
+        );
+    }
+
+    fn write_msi_completion(
+        start: &WsbGoldenProbeStart,
+        scenario_result: aiw_provider_wsb::ImportedMsiScenarioResult,
+        include_behavior: bool,
+        registry_fixture: RegistryFixture,
+        product_fixture: ProductRegistrationFixture,
+        document_output: Option<&[u8]>,
+    ) {
         let rendered = render_config(&start.wsb_plan).unwrap();
         let request = msi_request_for(start);
         let output = PathBuf::from(
@@ -4617,8 +4825,20 @@ mod tests {
                 payload: serde_json::json!({"completed":true}),
             })
             .unwrap();
+        let transfer = request.scenario.interactive_document.as_ref().map(|input| {
+            let bytes = document_output.unwrap_or_default();
+            aiw_provider_wsb::ImportedMsiDocumentTransferResult {
+                input_sha256: input.input_sha256.clone(),
+                input_size_bytes: input.input_size_bytes,
+                output_sha256: hex::encode(Sha256::digest(bytes)),
+                output_size_bytes: bytes.len() as u64,
+            }
+        });
         let valid_result =
-            aiw_provider_wsb::ImportedMsiScenarioResult::succeeded(&request, 0, 42, 0).unwrap();
+            aiw_provider_wsb::ImportedMsiScenarioResult::succeeded_with_document_transfer(
+                &request, 0, 42, 0, transfer,
+            )
+            .unwrap();
         let token = aiw_provider_wsb::ImportedMsiApplicationToken::new(
             &request,
             &valid_result,
@@ -4769,7 +4989,7 @@ mod tests {
             size_bytes: bytes.len() as u64,
             sha256: hex::encode(Sha256::digest(bytes)),
         };
-        let receipt = aiw_provider_wsb::WindowsSandboxCompletionReceipt {
+        let mut receipt = aiw_provider_wsb::WindowsSandboxCompletionReceipt {
             schema_version: aiw_provider_wsb::WINDOWS_SANDBOX_COMPLETION_RECEIPT_SCHEMA_VERSION
                 .to_owned(),
             run_id: "w1-run".to_owned(),
@@ -4795,6 +5015,15 @@ mod tests {
                 ),
             ],
         };
+        if let Some(bytes) = document_output {
+            publish_test_file(&output.join("document-output.txt"), bytes);
+            receipt.artifacts.push(artifact(
+                "document-output.txt",
+                aiw_evidence::ArtifactRole::ScenarioResults,
+                "text/plain",
+                bytes,
+            ));
+        }
         let mut receipt_bytes = serde_json::to_vec(&receipt).unwrap();
         receipt_bytes.push(b'\n');
         publish_test_file(&output.join("completion.json"), &receipt_bytes);
