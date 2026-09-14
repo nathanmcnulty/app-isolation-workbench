@@ -19,7 +19,7 @@ use serde::Serialize;
 
 use crate::WsbMsiReportSetInput;
 
-pub const WSB_SETTINGS_COMPARISON_SCHEMA_VERSION: &str = "aiw.dev/wsb-settings-comparison/v0alpha1";
+pub const WSB_SETTINGS_COMPARISON_SCHEMA_VERSION: &str = "aiw.dev/wsb-settings-comparison/v0alpha2";
 
 /// A retained, fixed-profile settings-placement comparison.
 ///
@@ -57,6 +57,7 @@ pub struct WsbSettingsComparisonTrial {
     pub compiled_scenario_schema: String,
     pub compiled_profile: String,
     pub settings_file: WsbSettingsComparisonFile,
+    pub recorded_execution: crate::WsbMsiRecordedExecution,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -74,15 +75,16 @@ pub struct WsbSettingsComparableEvidence {
     pub installer_sha256: String,
     pub guest_agent_sha256: String,
     pub runtime_boundary: RuntimeBoundary,
-    /// The normal retained MSI report does not expose the execution-provider
-    /// identity. The comparison therefore cannot claim that identity matched.
     pub provider_identity: WsbSettingsComparisonCoverage,
+    pub requested_configuration: WsbSettingsComparisonCoverage,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum WsbSettingsComparisonCoverage {
     Unmeasured,
+    MatchedRecordedIdentity,
+    MatchedRequestedConfiguration,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -196,10 +198,11 @@ pub fn report_windows_sandbox_settings_comparison(
             installer_sha256: trials[0].report.scenario.installer_sha256.clone(),
             guest_agent_sha256: trials[0].report.scenario.agent_sha256.clone(),
             runtime_boundary: trials[0].project.isolation_intent.runtime_boundary,
-            provider_identity: WsbSettingsComparisonCoverage::Unmeasured,
+            requested_configuration: WsbSettingsComparisonCoverage::MatchedRequestedConfiguration,
+            provider_identity: WsbSettingsComparisonCoverage::MatchedRecordedIdentity,
         },
         boundary_coverage: WsbSettingsBoundaryCoverage {
-            provider_identity: WsbSettingsComparisonCoverage::Unmeasured,
+            provider_identity: WsbSettingsComparisonCoverage::MatchedRecordedIdentity,
             operating_system: WsbSettingsComparisonCoverage::Unmeasured,
             effective_isolation: WsbSettingsComparisonCoverage::Unmeasured,
             network: WsbSettingsComparisonCoverage::Unmeasured,
@@ -210,7 +213,7 @@ pub fn report_windows_sandbox_settings_comparison(
         },
         limitations: vec![
             "This report reuses three retained fixed workflow observations; it does not authorize execution, packaging, host mappings, or a retry.".into(),
-            "Provider and operating-system identity are not exposed by the retained MSI report and are unmeasured here.".into(),
+            "Recorded provider identity and requested configuration match across these runs; current host state, operating-system equivalence, and effective enforcement remain unmeasured.".into(),
             "Boundary coverage for effective isolation, network, host mappings, registry, descendant processes, and canaries is unmeasured.".into(),
             "The fixed document workflow is not a complete adaptation validation or a general application compatibility verdict.".into(),
         ],
@@ -241,6 +244,7 @@ fn trial_report(trial: &VerifiedTrial) -> WsbSettingsComparisonTrial {
         compiled_scenario_schema: trial.compiled.schema_version.clone(),
         compiled_profile: trial.compiled.profile.clone(),
         settings_file: trial.settings_file.clone(),
+        recorded_execution: trial.report.recorded_execution.clone(),
     }
 }
 
@@ -329,6 +333,15 @@ fn validate_trials(trials: &[VerifiedTrial; 3]) -> Result<(), String> {
     }
 
     let baseline = &trials[0];
+    if trials[1..]
+        .iter()
+        .any(|trial| trial.report.recorded_execution != baseline.report.recorded_execution)
+    {
+        return Err(
+            "recorded provider identity, protocol, or requested Sandbox configuration differs"
+                .into(),
+        );
+    }
     if baseline.compiled.schema_version != COMPILED_MSI_SCENARIO_SCHEMA_VERSION
         || baseline.compiled.profile != NOTEPAD_PLUS_PLUS_MSI_PROFILE
         || !baseline.compiled.launch_arguments.is_empty()
@@ -442,6 +455,36 @@ fn normalized_project(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn execution_context() -> crate::WsbMsiRecordedExecution {
+        crate::WsbMsiRecordedExecution {
+            provider: aiw_probe::BinaryIdentity {
+                canonical_path: r"C:\Provider\wsb.exe".into(),
+                sha256: "a".repeat(64),
+                size_bytes: 123,
+                version: Some("1".into()),
+                signature_status: aiw_probe::ReadinessState::Available,
+            },
+            provider_package: aiw_probe::WindowsPackageIdentity {
+                name: "provider".into(),
+                full_name: "provider_1_x64".into(),
+                family_name: "provider_family".into(),
+                publisher: "publisher".into(),
+                publisher_id: "id".into(),
+                version: "1".into(),
+                architecture: "x64".into(),
+                signature_kind: "Store".into(),
+                status_ok: true,
+                install_location: r"C:\Provider".into(),
+            },
+            provider_protocol: aiw_probe::WindowsSandboxCliProtocol {
+                cli_version: "1".into(),
+                protocol: "test".into(),
+                list_schema: "test".into(),
+            },
+            normalized_sandbox_config_sha256: "b".repeat(64),
+        }
+    }
     use sha2::Digest as _;
 
     fn project(local_settings: bool) -> Project {
@@ -501,6 +544,7 @@ mod tests {
             compiled,
             report: crate::WsbMsiAssessmentReport {
                 schema_version: "test".into(),
+                recorded_execution: execution_context(),
                 run_id: scenario.run_id.clone(),
                 project_revision_sha256: hash.clone(),
                 outcome: aiw_orchestrator::RunOutcome::InsufficientEvidence,
@@ -559,6 +603,21 @@ mod tests {
         reused_identity[2].report.scenario.request_sha256 =
             reused_identity[1].report.scenario.request_sha256.clone();
         assert!(validate_trials(&reused_identity).is_err());
+    }
+
+    #[test]
+    fn rejects_recorded_provider_and_configuration_drift() {
+        for change in 0..4 {
+            let mut trials = valid_trials();
+            let context = &mut trials[2].report.recorded_execution;
+            match change {
+                0 => context.provider.sha256 = "c".repeat(64),
+                1 => context.provider_package.version = "different".into(),
+                2 => context.provider_protocol.protocol = "different".into(),
+                _ => context.normalized_sandbox_config_sha256 = "c".repeat(64),
+            }
+            assert!(validate_trials(&trials).is_err());
+        }
     }
 
     #[test]

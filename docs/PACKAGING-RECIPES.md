@@ -111,8 +111,10 @@ schema with `schema wsb-settings-comparison`.
 This command starts no provider or application and writes no run state. Missing,
 failed, duplicated, drifted, or incomplete required evidence rejects the whole
 comparison. Its result describes the fixed settings adaptation and measured
-workflow; it is not launch authority or an effective-isolation verdict. Boundary
-coverage stays explicitly unmeasured. The trial driver now uses this command for
+workflow; it is not launch authority or an effective-isolation verdict. The v0alpha2
+comparison requires matching recorded provider binary/package/protocol identities
+and normalized requested Sandbox configuration. It carries those identities per
+trial. OS equivalence and effective boundary enforcement stay explicitly unmeasured. The trial driver now uses this command for
 its final `comparison.json`; historical script-only comparisons retain their
 original observation schema.
 
@@ -125,6 +127,24 @@ were rejected without partial output. All 75 retained workspace files kept their
 original hashes and inventory. The proof contains `comparison.json`, the output
 schema, per-case diagnostics, and before/after inventories. No Sandbox was
 started for these reporting checks. Focused runner and CLI tests also passed.
+### Recorded provider/configuration proof, 2026-09-13
+
+Rechecking the same three completed workspaces with comparison `v0alpha2`
+matched provider binary SHA-256
+`247e092b5c5bd37820f225a7dd3ddf10ae37a67e2751a19c24b802c84769c441`,
+package/CLI version `0.8.107.0`, and normalized requested configuration SHA-256
+`e8daf47abe678d2414f1bf68944bb382ce05c8e8f9894de00b02faf40389ef1b`.
+The recorded preparation identities were exposed through assessment report
+`v0alpha8`; no provider was queried or started.
+
+Proof: `%TEMP%\aiw-recorded-context-14241b03abfe4b9c97e610b8196fdaaa`.
+Two outputs matched exactly, five altered selectors were rejected, the output
+passed its generated JSON schema, and all 75 evidence files retained their
+original content and inventory. Unit checks reject provider hash/package/protocol
+or configuration drift and show that normalization preserves resource and mapping
+suffix differences while rejecting outside mappings. OS equivalence and actual
+boundary enforcement remain unmeasured.
+
 ### Development failures retained
 
 The first trial in `%TEMP%\aiw-local-settings-22d32e8a4fe644169739d2570b48a7bd`

@@ -52,7 +52,8 @@ mod preparation;
 pub use assessment_report::{
     AssessmentEvidenceGap, FailureProgressEvidence, UnverifiedGuestDiagnostic,
     VerifiedMsiFailureProgress, WSB_MSI_DOCUMENT_EXPORT_SCHEMA_VERSION, WsbMsiAssessmentReport,
-    WsbMsiDocumentExport, WsbMsiInteractiveReport, WsbMsiRunReport, WsbMsiUnsuccessfulReport,
+    WsbMsiDocumentExport, WsbMsiInteractiveReport, WsbMsiRecordedExecution, WsbMsiRunReport,
+    WsbMsiUnsuccessfulReport,
 };
 #[cfg(windows)]
 pub use assessment_report::{

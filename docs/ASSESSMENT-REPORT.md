@@ -14,6 +14,28 @@ The command reads the committed terminal journal, approval/import provenance, pr
 
 Reporting never acquires a provider lease, invokes a provider, repairs a journal, creates run locks, or modifies workspace files. The original intake and currently installed provider are not queried. Retained binaries and the original project must still match their recorded authority. Explicit legacy v1, v2 and v3 profile requests remain readable; all action fields are compared against the supported compiler while retaining the historical evidence-version requirement.
 
+## Recorded execution context
+
+Newly rendered completed assessment reports use `v0alpha8` and include
+`recordedExecution`: the verified historical provider binary identity, package
+identity, CLI protocol, and normalized requested Sandbox configuration hash.
+The context is extracted inside the existing held-workspace verification; it is
+not read from a separate caller-supplied report. The provider package and binary
+are not queried from today's machine. Historical guest observations retain their
+own versions and optional coverage; the new report envelope does not fill any
+missing guest measurement. Interactive and unsuccessful report schemas are
+unchanged.
+
+Configuration normalization validates the original plan, replaces only the
+workspace prefix of each host mapping with a fixed comparison root, and hashes
+the existing renderer's XML. Mapping purposes and suffixes, guest paths, probe
+contract, memory, and security switches remain bound. The exact original
+configuration hash remains in the scenario result. A matching normalized hash
+describes the requested configuration, not observed enforcement.
+
+The preparation did not retain a host or guest OS build, so OS equivalence remains
+unmeasured. No current-host probe is substituted for historical evidence.
+
 ## Interactive document-transfer reports
 
 The typed interactive transfer profile is reported by `run report-wsb-msi-run` as

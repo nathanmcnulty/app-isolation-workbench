@@ -45,6 +45,7 @@ fn verify_historical_scenario(
 #[serde(rename_all = "camelCase")]
 pub struct WsbMsiAssessmentReport {
     pub schema_version: String,
+    pub recorded_execution: WsbMsiRecordedExecution,
     pub run_id: String,
     pub project_revision_sha256: String,
     pub outcome: RunOutcome,
@@ -78,6 +79,107 @@ pub struct WsbMsiAssessmentReport {
     pub requested_isolation: aiw_schema::IsolationIntent,
     pub unmeasured_scenarios: Vec<String>,
     pub missing_evidence: Vec<AssessmentEvidenceGap>,
+}
+
+/// Historical identities from the verified preparation and settled session.
+/// These are not a fresh host probe or measurements of effective containment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WsbMsiRecordedExecution {
+    pub provider: aiw_probe::BinaryIdentity,
+    pub provider_package: aiw_probe::WindowsPackageIdentity,
+    pub provider_protocol: aiw_probe::WindowsSandboxCliProtocol,
+    /// Exact renderer output with only the validated workspace prefix replaced.
+    pub normalized_sandbox_config_sha256: String,
+}
+
+fn recorded_execution(
+    artifacts: &PreparedWsbArtifacts,
+) -> Result<WsbMsiRecordedExecution, RunnerError> {
+    // Validate before normalizing: never make an outside mapping look in-scope.
+    artifacts
+        .validate()
+        .map_err(|e| RunnerError::Preparation(e.to_string()))?;
+    Ok(WsbMsiRecordedExecution {
+        provider: artifacts.receipt.provider.clone(),
+        provider_package: artifacts.receipt.provider_package.clone(),
+        provider_protocol: artifacts.receipt.provider_protocol.clone(),
+        normalized_sandbox_config_sha256: normalized_sandbox_config_sha256(&artifacts.wsb_plan)?,
+    })
+}
+
+fn normalized_sandbox_config_sha256(plan: &WindowsSandboxPlan) -> Result<String, RunnerError> {
+    aiw_provider_wsb::render_config(plan).map_err(|e| RunnerError::Preparation(e.to_string()))?;
+    let mut plan = plan.clone();
+    let workspace = plan.workspace_root.clone();
+    const COMPARISON_ROOT: &str = r"C:\AIW\ComparisonWorkspace";
+    for mapping in &mut plan.mappings {
+        let suffix = mapping
+            .host_folder
+            .strip_prefix(&workspace)
+            .filter(|suffix| suffix.starts_with('\\'))
+            .ok_or(RunnerError::Drift)?;
+        mapping.host_folder = format!("{COMPARISON_ROOT}{suffix}");
+    }
+    plan.workspace_root = COMPARISON_ROOT.into();
+    let config = aiw_provider_wsb::render_config(&plan)
+        .map_err(|e| RunnerError::Preparation(e.to_string()))?;
+    Ok(config.sha256)
+}
+
+#[cfg(test)]
+mod recorded_execution_tests {
+    use super::*;
+
+    fn plan(root: &str) -> WindowsSandboxPlan {
+        WindowsSandboxPlan {
+            schema_version: aiw_provider_wsb::WINDOWS_SANDBOX_PLAN_SCHEMA_VERSION.into(),
+            workspace_root: root.into(),
+            mappings: vec![
+                aiw_provider_wsb::MappedFolder {
+                    purpose: MappingPurpose::Tools,
+                    host_folder: format!(r"{root}\tools"),
+                    sandbox_folder: r"C:\AIW\Tools".into(),
+                },
+                aiw_provider_wsb::MappedFolder {
+                    purpose: MappingPurpose::Output,
+                    host_folder: format!(r"{root}\output"),
+                    sandbox_folder: r"C:\AIW\Output".into(),
+                },
+            ],
+            probe: aiw_provider_wsb::GoldenProbe {
+                executable: r"C:\AIW\Tools\aiw-guest-agent.exe".into(),
+                request: Some(r"C:\AIW\Tools\request.json".into()),
+                output: r"C:\AIW\Output\result.json".into(),
+            },
+            memory_mb: Some(4096),
+        }
+    }
+
+    #[test]
+    fn recorded_execution_normalizes_only_workspace_prefix() {
+        let baseline = plan(r"C:\Runs\one");
+        let expected = normalized_sandbox_config_sha256(&baseline).unwrap();
+        assert_eq!(
+            expected,
+            normalized_sandbox_config_sha256(&plan(r"D:\Runs\two")).unwrap()
+        );
+        let mut changed = baseline.clone();
+        changed.memory_mb = Some(8192);
+        assert_ne!(
+            expected,
+            normalized_sandbox_config_sha256(&changed).unwrap()
+        );
+        changed = baseline.clone();
+        changed.mappings[1].host_folder.push_str(r"\nested");
+        assert_ne!(
+            expected,
+            normalized_sandbox_config_sha256(&changed).unwrap()
+        );
+        changed = baseline;
+        changed.mappings[1].host_folder = r"C:\Runs\one-other\output".into();
+        assert!(normalized_sandbox_config_sha256(&changed).is_err());
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
@@ -938,22 +1040,8 @@ pub(crate) fn report_windows_sandbox_msi_run_bound(
     }
     Ok(WsbMsiRunReport::CompletedAssessment(Box::new(
         WsbMsiAssessmentReport {
-            schema_version: if product_registration.is_some() {
-                "aiw.dev/wsb-msi-assessment-report/v0alpha7"
-            } else if registry_evidence.is_some() {
-                "aiw.dev/wsb-msi-assessment-report/v0alpha6"
-            } else if standard_user_context.is_some() {
-                "aiw.dev/wsb-msi-assessment-report/v0alpha5"
-            } else if msi.import_receipt.download_metadata_archive.is_some() {
-                "aiw.dev/wsb-msi-assessment-report/v0alpha4"
-            } else if stage_progress.is_some() {
-                "aiw.dev/wsb-msi-assessment-report/v0alpha3"
-            } else if behavior.is_some() {
-                "aiw.dev/wsb-msi-assessment-report/v0alpha2"
-            } else {
-                "aiw.dev/wsb-msi-assessment-report/v0alpha1"
-            }
-            .to_owned(),
+            schema_version: "aiw.dev/wsb-msi-assessment-report/v0alpha8".into(),
+            recorded_execution: recorded_execution(&artifacts)?,
             run_id: run_id.to_owned(),
             project_revision_sha256: artifacts.receipt.project_revision_sha256,
             outcome: RunOutcome::InsufficientEvidence,

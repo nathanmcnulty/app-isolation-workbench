@@ -81,24 +81,29 @@ fn completed_msi_report_is_readonly_and_rejects_drift() {
     );
     let preparation: aiw_runner::WsbPreparationReceipt =
         serde_json::from_slice(&fs::read(root.join("preparation.json")).unwrap()).unwrap();
+    assert_eq!(
+        report.schema_version,
+        "aiw.dev/wsb-msi-assessment-report/v0alpha8"
+    );
+    assert_eq!(report.recorded_execution.provider, preparation.provider);
+    assert_eq!(
+        report.recorded_execution.provider_package,
+        preparation.provider_package
+    );
+    assert_eq!(
+        report.recorded_execution.provider_protocol,
+        preparation.provider_protocol
+    );
+    assert_eq!(
+        report
+            .recorded_execution
+            .normalized_sandbox_config_sha256
+            .len(),
+        64
+    );
+    assert!(report.to_markdown().contains(&preparation.provider.sha256));
     let prepared_scenario = preparation.msi.unwrap().scenario;
     if prepared_scenario.requires_application_exercise() {
-        assert_eq!(
-            report.schema_version,
-            if report.product_registration.is_some() {
-                "aiw.dev/wsb-msi-assessment-report/v0alpha7"
-            } else if report.registry_evidence.is_some() {
-                "aiw.dev/wsb-msi-assessment-report/v0alpha6"
-            } else if report.standard_user_context.is_some() {
-                "aiw.dev/wsb-msi-assessment-report/v0alpha5"
-            } else if report.download_metadata_policy.is_some() {
-                "aiw.dev/wsb-msi-assessment-report/v0alpha4"
-            } else if report.stage_progress.is_some() {
-                "aiw.dev/wsb-msi-assessment-report/v0alpha3"
-            } else {
-                "aiw.dev/wsb-msi-assessment-report/v0alpha2"
-            }
-        );
         let behavior = report
             .behavior
             .as_ref()
@@ -148,7 +153,7 @@ fn completed_msi_report_is_readonly_and_rejects_drift() {
     } else {
         assert_eq!(
             report.schema_version,
-            "aiw.dev/wsb-msi-assessment-report/v0alpha1"
+            "aiw.dev/wsb-msi-assessment-report/v0alpha8"
         );
         assert!(report.behavior.is_none());
         assert!(report.installation_file_changes.is_none());

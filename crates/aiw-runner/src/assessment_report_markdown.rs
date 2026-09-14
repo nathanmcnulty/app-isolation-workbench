@@ -65,6 +65,7 @@ impl WsbMsiAssessmentReport {
             out.push_str(&format!("| {name} | {status} |\n"));
         }
         out.push_str(&format!("\nRecorded exact-session cleanup verified: **{}**. This is the retained cleanup record, not a current-session query.\n", self.recorded_cleanup_verified));
+        out.push_str(&format!("\nRecorded provider SHA-256: {}. Package: {}. CLI protocol: {}. Normalized requested Sandbox configuration SHA-256: {}. These identities describe the verified historical run; they do not establish current host state, OS equivalence, or effective containment.\n", cell(&self.recorded_execution.provider.sha256), cell(&self.recorded_execution.provider_package.full_name), cell(&self.recorded_execution.provider_protocol.protocol), cell(&self.recorded_execution.normalized_sandbox_config_sha256)));
         if let Some(token) = &self.application_token {
             out.push_str(&format!("\nLaunched guest process: PID {}, {:?} integrity, elevated {}, AppContainer {}. This root-process token does not satisfy independent host or descendant checks.\n", token.token.process_id, token.token.integrity.level, token.token.is_elevated, token.token.is_app_container));
         }
