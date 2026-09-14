@@ -5,7 +5,7 @@ Updated 2026-09-13. This is a compact handoff, not a run receipt or authorizatio
 ## Where to resume
 
 - Active development branch: `codex/wsb-typed-scenarios`. Locate it with `git worktree list` if this checkout differs. The main checkout has historically been behind this worktree.
-- Latest slice: `package inspect-wsb-msi-recipe` exposes a verified pre-import preparation as JSON/Markdown: source/provider/agent bindings, fixed launch, exact Sandbox XML, data lifetime, and gaps. See PACKAGING-RECIPES.md. The preceding production human edit/save/close trial passed on September 13 with retained report, bundle association, exact export, unchanged input, and cleanup verified; see INTERACTIVE-SANDBOX.md. Use `scripts/work-status.ps1` for current HEAD and dirty files.
+- Latest slice: the fixed Notepad++ local-settings adaptation adds an exact typed launch argument, standard-user directory preparation, and a retained baseline/candidate/relocated-replay driver. See PACKAGING-RECIPES.md for outcomes and development failures. `package inspect-wsb-msi-recipe` exposes a verified pre-import preparation as JSON/Markdown: source/provider/agent bindings, fixed launch, exact Sandbox XML, data lifetime, and gaps. See PACKAGING-RECIPES.md. The preceding production human edit/save/close trial passed on September 13 with retained report, bundle association, exact export, unchanged input, and cleanup verified; see INTERACTIVE-SANDBOX.md. Use `scripts/work-status.ps1` for current HEAD and dirty files.
 - Goal: report tested functions for exact application bytes and measured isolation configurations, then use the evidence for adaptation/repackaging. Free community project; feedback collection is not a development gate.
 
 ## Implemented versus exploratory
@@ -18,7 +18,7 @@ Updated 2026-09-13. This is a compact handoff, not a run receipt or authorizatio
 
 ## Next coherent slice
 
-Recipe inspection is implemented; Benchmark 3 remains incomplete. Next implement one narrow adaptation and bind its evidence to a reproducible comparison/replay, including changed authority and affected boundary canaries. Preserve the startup boundary: cold initialization took about 13 minutes and created a late session after timeout; that exact session was stopped. New uncertain starts retain recovery-required state until an observed exact stop; historical false-clean records require manual corroboration. See INTERACTIVE-SANDBOX.md for evidence and migration limits.
+Recipe inspection and the fixed local-settings adaptation are implemented; Benchmark 3 remains incomplete. Next bind affected-boundary canaries and validation evidence to the reusable profile. Track the retained transient edit timeout and non-reproduced bundle import failure; do not describe the trial driver as reliably unattended yet. Preserve the startup boundary: cold initialization took about 13 minutes and created a late session after timeout; that exact session was stopped. New uncertain starts retain recovery-required state until an observed exact stop; historical false-clean records require manual corroboration. See INTERACTIVE-SANDBOX.md for evidence and migration limits.
 
 ## Read only what the slice needs
 

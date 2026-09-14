@@ -2,8 +2,8 @@
 
 `package inspect-wsb-msi-recipe` exposes the fixed Notepad++ preparation as a
 read-only recipe snapshot before execution. It is the inspection foundation for
-Roadmap Benchmark 3. It does not yet implement an adaptation comparison or a
-portable launch profile.
+Roadmap Benchmark 3. The fixed local-settings experiment below adds one narrow
+adaptation; portable launch validation and boundary canaries remain separate.
 
 Prepare normally with `run prepare-wsb-msi`, optionally supplying a bounded
 document input. Then inspect the preparation before `run import-prepared-wsb`:
@@ -46,11 +46,110 @@ or compatibility verdict. Preparation readiness does not establish deployment OS
 compatibility. The original preparation and run plan remain execution authority
 inputs; approval and start still perform their existing checks.
 
-The next slice must introduce one explicit, narrow adaptation, bind its changed
-authority, and compare fresh-worker behavior and affected boundary canaries.
 Successful human document transfer is useful baseline evidence but cannot be
-relabeled as that comparison.
+relabeled as an adaptation comparison.
 
+## Fixed local-settings experiment
+
+The new example `examples/notepad-plus-plus-local-settings.aiw.yaml` keeps the
+automated install/open/edit/save/close workflow and adds exactly one argument:
+`-settingsDir=C:\Users\AiwStandardUser\AppData\Local\Notepad++`. The native guest
+and recipe inspector share the resolved argument array, including the fixed
+document path. No additional directory ACLs, capabilities, host mappings, or
+network access are granted. The guest creates this one fresh directory under the
+standard-user profile while impersonating that user, retains its non-reparse
+ancestry/identity, and rejects existing entries. Notepad++ writes settings there;
+the worker remains ephemeral.
+
+Notepad++ documents both the [settings-directory switch](https://github.com/notepad-plus-plus/npp-usermanual/blob/master/content/docs/command-prompt.md)
+and [configuration creation and fallback behavior](https://github.com/notepad-plus-plus/npp-usermanual/blob/master/content/docs/config-files.md).
+The [pinned 8.9.8 implementation](https://github.com/notepad-plus-plus/notepad-plus-plus/blob/v8.9.8/PowerEditor/src/Parameters.cpp#L1376-L1395)
+requires the override directory to exist before launch; otherwise a modal
+invalid-directory message blocks the automated document workflow.
+This experiment asks whether settings move to local application data while the
+document function remains intact; it does not assert that the default location
+is a compatibility failure or that redirecting settings restricts access.
+
+The compiled scenario has schema `windows-sandbox-compiled-msi-scenario/v0alpha9`
+and profile `windows-sandbox/notepad-plus-plus-local-settings/v0alpha1` (both with
+the `aiw.dev/` prefix). It is separately hashed and disclosed in approval. The
+compiler accepts only that exact argument in the automated scenario; altered
+paths, extra flags, and interactive use are rejected. Existing no-argument and
+interactive profiles retain their wire hashes. Bundles preserve the typed
+scenario through ordinary export, relocation, fresh intake, and replay.
+
+After building the CLI and production static guest, an explicitly approved
+three-worker trial can be run with:
+
+```powershell
+.\scripts\test-local-settings-replay.ps1 `
+  -ImportReceipt <verified-intake-receipt.json> `
+  -GuestAgent <static-production-guest.exe> `
+  -GuestAgentSha256 <independently-verified-hash> `
+  -EvidenceParent <canonical-existing-local-directory> `
+  -ApprovedBy <approving-operator> -Approve
+```
+
+The driver retains preparation, recipe inspection, bound approval, execution,
+run report, and bundle report for baseline, candidate, and relocated replay.
+It requires the fixed saved-document hash, verified cleanup, complete settings
+capture, and nonempty `config.xml` exclusively in roaming application data for
+baseline or local application data for candidate/replay. It preserves evidence
+and stops on failure. `comparison.json` is a bounded experiment observation;
+the underlying CLI reports remain the reverified evidence source. There is no
+new compatibility verdict or reusable host-launch authorization.
+
+### Development failures retained
+
+The first trial in `%TEMP%\aiw-local-settings-22d32e8a4fe644169739d2570b48a7bd`
+passed baseline but failed candidate document readiness. The pinned Notepad++
+source identifies the missing settings directory as a blocking modal precondition;
+the guest now creates the directory as described above. That attempt used guest
+`f7426ef8caeca4d85783bfb7efedd2cba0c589354cbb00d9a502f5ffc61e35e1`.
+
+With corrected guest `a27bc46b1a7b6498895eae4e5e95616b47b08a0df653a436ea61dc633a32d065`,
+the next trial in `%TEMP%\aiw-local-settings-ef41124bb9564ab48e27edde7dfed866`
+passed baseline document readiness but failed during editing when a bounded
+`WM_CHAR` call exceeded the existing 250 ms deadline (`ERROR_TIMEOUT`). The
+driver retained `baseline-failed-report.json` automatically. Both attempts
+verified worker cleanup. Timeouts were not relaxed; these failures remain
+distinct from subsequent successful trials and do not establish settings placement.
+
+### Live comparison and relocated replay, 2026-09-13
+
+Retained evidence: `%TEMP%\aiw-local-settings-64d5d7f4b05a45c08655a5954e59560a`.
+All three fresh workers passed the bound document open/edit/save/close workflow,
+verified saved bytes, and recorded verified cleanup with the corrected guest
+hash above. `report-set.json` reverified the three reports; `comparison.json`
+records the limited settings-placement observation.
+
+| Trial | Run ID | Observed config.xml location |
+|---|---|---|
+| Baseline | `baseline-9f518cf1489e4bdb9e274ab7742fc647` | Roaming application data |
+| Candidate | `candidate-23e5767ad4314715b8de7ae0a9c9e1f0` | Local application data |
+| Relocated replay | `replay-698ee03ae3d54bcdb4623c9c3ab7a32f` | Local application data |
+
+Each retained `config.xml` was 9,184 bytes with SHA-256
+`7cf189ed2e50a9372bab419e7a31d1baeed5123b48376669fa09b20e19461862`.
+Candidate and replay shared manifest
+`2ab7e567da5f7d106ac10755892fce546656886c8dc8aba8ea687a48b3d2de2e`
+and scenario `41cd25921cbb42b97846192b64342e10b1375be1f996023b41c2765d6d527d66`.
+Their receipt hashes were respectively
+`99acf6436f33c5bea140d4e8f9fa56bbfcf1e217ac8bac2b38622745243cd492` and
+`8c379e02ee562abf7e5f9601db432b592fb1801936974b88c00df6212bf4555e`.
+
+The first relocated import failed before worker start after leaving an intake.
+Its old CLI error was generic, so the cause remains unresolved. The CLI now
+preserves bounded bundle error detail as `AIW_SANDBOX_BUNDLE_REJECTED`, with a
+contract test. A new intake ID imported the unchanged relocated bundle
+successfully; the failed intake was preserved, not adopted. Replay resumed from
+that successful import without repeating baseline/candidate. Thus these are
+three successful bound runs, not an uninterrupted successful driver invocation.
+`replay-initial-import.stderr.log` preserves the original failure.
+
+The driver and native checks preserve failed trials. This result does not close
+Benchmark 3: affected-boundary canaries and deployment-environment validation
+remain unmeasured, and no host installation or persistent launch was tested.
 ## Inspection evidence, 2026-09-13
 
 A fresh protected transfer preparation was inspected without approval or worker

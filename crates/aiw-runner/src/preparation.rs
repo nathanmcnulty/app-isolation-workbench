@@ -47,6 +47,12 @@ const BAMBU_FILE: &str = "application.exe";
 const GUEST_MSI_RESULT: &str = r"C:\AIW\Output\scenario-result.json";
 const TRUST_DELTA_MSI: &str = "installs and exercises the approved imported MSI in Windows Sandbox";
 fn msi_trust_delta(msi: &WsbMsiApplication) -> String {
+    if msi.scenario.requires_local_settings() {
+        return format!(
+            "installs and exercises the approved imported MSI in Windows Sandbox; creates the fresh directory {} as the standard user with inherited permissions and redirects Notepad++ settings there; settings are discarded with the worker; no additional host mappings, network access, capabilities, or ACL grants",
+            aiw_provider_wsb::NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_DIRECTORY,
+        );
+    }
     match (
         msi.scenario.interactive_session_seconds,
         &msi.scenario.interactive_document,
@@ -3274,6 +3280,47 @@ mod tests {
         assert_eq!(short.recipe.data.mode, "ephemeralInteractiveScratch");
         assert!(short.recipe.data.retained_output_path.is_none());
         assert!(short.recipe.effective_launch_arguments.is_empty());
+    }
+
+    #[test]
+    fn local_settings_preparation_discloses_the_fixed_adaptation() {
+        let mut project = msi_project();
+        let aiw_schema::ScenarioStep::Launch { arguments, .. } = &mut project.scenarios[0].steps[1]
+        else {
+            panic!("launch")
+        };
+        arguments.push(aiw_provider_wsb::NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_ARGUMENT.into());
+        let mut msi = fake_msi_application();
+        msi.scenario = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
+            &project,
+            "install-launch-close",
+        )
+        .unwrap();
+        msi.scenario_sha256 = msi.scenario.canonical_sha256().unwrap();
+        let artifacts = build_wsb_msi_preparation(
+            "run-one",
+            &project,
+            &readiness(),
+            &workspace(),
+            &guest(),
+            "now",
+            msi,
+        )
+        .unwrap();
+        let inspection = crate::packaging_recipe::inspect_artifacts(&artifacts).unwrap();
+        assert_eq!(
+            inspection.recipe.settings_directory.as_deref(),
+            Some(aiw_provider_wsb::NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_DIRECTORY)
+        );
+        assert_eq!(
+            inspection.recipe.effective_launch_arguments[0],
+            aiw_provider_wsb::NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_ARGUMENT
+        );
+        assert!(artifacts.run_plan.trust_deltas[0].contains("no additional host mappings"));
+        assert!(
+            artifacts.run_plan.trust_deltas[0]
+                .contains(aiw_provider_wsb::NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_DIRECTORY)
+        );
     }
 
     #[test]

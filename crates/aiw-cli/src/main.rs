@@ -3014,6 +3014,16 @@ fn emit_anyhow_error(error: &anyhow::Error) {
             remediation: "Preserve the run directory and provider state; inspect readiness, approval binding, drift, and recovery status before retrying.".to_owned(),
             detail: error.source.to_string().chars().take(512).collect(),
         });
+    } else if let Some(error) = error.downcast_ref::<aiw_runner::SandboxBundleError>() {
+        emit_error(&ErrorEnvelope {
+            code: "AIW_SANDBOX_BUNDLE_REJECTED".to_owned(),
+            summary: "Sandbox bundle operation could not be completed".to_owned(),
+            stage: "sandboxBundle".to_owned(),
+            run_id: None,
+            retryable: false,
+            remediation: "Preserve the bundle and any incomplete destination. Resolve the reported identity, inventory, or copy failure; never adopt an incomplete intake.".to_owned(),
+            detail: error.to_string().chars().take(512).collect(),
+        });
     } else if let Some(error) = error.downcast_ref::<RecipeInspectionFailed>() {
         emit_error(&ErrorEnvelope {
             code: "AIW_WSB_RECIPE_INSPECTION_REJECTED".to_owned(),

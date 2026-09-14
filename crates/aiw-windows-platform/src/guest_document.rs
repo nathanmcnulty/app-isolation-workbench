@@ -95,6 +95,68 @@ pub(crate) struct FixedGuestDocument {
     expected_sha256: String,
 }
 
+/// The one local-settings directory, created as the standard user before
+/// Notepad++ starts. Inherited permissions; no existing entry is adopted.
+pub(crate) struct FixedGuestSettingsDirectory {
+    ancestors: Vec<File>,
+    directory: File,
+}
+
+impl FixedGuestSettingsDirectory {
+    pub(crate) fn prepare() -> Result<Self, String> {
+        let path = Path::new(aiw_provider_wsb::NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_DIRECTORY);
+        Self::create(held_directory_chain_with_sharing(
+            path.parent().ok_or("fixed settings parent missing")?,
+            FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0,
+        )?)
+    }
+
+    fn create(ancestors: Vec<File>) -> Result<Self, String> {
+        let parent = ancestors.last().ok_or("fixed settings parent not held")?;
+        let created =
+            create_relative_directory(parent, "Notepad++", FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0)
+                .map_err(|error| relative_error("create fresh local settings directory", error))?;
+        // Drop write access before application use and read-only snapshots,
+        // but retain a handle denying deletion of this directory itself.
+        let directory = open_relative_directory(
+            parent,
+            "Notepad++",
+            0,
+            FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0,
+        )?
+        .ok_or("new settings directory missing")?;
+        if !same_file_information(&file_information(&created)?, &file_information(&directory)?) {
+            return Err("new settings directory identity changed".into());
+        }
+        drop(created);
+        Ok(Self {
+            ancestors,
+            directory,
+        })
+    }
+
+    pub(crate) fn revalidate(&self) -> Result<(), String> {
+        let parent = self
+            .ancestors
+            .last()
+            .ok_or("fixed settings parent not held")?;
+        let reopened = open_relative_directory(
+            parent,
+            "Notepad++",
+            0,
+            FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0,
+        )?
+        .ok_or("fixed settings directory missing")?;
+        if !same_file_information(
+            &file_information(&self.directory)?,
+            &file_information(&reopened)?,
+        ) {
+            return Err("fixed settings directory identity changed".into());
+        }
+        Ok(())
+    }
+}
+
 impl FixedGuestDocument {
     pub(crate) fn prepare() -> Result<Self, String> {
         Self::prepare_with_ancestors(
@@ -693,6 +755,32 @@ fn sha256(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_settings_are_fresh_writable_and_held_against_replacement() {
+        let root = fixture_root();
+        std::fs::create_dir(&root).unwrap();
+        let held =
+            FixedGuestSettingsDirectory::create(vec![open_fixture_root(&root).unwrap()]).unwrap();
+        let settings = root.join("Notepad++");
+        std::fs::write(settings.join("config.xml"), b"settings").unwrap();
+        let reader = open_relative_directory(
+            held.ancestors.last().unwrap(),
+            "Notepad++",
+            0,
+            FILE_SHARE_READ.0,
+        )
+        .unwrap()
+        .unwrap();
+        drop(reader);
+        assert!(std::fs::rename(&settings, root.join("replaced")).is_err());
+        held.revalidate().unwrap();
+        drop(held);
+        assert!(
+            FixedGuestSettingsDirectory::create(vec![open_fixture_root(&root).unwrap()]).is_err()
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     fn fixture_root() -> std::path::PathBuf {
         std::env::temp_dir().join(format!(

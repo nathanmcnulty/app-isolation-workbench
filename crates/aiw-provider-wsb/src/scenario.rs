@@ -26,11 +26,19 @@ pub const NOTEPAD_PLUS_PLUS_INTERACTIVE_DOCUMENT_PROFILE: &str =
     "aiw.dev/windows-sandbox/notepad-plus-plus-interactive-document/v0alpha1";
 pub const COMPILED_MSI_INTERACTIVE_DOCUMENT_SCENARIO_SCHEMA_VERSION: &str =
     "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha8";
+pub const COMPILED_MSI_LOCAL_SETTINGS_SCENARIO_SCHEMA_VERSION: &str =
+    "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha9";
+pub const NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_PROFILE: &str =
+    "aiw.dev/windows-sandbox/notepad-plus-plus-local-settings/v0alpha1";
 
 const NOTEPAD_PLUS_PLUS_ENTRYPOINT_ID: &str = "notepad-plus-plus";
 const NOTEPAD_PLUS_PLUS_ENTRYPOINT_PATH: &str = "notepad++.exe";
 const NOTEPAD_PLUS_PLUS_INSTALLED_PATH: &str = r"C:\Program Files\Notepad++\notepad++.exe";
 const NOTEPAD_PLUS_PLUS_PROCESS_IMAGE: &str = "notepad++.exe";
+pub const NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_DIRECTORY: &str =
+    r"C:\Users\AiwStandardUser\AppData\Local\Notepad++";
+pub const NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_ARGUMENT: &str =
+    "-settingsDir=C:\\Users\\AiwStandardUser\\AppData\\Local\\Notepad++";
 const STAGED_INSTALLER_PATH: &str = r"C:\AIW\Tools\application.msi";
 pub const INTERACTIVE_DOCUMENT_INPUT_PATH: &str = r"C:\AIW\Tools\document-input.txt";
 pub const INTERACTIVE_DOCUMENT_OUTPUT_PATH: &str = r"C:\AIW\Output\document-output.txt";
@@ -116,6 +124,9 @@ impl CompiledMsiScenario {
     pub fn validate(&self) -> Result<(), ScenarioCompileError> {
         let current = self.schema_version == COMPILED_MSI_SCENARIO_SCHEMA_VERSION
             && self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE;
+        let local_settings = self.schema_version
+            == COMPILED_MSI_LOCAL_SETTINGS_SCENARIO_SCHEMA_VERSION
+            && self.profile == NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_PROFILE;
         let interactive = self.schema_version
             == "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha7"
             && self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_PROFILE;
@@ -138,6 +149,7 @@ impl CompiledMsiScenario {
             == "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha1"
             && self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha1";
         if !(current
+            || local_settings
             || interactive
             || interactive_document
             || registry_profile
@@ -147,9 +159,10 @@ impl CompiledMsiScenario {
             || legacy)
             || (legacy_exercise
                 && self.document_exercise.as_ref() != Some(&FixedDocumentExercise::legacy()))
-            || ((current || registry_profile || standard_user_legacy)
+            || ((current || local_settings || registry_profile || standard_user_legacy)
                 && self.document_exercise.as_ref() != Some(&FixedDocumentExercise::standard_user()))
             || (!current
+                && !local_settings
                 && !registry_profile
                 && !standard_user_legacy
                 && !legacy_exercise
@@ -178,7 +191,11 @@ impl CompiledMsiScenario {
                 ]
             || self.install_timeout_seconds != INSTALL_TIMEOUT_SECONDS
             || self.launch_path != NOTEPAD_PLUS_PLUS_INSTALLED_PATH
-            || !self.launch_arguments.is_empty()
+            || if local_settings {
+                !has_local_settings_argument(&self.launch_arguments)
+            } else {
+                !self.launch_arguments.is_empty()
+            }
             || self.process_image != NOTEPAD_PLUS_PLUS_PROCESS_IMAGE
             || self.process_wait_timeout_seconds == 0
             || self.process_wait_timeout_seconds > MAX_PROCESS_WAIT_TIMEOUT_SECONDS
@@ -195,6 +212,7 @@ impl CompiledMsiScenario {
         self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_PROFILE
             || self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_DOCUMENT_PROFILE
             || self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
+            || self.profile == NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_PROFILE
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha5"
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha3"
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha4"
@@ -203,6 +221,7 @@ impl CompiledMsiScenario {
 
     pub fn requires_application_exercise(&self) -> bool {
         self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
+            || self.profile == NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_PROFILE
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha5"
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha3"
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha4"
@@ -212,21 +231,40 @@ impl CompiledMsiScenario {
         self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_PROFILE
             || self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_DOCUMENT_PROFILE
             || self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
+            || self.profile == NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_PROFILE
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha5"
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha4"
     }
 
     pub fn requires_registry_observations(&self) -> bool {
         self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
+            || self.profile == NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_PROFILE
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha5"
     }
 
     pub fn requires_product_registration(&self) -> bool {
         self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
+            || self.profile == NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_PROFILE
     }
 
     pub fn requires_document_transfer(&self) -> bool {
         self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_DOCUMENT_PROFILE
+    }
+
+    pub fn requires_local_settings(&self) -> bool {
+        self.profile == NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_PROFILE
+    }
+
+    /// The exact application argument array the fixed guest supplies after it
+    /// has prepared its profile-bound document, if any.
+    pub fn effective_launch_arguments(&self) -> Vec<String> {
+        let mut arguments = self.launch_arguments.clone();
+        if self.interactive_document.is_some() {
+            arguments.push(crate::STANDARD_USER_DOCUMENT_EXERCISE_PATH.to_owned());
+        } else if let Some(exercise) = &self.document_exercise {
+            arguments.push(exercise.document_path.clone());
+        }
+        arguments
     }
 
     /// Returns the canonical digest used by later plan/approval layers.
@@ -347,7 +385,16 @@ pub fn compile_notepad_plus_plus_msi_scenario(
         ],
         install_timeout_seconds: INSTALL_TIMEOUT_SECONDS,
         launch_path: NOTEPAD_PLUS_PLUS_INSTALLED_PATH.to_owned(),
-        launch_arguments: Vec::new(),
+        launch_arguments: match scenario.steps.as_slice() {
+            [
+                ScenarioStep::Install,
+                ScenarioStep::Launch { arguments, .. },
+                ScenarioStep::WaitForProcess { .. },
+                ScenarioStep::GracefulClose,
+                ScenarioStep::ExpectExitCode { value: 0 },
+            ] => arguments.clone(),
+            _ => Vec::new(),
+        },
         process_image: NOTEPAD_PLUS_PLUS_PROCESS_IMAGE.to_owned(),
         process_wait_timeout_seconds: *timeout_seconds,
         graceful_close_timeout_seconds: GRACEFUL_CLOSE_TIMEOUT_SECONDS,
@@ -360,6 +407,9 @@ pub fn compile_notepad_plus_plus_msi_scenario(
         compiled.schema_version = "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha7".into();
         compiled.profile = NOTEPAD_PLUS_PLUS_INTERACTIVE_PROFILE.into();
         compiled.document_exercise = None;
+    } else if has_local_settings_argument(&compiled.launch_arguments) {
+        compiled.schema_version = COMPILED_MSI_LOCAL_SETTINGS_SCENARIO_SCHEMA_VERSION.to_owned();
+        compiled.profile = NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_PROFILE.to_owned();
     }
     compiled.validate()?;
     Ok(compiled)
@@ -414,7 +464,8 @@ fn matches_notepad_plus_plus_sequence(steps: &[ScenarioStep]) -> bool {
             ScenarioStep::GracefulClose,
             ScenarioStep::ExpectExitCode { value: 0 },
         ] if entrypoint == NOTEPAD_PLUS_PLUS_ENTRYPOINT_ID
-            && arguments.is_empty()
+            && (arguments.is_empty()
+                || has_local_settings_argument(arguments))
             && image == NOTEPAD_PLUS_PLUS_PROCESS_IMAGE
             && *timeout_seconds > 0
             && *timeout_seconds <= MAX_PROCESS_WAIT_TIMEOUT_SECONDS
@@ -426,6 +477,10 @@ fn lower_hex_sha256(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+}
+
+fn has_local_settings_argument(arguments: &[String]) -> bool {
+    arguments.len() == 1 && arguments[0] == NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_ARGUMENT
 }
 
 fn valid_id(value: &str) -> bool {
@@ -525,6 +580,96 @@ mod tests {
     }
 
     #[test]
+    fn compiles_the_fixed_local_settings_profile() {
+        let compiled =
+            compile_notepad_plus_plus_msi_scenario(&local_settings_project(), "first-run").unwrap();
+        assert_eq!(
+            compiled.schema_version,
+            COMPILED_MSI_LOCAL_SETTINGS_SCENARIO_SCHEMA_VERSION
+        );
+        assert_eq!(compiled.profile, NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_PROFILE);
+        assert_eq!(
+            compiled.launch_arguments,
+            vec![NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_ARGUMENT.to_owned()]
+        );
+        assert_eq!(
+            compiled.effective_launch_arguments(),
+            vec![
+                NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_ARGUMENT.to_owned(),
+                crate::STANDARD_USER_DOCUMENT_EXERCISE_PATH.to_owned(),
+            ]
+        );
+        assert!(compiled.requires_local_settings());
+        assert!(compiled.requires_application_token());
+        assert!(compiled.requires_application_exercise());
+        assert!(compiled.requires_standard_user());
+        assert!(compiled.requires_registry_observations());
+        assert!(compiled.requires_product_registration());
+        assert!(!compiled.requires_document_transfer());
+    }
+
+    #[test]
+    fn local_settings_rejects_unknown_extra_and_interactive_arguments() {
+        for arguments in [
+            vec!["-settingsDir=C:\\Users\\AiwStandardUser\\AppData\\Roaming\\Notepad++".to_owned()],
+            vec![
+                NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_ARGUMENT.to_owned(),
+                "-pluginMessage=1".to_owned(),
+            ],
+        ] {
+            let mut value = project();
+            let ScenarioStep::Launch {
+                arguments: target, ..
+            } = &mut value.scenarios[0].steps[1]
+            else {
+                unreachable!();
+            };
+            *target = arguments;
+            assert_eq!(
+                compile_notepad_plus_plus_msi_scenario(&value, "first-run"),
+                Err(ScenarioCompileError::UnsupportedScenario)
+            );
+        }
+
+        let mut interactive = interactive_project();
+        let ScenarioStep::Launch { arguments, .. } = &mut interactive.scenarios[0].steps[1] else {
+            unreachable!();
+        };
+        *arguments = vec![NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_ARGUMENT.to_owned()];
+        assert_eq!(
+            compile_notepad_plus_plus_msi_scenario(&interactive, "interactive"),
+            Err(ScenarioCompileError::UnsupportedScenario)
+        );
+
+        let mut compiled =
+            compile_notepad_plus_plus_msi_scenario(&local_settings_project(), "first-run").unwrap();
+        compiled.launch_arguments[0] =
+            "-settingsDir=C:\\Users\\AiwStandardUser\\AppData\\Roaming\\Notepad++".to_owned();
+        assert_eq!(
+            compiled.validate(),
+            Err(ScenarioCompileError::InvalidCompiledProfile)
+        );
+        compiled.launch_arguments = vec![
+            NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_ARGUMENT.to_owned(),
+            "-pluginMessage=1".to_owned(),
+        ];
+        assert_eq!(
+            compiled.validate(),
+            Err(ScenarioCompileError::InvalidCompiledProfile)
+        );
+    }
+
+    #[test]
+    fn local_settings_does_not_change_the_v6_compiled_hash() {
+        let compiled = compile_notepad_plus_plus_msi_scenario(&project(), "first-run").unwrap();
+        assert_eq!(compiled.profile, NOTEPAD_PLUS_PLUS_MSI_PROFILE);
+        assert_eq!(
+            compiled.canonical_sha256().unwrap(),
+            "20919d9d2a6de4de3723b567c25fc18e220f984b050fd3e8983d504f70b3bda8"
+        );
+    }
+
+    #[test]
     fn compiles_the_bounded_interactive_document_profile() {
         let input = b"hello from the approved worker\r\n";
         let hash = hex::encode(Sha256::digest(input));
@@ -591,6 +736,15 @@ mod tests {
             },
             ScenarioStep::ExpectExitCode { value: 0 },
         ];
+        value
+    }
+
+    fn local_settings_project() -> Project {
+        let mut value = project();
+        let ScenarioStep::Launch { arguments, .. } = &mut value.scenarios[0].steps[1] else {
+            unreachable!();
+        };
+        *arguments = vec![NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_ARGUMENT.to_owned()];
         value
     }
 

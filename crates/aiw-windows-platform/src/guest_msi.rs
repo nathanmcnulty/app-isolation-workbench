@@ -469,22 +469,30 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
     } else {
         None
     };
+    let mut settings_directory = None;
     let document_exercise = if scenario.requires_application_exercise() {
         Some(stages.run(GuestMsiStage::PrepareDocument, || {
+            if scenario.requires_local_settings() {
+                settings_directory = Some(
+                    standard_user
+                        .as_ref()
+                        .ok_or_else(|| {
+                            GuestMsiExecutionError::Scenario(
+                                "local settings require standard user".into(),
+                            )
+                        })?
+                        .impersonate(|| {
+                            crate::guest_document::FixedGuestSettingsDirectory::prepare()
+                                .map_err(GuestMsiExecutionError::Process)
+                        })?,
+                );
+            }
             prepare_fixed_document_exercise(scenario, standard_user.as_ref())
         })?)
     } else {
         None
     };
-    let launch_arguments = interactive_document
-        .as_ref()
-        .map(|plan| vec![plan.document_path.clone()])
-        .or_else(|| {
-            document_exercise
-                .as_ref()
-                .map(|plan| vec![plan.document_path.clone()])
-        })
-        .unwrap_or_default();
+    let launch_arguments = scenario.effective_launch_arguments();
     let application = stages.run(GuestMsiStage::Launch, || {
         if let Some(standard_user) = &standard_user {
             GuestProcess::start_standard_user(
@@ -656,6 +664,11 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
     let (filesystem_observations, registry_observations) =
         if let Some((before_install, after_install)) = before_install.zip(after_install) {
             let after_exercise = stages.run(GuestMsiStage::AfterExerciseCapture, || {
+                if let Some(settings) = &settings_directory {
+                    settings
+                        .revalidate()
+                        .map_err(GuestMsiExecutionError::Process)?;
+                }
                 Ok(capture_application_state(scenario, standard_user.as_ref()))
             })?;
             stages.retain_capture(
@@ -710,13 +723,11 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
 struct ExercisePlan {
     expected_sha256: String,
     document: crate::FixedGuestDocument,
-    document_path: String,
 }
 
 struct InteractiveDocumentPlan {
     input: HeldInteractiveDocumentInput,
     document: crate::FixedGuestDocument,
-    document_path: String,
 }
 
 struct HeldInteractiveDocumentInput {
@@ -831,11 +842,7 @@ fn prepare_interactive_document(
         crate::FixedGuestDocument::prepare_at_with_initial(standard_user.document_root(), &initial)
             .map_err(GuestMsiExecutionError::Process)
     })?;
-    Ok(InteractiveDocumentPlan {
-        input,
-        document,
-        document_path: aiw_provider_wsb::STANDARD_USER_DOCUMENT_EXERCISE_PATH.to_owned(),
-    })
+    Ok(InteractiveDocumentPlan { input, document })
 }
 
 fn validate_interactive_document_bytes(bytes: &[u8]) -> Result<(), GuestMsiExecutionError> {
@@ -876,7 +883,6 @@ fn prepare_fixed_document_exercise(
     Ok(ExercisePlan {
         expected_sha256,
         document,
-        document_path: expected_path.to_owned(),
     })
 }
 

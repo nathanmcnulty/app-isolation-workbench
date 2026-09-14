@@ -31,6 +31,8 @@ pub struct WsbMsiRecipe {
     /// The fixed guest appends the document path when the profile uses one.
     pub effective_launch_arguments: Vec<String>,
     pub application_profile_directory: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub settings_directory: Option<String>,
     pub data: WsbMsiRecipeData,
     pub trust_deltas: Vec<String>,
     pub limitations: Vec<String>,
@@ -107,7 +109,8 @@ pub(crate) fn inspect_artifacts(
             WsbPreparationError::Contract("fixed launch path has no parent".into())
         })?.0.into(),
         application_profile_directory: aiw_provider_wsb::STANDARD_USER_PROFILE_PATH.into(),
-        effective_launch_arguments: data.guest_document_path.iter().cloned().collect(),
+        effective_launch_arguments: scenario.effective_launch_arguments(),
+        settings_directory: scenario.requires_local_settings().then(|| aiw_provider_wsb::NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_DIRECTORY.into()),
         data,
         trust_deltas: artifacts.run_plan.trust_deltas.clone(),
         limitations: vec![

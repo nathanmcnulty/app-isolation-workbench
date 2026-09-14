@@ -87,11 +87,14 @@ pub use runtime_context::{
     verify_imported_msi_runtime_context, verify_msi_runtime_context,
 };
 pub use scenario::{
-    COMPILED_MSI_INTERACTIVE_DOCUMENT_SCENARIO_SCHEMA_VERSION, CompiledMsiScenario,
+    COMPILED_MSI_INTERACTIVE_DOCUMENT_SCENARIO_SCHEMA_VERSION,
+    COMPILED_MSI_LOCAL_SETTINGS_SCENARIO_SCHEMA_VERSION, CompiledMsiScenario,
     FixedDocumentExercise, INTERACTIVE_DOCUMENT_INPUT_PATH, INTERACTIVE_DOCUMENT_OUTPUT_PATH,
     InteractiveDocumentTransfer, MAX_INTERACTIVE_DOCUMENT_BYTES,
-    NOTEPAD_PLUS_PLUS_INTERACTIVE_DOCUMENT_PROFILE, ScenarioCompileError,
-    compile_notepad_plus_plus_msi_scenario, compile_notepad_plus_plus_msi_scenario_with_document,
+    NOTEPAD_PLUS_PLUS_INTERACTIVE_DOCUMENT_PROFILE, NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_ARGUMENT,
+    NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_DIRECTORY, NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_PROFILE,
+    ScenarioCompileError, compile_notepad_plus_plus_msi_scenario,
+    compile_notepad_plus_plus_msi_scenario_with_document,
 };
 pub use stage_progress::{
     IMPORTED_MSI_FAILED_ATTEMPT_SCHEMA, IMPORTED_MSI_FAILED_ATTEMPT_SCHEMA_VERSION,
