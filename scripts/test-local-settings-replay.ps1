@@ -83,10 +83,5 @@ foreach ($mode in @('baseline', 'candidate', 'replay')) {
 $setPath = Join-Path $evidenceRoot 'report-set-input.json'
 Save-Json $setPath ([ordered]@{schemaVersion='aiw.dev/wsb-msi-report-set-input/v0alpha1'; entries=$entries})
 $null = Invoke-Aiw 'report-set' @('run', 'report-wsb-msi-set', '--input', $setPath)
-Save-Json (Join-Path $evidenceRoot 'comparison.json') ([ordered]@{
-    schemaVersion='aiw.dev/local-settings-trial-observation/v0alpha1'
-    observations=$observations
-    scope='Fresh-worker document workflow and settings placement; no tighter-isolation or validated-package claim'
-    gaps=@('No affected-boundary canaries measured', 'No host deployment, persistence, uninstall, update, or reboot validation')
-})
+$null = Invoke-Aiw 'comparison' @('run', 'report-wsb-settings-comparison', '--input', $setPath)
 [ordered]@{evidenceRoot=$evidenceRoot; trialsCompleted=3; comparison=(Join-Path $evidenceRoot 'comparison.json')} | ConvertTo-Json

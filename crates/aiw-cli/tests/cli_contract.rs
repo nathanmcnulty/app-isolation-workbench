@@ -58,6 +58,37 @@ fn parse_one_json(bytes: &[u8]) -> Value {
     serde_json::from_slice(bytes).expect("expected exactly one JSON document")
 }
 
+#[cfg(windows)]
+#[test]
+fn settings_comparison_rejects_missing_trials_without_output() {
+    let temp = TempDir::new();
+    let input = temp.path().join("input.json");
+    fs::write(
+        &input,
+        r#"{"schemaVersion":"aiw.dev/wsb-msi-report-set-input/v0alpha1","entries":[]}"#,
+    )
+    .unwrap();
+    let output = Command::new(aiw())
+        .args(["run", "report-wsb-settings-comparison", "--input"])
+        .arg(&input)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let error = parse_one_json(&output.stderr);
+    assert_eq!(error["runId"], "settings-comparison");
+    assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 1);
+    let schema = Command::new(aiw())
+        .args(["schema", "wsb-settings-comparison"])
+        .output()
+        .unwrap();
+    assert!(schema.status.success());
+    assert_eq!(
+        parse_one_json(&schema.stdout)["title"],
+        "WsbSettingsComparison"
+    );
+}
+
 fn canonical_hash<T: Serialize>(value: &T) -> String {
     let value = serde_json::to_value(value).unwrap();
     hex::encode(Sha256::digest(canonical_json_bytes(&value).unwrap()))

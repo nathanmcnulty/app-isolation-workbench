@@ -99,6 +99,32 @@ and stops on failure. `comparison.json` is a bounded experiment observation;
 the underlying CLI reports remain the reverified evidence source. There is no
 new compatibility verdict or reusable host-launch authorization.
 
+### Retained settings comparison
+
+`run report-wsb-settings-comparison --input <report-set-input.json>` reopens the
+retained workspaces and verifies their evidence using the production report
+reader. The input uses the existing report-set schema with exactly three entries
+named `baseline`, `candidate`, and `replay`, in that order. It accepts workspace references, not
+previously rendered reports or the script's observations. Obtain the output
+schema with `schema wsb-settings-comparison`.
+
+This command starts no provider or application and writes no run state. Missing,
+failed, duplicated, drifted, or incomplete required evidence rejects the whole
+comparison. Its result describes the fixed settings adaptation and measured
+workflow; it is not launch authority or an effective-isolation verdict. Boundary
+coverage stays explicitly unmeasured. The trial driver now uses this command for
+its final `comparison.json`; historical script-only comparisons retain their
+original observation schema.
+
+
+Retained verification on September 13 used
+`%TEMP%\aiw-settings-comparison-cb9dfd45cd964e2f91dcc1ecbaaa962c`.
+The two comparison outputs were byte-identical. Five altered inputs (missing
+trial, duplicate trial, wrong guest hash, swapped roles, and changed project)
+were rejected without partial output. All 75 retained workspace files kept their
+original hashes and inventory. The proof contains `comparison.json`, the output
+schema, per-case diagnostics, and before/after inventories. No Sandbox was
+started for these reporting checks. Focused runner and CLI tests also passed.
 ### Development failures retained
 
 The first trial in `%TEMP%\aiw-local-settings-22d32e8a4fe644169739d2570b48a7bd`

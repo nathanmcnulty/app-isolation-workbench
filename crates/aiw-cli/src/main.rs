@@ -593,6 +593,11 @@ enum RunCommand {
         #[arg(long, value_enum, default_value_t = AssessmentReportFormat::Json)]
         format: AssessmentReportFormat,
     },
+    /// Reverify baseline, candidate, and replay for the fixed settings adaptation.
+    ReportWsbSettingsComparison {
+        #[arg(long)]
+        input: PathBuf,
+    },
     /// Start only the already-approved, hash-bound Windows Sandbox preparation profile.
     /// No arbitrary command, script, policy fragment, or provider verb is accepted.
     Start {
@@ -709,6 +714,7 @@ enum SchemaKind {
     WsbMsiReportSetInput,
     #[value(name = "wsb-msi-report-set")]
     WsbMsiReportSet,
+    WsbSettingsComparison,
     ImportedMsiStageProgress,
     ImportedMsiFailedAttempt,
     #[value(name = "msi-failed-snapshots")]
@@ -2075,6 +2081,32 @@ fn run(command: Command) -> Result<()> {
                     }))
                 }
             }
+            RunCommand::ReportWsbSettingsComparison { input } => {
+                let manifest: WsbMsiReportSetInput = read_document(&input, 1024 * 1024)?;
+                #[cfg(windows)]
+                {
+                    let report = aiw_runner::report_windows_sandbox_settings_comparison(&manifest)
+                        .map_err(|source| {
+                            anyhow!(RunReportFailed {
+                                run_id: "settings-comparison".to_owned(),
+                                source: RunnerError::Receipt(source),
+                            })
+                        })?;
+                    write_json(&report)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = manifest;
+                    Err(anyhow!(RunOperationUnavailable {
+                        code: "AIW_WINDOWS_REQUIRED",
+                        summary: "retained Windows workspace verification requires Windows",
+                        stage: "wsbSettingsComparison",
+                        remediation: "Read the retained workspaces on their original Windows host.",
+                        detail: "No files or provider state were changed.",
+                        run_id: input.display().to_string(),
+                    }))
+                }
+            }
             RunCommand::ReportWsbMsiSet { input, format } => {
                 let manifest: WsbMsiReportSetInput = read_document(&input, 1024 * 1024)?;
                 manifest.validate().map_err(|error| anyhow!(error))?;
@@ -2252,6 +2284,9 @@ fn run(command: Command) -> Result<()> {
                 write_json(&schema_for!(aiw_runner::WsbMsiReportSetInput))
             }
             SchemaKind::WsbMsiReportSet => write_json(&schema_for!(aiw_runner::WsbMsiReportSet)),
+            SchemaKind::WsbSettingsComparison => {
+                write_json(&schema_for!(aiw_runner::WsbSettingsComparison))
+            }
             SchemaKind::ImportedMsiBehaviorEvidence => {
                 write_json(&schema_for!(aiw_provider_wsb::ImportedMsiBehaviorEvidence))
             }
@@ -3182,6 +3217,7 @@ mod tests {
             (SchemaKind::WsbReportSet, "wsb-report-set"),
             (SchemaKind::WsbMsiReportSetInput, "wsb-msi-report-set-input"),
             (SchemaKind::WsbMsiReportSet, "wsb-msi-report-set"),
+            (SchemaKind::WsbSettingsComparison, "wsb-settings-comparison"),
         ] {
             assert_eq!(kind.to_possible_value().unwrap().get_name(), expected);
         }

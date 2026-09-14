@@ -26,6 +26,7 @@ pub use packaging_recipe::{
 mod application_report_set;
 mod assessment_report;
 mod report_set;
+mod settings_comparison;
 #[cfg(windows)]
 pub use application_report_set::report_windows_sandbox_set;
 pub use application_report_set::{
@@ -41,6 +42,9 @@ pub use report_set::{
     WsbMsiReportSet, WsbMsiReportSetEntry, WsbMsiReportSetInput, WsbMsiReportSetResult,
     WsbMsiReportSetRow, WsbMsiReportSetSummary,
 };
+pub use settings_comparison::WsbSettingsComparison;
+#[cfg(windows)]
+pub use settings_comparison::report_windows_sandbox_settings_comparison;
 #[cfg(windows)]
 mod discard;
 mod msi_document;
