@@ -271,7 +271,7 @@ pub fn assess(
     save_stage(&evidence_root, "planning-import", &imported)?;
     let layout = RunLayout::new(&workspace, &run_id)?;
     let plan = layout.read_plan()?;
-    let approval = ApprovalRecord::for_plan(&plan, identity.trim(), &now_rfc3339())?;
+    let approval = ApprovalRecord::for_plan(&plan, identity.trim(), now_rfc3339())?;
     if !approval_review::confirm(
         &approval,
         &plan,
