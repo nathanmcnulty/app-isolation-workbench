@@ -184,7 +184,7 @@ inner application isolation boundary or resolve cold-image startup latency.
 
 ## Startup diagnostics
 
-Production `run start` retains `runs/<runId>/provider-diagnostics-<pid>-<timestamp>.jsonl` in the
+Production `run start` retains `runs/<runId>/provider-diagnostics-<pid>-<timestamp>-<sequence>.jsonl` in the
 protected host workspace. Each attempt creates a new trace, including retries after a failed preflight; the CLI prints its path to stderr. Each provider operation records its arguments (including rendered
 configuration), UTC timestamp, deadline, elapsed time, and captured output or
 failure. Timeout errors retain the process ID, stream errors, and cleanup errors
