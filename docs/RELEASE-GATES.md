@@ -38,6 +38,38 @@ reliability. Resolve release-blocking findings before moving to the administrato
 workflow. This is a review checkpoint with defined scope, not an open-ended
 requirement to finish every isolation experiment.
 
+The [2026-09-20 focused review](QUALITY-REVIEW-2026-09-20.md) found a preflight
+guidance defect, corrected it, and confirmed the reviewed authority/recovery
+boundaries. Its finite follow-ups remain visible; it does not require restarting
+foundation work before the administrator milestone.
+
+## Administrator milestone acceptance cases
+
+- Starting with the distributed build and an operator-selected installer, show
+  whether an exact supported profile exists. Unsupported bytes or application
+  types produce an honest unsupported result and next step, never a guessed command.
+- Detect missing prerequisites or an occupied Sandbox before starting work; show
+  actionable diagnostics without stopping another task's session.
+- Present tested functions as passed, failed, not reached, or not measured,
+  separately from boundary measurements and requested settings. Identify the
+  application/version/hash and explain what `insufficientEvidence` means without
+  making successful function results look like an application failure.
+- Show the proposed recipe, runtime/data lifetime, explicit export behavior, and
+  approval changes before execution. Bind approval through existing services;
+  operators do not hand-author internal JSON or use developer evidence paths.
+- Complete assessment, retained report, recipe selection, and fresh approved
+  replay from the documented path without a compiler or coding assistant.
+- Exercise an unsupported input, a missing prerequisite, a failed/interrupted
+  attempt, and profile drift. Each must lead to a specific safe next action and
+  retained diagnostics; failed worker setup is not application incompatibility.
+
+For the clean-host gate, publish the exact supported host/provider and application
+versions, CLI/guest hashes, acquisition instructions, data contract, and known
+limits. Verify the target's capabilities rather than assuming every Windows 11
+24H2+ machine works. The operator must be able to retain evidence deliberately;
+automatic deletion is not required. Recreate same-host validation on the target
+when necessary instead of copying old paths or weakening environment checks.
+
 These are outcome gates, not a calendar or quota estimate. The remaining
 uncertainty is concentrated in the administrator workflow and clean-host trial;
 new application classes and new isolation mechanisms are not prerequisites.

@@ -45,4 +45,12 @@ the same workspace-test path. These selected checks require cached dependencies
 
 Use the pull request template. Include the exact validation commands and distinguish automated checks, mock-provider evidence, and live Windows evidence. Keep commits reviewable and use the `codex/` branch prefix for branches created by project automation.
 
+Before merging, verify that both `Verify and audit` and `Minimum supported Rust`
+completed successfully for the exact final PR head, then merge with that expected
+head SHA. Pending, missing, failed, or cancelled checks do not pass. Do not assume
+`gh pr merge --auto` waits: without enforced branch protection it can merge
+immediately. Repository administrators should enforce these checks on `main`;
+until then the explicit check is mandatory. A later successful run does not turn
+an earlier cancelled run into successful validation.
+
 By submitting a contribution, you agree that it is provided under the [Apache License 2.0](LICENSE). Third-party code and artifacts must retain their original licenses and be recorded in the appropriate supply-chain documentation.

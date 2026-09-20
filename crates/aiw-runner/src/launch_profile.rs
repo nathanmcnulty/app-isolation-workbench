@@ -159,7 +159,10 @@ pub fn check_windows_sandbox_launch_profile(
         profile_sha256: expected.into(),
         preparation_sha256: digest(&artifacts.receipt)?,
         recipe: crate::packaging_recipe::inspect_artifacts(&artifacts).map_err(|e| e.to_string())?,
-        next_step: "Import this preparation and obtain a fresh bound run approval. Preflight does not approve or launch a worker.".into(),
+        next_step: preflight_next_step(
+            artifacts.receipt.msi.as_ref().and_then(|msi| msi.launch_profile.as_ref()).map(|bound| bound.profile_sha256.as_str()),
+            expected,
+        ).into(),
         limitations: vec![
             "Only the fixed Notepad++ local-settings document workflow and guest standard-user file ACL controls were validated. Other functions and isolation boundaries remain unmeasured.".into(),
             "This is a point-in-time check. Normal import, approval, and start must recheck preparation authority; this output is not accepted as execution authority.".into(),
@@ -167,6 +170,15 @@ pub fn check_windows_sandbox_launch_profile(
             "Retained evidence must remain accessible on this host. Guest OS and workflow results must be verified after the new run; no cross-host deployment claim is made.".into(),
         ],
     })
+}
+
+#[cfg(any(windows, test))]
+fn preflight_next_step(bound_hash: Option<&str>, checked_hash: &str) -> &'static str {
+    if bound_hash == Some(checked_hash) {
+        "This preparation binds the checked profile. Import it and obtain a fresh run approval. Start re-verifies the bound profile; preflight does not approve or launch a worker."
+    } else {
+        "This preparation does not bind the checked profile. Prepare a new workspace using run prepare-wsb-msi with --launch-profile and --launch-profile-sha256 for this profile, then import it and obtain a fresh run approval. This preflight alone does not bind profile revalidation into execution."
+    }
 }
 
 pub(crate) fn match_preparation(
@@ -213,7 +225,7 @@ pub(crate) fn match_preparation(
 impl WsbLaunchProfileExport {
     pub fn to_markdown(&self) -> String {
         format!(
-            "# Reusable Sandbox trial profile\n\nValidated: Notepad++ install, open, edit, save, close; local settings placement; guest standard-user file ACL controls.\n\nProfile SHA-256: `{}`\n\nApplication SHA-256: `{}`\n\nUse this profile with a fresh preparation and `package check-wsb-launch-profile`, retaining the profile hash independently. The check reopens the original three trials. A fresh run approval is still required.\n\nSession data is discarded. Other application functions, broader containment, and cross-host deployment remain unvalidated. This profile supports replay of the fixed assessment; it does not enable arbitrary interactive launch.\n",
+            "# Reusable Sandbox trial profile\n\nValidated: Notepad++ install, open, edit, save, close; local settings placement; guest standard-user file ACL controls.\n\nProfile SHA-256: `{}`\n\nApplication SHA-256: `{}`\n\nBind this profile with `run prepare-wsb-msi --launch-profile <profile.json> --launch-profile-sha256 <independently-retained-hash>` alongside the normal preparation options. Import that preparation and obtain a fresh approval. `package check-wsb-launch-profile` can inspect a preparation but does not add a profile binding to it. Preparation and start reverify the original three trials.\n\nSession data is discarded. Other application functions, broader containment, and cross-host deployment remain unvalidated. This profile supports replay of the fixed assessment; it does not enable arbitrary interactive launch.\n",
             self.profile_sha256, self.profile.application_sha256
         )
     }
@@ -236,6 +248,18 @@ impl WsbLaunchPreflight {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preflight_advice_requires_the_checked_profile_to_be_bound() {
+        for bound in [None, Some("different-profile")] {
+            let advice = preflight_next_step(bound, "checked-profile");
+            assert!(advice.contains("does not bind the checked profile"));
+            assert!(advice.contains("--launch-profile-sha256"));
+        }
+        let advice = preflight_next_step(Some("checked-profile"), "checked-profile");
+        assert!(advice.contains("This preparation binds the checked profile"));
+        assert!(advice.contains("fresh run approval"));
+    }
 
     pub(crate) fn profile() -> WsbLaunchProfileExport {
         let profile = WsbLaunchProfile {
