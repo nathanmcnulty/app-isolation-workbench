@@ -27,6 +27,7 @@ fn transfer_process(
     start: &WsbGoldenProbeStart,
     result: ImportedMsiScenarioResult,
     bytes: Option<Vec<u8>>,
+    protected_document: bool,
 ) -> FakeProcess {
     let writer_start = start.clone();
     successful_msi_process(start, result.clone()).with_start_action(Box::new(move || {
@@ -36,7 +37,7 @@ fn transfer_process(
             false,
             RegistryFixture::Missing,
             ProductRegistrationFixture::Missing,
-            bytes.as_deref(),
+            bytes.as_deref().map(|bytes| (bytes, protected_document)),
         );
     }))
 }
@@ -60,7 +61,7 @@ fn transfer_execution_rejects_contradictory_output_after_cleanup() {
             "input" => transfer.input_sha256 = "e".repeat(64),
             _ => {}
         }
-        let fake = transfer_process(&start, result, (case != "missing").then_some(bytes));
+        let fake = transfer_process(&start, result, (case != "missing").then_some(bytes), false);
         let error =
             execute_wsb_golden_probe(&start, &readiness, &layout, &fake, &TestLease::default())
                 .unwrap_err();
@@ -200,7 +201,7 @@ fn protected_transfer_preparation_completion_report_and_export() {
                 == b"{\"event\":\"test-observation\"}\n")
     );
     let result = transfer_result(&start, output);
-    let fake = transfer_process(&start, result, Some(output.to_vec()));
+    let fake = transfer_process(&start, result, Some(output.to_vec()), true);
     let execution = crate::execute_wsb_golden_probe(
         &start,
         &readiness,
@@ -349,7 +350,7 @@ fn transfer_execution_accepts_empty_and_maximum_utf8_documents() {
     for bytes in [vec![], vec![b'x'; MAX_INTERACTIVE_DOCUMENT_BYTES as usize]] {
         let (_root, layout, start, readiness) = setup_msi_profile(Some(b"input"));
         let result = transfer_result(&start, &bytes);
-        let fake = transfer_process(&start, result.clone(), Some(bytes));
+        let fake = transfer_process(&start, result.clone(), Some(bytes), false);
         let execution =
             execute_wsb_golden_probe(&start, &readiness, &layout, &fake, &TestLease::default())
                 .unwrap();

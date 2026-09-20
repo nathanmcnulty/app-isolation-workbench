@@ -324,8 +324,8 @@ pub fn export_windows_sandbox_msi_document(
 ) -> Result<WsbMsiDocumentExport, RunnerError> {
     use std::os::windows::fs::OpenOptionsExt as _;
 
-    let report =
-        report_windows_sandbox_msi_run(root, run_id, project, expected_guest_agent_sha256)?;
+    let report = report_windows_sandbox_msi_run(root, run_id, project, expected_guest_agent_sha256)
+        .map_err(|error| RunnerError::Receipt(format!("export report verification: {error}")))?;
     let interactive = match report {
         WsbMsiRunReport::InteractiveSession(report) => *report,
         WsbMsiRunReport::CompletedAssessment(_) => {
@@ -350,21 +350,30 @@ pub fn export_windows_sandbox_msi_document(
     let held = aiw_windows_platform::HeldRunWorkspace::reopen_bound(&preparation.workspace)
         .map_err(|error| RunnerError::Preparation(error.to_string()))?;
     if !same_windows_path(
-        root.canonicalize().map_err(|_| RunnerError::Drift)?,
+        root.canonicalize().map_err(|error| {
+            RunnerError::Receipt(format!("export workspace canonicalization: {error}"))
+        })?,
         held.root_path(),
     ) {
-        return Err(RunnerError::Drift);
+        return Err(RunnerError::Receipt(
+            "export workspace canonical identity changed".into(),
+        ));
     }
-    held.revalidate().map_err(|_| RunnerError::Drift)?;
+    held.revalidate()
+        .map_err(|error| RunnerError::Receipt(format!("export workspace validation: {error}")))?;
 
     let source = held
         .reopen_output_file("document-output.txt")
-        .map_err(|_| RunnerError::Drift)?;
+        .map_err(|error| RunnerError::Receipt(format!("export source open: {error}")))?;
     let source_bytes =
-        read_bound_workspace_file(&source, aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES)?;
+        read_bound_workspace_file(&source, aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES)
+            .map_err(|error| RunnerError::Receipt(format!("export source read: {error}")))?;
     msi_document::verify_bytes(&source_bytes, &transfer)?;
-    source.revalidate().map_err(|_| RunnerError::Drift)?;
-    held.revalidate().map_err(|_| RunnerError::Drift)?;
+    source
+        .revalidate()
+        .map_err(|error| RunnerError::Receipt(format!("export source revalidation: {error}")))?;
+    held.revalidate()
+        .map_err(|error| RunnerError::Receipt(format!("export workspace revalidation: {error}")))?;
 
     // The bounded in-memory bytes are now independently bound to the verified
     // receipt. Release workspace write-capable directory handles before taking
@@ -493,9 +502,11 @@ fn canonical_export_destination(
     // Hold every component before using this pathname for a host write. A
     // metadata-only check permits a parent to become a junction after checking.
     let ancestors = hold_export_directory_chain(&parent)?;
-    let workspace = workspace_root
-        .canonicalize()
-        .map_err(|_| RunnerError::Drift)?;
+    let workspace = workspace_root.canonicalize().map_err(|error| {
+        RunnerError::Receipt(format!(
+            "export workspace canonicalization with held destination: {error}"
+        ))
+    })?;
     if windows_path_contains(&workspace, &parent) {
         return Err(RunnerError::Receipt(
             "export destination must be outside the retained Sandbox workspace".to_owned(),
@@ -509,7 +520,11 @@ fn canonical_export_destination(
             ));
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(_) => return Err(RunnerError::Drift),
+        Err(error) => {
+            return Err(RunnerError::Receipt(format!(
+                "export destination metadata: {error}"
+            )));
+        }
     }
     Ok((destination, ancestors))
 }
@@ -544,7 +559,9 @@ fn hold_export_directory_chain(parent: &Path) -> Result<Vec<File>, RunnerError> 
             .map_err(|_| {
                 RunnerError::Receipt("cannot retain export destination ancestry".into())
             })?;
-        let metadata = directory.metadata().map_err(|_| RunnerError::Drift)?;
+        let metadata = directory
+            .metadata()
+            .map_err(|error| RunnerError::Receipt(format!("export ancestor metadata: {error}")))?;
         if !metadata.is_dir() || metadata.file_attributes() & 0x0400 != 0 {
             return Err(RunnerError::Receipt(
                 "export destination ancestry contains a reparse point".into(),

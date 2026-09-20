@@ -219,6 +219,16 @@ schema-valid v0alpha10 reports and Markdown controls, a schema-valid determinist
 comparison, seven positive/negative checks, and unchanged inventories of 75
 workspace files. The guest hash is the one recorded above.
 
+Integration validation found a hosted synthetic-transfer test returning `Drift`
+during export. CI now retains full failed-check logs, and export errors include
+phase/native error context. The protected synthetic document publisher now uses
+the explicit workspace owner/SYSTEM file policy, avoiding reliance on an elevated
+token's default owner. Production export checks were not relaxed. A separate
+fixed-clock regression covers unique diagnostic filenames within one clock tick.
+One local diagnostic run failed earlier at planning-import rename with native
+error 5 (`aiw-export-diagnostic-test.log` in TEMP); subsequent focused transfer
+tests passed. That isolated failure is retained separately from the live proof.
+
 ### Recorded OS versions and fresh replay, 2026-09-19
 
 The complete driver passed uninterrupted in three fresh workers:

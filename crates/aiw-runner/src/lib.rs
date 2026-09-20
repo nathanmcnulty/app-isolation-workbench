@@ -4834,7 +4834,7 @@ mod tests {
         include_behavior: bool,
         registry_fixture: RegistryFixture,
         product_fixture: ProductRegistrationFixture,
-        document_output: Option<&[u8]>,
+        document_output: Option<(&[u8], bool)>,
     ) {
         let rendered = render_config(&start.wsb_plan).unwrap();
         let request = msi_request_for(start);
@@ -4856,7 +4856,7 @@ mod tests {
             })
             .unwrap();
         let transfer = request.scenario.interactive_document.as_ref().map(|input| {
-            let bytes = document_output.unwrap_or_default();
+            let bytes = document_output.map(|(bytes, _)| bytes).unwrap_or_default();
             aiw_provider_wsb::ImportedMsiDocumentTransferResult {
                 input_sha256: input.input_sha256.clone(),
                 input_size_bytes: input.input_size_bytes,
@@ -5045,8 +5045,27 @@ mod tests {
                 ),
             ],
         };
-        if let Some(bytes) = document_output {
-            publish_test_file(&output.join("document-output.txt"), bytes);
+        if let Some((bytes, protected)) = document_output {
+            // Export requires the workspace's exact owner/SYSTEM file policy.
+            // Ordinary creation uses the token's default owner, which may be
+            // Administrators on an elevated hosted runner instead of its user.
+            // Publish this synthetic artifact with the same explicit contract;
+            // the completion receipt is still published last below.
+            if protected {
+                let workspace =
+                    aiw_windows_platform::HeldRunWorkspace::reopen_bound(&start.workspace).unwrap();
+                let mut file = workspace
+                    .create_output_file_new("document-output.txt")
+                    .unwrap()
+                    .into_file();
+                file.write_all(bytes).unwrap();
+                file.sync_all().unwrap();
+                drop(file);
+                workspace.reopen_output_file("document-output.txt").unwrap();
+            } else {
+                // Pure runner-contract tests deliberately use synthetic workspaces.
+                publish_test_file(&output.join("document-output.txt"), bytes);
+            }
             receipt.artifacts.push(artifact(
                 "document-output.txt",
                 aiw_evidence::ArtifactRole::ScenarioResults,
