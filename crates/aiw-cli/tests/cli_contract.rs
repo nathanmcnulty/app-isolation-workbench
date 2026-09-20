@@ -47,6 +47,68 @@ fn aiw() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_aiw"))
 }
 
+#[test]
+fn interactive_approval_rejects_redirected_input_without_mutation() {
+    let temp = TempDir::new();
+    let plan_path = temp.path().join("input-plan.json");
+    write_plan(&plan_path, &repo_path("examples/minimal.aiw.yaml"), None);
+    let plan: RunPlan = serde_json::from_slice(&fs::read(&plan_path).unwrap()).unwrap();
+    let root = temp.path().join("runs");
+    fs::create_dir(&root).unwrap();
+    let layout = RunLayout::new(&root, &plan.run_id).unwrap();
+    layout.create(&plan).unwrap();
+    let before = layout.status().unwrap();
+    let output = Command::new(aiw())
+        .args(["run", "review-approval", "--root"])
+        .arg(&root)
+        .args([
+            "--run-id",
+            &plan.run_id,
+            "--approved-by",
+            "operator",
+            "--approved-at",
+            "now",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("requires terminal input"));
+    assert_eq!(
+        serde_json::to_value(layout.status().unwrap()).unwrap(),
+        serde_json::to_value(before).unwrap()
+    );
+    assert!(layout.read_approval().is_err());
+}
+
+#[test]
+fn administrator_route_rejects_redirected_input_before_evidence_mutation() {
+    let temp = TempDir::new();
+    let output = Command::new(aiw())
+        .args([
+            "admin",
+            "assess",
+            "--installer",
+            "missing.msi",
+            "--evidence",
+        ])
+        .arg(temp.path())
+        .args(["--identity", "operator"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(error["code"], "AIW_ADMIN_WORKFLOW_FAILED");
+    assert_eq!(error["stage"], "adminWorkflow");
+    assert!(
+        error["detail"]
+            .as_str()
+            .unwrap()
+            .contains("requires terminal input")
+    );
+    assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 0);
+}
+
 #[cfg(windows)]
 #[test]
 fn launch_profile_rejection_preserves_actionable_diagnostics() {

@@ -24,47 +24,10 @@ impl WsbMsiAssessmentReport {
     /// independently verify a constructed report or promote guest observations.
     pub fn to_markdown(&self) -> String {
         let mut out = format!(
-            "# Notepad++ Windows Sandbox assessment\n\nRun: {}\n\nThese are guest-reported observations from one approved scenario. The assessment remains **insufficient evidence** for an isolation verdict or a general compatibility recommendation.\n\n| Function | Observed result |\n|---|---|\n",
+            "# Notepad++ Windows Sandbox assessment\n\nRun: {}\n",
             cell(&self.run_id)
         );
-        for (name, observed) in [
-            (
-                "Silent installation",
-                Some(self.scenario.install_exit_code == 0),
-            ),
-            (
-                "Launch and visible window",
-                Some(self.scenario.process_observed),
-            ),
-            (
-                "Open fixed text document",
-                self.behavior
-                    .as_ref()
-                    .map(|b| b.functional_exercise.opened_document),
-            ),
-            (
-                "Edit and save expected bytes",
-                self.behavior
-                    .as_ref()
-                    .map(|b| b.functional_exercise.saved_document),
-            ),
-            (
-                "Graceful close",
-                Some(
-                    self.scenario.process_closed
-                        && self.scenario.graceful_close_requested
-                        && self.scenario.launch_exit_code == 0,
-                ),
-            ),
-        ] {
-            let status = match observed {
-                Some(true) => "Passed",
-                Some(false) => "Failed",
-                None => "Not measured",
-            };
-            out.push_str(&format!("| {name} | {status} |\n"));
-        }
-        out.push_str(&format!("\nRecorded exact-session cleanup verified: **{}**. This is the retained cleanup record, not a current-session query.\n", self.recorded_cleanup_verified));
+        append_administrator_overview(&mut out, self);
         if let Some(profile) = &self.launch_profile_sha256 {
             out.push_str(&format!("\nValidated replay profile bound to this run's approval: **{}**. This identifies the profile used at execution; retained reporting does not re-open its source trials or claim they remain available.\n", cell(profile)));
         }
@@ -135,6 +98,116 @@ impl WsbMsiAssessmentReport {
     }
 }
 
+fn append_administrator_overview(out: &mut String, report: &WsbMsiAssessmentReport) {
+    out.push_str("\n## Administrator overview\n\n");
+    out.push_str(&format!(
+        "Application bytes: Notepad++ MSI with installer SHA-256 `{}`. Fixed workflow: privileged guest installation, launch of the application under the recorded runtime account, open/edit/save of the fixed text document, and graceful close.\n\n",
+        cell(&report.scenario.installer_sha256)
+    ));
+    out.push_str("Function results:\n\n| Function | Result |\n|---|---|\n");
+    let functions = function_results(report);
+    for (name, observed) in functions {
+        out.push_str(&format!("| {name} | {} |\n", result_label(observed)));
+    }
+    let missing = report
+        .missing_evidence
+        .iter()
+        .map(|gap| gap_label(*gap))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let missing = if missing.is_empty() {
+        "none recorded".to_owned()
+    } else {
+        missing
+    };
+    out.push_str(&format!(
+        "\nMeasured observations and controls: {}. Requested Sandbox settings are not treated as measured containment.\n\nRecorded cleanup: **{}**. This is historical receipt-bound evidence, not a current-session query.\n\nAssessment: **insufficientEvidence** for broader isolation. The missing checks remain unmeasured: {}.\n\nSafe next action: {}\n",
+        measured_boundary_labels(report).join(", "),
+        report.recorded_cleanup_verified,
+        missing,
+        completed_next_action(&functions),
+    ));
+}
+
+fn completed_next_action(functions: &[(&str, Option<bool>)]) -> &'static str {
+    if functions.iter().any(|(_, result)| *result == Some(false)) {
+        "Investigate the failed fixed-workflow functions and retained diagnostics before preparing a recipe or replay. A failed function is not an isolation verdict."
+    } else if functions.iter().any(|(_, result)| result.is_none()) {
+        "Treat unmeasured fixed-workflow functions as gaps and inspect the retained evidence before preparing a recipe or replay. Do not infer compatibility from the measured subset."
+    } else {
+        "Use this passing fixed-workflow result only for the exact application bytes and tested scenario when reviewing a recipe or replay. Collect the missing boundary evidence and a comparable baseline before relying on an isolation decision."
+    }
+}
+
+fn measured_boundary_labels(report: &WsbMsiAssessmentReport) -> Vec<&'static str> {
+    let mut labels = vec!["guest function workflow"];
+    if report.standard_user_context.is_some() {
+        labels.push("recorded standard-user runtime");
+    }
+    if report.installation_file_changes.is_some() || report.exercise_file_changes.is_some() {
+        labels.push("scoped guest filesystem snapshots");
+    }
+    if report.installation_registry_changes.is_some() || report.exercise_registry_changes.is_some()
+    {
+        labels.push("scoped guest registry snapshots");
+    }
+    if report
+        .standard_user_context
+        .as_ref()
+        .and_then(|runtime| runtime.standard_user_acl.as_ref())
+        .is_some()
+    {
+        labels.push("guest standard-user ACL control");
+    }
+    if report.recorded_cleanup_verified {
+        labels.push("exact-session cleanup");
+    }
+    labels
+}
+
+fn function_results(report: &WsbMsiAssessmentReport) -> [(&'static str, Option<bool>); 5] {
+    [
+        (
+            "Silent installation",
+            Some(report.scenario.install_exit_code == 0),
+        ),
+        (
+            "Launch and visible window",
+            Some(report.scenario.process_observed),
+        ),
+        (
+            "Open fixed text document",
+            report
+                .behavior
+                .as_ref()
+                .map(|b| b.functional_exercise.opened_document),
+        ),
+        (
+            "Edit and save expected bytes",
+            report
+                .behavior
+                .as_ref()
+                .map(|b| b.functional_exercise.saved_document),
+        ),
+        (
+            "Graceful close",
+            Some(
+                report.scenario.process_closed
+                    && report.scenario.graceful_close_requested
+                    && report.scenario.launch_exit_code == 0,
+            ),
+        ),
+    ]
+}
+
+fn result_label(observed: Option<bool>) -> &'static str {
+    match observed {
+        Some(true) => "Passed",
+        Some(false) => "Failed",
+        None => "Not measured",
+    }
+}
+
 impl WsbMsiRunReport {
     pub fn to_markdown(&self) -> String {
         match self {
@@ -148,10 +221,12 @@ impl WsbMsiRunReport {
 impl WsbMsiUnsuccessfulReport {
     pub fn to_markdown(&self) -> String {
         let mut out = format!(
-            "# Notepad++ Windows Sandbox unsuccessful attempt\n\nRun: {}\n\nRecorded outcome: **{:?}**. No completed application assessment is available. Application functions are **not verified**; this does not establish application incompatibility.\n\nRecorded exact-session cleanup verified: **{}**. This historical record is not a current-session query.\n\n## Recorded provider lifecycle\n\n| Sequence | State | Reason code |\n|---|---|---|\n",
+            "# Notepad++ Windows Sandbox unsuccessful attempt\n\nRun: {}\n\n## Administrator overview\n\nInstaller SHA-256: `{}`. Recorded outcome: **{:?}**. Fixed workflow: privileged guest installation followed by launch, fixed-document open/edit/save, and graceful close. No completed application assessment is available; application functions are **not verified**. The failure may be in setup, the worker, the installer, the application, or the test driver, and does not establish application incompatibility.\n\nRecorded exact-session cleanup verified: **{}**. This historical record is not a current-session query.\n\nSafe next action: {}\n\n## Recorded provider lifecycle\n\n| Sequence | State | Reason code |\n|---|---|---|\n",
             cell(&self.run_id),
+            cell(&self.installer_sha256),
             self.outcome,
             self.recorded_cleanup_verified,
+            unsuccessful_next_action(self.recorded_cleanup_verified),
         );
         for transition in &self.lifecycle {
             out.push_str(&format!(
@@ -203,6 +278,14 @@ impl WsbMsiUnsuccessfulReport {
         append_download_metadata_policy(&mut out, self.download_metadata_policy.as_ref());
         out.push_str(&format!("\n## Attempt identity\n\n- Session ID: {}\n- Project revision SHA-256: {}\n- Installer SHA-256: {}\n- Guest-agent SHA-256: {}\n- Scenario SHA-256: {}\n- Request SHA-256: {}\n\nOnly a fully verified failed receipt can supply the stage progress above. Other guest output cannot establish an accepted compatibility assessment, application token, or file-change claim.\n", cell(&self.session_id), cell(&self.project_revision_sha256), cell(&self.installer_sha256), cell(&self.guest_agent_sha256), cell(&self.scenario_sha256), cell(&self.request_sha256)));
         out
+    }
+}
+
+fn unsuccessful_next_action(cleanup_verified: bool) -> &'static str {
+    if cleanup_verified {
+        "Cleanup is already recorded for this attempt; do not recover the historical session. Retain and inspect the lifecycle, receipt-bound diagnostics, and snapshots below, then prepare a new run only after the failure cause is understood."
+    } else {
+        "Do not retry. Inspect current run status and use only the documented exact-session recovery path before preparing a new run."
     }
 }
 
@@ -492,6 +575,39 @@ fn append_download_metadata_policy(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn result_labels_preserve_pass_fail_and_unmeasured_states() {
+        assert_eq!(result_label(Some(true)), "Passed");
+        assert_eq!(result_label(Some(false)), "Failed");
+        assert_eq!(result_label(None), "Not measured");
+    }
+
+    #[test]
+    fn next_actions_follow_function_and_cleanup_state() {
+        assert!(completed_next_action(&[("function", Some(false))]).contains("failed"));
+        assert!(completed_next_action(&[("function", None)]).contains("unmeasured"));
+        assert!(completed_next_action(&[("function", Some(true))]).contains("passing"));
+        assert!(unsuccessful_next_action(true).contains("do not recover"));
+        assert!(unsuccessful_next_action(false).contains("Do not retry"));
+    }
+
+    #[test]
+    fn evidence_gap_labels_are_actionable_and_distinct() {
+        assert_eq!(
+            gap_label(AssessmentEvidenceGap::OrdinaryBaseline),
+            "Comparable ordinary execution baseline"
+        );
+        assert_eq!(
+            gap_label(AssessmentEvidenceGap::EffectiveBackendVerification),
+            "Required effective isolation backend verification"
+        );
+        assert_ne!(
+            gap_label(AssessmentEvidenceGap::IndependentHostMeasurements),
+            gap_label(AssessmentEvidenceGap::DescendantCoverage)
+        );
+    }
+
     #[test]
     fn filenames_cannot_inject_report_markup() {
         assert_eq!(

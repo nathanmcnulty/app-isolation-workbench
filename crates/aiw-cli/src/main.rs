@@ -6,6 +6,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+mod admin_workflow;
+mod approval_review;
+
 use aiw_core::{
     AnalystReport, AnalystReportValidation, CanaryObservationSet, CanaryPlan, CanaryReport,
     RunSummary, compare_runs, evaluate_canaries, validate_analyst_report,
@@ -83,6 +86,7 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    Admin(AdminArgs),
     Project(ProjectArgs),
     Application(ApplicationArgs),
     Package(PackageArgs),
@@ -97,6 +101,25 @@ enum Command {
     Provider(ProviderArgs),
     Schema(SchemaArgs),
     Compare(CompareArgs),
+}
+
+#[derive(Debug, Args)]
+struct AdminArgs {
+    #[command(subcommand)]
+    command: AdminCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum AdminCommand {
+    /// Assess supported Notepad++ bytes through the packaged fixed workflow.
+    Assess {
+        #[arg(long)]
+        installer: PathBuf,
+        #[arg(long)]
+        evidence: PathBuf,
+        #[arg(long)]
+        identity: String,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -528,6 +551,18 @@ enum RunCommand {
         run_id: String,
         #[arg(long)]
         approval: PathBuf,
+    },
+    /// Review the exact persisted plan and record approval after terminal confirmation.
+    /// Does not start the run. Automation should use the existing approval-record path.
+    ReviewApproval {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        run_id: String,
+        #[arg(long)]
+        approved_by: String,
+        #[arg(long)]
+        approved_at: String,
     },
     /// Read the verified persisted state of a run without executing it.
     Status {
@@ -1172,6 +1207,17 @@ fn main() -> ExitCode {
 
 fn run(command: Command) -> Result<()> {
     match command {
+        Command::Admin(args) => match args.command {
+            AdminCommand::Assess {
+                installer,
+                evidence,
+                identity,
+            } => {
+                let result = admin_workflow::assess(&installer, &evidence, &identity)
+                    .map_err(admin_workflow::public_error)?;
+                write_json(&result)
+            }
+        },
         Command::Package(args) => match args.command {
             PackageCommand::CreateWsbLaunchProfile { input, format } => {
                 #[cfg(windows)]
@@ -1926,6 +1972,41 @@ fn run(command: Command) -> Result<()> {
             } => {
                 let approval: ApprovalRecord = read_document(&approval, MAX_CONFIG_BYTES)?;
                 let layout = RunLayout::new(&root, run_id)?;
+                layout.write_approval(&approval)?;
+                write_json(&approval)
+            }
+            RunCommand::ReviewApproval {
+                root,
+                run_id,
+                approved_by,
+                approved_at,
+            } => {
+                use std::io::IsTerminal;
+                if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
+                    return Err(AiwError {
+                        code: "AIW_APPROVAL_TERMINAL_REQUIRED".into(),
+                        summary: "review-approval requires terminal input and visible review".into(),
+                        stage: "approvalReview".into(), run_id: Some(run_id.into()), retryable: false,
+                        remediation: "Run in an interactive terminal, or use run approve --approval for explicit automation.".into(),
+                        detail: "Standard input and standard error must both be terminals. No approval was recorded.".into(),
+                    }.into());
+                }
+                let layout = RunLayout::new(&root, run_id)?;
+                let plan = layout.read_plan()?;
+                let approval = ApprovalRecord::for_plan(&plan, approved_by, approved_at)?;
+                if !approval_review::confirm(
+                    &approval,
+                    &plan,
+                    io::stdin().lock(),
+                    io::stderr().lock(),
+                )? {
+                    return write_json(&serde_json::json!({
+                        "runId": layout.run_id(), "approvalRecorded": false,
+                        "reason": "Approval cancelled; no approval was recorded."
+                    }));
+                }
+                // The service re-reads and validates the exact plan under its mutation lock.
+                // A plan change during review cannot acquire approval for different content.
                 layout.write_approval(&approval)?;
                 write_json(&approval)
             }

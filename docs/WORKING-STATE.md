@@ -4,7 +4,7 @@ Updated 2026-09-20. This is a compact handoff, not a run receipt or authorizatio
 
 ## Where to resume
 
-- Review branch: `codex/focused-quality-review`, based on PR #65 merge `daa6b0f`. Later main dependency updates have separate validation. Use the status helper rather than assuming this branch is current main.
+- Active branch: `codex/admin-assessment-summary`, based on PR #66 merge `6f19136`. PR #66 merged only after hosted verification/audit and MSRV passed. Use the status helper rather than assuming another checkout has these changes.
 - Latest milestone: profile-bound approved replay passed the fixed document workflow, required guest file ACL controls, recorded environment comparison, and cleanup. PR #65 hosted verification/audit and MSRV passed; its main run was superseded and cancelled. Source evidence and the earlier worktree remain preserved. See VALIDATED-SANDBOX-LAUNCH.md.
 - Goal: report tested functions for exact application bytes and measured isolation configurations, then use the evidence for adaptation/repackaging. Free community project; feedback collection is not a development gate.
 
@@ -17,6 +17,12 @@ Updated 2026-09-20. This is a compact handoff, not a run receipt or authorizatio
 - Packaging: `package export-wsb-msi`, `package verify`, and `package import` carry exact MSI bytes and a fixed recipe, with an independently supplied manifest hash. Replay passes the existing standard-user document workflow and report checks. Both the automated assessment recipe and approved scratch-only interactive launch are supported. The transfer profile accepts one bounded text input and offers explicit receipt-bound export; persistent data, MSI/MSIX conversion, and application-level baseline/candidate isolation comparison remain open. Outer Sandbox containment is distinct from an inner application boundary.
 
 ## Next coherent slice
+
+Follow [EXECUTION-PLAN.md](EXECUTION-PLAN.md) for bounded work packets and model
+assignments. Recommended main model: Sol medium; Luna for bounded implementation;
+stronger models for specific review/escalation. The exact-commit Sol review of
+terminal approval found no actionable issue. Next add the administrator summary,
+then the guided workflow.
 
 Approved profile replay passed at runtime commit `fc22efb`: preparation v0alpha6
 embeds the reverified profile, approval binds its exact identity, and start
@@ -33,10 +39,46 @@ production blocker was found in the reviewed authority, historical report, or
 recovery paths. Test/build failure causes remain unconfirmed; retained diagnostics
 and the missing direct start-before-acquisition regression are tracked in the review.
 
-Next: finish the [administrator workflow acceptance cases](RELEASE-GATES.md),
-then the clean-host/second-operator trial. ROADMAP.md now makes this ordering
-authoritative; broader AppContainer research and application conversion do not
-block the narrow preview. Do not repeat installer trials for output-only changes.
+The first administrator improvement adds [terminal approval review](ADMIN-APPROVAL.md):
+show the exact plan and approval identity, require the displayed hash, and record
+through the existing service without a hand-authored approval file. Cancellation
+does not approve or execute anything; redirected input is rejected.
+
+The retained MSI Markdown report now starts with an administrator overview for
+exact application bytes and the fixed workflow. It separates function results,
+measured observations, cleanup, and broader missing isolation evidence, then
+gives a state-specific next action. Retained completed and controlled-failure
+workspaces rendered correctly without changing their files. See
+[ASSESSMENT-REPORT.md](ASSESSMENT-REPORT.md).
+
+The packaged `aiw admin assess` route now composes protected intake, preparation,
+visible recipe review, exact-plan terminal approval, execution, and retained
+JSON/Markdown reporting. Product assets bind the fixed local-settings project,
+static guest, and optional approved replay profile. A real profile-bound preview
+package was assembled with a receipt.
+Assembly now verifies the profile's application, project, scenario, and guest
+bindings. The runnable replay package uses the exact retained validated guest;
+an incompatible freshly built release guest was rejected before receipt.
+The public package also passed the occupied-session negative case with a specific
+retained readiness path and no intake/provider mutation. Another task's session
+`8fd60024-30fd-41d7-8fa8-04571a405184` was later explicitly stopped with user
+authorization.
+
+The public profile-bound replay then completed as run
+`admin-1789947096248087800` under
+`%LOCALAPPDATA%\Temp\aiw-admin-public-replay-783a99b8f9a24fcb9c1f6d25cfe90ecf`.
+The exact supported MSI installed; Notepad++ launched under the fixed medium-
+integrity, non-elevated standard user; the document opened and saved the expected
+bytes; the guest file ACL control passed; and the retained status is terminal
+with cleanup verified. The provider list was empty afterward. The administrator
+overview correctly reports all fixed functions as passed and broader isolation
+as `insufficientEvidence`. A separate visibility retry is preserved as an
+unapproved preparation and never acquired Sandbox.
+
+Next: integrate this administrator milestone through one reviewed PR with both
+required hosted checks, then begin Packet 5's clean-host package and second-
+operator trial. Broader AppContainer research and application conversion do not
+block the narrow preview.
 
 ## Read only what the slice needs
 

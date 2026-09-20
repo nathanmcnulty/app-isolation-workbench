@@ -1,0 +1,126 @@
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory)]
+    [ValidateNotNullOrEmpty()]
+    [string]$OutputDirectory,
+    [string]$GuestAgent,
+    [string]$GuestAgentSha256,
+    [string]$LaunchProfile,
+    [string]$LaunchProfileSha256
+)
+
+$ErrorActionPreference = 'Stop'
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$productRoot = Join-Path $repoRoot 'crates\aiw-cli\product\notepad-plus-plus'
+$buildTarget = if ([string]::IsNullOrWhiteSpace($env:CARGO_TARGET_DIR)) {
+    Join-Path $repoRoot 'target'
+} else {
+    [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR)
+}
+$cliSource = Join-Path $buildTarget 'release\aiw.exe'
+$projectSource = Join-Path $productRoot 'project.yaml'
+$manifestSource = Join-Path $productRoot 'manifest.json'
+$output = [IO.Path]::GetFullPath($OutputDirectory)
+$packagedProductRoot = Join-Path $output 'product\notepad-plus-plus'
+
+function Write-Utf8NoBom([string]$Path, [string]$Text) {
+    [IO.File]::WriteAllText($Path, $Text + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+}
+
+function Assert-LowerSha256([string]$Value, [string]$Name) {
+    if ($Value -notmatch '^[0-9a-f]{64}$') { throw "$Name must be a lowercase SHA-256" }
+}
+
+function Get-CanonicalJsonBytes([object]$Value) {
+    $json = $Value | ConvertTo-Json -Depth 20 -Compress
+    return ,([Text.UTF8Encoding]::new($false).GetBytes($json))
+}
+
+if (Test-Path -LiteralPath $output) { throw "Output directory already exists; choose a new path: $output" }
+if (-not (Test-Path -LiteralPath $productRoot -PathType Container)) { throw "Required product asset directory is missing: $productRoot" }
+foreach ($path in @($projectSource, $manifestSource)) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required product asset is missing: $path" }
+}
+
+Push-Location -LiteralPath $repoRoot
+try {
+    & cargo build --locked --release -p aiw-cli
+    if ($LASTEXITCODE -ne 0) { throw 'release aiw-cli build failed' }
+
+    if ($null -ne $GuestAgent -xor $null -ne $GuestAgentSha256) { throw 'GuestAgent and GuestAgentSha256 must be supplied together' }
+    if ($GuestAgent) {
+        Assert-LowerSha256 $GuestAgentSha256 'GuestAgentSha256'
+        $guestSource = [IO.Path]::GetFullPath($GuestAgent)
+        if (-not (Test-Path -LiteralPath $guestSource -PathType Leaf)) { throw "guest-agent artifact is missing: $guestSource" }
+        $actualGuestHash = (Get-FileHash -LiteralPath $guestSource -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actualGuestHash -ne $GuestAgentSha256) { throw 'guest-agent bytes do not match the independently retained hash' }
+    } else {
+        $guestBuildText = & (Join-Path $PSScriptRoot 'build-guest-agent.ps1') -Profile release | Out-String
+        if ($LASTEXITCODE -ne 0) { throw 'release guest-agent build failed' }
+        $guestBuild = $guestBuildText | ConvertFrom-Json
+        $guestSource = [IO.Path]::GetFullPath([string]$guestBuild.artifact)
+    }
+    if (-not (Test-Path -LiteralPath $guestSource -PathType Leaf)) { throw "guest-agent artifact is missing: $guestSource" }
+    if (-not (Test-Path -LiteralPath $cliSource -PathType Leaf)) { throw "release CLI artifact is missing: $cliSource" }
+
+    $manifest = Get-Content -Raw -LiteralPath $manifestSource | ConvertFrom-Json
+    if ($manifest.schemaVersion -ne 'aiw.dev/admin-product-assets/v0alpha1' -or $manifest.productId -notlike 'notepad-plus-plus-*') {
+        throw 'product manifest is not the supported Notepad++ contract'
+    }
+    if ($null -ne $LaunchProfile -xor $null -ne $LaunchProfileSha256) { throw 'LaunchProfile and LaunchProfileSha256 must be supplied together' }
+    $profileSource = $null
+    if ($LaunchProfile) {
+        $profileSource = [IO.Path]::GetFullPath($LaunchProfile)
+        if (-not (Test-Path -LiteralPath $profileSource -PathType Leaf)) { throw "launch profile is missing: $profileSource" }
+        Assert-LowerSha256 $LaunchProfileSha256 'LaunchProfileSha256'
+        $profile = Get-Content -Raw -LiteralPath $profileSource | ConvertFrom-Json
+        if ($profile.profileSha256 -ne $LaunchProfileSha256) { throw 'launch profile JSON does not match the supplied profile hash' }
+    }
+
+    New-Item -ItemType Directory -Path $output -Force:$false | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $packagedProductRoot 'tools') -Force:$false | Out-Null
+    Copy-Item -LiteralPath $cliSource -Destination (Join-Path $output 'aiw.exe')
+    Copy-Item -LiteralPath $guestSource -Destination (Join-Path $packagedProductRoot 'tools\aiw-guest-agent.exe')
+    Copy-Item -LiteralPath $projectSource -Destination (Join-Path $packagedProductRoot 'project.yaml')
+    if ($profileSource) { Copy-Item -LiteralPath $profileSource -Destination (Join-Path $packagedProductRoot 'launch-profile.json') }
+
+    $manifest.projectPath = 'project.yaml'
+    $manifest.guestAgentPath = 'tools/aiw-guest-agent.exe'
+    $manifest.projectSha256 = (Get-FileHash -LiteralPath (Join-Path $packagedProductRoot 'project.yaml') -Algorithm SHA256).Hash.ToLowerInvariant()
+    $manifest.guestAgentSha256 = (Get-FileHash -LiteralPath (Join-Path $packagedProductRoot 'tools\aiw-guest-agent.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($profileSource) {
+        $compiledText = & (Join-Path $output 'aiw.exe') provider compile-msi-scenario `
+            --project (Join-Path $packagedProductRoot 'project.yaml') --scenario ([string]$manifest.scenarioId) | Out-String
+        if ($LASTEXITCODE -ne 0) { throw 'packaged fixed scenario compilation failed' }
+        $compiled = $compiledText | ConvertFrom-Json
+        if ($profile.profile.applicationSha256 -ne $compiled.scenario.applicationSha256 -or
+            $profile.profile.projectRevisionSha256 -ne $compiled.projectRevisionSha256 -or
+            $profile.profile.scenarioSha256 -ne $compiled.scenarioSha256 -or
+            $profile.profile.guestAgentSha256 -ne $manifest.guestAgentSha256) {
+            throw 'launch profile does not bind the assembled application, project, scenario, and guest agent'
+        }
+        $manifest | Add-Member -NotePropertyName launchProfilePath -NotePropertyValue 'launch-profile.json' -Force
+        $manifest | Add-Member -NotePropertyName launchProfileSha256 -NotePropertyValue $LaunchProfileSha256 -Force
+    } else {
+        $manifest.PSObject.Properties.Remove('launchProfilePath')
+        $manifest.PSObject.Properties.Remove('launchProfileSha256')
+    }
+    Write-Utf8NoBom (Join-Path $packagedProductRoot 'manifest.json') ($manifest | ConvertTo-Json -Depth 20)
+
+    $payloadFiles = Get-ChildItem -LiteralPath $output -File -Recurse | Where-Object { $_.Name -ne 'receipt.json' } |
+        ForEach-Object {
+            $relative = [IO.Path]::GetRelativePath($output, $_.FullName).Replace('\', '/')
+            [ordered]@{ path = $relative; sizeBytes = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
+        } | Sort-Object path
+    $receiptCore = [ordered]@{
+        schemaVersion = 'aiw.dev/preview-package-receipt/v0alpha1'
+        productId = [string]$manifest.productId
+        files = @($payloadFiles)
+        receiptLast = $true
+    }
+    $receiptHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData((Get-CanonicalJsonBytes $receiptCore))).ToLowerInvariant()
+    $receipt = [ordered]@{ schemaVersion = $receiptCore.schemaVersion; productId = $receiptCore.productId; files = $receiptCore.files; receiptLast = $true; receiptSha256 = $receiptHash }
+    Write-Utf8NoBom (Join-Path $output 'receipt.json') ($receipt | ConvertTo-Json -Depth 20)
+    Write-Output ($receipt | ConvertTo-Json -Depth 20 -Compress)
+}
+finally { Pop-Location }

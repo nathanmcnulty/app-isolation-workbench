@@ -102,6 +102,15 @@ fn completed_msi_report_is_readonly_and_rejects_drift() {
         64
     );
     assert!(report.to_markdown().contains(&preparation.provider.sha256));
+    let markdown = report.to_markdown();
+    assert!(markdown.contains("## Administrator overview"));
+    assert!(markdown.contains(&format!(
+        "Installer SHA-256: `{}`",
+        report.scenario.installer_sha256
+    )));
+    assert!(markdown.contains("Assessment: **insufficientEvidence** for broader isolation"));
+    assert!(markdown.contains("Safe next action:"));
+    assert!(markdown.contains("| Edit and save expected bytes | Passed |"));
     let prepared_scenario = preparation.msi.unwrap().scenario;
     if prepared_scenario.requires_application_exercise() {
         let behavior = report
@@ -244,6 +253,15 @@ fn unsuccessful_msi_report_is_readonly_and_never_promotes_guest_outputs() {
             .to_markdown()
             .contains("functions are **not verified**")
     );
+    let markdown = report.to_markdown();
+    assert!(markdown.contains(&format!(
+        "Installer SHA-256: `{}`",
+        attempt.installer_sha256
+    )));
+    assert!(markdown.contains(
+        "may be in setup, the worker, the installer, the application, or the test driver"
+    ));
+    assert!(markdown.contains("Safe next action:"));
     assert!(report_windows_sandbox_msi(&root, run_id, &project, &guest_hash).is_err());
     assert!(report_windows_sandbox_msi_run(&root, run_id, &project, &"0".repeat(64)).is_err());
     let mut foreign = project.clone();
