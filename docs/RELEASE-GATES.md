@@ -79,6 +79,13 @@ identity. `receipt.json`
 is written last and binds the package inventory; this assembles release inputs
 but does not prove clean-host installation, signing, or Sandbox execution.
 
+The public packaged route exercised the occupied-session acceptance case on
+2026-09-20. It returned `AIW_ADMIN_HOST_NOT_READY`, named the retained
+`host-readiness.json`, recorded session `8fd60024-30fd-41d7-8fa8-04571a405184`,
+and created no intake or run. AIW did not acquire, recover, or stop that session.
+The retained parent is
+`%LOCALAPPDATA%\Temp\aiw-admin-public-occupied-d3fef39ab1c742adbb8fbac9dd56725e`.
+
 These are outcome gates, not a calendar or quota estimate. The remaining
 uncertainty is concentrated in the administrator workflow and clean-host trial;
 new application classes and new isolation mechanisms are not prerequisites.

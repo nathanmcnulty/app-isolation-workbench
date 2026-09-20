@@ -6,7 +6,7 @@ use anyhow::{Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use aiw_orchestrator::{ApprovalRecord, RunLayout};
+use aiw_orchestrator::{AiwError, ApprovalRecord, RunLayout};
 use aiw_probe::{ApplicationInspectionKind, ReadinessState, inspect_application_source};
 use aiw_schema::{ApplicationSource, Project, validate_project_for_planning};
 
@@ -15,6 +15,21 @@ use crate::approval_review;
 pub const MANIFEST_SCHEMA: &str = "aiw.dev/admin-product-assets/v0alpha1";
 pub const PRODUCT_ID: &str = "notepad-plus-plus-local-settings";
 pub const SCENARIO_ID: &str = "install-launch-close";
+
+pub fn public_error(error: anyhow::Error) -> anyhow::Error {
+    if error.is::<AiwError>() {
+        return error;
+    }
+    anyhow!(AiwError {
+        code: "AIW_ADMIN_WORKFLOW_FAILED".into(),
+        summary: "administrator workflow stopped safely".into(),
+        stage: "adminWorkflow".into(),
+        run_id: None,
+        retryable: false,
+        remediation: "Read the detail and retained stage files. Correct the package, input, or prerequisite; use a new evidence location unless an exact retained run status says otherwise.".into(),
+        detail: error.to_string().into(),
+    })
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -180,9 +195,18 @@ pub fn assess(
         || !readiness.blockers.is_empty()
         || !readiness.current_session_ids.is_empty()
     {
-        bail!(
-            "host readiness blocks this assessment; inspect host-readiness.json. AIW did not create intake, acquire, recover, or stop a Sandbox session"
-        );
+        return Err(anyhow!(AiwError {
+            code: "AIW_ADMIN_HOST_NOT_READY".into(),
+            summary: "Windows Sandbox readiness blocks this assessment".into(),
+            stage: "adminReadiness".into(),
+            run_id: Some(run_id.clone().into()),
+            retryable: false,
+            remediation: format!(
+                "Inspect {}. Resolve the listed prerequisite, or wait for the existing Sandbox session to finish. Do not stop an unrelated session.",
+                evidence_root.join("host-readiness.json").display()
+            ).into(),
+            detail: "No protected intake was created and AIW did not acquire, recover, or stop a Sandbox session.".into(),
+        }));
     }
     let held = aiw_windows_platform::HeldApplicationFile::open_with_download_metadata(installer)
         .map_err(|error| anyhow!("installer is unsupported: {error}"))?;
@@ -192,9 +216,18 @@ pub fn assess(
     if inspection.sha256.as_deref() != Some(&held.observation().sha256)
         || inspection.sha256.as_deref() != Some(expected_msi.as_str())
     {
-        bail!(
-            "installer bytes are unsupported for the packaged Notepad++ profile; inspect installer-inspection.json and select the exact supported MSI bytes. No intake or Sandbox run was created"
-        );
+        return Err(anyhow!(AiwError {
+            code: "AIW_ADMIN_UNSUPPORTED_INSTALLER".into(),
+            summary: "installer bytes are not supported by this Notepad++ profile".into(),
+            stage: "adminInstallerInspection".into(),
+            run_id: Some(run_id.clone().into()),
+            retryable: false,
+            remediation: format!(
+                "Inspect {} and select the exact supported MSI bytes. Do not guess a recipe for changed bytes.",
+                evidence_root.join("installer-inspection.json").display()
+            ).into(),
+            detail: "No protected intake was created and no Sandbox session was acquired.".into(),
+        }));
     }
     held.revalidate()
         .map_err(|error| anyhow!("installer drifted before protected intake: {error}"))?;

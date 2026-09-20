@@ -1213,7 +1213,8 @@ fn run(command: Command) -> Result<()> {
                 evidence,
                 identity,
             } => {
-                let result = admin_workflow::assess(&installer, &evidence, &identity)?;
+                let result = admin_workflow::assess(&installer, &evidence, &identity)
+                    .map_err(admin_workflow::public_error)?;
                 write_json(&result)
             }
         },
