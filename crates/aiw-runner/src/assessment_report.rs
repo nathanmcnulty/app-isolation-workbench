@@ -97,7 +97,7 @@ pub struct WsbMsiRecordedExecution {
     pub normalized_sandbox_config_sha256: String,
 }
 
-fn recorded_execution(
+pub(crate) fn recorded_execution(
     artifacts: &PreparedWsbArtifacts,
 ) -> Result<WsbMsiRecordedExecution, RunnerError> {
     // Validate before normalizing: never make an outside mapping look in-scope.

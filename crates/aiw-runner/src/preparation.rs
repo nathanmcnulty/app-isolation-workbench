@@ -3448,6 +3448,65 @@ mod tests {
             artifacts.run_plan.trust_deltas[0]
                 .contains(aiw_provider_wsb::NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_DIRECTORY)
         );
+        let profile = crate::WsbLaunchProfile {
+            schema_version: "aiw.dev/wsb-local-settings-launch-profile/v0alpha1".into(),
+            evidence: crate::WsbMsiReportSetInput {
+                schema_version: crate::WSB_MSI_REPORT_SET_INPUT_SCHEMA.into(),
+                entries: vec![],
+            },
+            comparison_sha256: "a".repeat(64),
+            application_sha256: artifacts
+                .receipt
+                .msi
+                .as_ref()
+                .unwrap()
+                .staged_payload
+                .sha256
+                .clone(),
+            project_revision_sha256: artifacts.receipt.project_revision_sha256.clone(),
+            scenario_sha256: artifacts
+                .receipt
+                .msi
+                .as_ref()
+                .unwrap()
+                .scenario_sha256
+                .clone(),
+            guest_agent_sha256: artifacts.receipt.guest_agent.sha256.clone(),
+        };
+        // This exercises only the preparation matcher. Production re-verifies
+        // the profile's evidence and independent hash before reaching it.
+        let recorded = crate::assessment_report::recorded_execution(&artifacts).unwrap();
+        let check = crate::launch_profile::match_preparation;
+        check(&profile, &recorded, &artifacts).unwrap();
+        for field in [
+            "applicationSha256",
+            "projectRevisionSha256",
+            "scenarioSha256",
+            "guestAgentSha256",
+        ] {
+            let mut changed = serde_json::to_value(&profile).unwrap();
+            changed[field] = serde_json::json!("f".repeat(64));
+            let changed = serde_json::from_value(changed).unwrap();
+            assert!(check(&changed, &recorded, &artifacts).is_err(), "{field}");
+        }
+        let mut changed = recorded.clone();
+        changed.provider.sha256 = "f".repeat(64);
+        assert!(check(&profile, &changed, &artifacts).is_err());
+        let mut changed = recorded.clone();
+        changed.provider_package.version = "different".into();
+        assert!(check(&profile, &changed, &artifacts).is_err());
+        let mut changed = recorded.clone();
+        changed.normalized_sandbox_config_sha256 = "f".repeat(64);
+        assert!(check(&profile, &changed, &artifacts).is_err());
+        let mut changed = recorded.clone();
+        changed.host_os_version = Some(aiw_probe::WindowsVersionObservation {
+            major: 10,
+            minor: 0,
+            build: 28000,
+            revision: 1,
+            observer_architecture: "x86_64".into(),
+        });
+        assert!(check(&profile, &changed, &artifacts).is_err());
     }
 
     #[test]

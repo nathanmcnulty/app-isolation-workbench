@@ -10,7 +10,13 @@
 //! script, URL, or arbitrary policy API.
 
 mod bambu_report;
+mod launch_profile;
 mod packaging_recipe;
+pub use launch_profile::{WsbLaunchPreflight, WsbLaunchProfile, WsbLaunchProfileExport};
+#[cfg(windows)]
+pub use launch_profile::{
+    check_windows_sandbox_launch_profile, create_windows_sandbox_launch_profile,
+};
 mod sandbox_bundle;
 #[cfg(windows)]
 pub use bambu_report::report_windows_sandbox_bambu_run;
