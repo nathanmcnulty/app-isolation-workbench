@@ -2,7 +2,7 @@
 
 ## Product shape
 
-AIW is an administrator-led comparison laboratory that evolves into application adaptation and authoring. Workbench will compare the same typed workflows across an ordinary in-worker baseline and isolation candidates. Scoped function results, boundary verification, and capture completeness remain separate. Evidence can support a reviewed recipe experiment before a complete isolation verdict exists; a package or launch profile becomes validated only after its own required checks pass. Studio is the evolution of this product, not a separate project. See the [capability benchmarks](ROADMAP.md) for implementation order.
+AIW is an administrator-led comparison laboratory that evolves into application adaptation and authoring. Workbench will compare the same typed workflows across an ordinary in-worker baseline and isolation candidates. Scoped function results, boundary verification, and capture completeness remain separate. Evidence can support a reviewed recipe experiment before a complete isolation verdict exists; a package or launch profile becomes validated only after its own required checks pass. Studio is the evolution of this product, not a separate project. See the [current delivery sequence](ROADMAP.md#current-delivery-sequence) for implementation order; later capability benchmarks do not all gate the first preview.
 
 ```text
 CLI / PowerShell / future Tauri UI (ordinary user)

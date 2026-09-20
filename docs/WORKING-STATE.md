@@ -1,11 +1,11 @@
 # Working state
 
-Updated 2026-09-19. This is a compact handoff, not a run receipt or authorization.
+Updated 2026-09-20. This is a compact handoff, not a run receipt or authorization.
 
 ## Where to resume
 
-- Active development branch: `codex/validated-sandbox-launch` in the main checkout. PR #63 merged at `d387641` after hosted verification, audit, and MSRV passed; the earlier worktree and retained evidence remain preserved. Use the status helper to verify current state.
-- Latest slice: required app-token file ACL observations are bound to preparation, approval, guest results, and retained reports. The baseline/candidate/relocated comparison passed with report v0alpha10 and comparison v0alpha4; provider, requested configuration, and recorded Windows versions match. Broader containment remains unmeasured. Recipe inspection exposes exact launch settings, mappings, data lifetime, and requirements. See PACKAGING-RECIPES.md for the resumed live proof and retained failures, and INTERACTIVE-SANDBOX.md for the earlier human edit/save/close/export proof. Use scripts/work-status.ps1 for current HEAD and dirty files.
+- Review branch: `codex/focused-quality-review`, based on PR #65 merge `daa6b0f`. Later main dependency updates have separate validation. Use the status helper rather than assuming this branch is current main.
+- Latest milestone: profile-bound approved replay passed the fixed document workflow, required guest file ACL controls, recorded environment comparison, and cleanup. PR #65 hosted verification/audit and MSRV passed; its main run was superseded and cancelled. Source evidence and the earlier worktree remain preserved. See VALIDATED-SANDBOX-LAUNCH.md.
 - Goal: report tested functions for exact application bytes and measured isolation configurations, then use the evidence for adaptation/repackaging. Free community project; feedback collection is not a development gate.
 
 ## Implemented versus exploratory
@@ -27,13 +27,17 @@ approved profile. The provider list was empty afterward. See
 [VALIDATED-SANDBOX-LAUNCH.md](VALIDATED-SANDBOX-LAUNCH.md) for exact evidence and
 validation logs, including the preserved pre-harness executable crash.
 
-One of the three [first preview gates](RELEASE-GATES.md) is demonstrated. Next:
-pause feature expansion for a focused quality review of approval/evidence,
-historical reporting, exact recovery, and build/test reliability. Resolve blocking
-findings, then finish the guided administrator workflow and clean-host distribution
-trial. This is not a promise of general application compatibility or isolation.
-Benchmark 3's deployment-environment validation remains open; broader boundaries
-remain unmeasured. Do not repeat a successful installer trial for report-only edits.
+The [focused quality review](QUALITY-REVIEW-2026-09-20.md) found and corrected
+misleading preflight advice for unbound/differently bound preparations. No other
+production blocker was found in the reviewed authority, historical report, or
+recovery paths. Test/build failure causes remain unconfirmed; retained diagnostics
+and the missing direct start-before-acquisition regression are tracked in the review.
+
+Next: finish the [administrator workflow acceptance cases](RELEASE-GATES.md),
+then the clean-host/second-operator trial. ROADMAP.md now makes this ordering
+authoritative; broader AppContainer research and application conversion do not
+block the narrow preview. Do not repeat installer trials for output-only changes.
+
 ## Read only what the slice needs
 
 - [Execution control and retained proof](CONTROL-FIXTURE.md): fixed fixture, driver, normalizer and negative tests.

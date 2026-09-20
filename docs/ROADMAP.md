@@ -1,10 +1,44 @@
 # Roadmap
 
-Revised 2026-09-12 against the implemented runner and current Microsoft documentation. This replaces the former W0-W5/S0-S4 ordering; those labels remain historical references, not release dependencies.
+Reviewed 2026-09-20 against the implemented runner and retained live evidence. The release sequence below is authoritative; numbered capability benchmarks retain research acceptance criteria, not a serial release backlog. External platform research below is dated context and must be reverified before implementation.
 
 The goal is a free community tool that answers **which tested application functions work under which measured isolation configuration**, helps an administrator adapt the application, and produces a launch profile or package that passes the same tests. Workbench evolves into Studio when authoring is useful; this is one product.
 
 Deliver **Assess -> Adapt -> Package -> Validate** for a narrow application class before expanding every provider, collector, lifecycle, and UI. Community feedback is welcome whenever capabilities are usable, but a feedback round is not a development gate.
+
+## Current delivery sequence
+
+The first preview helps an administrator answer: **Does the supported workflow
+work in Sandbox, what was actually checked, and how can I safely repeat it?**
+Notepad++ is the reference workflow for proving this product loop. It is not
+evidence that an arbitrary MSI is compatible or a claim of broad market coverage.
+
+1. **Demonstrated:** same-host evidence-bound approved replay, with fixed document
+   workflow, ephemeral local settings, required guest file ACL controls, and exact
+   cleanup. [Quality review](QUALITY-REVIEW-2026-09-20.md) records the inspected
+   boundaries, corrected guidance, and remaining validation gaps.
+2. **Next milestone: administrator assessment and replay workflow.** Provide one
+   documented entry path, a plain-language report with specific next actions,
+   discoverable supported profiles, and reviewed recipe/replay approval. An
+   operator must not need development TEMP paths, hand-authored approval JSON,
+   a compiler, or an agent to reconstruct runtime parameters. Use the existing
+   services; a desktop UI and general scenario engine are not prerequisites.
+3. **Then: clean-host preview validation and distribution.** Ship identified CLI
+   and guest builds together, detect prerequisites, and have a second operator
+   complete the documented loop. Reassess and create fresh approval/evidence on
+   that host; copying a same-host validation profile is not deployment validation.
+
+The exact acceptance cases are in [RELEASE-GATES.md](RELEASE-GATES.md). A release
+requires successful supported use and understandable failure handling, not only
+a successful developer script. Preserve explicit data-loss/export warnings for
+ephemeral sessions, evidence retention needs, and unsupported application behavior.
+
+After the narrow preview loop is usable, choose the next real application by a
+concrete admin need (for example a useful local-file workflow), and measure how
+much profile-specific code it requires. Bambu already supplies a second reporting
+consumer. Broader utility is a subsequent product outcome, not something inferred
+from repeated Notepad++ trials. Do not expand providers or collectors unless they
+answer a documented workflow failure or a claim the next release actually makes.
 
 ## What is already working
 
@@ -35,13 +69,13 @@ The [installer inventory](INSTALLER-CORPUS.md) now makes profile selection concr
 
 The corpus exposed an intake requirement now addressed by [explicit download metadata archiving](DOWNLOAD-METADATA-INTAKE.md): all seven supplied files pass protected intake, with source identity and metadata unchanged. Retain this bounded policy when broadening profiles; arbitrary streams remain rejected. Separate networked payload acquisition from offline application assessment; bind downloaded payloads, not just launcher hashes. These are prerequisites for using the affected fixtures, not reasons to enable networking on the existing offline profile.
 
-## Benchmark 1 - comparable application evidence (next)
+## Benchmark 1 - comparable application evidence
 
 **Deliverable:** a repeatable function report with an ordinary in-worker baseline, packaging-relevant state observations, and explicit comparison eligibility.
 
-1. **Implemented and live-tested:** separate privileged installation from standard-user application execution, record actual identity/token/profile, and bind application-data file capture to that account. Preserve the elevated fixture as its own configuration. Scoped user-registry capture now uses the same account; comparison eligibility is still pending.
-2. **Scoped registry snapshots implemented:** machine/user Notepad++ settings in both views, with explicit absence and incomplete-scope diff suppression. Machine Windows Installer product state is now bound to the approved MSI identity and live-tested. Next add static dependency hints alongside file observations. Record key/value identity, type, size/hash, registry view, phase, and incompleteness; raw values require an explicit capture policy. Distinguish installed state, observed runtime use, static references, and unresolved dependencies. A changed file/key or PE import alone does not prove a required dependency.
-3. Add a second real application profile and a project-owned control fixture with expected success, denial, child-process, and failure cases. Use clean repetitions to identify unstable state; retain raw evidence and version normalization rules. Never hide a difference merely to make comparisons pass.
+1. **Implemented and live-tested:** separate privileged installation from standard-user application execution, record actual identity/token/profile, and bind application-data file capture to that account. Preserve the elevated fixture as its own configuration. Scoped user-registry capture uses the same account. The fixed local-settings baseline/candidate/replay comparison is verified; general application-level isolation comparison remains open.
+2. **Scoped registry snapshots implemented:** machine/user Notepad++ settings in both views, with explicit absence and incomplete-scope diff suppression. Machine Windows Installer product state is bound to the approved MSI identity and live-tested. Add static dependency hints only for a concrete packaging question. Record identity, type, size/hash, view, phase, and incompleteness; raw values require an explicit capture policy. Distinguish observed runtime use, static references, and unresolved dependencies. A changed file/key or PE import alone does not prove a required dependency.
+3. **Second consumer and development controls implemented:** Bambu export and the project-owned fixture exercise shared reporting and standard-user/file/registry/child controls. Real-application AppContainer integration remains research work. Use clean repetitions to identify unstable state; retain raw evidence and version normalization rules. Never hide a difference merely to make comparisons pass.
 4. Preserve completed file/registry snapshots when a later application stage fails, bound to the failed receipt and stage prefix; missing phases must remain explicitly unmeasured. Implemented and live-tested: the optional v5 failed-snapshot event and unsuccessful report v0alpha4 retain this metadata. A controlled post-install failure preserved installation evidence while leaving later phases unmeasured; the production success path also passed. Report interrupted/pre-start/recovery states observationally, without repairing state or inferring uncommitted guest progress. Explicit bounded [report sets](REPORT-SETS.md) now summarize retained runs without an index, preserve unavailable entries and suppress duplicate verified identities. A persistent local index remains optional; it must be rebuildable and never execution authority.
 
 **Completion criteria:** two clean repetitions of the selected standard-user scenario produce comparable function results; changed inputs, account, scenario, or environment are detected. A second application exercises shared collection/reporting code. Capture gaps remain visible, and a failed control fixture cannot become an application incompatibility claim.
@@ -74,9 +108,9 @@ Start the first packaging slice with the existing approved Windows Sandbox appli
 
 For AppContainer packaging, finish its declared control measurements and approved paired reporting, then trial one real application to identify concrete requirements. A failed function with a trustworthy cause can motivate an adaptation; universal application compatibility is not required. Do not add more providers, applications, general tracing, or feedback collection as prerequisites.
 
-Packaging development starts with the inspectable recipe and reusable launch output in Benchmark 3. The first installable distribution follows in Benchmark 4. This lets an admin preserve and replay the exact files, launch settings, data locations, and grants that a trial established before we build broader conversion capabilities.
+The inspectable recipe and reusable launch output in Benchmark 3 supply the first preview. Distribution of Workbench itself follows the release gates above; Benchmark 4's application-package conversion and lifecycle work is a separate later capability.
 
-The first [versioned Sandbox bundle](SANDBOX-BUNDLES.md) now exports the fixed Notepad++ MSI profile with exact payload/project/scenario hashes, runtime/data contract, and source-intake provenance. Relocation, fresh protected import, normal preparation/approval, and a fresh-worker document workflow have passed. Changed payloads and unsupported manifest fields are rejected. Package JSON/Markdown reports now match that manifest and exact import receipt to reverified terminal run evidence, retaining failures and evidence gaps. A separate [scratch-only interactive profile](INTERACTIVE-SANDBOX.md) supports approved launch, bounded normal-exit/timeout handling, and distinct session reports excluded from assessment matrices. The transfer variant now binds one immutable text input, verifies the receipt-bound output artifact, and offers explicit export to a new host file. Production timeout and controlled-close trials pass; the September 13 human edit/save/close trial also passed with verified retained report, bundle association, explicit export, and cleanup. The next benchmark is an inspectable packaging recipe informed by these retained observations. Installer acquisition and universal conversion remain outside this slice.
+The first [versioned Sandbox bundle](SANDBOX-BUNDLES.md) now exports the fixed Notepad++ MSI profile with exact payload/project/scenario hashes, runtime/data contract, and source-intake provenance. Relocation, fresh protected import, normal preparation/approval, and a fresh-worker document workflow have passed. Changed payloads and unsupported manifest fields are rejected. Package JSON/Markdown reports now match that manifest and exact import receipt to reverified terminal run evidence, retaining failures and evidence gaps. A separate [scratch-only interactive profile](INTERACTIVE-SANDBOX.md) supports approved launch, bounded normal-exit/timeout handling, and distinct session reports excluded from assessment matrices. The transfer variant now binds one immutable text input, verifies the receipt-bound output artifact, and offers explicit export to a new host file. Production timeout and controlled-close trials pass; the September 13 human edit/save/close trial also passed with verified retained report, bundle association, explicit export, and cleanup. Recipe inspection and evidence-bound approved replay now build on these retained observations; the next delivery milestone is the guided administrator workflow. Installer acquisition and universal conversion remain outside this slice.
 
 ## Benchmark 3 - first packaging capability: recipe and reusable launch
 

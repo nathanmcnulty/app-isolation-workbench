@@ -16,7 +16,7 @@ Reporting never acquires a provider lease, invokes a provider, repairs a journal
 
 ## Recorded execution context
 
-Newly rendered completed assessment reports use `v0alpha10` and include
+Newly rendered completed assessment reports use `v0alpha11` and include
 `recordedExecution`: the verified historical provider binary identity, package
 identity, CLI protocol, and normalized requested Sandbox configuration hash.
 The context is extracted inside the existing held-workspace verification; it is
@@ -25,6 +25,11 @@ are not queried from today's machine. Historical guest observations retain their
 own versions and optional coverage; the new report envelope does not fill any
 missing guest measurement. Interactive and unsuccessful report schemas are
 unchanged.
+
+Profile-bound preparations use v0alpha6 and add `launchProfileSha256` to the
+completed report. It identifies the profile bound to the recorded approval;
+historical reporting does not reopen that profile's source trials. Preparations
+without a profile omit the field. See [approved replay](VALIDATED-SANDBOX-LAUNCH.md).
 
 Fresh automated MSI preparations require `standardUserAclV1` in preparation
 v0alpha5 and guest-request v0alpha2. The requirement is bound to the approved
