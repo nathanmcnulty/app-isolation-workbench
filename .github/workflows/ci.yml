@@ -36,14 +36,14 @@ jobs:
           path: ~/.cargo/bin/cargo-audit.exe
           key: cargo-audit-${{ runner.os }}-${{ runner.arch }}-0.22.2
 
+      - name: Run repository verification
+        shell: pwsh
+        run: .\scripts\verify.ps1
+
       - name: Install cargo-audit
         if: steps.cargo-audit-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: cargo install cargo-audit --version 0.22.2 --locked
-
-      - name: Run repository verification
-        shell: pwsh
-        run: .\scripts\verify.ps1
 
       - name: Audit dependencies
         shell: pwsh

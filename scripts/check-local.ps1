@@ -75,6 +75,16 @@ try {
         }
         if (!$record.passed) {
             $record.failure = $failure
+            # Hosted runners are ephemeral: paths alone lose the actual panic
+            # after the job exits. Preserve failed-check logs in the job output.
+            if ($env:GITHUB_ACTIONS -eq 'true') {
+                foreach ($path in @($stderr, $stdout)) {
+                    if (Test-Path -LiteralPath $path) {
+                        Write-Host "Failed $name log: $path"
+                        Get-Content -LiteralPath $path | Write-Host
+                    }
+                }
+            }
             $record.tail = @(foreach ($path in @($stderr, $stdout)) {
                 if (Test-Path -LiteralPath $path) {
                     Get-Content -LiteralPath $path -Tail 8 | ForEach-Object { $_.Substring(0, [Math]::Min(300, $_.Length)) }
