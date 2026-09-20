@@ -56,6 +56,9 @@ visible recipe review, exact-plan terminal approval, execution, and retained
 JSON/Markdown reporting. Product assets bind the fixed local-settings project,
 static guest, and optional approved replay profile. A real profile-bound preview
 package was assembled with a receipt; no Sandbox was run for that assembly.
+Assembly now verifies the profile's application, project, scenario, and guest
+bindings. The runnable replay package uses the exact retained validated guest;
+an incompatible freshly built release guest was rejected before receipt.
 The public package also passed the occupied-session negative case with a specific
 retained readiness path and no intake/provider mutation. Another task's session
 `8fd60024-30fd-41d7-8fa8-04571a405184` was still present, so the approved replay

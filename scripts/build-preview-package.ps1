@@ -3,6 +3,8 @@ param(
     [Parameter(Mandatory)]
     [ValidateNotNullOrEmpty()]
     [string]$OutputDirectory,
+    [string]$GuestAgent,
+    [string]$GuestAgentSha256,
     [string]$LaunchProfile,
     [string]$LaunchProfileSha256
 )
@@ -45,10 +47,19 @@ try {
     & cargo build --locked --release -p aiw-cli
     if ($LASTEXITCODE -ne 0) { throw 'release aiw-cli build failed' }
 
-    $guestBuildText = & (Join-Path $PSScriptRoot 'build-guest-agent.ps1') -Profile release | Out-String
-    if ($LASTEXITCODE -ne 0) { throw 'release guest-agent build failed' }
-    $guestBuild = $guestBuildText | ConvertFrom-Json
-    $guestSource = [IO.Path]::GetFullPath([string]$guestBuild.artifact)
+    if ($null -ne $GuestAgent -xor $null -ne $GuestAgentSha256) { throw 'GuestAgent and GuestAgentSha256 must be supplied together' }
+    if ($GuestAgent) {
+        Assert-LowerSha256 $GuestAgentSha256 'GuestAgentSha256'
+        $guestSource = [IO.Path]::GetFullPath($GuestAgent)
+        if (-not (Test-Path -LiteralPath $guestSource -PathType Leaf)) { throw "guest-agent artifact is missing: $guestSource" }
+        $actualGuestHash = (Get-FileHash -LiteralPath $guestSource -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actualGuestHash -ne $GuestAgentSha256) { throw 'guest-agent bytes do not match the independently retained hash' }
+    } else {
+        $guestBuildText = & (Join-Path $PSScriptRoot 'build-guest-agent.ps1') -Profile release | Out-String
+        if ($LASTEXITCODE -ne 0) { throw 'release guest-agent build failed' }
+        $guestBuild = $guestBuildText | ConvertFrom-Json
+        $guestSource = [IO.Path]::GetFullPath([string]$guestBuild.artifact)
+    }
     if (-not (Test-Path -LiteralPath $guestSource -PathType Leaf)) { throw "guest-agent artifact is missing: $guestSource" }
     if (-not (Test-Path -LiteralPath $cliSource -PathType Leaf)) { throw "release CLI artifact is missing: $cliSource" }
 
@@ -78,6 +89,16 @@ try {
     $manifest.projectSha256 = (Get-FileHash -LiteralPath (Join-Path $packagedProductRoot 'project.yaml') -Algorithm SHA256).Hash.ToLowerInvariant()
     $manifest.guestAgentSha256 = (Get-FileHash -LiteralPath (Join-Path $packagedProductRoot 'tools\aiw-guest-agent.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($profileSource) {
+        $compiledText = & (Join-Path $output 'aiw.exe') provider compile-msi-scenario `
+            --project (Join-Path $packagedProductRoot 'project.yaml') --scenario ([string]$manifest.scenarioId) | Out-String
+        if ($LASTEXITCODE -ne 0) { throw 'packaged fixed scenario compilation failed' }
+        $compiled = $compiledText | ConvertFrom-Json
+        if ($profile.profile.applicationSha256 -ne $compiled.scenario.applicationSha256 -or
+            $profile.profile.projectRevisionSha256 -ne $compiled.projectRevisionSha256 -or
+            $profile.profile.scenarioSha256 -ne $compiled.scenarioSha256 -or
+            $profile.profile.guestAgentSha256 -ne $manifest.guestAgentSha256) {
+            throw 'launch profile does not bind the assembled application, project, scenario, and guest agent'
+        }
         $manifest | Add-Member -NotePropertyName launchProfilePath -NotePropertyValue 'launch-profile.json' -Force
         $manifest | Add-Member -NotePropertyName launchProfileSha256 -NotePropertyValue $LaunchProfileSha256 -Force
     } else {

@@ -34,7 +34,7 @@ candidates:
       network: blocked
 scenarios:
   - id: install-launch-close
-    description: Install Notepad++, observe it, and close it gracefully.
+    description: Run the document workflow with settings in fixed local application data.
     required: true
     steps:
       - type: install

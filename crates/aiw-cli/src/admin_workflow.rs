@@ -129,6 +129,38 @@ fn packaged_asset_root() -> Result<PathBuf> {
     Ok(parent.join("product").join("notepad-plus-plus"))
 }
 
+fn unsupported_installer_error(
+    evidence_root: &Path,
+    run_id: &str,
+    reason: impl Into<String>,
+) -> anyhow::Error {
+    let reason = reason.into();
+    let diagnostic_path = evidence_root.join("installer-rejection.json");
+    let diagnostic = serde_json::json!({
+        "schemaVersion": "aiw.dev/admin-installer-rejection/v0alpha1",
+        "runId": run_id,
+        "supportedKind": "msi",
+        "reason": reason,
+        "intakeCreated": false,
+        "providerAcquired": false
+    });
+    let diagnostic_status = save_stage(evidence_root, "installer-rejection", &diagnostic)
+        .map(|_| format!("Inspect {}.", diagnostic_path.display()))
+        .unwrap_or_else(|error| format!("Diagnostic publication failed safely: {error}."));
+    anyhow!(AiwError {
+        code: "AIW_ADMIN_UNSUPPORTED_INSTALLER".into(),
+        summary: "installer is not supported by this Notepad++ MSI profile".into(),
+        stage: "adminInstallerInspection".into(),
+        run_id: Some(run_id.into()),
+        retryable: false,
+        remediation: format!(
+            "{diagnostic_status} Select the exact supported MSI bytes; do not guess a recipe for another application type."
+        )
+        .into(),
+        detail: "No protected intake was created and no Sandbox session was acquired.".into(),
+    })
+}
+
 #[cfg(windows)]
 pub fn assess(
     installer: &Path,
@@ -209,9 +241,9 @@ pub fn assess(
         }));
     }
     let held = aiw_windows_platform::HeldApplicationFile::open_with_download_metadata(installer)
-        .map_err(|error| anyhow!("installer is unsupported: {error}"))?;
+        .map_err(|error| unsupported_installer_error(&evidence_root, &run_id, error.to_string()))?;
     let inspection = inspect_application_source(installer, ApplicationInspectionKind::Msi)
-        .map_err(|error| anyhow!("installer is unsupported: {error}"))?;
+        .map_err(|error| unsupported_installer_error(&evidence_root, &run_id, error.to_string()))?;
     save_stage(&evidence_root, "installer-inspection", &inspection)?;
     if inspection.sha256.as_deref() != Some(&held.observation().sha256)
         || inspection.sha256.as_deref() != Some(expected_msi.as_str())
@@ -453,6 +485,22 @@ mod tests {
             launch_profile_sha256: None,
         };
         assert!(manifest.resolve(Path::new(".")).is_err());
+    }
+    #[test]
+    fn unsupported_type_retains_a_specific_rejection_stage() {
+        let root = std::env::temp_dir().join(format!("aiw-admin-rejection-{}", nonce()));
+        std::fs::create_dir(&root).unwrap();
+        let error = unsupported_installer_error(&root, "admin-test", "MSI extension required");
+        let public = error.downcast_ref::<AiwError>().unwrap();
+        assert_eq!(public.code.as_ref(), "AIW_ADMIN_UNSUPPORTED_INSTALLER");
+        assert_eq!(public.run_id.as_deref(), Some("admin-test"));
+        let retained: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(root.join("installer-rejection.json")).unwrap())
+                .unwrap();
+        assert_eq!(retained["supportedKind"], "msi");
+        assert_eq!(retained["intakeCreated"], false);
+        assert_eq!(retained["providerAcquired"], false);
+        std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn non_windows_route_cannot_start_provider() {

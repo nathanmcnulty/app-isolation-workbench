@@ -75,9 +75,18 @@ The deterministic preview assembly is prepared with
 the release CLI and static guest agent, copies the fixed Notepad++ project, and
 publishes a package-local manifest with exact project and guest hashes. A
 validated launch profile can be supplied with its canonical `profileSha256`
-identity. `receipt.json`
+identity. Profile-bound replay assembly may also supply the independently
+retained exact guest binary and SHA-256 that the profile binds; assembly rejects
+all profile/project/scenario/guest mismatches. `receipt.json`
 is written last and binds the package inventory; this assembles release inputs
 but does not prove clean-host installation, signing, or Sandbox execution.
+
+The profile-bound package assembled on 2026-09-20 uses exact retained guest
+SHA-256 `121daa7e6b93212037813dea948675431d1a1680bbb106cd396a2647454cfee5`,
+profile `d8d7e4daddda76c535e6da1f897c210fa6b0798275640777747cea3df025d987`,
+and receipt `b29693291be6779d488bff5d5a8f8d6257a12851d124202ec74d667032b0118a`.
+Assembly rejected the current release guest because it did not match the
+validated profile before publishing a receipt.
 
 The public packaged route exercised the occupied-session acceptance case on
 2026-09-20. It returned `AIW_ADMIN_HOST_NOT_READY`, named the retained
