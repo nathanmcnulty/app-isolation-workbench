@@ -779,7 +779,8 @@ fn reconcile_bound_session(
 
 pub(super) fn assess_windows_sandbox() -> WindowsSandboxReadiness {
     let mut result = empty_readiness();
-    result.os_build = os_build();
+    result.os_version = observe_windows_version().ok();
+    result.os_build = result.os_version.as_ref().map(|os| u32::from(os.build));
     result.virtualization = if virtualization_firmware_enabled() {
         ReadinessState::Available
     } else {
@@ -820,6 +821,7 @@ fn empty_readiness() -> WindowsSandboxReadiness {
         schema_version: "aiw.dev/windows-sandbox-readiness/v0alpha2".to_owned(),
         supported: false,
         os_build: None,
+        os_version: None,
         process_architecture: std::env::consts::ARCH.to_owned(),
         virtualization: ReadinessState::Unknown,
         sandbox_feature: ReadinessState::Unknown,
@@ -1911,13 +1913,15 @@ fn observed_alias() -> Option<String> {
     alias.exists().then(|| alias.to_string_lossy().into_owned())
 }
 
-fn os_build() -> Option<u32> {
+pub fn observe_windows_version() -> Result<aiw_probe::WindowsVersionObservation, String> {
     let value = AnalyticsInfo::VersionInfo()
-        .ok()?
+        .map_err(|e| format!("Windows version information unavailable: {e}"))?
         .DeviceFamilyVersion()
-        .ok()?;
-    let packed = value.to_string().parse::<u64>().ok()?;
-    Some(((packed >> 16) & 0xffff) as u32)
+        .map_err(|e| format!("Windows version value unavailable: {e}"))?;
+    aiw_probe::WindowsVersionObservation::from_device_family_version(
+        &value.to_string(),
+        std::env::consts::ARCH,
+    )
 }
 
 fn virtualization_firmware_enabled() -> bool {

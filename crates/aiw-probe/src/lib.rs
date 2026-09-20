@@ -980,6 +980,8 @@ pub struct WindowsSandboxReadiness {
     pub schema_version: String,
     pub supported: bool,
     pub os_build: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub os_version: Option<WindowsVersionObservation>,
     pub process_architecture: String,
     pub virtualization: ReadinessState,
     pub sandbox_feature: ReadinessState,
@@ -999,6 +1001,66 @@ pub struct WindowsSandboxReadiness {
     pub current_session_ids: Vec<String>,
     pub blockers: Vec<String>,
     pub warnings: Vec<String>,
+}
+
+/// Windows-reported version at observation time, not an environment equivalence verdict.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WindowsVersionObservation {
+    pub major: u16,
+    pub minor: u16,
+    pub build: u16,
+    pub revision: u16,
+    pub observer_architecture: String,
+}
+
+impl WindowsVersionObservation {
+    pub fn from_device_family_version(
+        value: &str,
+        observer_architecture: &str,
+    ) -> Result<Self, String> {
+        let packed = value.parse::<u64>().map_err(|e| e.to_string())?;
+        let observation = Self {
+            major: (packed >> 48) as u16,
+            minor: (packed >> 32) as u16,
+            build: (packed >> 16) as u16,
+            revision: packed as u16,
+            observer_architecture: observer_architecture.into(),
+        };
+        observation.validate()?;
+        Ok(observation)
+    }
+    pub fn validate(&self) -> Result<(), String> {
+        if self.major == 0
+            || self.build == 0
+            || !matches!(
+                self.observer_architecture.as_str(),
+                "x86" | "x86_64" | "aarch64"
+            )
+        {
+            return Err("invalid Windows version observation".into());
+        }
+        Ok(())
+    }
+}
+
+#[test]
+fn windows_version_decoding_is_bounded() {
+    let packed = (10_u64 << 48) | (1_u64 << 32) | (28000_u64 << 16) | 123;
+    let value =
+        WindowsVersionObservation::from_device_family_version(&packed.to_string(), "x86_64")
+            .unwrap();
+    assert_eq!(
+        (value.major, value.minor, value.build, value.revision),
+        (10, 1, 28000, 123)
+    );
+    for invalid in ["0", "invalid", "18446744073709551616"] {
+        assert!(WindowsVersionObservation::from_device_family_version(invalid, "x86_64").is_err());
+    }
+    assert!(
+        WindowsVersionObservation::from_device_family_version(&packed.to_string(), "unknown")
+            .is_err()
+    );
 }
 
 #[must_use]
@@ -1043,6 +1105,7 @@ pub fn assess_windows_sandbox() -> WindowsSandboxReadiness {
         schema_version: "aiw.dev/windows-sandbox-readiness/v0alpha1".to_owned(),
         supported: false,
         os_build: None,
+        os_version: None,
         process_architecture: "unknown".to_owned(),
         virtualization: ReadinessState::Unknown,
         sandbox_feature: ReadinessState::Unknown,

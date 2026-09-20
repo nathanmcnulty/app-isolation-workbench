@@ -377,7 +377,7 @@ fn exercise(bundle: bool) {
     assert_eq!(report.download_metadata_policy, expected_policy);
     assert_eq!(
         report.schema_version,
-        "aiw.dev/wsb-msi-assessment-report/v0alpha8"
+        "aiw.dev/wsb-msi-assessment-report/v0alpha9"
     );
     if report.download_metadata_policy.is_some() {
         assert!(

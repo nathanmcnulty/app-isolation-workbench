@@ -273,7 +273,6 @@ impl ImportedMsiRegistryEvidence {
             || self.request_sha256 != request.request_sha256
             || self.scenario_sha256 != request.scenario_sha256
             || self.user_sid != context.context.user_sid
-            || context.schema_version != crate::IMPORTED_MSI_RUNTIME_CONTEXT_SCHEMA_VERSION
             || context.run_id != request.run_id
             || context.sandbox_id != request.sandbox_id
             || context.request_sha256 != request.request_sha256
@@ -285,6 +284,7 @@ impl ImportedMsiRegistryEvidence {
                     .into(),
             );
         }
+        context.validate_version()?;
         context.context.validate()?;
         self.before_install.validate()?;
         self.after_install.validate()?;
@@ -560,6 +560,7 @@ mod tests {
         result: &ImportedMsiScenarioResult,
     ) -> ImportedMsiRuntimeContext {
         ImportedMsiRuntimeContext {
+            guest_os_version: None,
             schema_version: crate::IMPORTED_MSI_RUNTIME_CONTEXT_SCHEMA_VERSION.into(),
             run_id: request.run_id.clone(),
             sandbox_id: request.sandbox_id.clone(),
@@ -840,6 +841,37 @@ mod tests {
                 Some(&context)
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn registry_verifier_accepts_os_context_and_rejects_version_downgrades() {
+        let request = v5_request();
+        let result = ImportedMsiScenarioResult::succeeded(&request, 0, 42, 0).unwrap();
+        let mut context = runtime(&request, &result);
+        context.schema_version = crate::IMPORTED_MSI_ENVIRONMENT_CONTEXT_SCHEMA_VERSION.into();
+        context.guest_os_version = Some(aiw_probe::WindowsVersionObservation {
+            major: 10,
+            minor: 0,
+            build: 28000,
+            revision: 2956,
+            observer_architecture: "x86_64".into(),
+        });
+        let payload = serde_json::to_value(evidence(&request, &result, &context)).unwrap();
+        let (bytes, root) = log_bytes(vec![("aiw-guest-agent", payload)]);
+        assert!(
+            verify_msi_registry_evidence(&bytes, &root, &request, &result, Some(&context))
+                .unwrap()
+                .is_some()
+        );
+        context.schema_version = crate::IMPORTED_MSI_RUNTIME_CONTEXT_SCHEMA_VERSION.into();
+        assert!(
+            verify_msi_registry_evidence(&bytes, &root, &request, &result, Some(&context)).is_err()
+        );
+        context.schema_version = crate::IMPORTED_MSI_ENVIRONMENT_CONTEXT_SCHEMA_VERSION.into();
+        context.guest_os_version = None;
+        assert!(
+            verify_msi_registry_evidence(&bytes, &root, &request, &result, Some(&context)).is_err()
         );
     }
 

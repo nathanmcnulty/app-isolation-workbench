@@ -1,11 +1,11 @@
 # Working state
 
-Updated 2026-09-13. This is a compact handoff, not a run receipt or authorization.
+Updated 2026-09-19. This is a compact handoff, not a run receipt or authorization.
 
 ## Where to resume
 
 - Active development branch: `codex/wsb-typed-scenarios`. Locate it with `git worktree list` if this checkout differs. The main checkout has historically been behind this worktree.
-- Latest slice: `run report-wsb-settings-comparison` binds the three retained settings trials through the production report reader; the trial driver uses that result. The comparison now requires matching verified historical provider/package/protocol identities and normalized requested configuration. OS equivalence and effective boundary coverage remain unmeasured. The fixed Notepad++ local-settings adaptation adds an exact typed launch argument, standard-user directory preparation, and a retained baseline/candidate/relocated-replay driver. See PACKAGING-RECIPES.md for outcomes and development failures. `package inspect-wsb-msi-recipe` exposes a verified pre-import preparation as JSON/Markdown: source/provider/agent bindings, fixed launch, exact Sandbox XML, data lifetime, and gaps. See PACKAGING-RECIPES.md. The preceding production human edit/save/close trial passed on September 13 with retained report, bundle association, exact export, unchanged input, and cleanup verified; see INTERACTIVE-SANDBOX.md. Use `scripts/work-status.ps1` for current HEAD and dirty files.
+- Latest slice: `run report-wsb-settings-comparison` binds the three retained settings trials through the production report reader; the trial driver uses that result. The comparison now requires matching verified historical provider/package/protocol identities and normalized requested configuration. Fresh preparations and guest runtime evidence now record Windows versions; comparison v0alpha3 distinguishes matched recorded versions from unmeasured historical coverage. Full environment equivalence and effective boundary coverage remain unmeasured. The fixed Notepad++ local-settings adaptation adds an exact typed launch argument, standard-user directory preparation, and a retained baseline/candidate/relocated-replay driver. See PACKAGING-RECIPES.md for outcomes and development failures. `package inspect-wsb-msi-recipe` exposes a verified pre-import preparation as JSON/Markdown: source/provider/agent bindings, fixed launch, exact Sandbox XML, data lifetime, and gaps. See PACKAGING-RECIPES.md. The preceding production human edit/save/close trial passed on September 13 with retained report, bundle association, exact export, unchanged input, and cleanup verified; see INTERACTIVE-SANDBOX.md. Use `scripts/work-status.ps1` for current HEAD and dirty files.
 - Goal: report tested functions for exact application bytes and measured isolation configurations, then use the evidence for adaptation/repackaging. Free community project; feedback collection is not a development gate.
 
 ## Implemented versus exploratory
@@ -18,7 +18,7 @@ Updated 2026-09-13. This is a compact handoff, not a run receipt or authorizatio
 
 ## Next coherent slice
 
-Recipe inspection and the fixed local-settings adaptation are implemented; Benchmark 3 remains incomplete. The retained settings comparison is implemented. Recorded provider and requested configuration comparison are implemented. Next integrate affected-boundary canaries and record host/guest OS identity for fresh trials before treating the reusable profile as validated. Track the retained transient edit timeout and non-reproduced bundle import failure; do not describe the trial driver as reliably unattended yet. Preserve the startup boundary: cold initialization took about 13 minutes and created a late session after timeout; that exact session was stopped. New uncertain starts retain recovery-required state until an observed exact stop; historical false-clean records require manual corroboration. See INTERACTIVE-SANDBOX.md for evidence and migration limits.
+Recipe inspection and the fixed local-settings adaptation are implemented; Benchmark 3 remains incomplete. The retained settings comparison is implemented. Recorded provider and requested configuration comparison are implemented. Next integrate a required app-token ACL control with a project-owned protected resource before treating the reusable profile as validated. Host/guest version capture passed an uninterrupted three-worker baseline/candidate/relocated replay on September 19, including registry verification and cleanup; see PACKAGING-RECIPES.md. Track the retained transient edit timeout and non-reproduced bundle import failure; do not describe the trial driver as reliably unattended yet. Preserve the startup boundary: cold initialization took about 13 minutes and created a late session after timeout; that exact session was stopped. New uncertain starts retain recovery-required state until an observed exact stop; historical false-clean records require manual corroboration. See INTERACTIVE-SANDBOX.md for evidence and migration limits.
 
 ## Read only what the slice needs
 
@@ -35,3 +35,11 @@ Recipe inspection and the fixed local-settings adaptation are implemented; Bench
 ## Operational constraints
 
 Use local checks first and CI sparingly. Push completed authorized changes; avoid incidental workflow triggers. Installer corpus is locally available in `%USERPROFILE%\Downloads\installers`; original files are not execution authority. Reverify retained intake/artifact bindings when used. Keep research evidence outside production report sets. Never install on the host or remove unrelated worktrees/evidence.
+
+September 19 local storage: E: filled during final compilation. The active
+worktree's incremental cache was preserved at
+`%LOCALAPPDATA%\Temp\aiw-incremental-preserved-20260919`. Free space recovered
+after a delay. Validation moved to `CARGO_TARGET_DIR=%LOCALAPPDATA%\Temp\aiw-os-validation-20260919`
+with `CARGO_INCREMENTAL=0`, `CARGO_PROFILE_DEV_DEBUG=0`, and
+`CARGO_PROFILE_TEST_DEBUG=0`. Check free space before another default-target
+build. Retained trials and static guest artifacts were preserved.

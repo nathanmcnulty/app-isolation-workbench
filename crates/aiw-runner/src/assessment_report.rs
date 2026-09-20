@@ -86,6 +86,8 @@ pub struct WsbMsiAssessmentReport {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WsbMsiRecordedExecution {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_os_version: Option<aiw_probe::WindowsVersionObservation>,
     pub provider: aiw_probe::BinaryIdentity,
     pub provider_package: aiw_probe::WindowsPackageIdentity,
     pub provider_protocol: aiw_probe::WindowsSandboxCliProtocol,
@@ -101,6 +103,7 @@ fn recorded_execution(
         .validate()
         .map_err(|e| RunnerError::Preparation(e.to_string()))?;
     Ok(WsbMsiRecordedExecution {
+        host_os_version: artifacts.receipt.host_os_version.clone(),
         provider: artifacts.receipt.provider.clone(),
         provider_package: artifacts.receipt.provider_package.clone(),
         provider_protocol: artifacts.receipt.provider_protocol.clone(),
@@ -1040,7 +1043,7 @@ pub(crate) fn report_windows_sandbox_msi_run_bound(
     }
     Ok(WsbMsiRunReport::CompletedAssessment(Box::new(
         WsbMsiAssessmentReport {
-            schema_version: "aiw.dev/wsb-msi-assessment-report/v0alpha8".into(),
+            schema_version: "aiw.dev/wsb-msi-assessment-report/v0alpha9".into(),
             recorded_execution: recorded_execution(&artifacts)?,
             run_id: run_id.to_owned(),
             project_revision_sha256: artifacts.receipt.project_revision_sha256,

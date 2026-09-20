@@ -11,6 +11,8 @@ pub const IMPORTED_MSI_RUNTIME_CONTEXT_SCHEMA_VERSION: &str =
     "aiw.dev/windows-sandbox-imported-msi-runtime-context/v0alpha1";
 pub const IMPORTED_MSI_RUNTIME_CONTEXT_SCHEMA: &str = IMPORTED_MSI_RUNTIME_CONTEXT_SCHEMA_VERSION;
 pub const IMPORTED_MSI_RUNTIME_CONTEXT_EVENT: &str = "importedMsiRuntimeContext";
+pub const IMPORTED_MSI_ENVIRONMENT_CONTEXT_SCHEMA_VERSION: &str =
+    "aiw.dev/windows-sandbox-imported-msi-runtime-context/v0alpha2";
 pub const STANDARD_USER_ACCOUNT_NAME: &str = "AiwStandardUser";
 pub const STANDARD_USER_PROFILE_PATH: &str = r"C:\Users\AiwStandardUser";
 
@@ -76,9 +78,18 @@ pub struct ImportedMsiRuntimeContext {
     pub scenario_sha256: String,
     pub process_id: u32,
     pub context: StandardUserRuntimeContext,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guest_os_version: Option<aiw_probe::WindowsVersionObservation>,
 }
 
 impl ImportedMsiRuntimeContext {
+    pub(crate) fn validate_version(&self) -> Result<(), String> {
+        match (&self.guest_os_version, self.schema_version.as_str()) {
+            (None, IMPORTED_MSI_RUNTIME_CONTEXT_SCHEMA_VERSION) => Ok(()),
+            (Some(os), IMPORTED_MSI_ENVIRONMENT_CONTEXT_SCHEMA_VERSION) => os.validate(),
+            _ => Err("runtime context version does not match OS coverage".into()),
+        }
+    }
     pub fn new(
         request: &ImportedMsiGuestRequest,
         result: &ImportedMsiScenarioResult,
@@ -93,6 +104,7 @@ impl ImportedMsiRuntimeContext {
             scenario_sha256: request.scenario_sha256.clone(),
             process_id: result.launch_process_id,
             context,
+            guest_os_version: None,
         };
         value.validate_for(request, result, application_token)?;
         Ok(value)
@@ -108,9 +120,9 @@ impl ImportedMsiRuntimeContext {
             .validate_for_request(request)
             .map_err(|e| e.to_string())?;
         application_token.validate_for(request, result)?;
+        self.validate_version()?;
         let token = &application_token.token;
         if !request.scenario.requires_standard_user()
-            || self.schema_version != IMPORTED_MSI_RUNTIME_CONTEXT_SCHEMA_VERSION
             || self.run_id != request.run_id
             || self.sandbox_id != request.sandbox_id
             || self.request_sha256 != request.request_sha256
@@ -303,6 +315,33 @@ mod tests {
             administrators_enabled: false,
         };
         assert!(context.validate().is_err());
+    }
+
+    #[test]
+    fn os_version_requires_versioned_bound_context() {
+        let request = request();
+        let result = ImportedMsiScenarioResult::succeeded(&request, 0, 42, 0).unwrap();
+        let token = ImportedMsiApplicationToken::new(&request, &result, token(42)).unwrap();
+        let mut event =
+            ImportedMsiRuntimeContext::new(&request, &result, &token, context()).unwrap();
+        event.guest_os_version = Some(aiw_probe::WindowsVersionObservation {
+            major: 10,
+            minor: 0,
+            build: 28000,
+            revision: 1,
+            observer_architecture: "x86_64".into(),
+        });
+        assert!(event.validate_for(&request, &result, &token).is_err());
+        event.schema_version = IMPORTED_MSI_ENVIRONMENT_CONTEXT_SCHEMA_VERSION.into();
+        let (bytes, root) = log_bytes(vec![serde_json::to_value(&event).unwrap()]);
+        let verified = verify_msi_runtime_context(&bytes, &root, &request, &result, Some(&token))
+            .unwrap()
+            .unwrap();
+        assert_eq!(verified.guest_os_version, event.guest_os_version);
+        event.guest_os_version.as_mut().unwrap().build = 0;
+        assert!(event.validate_for(&request, &result, &token).is_err());
+        event.guest_os_version = None;
+        assert!(event.validate_for(&request, &result, &token).is_err());
     }
 
     #[test]

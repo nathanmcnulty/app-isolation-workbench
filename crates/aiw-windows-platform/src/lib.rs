@@ -6,6 +6,7 @@ use aiw_probe::WindowsSandboxReadiness;
 pub use windows_platform::{
     CanonicalSandboxId, WindowsSandboxExecutionLease, WindowsSandboxInvocationError,
     WsbConnectObservation, WsbListObservation, WsbStartObservation, WsbStopObservation,
+    observe_windows_version,
 };
 
 #[cfg(windows)]
@@ -231,6 +232,7 @@ mod platform {
             schema_version: "aiw.dev/windows-sandbox-readiness/v0alpha2".to_owned(),
             supported: false,
             os_build: None,
+            os_version: None,
             process_architecture: std::env::consts::ARCH.to_owned(),
             virtualization: ReadinessState::Unknown,
             sandbox_feature: ReadinessState::Missing,

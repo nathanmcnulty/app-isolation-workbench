@@ -330,9 +330,16 @@ fn execute_imported_msi_request(request: &ImportedMsiGuestRequest) -> Result<()>
         payload: serde_json::to_value(&token)?,
     })?;
     let runtime = if let Some(context) = observation.standard_user_context {
-        let runtime =
+        let mut runtime =
             aiw_provider_wsb::ImportedMsiRuntimeContext::new(request, &result, &token, context)
                 .map_err(anyhow::Error::msg)?;
+        runtime.guest_os_version =
+            Some(aiw_windows_platform::observe_windows_version().map_err(anyhow::Error::msg)?);
+        runtime.schema_version =
+            aiw_provider_wsb::IMPORTED_MSI_ENVIRONMENT_CONTEXT_SCHEMA_VERSION.into();
+        runtime
+            .validate_for(request, &result, &token)
+            .map_err(anyhow::Error::msg)?;
         evidence.append(EvidenceEvent {
             observed_utc: "guest-agent-time-not-trusted".to_owned(),
             kind: aiw_provider_wsb::IMPORTED_MSI_RUNTIME_CONTEXT_EVENT.to_owned(),

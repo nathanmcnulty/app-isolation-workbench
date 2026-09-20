@@ -114,7 +114,11 @@ comparison. Its result describes the fixed settings adaptation and measured
 workflow; it is not launch authority or an effective-isolation verdict. The v0alpha2
 comparison requires matching recorded provider binary/package/protocol identities
 and normalized requested Sandbox configuration. It carries those identities per
-trial. OS equivalence and effective boundary enforcement stay explicitly unmeasured. The trial driver now uses this command for
+trial. Comparison v0alpha3 additionally rejects recorded host/guest OS version
+differences or partial guest coverage. `matchedRecordedVersion` requires all three
+host and guest observations; historical absence remains `unmeasured`. The fresh
+trial driver requires this version coverage. Complete environment equivalence
+and effective boundary enforcement remain unmeasured. The trial driver now uses this command for
 its final `comparison.json`; historical script-only comparisons retain their
 original observation schema.
 
@@ -145,7 +149,58 @@ or configuration drift and show that normalization preserves resource and mappin
 suffix differences while rejecting outside mappings. OS equivalence and actual
 boundary enforcement remain unmeasured.
 
+### Recorded OS versions and fresh replay, 2026-09-19
+
+The complete driver passed uninterrupted in three fresh workers:
+`%TEMP%\aiw-local-settings-12e8f7b0e7604106add72305a1c30f2d`.
+Static guest SHA-256 was
+`a979b8b51680fb6fdde9615c307c3df86ffe30147ddc368df2dc9ba430775331`.
+Each trial passed document open/edit/save/close, bound saved bytes, registry
+verification, and exact-session cleanup. The final provider list was empty.
+
+| Trial | Run ID | Observed config.xml location |
+|---|---|---|
+| Baseline | `baseline-1d27ff088d74436283194d09a5ce27aa` | Roaming application data |
+| Candidate | `candidate-8b1975719bbb47b9b97a53e1b8974dd7` | Local application data |
+| Relocated replay | `replay-07ce0c0a2c844da296a8c0438a6b0346` | Local application data |
+
+All three recorded host and guest version `10.0.28000.2956` with x86_64
+observers. Comparison v0alpha3 reports `matchedRecordedVersion`; effective
+isolation and boundary canaries remain unmeasured. Each `config.xml` was 9,184
+bytes with SHA-256
+`f59bbed50f1d00f798fc09caa24911016ae07c1c26681e8442c09a532a9dff37`.
+
+Final retained verification is in `%TEMP%\aiw-os-final-proof-20260919`.
+The fresh comparison was deterministic, five altered selectors were rejected,
+all 75 workspace files retained their hashes/inventory, and the comparison and
+all three re-rendered v0alpha9 assessment reports passed their generated schemas.
+
+Historical verification in
+`%TEMP%\aiw-os-retained-f1bed0b4929e43e59f6bb000c2d71015` produced identical
+repeated comparison output, rejected five altered inputs without partial output,
+passed the generated JSON schema, and preserved all 75 workspace files and
+hashes. Its old OS observations remain absent and coverage stays `unmeasured`.
+
+Local validation passed the workspace tests outside the native crate, then all
+155 native tests in a separate rerun with a short private TEMP root. The initial
+native attempt rejected the shared TEMP directory's excessive entry count;
+the first private-root layout also exposed existing Win32 path-length limits.
+Production guards were unchanged. The harness now creates short private roots.
+Doctests, warnings-as-errors Clippy, Rust 1.85 all-target checks, formatting,
+PowerShell parsing, and governance checks passed. Final native/compiler logs:
+`%TEMP%\aiw-local-checks-c2f7d70a-1f41-4006-892a-bac6a2eff360`.
+Hosted CI was not run.
+
 ### Development failures retained
+
+The first OS-capture trial on September 19 retained evidence in
+`%TEMP%\aiw-local-settings-7b016eb355e840a9a19cc1925e741e23`.
+Baseline completion was rejected because the registry verifier still required
+runtime context v0alpha1 while the guest emitted the OS-bearing v0alpha2.
+The verifier now shares the runtime context's version/coverage validation;
+regression checks accept v0alpha2 and reject missing OS data and version
+downgrades. The failed report records verified cleanup, and the provider list
+was empty afterward. This rejected trial is not a completed assessment.
 
 The first trial in `%TEMP%\aiw-local-settings-22d32e8a4fe644169739d2570b48a7bd`
 passed baseline but failed candidate document readiness. The pinned Notepad++

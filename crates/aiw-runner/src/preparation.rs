@@ -136,6 +136,8 @@ pub struct WsbPreparationReceipt {
     pub workspace: WorkspaceBindingEvidence,
     pub workspace_identity_sha256: String,
     pub readiness_schema_version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_os_version: Option<aiw_probe::WindowsVersionObservation>,
     pub provider: BinaryIdentity,
     pub provider_package: WindowsPackageIdentity,
     pub provider_catalog: CatalogTrustIdentity,
@@ -312,7 +314,25 @@ impl WsbBambuApplication {
 }
 
 impl WsbPreparationReceipt {
+    pub(crate) fn verify_host_os_version(
+        &self,
+        current: Option<&aiw_probe::WindowsVersionObservation>,
+    ) -> Result<(), WsbPreparationError> {
+        if self
+            .host_os_version
+            .as_ref()
+            .is_some_and(|recorded| Some(recorded) != current)
+        {
+            return Err(WsbPreparationError::Contract(
+                "host OS version changed since preparation or could not be reobserved".into(),
+            ));
+        }
+        Ok(())
+    }
     pub fn validate(&self) -> Result<(), WsbPreparationError> {
+        if let Some(os) = &self.host_os_version {
+            os.validate().map_err(WsbPreparationError::Contract)?;
+        }
         let expected_schema = if self.bambu.is_some() {
             WSB_BAMBU_PREPARATION_RECEIPT_SCHEMA_VERSION
         } else if self.msi.is_some() {
@@ -631,6 +651,7 @@ pub fn build_wsb_preparation(
         workspace: workspace.clone(),
         workspace_identity_sha256,
         readiness_schema_version: readiness.schema_version.clone(),
+        host_os_version: readiness.os_version.clone(),
         provider,
         provider_package: trusted.package.clone(),
         provider_catalog: trusted.catalog.clone(),
@@ -2543,6 +2564,7 @@ mod tests {
             schema_version: READINESS_SCHEMA.to_owned(),
             supported: true,
             os_build: Some(26_100),
+            os_version: None,
             process_architecture: "x86_64".to_owned(),
             virtualization: ReadinessState::Available,
             sandbox_feature: ReadinessState::Available,
@@ -2750,6 +2772,33 @@ mod tests {
             "now",
         )
         .unwrap();
+        let mut invalid_os = artifacts.clone();
+        invalid_os.receipt.host_os_version = Some(aiw_probe::WindowsVersionObservation {
+            major: 10,
+            minor: 0,
+            build: 0,
+            revision: 1,
+            observer_architecture: "x86_64".into(),
+        });
+        assert!(invalid_os.validate().is_err());
+        invalid_os.receipt.host_os_version.as_mut().unwrap().build = 28000;
+        let recorded = invalid_os.receipt.host_os_version.clone().unwrap();
+        assert!(artifacts.receipt.verify_host_os_version(None).is_ok());
+        assert!(
+            invalid_os
+                .receipt
+                .verify_host_os_version(Some(&recorded))
+                .is_ok()
+        );
+        assert!(invalid_os.receipt.verify_host_os_version(None).is_err());
+        let mut changed = recorded;
+        changed.revision += 1;
+        assert!(
+            invalid_os
+                .receipt
+                .verify_host_os_version(Some(&changed))
+                .is_err()
+        );
         let mut lifecycle = artifacts.clone();
         lifecycle.run_plan.lifecycle = RunLifecycleKind::Launch;
         assert!(lifecycle.validate().is_err());

@@ -1014,6 +1014,10 @@ fn start_approved_windows_sandbox_inner(
         layout.run_id(),
     )?);
     let readiness = native_lease.readiness().clone();
+    artifacts
+        .receipt
+        .verify_host_os_version(readiness.os_version.as_ref())
+        .map_err(|error| RunnerError::Preparation(error.to_string()))?;
     let process = NativeWsbProcess {
         state: std::sync::Mutex::new(NativeWsbState {
             lease: native_lease,
@@ -3123,6 +3127,7 @@ mod tests {
             schema_version: READINESS_SCHEMA.to_owned(),
             supported: true,
             os_build: Some(26100),
+            os_version: None,
             process_architecture: "x86_64".to_owned(),
             virtualization: aiw_probe::ReadinessState::Available,
             sandbox_feature: aiw_probe::ReadinessState::Available,

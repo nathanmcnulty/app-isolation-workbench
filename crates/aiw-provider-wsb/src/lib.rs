@@ -81,10 +81,10 @@ pub use registry_observations::{
     verify_msi_registry_evidence,
 };
 pub use runtime_context::{
-    IMPORTED_MSI_RUNTIME_CONTEXT_EVENT, IMPORTED_MSI_RUNTIME_CONTEXT_SCHEMA,
-    IMPORTED_MSI_RUNTIME_CONTEXT_SCHEMA_VERSION, ImportedMsiRuntimeContext,
-    STANDARD_USER_ACCOUNT_NAME, STANDARD_USER_PROFILE_PATH, StandardUserRuntimeContext,
-    verify_imported_msi_runtime_context, verify_msi_runtime_context,
+    IMPORTED_MSI_ENVIRONMENT_CONTEXT_SCHEMA_VERSION, IMPORTED_MSI_RUNTIME_CONTEXT_EVENT,
+    IMPORTED_MSI_RUNTIME_CONTEXT_SCHEMA, IMPORTED_MSI_RUNTIME_CONTEXT_SCHEMA_VERSION,
+    ImportedMsiRuntimeContext, STANDARD_USER_ACCOUNT_NAME, STANDARD_USER_PROFILE_PATH,
+    StandardUserRuntimeContext, verify_imported_msi_runtime_context, verify_msi_runtime_context,
 };
 pub use scenario::{
     COMPILED_MSI_INTERACTIVE_DOCUMENT_SCENARIO_SCHEMA_VERSION,

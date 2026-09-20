@@ -19,7 +19,7 @@ use serde::Serialize;
 
 use crate::WsbMsiReportSetInput;
 
-pub const WSB_SETTINGS_COMPARISON_SCHEMA_VERSION: &str = "aiw.dev/wsb-settings-comparison/v0alpha2";
+pub const WSB_SETTINGS_COMPARISON_SCHEMA_VERSION: &str = "aiw.dev/wsb-settings-comparison/v0alpha3";
 
 /// A retained, fixed-profile settings-placement comparison.
 ///
@@ -58,6 +58,8 @@ pub struct WsbSettingsComparisonTrial {
     pub compiled_profile: String,
     pub settings_file: WsbSettingsComparisonFile,
     pub recorded_execution: crate::WsbMsiRecordedExecution,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guest_os_version: Option<aiw_probe::WindowsVersionObservation>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -85,6 +87,7 @@ pub enum WsbSettingsComparisonCoverage {
     Unmeasured,
     MatchedRecordedIdentity,
     MatchedRequestedConfiguration,
+    MatchedRecordedVersion,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -189,6 +192,14 @@ pub fn report_windows_sandbox_settings_comparison(
         .map_err(|_| "settings comparison required three retained trials".to_owned())?;
     validate_trials(&trials)?;
 
+    let operating_system = if trials.iter().all(|trial| {
+        trial.report.recorded_execution.host_os_version.is_some() && guest_os(trial).is_some()
+    }) {
+        WsbSettingsComparisonCoverage::MatchedRecordedVersion
+    } else {
+        WsbSettingsComparisonCoverage::Unmeasured
+    };
+
     Ok(WsbSettingsComparison {
         schema_version: WSB_SETTINGS_COMPARISON_SCHEMA_VERSION.to_owned(),
         baseline: trial_report(&trials[0]),
@@ -203,7 +214,7 @@ pub fn report_windows_sandbox_settings_comparison(
         },
         boundary_coverage: WsbSettingsBoundaryCoverage {
             provider_identity: WsbSettingsComparisonCoverage::MatchedRecordedIdentity,
-            operating_system: WsbSettingsComparisonCoverage::Unmeasured,
+            operating_system,
             effective_isolation: WsbSettingsComparisonCoverage::Unmeasured,
             network: WsbSettingsComparisonCoverage::Unmeasured,
             host_mappings: WsbSettingsComparisonCoverage::Unmeasured,
@@ -213,7 +224,7 @@ pub fn report_windows_sandbox_settings_comparison(
         },
         limitations: vec![
             "This report reuses three retained fixed workflow observations; it does not authorize execution, packaging, host mappings, or a retry.".into(),
-            "Recorded provider identity and requested configuration match across these runs; current host state, operating-system equivalence, and effective enforcement remain unmeasured.".into(),
+            "Recorded provider identity and requested configuration match. Matching recorded OS versions, when present, do not prove complete environment equivalence or effective enforcement; historical absence remains unmeasured.".into(),
             "Boundary coverage for effective isolation, network, host mappings, registry, descendant processes, and canaries is unmeasured.".into(),
             "The fixed document workflow is not a complete adaptation validation or a general application compatibility verdict.".into(),
         ],
@@ -226,6 +237,14 @@ struct VerifiedTrial {
     compiled: CompiledMsiScenario,
     report: crate::WsbMsiAssessmentReport,
     settings_file: WsbSettingsComparisonFile,
+}
+
+fn guest_os(trial: &VerifiedTrial) -> Option<&aiw_probe::WindowsVersionObservation> {
+    trial
+        .report
+        .standard_user_context
+        .as_ref()
+        .and_then(|context| context.guest_os_version.as_ref())
 }
 
 fn trial_report(trial: &VerifiedTrial) -> WsbSettingsComparisonTrial {
@@ -245,6 +264,7 @@ fn trial_report(trial: &VerifiedTrial) -> WsbSettingsComparisonTrial {
         compiled_profile: trial.compiled.profile.clone(),
         settings_file: trial.settings_file.clone(),
         recorded_execution: trial.report.recorded_execution.clone(),
+        guest_os_version: guest_os(trial).cloned(),
     }
 }
 
@@ -333,6 +353,12 @@ fn validate_trials(trials: &[VerifiedTrial; 3]) -> Result<(), String> {
     }
 
     let baseline = &trials[0];
+    if trials[1..]
+        .iter()
+        .any(|trial| guest_os(trial) != guest_os(baseline))
+    {
+        return Err("recorded guest OS version differs or coverage is incomplete".into());
+    }
     if trials[1..]
         .iter()
         .any(|trial| trial.report.recorded_execution != baseline.report.recorded_execution)
@@ -458,6 +484,7 @@ mod tests {
 
     fn execution_context() -> crate::WsbMsiRecordedExecution {
         crate::WsbMsiRecordedExecution {
+            host_os_version: None,
             provider: aiw_probe::BinaryIdentity {
                 canonical_path: r"C:\Provider\wsb.exe".into(),
                 sha256: "a".repeat(64),
@@ -618,6 +645,81 @@ mod tests {
             }
             assert!(validate_trials(&trials).is_err());
         }
+    }
+
+    #[test]
+    fn rejects_host_os_drift_and_partial_coverage() {
+        let mut trials = valid_trials();
+        for trial in &mut trials {
+            trial.report.recorded_execution.host_os_version =
+                Some(aiw_probe::WindowsVersionObservation {
+                    major: 10,
+                    minor: 0,
+                    build: 28000,
+                    revision: 1,
+                    observer_architecture: "x86_64".into(),
+                });
+        }
+        validate_trials(&trials).unwrap();
+        trials[2]
+            .report
+            .recorded_execution
+            .host_os_version
+            .as_mut()
+            .unwrap()
+            .revision += 1;
+        assert!(validate_trials(&trials).is_err());
+        trials[2].report.recorded_execution.host_os_version = None;
+        assert!(validate_trials(&trials).is_err());
+    }
+
+    #[test]
+    fn rejects_guest_os_drift_and_partial_coverage() {
+        let mut trials = valid_trials();
+        for trial in &mut trials {
+            trial.report.standard_user_context =
+                Some(aiw_provider_wsb::ImportedMsiRuntimeContext {
+                    schema_version:
+                        aiw_provider_wsb::IMPORTED_MSI_ENVIRONMENT_CONTEXT_SCHEMA_VERSION.into(),
+                    run_id: trial.report.run_id.clone(),
+                    sandbox_id: trial.report.scenario.sandbox_id.clone(),
+                    request_sha256: trial.report.scenario.request_sha256.clone(),
+                    scenario_sha256: trial.report.scenario.scenario_sha256.clone(),
+                    process_id: 1,
+                    context: aiw_provider_wsb::StandardUserRuntimeContext {
+                        user_sid: "S-1-5-21-1-2-3-4".into(),
+                        profile_path: r"C:\Users\AiwStandardUser".into(),
+                        roaming_app_data: r"C:\Users\AiwStandardUser\AppData\Roaming".into(),
+                        local_app_data: r"C:\Users\AiwStandardUser\AppData\Local".into(),
+                        administrators_enabled: false,
+                    },
+                    guest_os_version: Some(aiw_probe::WindowsVersionObservation {
+                        major: 10,
+                        minor: 0,
+                        build: 28000,
+                        revision: 1,
+                        observer_architecture: "x86_64".into(),
+                    }),
+                });
+        }
+        validate_trials(&trials).unwrap();
+        trials[2]
+            .report
+            .standard_user_context
+            .as_mut()
+            .unwrap()
+            .guest_os_version
+            .as_mut()
+            .unwrap()
+            .revision += 1;
+        assert!(validate_trials(&trials).is_err());
+        trials[2]
+            .report
+            .standard_user_context
+            .as_mut()
+            .unwrap()
+            .guest_os_version = None;
+        assert!(validate_trials(&trials).is_err());
     }
 
     #[test]

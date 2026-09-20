@@ -16,7 +16,7 @@ Reporting never acquires a provider lease, invokes a provider, repairs a journal
 
 ## Recorded execution context
 
-Newly rendered completed assessment reports use `v0alpha8` and include
+Newly rendered completed assessment reports use `v0alpha9` and include
 `recordedExecution`: the verified historical provider binary identity, package
 identity, CLI protocol, and normalized requested Sandbox configuration hash.
 The context is extracted inside the existing held-workspace verification; it is
@@ -33,8 +33,14 @@ contract, memory, and security switches remain bound. The exact original
 configuration hash remains in the scenario result. A matching normalized hash
 describes the requested configuration, not observed enforcement.
 
-The preparation did not retain a host or guest OS build, so OS equivalence remains
-unmeasured. No current-host probe is substituted for historical evidence.
+Fresh preparations now retain optional `hostOsVersion` (major, minor, build,
+revision, and observer architecture) from Windows version information. Start
+checks it again through the native execution lease and rejects a changed or
+unavailable value. Guest runtime-context v0alpha2 binds its separately observed
+`guestOsVersion` to the result, process token, and evidence chain. Old receipts
+and v0alpha1 guest contexts remain readable without acquiring OS coverage.
+Matching versions describe recorded version equality, not complete environment
+equivalence. No current-host probe is substituted for historical evidence.
 
 ## Interactive document-transfer reports
 
