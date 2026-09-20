@@ -1,0 +1,69 @@
+{
+  "schemaVersion": "aiw.dev/v0alpha2",
+  "kind": "AppIsolationProject",
+  "metadata": {
+    "name": "bambu-studio",
+    "displayName": "Bambu Studio local-file information",
+    "owner": "example"
+  },
+  "application": {
+    "type": "exe",
+    "path": "inputs/Bambu_Studio_win-v02.08.02.60.exe",
+    "sha256": "cd2f8f2c789a22efee1300e993827cfdb047f27cfb0b8f5dd7395fbafadef4c7",
+    "silentArguments": [],
+    "entryPoints": [
+      {
+        "id": "bambu-studio",
+        "path": "bambu-studio.exe",
+        "arguments": []
+      }
+    ],
+    "architecture": "x64",
+    "mayReboot": false
+  },
+  "isolationIntent": {
+    "runtimeBoundary": "windowsSandbox",
+    "network": "blocked",
+    "allowClipboard": false,
+    "allowHostFileAccess": false,
+    "allowHostRegistryAccess": false,
+    "requireDescendantCoverage": false
+  },
+  "candidates": [
+    {
+      "id": "baseline",
+      "type": "unpackagedBaseline",
+      "config": {
+        "type": "baseline"
+      }
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "local-file-info",
+      "description": "Install Bambu Studio and inspect the profile-owned local tetrahedron STL.",
+      "required": true,
+      "steps": [
+        {
+          "type": "install"
+        },
+        {
+          "type": "launch",
+          "entrypoint": "bambu-studio",
+          "arguments": []
+        },
+        {
+          "type": "expectExitCode",
+          "value": 0
+        }
+      ]
+    }
+  ],
+  "assertions": {
+    "requireEffectiveBackendMatch": false,
+    "requireTargetTokenEvidence": false,
+    "requireExpectedChildCoverage": false,
+    "requireOfflineCanaryDenied": false,
+    "failOnEvidenceTruncation": false
+  }
+}

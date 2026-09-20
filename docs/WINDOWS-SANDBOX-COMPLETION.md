@@ -2,7 +2,7 @@
 
 The Windows Sandbox CLI can identify, list, and stop a sandbox, but it does not return guest process output. AIW therefore uses the preconfigured writable output mapping as an untrusted one-way return channel. A terminal receipt written last lets the host correlate that output with the exact run it approved without turning `wsb exec` into a command channel.
 
-The current implementation verifies completed output. It does not launch Windows Sandbox, wait for a receipt, freeze writers, or generate the receipt inside the guest.
+The current implementation includes a fixed-function guest agent and a private, fake-provider-tested runner kernel. The kernel models durable start intent, exact-session reconciliation, explicit connection for user logon, receipt waiting, stop/absence confirmation, output verification, and crash recovery under one provider lease. It binds the canonical identity of a held owner-and-SYSTEM-only workspace through approval, the session transaction, status, and execution evidence. Its native provider launcher creates the exact image suspended, assigns it to a kill-on-close job before resume, restricts inherited handles, and enforces bounded output, an invocation deadline, and a fixed cleanup allowance. Successful pinned-CLI calls release required provider-managed descendants only after the root exits zero and both output streams complete; launch/wait failure, timeout, nonzero exit, and capture failure retain whole-job cleanup, while later mutation-protocol failures are additionally bound to the exact durable Sandbox ID. An opt-in supported-host test exercises that full flow against the pinned native Store provider. Exact provider recovery is available through `aiw run recover`; public `aiw run start` is available for the imported and explicitly approved fixed golden probe following its recorded live success and interruption/recovery proofs. This does not establish imported-application containment.
 
 ## Trusted expectation
 
@@ -18,7 +18,7 @@ All paths are portable ASCII relative paths using `/`. There are no globs, comma
 
 ## Guest receipt
 
-The guest writes its allowlisted artifacts using create-new semantics, closes them, and writes `completion.json` last. The receipt repeats the run, sandbox, configuration, request, and agent bindings; reports a terminal status and exit code; and lists every artifact's path, role, media type, byte count, and SHA-256 value. It also declares the root of the JSONL evidence chain.
+The guest atomically publishes its allowlisted artifacts using create-new staging plus same-directory hard links, closes them, and publishes `completion.json` last. Bounded ordinary staging files from an interrupted publication can be removed on a retry; existing final artifacts are never overwritten. The receipt repeats the run, sandbox, configuration, request, and agent bindings; reports a terminal status and exit code; and lists every artifact's path, role, media type, byte count, and SHA-256 value. It also declares the root of the JSONL evidence chain.
 
 `succeeded` requires exit code zero. `failed` requires a nonzero exit code. A structurally valid failed receipt is still useful evidence, so verification succeeds while the returned `successful` field remains false.
 
@@ -44,6 +44,6 @@ The output tree is exact: the receipt and approved artifacts are the only permit
 
 ## Trust limit
 
-This contract provides integrity checking, bounded parsing, and run correlation. It is not remote attestation and cannot prevent an administrator inside the guest from forging internally consistent output. The future executor must add host-side evidence for the resolved Windows Sandbox package and CLI, returned sandbox ID, lifecycle state, effective configuration, process identity/tree, target token, trace completeness, and cleanup.
+This contract and the private kernel provide integrity checking, bounded parsing, run correlation, and fake-tested lifecycle/recovery behavior. The supported-host golden proof also establishes that the fixed guest agent can return a verified receipt through the configured mapping. These are not remote attestation and cannot prevent an administrator inside the guest from forging internally consistent output. An imported-application containment conclusion still requires host-side target process/tree, target-token, effective-configuration/backend, trace-completeness, and canary evidence.
 
 Verification also assumes guest writers have stopped. The verifier checks paths before use and measures artifacts twice, but a privileged same-host actor can still race path-based filesystem operations. A production exporter should freeze the worker/output channel and use handle-relative anti-reparse access before copying artifacts into an ACL-restricted staging directory.

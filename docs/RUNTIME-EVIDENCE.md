@@ -47,7 +47,7 @@ Windows Sandbox defaults are unsuitable for hostile installer assessment: networ
 
 Mapped folders are a deliberate declassification boundary. Every mapping must be strictly below an explicit workspace root. Tools and inputs are read-only. A single output mapping is writable so the target can return evidence; it must exist, be an ordinary directory root, resolve distinctly from other mappings, and be empty immediately before use. Canonical paths are checked again so a reparse root or alias cannot escape the workspace. Returned files remain untrusted. There is an unavoidable time-of-check/time-of-use interval between rendering and launch, so a future runner must revalidate immediately before process creation and retain the directory handle where possible.
 
-The logon command invokes only `aiw-golden-probe` with a typed `--output` argument. Complex assessment orchestration will be a signed mapped script or guest agent in a later slice; the generic planner does not accept arbitrary logon commands.
+The logon command invokes only a measured fixed-function probe or `aiw-guest-agent` with a typed request/output argument. The Store CLI environment must then be explicitly connected to establish the user logon that triggers this command. The planner does not accept arbitrary logon commands, scripts, URLs, or policy fragments.
 
 Source: [Use and configure Windows Sandbox](https://learn.microsoft.com/en-us/windows/security/application-security/application-isolation/windows-sandbox/windows-sandbox-configure-using-wsb-file).
 

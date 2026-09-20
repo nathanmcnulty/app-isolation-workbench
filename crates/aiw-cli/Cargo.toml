@@ -18,14 +18,20 @@ aiw-orchestrator.workspace = true
 aiw-probe.workspace = true
 aiw-provider-mxc.workspace = true
 aiw-provider-wsb.workspace = true
+aiw-runner.workspace = true
 aiw-schema.workspace = true
 aiw-token.workspace = true
+aiw-windows-platform.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
+
+[dev-dependencies]
+hex.workspace = true
+sha2.workspace = true
 
 [lints]
 workspace = true

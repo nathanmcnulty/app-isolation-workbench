@@ -1,6 +1,34 @@
 #![forbid(unsafe_code)]
 
+mod application_token;
+mod bambu_artifact;
+pub use bambu_artifact::{BambuExportArtifact, verify_bambu_export};
+mod bambu_export;
+mod imported_bambu;
+pub use bambu_export::{
+    BAMBU_EXPORT_ARTIFACT_PATH, BAMBU_MAX_ARTIFACT_BYTES, BAMBU_STUDIO_EXPORT_OUTPUT_PATH,
+    BambuExportCompileError, CompiledBambuExportScenario, compile_bambu_studio_export_scenario,
+};
+pub use imported_bambu::{
+    BAMBU_SCENARIO_EVENT, BambuExecutionStage, BambuScenarioStatus,
+    IMPORTED_BAMBU_GUEST_REQUEST_SCHEMA_VERSION, IMPORTED_BAMBU_SCENARIO_RESULT_SCHEMA_VERSION,
+    ImportedBambuGuestRequest, ImportedBambuRequestError, ImportedBambuScenarioResult,
+    verify_bambu_scenario_evidence,
+};
+mod bambu_scenario;
 mod completion;
+mod failure_snapshots;
+mod imported_msi;
+mod product_registration;
+mod registry_observations;
+mod runtime_context;
+mod scenario;
+mod stage_progress;
+mod standard_user_acl;
+pub use standard_user_acl::{
+    MsiRequiredObservations, STANDARD_USER_ACL_CONTROL_BYTES, STANDARD_USER_ACL_POSITIVE_PATH,
+    STANDARD_USER_ACL_PROTECTED_PATH, StandardUserAclObservation,
+};
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -13,6 +41,18 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+pub use application_token::{
+    ImportedMsiApplicationToken, MSI_APPLICATION_TOKEN_EVENT, MSI_APPLICATION_TOKEN_SCHEMA,
+    verify_msi_application_token,
+};
+pub use bambu_scenario::{
+    BAMBU_STUDIO_APPLICATION_SHA256, BAMBU_STUDIO_ENTRYPOINT_ID, BAMBU_STUDIO_ENTRYPOINT_PATH,
+    BAMBU_STUDIO_INFO_FIXTURE_PATH, BAMBU_STUDIO_INFO_FIXTURE_SHA256, BAMBU_STUDIO_INFO_PROFILE,
+    BAMBU_STUDIO_INSTALLED_PATH, BAMBU_STUDIO_STAGED_INSTALLER_PATH, BambuScenarioCompileError,
+    COMPILED_BAMBU_SCENARIO_SCHEMA_VERSION, CompiledBambuScenario,
+    compile_bambu_studio_info_scenario,
+};
+
 pub use completion::{
     CompletionArtifact, CompletionArtifactExpectation, CompletionStatus,
     WINDOWS_SANDBOX_COMPLETION_EXPECTATION_SCHEMA_VERSION,
@@ -21,10 +61,58 @@ pub use completion::{
     WindowsSandboxCompletionExpectation, WindowsSandboxCompletionReceipt,
     WindowsSandboxCompletionVerification, verify_completion_receipt,
 };
+pub use failure_snapshots::{
+    FailedSnapshotPhase, IMPORTED_MSI_FAILED_SNAPSHOTS_EVENT,
+    IMPORTED_MSI_FAILED_SNAPSHOTS_SCHEMA_VERSION, ImportedMsiFailedSnapshots,
+    verify_msi_failed_snapshots,
+};
+pub use imported_msi::{
+    IMPORTED_MSI_DOCUMENT_SCENARIO_RESULT_SCHEMA_VERSION,
+    IMPORTED_MSI_GUEST_REQUEST_SCHEMA_VERSION, IMPORTED_MSI_OBSERVATION_REQUEST_SCHEMA_VERSION,
+    IMPORTED_MSI_SCENARIO_RESULT_SCHEMA_VERSION, ImportedMsiDocumentTransferResult,
+    ImportedMsiGuestRequest, ImportedMsiRequestError, ImportedMsiScenarioResult,
+    ImportedMsiScenarioStatus,
+};
+pub use product_registration::{
+    IMPORTED_MSI_PRODUCT_REGISTRATION_EVENT, IMPORTED_MSI_PRODUCT_REGISTRATION_SCHEMA_VERSION,
+    ImportedMsiProductRegistrationEvidence, MsiMachineProductState, validate_msi_product_code,
+    verify_msi_product_registration_evidence,
+};
+pub use registry_observations::{
+    ApplicationRegistryRoot, ApplicationRegistrySnapshot, IMPORTED_MSI_REGISTRY_EVENT,
+    IMPORTED_MSI_REGISTRY_SCHEMA, IMPORTED_MSI_REGISTRY_SCHEMA_VERSION,
+    ImportedMsiRegistryEvidence, RegistryCaptureIssue, RegistryCaptureIssueReason,
+    RegistryDiffKind, RegistryKeyDiff, RegistryKeyEntry, RegistryScope, RegistrySnapshotDiff,
+    RegistryValueDiff, RegistryValueEntry, RegistryView, diff_registry_snapshots,
+    verify_msi_registry_evidence,
+};
+pub use runtime_context::{
+    IMPORTED_MSI_ACL_CONTEXT_SCHEMA_VERSION, IMPORTED_MSI_ENVIRONMENT_CONTEXT_SCHEMA_VERSION,
+    IMPORTED_MSI_RUNTIME_CONTEXT_EVENT, IMPORTED_MSI_RUNTIME_CONTEXT_SCHEMA,
+    IMPORTED_MSI_RUNTIME_CONTEXT_SCHEMA_VERSION, ImportedMsiRuntimeContext,
+    STANDARD_USER_ACCOUNT_NAME, STANDARD_USER_PROFILE_PATH, StandardUserRuntimeContext,
+    verify_imported_msi_runtime_context, verify_msi_runtime_context,
+};
+pub use scenario::{
+    COMPILED_MSI_INTERACTIVE_DOCUMENT_SCENARIO_SCHEMA_VERSION,
+    COMPILED_MSI_LOCAL_SETTINGS_SCENARIO_SCHEMA_VERSION, COMPILED_MSI_SCENARIO_SCHEMA_VERSION,
+    CompiledMsiScenario, FixedDocumentExercise, INTERACTIVE_DOCUMENT_INPUT_PATH,
+    INTERACTIVE_DOCUMENT_OUTPUT_PATH, InteractiveDocumentTransfer, MAX_INTERACTIVE_DOCUMENT_BYTES,
+    NOTEPAD_PLUS_PLUS_INTERACTIVE_DOCUMENT_PROFILE, NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_ARGUMENT,
+    NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_DIRECTORY, NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_PROFILE,
+    NOTEPAD_PLUS_PLUS_MSI_PROFILE, ScenarioCompileError, compile_notepad_plus_plus_msi_scenario,
+    compile_notepad_plus_plus_msi_scenario_with_document,
+};
+pub use stage_progress::{
+    IMPORTED_MSI_FAILED_ATTEMPT_SCHEMA, IMPORTED_MSI_FAILED_ATTEMPT_SCHEMA_VERSION,
+    IMPORTED_MSI_STAGE_PROGRESS_EVENT, IMPORTED_MSI_STAGE_PROGRESS_SCHEMA,
+    IMPORTED_MSI_STAGE_PROGRESS_SCHEMA_VERSION, ImportedMsiFailedAttempt, ImportedMsiStageProgress,
+    MsiExecutionStage, MsiStageResult, MsiStageStatus, verify_imported_msi_stage_progress,
+};
 
 pub const WINDOWS_SANDBOX_PLAN_SCHEMA_VERSION: &str = "aiw.dev/windows-sandbox-plan/v0alpha1";
 pub const WINDOWS_SANDBOX_CLI_LIFECYCLE_SCHEMA_VERSION: &str =
-    "aiw.dev/windows-sandbox-cli-lifecycle/v0alpha1";
+    "aiw.dev/windows-sandbox-cli-lifecycle/v0alpha2";
 pub const WINDOWS_SANDBOX_CLI_INTERFACE: &str = "microsoft.windows-sandbox-cli/2025-01-24";
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -64,6 +152,11 @@ impl MappingPurpose {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GoldenProbe {
     pub executable: String,
+    /// The immutable fixed-function guest-agent request.  Legacy planner use
+    /// can omit it, but W1 execution requires it and never falls back to an
+    /// arbitrary logon command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request: Option<String>,
     pub output: String,
 }
 
@@ -86,6 +179,7 @@ pub struct WindowsSandboxCliLifecyclePlan {
     pub rendered_config: RenderedWindowsSandboxConfig,
     pub start: ProcessInvocation,
     pub list: ProcessInvocation,
+    pub connect: ProcessInvocation,
     pub stop: ProcessInvocation,
     pub guest_execution: GuestExecutionContract,
     pub output_observation: OutputObservationContract,
@@ -212,6 +306,15 @@ pub fn plan_cli_lifecycle(
             executable: wsb_cli_path.to_owned(),
             arguments: vec!["list".to_owned(), "--raw".to_owned()],
         },
+        connect: ProcessInvocation {
+            executable: wsb_cli_path.to_owned(),
+            arguments: vec![
+                "connect".to_owned(),
+                "--raw".to_owned(),
+                "--id".to_owned(),
+                sandbox_id.clone(),
+            ],
+        },
         stop: ProcessInvocation {
             executable: wsb_cli_path.to_owned(),
             arguments: vec![
@@ -242,7 +345,7 @@ pub fn plan_cli_lifecycle(
         rendered_config,
         requires_human_approval: true,
         warnings: vec![
-            "This output is an inspectable plan only; it does not launch or stop Windows Sandbox."
+            "This output is an inspectable plan only; it does not launch, connect, or stop Windows Sandbox."
                 .to_owned(),
             "The Windows Sandbox CLI is an early interface delivered with the Store-updated app; record the resolved binary identity and app version at execution time."
                 .to_owned(),
@@ -251,6 +354,8 @@ pub fn plan_cli_lifecycle(
             "Do not add folders with wsb share or run the guest agent with wsb exec --run-as System; both would change the reviewed trust contract."
                 .to_owned(),
             "Windows Sandbox supports one running instance per user session; orchestration must serialize runs and verify the returned sandbox ID."
+                .to_owned(),
+            "The CLI-created environment is explicitly connected so the configured user logon and LogonCommand occur before receipt observation."
                 .to_owned(),
         ],
     })
@@ -294,11 +399,14 @@ pub fn render_config(
     }
     xml.push_str("  </MappedFolders>\n");
     xml.push_str("  <LogonCommand>\n");
-    let command = join_arguments([
-        plan.probe.executable.as_str(),
-        "--output",
-        plan.probe.output.as_str(),
-    ]);
+    let command = match &plan.probe.request {
+        Some(request) => join_arguments([plan.probe.executable.as_str(), "--request", request]),
+        None => join_arguments([
+            plan.probe.executable.as_str(),
+            "--output",
+            plan.probe.output.as_str(),
+        ]),
+    };
     let _ = writeln!(xml, "    <Command>{}</Command>", escape_xml(&command));
     xml.push_str("  </LogonCommand>\n");
     xml.push_str("</Configuration>\n");
@@ -469,6 +577,9 @@ pub fn validate_plan(plan: &WindowsSandboxPlan) -> Result<(), WindowsSandboxPlan
         return Err(WindowsSandboxPlanError::InsufficientMemory);
     }
     validate_guest_path("probe.executable", &plan.probe.executable)?;
+    if let Some(request) = &plan.probe.request {
+        validate_guest_path("probe.request", request)?;
+    }
     validate_guest_path("probe.output", &plan.probe.output)?;
     if !plan.probe.executable.to_ascii_lowercase().ends_with(".exe")
         || !plan.probe.output.to_ascii_lowercase().ends_with(".json")
@@ -520,6 +631,13 @@ pub fn validate_plan(plan: &WindowsSandboxPlan) -> Result<(), WindowsSandboxPlan
     }
     if !is_path_below(&plan.probe.executable, &tools[0].sandbox_folder) {
         return Err(WindowsSandboxPlanError::ProbeOutsideTools);
+    }
+    if let Some(request) = &plan.probe.request {
+        if !is_path_below(request, &tools[0].sandbox_folder)
+            || !request.to_ascii_lowercase().ends_with(".json")
+        {
+            return Err(WindowsSandboxPlanError::ProbeOutsideTools);
+        }
     }
     if !is_path_below(&plan.probe.output, &outputs[0].sandbox_folder) {
         return Err(WindowsSandboxPlanError::OutputOutsideMapping);
@@ -624,6 +742,7 @@ mod tests {
             ],
             probe: GoldenProbe {
                 executable: "C:\\AIW\\Tools\\aiw-golden-probe.exe".to_owned(),
+                request: None,
                 output: "C:\\AIW\\Output\\token.json".to_owned(),
             },
             memory_mb: Some(4096),
@@ -810,3 +929,19 @@ mod tests {
         fs::remove_dir_all(&root).expect("test fixture should be removed");
     }
 }
+
+#[cfg(test)]
+mod application_token_tests;
+
+mod runtime_observations;
+pub use runtime_observations::{
+    ApplicationFileEntry, ApplicationFileRoot, ApplicationFilesystemSnapshot,
+    DOCUMENT_EXERCISE_PATH, DOCUMENT_EXPECTED_TEXT, DOCUMENT_INITIAL_TEXT, FilesystemCaptureIssue,
+    FilesystemCaptureIssueReason, FilesystemDiffKind, FilesystemSnapshotDiff,
+    FilesystemSnapshotDiffResult, FunctionalExercise, IMPORTED_MSI_BEHAVIOR_EVENT,
+    IMPORTED_MSI_BEHAVIOR_SCHEMA, IMPORTED_MSI_BEHAVIOR_SCHEMA_VERSION,
+    ImportedMsiBehaviorEvidence, STANDARD_USER_DOCUMENT_EXERCISE_PATH, diff_filesystem_snapshots,
+    verify_imported_msi_behavior,
+};
+
+pub use application_token::MAX_APPLICATION_EVIDENCE_BYTES;

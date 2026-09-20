@@ -1,0 +1,30 @@
+[package]
+name = "aiw-guest-agent"
+description = "Fixed-function measured Windows Sandbox guest agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "aiw-guest-agent"
+path = "src/main.rs"
+
+[dependencies]
+aiw-evidence.workspace = true
+aiw-provider-wsb.workspace = true
+aiw-token.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+hex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+aiw-windows-platform.workspace = true
+windows = { version = "0.62.2", features = ["Win32_Storage_FileSystem"] }
+
+[lints]
+workspace = true

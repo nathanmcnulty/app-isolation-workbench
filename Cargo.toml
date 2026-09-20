@@ -1,15 +1,20 @@
 [workspace]
 members = [
     "crates/aiw-cli",
+    "crates/aiw-control-fixture",
+    "crates/aiw-control-appcontainer",
     "crates/aiw-core",
     "crates/aiw-evidence",
     "crates/aiw-orchestrator",
     "crates/aiw-golden-probe",
+    "crates/aiw-guest-agent",
     "crates/aiw-probe",
     "crates/aiw-provider-mxc",
     "crates/aiw-provider-wsb",
+    "crates/aiw-runner",
     "crates/aiw-schema",
     "crates/aiw-token",
+    "crates/aiw-windows-platform",
     "crates/aiw-windows-command-line",
 ]
 resolver = "3"
@@ -26,9 +31,11 @@ aiw-core = { path = "crates/aiw-core" }
 aiw-evidence = { path = "crates/aiw-evidence" }
 aiw-orchestrator = { path = "crates/aiw-orchestrator" }
 aiw-token = { path = "crates/aiw-token" }
+aiw-windows-platform = { path = "crates/aiw-windows-platform" }
 aiw-probe = { path = "crates/aiw-probe" }
 aiw-provider-mxc = { path = "crates/aiw-provider-mxc" }
 aiw-provider-wsb = { path = "crates/aiw-provider-wsb" }
+aiw-runner = { path = "crates/aiw-runner" }
 aiw-schema = { path = "crates/aiw-schema" }
 aiw-windows-command-line = { path = "crates/aiw-windows-command-line" }
 anyhow = "1.0"
@@ -42,6 +49,8 @@ serde_json = "1.0"
 serde_yaml = { package = "serde_yaml_ng", version = "0.10" }
 sha2 = "0.10"
 thiserror = "2.0"
+quick-xml = "0.41"
+zip = { version = "2.4", default-features = false, features = ["deflate"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
