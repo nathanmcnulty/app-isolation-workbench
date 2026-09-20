@@ -598,6 +598,7 @@ mod tests {
             project,
             compiled,
             report: crate::WsbMsiAssessmentReport {
+                launch_profile_sha256: None,
                 schema_version: "test".into(),
                 recorded_execution: execution_context(),
                 run_id: scenario.run_id.clone(),

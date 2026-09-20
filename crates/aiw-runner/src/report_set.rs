@@ -10,14 +10,14 @@ use crate::{FailureProgressEvidence, WsbMsiRunReport};
 pub const WSB_MSI_REPORT_SET_INPUT_SCHEMA: &str = "aiw.dev/wsb-msi-report-set-input/v0alpha1";
 pub const WSB_MSI_REPORT_SET_SCHEMA: &str = "aiw.dev/wsb-msi-report-set/v0alpha1";
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WsbMsiReportSetInput {
     pub schema_version: String,
     pub entries: Vec<WsbMsiReportSetEntry>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WsbMsiReportSetEntry {
     pub id: String,

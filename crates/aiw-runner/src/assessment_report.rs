@@ -45,6 +45,10 @@ fn verify_historical_scenario(
 #[serde(rename_all = "camelCase")]
 pub struct WsbMsiAssessmentReport {
     pub schema_version: String,
+    /// Identity bound into the recorded preparation and run approval. Historical
+    /// reporting does not re-open the profile's source workspaces.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub launch_profile_sha256: Option<String>,
     pub recorded_execution: WsbMsiRecordedExecution,
     pub run_id: String,
     pub project_revision_sha256: String,
@@ -1068,7 +1072,11 @@ pub(crate) fn report_windows_sandbox_msi_run_bound(
     }
     Ok(WsbMsiRunReport::CompletedAssessment(Box::new(
         WsbMsiAssessmentReport {
-            schema_version: "aiw.dev/wsb-msi-assessment-report/v0alpha10".into(),
+            schema_version: "aiw.dev/wsb-msi-assessment-report/v0alpha11".into(),
+            launch_profile_sha256: msi
+                .launch_profile
+                .as_ref()
+                .map(|profile| profile.profile_sha256.clone()),
             recorded_execution: recorded_execution(&artifacts)?,
             run_id: run_id.to_owned(),
             project_revision_sha256: artifacts.receipt.project_revision_sha256,

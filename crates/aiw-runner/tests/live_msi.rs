@@ -103,6 +103,7 @@ fn prepare_profile(
         &parent,
         &format!("unix-ns:{stamp}"),
         WsbMsiPreparationInput {
+            launch_profile: None,
             import_receipt: &receipt,
             scenario_id: "install-launch-close",
             document_input: None,
@@ -377,7 +378,7 @@ fn exercise(bundle: bool) {
     assert_eq!(report.download_metadata_policy, expected_policy);
     assert_eq!(
         report.schema_version,
-        "aiw.dev/wsb-msi-assessment-report/v0alpha10"
+        "aiw.dev/wsb-msi-assessment-report/v0alpha11"
     );
     if report.download_metadata_policy.is_some() {
         assert!(

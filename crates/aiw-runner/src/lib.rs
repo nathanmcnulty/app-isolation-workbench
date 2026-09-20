@@ -1030,6 +1030,8 @@ fn start_approved_windows_sandbox_inner(
     }
     ensure_approval(&artifacts.run_plan, &approval, &request)?;
 
+    crate::launch_profile::verify_bound_profile(&artifacts).map_err(RunnerError::Preparation)?;
+
     let mut native_lease =
         aiw_windows_platform::acquire_windows_sandbox(&artifacts.receipt.provider.sha256)
             .map_err(native_invocation_error)?;
@@ -4630,6 +4632,7 @@ mod tests {
         let import_receipt_sha256 =
             hex::encode(Sha256::digest(serde_json::to_vec(&import_receipt).unwrap()));
         let msi = WsbMsiApplication {
+            launch_profile: None,
             required_observations: None,
             import_receipt,
             import_receipt_sha256,

@@ -11,7 +11,7 @@ use crate::{WsbMsiReportSetInput, WsbSettingsComparison};
 
 const PROFILE_SCHEMA: &str = "aiw.dev/wsb-local-settings-launch-profile/v0alpha1";
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WsbLaunchProfile {
     pub schema_version: String,
@@ -23,7 +23,7 @@ pub struct WsbLaunchProfile {
     pub guest_agent_sha256: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WsbLaunchProfileExport {
     pub profile_sha256: String,
@@ -84,7 +84,10 @@ pub fn create_windows_sandbox_launch_profile(
     from_comparison(input, &comparison)
 }
 
-fn verify_profile_hash(profile: &WsbLaunchProfileExport, expected: &str) -> Result<(), String> {
+pub(crate) fn verify_profile_hash(
+    profile: &WsbLaunchProfileExport,
+    expected: &str,
+) -> Result<(), String> {
     if expected.len() != 64
         || !expected
             .bytes()
@@ -99,6 +102,37 @@ fn verify_profile_hash(profile: &WsbLaunchProfileExport, expected: &str) -> Resu
 }
 
 #[cfg(windows)]
+pub(crate) fn reverify_profile(
+    profile: &WsbLaunchProfileExport,
+    expected: &str,
+) -> Result<WsbSettingsComparison, String> {
+    verify_profile_hash(profile, expected)?;
+    let comparison = crate::report_windows_sandbox_settings_comparison(&profile.profile.evidence)?;
+    if from_comparison(&profile.profile.evidence, &comparison)?.profile_sha256 != expected {
+        return Err("retained validation evidence changed; create and review a new profile".into());
+    }
+    Ok(comparison)
+}
+
+#[cfg(windows)]
+pub(crate) fn verify_bound_profile(artifacts: &crate::PreparedWsbArtifacts) -> Result<(), String> {
+    if let Some(profile) = artifacts
+        .receipt
+        .msi
+        .as_ref()
+        .and_then(|msi| msi.launch_profile.as_ref())
+    {
+        let comparison = reverify_profile(profile, &profile.profile_sha256)?;
+        match_preparation(
+            &profile.profile,
+            &comparison.replay.recorded_execution,
+            artifacts,
+        )?;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
 pub fn check_windows_sandbox_launch_profile(
     profile: &WsbLaunchProfileExport,
     expected: &str,
@@ -107,12 +141,7 @@ pub fn check_windows_sandbox_launch_profile(
     guest_hash: &str,
 ) -> Result<WsbLaunchPreflight, String> {
     // Check the trusted hash before following caller-supplied evidence paths.
-    verify_profile_hash(profile, expected)?;
-    let comparison = crate::report_windows_sandbox_settings_comparison(&profile.profile.evidence)?;
-    let recreated = from_comparison(&profile.profile.evidence, &comparison)?;
-    if recreated.profile_sha256 != expected {
-        return Err("retained validation evidence changed; create and review a new profile".into());
-    }
+    let comparison = reverify_profile(profile, expected)?;
     let artifacts = crate::verify_windows_sandbox_preparation(root, project, guest_hash)
         .map_err(|e| e.to_string())?;
     let current_os = aiw_windows_platform::observe_windows_version()?;

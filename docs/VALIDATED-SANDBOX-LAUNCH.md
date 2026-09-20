@@ -5,6 +5,34 @@ Notepad++ local-settings assessment. It supports the fixed install/open/edit/sav
 workflow, ephemeral settings, and measured standard-user file ACL controls.
 It does not enable arbitrary interactive launch or authorize execution.
 
+## Bind the profile into a fresh run approval
+
+Supply `--launch-profile <launch-profile.json>` and
+`--launch-profile-sha256 <independently-retained-hash>` together to
+`run prepare-wsb-msi`. Preparation re-verifies the original three trials before
+creating the workspace, checks the new preparation against them, and publishes
+the complete profile in a v0alpha6 preparation receipt. The plan's approval
+disclosure includes the exact profile and comparison hashes.
+
+Normal planning import and a new approval are still required. Start re-verifies
+the embedded profile's retained evidence before acquiring Sandbox, then uses the
+existing current-provider/OS, request, and cleanup checks. It never reopens the
+caller-supplied profile file. Removing the profile or downgrading its observation
+requirements invalidates the receipt/plan binding; rebuilding an unbound plan
+requires a different approval hash.
+
+Completed assessment report v0alpha11 includes `launchProfileSha256` when present.
+Historical runs omit it. Retained reporting validates the recorded binding but
+does not require the source trials to remain accessible; the field identifies
+what was approved, not the current validity of an old profile.
+
+The fixed integration trial is codified in `scripts/test-validated-launch.ps1`.
+It requires explicit `-Approve` and operator identity, checks host readiness
+before preparation, records every stage's output/error, and runs one disposable
+worker. Its final comparison substitutes the fresh replay into the embedded
+baseline/candidate selectors and requires matching recorded OS and file ACL
+coverage. Failures preserve diagnostics and exact recovery remains with the CLI.
+
 Create the profile from the retained baseline/candidate/replay selectors used by
 `run report-wsb-settings-comparison`:
 
@@ -40,7 +68,9 @@ normalized, allowing fresh preparation locations without ignoring other mappings
 The output includes the exact preparation hash and recipe inspection. The nested
 recipe retains its standalone inspection wording; the outer preflight supplies
 the separate validation association. Neither output is execution authority.
-Normal planning import, fresh bound approval, and start still perform their checks.
+Use the preparation options above to bind the profile into execution; checking
+an ordinary unbound preparation alone does not do so. Normal planning import,
+fresh bound approval, and start still perform their checks.
 Do not reuse a preflight result after changing the preparation or environment.
 
 Retained evidence must remain accessible on the same host. The new guest's OS,

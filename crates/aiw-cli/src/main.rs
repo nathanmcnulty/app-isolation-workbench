@@ -457,6 +457,11 @@ enum RunCommand {
         /// Optional absolute canonical UTF-8 text file for the interactive transfer profile.
         #[arg(long)]
         document_input: Option<PathBuf>,
+        /// Bind an independently verified replay profile into this run's approval.
+        #[arg(long, requires = "launch_profile_sha256")]
+        launch_profile: Option<PathBuf>,
+        #[arg(long, requires = "launch_profile")]
+        launch_profile_sha256: Option<String>,
     },
     /// Create and verify a fresh Windows Sandbox workspace and approvable plan bundle.
     /// This does not approve, acquire, start, connect, stop, or recover a provider.
@@ -1720,12 +1725,18 @@ fn run(command: Command) -> Result<()> {
                 import_receipt,
                 scenario,
                 document_input,
+                launch_profile,
+                launch_profile_sha256,
             } => {
                 let loaded = read_project(&project)?;
                 let receipt: ApplicationFileImportReceipt =
                     read_document(&import_receipt, MAX_CONFIG_BYTES)?;
                 #[cfg(windows)]
                 {
+                    let profile: Option<aiw_runner::WsbLaunchProfileExport> = launch_profile
+                        .as_ref()
+                        .map(|path| read_document(path, 1024 * 1024))
+                        .transpose()?;
                     let prepared = prepare_windows_sandbox_msi_bundle(
                         &run_id,
                         &loaded.project,
@@ -1737,6 +1748,7 @@ fn run(command: Command) -> Result<()> {
                             import_receipt: &receipt,
                             scenario_id: &scenario,
                             document_input: document_input.as_deref(),
+                            launch_profile: profile.as_ref().zip(launch_profile_sha256.as_deref()),
                         },
                     )
                     .map_err(|source| anyhow!(RunPreparationFailed { run_id, source }))?;
@@ -1754,6 +1766,8 @@ fn run(command: Command) -> Result<()> {
                         receipt,
                         scenario,
                         document_input,
+                        launch_profile,
+                        launch_profile_sha256,
                     );
                     bail!("MSI preparation requires Windows")
                 }

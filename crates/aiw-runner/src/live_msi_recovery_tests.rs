@@ -39,6 +39,7 @@ fn live_msi_interrupted_completion_rejects_foreign_request_and_recovers() {
         &parent,
         "live-test-time",
         WsbMsiPreparationInput {
+            launch_profile: None,
             import_receipt: &receipt,
             scenario_id: "install-launch-close",
             document_input: None,
