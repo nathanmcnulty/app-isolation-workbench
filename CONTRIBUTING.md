@@ -22,6 +22,15 @@ Run the local checks from the repository root:
 
 The verification script is intentionally local and deterministic. Hosted CI runs the same checks on Windows, but CI does not prove that a provider actually isolates an application. A live provider claim requires an explicitly documented Windows 11 24H2 x64 proof with target-token, effective-backend, canary, completeness, and cleanup evidence.
 
+For selected checks, use `scripts/check-local.ps1 -Check Workspace` or
+`-Check Platform` (native Windows tests), alongside the existing `Format`,
+`Provider`, `Cli`, `Clippy`, `Msrv`, and `Governance` choices. Cargo test checks
+use a short, fresh temporary directory per check, retain its location in the logs,
+and restore the caller's `TEMP`/`TMP`. This keeps unrelated accumulated files
+from exceeding the native verifier's directory-entry bound. `verify.ps1` uses
+the same workspace-test path. These selected checks require cached dependencies
+(`--locked --offline`).
+
 ## Design and security expectations
 
 - Evidence is authoritative; model-generated text is advisory only.

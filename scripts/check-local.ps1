@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
-    [ValidateSet('Format', 'Provider', 'Cli', 'Clippy', 'Msrv', 'Governance')]
+    [ValidateSet('Format', 'Provider', 'Cli', 'Platform', 'Workspace', 'Clippy', 'Msrv', 'Governance')]
     [string[]]$Check
 )
 
@@ -27,6 +27,8 @@ try {
             Format { @('fmt', '--all', '--check') }
             Provider { @('test', '-p', 'aiw-provider-wsb', '--locked', '--offline') }
             Cli { @('test', '-p', 'aiw-cli', '--locked', '--offline') }
+            Platform { @('test', '-p', 'aiw-windows-platform', '--locked', '--offline') }
+            Workspace { @('test', '--workspace', '--locked', '--offline') }
             Clippy { @('clippy', '--workspace', '--all-targets', '--locked', '--offline', '--', '-D', 'warnings') }
             Msrv { @('+1.85.0', 'check', '--workspace', '--all-targets', '--locked', '--offline') }
             Governance {
@@ -39,10 +41,26 @@ try {
         $timer = [Diagnostics.Stopwatch]::StartNew()
         $exitCode = $null
         $failure = $null
+        $previousTemp = $env:TEMP
+        $previousTmp = $env:TMP
+        $testTemp = $null
         try {
+            if ($program -eq 'cargo' -and $arguments[0] -eq 'test') {
+                # Native parent-entry checks are bounded. Unrelated files in a
+                # long-lived user TEMP must not determine whether fixtures work.
+                # Keep the fixture root short for Win32 APIs without long-path prefixes.
+                $testTemp = Join-Path ([IO.Path]::GetTempPath()) ('aiwt-' + [guid]::NewGuid().ToString('N').Substring(0, 12))
+                New-Item -ItemType Directory -Path $testTemp | Out-Null
+                $env:TEMP = $testTemp
+                $env:TMP = $testTemp
+            }
             & $program @arguments 1> $stdout 2> $stderr
             $exitCode = $LASTEXITCODE
         } catch { $failure = $_.Exception.Message }
+        finally {
+            $env:TEMP = $previousTemp
+            $env:TMP = $previousTmp
+        }
         $timer.Stop()
         $record = [ordered]@{
             check = $name
@@ -53,6 +71,7 @@ try {
             seconds = [Math]::Round($timer.Elapsed.TotalSeconds, 2)
             stdout = $stdout
             stderr = $stderr
+            testTemp = $testTemp
         }
         if (!$record.passed) {
             $record.failure = $failure

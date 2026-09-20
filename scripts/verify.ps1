@@ -62,7 +62,7 @@ try {
     cargo clippy --workspace --all-targets --locked -- -D warnings
     if ($LASTEXITCODE -ne 0) { throw 'cargo clippy failed' }
 
-    cargo test --workspace --locked
+    & (Join-Path $PSScriptRoot 'check-local.ps1') -Check Workspace
     if ($LASTEXITCODE -ne 0) { throw 'cargo test failed' }
 
     cargo run --quiet --locked -p aiw-cli -- project validate --path .\examples\minimal.aiw.yaml | ConvertFrom-Json | Out-Null
