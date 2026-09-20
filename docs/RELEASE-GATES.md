@@ -70,6 +70,14 @@ limits. Verify the target's capabilities rather than assuming every Windows 11
 automatic deletion is not required. Recreate same-host validation on the target
 when necessary instead of copying old paths or weakening environment checks.
 
+The deterministic preview assembly is prepared with
+`scripts/build-preview-package.ps1 -OutputDirectory <new-directory>`. It builds
+the release CLI and static guest agent, copies the fixed Notepad++ project, and
+publishes a package-local manifest with exact project and guest hashes. A
+validated launch profile can be supplied with its exact SHA-256. `receipt.json`
+is written last and binds the package inventory; this assembles release inputs
+but does not prove clean-host installation, signing, or Sandbox execution.
+
 These are outcome gates, not a calendar or quota estimate. The remaining
 uncertainty is concentrated in the administrator workflow and clean-host trial;
 new application classes and new isolation mechanisms are not prerequisites.
