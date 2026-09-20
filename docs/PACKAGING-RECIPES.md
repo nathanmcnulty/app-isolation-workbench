@@ -172,9 +172,9 @@ in `%TEMP%\aiw-local-settings-f0f9d6c216354bc1add9300626525ef4`.
 The driver now saves `host-readiness.json` before creating any intake or run.
 The focused blocked-preflight check in
 `%TEMP%\aiw-local-settings-ead6fe44669e443cb9e45043b1c6fdc2` retained that exact
-session and left bundles, intakes, and runs empty. This session has no verified
-ownership record in these trials and was not stopped. Fresh ACL execution
-remains pending its identification/closure; this is not a successful live result.
+session and left bundles, intakes, and runs empty. After the user identified it
+as abandoned, its exact stop was authorized and the provider list was verified
+empty. These preflight records are not successful live results.
 
 Local validation passed 514 workspace tests (25 explicit live/privileged skips),
 warnings-as-errors clippy, Rust 1.85 all-target checking, formatting, governance,
@@ -184,6 +184,40 @@ Historical comparison checks in
 `%TEMP%\aiw-acl-historical-4cfaf41c39d7440995ab7ebeb49b6c40` passed seven
 positive/negative cases, generated-schema validation, deterministic output,
 and unchanged inventories for 75 files. Their ACL coverage remains unmeasured.
+
+### Live required-ACL comparison, 2026-09-19
+
+The baseline passed in
+`%TEMP%\aiw-local-settings-95813faebc184639a50f16f6c18d4c57`. The user then
+paused trials because another task was using Sandbox. The driver was stopped
+before replay, and candidate `candidate-da17762d299b4d80b5b0f97fbce29b0b`
+was cancelled. Recovery after the provider became empty verified exact cleanup
+of session `c8874793-cda8-7d52-6c68-42a8784526c8`; it remains a cancelled run
+without accepted assessment evidence.
+
+After explicit permission to resume, two fresh workers completed candidate and
+relocated replay in `%TEMP%\aiw-local-settings-d5701d4b13a340b5b07740f480397475`.
+Its `report-set-input.json` references the retained successful baseline; it is
+a resumed comparison, not an uninterrupted three-worker driver invocation.
+
+| Trial | Run ID | Settings location |
+|---|---|---|
+| Baseline | `baseline-97a3c46b35a5496eb5b9cb501098ee99` | Roaming application data |
+| Candidate | `candidate-88a8fd6c4b83432ea18ab9d2205693bc` | Local application data |
+| Relocated replay | `replay-403f198fa0df4cc48c1122189652502f` | Local application data |
+
+All three passed the document workflow, required app-token ACL control (explicit
+read denial code 5 and successful local-data create/write/read), registry
+verification, and exact cleanup. Each `config.xml` was 9,184 bytes with SHA-256
+`f59bbed50f1d00f798fc09caa24911016ae07c1c26681e8442c09a532a9dff37`.
+Comparison v0alpha4 reports matched recorded provider/OS identity and
+`measuredStandardUserFileAclOnly`; all broader boundary categories remain
+unmeasured. The final provider list was empty.
+
+`%TEMP%\aiw-acl-final-proof-0d20f8c12cde4157bc2ef7a913c02981` retains three
+schema-valid v0alpha10 reports and Markdown controls, a schema-valid deterministic
+comparison, seven positive/negative checks, and unchanged inventories of 75
+workspace files. The guest hash is the one recorded above.
 
 ### Recorded OS versions and fresh replay, 2026-09-19
 

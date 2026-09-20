@@ -174,13 +174,14 @@ fn protected_transfer_preparation_completion_report_and_export() {
         )
         .unwrap();
     let output = "edited text: café\r\n".as_bytes();
-    let mut diagnostics = crate::create_provider_diagnostics(&workspace, "w1-run").unwrap();
+    // Reproduce two attempts within the same Windows clock tick.
+    let mut diagnostics = crate::create_provider_diagnostics_at(&workspace, "w1-run", 42).unwrap();
     diagnostics
         .write_all(b"{\"event\":\"test-observation\"}\n")
         .unwrap();
     diagnostics.sync_all().unwrap();
     drop(diagnostics);
-    drop(crate::create_provider_diagnostics(&workspace, "w1-run").unwrap());
+    drop(crate::create_provider_diagnostics_at(&workspace, "w1-run", 42).unwrap());
     let traces: Vec<_> = std::fs::read_dir(layout.run_dir())
         .unwrap()
         .map(Result::unwrap)

@@ -899,7 +899,6 @@ fn create_provider_diagnostics(
     workspace: &aiw_windows_platform::HeldRunWorkspace,
     run_id: &str,
 ) -> Result<std::fs::File, RunnerError> {
-    use aiw_windows_platform::WorkspaceAclPolicy;
     // A failed preflight can leave the run Ready. Give each attempt its own
     // create-only trace so retries preserve diagnostics without adopting files.
     let nonce = std::time::SystemTime::now()
@@ -908,7 +907,25 @@ fn create_provider_diagnostics(
             RunnerError::Process(format!("provider diagnostics clock failed: {error}"))
         })?
         .as_nanos();
-    let leaf = format!("provider-diagnostics-{}-{nonce}.jsonl", std::process::id());
+    create_provider_diagnostics_at(workspace, run_id, nonce)
+}
+
+#[cfg(windows)]
+fn create_provider_diagnostics_at(
+    workspace: &aiw_windows_platform::HeldRunWorkspace,
+    run_id: &str,
+    nonce: u128,
+) -> Result<std::fs::File, RunnerError> {
+    use aiw_windows_platform::WorkspaceAclPolicy;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    // Clock precision can be coarser than nanoseconds on Windows. Retries or
+    // concurrent calls in one process must not depend on a new clock tick.
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let leaf = format!(
+        "provider-diagnostics-{}-{nonce}-{sequence}.jsonl",
+        std::process::id()
+    );
     let create = || {
         workspace
             .reopen_root_directory("runs", WorkspaceAclPolicy::Inherited)?
