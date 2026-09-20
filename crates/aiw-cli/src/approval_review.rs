@@ -29,7 +29,10 @@ pub(super) fn confirm(
     Ok(response.trim_end_matches(['\r', '\n']) == expected)
 }
 
-fn write_review_json(output: &mut impl Write, value: &impl serde::Serialize) -> Result<()> {
+pub(super) fn write_review_json(
+    output: &mut impl Write,
+    value: &impl serde::Serialize,
+) -> Result<()> {
     let mut escaped = Vec::new();
     for ch in serde_json::to_string_pretty(value)?.chars() {
         if ch.is_ascii() && ch != '\u{7f}' {

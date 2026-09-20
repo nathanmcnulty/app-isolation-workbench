@@ -2,6 +2,7 @@
   "schemaVersion": "aiw.dev/admin-product-assets/v0alpha1",
   "productId": "notepad-plus-plus-local-settings",
   "projectPath": "project.yaml",
+  "projectSha256": "0000000000000000000000000000000000000000000000000000000000000000",
   "guestAgentPath": "tools/aiw-guest-agent.exe",
   "scenarioId": "install-launch-close",
   "guestAgentSha256": "0000000000000000000000000000000000000000000000000000000000000000"

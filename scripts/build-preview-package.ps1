@@ -10,10 +10,16 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $productRoot = Join-Path $repoRoot 'crates\aiw-cli\product\notepad-plus-plus'
-$cliSource = Join-Path $repoRoot 'target\release\aiw.exe'
+$buildTarget = if ([string]::IsNullOrWhiteSpace($env:CARGO_TARGET_DIR)) {
+    Join-Path $repoRoot 'target'
+} else {
+    [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR)
+}
+$cliSource = Join-Path $buildTarget 'release\aiw.exe'
 $projectSource = Join-Path $productRoot 'project.yaml'
 $manifestSource = Join-Path $productRoot 'manifest.json'
 $output = [IO.Path]::GetFullPath($OutputDirectory)
+$packagedProductRoot = Join-Path $output 'product\notepad-plus-plus'
 
 function Write-Utf8NoBom([string]$Path, [string]$Text) {
     [IO.File]::WriteAllText($Path, $Text + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
@@ -58,29 +64,27 @@ try {
         Assert-LowerSha256 $LaunchProfileSha256 'LaunchProfileSha256'
         $profile = Get-Content -Raw -LiteralPath $profileSource | ConvertFrom-Json
         if ($profile.profileSha256 -ne $LaunchProfileSha256) { throw 'launch profile JSON does not match the supplied profile hash' }
-        $actualProfileHash = (Get-FileHash -LiteralPath $profileSource -Algorithm SHA256).Hash.ToLowerInvariant()
-        if ($actualProfileHash -ne $LaunchProfileSha256) { throw 'launch profile bytes do not match the supplied profile hash' }
     }
 
     New-Item -ItemType Directory -Path $output -Force:$false | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $output 'tools') -Force:$false | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $packagedProductRoot 'tools') -Force:$false | Out-Null
     Copy-Item -LiteralPath $cliSource -Destination (Join-Path $output 'aiw.exe')
-    Copy-Item -LiteralPath $guestSource -Destination (Join-Path $output 'tools\aiw-guest-agent.exe')
-    Copy-Item -LiteralPath $projectSource -Destination (Join-Path $output 'project.yaml')
-    if ($profileSource) { Copy-Item -LiteralPath $profileSource -Destination (Join-Path $output 'launch-profile.json') }
+    Copy-Item -LiteralPath $guestSource -Destination (Join-Path $packagedProductRoot 'tools\aiw-guest-agent.exe')
+    Copy-Item -LiteralPath $projectSource -Destination (Join-Path $packagedProductRoot 'project.yaml')
+    if ($profileSource) { Copy-Item -LiteralPath $profileSource -Destination (Join-Path $packagedProductRoot 'launch-profile.json') }
 
     $manifest.projectPath = 'project.yaml'
     $manifest.guestAgentPath = 'tools/aiw-guest-agent.exe'
-    $manifest.projectSha256 = (Get-FileHash -LiteralPath (Join-Path $output 'project.yaml') -Algorithm SHA256).Hash.ToLowerInvariant()
-    $manifest.guestAgentSha256 = (Get-FileHash -LiteralPath (Join-Path $output 'tools\aiw-guest-agent.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+    $manifest.projectSha256 = (Get-FileHash -LiteralPath (Join-Path $packagedProductRoot 'project.yaml') -Algorithm SHA256).Hash.ToLowerInvariant()
+    $manifest.guestAgentSha256 = (Get-FileHash -LiteralPath (Join-Path $packagedProductRoot 'tools\aiw-guest-agent.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($profileSource) {
-        $manifest.launchProfilePath = 'launch-profile.json'
-        $manifest.profileSha256 = $LaunchProfileSha256
+        $manifest | Add-Member -NotePropertyName launchProfilePath -NotePropertyValue 'launch-profile.json' -Force
+        $manifest | Add-Member -NotePropertyName launchProfileSha256 -NotePropertyValue $LaunchProfileSha256 -Force
     } else {
         $manifest.PSObject.Properties.Remove('launchProfilePath')
-        $manifest.PSObject.Properties.Remove('profileSha256')
+        $manifest.PSObject.Properties.Remove('launchProfileSha256')
     }
-    Write-Utf8NoBom (Join-Path $output 'manifest.json') ($manifest | ConvertTo-Json -Depth 20)
+    Write-Utf8NoBom (Join-Path $packagedProductRoot 'manifest.json') ($manifest | ConvertTo-Json -Depth 20)
 
     $payloadFiles = Get-ChildItem -LiteralPath $output -File -Recurse | Where-Object { $_.Name -ne 'receipt.json' } |
         ForEach-Object {

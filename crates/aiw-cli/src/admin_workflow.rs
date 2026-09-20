@@ -4,6 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use aiw_orchestrator::{ApprovalRecord, RunLayout};
 use aiw_probe::{ApplicationInspectionKind, ReadinessState, inspect_application_source};
@@ -21,9 +22,20 @@ struct ProductAssetManifest {
     schema_version: String,
     product_id: String,
     project_path: String,
+    project_sha256: String,
     guest_agent_path: String,
     scenario_id: String,
     guest_agent_sha256: String,
+    #[serde(default)]
+    launch_profile_path: Option<String>,
+    #[serde(default)]
+    launch_profile_sha256: Option<String>,
+}
+
+struct ResolvedProductAssets {
+    project: PathBuf,
+    guest_agent: PathBuf,
+    launch_profile: Option<PathBuf>,
 }
 
 #[derive(Debug, Serialize)]
@@ -35,16 +47,23 @@ pub struct AdminAssessmentResult {
     pub evidence_root: PathBuf,
     pub run_id: String,
     pub workspace: PathBuf,
+    pub execution_mode: &'static str,
     pub approval_recorded: bool,
     pub next: &'static str,
 }
 
 impl ProductAssetManifest {
-    fn resolve(&self, package_root: &Path) -> Result<(PathBuf, PathBuf)> {
+    fn resolve(&self, package_root: &Path) -> Result<ResolvedProductAssets> {
         if self.schema_version != MANIFEST_SCHEMA
             || self.product_id != PRODUCT_ID
             || self.scenario_id != SCENARIO_ID
+            || !valid_sha256(&self.project_sha256)
             || !valid_sha256(&self.guest_agent_sha256)
+            || self
+                .launch_profile_sha256
+                .as_deref()
+                .is_some_and(|value| !valid_sha256(value))
+            || self.launch_profile_path.is_some() != self.launch_profile_sha256.is_some()
         {
             bail!("packaged product manifest is not the fixed Notepad++ assessment contract");
         }
@@ -74,10 +93,15 @@ impl ProductAssetManifest {
             }
             Ok(path)
         };
-        Ok((
-            resolve(&self.project_path, ".yaml")?,
-            resolve(&self.guest_agent_path, ".exe")?,
-        ))
+        Ok(ResolvedProductAssets {
+            project: resolve(&self.project_path, ".yaml")?,
+            guest_agent: resolve(&self.guest_agent_path, ".exe")?,
+            launch_profile: self
+                .launch_profile_path
+                .as_deref()
+                .map(|path| resolve(path, ".json"))
+                .transpose()?,
+        })
     }
 }
 
@@ -109,8 +133,12 @@ pub fn assess(
         &std::fs::read(assets_root.join("manifest.json"))
             .map_err(|_| anyhow!("packaged product manifest is missing"))?,
     )?;
-    let (project_path, guest_agent) = manifest.resolve(&assets_root)?;
-    let project: Project = serde_yaml::from_slice(&std::fs::read(&project_path)?)?;
+    let assets = manifest.resolve(&assets_root)?;
+    let project_bytes = std::fs::read(&assets.project)?;
+    if lowercase_sha256(&project_bytes) != manifest.project_sha256 {
+        bail!("packaged project bytes do not match the product manifest");
+    }
+    let project: Project = serde_yaml::from_slice(&project_bytes)?;
     if !validate_project_for_planning(&project).is_empty() || project.metadata.name != PRODUCT_ID {
         bail!("packaged project is not valid for the fixed assessment");
     }
@@ -118,7 +146,7 @@ pub fn assess(
         ApplicationSource::Msi(source) => &source.sha256,
         _ => bail!("packaged project is not an MSI assessment"),
     };
-    let expected_agent = aiw_windows_platform::HeldApplicationFile::open(&guest_agent)
+    let expected_agent = aiw_windows_platform::HeldApplicationFile::open(&assets.guest_agent)
         .map_err(|error| anyhow!("packaged guest agent is unsupported: {error}"))?;
     if expected_agent.observation().sha256 != manifest.guest_agent_sha256 {
         bail!("packaged guest agent bytes do not match the product manifest");
@@ -126,6 +154,23 @@ pub fn assess(
     expected_agent
         .revalidate()
         .map_err(|error| anyhow!("packaged guest agent drifted: {error}"))?;
+    let launch_profile: Option<aiw_runner::WsbLaunchProfileExport> = assets
+        .launch_profile
+        .as_ref()
+        .map(|path| -> Result<_> {
+            let profile: aiw_runner::WsbLaunchProfileExport =
+                serde_json::from_slice(&std::fs::read(path)?)?;
+            if Some(profile.profile_sha256.as_str()) != manifest.launch_profile_sha256.as_deref() {
+                bail!("packaged launch profile identity differs from the product manifest");
+            }
+            Ok(profile)
+        })
+        .transpose()?;
+    let execution_mode = if launch_profile.is_some() {
+        "approvedReplay"
+    } else {
+        "assessment"
+    };
     let run_id = format!("admin-{}", nonce());
     let evidence_root = create_evidence_root(evidence_parent, &run_id)?;
     let readiness = aiw_windows_platform::assess_windows_sandbox();
@@ -143,22 +188,22 @@ pub fn assess(
         .map_err(|error| anyhow!("installer is unsupported: {error}"))?;
     let inspection = inspect_application_source(installer, ApplicationInspectionKind::Msi)
         .map_err(|error| anyhow!("installer is unsupported: {error}"))?;
+    save_stage(&evidence_root, "installer-inspection", &inspection)?;
     if inspection.sha256.as_deref() != Some(&held.observation().sha256)
         || inspection.sha256.as_deref() != Some(expected_msi.as_str())
     {
         bail!(
-            "installer bytes are unsupported for the packaged Notepad++ profile; no intake or Sandbox run was created"
+            "installer bytes are unsupported for the packaged Notepad++ profile; inspect installer-inspection.json and select the exact supported MSI bytes. No intake or Sandbox run was created"
         );
     }
     held.revalidate()
         .map_err(|error| anyhow!("installer drifted before protected intake: {error}"))?;
-    save_stage(&evidence_root, "installer-inspection", &inspection)?;
     let intake_parent = evidence_root.join("intakes");
     std::fs::create_dir(&intake_parent)?;
     let receipt = aiw_windows_platform::import_application_file_with_metadata(&intake_parent, "notepad-plus-plus", ApplicationInspectionKind::Msi, &held, true)
         .map_err(|error| anyhow!("protected intake failed; preserve evidence and use a new evidence location to retry: {error}"))?;
     save_stage(&evidence_root, "intake-receipt", &receipt)?;
-    let prepared = aiw_runner::prepare_windows_sandbox_msi_bundle(&run_id, &project, &guest_agent, &manifest.guest_agent_sha256, &evidence_root, &now_rfc3339(), aiw_runner::WsbMsiPreparationInput { import_receipt: &receipt, scenario_id: SCENARIO_ID, document_input: None, launch_profile: None })
+    let prepared = aiw_runner::prepare_windows_sandbox_msi_bundle(&run_id, &project, &assets.guest_agent, &manifest.guest_agent_sha256, &evidence_root, &now_rfc3339(), aiw_runner::WsbMsiPreparationInput { import_receipt: &receipt, scenario_id: SCENARIO_ID, document_input: None, launch_profile: launch_profile.as_ref().zip(manifest.launch_profile_sha256.as_deref()) })
         .map_err(|error| anyhow!("preparation failed; inspect retained stage output and do not retry this workspace: {error}"))?;
     save_stage(&evidence_root, "preparation", &prepared.receipt)?;
     let workspace = PathBuf::from(&prepared.receipt.workspace.root.final_path);
@@ -171,6 +216,16 @@ pub fn assess(
         anyhow!("recipe inspection failed; inspect retained preparation before retrying: {error}")
     })?;
     save_stage(&evidence_root, "recipe", &recipe)?;
+    {
+        let mut terminal = std::io::stderr().lock();
+        writeln!(
+            terminal,
+            "Review the complete verified recipe before approval (mode: {execution_mode}):\n"
+        )?;
+        approval_review::write_review_json(&mut terminal, &recipe)?;
+        writeln!(terminal, "\n")?;
+        terminal.flush()?;
+    }
     let imported = aiw_runner::import_windows_sandbox_preparation(
         &workspace,
         &project,
@@ -202,6 +257,7 @@ pub fn assess(
             evidence_root,
             run_id,
             workspace,
+            execution_mode,
             approval_recorded: false,
             next: "Approval was cancelled. The run remains pending approval; no Sandbox was started.",
         });
@@ -210,7 +266,7 @@ pub fn assess(
     save_stage(&evidence_root, "approval", &approval)?;
     let execution = match aiw_runner::start_approved_windows_sandbox(
         &workspace,
-        &project_path,
+        &assets.project,
         &project,
         &manifest.guest_agent_sha256,
         900,
@@ -254,6 +310,7 @@ pub fn assess(
         evidence_root,
         run_id,
         workspace,
+        execution_mode,
         approval_recorded: true,
         next: "Assessment completed. Read report.md; use the retained run status for any later recovery decision.",
     })
@@ -327,6 +384,10 @@ fn valid_sha256(value: &str) -> bool {
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
+fn lowercase_sha256(bytes: &[u8]) -> String {
+    hex::encode(Sha256::digest(bytes))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -336,9 +397,27 @@ mod tests {
             schema_version: MANIFEST_SCHEMA.into(),
             product_id: PRODUCT_ID.into(),
             project_path: "../project.yaml".into(),
+            project_sha256: "b".repeat(64),
             guest_agent_path: "tools/agent.exe".into(),
             scenario_id: SCENARIO_ID.into(),
             guest_agent_sha256: "a".repeat(64),
+            launch_profile_path: None,
+            launch_profile_sha256: None,
+        };
+        assert!(manifest.resolve(Path::new(".")).is_err());
+    }
+    #[test]
+    fn manifest_rejects_placeholder_and_unpaired_profile_identity() {
+        let manifest = ProductAssetManifest {
+            schema_version: MANIFEST_SCHEMA.into(),
+            product_id: PRODUCT_ID.into(),
+            project_path: "project.yaml".into(),
+            project_sha256: "b".repeat(64),
+            guest_agent_path: "tools/agent.exe".into(),
+            scenario_id: SCENARIO_ID.into(),
+            guest_agent_sha256: "0".repeat(64),
+            launch_profile_path: Some("profile.json".into()),
+            launch_profile_sha256: None,
         };
         assert!(manifest.resolve(Path::new(".")).is_err());
     }

@@ -63,6 +63,15 @@ if interpretation or multiple report paths change; otherwise Sol integrates it.
 
 ### 3. Connect the supported operator workflow — Sol or Terra, medium
 
+Implementation is ready for the live acceptance pass. `aiw admin assess` now
+owns protected intake through retained report, displays the complete verified
+recipe before exact-plan terminal approval, and selects assessment or
+profile-bound replay only from package assets. Project, guest, and optional
+profile identities are package-bound. `scripts/build-preview-package.ps1`
+produced a real profile-bound package and receipt without running Sandbox. The
+remaining Packet 3 evidence is the public-entry disposable-worker trial and its
+negative acceptance cases; do not call the packet closed from local tests alone.
+
 Deliver a single documented CLI entry path for supported Notepad++ assessment
 and replay. Before editing, write a short command/state contract in the existing
 admin guide: operator inputs, read-only checks, durable stage outputs, review

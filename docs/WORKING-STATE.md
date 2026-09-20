@@ -51,10 +51,14 @@ gives a state-specific next action. Retained completed and controlled-failure
 workspaces rendered correctly without changing their files. See
 [ASSESSMENT-REPORT.md](ASSESSMENT-REPORT.md).
 
-Next: finish the remaining [administrator workflow acceptance cases](RELEASE-GATES.md),
-then the clean-host/second-operator trial. ROADMAP.md now makes this ordering
-authoritative; broader AppContainer research and application conversion do not
-block the narrow preview. Do not repeat installer trials for output-only changes.
+The packaged `aiw admin assess` route now composes protected intake, preparation,
+visible recipe review, exact-plan terminal approval, execution, and retained
+JSON/Markdown reporting. Product assets bind the fixed local-settings project,
+static guest, and optional approved replay profile. A real profile-bound preview
+package was assembled with a receipt; no Sandbox was run for that assembly.
+Next: exercise the remaining [administrator workflow acceptance cases](RELEASE-GATES.md)
+through that public package, then the clean-host/second-operator trial. Broader
+AppContainer research and application conversion do not block the narrow preview.
 
 ## Read only what the slice needs
 

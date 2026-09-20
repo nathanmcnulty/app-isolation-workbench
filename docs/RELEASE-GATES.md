@@ -74,7 +74,8 @@ The deterministic preview assembly is prepared with
 `scripts/build-preview-package.ps1 -OutputDirectory <new-directory>`. It builds
 the release CLI and static guest agent, copies the fixed Notepad++ project, and
 publishes a package-local manifest with exact project and guest hashes. A
-validated launch profile can be supplied with its exact SHA-256. `receipt.json`
+validated launch profile can be supplied with its canonical `profileSha256`
+identity. `receipt.json`
 is written last and binds the package inventory; this assembles release inputs
 but does not prove clean-host installation, signing, or Sandbox execution.
 
