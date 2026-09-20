@@ -47,6 +47,39 @@ fn aiw() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_aiw"))
 }
 
+#[test]
+fn interactive_approval_rejects_redirected_input_without_mutation() {
+    let temp = TempDir::new();
+    let plan_path = temp.path().join("input-plan.json");
+    write_plan(&plan_path, &repo_path("examples/minimal.aiw.yaml"), None);
+    let plan: RunPlan = serde_json::from_slice(&fs::read(&plan_path).unwrap()).unwrap();
+    let root = temp.path().join("runs");
+    fs::create_dir(&root).unwrap();
+    let layout = RunLayout::new(&root, &plan.run_id).unwrap();
+    layout.create(&plan).unwrap();
+    let before = layout.status().unwrap();
+    let output = Command::new(aiw())
+        .args(["run", "review-approval", "--root"])
+        .arg(&root)
+        .args([
+            "--run-id",
+            &plan.run_id,
+            "--approved-by",
+            "operator",
+            "--approved-at",
+            "now",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("requires terminal input"));
+    assert_eq!(
+        serde_json::to_value(layout.status().unwrap()).unwrap(),
+        serde_json::to_value(before).unwrap()
+    );
+    assert!(layout.read_approval().is_err());
+}
+
 #[cfg(windows)]
 #[test]
 fn launch_profile_rejection_preserves_actionable_diagnostics() {

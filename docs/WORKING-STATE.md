@@ -4,7 +4,7 @@ Updated 2026-09-20. This is a compact handoff, not a run receipt or authorizatio
 
 ## Where to resume
 
-- Review branch: `codex/focused-quality-review`, based on PR #65 merge `daa6b0f`. Later main dependency updates have separate validation. Use the status helper rather than assuming this branch is current main.
+- Active branch: `codex/admin-assessment-summary`, based on PR #66 merge `6f19136`. PR #66 merged only after hosted verification/audit and MSRV passed. Use the status helper rather than assuming another checkout has these changes.
 - Latest milestone: profile-bound approved replay passed the fixed document workflow, required guest file ACL controls, recorded environment comparison, and cleanup. PR #65 hosted verification/audit and MSRV passed; its main run was superseded and cancelled. Source evidence and the earlier worktree remain preserved. See VALIDATED-SANDBOX-LAUNCH.md.
 - Goal: report tested functions for exact application bytes and measured isolation configurations, then use the evidence for adaptation/repackaging. Free community project; feedback collection is not a development gate.
 
@@ -33,7 +33,12 @@ production blocker was found in the reviewed authority, historical report, or
 recovery paths. Test/build failure causes remain unconfirmed; retained diagnostics
 and the missing direct start-before-acquisition regression are tracked in the review.
 
-Next: finish the [administrator workflow acceptance cases](RELEASE-GATES.md),
+The first administrator improvement adds [terminal approval review](ADMIN-APPROVAL.md):
+show the exact plan and approval identity, require the displayed hash, and record
+through the existing service without a hand-authored approval file. Cancellation
+does not approve or execute anything; redirected input is rejected.
+
+Next: finish the remaining [administrator workflow acceptance cases](RELEASE-GATES.md),
 then the clean-host/second-operator trial. ROADMAP.md now makes this ordering
 authoritative; broader AppContainer research and application conversion do not
 block the narrow preview. Do not repeat installer trials for output-only changes.
