@@ -18,6 +18,11 @@ Updated 2026-09-20. This is a compact handoff, not a run receipt or authorizatio
 
 ## Next coherent slice
 
+Follow [EXECUTION-PLAN.md](EXECUTION-PLAN.md) for bounded work packets and model
+assignments. Recommended main model: Sol medium; Luna for bounded implementation;
+stronger models for specific review/escalation. Close the pending independent
+approval review before adding the administrator summary and guided workflow.
+
 Approved profile replay passed at runtime commit `fc22efb`: preparation v0alpha6
 embeds the reverified profile, approval binds its exact identity, and start
 re-verifies source evidence before acquiring Sandbox. A fresh fixed trial passed
