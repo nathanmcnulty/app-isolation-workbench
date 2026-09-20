@@ -61,16 +61,19 @@ fixtures in existing report tests. Test semantic misclassification cases, not
 every heading. No installer rerun for formatting. Terra can review the exact diff
 if interpretation or multiple report paths change; otherwise Sol integrates it.
 
-### 3. Connect the supported operator workflow — Sol or Terra, medium
+### 3. Closed: connect the supported operator workflow
 
-Implementation is ready for the live acceptance pass. `aiw admin assess` now
+`aiw admin assess` now
 owns protected intake through retained report, displays the complete verified
 recipe before exact-plan terminal approval, and selects assessment or
 profile-bound replay only from package assets. Project, guest, and optional
 profile identities are package-bound. `scripts/build-preview-package.ps1`
-produced a real profile-bound package and receipt without running Sandbox. The
-remaining Packet 3 evidence is the public-entry disposable-worker trial and its
-negative acceptance cases; do not call the packet closed from local tests alone.
+produced the profile-bound package and receipt. The public-entry trial completed
+as run `admin-1789947096248087800`: operator approval, installation, launch,
+fixed document save, required guest ACL control, report publication, and exact
+cleanup all passed. The retained report keeps broader isolation as
+`insufficientEvidence`. Occupied Sandbox, unsupported input, cancellation, and
+profile/package drift have specific retained or tested failure paths.
 
 Deliver a single documented CLI entry path for supported Notepad++ assessment
 and replay. Before editing, write a short command/state contract in the existing
@@ -95,7 +98,7 @@ and negative tests before one authorized disposable-worker trial. Sol high revie
 changes crossing approval, provider acquisition, retained authority, or recovery.
 If those primitives need redesign, stop that packet and explain the concrete gap.
 
-### 4. Validate the complete administrator milestone — Sol, medium
+### 4. Closed: validate the complete administrator milestone
 
 Follow RELEASE-GATES.md's acceptance cases through the actual public entry path,
 not a development-only driver. Luna can prepare documentation or inspect retained
@@ -109,6 +112,12 @@ Create one integration PR for the coherent milestone, after local validation.
 Review the exact head and require successful `Verify and audit` and `Minimum
 supported Rust` before merging. Commit and push stable intermediate work without
 creating PRs or triggering CI just to preserve it.
+
+The actual packaged entry path completed on 2026-09-20 with retained evidence
+linked from ADMINISTRATOR-WORKFLOW.md. The exact package head also passed the
+workspace suite, formatting, warnings-as-errors clippy, Rust 1.85, governance,
+and independent exact-head review. The remaining integration work is one PR,
+hosted verification/audit, MSRV, and merge; after that Packet 5 is next.
 
 ### 5. Clean-host preview — Terra or Sol, medium, then a second operator
 

@@ -55,17 +55,30 @@ The packaged `aiw admin assess` route now composes protected intake, preparation
 visible recipe review, exact-plan terminal approval, execution, and retained
 JSON/Markdown reporting. Product assets bind the fixed local-settings project,
 static guest, and optional approved replay profile. A real profile-bound preview
-package was assembled with a receipt; no Sandbox was run for that assembly.
+package was assembled with a receipt.
 Assembly now verifies the profile's application, project, scenario, and guest
 bindings. The runnable replay package uses the exact retained validated guest;
 an incompatible freshly built release guest was rejected before receipt.
 The public package also passed the occupied-session negative case with a specific
 retained readiness path and no intake/provider mutation. Another task's session
-`8fd60024-30fd-41d7-8fa8-04571a405184` was still present, so the approved replay
-was not started or stopped.
-Next: exercise the remaining [administrator workflow acceptance cases](RELEASE-GATES.md)
-through that public package, then the clean-host/second-operator trial. Broader
-AppContainer research and application conversion do not block the narrow preview.
+`8fd60024-30fd-41d7-8fa8-04571a405184` was later explicitly stopped with user
+authorization.
+
+The public profile-bound replay then completed as run
+`admin-1789947096248087800` under
+`%LOCALAPPDATA%\Temp\aiw-admin-public-replay-783a99b8f9a24fcb9c1f6d25cfe90ecf`.
+The exact supported MSI installed; Notepad++ launched under the fixed medium-
+integrity, non-elevated standard user; the document opened and saved the expected
+bytes; the guest file ACL control passed; and the retained status is terminal
+with cleanup verified. The provider list was empty afterward. The administrator
+overview correctly reports all fixed functions as passed and broader isolation
+as `insufficientEvidence`. A separate visibility retry is preserved as an
+unapproved preparation and never acquired Sandbox.
+
+Next: integrate this administrator milestone through one reviewed PR with both
+required hosted checks, then begin Packet 5's clean-host package and second-
+operator trial. Broader AppContainer research and application conversion do not
+block the narrow preview.
 
 ## Read only what the slice needs
 

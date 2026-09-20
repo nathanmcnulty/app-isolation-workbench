@@ -29,7 +29,7 @@ not measure that final product outcome.
 | Gate | Concrete completion evidence |
 |---|---|
 | Approved profile replay — demonstrated | Profile identity is bound into approval; stripping/substitution/drift is rejected. The fresh worker at `fc22efb` completed the fixed workflow, required file ACL controls, and cleanup; report v0alpha11 identifies the approved profile. See [retained proof](VALIDATED-SANDBOX-LAUNCH.md#approved-replay-proof). |
-| Administrator workflow | A documented, guided path from intake through assessment, plain-language summary, recipe selection, and approved replay. Failures and unmeasured functions remain visible, with specific next steps and accessible diagnostics. |
+| Administrator workflow — demonstrated | The packaged `aiw admin assess` route completed protected intake, complete recipe display, operator exact-hash approval, profile-bound replay, retained JSON/Markdown reporting, and verified cleanup for run `admin-1789947096248087800`. The report records every fixed function as passed while retaining `insufficientEvidence` for broader isolation. Occupied-session, unsupported-input, cancellation, and profile/package drift controls are retained or covered by the exact package checks and tests. See [administrator workflow proof](ADMINISTRATOR-WORKFLOW.md#public-entry-proof). |
 | Clean-host distribution trial | A versioned Workbench build can be installed or unpacked on a clean supported host, prerequisites are detected correctly, and a second operator completes the documented assessment/replay path with retained evidence. Publish the exact build identity, support scope, and known limitations. |
 
 After approved profile replay, pause feature expansion for a focused quality
@@ -95,9 +95,20 @@ and created no intake or run. AIW did not acquire, recover, or stop that session
 The retained parent is
 `%LOCALAPPDATA%\Temp\aiw-admin-public-occupied-d3fef39ab1c742adbb8fbac9dd56725e`.
 
+The same package then completed the public profile-bound route after visible
+operator approval. Run `admin-1789947096248087800` retained the exact approval,
+execution, report, guest result, and clean terminal status under
+`%LOCALAPPDATA%\Temp\aiw-admin-public-replay-783a99b8f9a24fcb9c1f6d25cfe90ecf`.
+Installation and launch exited zero; the fixed document opened and saved the
+expected SHA-256; the application ran at medium integrity without elevation;
+the required guest file ACL control passed; and exact cleanup was verified. The
+provider reported no sessions afterward. The report's broader outcome remains
+`insufficientEvidence`, with its missing independent host, descendant, network,
+IPC, persistence, and effective-backend measurements listed explicitly.
+
 These are outcome gates, not a calendar or quota estimate. The remaining
-uncertainty is concentrated in the administrator workflow and clean-host trial;
-new application classes and new isolation mechanisms are not prerequisites.
+release uncertainty is concentrated in the clean-host trial; new application
+classes and new isolation mechanisms are not prerequisites.
 Update this table when evidence closes a gate rather than repeatedly labelling
 implementation slices as a release milestone.
 
