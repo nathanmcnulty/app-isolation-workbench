@@ -10,6 +10,7 @@ rust-version.workspace = true
 [dependencies]
 aiw-probe.workspace = true
 aiw-provider-wsb.workspace = true
+aiw-token.workspace = true
 aiw-windows-command-line.workspace = true
 hex.workspace = true
 serde_json.workspace = true
@@ -31,17 +32,20 @@ windows = { version = "0.62.2", features = [
     "Win32_Globalization",
     "Win32_Security",
     "Win32_Security_Authorization",
+    "Win32_Security_Isolation",
     "Win32_Security_Cryptography",
     "Win32_Security_Cryptography_Catalog",
     "Win32_Security_WinTrust",
     "Win32_Storage_FileSystem",
     "Win32_System_JobObjects",
+    "Win32_System_Registry",
     "Win32_System_IO",
     "Win32_System_Pipes",
     "Win32_System_Threading",
     "Win32_System_SystemServices",
     "Win32_System_WindowsProgramming",
     "Win32_System_WinRT",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 
 # This crate is the sole WSB-specific native boundary. Unsafe blocks are kept

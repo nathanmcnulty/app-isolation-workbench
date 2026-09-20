@@ -58,9 +58,126 @@ fn parse_one_json(bytes: &[u8]) -> Value {
     serde_json::from_slice(bytes).expect("expected exactly one JSON document")
 }
 
+#[cfg(windows)]
+#[test]
+fn settings_comparison_rejects_missing_trials_without_output() {
+    let temp = TempDir::new();
+    let input = temp.path().join("input.json");
+    fs::write(
+        &input,
+        r#"{"schemaVersion":"aiw.dev/wsb-msi-report-set-input/v0alpha1","entries":[]}"#,
+    )
+    .unwrap();
+    let output = Command::new(aiw())
+        .args(["run", "report-wsb-settings-comparison", "--input"])
+        .arg(&input)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let error = parse_one_json(&output.stderr);
+    assert_eq!(error["runId"], "settings-comparison");
+    assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 1);
+    let schema = Command::new(aiw())
+        .args(["schema", "wsb-settings-comparison"])
+        .output()
+        .unwrap();
+    assert!(schema.status.success());
+    assert_eq!(
+        parse_one_json(&schema.stdout)["title"],
+        "WsbSettingsComparison"
+    );
+}
+
 fn canonical_hash<T: Serialize>(value: &T) -> String {
     let value = serde_json::to_value(value).unwrap();
     hex::encode(Sha256::digest(canonical_json_bytes(&value).unwrap()))
+}
+
+#[cfg(windows)]
+#[test]
+fn recipe_inspection_failure_preserves_actionable_preparation_diagnostic() {
+    let temp = TempDir::new();
+    let result = Command::new(aiw())
+        .args(["package", "inspect-wsb-msi-recipe", "--root"])
+        .arg(temp.path().join("missing-preparation"))
+        .arg("--project")
+        .arg(repo_path("examples/notepad-plus-plus-msi.aiw.yaml"))
+        .args(["--guest-agent-sha256", &"f".repeat(64)])
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(result.stdout.is_empty());
+    let error = parse_one_json(&result.stderr);
+    assert_eq!(error["code"], "AIW_WSB_RECIPE_INSPECTION_REJECTED");
+    assert_eq!(error["stage"], "wsbRecipeInspection");
+    assert!(error["detail"].as_str().unwrap().contains("preparation"));
+    assert!(error["detail"].as_str().unwrap().chars().count() <= 512);
+}
+
+#[cfg(windows)]
+#[test]
+fn bundle_failure_preserves_actionable_diagnostic() {
+    let temp = TempDir::new();
+    let result = Command::new(aiw())
+        .args(["package", "verify", "--bundle"])
+        .arg(temp.path())
+        .args(["--manifest-sha256", "bad-hash"])
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(result.stdout.is_empty());
+    let error = parse_one_json(&result.stderr);
+    assert_eq!(error["code"], "AIW_SANDBOX_BUNDLE_REJECTED");
+    assert!(
+        error["detail"]
+            .as_str()
+            .unwrap()
+            .contains("expected manifest hash")
+    );
+}
+
+#[test]
+fn typed_msi_compilation_emits_bound_review_and_rejects_unknown_scenario() {
+    let project_path = repo_path("examples/notepad-plus-plus-msi.aiw.yaml");
+    let project_bytes = fs::read(&project_path).unwrap();
+    let project: Project = serde_yaml::from_slice(&project_bytes).unwrap();
+    let result = Command::new(aiw())
+        .args(["provider", "compile-msi-scenario", "--project"])
+        .arg(&project_path)
+        .args(["--scenario", "install-launch-close"])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(result.stderr.is_empty());
+    let review = parse_one_json(&result.stdout);
+    assert_eq!(
+        review["projectRevisionSha256"],
+        project_revision_hash(&project).unwrap()
+    );
+    assert_eq!(
+        review["scenarioSha256"],
+        canonical_hash(&review["scenario"])
+    );
+    assert_eq!(review["scenario"]["processWaitTimeoutSeconds"], 30);
+    assert_eq!(fs::read(&project_path).unwrap(), project_bytes);
+
+    let rejected = Command::new(aiw())
+        .args(["provider", "compile-msi-scenario", "--project"])
+        .arg(&project_path)
+        .args(["--scenario", "unsupported"])
+        .output()
+        .unwrap();
+    assert!(!rejected.status.success());
+    assert!(rejected.stdout.is_empty());
+    assert_eq!(
+        parse_one_json(&rejected.stderr)["code"],
+        "AIW_MSI_SCENARIO_REJECTED"
+    );
 }
 
 fn write_plan(path: &Path, project_path: &Path, hash: Option<String>) {
@@ -250,9 +367,12 @@ fn clap_failures_emit_one_json_envelope_and_no_stdout() {
 
 #[test]
 fn application_inspection_is_json_only_and_type_bound() {
+    let temp = TempDir::new();
+    let source = temp.path().join("aiw-fixture.exe");
+    fs::copy(aiw(), &source).unwrap();
     let inspected = Command::new(aiw())
         .args(["application", "inspect", "--source"])
-        .arg(aiw())
+        .arg(&source)
         .args(["--kind", "exe"])
         .output()
         .unwrap();
@@ -265,11 +385,45 @@ fn application_inspection_is_json_only_and_type_bound() {
     );
     assert_eq!(value["kind"], "exe");
     assert_eq!(value["architecture"], "x64");
-    assert_eq!(value["signatureStatus"], "unknown");
+    assert_eq!(value["signatureStatus"], "missing");
+    assert_eq!(
+        value["fileAuthority"]["schemaVersion"],
+        "aiw.dev/application-file-authority/v0alpha1"
+    );
+    assert_eq!(value["fileAuthority"]["linkCount"], 1);
+    assert_eq!(value["fileAuthority"]["sha256"], value["sha256"]);
+    assert_eq!(value["fileAuthority"]["sizeBytes"], value["sizeBytes"]);
+    assert_eq!(value["fileAuthority"]["onlyUnnamedDataStream"], true);
+
+    let portable = temp.path().join("portable");
+    fs::create_dir(&portable).unwrap();
+    fs::write(portable.join("app.txt"), b"portable").unwrap();
+    let inspected_portable = Command::new(aiw())
+        .args(["application", "inspect", "--source"])
+        .arg(&portable)
+        .args(["--kind", "portable-directory"])
+        .output()
+        .unwrap();
+    assert!(inspected_portable.status.success());
+    assert!(inspected_portable.stderr.is_empty());
+    let portable_value = parse_one_json(&inspected_portable.stdout);
+    assert_eq!(portable_value["kind"], "portableDirectory");
+    assert_eq!(
+        portable_value["portableDirectoryAuthority"]["schemaVersion"],
+        "aiw.dev/portable-directory-authority/v0alpha1"
+    );
+    assert_eq!(
+        portable_value["portableDirectoryAuthority"]["manifestSha256"],
+        portable_value["portableManifest"]["manifestSha256"]
+    );
+    assert_eq!(
+        portable_value["portableDirectoryAuthority"]["entries"][0]["relativePath"],
+        "app.txt"
+    );
 
     let rejected = Command::new(aiw())
         .args(["application", "inspect", "--source"])
-        .arg(aiw())
+        .arg(&source)
         .args(["--kind", "msi"])
         .output()
         .unwrap();
@@ -278,6 +432,238 @@ fn application_inspection_is_json_only_and_type_bound() {
     let error = parse_one_json(&rejected.stderr);
     assert_eq!(error["code"], "AIW_APPLICATION_INSPECTION_REJECTED");
     assert_eq!(error["stage"], "applicationInspection");
+
+    #[cfg(windows)]
+    {
+        fs::write(format!("{}:extra", source.display()), b"untrusted").unwrap();
+        let streamed = Command::new(aiw())
+            .args(["application", "inspect", "--source"])
+            .arg(&source)
+            .args(["--kind", "exe"])
+            .output()
+            .unwrap();
+        assert!(!streamed.status.success());
+        assert!(streamed.stdout.is_empty());
+        let error = parse_one_json(&streamed.stderr);
+        assert_eq!(error["code"], "AIW_APPLICATION_AUTHORITY_REJECTED");
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn protected_file_import_is_receipt_last_create_new_and_read_only_verifiable() {
+    let temp = TempDir::new();
+    let source = temp.path().join("fixture.exe");
+    fs::copy(aiw(), &source).unwrap();
+    let intake_parent = temp.path().join("intakes");
+    fs::create_dir(&intake_parent).unwrap();
+    let imported = Command::new(aiw())
+        .args(["application", "import", "--source"])
+        .arg(&source)
+        .args(["--kind", "exe", "--intake-parent"])
+        .arg(&intake_parent)
+        .args(["--intake-id", "cli-intake-001"])
+        .output()
+        .unwrap();
+    assert!(
+        imported.status.success(),
+        "protected file import failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&imported.stdout),
+        String::from_utf8_lossy(&imported.stderr)
+    );
+    assert!(imported.stderr.is_empty());
+    let receipt = parse_one_json(&imported.stdout);
+    assert_eq!(
+        receipt["schemaVersion"],
+        "aiw.dev/application-file-import-receipt/v0alpha2"
+    );
+    assert_eq!(receipt["sourceKind"], "exe");
+    assert_eq!(receipt["payloadRelativePath"], "source/payload.exe");
+    let receipt_path = temp.path().join("receipt.json");
+    fs::write(&receipt_path, serde_json::to_vec(&receipt).unwrap()).unwrap();
+
+    let verified = Command::new(aiw())
+        .args(["application", "verify-import", "--receipt"])
+        .arg(&receipt_path)
+        .output()
+        .unwrap();
+    assert!(verified.status.success());
+    assert!(verified.stderr.is_empty());
+    let verification = parse_one_json(&verified.stdout);
+    assert_eq!(verification["verified"], true);
+    assert_eq!(
+        verification["schemaVersion"],
+        "aiw.dev/application-file-import-verification/v0alpha1"
+    );
+
+    let collision = Command::new(aiw())
+        .args(["application", "import", "--source"])
+        .arg(&source)
+        .args(["--kind", "exe", "--intake-parent"])
+        .arg(&intake_parent)
+        .args(["--intake-id", "cli-intake-001"])
+        .output()
+        .unwrap();
+    assert!(!collision.status.success());
+    assert!(collision.stdout.is_empty());
+    let collision_error = parse_one_json(&collision.stderr);
+    assert_eq!(collision_error["code"], "AIW_APPLICATION_IMPORT_REJECTED");
+    assert_eq!(collision_error["retryable"], false);
+
+    let payload = receipt["payload"]["finalPath"].as_str().unwrap();
+    fs::write(payload, b"tampered").unwrap();
+    let rejected = Command::new(aiw())
+        .args(["application", "verify-import", "--receipt"])
+        .arg(&receipt_path)
+        .output()
+        .unwrap();
+    assert!(!rejected.status.success());
+    assert!(rejected.stdout.is_empty());
+    let rejected_error = parse_one_json(&rejected.stderr);
+    assert_eq!(
+        rejected_error["code"],
+        "AIW_APPLICATION_IMPORT_VERIFICATION_REJECTED"
+    );
+    assert_eq!(rejected_error["stage"], "applicationImportVerification");
+}
+
+#[cfg(windows)]
+#[test]
+fn downloaded_import_requires_explicit_archiving_and_preserves_metadata() {
+    let temp = TempDir::new();
+    let source = temp.path().join("download.exe");
+    fs::copy(aiw(), &source).unwrap();
+    let stream = format!("{}:Zone.Identifier", source.display());
+    let origin = b"[ZoneTransfer]\r\nZoneId=3\r\nHostUrl=https://example.invalid/private\r\n";
+    fs::write(&stream, origin).unwrap();
+    let inspect = Command::new(aiw())
+        .args(["application", "inspect", "--kind", "exe", "--source"])
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(
+        inspect.status.success(),
+        "{}",
+        String::from_utf8_lossy(&inspect.stderr)
+    );
+    let observed = parse_one_json(&inspect.stdout);
+    assert_eq!(
+        observed["fileAuthority"]["downloadMetadata"][0]["name"],
+        "Zone.Identifier"
+    );
+    assert!(!String::from_utf8_lossy(&inspect.stdout).contains("example.invalid/private"));
+    let invoke = |explicit: bool| {
+        let mut command = Command::new(aiw());
+        command
+            .args(["application", "import", "--kind", "exe", "--source"])
+            .arg(&source)
+            .args(["--intake-parent"])
+            .arg(temp.path())
+            .args(["--intake-id", "download-intake"]);
+        if explicit {
+            command.arg("--archive-download-metadata");
+        }
+        command.output().unwrap()
+    };
+    assert!(!invoke(false).status.success());
+    assert!(!temp.path().join("download-intake").exists());
+    let imported = invoke(true);
+    assert!(
+        imported.status.success(),
+        "{}",
+        String::from_utf8_lossy(&imported.stderr)
+    );
+    let receipt = parse_one_json(&imported.stdout);
+    assert_eq!(
+        receipt["schemaVersion"],
+        "aiw.dev/application-file-import-receipt/v0alpha3"
+    );
+    assert_eq!(
+        receipt["downloadMetadataArchive"]["policy"],
+        "archiveForSandbox"
+    );
+    assert_eq!(fs::read(&stream).unwrap(), origin);
+    assert_eq!(
+        fs::read(
+            receipt["downloadMetadataArchive"]["entries"][0]["identity"]["finalPath"]
+                .as_str()
+                .unwrap()
+        )
+        .unwrap(),
+        origin
+    );
+    let receipt_path = temp.path().join("receipt.json");
+    fs::write(&receipt_path, imported.stdout).unwrap();
+    let verified = Command::new(aiw())
+        .args(["application", "verify-import", "--receipt"])
+        .arg(&receipt_path)
+        .output()
+        .unwrap();
+    assert!(
+        verified.status.success(),
+        "{}",
+        String::from_utf8_lossy(&verified.stderr)
+    );
+}
+
+#[test]
+fn protected_portable_import_is_json_only_and_read_only_verifiable() {
+    let temp = TempDir::new();
+    let source = temp.path().join("portable");
+    fs::create_dir(&source).unwrap();
+    fs::create_dir(source.join("bin")).unwrap();
+    fs::create_dir(source.join("empty")).unwrap();
+    fs::write(source.join("bin").join("app.exe"), b"portable-app").unwrap();
+    fs::write(source.join("readme.txt"), b"readme").unwrap();
+    let intake_parent = temp.path().join("intakes");
+    fs::create_dir(&intake_parent).unwrap();
+
+    let imported = Command::new(aiw())
+        .args(["application", "import-portable", "--source"])
+        .arg(&source)
+        .arg("--intake-parent")
+        .arg(&intake_parent)
+        .args(["--intake-id", "portable-001"])
+        .output()
+        .unwrap();
+    assert!(
+        imported.status.success(),
+        "protected portable import failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&imported.stdout),
+        String::from_utf8_lossy(&imported.stderr)
+    );
+    assert!(imported.stderr.is_empty());
+    let receipt = parse_one_json(&imported.stdout);
+    assert_eq!(
+        receipt["schemaVersion"],
+        "aiw.dev/portable-directory-import-receipt/v0alpha2"
+    );
+    assert_eq!(receipt["sourceKind"], "portableDirectory");
+    assert_eq!(receipt["entryCount"], 4);
+    let receipt_path = temp.path().join("portable-receipt.json");
+    fs::write(&receipt_path, serde_json::to_vec(&receipt).unwrap()).unwrap();
+
+    let verified = Command::new(aiw())
+        .args(["application", "verify-portable-import", "--receipt"])
+        .arg(&receipt_path)
+        .output()
+        .unwrap();
+    assert!(verified.status.success());
+    assert!(verified.stderr.is_empty());
+    assert_eq!(parse_one_json(&verified.stdout)["verified"], true);
+
+    let payload = receipt["payloadDirectory"]["finalPath"].as_str().unwrap();
+    fs::write(Path::new(payload).join("readme.txt"), b"tampered").unwrap();
+    let rejected = Command::new(aiw())
+        .args(["application", "verify-portable-import", "--receipt"])
+        .arg(&receipt_path)
+        .output()
+        .unwrap();
+    assert!(!rejected.status.success());
+    assert!(rejected.stdout.is_empty());
+    let error = parse_one_json(&rejected.stderr);
+    assert_eq!(error["code"], "AIW_PORTABLE_IMPORT_VERIFICATION_REJECTED");
+    assert_eq!(error["stage"], "portableImportVerification");
 }
 
 #[test]
@@ -544,7 +930,11 @@ fn clean_wsb_transaction_without_terminal_result_fails_closed() {
     assert!(status.status.success());
     let status_json = parse_one_json(&status.stdout);
     assert_eq!(status_json["core"]["status"], "ready");
-    assert_eq!(status_json["windowsSandbox"]["status"], "clean");
+    assert_eq!(status_json["windowsSandbox"]["status"], "recoveryRequired");
+    assert_eq!(
+        status_json["windowsSandbox"]["reasonCode"],
+        "legacy-request-location-unavailable"
+    );
     assert_eq!(fs::read(&journal).unwrap(), before);
 
     let recovery = Command::new(aiw())

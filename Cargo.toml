@@ -1,6 +1,8 @@
 [workspace]
 members = [
     "crates/aiw-cli",
+    "crates/aiw-control-fixture",
+    "crates/aiw-control-appcontainer",
     "crates/aiw-core",
     "crates/aiw-evidence",
     "crates/aiw-orchestrator",
@@ -47,6 +49,8 @@ serde_json = "1.0"
 serde_yaml = { package = "serde_yaml_ng", version = "0.10" }
 sha2 = "0.11"
 thiserror = "2.0"
+quick-xml = "0.41"
+zip = { version = "2.4", default-features = false, features = ["deflate"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

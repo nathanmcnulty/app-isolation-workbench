@@ -281,6 +281,25 @@ impl<'a> TransactionStore<'a> {
         Self { layout, binding }
     }
 
+    #[cfg(test)]
+    pub(crate) fn seed_legacy_for_test(&self) -> Result<(), RunnerError> {
+        let mut transaction = SessionTransaction {
+            schema_version: LEGACY_SESSION_TRANSACTION_SCHEMA_VERSION.to_owned(),
+            run_id: self.binding.run_id.clone(),
+            plan_hash: self.binding.plan_hash.clone(),
+            project_revision_hash: self.binding.project_revision_hash.clone(),
+            provider_sha256: self.binding.provider_sha256.clone(),
+            config_sha256: self.binding.config_sha256.clone(),
+            session_id: self.binding.session_id.clone(),
+            request_sha256: self.binding.request_sha256.clone(),
+            workspace_identity_sha256: self.binding.workspace_identity_sha256.clone(),
+            recovery: None,
+            transitions: Vec::new(),
+        };
+        transaction.push(SessionTransactionState::StartIntent, "approved-start")?;
+        self.publish(&transaction)
+    }
+
     pub(crate) fn create(&self, reason_code: &str) -> Result<SessionTransaction, RunnerError> {
         if self.load()?.is_some() {
             return Err(RunnerError::RecoveryRequired(

@@ -65,6 +65,7 @@ pub enum ArtifactRole {
     RunSummary,
     ComparisonReport,
     CanaryResults,
+    ScenarioResults,
     DiagnosticLog,
     Trace,
     Screenshot,
@@ -88,6 +89,7 @@ impl ArtifactRole {
             | Self::RunSummary
             | Self::ComparisonReport
             | Self::CanaryResults
+            | Self::ScenarioResults
             | Self::DiagnosticLog
             | Self::Trace
             | Self::Screenshot => ArtifactClass::Evidence,

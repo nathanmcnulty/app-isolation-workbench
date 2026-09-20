@@ -108,6 +108,8 @@ pub enum WorkspaceError {
     IdentityRejected,
     #[error("workspace ACL is not protected owner-and-SYSTEM-only full control")]
     AclRejected,
+    #[error("workspace ACL is not protected owner-and-SYSTEM-only full control: {detail}")]
+    AclRejectedDetail { detail: String },
     #[error("workspace native operation failed at {operation}: {detail}")]
     Native {
         operation: &'static str,
@@ -154,6 +156,31 @@ impl WorkspaceAclPolicy {
 }
 
 impl CreatedWorkspaceDirectory {
+    /// Creates one new owner-and-SYSTEM-protected directory below an existing
+    /// absolute local fixed-volume parent. Existing leaves are never adopted.
+    pub fn create_protected(parent: &Path, leaf: &str) -> Result<Self, WorkspaceError> {
+        validate_leaf(leaf)?;
+        if !parent.is_absolute() {
+            return Err(WorkspaceError::InvalidParent);
+        }
+        let parent_path = parent
+            .canonicalize()
+            .map_err(|_| WorkspaceError::InvalidParent)?;
+        if !is_fixed_volume(&parent_path)? {
+            return Err(WorkspaceError::InvalidParent);
+        }
+        let parent_handle = open_held_parent(&parent_path)?;
+        verify_local_acl_volume(&parent_handle)?;
+        if !same_path(
+            &directory_identity(&parent_handle)?.final_path,
+            &parent_path,
+        ) {
+            return Err(WorkspaceError::IdentityRejected);
+        }
+        let owner = CurrentUser::query()?;
+        create_directory_handle_with_policy(&parent_handle, leaf, &owner.sid_string, true)
+    }
+
     pub fn identity(&self) -> &WindowsFileIdentity {
         &self.identity
     }
@@ -168,6 +195,15 @@ impl CreatedWorkspaceDirectory {
 
     pub fn into_file(self) -> File {
         self.file
+    }
+
+    pub fn revalidate(&self) -> Result<(), WorkspaceError> {
+        let owner = OwnedSid::from_string(&self.owner_sid)?;
+        verify_owner_system_acl(&self.file, &owner, self.acl_policy.is_protected(), true)?;
+        if directory_identity(&self.file)? != self.identity {
+            return Err(WorkspaceError::IdentityRejected);
+        }
+        Ok(())
     }
 
     /// Publish this newly-created directory under a held, protected parent.
@@ -284,6 +320,11 @@ impl CreatedWorkspaceDirectory {
         }
         create_owner_system_file_handle(&self.file, leaf, &self.owner_sid)
     }
+
+    pub fn reopen_file_readonly(&self, leaf: &str) -> Result<BoundWorkspaceFile, WorkspaceError> {
+        self.revalidate()?;
+        reopen_bound_file_readonly(&self.file, leaf, &self.owner_sid)
+    }
 }
 
 /// A strict read-only binding to an existing ordinary workspace directory.
@@ -349,6 +390,35 @@ impl BoundWorkspaceFile {
 }
 
 impl BoundWorkspaceDirectory {
+    /// Reopens an exact persisted protected directory binding for the current
+    /// owner. This is observational and never creates, repairs, or adopts it.
+    pub fn reopen_protected(expected: &WindowsFileIdentity) -> Result<Self, WorkspaceError> {
+        let path = PathBuf::from(&expected.final_path);
+        let parent_path = path.parent().ok_or(WorkspaceError::IdentityRejected)?;
+        let leaf = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or(WorkspaceError::IdentityRejected)?;
+        validate_leaf(leaf)?;
+        let parent = open_held_parent_readonly(parent_path)?;
+        verify_local_acl_volume(&parent)?;
+        if !is_fixed_volume(parent_path)? {
+            return Err(WorkspaceError::InvalidParent);
+        }
+        let owner = CurrentUser::query()?;
+        let bound = reopen_bound_directory_readonly(
+            &parent,
+            leaf,
+            &owner.sid_string,
+            WorkspaceAclPolicy::Protected,
+        )?;
+        if bound.identity != *expected {
+            return Err(WorkspaceError::IdentityRejected);
+        }
+        bound.revalidate()?;
+        Ok(bound)
+    }
+
     pub fn identity(&self) -> &WindowsFileIdentity {
         &self.identity
     }
@@ -389,6 +459,15 @@ impl BoundWorkspaceDirectory {
     ) -> Result<Self, WorkspaceError> {
         self.revalidate()?;
         reopen_bound_directory(&self.file, leaf, &self.owner_sid, acl_policy)
+    }
+
+    pub fn reopen_directory_readonly(
+        &self,
+        leaf: &str,
+        acl_policy: WorkspaceAclPolicy,
+    ) -> Result<Self, WorkspaceError> {
+        self.revalidate()?;
+        reopen_bound_directory_readonly(&self.file, leaf, &self.owner_sid, acl_policy)
     }
 
     /// Publish a recovered directory under another strict bound directory.
@@ -485,6 +564,11 @@ impl BoundWorkspaceDirectory {
         self.revalidate()?;
         reopen_bound_file(&self.file, leaf, &self.owner_sid)
     }
+
+    pub fn reopen_file_readonly(&self, leaf: &str) -> Result<BoundWorkspaceFile, WorkspaceError> {
+        self.revalidate()?;
+        reopen_bound_file_readonly(&self.file, leaf, &self.owner_sid)
+    }
 }
 
 /// A newly-created owner-and-SYSTEM-protected workspace file.  The returned
@@ -516,6 +600,15 @@ impl CreatedWorkspaceFile {
 
     pub fn into_file(self) -> File {
         self.file
+    }
+
+    pub fn revalidate(&self) -> Result<(), WorkspaceError> {
+        let owner = OwnedSid::from_string(&self.owner_sid)?;
+        verify_owner_system_acl(&self.file, &owner, false, false)?;
+        if file_identity(&self.file)? != self.identity {
+            return Err(WorkspaceError::IdentityRejected);
+        }
+        Ok(())
     }
 
     pub fn publish_into_bound(
@@ -862,6 +955,14 @@ impl HeldRunWorkspace {
         reopen_bound_directory(&self.root, leaf, &self.evidence.owner_sid, acl_policy)
     }
 
+    pub fn reopen_root_file_readonly(
+        &self,
+        leaf: &str,
+    ) -> Result<BoundWorkspaceFile, WorkspaceError> {
+        self.revalidate()?;
+        reopen_bound_file_readonly(&self.root, leaf, &self.evidence.owner_sid)
+    }
+
     pub fn reopen_root_file(&self, leaf: &str) -> Result<BoundWorkspaceFile, WorkspaceError> {
         self.revalidate()?;
         reopen_bound_file(&self.root, leaf, &self.evidence.owner_sid)
@@ -879,6 +980,14 @@ impl HeldRunWorkspace {
     pub fn reopen_tools_file(&self, leaf: &str) -> Result<BoundWorkspaceFile, WorkspaceError> {
         self.revalidate()?;
         reopen_bound_file(&self.tools, leaf, &self.evidence.owner_sid)
+    }
+
+    pub fn reopen_tools_file_readonly(
+        &self,
+        leaf: &str,
+    ) -> Result<BoundWorkspaceFile, WorkspaceError> {
+        self.revalidate()?;
+        reopen_bound_file_readonly(&self.tools, leaf, &self.evidence.owner_sid)
     }
 
     pub fn reopen_output_directory(
@@ -966,7 +1075,7 @@ fn validate_leaf(leaf: &str) -> Result<(), WorkspaceError> {
     Ok(())
 }
 
-fn validate_new_child_leaf(leaf: &str) -> Result<(), WorkspaceError> {
+pub(crate) fn validate_new_child_leaf(leaf: &str) -> Result<(), WorkspaceError> {
     if leaf.is_empty()
         || leaf.len() > 255
         || leaf.ends_with(['.', ' '])
@@ -1031,13 +1140,15 @@ fn create_directory_handle_with_policy(
     owner_sid: &str,
     protected_acl: bool,
 ) -> Result<CreatedWorkspaceDirectory, WorkspaceError> {
-    let descriptor = protected_acl
-        .then(|| SecurityDescriptor::owner_system_only(owner_sid, true))
-        .transpose()?;
+    let descriptor = if protected_acl {
+        SecurityDescriptor::owner_system_only(owner_sid, true)?
+    } else {
+        SecurityDescriptor::owner_only(owner_sid)?
+    };
     let file = create_child_handle(
         parent,
         leaf,
-        descriptor.as_ref(),
+        Some(&descriptor),
         true,
         FILE_CREATE_DISPOSITION,
         true,
@@ -1068,13 +1179,14 @@ fn create_owner_system_file_handle(
     leaf: &str,
     owner_sid: &str,
 ) -> Result<CreatedWorkspaceFile, WorkspaceError> {
-    // Files inherit the protected owner/SYSTEM DACL from their held parent.
-    // An explicit file descriptor would produce an unprotected DACL that does
-    // not match the fixed WSB inventory contract.
+    // Set the exact token user as owner even when TokenOwner defaults to an
+    // administrator group. Omit the DACL so the held parent's two ACEs inherit
+    // unchanged, preserving the fixed workspace ACL contract.
+    let descriptor = SecurityDescriptor::owner_only(owner_sid)?;
     let file = create_child_handle(
         parent,
         leaf,
-        None,
+        Some(&descriptor),
         false,
         FILE_CREATE_DISPOSITION,
         true,
@@ -1170,6 +1282,68 @@ fn reopen_bound_file(
     })
 }
 
+fn reopen_bound_directory_readonly(
+    parent: &File,
+    leaf: &str,
+    owner_sid: &str,
+    acl_policy: WorkspaceAclPolicy,
+) -> Result<BoundWorkspaceDirectory, WorkspaceError> {
+    validate_new_child_leaf(leaf)?;
+    let owner = OwnedSid::from_string(owner_sid)?;
+    let parent_identity = directory_identity(parent)?;
+    let file = open_child_read_authority(parent, leaf, true)?;
+    verify_owner_system_acl(&file, &owner, acl_policy.is_protected(), true)?;
+    let identity = directory_identity(&file)?;
+    verify_created_child(parent, leaf, &file, true)?;
+    verify_exact_child_entry(parent, leaf, &identity)?;
+    if directory_identity(parent)? != parent_identity {
+        return Err(WorkspaceError::IdentityRejected);
+    }
+    let parent_handle = parent.try_clone().map_err(|error| WorkspaceError::Native {
+        operation: "DuplicateHandle(readonly-bound-directory-parent)",
+        detail: error.to_string(),
+    })?;
+    Ok(BoundWorkspaceDirectory {
+        parent: parent_handle,
+        file,
+        identity,
+        parent_identity,
+        leaf: leaf.to_owned(),
+        owner_sid: owner_sid.to_owned(),
+        acl_policy,
+    })
+}
+
+fn reopen_bound_file_readonly(
+    parent: &File,
+    leaf: &str,
+    owner_sid: &str,
+) -> Result<BoundWorkspaceFile, WorkspaceError> {
+    validate_new_child_leaf(leaf)?;
+    let owner = OwnedSid::from_string(owner_sid)?;
+    let parent_identity = directory_identity(parent)?;
+    let file = open_child_read_authority(parent, leaf, false)?;
+    verify_owner_system_acl(&file, &owner, false, false)?;
+    let identity = file_identity(&file)?;
+    verify_created_child(parent, leaf, &file, false)?;
+    verify_exact_child_entry(parent, leaf, &identity)?;
+    if directory_identity(parent)? != parent_identity {
+        return Err(WorkspaceError::IdentityRejected);
+    }
+    let parent_handle = parent.try_clone().map_err(|error| WorkspaceError::Native {
+        operation: "DuplicateHandle(readonly-bound-file-parent)",
+        detail: error.to_string(),
+    })?;
+    Ok(BoundWorkspaceFile {
+        parent: parent_handle,
+        file,
+        identity,
+        parent_identity,
+        leaf: leaf.to_owned(),
+        owner_sid: owner_sid.to_owned(),
+    })
+}
+
 fn verify_exact_child_entry(
     parent: &File,
     leaf: &str,
@@ -1202,6 +1376,73 @@ fn verify_exact_child_entry(
     Ok(())
 }
 
+fn open_child_read_authority(
+    parent: &File,
+    leaf: &str,
+    directory: bool,
+) -> Result<File, WorkspaceError> {
+    validate_new_child_leaf(leaf)?;
+    let mut name: Vec<u16> = leaf.encode_utf16().collect();
+    let mut unicode = NtUnicodeString {
+        length: u16::try_from(name.len() * 2).map_err(|_| WorkspaceError::InvalidLeaf)?,
+        maximum_length: u16::try_from(name.len() * 2).map_err(|_| WorkspaceError::InvalidLeaf)?,
+        buffer: name.as_mut_ptr(),
+    };
+    let mut attributes = NtObjectAttributes {
+        length: size_of::<NtObjectAttributes>() as u32,
+        root_directory: raw_handle(parent).0,
+        object_name: &mut unicode,
+        attributes: OBJ_CASE_INSENSITIVE,
+        security_descriptor: std::ptr::null_mut(),
+        security_quality_of_service: std::ptr::null_mut(),
+    };
+    let desired_access = FILE_READ_ATTRIBUTES.0
+        | FILE_READ_EA.0
+        | READ_CONTROL.0
+        | SYNCHRONIZE.0
+        | if directory {
+            FILE_LIST_DIRECTORY.0
+        } else {
+            FILE_READ_DATA.0
+        };
+    let create_options = if directory {
+        FILE_DIRECTORY_CREATE_OPTION
+    } else {
+        FILE_NON_DIRECTORY_CREATE_OPTION
+    } | FILE_SYNCHRONOUS_IO_NONALERT_OPTION
+        | FILE_FLAG_OPEN_REPARSE_POINT.0;
+    let mut handle = std::ptr::null_mut();
+    let mut io_status = NtIoStatusBlock {
+        status: 0,
+        information: 0,
+    };
+    // SAFETY: all pointers reference local buffers valid through the call;
+    // successful NtCreateFile returns one uniquely owned handle.
+    let status = unsafe {
+        NtCreateFile(
+            &mut handle,
+            desired_access,
+            &mut attributes,
+            &mut io_status,
+            std::ptr::null_mut(),
+            FILE_ATTRIBUTE_NORMAL.0,
+            FILE_SHARE_READ.0,
+            FILE_OPEN_DISPOSITION,
+            create_options,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if status < 0 || handle.is_null() {
+        return Err(WorkspaceError::Native {
+            operation: "NtCreateFile(relative-read-authority)",
+            detail: format!("ntstatus=0x{:08x}", status as u32),
+        });
+    }
+    // SAFETY: NtCreateFile returned a uniquely owned kernel handle.
+    Ok(unsafe { File::from_raw_handle(handle) })
+}
+
 fn create_child_handle(
     parent: &File,
     leaf: &str,
@@ -1227,7 +1468,11 @@ fn create_child_handle(
         security_quality_of_service: std::ptr::null_mut(),
     };
     let desired_access = if !mutating && directory {
-        FILE_LIST_DIRECTORY.0 | FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0 | SYNCHRONIZE.0
+        FILE_LIST_DIRECTORY.0
+            | FILE_READ_ATTRIBUTES.0
+            | FILE_READ_EA.0
+            | READ_CONTROL.0
+            | SYNCHRONIZE.0
     } else if !mutating && writable {
         FILE_READ_DATA.0
             | FILE_WRITE_DATA.0
@@ -1240,6 +1485,7 @@ fn create_child_handle(
         FILE_LIST_DIRECTORY.0
             | FILE_ADD_SUBDIRECTORY.0
             | FILE_READ_ATTRIBUTES.0
+            | FILE_READ_EA.0
             | FILE_WRITE_ATTRIBUTES.0
             | DELETE.0
             | READ_CONTROL.0
@@ -1446,6 +1692,24 @@ fn open_held_parent(path: &Path) -> Result<File, WorkspaceError> {
     Ok(file)
 }
 
+fn open_held_parent_readonly(path: &Path) -> Result<File, WorkspaceError> {
+    let file = OpenOptions::new()
+        .access_mode(
+            FILE_READ_ATTRIBUTES.0 | FILE_LIST_DIRECTORY.0 | READ_CONTROL.0 | SYNCHRONIZE.0,
+        )
+        // Exclude existing and future write/delete authorities while the
+        // persisted child binding is verified relative to this parent.
+        .share_mode(FILE_SHARE_READ.0)
+        .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
+        .open(path)
+        .map_err(|error| WorkspaceError::Native {
+            operation: "CreateFileW(readonly-parent-directory)",
+            detail: error.to_string(),
+        })?;
+    ensure_directory_handle(&file)?;
+    Ok(file)
+}
+
 fn ensure_directory_handle(file: &File) -> Result<(), WorkspaceError> {
     let mut info = BY_HANDLE_FILE_INFORMATION::default();
     // SAFETY: the file owns a valid directory handle and `info` is writable.
@@ -1565,11 +1829,15 @@ pub(crate) fn verify_owner_system_acl(
         || !unsafe { IsValidSid(owner) }.as_bool()
         || !unsafe { IsValidSid(expected_owner.0) }.as_bool()
     {
-        return Err(WorkspaceError::AclRejected);
+        return Err(WorkspaceError::AclRejectedDetail {
+            detail: "security descriptor, owner SID, or expected owner SID is invalid".to_owned(),
+        });
     }
     // SAFETY: both SIDs are valid for the lifetime of their owning buffers.
     if unsafe { EqualSid(owner, expected_owner.0) }.is_err() {
-        return Err(WorkspaceError::AclRejected);
+        return Err(WorkspaceError::AclRejectedDetail {
+            detail: "object owner does not match the current user SID".to_owned(),
+        });
     }
     verify_acl(
         descriptor.0,
@@ -1588,11 +1856,15 @@ fn verify_acl(
     directory: bool,
 ) -> Result<(), WorkspaceError> {
     if dacl.is_null() {
-        return Err(WorkspaceError::AclRejected);
+        return Err(WorkspaceError::AclRejectedDetail {
+            detail: "DACL is absent".to_owned(),
+        });
     }
     // SAFETY: dacl points into the still-owned security descriptor.
     if !unsafe { IsValidAcl(dacl) }.as_bool() {
-        return Err(WorkspaceError::AclRejected);
+        return Err(WorkspaceError::AclRejectedDetail {
+            detail: "DACL is invalid".to_owned(),
+        });
     }
     let mut control = 0_u16;
     let mut revision = 0_u32;
@@ -1604,7 +1876,9 @@ fn verify_acl(
         || control & SE_DACL_DEFAULTED.0 != 0
         || control & SE_OWNER_DEFAULTED.0 != 0
     {
-        return Err(WorkspaceError::AclRejected);
+        return Err(WorkspaceError::AclRejectedDetail {
+            detail: format!("security descriptor control flags are 0x{control:04x}"),
+        });
     }
     let mut info = ACL_SIZE_INFORMATION::default();
     // SAFETY: dacl and output buffer are valid for the call.
@@ -1618,7 +1892,9 @@ fn verify_acl(
     }
     .map_err(|error| native("GetAclInformation", error))?;
     if info.AceCount != 2 {
-        return Err(WorkspaceError::AclRejected);
+        return Err(WorkspaceError::AclRejectedDetail {
+            detail: format!("DACL contains {} ACEs instead of 2", info.AceCount),
+        });
     }
     let system = OwnedSid::from_string(WINDOWS_SYSTEM_SID)?;
     let mut owner_seen = false;
@@ -1628,7 +1904,9 @@ fn verify_acl(
         // SAFETY: index is bounded by the queried AceCount and output is valid.
         unsafe { GetAce(dacl, index, &mut raw_ace) }.map_err(|error| native("GetAce", error))?;
         if raw_ace.is_null() {
-            return Err(WorkspaceError::AclRejected);
+            return Err(WorkspaceError::AclRejectedDetail {
+                detail: format!("ACE {index} is null"),
+            });
         }
         // SAFETY: IsValidAcl established that every ACE includes a valid common
         // header within the DACL allocation.
@@ -1637,7 +1915,12 @@ fn verify_acl(
         if u32::from(header.AceType) != ACCESS_ALLOWED_ACE_TYPE
             || usize::from(header.AceSize) < sid_offset + 8
         {
-            return Err(WorkspaceError::AclRejected);
+            return Err(WorkspaceError::AclRejectedDetail {
+                detail: format!(
+                    "ACE {index} has unsupported type {} or size {}",
+                    header.AceType, header.AceSize
+                ),
+            });
         }
         // SAFETY: the type and IsValidAcl-backed size checks above establish
         // that the fixed ACCESS_ALLOWED_ACE fields are present.
@@ -1655,7 +1938,12 @@ fn verify_acl(
                 inheritance | INHERITED_ACE.0
             };
         if !flags_valid || ace.Mask != FILE_ALL_ACCESS.0 {
-            return Err(WorkspaceError::AclRejected);
+            return Err(WorkspaceError::AclRejectedDetail {
+                detail: format!(
+                    "ACE {index} has flags 0x{flags:02x} and mask 0x{:08x}",
+                    ace.Mask
+                ),
+            });
         }
         let sid = PSID((&ace.SidStart as *const u32).cast_mut().cast());
         let sid_bytes = unsafe {
@@ -1671,7 +1959,9 @@ fn verify_acl(
             || !unsafe { IsValidSid(sid) }.as_bool()
             || unsafe { GetLengthSid(sid) } as usize != expected_sid_size
         {
-            return Err(WorkspaceError::AclRejected);
+            return Err(WorkspaceError::AclRejectedDetail {
+                detail: format!("ACE {index} contains an invalid SID"),
+            });
         }
         // SAFETY: the SID lies inside the ACE returned by GetAce.
         if unsafe { EqualSid(sid, expected_owner.0) }.is_ok() {
@@ -1679,11 +1969,15 @@ fn verify_acl(
         } else if unsafe { EqualSid(sid, system.0) }.is_ok() {
             system_seen = true;
         } else {
-            return Err(WorkspaceError::AclRejected);
+            return Err(WorkspaceError::AclRejectedDetail {
+                detail: format!("ACE {index} names neither the owner nor SYSTEM"),
+            });
         }
     }
     if !owner_seen || !system_seen {
-        return Err(WorkspaceError::AclRejected);
+        return Err(WorkspaceError::AclRejectedDetail {
+            detail: "DACL does not contain distinct owner and SYSTEM ACEs".to_owned(),
+        });
     }
     Ok(())
 }
@@ -1869,7 +2163,15 @@ impl SecurityDescriptor {
         let inheritance = if directory { "OICI" } else { "" };
         let sddl =
             format!("O:{owner_sid}D:P(A;{inheritance};FA;;;{owner_sid})(A;{inheritance};FA;;;SY)");
-        let wide = wide_string(&sddl)?;
+        Self::from_sddl(&sddl)
+    }
+
+    fn owner_only(owner_sid: &str) -> Result<Self, WorkspaceError> {
+        Self::from_sddl(&format!("O:{owner_sid}"))
+    }
+
+    fn from_sddl(sddl: &str) -> Result<Self, WorkspaceError> {
+        let wide = wide_string(sddl)?;
         let mut descriptor = PSECURITY_DESCRIPTOR::default();
         // SAFETY: input is NUL-terminated and output pointer is valid.
         unsafe {
@@ -2032,13 +2334,13 @@ mod tests {
 
         assert!(matches!(
             HeldRunWorkspace::reopen_bound(&evidence),
-            Err(WorkspaceError::AclRejected)
+            Err(WorkspaceError::AclRejected | WorkspaceError::AclRejectedDetail { .. })
         ));
         // Recovery is deliberately non-repairing; the drift remains observable.
         let reopened = open_held_directory(&path).unwrap();
         assert!(matches!(
             verify_owner_system_directory(&reopened, &CurrentUser::query().unwrap().sid),
-            Err(WorkspaceError::AclRejected)
+            Err(WorkspaceError::AclRejected | WorkspaceError::AclRejectedDetail { .. })
         ));
         drop(reopened);
         std::fs::remove_dir_all(path).unwrap();
@@ -2208,6 +2510,26 @@ mod tests {
     }
 
     #[test]
+    fn inherited_creation_descriptor_sets_user_owner_without_a_dacl() {
+        use windows::Win32::Security::{GetSecurityDescriptorDacl, GetSecurityDescriptorOwner};
+        let user = CurrentUser::query().unwrap();
+        let descriptor = SecurityDescriptor::owner_only(&user.sid_string).unwrap();
+        let mut owner = PSID::default();
+        let mut defaulted = Default::default();
+        // SAFETY: descriptor is live and both output pointers are writable.
+        unsafe { GetSecurityDescriptorOwner(descriptor.0, &mut owner, &mut defaulted) }.unwrap();
+        assert!(!defaulted.as_bool());
+        assert!(unsafe { EqualSid(owner, user.sid.0) }.is_ok());
+        let mut present = Default::default();
+        let mut dacl = std::ptr::null_mut();
+        unsafe { GetSecurityDescriptorDacl(descriptor.0, &mut present, &mut dacl, &mut defaulted) }
+            .unwrap();
+        // No supplied DACL (not an explicitly supplied NULL DACL): children
+        // receive the held parent's two inherited owner/SYSTEM ACEs.
+        assert!(!present.as_bool());
+    }
+
+    #[test]
     fn bound_directory_reopens_strictly_and_creates_inherited_children() {
         let name = leaf("bound-directory");
         let path = parent().join(&name);
@@ -2235,6 +2557,10 @@ mod tests {
             .unwrap();
         assert_eq!(reopened_run.identity(), &run_identity);
         let mut events = reopened_run.create_file_new("events.json").unwrap();
+        let user = CurrentUser::query().unwrap();
+        verify_owner_system_acl(events.as_file(), &user.sid, false, false).unwrap();
+        let administrators = OwnedSid::from_string("S-1-5-32-544").unwrap();
+        assert!(verify_owner_system_acl(events.as_file(), &administrators, false, false).is_err());
         events.as_file_mut().write_all(b"bound-child").unwrap();
         events.as_file_mut().sync_all().unwrap();
         drop(events);

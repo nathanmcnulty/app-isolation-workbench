@@ -72,6 +72,7 @@ const MAX_SMALL_ARTIFACT: u64 = 1024 * 1024;
 const MAX_JOURNAL: u64 = 64 * 1024 * 1024;
 const MAX_GUEST_AGENT: u64 = 128 * 1024 * 1024;
 const EA_STABILIZATION_ATTEMPTS: usize = 40;
+const EA_NONEMPTY_STABLE_OBSERVATIONS: usize = 20;
 pub(crate) const FORBIDDEN_ATTRIBUTES: u32 = FILE_ATTRIBUTE_READONLY.0
     | FILE_ATTRIBUTE_REPARSE_POINT.0
     | FILE_ATTRIBUTE_COMPRESSED.0
@@ -1490,22 +1491,48 @@ fn observe_binding(
     }
 }
 
-fn stabilized_extended_attributes(
+pub(crate) fn stabilized_extended_attributes(
     file: &File,
     directory: bool,
 ) -> Result<ExtendedAttributeBinding, ExactDisposeError> {
+    stabilized_eas_with_policy(file, directory, false)
+}
+
+pub(crate) fn stabilized_import_extended_attributes(
+    file: &File,
+    directory: bool,
+) -> Result<ExtendedAttributeBinding, ExactDisposeError> {
+    stabilized_eas_with_policy(file, directory, true)
+}
+
+fn stabilized_eas_with_policy(
+    file: &File,
+    directory: bool,
+    allow_file_hash_only: bool,
+) -> Result<ExtendedAttributeBinding, ExactDisposeError> {
     let mut previous = None::<ExtendedAttributeBinding>;
+    let mut matching_observations = 0usize;
     for attempt in 0..EA_STABILIZATION_ATTEMPTS {
-        match query_extended_attributes(file, directory) {
+        match query_extended_attributes_with_policy(file, directory, true, allow_file_hash_only) {
             Ok(observed) => {
-                if previous.as_ref().is_some_and(|prior| prior == &observed)
-                    && (!observed.entries.is_empty() || attempt + 1 == EA_STABILIZATION_ATTEMPTS)
+                matching_observations = if previous.as_ref().is_some_and(|prior| prior == &observed)
+                {
+                    matching_observations + 1
+                } else {
+                    1
+                };
+                if (!observed.entries.is_empty()
+                    && matching_observations >= EA_NONEMPTY_STABLE_OBSERVATIONS)
+                    || (observed.entries.is_empty() && attempt + 1 == EA_STABILIZATION_ATTEMPTS)
                 {
                     return Ok(observed);
                 }
                 previous = Some(observed);
             }
-            Err(ExactDisposeError::TransientSmartLockerEa) => previous = None,
+            Err(ExactDisposeError::TransientSmartLockerEa) => {
+                previous = None;
+                matching_observations = 0;
+            }
             Err(error) => return Err(error),
         }
         if attempt + 1 < EA_STABILIZATION_ATTEMPTS {
@@ -1513,7 +1540,7 @@ fn stabilized_extended_attributes(
         }
     }
     Err(ExactDisposeError::Rejected(
-        "SmartLocker EA metadata did not stabilize to none or the exact kernel pair".into(),
+        "kernel EA metadata did not stabilize to an exact allowed set".into(),
     ))
 }
 
@@ -1901,6 +1928,22 @@ pub(crate) fn query_extended_attributes(
     file: &File,
     directory: bool,
 ) -> Result<ExtendedAttributeBinding, ExactDisposeError> {
+    query_extended_attributes_with_policy(file, directory, true, false)
+}
+
+pub(crate) fn query_extended_attributes_for_import(
+    file: &File,
+    directory: bool,
+) -> Result<ExtendedAttributeBinding, ExactDisposeError> {
+    query_extended_attributes_with_policy(file, directory, false, true)
+}
+
+fn query_extended_attributes_with_policy(
+    file: &File,
+    directory: bool,
+    reject_transient_origin_claim: bool,
+    allow_file_hash_only: bool,
+) -> Result<ExtendedAttributeBinding, ExactDisposeError> {
     // u64 storage guarantees stronger alignment than FILE_FULL_EA_INFORMATION
     // requires. Zeroing also makes any tolerated final-record padding
     // deterministic and prevents stale process memory from entering evidence.
@@ -1940,7 +1983,13 @@ pub(crate) fn query_extended_attributes(
     if bytes.is_empty() {
         return empty_ea_binding();
     }
-    parse_extended_attributes(bytes, queried_bytes, directory)
+    parse_extended_attributes_with_policy(
+        bytes,
+        queried_bytes,
+        directory,
+        reject_transient_origin_claim,
+        allow_file_hash_only,
+    )
 }
 
 fn empty_ea_binding() -> Result<ExtendedAttributeBinding, ExactDisposeError> {
@@ -1951,10 +2000,28 @@ fn empty_ea_binding() -> Result<ExtendedAttributeBinding, ExactDisposeError> {
     })
 }
 
+#[cfg(test)]
 fn parse_extended_attributes(
     bytes: &[u8],
     queried_bytes: u32,
     directory: bool,
+    reject_transient_origin_claim: bool,
+) -> Result<ExtendedAttributeBinding, ExactDisposeError> {
+    parse_extended_attributes_with_policy(
+        bytes,
+        queried_bytes,
+        directory,
+        reject_transient_origin_claim,
+        false,
+    )
+}
+
+fn parse_extended_attributes_with_policy(
+    bytes: &[u8],
+    queried_bytes: u32,
+    directory: bool,
+    reject_transient_origin_claim: bool,
+    allow_file_hash_only: bool,
 ) -> Result<ExtendedAttributeBinding, ExactDisposeError> {
     if bytes.len() != queried_bytes as usize || bytes.len() > EA_BUFFER_BYTES {
         return Err(ExactDisposeError::Rejected(
@@ -2058,11 +2125,15 @@ fn parse_extended_attributes(
             ));
         }
     }
-    if !directory && entries.len() == 1 && entries[0].name == "$KERNEL.SMARTLOCKER.ORIGINCLAIM" {
+    let file_origin_claim =
+        !directory && entries.len() == 1 && entries[0].name == "$KERNEL.SMARTLOCKER.ORIGINCLAIM";
+    if reject_transient_origin_claim && file_origin_claim {
         return Err(ExactDisposeError::TransientSmartLockerEa);
     }
     let stable_directory_origin_claim =
         directory && entries.len() == 1 && entries[0].name == "$KERNEL.SMARTLOCKER.ORIGINCLAIM";
+    let file_hash_only =
+        !directory && entries.len() == 1 && entries[0].name == "$KERNEL.PURGE.SEC.FILEHASH";
     let exact_kernel_pair = !directory
         && entries.len() == ALLOWED_KERNEL_EAS.len()
         && entries
@@ -2077,6 +2148,8 @@ fn parse_extended_attributes(
             .all(|(entry, allowed)| entry.name == allowed);
     if !entries.is_empty()
         && !stable_directory_origin_claim
+        && !(allow_file_hash_only && file_hash_only)
+        && !(file_origin_claim && !reject_transient_origin_claim)
         && !exact_kernel_pair
         && !exact_kernel_triple
     {
@@ -2086,8 +2159,17 @@ fn parse_extended_attributes(
         )));
     }
 
+    let canonical_sha256 = ea_digest(&entries);
+    Ok(ExtendedAttributeBinding {
+        queried_bytes,
+        entries,
+        canonical_sha256,
+    })
+}
+
+fn ea_digest(entries: &[ExtendedAttributeEntryBinding]) -> [u8; 32] {
     let mut canonical = Vec::new();
-    for entry in &entries {
+    for entry in entries {
         let name = entry.name.as_bytes();
         canonical.extend_from_slice(
             &u16::try_from(name.len())
@@ -2099,11 +2181,58 @@ fn parse_extended_attributes(
         canonical.extend_from_slice(&entry.value_length.to_le_bytes());
         canonical.extend_from_slice(&entry.value_sha256);
     }
-    Ok(ExtendedAttributeBinding {
-        queried_bytes,
-        entries,
-        canonical_sha256: Sha256::digest(canonical).into(),
-    })
+    Sha256::digest(canonical).into()
+}
+
+impl ExtendedAttributeBinding {
+    /// v0alpha2 intake receipts bind content independently of this kernel-only
+    /// hash cache. Full native set validation must precede this projection.
+    /// Fixed-tree discard authority deliberately does not use this projection.
+    pub(crate) fn for_import_receipt(mut self) -> Self {
+        self.entries
+            .retain(|entry| entry.name != "$KERNEL.PURGE.SEC.FILEHASH");
+        self.canonical_sha256 = ea_digest(&self.entries);
+        self
+    }
+}
+
+pub(crate) fn valid_import_ea_authority(value: &aiw_probe::ApplicationFileEaAuthority) -> bool {
+    let names: Vec<_> = value
+        .entries
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect();
+    if !names.is_empty()
+        && names != ["$KERNEL.SMARTLOCKER.ORIGINCLAIM"]
+        && names != ALLOWED_KERNEL_EAS
+    {
+        return false;
+    }
+    let mut entries = Vec::new();
+    for entry in &value.entries {
+        if entry.flags != 0
+            || entry.value_length == 0
+            || (entry.name == ALLOWED_KERNEL_EAS[0] && entry.value_length != 4)
+        {
+            return false;
+        }
+        let Ok(hash) = hex::decode(&entry.value_sha256) else {
+            return false;
+        };
+        let Ok(value_sha256) = <[u8; 32]>::try_from(hash) else {
+            return false;
+        };
+        if hex::encode(value_sha256) != entry.value_sha256 {
+            return false;
+        }
+        entries.push(ExtendedAttributeEntryBinding {
+            name: entry.name.clone(),
+            flags: entry.flags,
+            value_length: entry.value_length,
+            value_sha256,
+        });
+    }
+    hex::encode(ea_digest(&entries)) == value.canonical_sha256
 }
 
 fn ntstatus_io(
@@ -2191,25 +2320,7 @@ pub(crate) fn verify_stream_policy(
     directory: bool,
     expected_size: u64,
 ) -> Result<(), ExactDisposeError> {
-    let mut buffer = vec![0_u64; STREAM_BUFFER_BYTES / size_of::<u64>()];
-    let result = unsafe {
-        GetFileInformationByHandleEx(
-            raw_handle(file),
-            FileStreamInfo,
-            buffer.as_mut_ptr().cast(),
-            STREAM_BUFFER_BYTES as u32,
-        )
-    };
-    if let Err(error) = result {
-        if WIN32_ERROR::from_error(&error) == Some(ERROR_HANDLE_EOF) && directory {
-            return Ok(());
-        }
-        return Err(native(
-            "GetFileInformationByHandleEx(FileStreamInfo)",
-            error,
-        ));
-    }
-    let streams = parse_streams(as_bytes(&buffer))?;
+    let streams = enumerate_file_streams(file, directory)?;
     if directory {
         if streams.is_empty() {
             Ok(())
@@ -2225,6 +2336,34 @@ pub(crate) fn verify_stream_policy(
             "file stream policy requires only the unnamed data stream".into(),
         ))
     }
+}
+
+/// Enumerate the bounded, exact stream names and logical sizes attached to a
+/// held file. Callers must impose their own narrow allowlist; this helper does
+/// not relax the ordinary workspace stream policy.
+pub(crate) fn enumerate_file_streams(
+    file: &File,
+    directory: bool,
+) -> Result<Vec<(String, u64)>, ExactDisposeError> {
+    let mut buffer = vec![0_u64; STREAM_BUFFER_BYTES / size_of::<u64>()];
+    let result = unsafe {
+        GetFileInformationByHandleEx(
+            raw_handle(file),
+            FileStreamInfo,
+            buffer.as_mut_ptr().cast(),
+            STREAM_BUFFER_BYTES as u32,
+        )
+    };
+    if let Err(error) = result {
+        if WIN32_ERROR::from_error(&error) == Some(ERROR_HANDLE_EOF) && directory {
+            return Ok(Vec::new());
+        }
+        return Err(native(
+            "GetFileInformationByHandleEx(FileStreamInfo)",
+            error,
+        ));
+    }
+    parse_streams(as_bytes(&buffer))
 }
 
 fn parse_streams(bytes: &[u8]) -> Result<Vec<(String, u64)>, ExactDisposeError> {
@@ -2277,6 +2416,14 @@ fn parse_streams(bytes: &[u8]) -> Result<Vec<(String, u64)>, ExactDisposeError> 
 }
 
 pub(crate) fn directory_entries(file: &File) -> Result<Vec<DirectoryEntry>, ExactDisposeError> {
+    let entries = source_directory_entries(file)?;
+    reject_unsafe_directory_entries(&entries)?;
+    Ok(entries)
+}
+
+pub(crate) fn source_directory_entries(
+    file: &File,
+) -> Result<Vec<DirectoryEntry>, ExactDisposeError> {
     let mut entries = extended_directory_entries(file)?;
     let aliases = directory_alias_entries(file)?;
     let entry_names = normalized_names(entries.iter().map(|entry| entry.name.clone()).collect())?;
@@ -2297,8 +2444,20 @@ pub(crate) fn directory_entries(file: &File) -> Result<Vec<DirectoryEntry>, Exac
             .expect("normalized name sets matched")
             .ea_size;
     }
-    reject_unsafe_directory_entries(&entries)?;
     Ok(entries)
+}
+
+/// Enumerates the long names of a read-held directory for read-only evidence.
+///
+/// Exact disposal rejects any 8.3 alias because that contract must address
+/// children by one fixed spelling.  The guest filesystem snapshot never opens
+/// aliases and records only the extended long-name view, so an otherwise
+/// ordinary legacy alias is not an incomplete observation by itself.  Callers
+/// still must reject their own case collisions before using these names.
+pub(crate) fn filesystem_capture_directory_entries(
+    file: &File,
+) -> Result<Vec<DirectoryEntry>, ExactDisposeError> {
+    extended_directory_entries(file)
 }
 
 pub(crate) fn exact_directory_entry(
@@ -2731,7 +2890,7 @@ mod tests {
     use std::sync::{Mutex, MutexGuard};
 
     use super::*;
-    use crate::HeldRunWorkspace;
+    use crate::{HeldRunWorkspace, WorkspaceAclPolicy};
 
     static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(1);
     static CURRENT_DIRECTORY_LOCK: Mutex<()> = Mutex::new(());
@@ -2790,25 +2949,71 @@ mod tests {
             let workspace = HeldRunWorkspace::create(&parent, &leaf).unwrap();
             let root = workspace.root_path().to_owned();
             fs::write(&sibling, b"unrelated").unwrap();
-            write_file(&root.join("plan.json"), b"prepared-plan");
-            write_file(&root.join("wsb-plan.json"), b"wsb-plan");
-            write_file(&root.join("preparation.json"), b"preparation");
-            write_file(&root.join("tools").join("aiw-guest-agent.exe"), b"agent");
-            let run = root.join("runs").join(RUN_ID);
-            fs::create_dir_all(run.join("journal-heads")).unwrap();
-            fs::create_dir_all(root.join("runs").join(".locks")).unwrap();
-            write_file(&root.join("runs").join(".locks").join("run-one.lock"), b"");
-            write_file(&run.join("plan.json"), b"authoritative-plan");
-            write_file(&run.join("wsb-planning-import.json"), b"planning-import");
-            write_file(&run.join("events.jsonl"), b"events\n");
-            write_file(&run.join("wsb-revocation.json"), b"revocation");
+            // Explicitly bind TokenUser ownership, including on elevated runners
+            // whose default TokenOwner is the Administrators group.
+            for (leaf, bytes) in [
+                ("plan.json", b"prepared-plan".as_slice()),
+                ("wsb-plan.json", b"wsb-plan".as_slice()),
+                ("preparation.json", b"preparation".as_slice()),
+            ] {
+                write_created(workspace.create_root_file_new(leaf).unwrap(), bytes);
+            }
+            write_created(
+                workspace
+                    .create_tools_file_new("aiw-guest-agent.exe")
+                    .unwrap(),
+                b"agent",
+            );
+            drop(
+                workspace
+                    .create_root_directory_new_with_policy("runs", WorkspaceAclPolicy::Inherited)
+                    .unwrap(),
+            );
+            let runs = workspace
+                .reopen_root_directory("runs", WorkspaceAclPolicy::Inherited)
+                .unwrap();
+            drop(
+                runs.create_directory_new_with_policy(".locks", WorkspaceAclPolicy::Inherited)
+                    .unwrap(),
+            );
+            let locks = runs
+                .reopen_directory(".locks", WorkspaceAclPolicy::Inherited)
+                .unwrap();
+            write_created(locks.create_file_new("run-one.lock").unwrap(), b"");
+            drop(
+                runs.create_directory_new_with_policy(RUN_ID, WorkspaceAclPolicy::Inherited)
+                    .unwrap(),
+            );
+            let run = runs
+                .reopen_directory(RUN_ID, WorkspaceAclPolicy::Inherited)
+                .unwrap();
+            for (leaf, bytes) in [
+                ("plan.json", b"authoritative-plan".as_slice()),
+                ("wsb-planning-import.json", b"planning-import".as_slice()),
+                ("events.jsonl", b"events\n".as_slice()),
+                ("wsb-revocation.json", b"revocation".as_slice()),
+            ] {
+                write_created(run.create_file_new(leaf).unwrap(), bytes);
+            }
+            drop(
+                run.create_directory_new_with_policy(
+                    "journal-heads",
+                    WorkspaceAclPolicy::Inherited,
+                )
+                .unwrap(),
+            );
+            let heads = run
+                .reopen_directory("journal-heads", WorkspaceAclPolicy::Inherited)
+                .unwrap();
             for sequence in 1..=3 {
-                write_file(
-                    &run.join("journal-heads")
-                        .join(format!("{sequence:020}.json")),
+                write_created(
+                    heads
+                        .create_file_new(&format!("{sequence:020}.json"))
+                        .unwrap(),
                     format!("head-{sequence}").as_bytes(),
                 );
             }
+            drop((heads, run, locks, runs));
             let evidence = workspace.evidence().clone();
             drop(workspace);
             for key in ACQUIRE_ORDER.into_iter().skip(1) {
@@ -2816,18 +3021,40 @@ mod tests {
                 clear_short_name(&path, key.is_directory());
             }
             let tombstone = parent.join(tombstone_leaf(&evidence));
-            Self {
+            let fixture = Self {
                 parent,
                 root,
                 tombstone,
                 sibling,
                 workspace: evidence,
-            }
+            };
+            fixture.require_stable_metadata();
+            fixture
         }
 
         fn inventory(&self) -> FixedWsbTreeInventory {
             observe_fixed_wsb_tree(&self.workspace, RUN_ID, &tombstone_leaf(&self.workspace))
                 .unwrap()
+        }
+
+        fn require_stable_metadata(&self) {
+            // Hashing freshly written fixtures can cause Windows to publish
+            // cache EAs after the observation handles close. Establish the
+            // positive test precondition across complete read-only reopen
+            // cycles, before any deletion authority or mutation is attempted.
+            let observe = || {
+                observe_fixed_wsb_tree(&self.workspace, RUN_ID, &tombstone_leaf(&self.workspace))
+                    .unwrap()
+            };
+            let mut previous = observe();
+            for _ in 0..3 {
+                let current = observe();
+                if current == previous {
+                    return;
+                }
+                previous = current;
+            }
+            panic!("fixture metadata changed across all bounded preflight observations");
         }
 
         fn cleanup(&self) {
@@ -2841,6 +3068,11 @@ mod tests {
         fn drop(&mut self) {
             self.cleanup();
         }
+    }
+
+    fn write_created(mut file: crate::CreatedWorkspaceFile, bytes: &[u8]) {
+        file.as_file_mut().write_all(bytes).unwrap();
+        file.as_file_mut().sync_all().unwrap();
     }
 
     fn write_file(path: &Path, bytes: &[u8]) {
@@ -3470,7 +3702,7 @@ mod tests {
         ]);
         let ea = misaligned(ea);
         assert_eq!(
-            parse_extended_attributes(&ea[1..], (ea.len() - 1) as u32, false)
+            parse_extended_attributes(&ea[1..], (ea.len() - 1) as u32, false, true)
                 .unwrap()
                 .entries
                 .len(),
@@ -3524,7 +3756,7 @@ mod tests {
     #[test]
     fn safe_byte_parsers_reject_exactly_header_sized_inputs() {
         let ea = vec![0_u8; offset_of!(FILE_FULL_EA_INFORMATION, EaName)];
-        assert!(parse_extended_attributes(&ea, ea.len() as u32, false).is_err());
+        assert!(parse_extended_attributes(&ea, ea.len() as u32, false, true).is_err());
 
         let streams = vec![0_u8; offset_of!(FILE_STREAM_INFO, StreamName)];
         assert!(parse_streams(&streams).is_err());
@@ -3546,8 +3778,8 @@ mod tests {
             (ALLOWED_KERNEL_EAS[0], 0, b"SMV1"),
             (ALLOWED_KERNEL_EAS[1], 0, b"opaque-origin"),
         ]);
-        let first = parse_extended_attributes(&first, first.len() as u32, false).unwrap();
-        let second = parse_extended_attributes(&second, second.len() as u32, false).unwrap();
+        let first = parse_extended_attributes(&first, first.len() as u32, false, true).unwrap();
+        let second = parse_extended_attributes(&second, second.len() as u32, false, true).unwrap();
         assert_eq!(first.entries, second.entries);
         assert_eq!(first.canonical_sha256, second.canonical_sha256);
         assert_eq!(first.entries[0].value_length, 4);
@@ -3556,10 +3788,34 @@ mod tests {
 
     #[test]
     fn approved_directory_origin_and_file_hash_triple_are_exact() {
+        let singleton =
+            synthetic_ea_buffer(&[("$KERNEL.PURGE.SEC.FILEHASH", 0, b"opaque-file-hash")]);
+        let parsed = parse_extended_attributes_with_policy(
+            &singleton,
+            singleton.len() as u32,
+            false,
+            true,
+            true,
+        )
+        .unwrap();
+        assert_eq!(parsed.entries.len(), 1);
+        assert!(
+            parse_extended_attributes(&singleton, singleton.len() as u32, false, true).is_err()
+        );
+        assert!(
+            parse_extended_attributes_with_policy(
+                &singleton,
+                singleton.len() as u32,
+                true,
+                true,
+                true
+            )
+            .is_err()
+        );
         let directory =
             synthetic_ea_buffer(&[("$KERNEL.SMARTLOCKER.ORIGINCLAIM", 0, b"opaque-origin")]);
         let directory =
-            parse_extended_attributes(&directory, directory.len() as u32, true).unwrap();
+            parse_extended_attributes(&directory, directory.len() as u32, true, true).unwrap();
         assert_eq!(directory.entries.len(), 1);
         assert_eq!(directory.entries[0].name, "$KERNEL.SMARTLOCKER.ORIGINCLAIM");
 
@@ -3568,7 +3824,7 @@ mod tests {
             (ALLOWED_KERNEL_EAS_WITH_FILE_HASH[1], 0, b"SMV1"),
             (ALLOWED_KERNEL_EAS_WITH_FILE_HASH[2], 0, b"opaque-origin"),
         ]);
-        let file = parse_extended_attributes(&file, file.len() as u32, false).unwrap();
+        let file = parse_extended_attributes(&file, file.len() as u32, false, true).unwrap();
         assert_eq!(file.entries.len(), 3);
         assert!(
             file.entries
@@ -3576,6 +3832,46 @@ mod tests {
                 .zip(ALLOWED_KERNEL_EAS_WITH_FILE_HASH)
                 .all(|(entry, expected)| entry.name == expected)
         );
+    }
+
+    #[test]
+    fn intake_projection_excludes_only_the_kernel_file_hash_cache() {
+        let parse = |entries: &[(&str, u8, &[u8])]| {
+            let bytes = synthetic_ea_buffer(entries);
+            parse_extended_attributes_with_policy(&bytes, bytes.len() as u32, false, true, true)
+                .unwrap()
+        };
+        let empty = empty_ea_binding().unwrap().for_import_receipt();
+        for cache in [b"first-cache".as_slice(), b"updated-cache".as_slice()] {
+            let singleton = parse(&[("$KERNEL.PURGE.SEC.FILEHASH", 0, cache)]).for_import_receipt();
+            assert_eq!(singleton.entries, empty.entries);
+            assert_eq!(singleton.canonical_sha256, empty.canonical_sha256);
+            let pair = parse(&[
+                (ALLOWED_KERNEL_EAS[0], 0, b"SMV1"),
+                (ALLOWED_KERNEL_EAS[1], 0, b"origin"),
+            ]);
+            let triple = parse(&[
+                ("$KERNEL.PURGE.SEC.FILEHASH", 0, cache),
+                (ALLOWED_KERNEL_EAS[0], 0, b"SMV1"),
+                (ALLOWED_KERNEL_EAS[1], 0, b"origin"),
+            ]);
+            // Exact discard authority still distinguishes the cache states.
+            assert_ne!(pair.canonical_sha256, triple.canonical_sha256);
+            let projected = triple.for_import_receipt();
+            assert_eq!(pair.entries, projected.entries);
+            assert_eq!(pair.canonical_sha256, projected.canonical_sha256);
+        }
+        let origin_changed = parse(&[
+            (ALLOWED_KERNEL_EAS[0], 0, b"SMV1"),
+            (ALLOWED_KERNEL_EAS[1], 0, b"changed"),
+        ])
+        .for_import_receipt();
+        let original = parse(&[
+            (ALLOWED_KERNEL_EAS[0], 0, b"SMV1"),
+            (ALLOWED_KERNEL_EAS[1], 0, b"origin"),
+        ])
+        .for_import_receipt();
+        assert_ne!(original.canonical_sha256, origin_changed.canonical_sha256);
     }
 
     #[test]
@@ -3596,13 +3892,13 @@ mod tests {
             ],
         ] {
             let bytes = synthetic_ea_buffer(&entries);
-            assert!(parse_extended_attributes(&bytes, bytes.len() as u32, false).is_err());
+            assert!(parse_extended_attributes(&bytes, bytes.len() as u32, false, true).is_err());
         }
         let bytes = synthetic_ea_buffer(&[
             (ALLOWED_KERNEL_EAS[0], 0, b"one"),
             (ALLOWED_KERNEL_EAS[1], 0, b"two"),
         ]);
-        assert!(parse_extended_attributes(&bytes, bytes.len() as u32, true).is_err());
+        assert!(parse_extended_attributes(&bytes, bytes.len() as u32, true, true).is_err());
     }
 
     #[test]
@@ -3614,22 +3910,26 @@ mod tests {
         let mut missing_nul = valid.clone();
         let nul = offset_of!(FILE_FULL_EA_INFORMATION, EaName) + ALLOWED_KERNEL_EAS[0].len();
         missing_nul[nul] = 1;
-        assert!(parse_extended_attributes(&missing_nul, missing_nul.len() as u32, false).is_err());
+        assert!(
+            parse_extended_attributes(&missing_nul, missing_nul.len() as u32, false, true).is_err()
+        );
 
         let mut bad_offset = valid.clone();
         bad_offset[..4].copy_from_slice(&3_u32.to_le_bytes());
-        assert!(parse_extended_attributes(&bad_offset, bad_offset.len() as u32, false).is_err());
+        assert!(
+            parse_extended_attributes(&bad_offset, bad_offset.len() as u32, false, true).is_err()
+        );
 
         let mut nonzero_padding = valid.clone();
         let next = u32::from_le_bytes(nonzero_padding[..4].try_into().unwrap()) as usize;
         nonzero_padding[next - 1] = 1;
         assert!(
-            parse_extended_attributes(&nonzero_padding, nonzero_padding.len() as u32, false)
+            parse_extended_attributes(&nonzero_padding, nonzero_padding.len() as u32, false, true)
                 .is_err()
         );
 
-        assert!(parse_extended_attributes(&valid[..7], 7, false).is_err());
-        assert!(parse_extended_attributes(&valid, (valid.len() - 1) as u32, false).is_err());
+        assert!(parse_extended_attributes(&valid[..7], 7, false, true).is_err());
+        assert!(parse_extended_attributes(&valid, (valid.len() - 1) as u32, false, true).is_err());
     }
 
     #[test]

@@ -20,25 +20,31 @@ use aiw_orchestrator::{
     project_revision_hash,
 };
 use aiw_probe::{
-    ApplicationInspection, ApplicationInspectionError, ApplicationInspectionKind,
-    PortableContentManifest, WindowsSandboxReadiness, WorkspaceBindingEvidence,
-    inspect_application_source, probe_host,
+    APPLICATION_FILE_AUTHORITY_SCHEMA, ApplicationFileAuthority, ApplicationFileImportReceipt,
+    ApplicationFileImportVerification, ApplicationInspection, ApplicationInspectionError,
+    ApplicationInspectionKind, PortableContentManifest, PortableDirectoryAuthority,
+    PortableDirectoryImportReceipt, PortableDirectoryImportVerification, ReadinessState,
+    WindowsSandboxReadiness, WorkspaceBindingEvidence, inspect_application_source, probe_host,
 };
 use aiw_provider_mxc::{MxcGoldenProbePlan, plan_capability_probe, plan_golden_probe};
 use aiw_provider_wsb::{
+    BambuScenarioCompileError, CompiledBambuScenario, CompiledMsiScenario, ScenarioCompileError,
     WindowsSandboxCliLifecyclePlan, WindowsSandboxCompletionExpectation,
     WindowsSandboxCompletionReceipt, WindowsSandboxCompletionVerification, WindowsSandboxPlan,
-    plan_cli_lifecycle, render_config, validate_host_mappings, verify_completion_receipt,
+    compile_bambu_studio_info_scenario, compile_notepad_plus_plus_msi_scenario, plan_cli_lifecycle,
+    render_config, validate_host_mappings, verify_completion_receipt,
 };
 use aiw_runner::{
     RunnerError, SessionTransaction, WsbGoldenProbeExecution, WsbGoldenProbeStart,
-    WsbPlanningImportReceipt, WsbPlanningImportResult, WsbPreparationError, WsbPreparationReceipt,
-    WsbRecoveryResult, WsbSessionDisposition, WsbSessionStatus, observe_wsb_session_status,
+    WsbMsiReportSetInput, WsbPlanningImportReceipt, WsbPlanningImportResult, WsbPreparationError,
+    WsbPreparationReceipt, WsbRecoveryResult, WsbSessionDisposition, WsbSessionStatus,
+    observe_wsb_session_status,
 };
 #[cfg(windows)]
 use aiw_runner::{
-    import_windows_sandbox_preparation, prepare_windows_sandbox_bundle, recover_windows_sandbox,
-    start_approved_windows_sandbox_golden_probe, verify_windows_sandbox_preparation,
+    WsbMsiPreparationInput, import_windows_sandbox_preparation, prepare_windows_sandbox_bundle,
+    prepare_windows_sandbox_msi_bundle, recover_windows_sandbox, report_windows_sandbox_msi_set,
+    start_approved_windows_sandbox, verify_windows_sandbox_preparation,
 };
 use aiw_schema::{
     LEGACY_PROJECT_SCHEMA_VERSION, LegacyProjectV0Alpha1, ModelPack, PROJECT_SCHEMA_VERSION,
@@ -47,6 +53,13 @@ use aiw_schema::{
 };
 use aiw_token::{TokenEvidence, collect_current_process_token};
 use aiw_windows_platform::assess_windows_sandbox;
+#[cfg(windows)]
+use aiw_windows_platform::{HeldApplicationFile, HeldPortableDirectory, SourceInspectionError};
+#[cfg(windows)]
+use aiw_windows_platform::{
+    PortableImportError, SourceImportError, import_application_file_with_metadata,
+    import_portable_directory, verify_application_file_import, verify_portable_directory_import,
+};
 use anyhow::{Context, Result, anyhow, bail};
 use clap::error::ErrorKind;
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -72,6 +85,7 @@ struct Cli {
 enum Command {
     Project(ProjectArgs),
     Application(ApplicationArgs),
+    Package(PackageArgs),
     ModelPack(ModelPackArgs),
     Analyst(AnalystArgs),
     Evidence(EvidenceArgs),
@@ -91,6 +105,75 @@ struct ApplicationArgs {
     command: ApplicationCommand,
 }
 
+#[derive(Debug, Args)]
+struct PackageArgs {
+    #[command(subcommand)]
+    command: PackageCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum PackageCommand {
+    /// Inspect a verified MSI preparation before planning import, approval, or launch.
+    InspectWsbMsiRecipe {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        guest_agent_sha256: String,
+        #[arg(long, value_enum, default_value_t = AssessmentReportFormat::Json)]
+        format: AssessmentReportFormat,
+    },
+    /// Match a bundle and its import record to a reverified terminal MSI run, without execution.
+    ReportWsbMsi {
+        #[arg(long)]
+        bundle: PathBuf,
+        #[arg(long)]
+        manifest_sha256: String,
+        #[arg(long)]
+        import_record: PathBuf,
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        run_id: String,
+        #[arg(long)]
+        guest_agent_sha256: String,
+        #[arg(long, value_enum, default_value_t = AssessmentReportFormat::Json)]
+        format: AssessmentReportFormat,
+    },
+    /// Export a reusable fixed Notepad++ MSI Sandbox recipe and payload, without approval.
+    ExportWsbMsi {
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        import_receipt: PathBuf,
+        #[arg(long)]
+        scenario: String,
+        #[arg(long)]
+        output_parent: PathBuf,
+        #[arg(long)]
+        bundle_id: String,
+    },
+    /// Verify exact bundle inventory, payload, and recipe against an independently retained manifest hash.
+    Verify {
+        #[arg(long)]
+        bundle: PathBuf,
+        #[arg(long)]
+        manifest_sha256: String,
+    },
+    /// Create a fresh protected intake from a verified bundle; preparation and approval remain separate.
+    Import {
+        #[arg(long)]
+        bundle: PathBuf,
+        #[arg(long)]
+        manifest_sha256: String,
+        #[arg(long)]
+        intake_parent: PathBuf,
+        #[arg(long)]
+        intake_id: String,
+    },
+}
+
 #[derive(Debug, Subcommand)]
 enum ApplicationCommand {
     /// Inspect source identity without executing, copying, or trusting it.
@@ -99,6 +182,39 @@ enum ApplicationCommand {
         source: PathBuf,
         #[arg(long, value_enum)]
         kind: ApplicationKindArg,
+    },
+    /// Copy one held MSI or EXE into a new protected receipt-last intake.
+    Import {
+        #[arg(long)]
+        source: PathBuf,
+        #[arg(long, value_enum)]
+        kind: FileApplicationKindArg,
+        #[arg(long)]
+        intake_parent: PathBuf,
+        #[arg(long)]
+        intake_id: String,
+        /// Preserve supported download streams as protected sidecars and normalize the payload for approved Sandbox execution.
+        #[arg(long)]
+        archive_download_metadata: bool,
+    },
+    /// Verify a protected file intake without modifying or repairing it.
+    VerifyImport {
+        #[arg(long)]
+        receipt: PathBuf,
+    },
+    /// Copy one held portable directory into a new protected receipt-last intake.
+    ImportPortable {
+        #[arg(long)]
+        source: PathBuf,
+        #[arg(long)]
+        intake_parent: PathBuf,
+        #[arg(long)]
+        intake_id: String,
+    },
+    /// Verify a protected portable intake without modifying or repairing it.
+    VerifyPortableImport {
+        #[arg(long)]
+        receipt: PathBuf,
     },
 }
 
@@ -115,6 +231,21 @@ impl From<ApplicationKindArg> for ApplicationInspectionKind {
             ApplicationKindArg::Msi => Self::Msi,
             ApplicationKindArg::Exe => Self::Exe,
             ApplicationKindArg::PortableDirectory => Self::PortableDirectory,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum FileApplicationKindArg {
+    Msi,
+    Exe,
+}
+
+impl From<FileApplicationKindArg> for ApplicationInspectionKind {
+    fn from(value: FileApplicationKindArg) -> Self {
+        match value {
+            FileApplicationKindArg::Msi => Self::Msi,
+            FileApplicationKindArg::Exe => Self::Exe,
         }
     }
 }
@@ -264,6 +395,47 @@ struct RunArgs {
 
 #[derive(Debug, Subcommand)]
 enum RunCommand {
+    /// Stage a verified MSI and fixed typed scenario for separate approval.
+    /// Stage the fixed Bambu export profile for separate approval.
+    PrepareWsbBambu {
+        #[arg(long)]
+        run_id: String,
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        guest_agent: PathBuf,
+        #[arg(long)]
+        guest_agent_sha256: String,
+        #[arg(long)]
+        workspace_parent: PathBuf,
+        #[arg(long)]
+        created_at: String,
+        #[arg(long)]
+        import_receipt: PathBuf,
+        #[arg(long)]
+        scenario: String,
+    },
+    PrepareWsbMsi {
+        #[arg(long)]
+        run_id: String,
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        guest_agent: PathBuf,
+        #[arg(long)]
+        guest_agent_sha256: String,
+        #[arg(long)]
+        workspace_parent: PathBuf,
+        #[arg(long)]
+        created_at: String,
+        #[arg(long)]
+        import_receipt: PathBuf,
+        #[arg(long)]
+        scenario: String,
+        /// Optional absolute canonical UTF-8 text file for the interactive transfer profile.
+        #[arg(long)]
+        document_input: Option<PathBuf>,
+    },
     /// Create and verify a fresh Windows Sandbox workspace and approvable plan bundle.
     /// This does not approve, acquire, start, connect, stop, or recover a provider.
     PrepareWsb {
@@ -355,7 +527,78 @@ enum RunCommand {
         #[arg(long)]
         requested_at: String,
     },
-    /// Start only an already-approved, hash-bound Windows Sandbox golden probe.
+    /// Reverify a completed MSI workspace and report observed evidence and gaps without mutation.
+    ReportWsbMsi {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        run_id: String,
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        guest_agent_sha256: String,
+        #[arg(long, value_enum, default_value_t = AssessmentReportFormat::Json)]
+        format: AssessmentReportFormat,
+    },
+    /// Reverify a retained Bambu export or unsuccessful attempt.
+    ReportWsbBambuRun {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        run_id: String,
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        guest_agent_sha256: String,
+        #[arg(long, value_enum, default_value_t = AssessmentReportFormat::Json)]
+        format: AssessmentReportFormat,
+    },
+    ReportWsbMsiRun {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        run_id: String,
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        guest_agent_sha256: String,
+        #[arg(long, value_enum, default_value_t = AssessmentReportFormat::Json)]
+        format: AssessmentReportFormat,
+    },
+    /// Export a verified interactive document artifact to one new host file.
+    /// Existing destinations and paths inside the retained workspace are rejected.
+    ExportWsbMsiDocument {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        run_id: String,
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        guest_agent_sha256: String,
+        #[arg(long)]
+        destination: PathBuf,
+    },
+    /// Combine retained Notepad++ and Bambu results without executing or comparing applications.
+    ReportWsbSet {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long, value_enum, default_value_t = AssessmentReportFormat::Json)]
+        format: AssessmentReportFormat,
+    },
+    /// Reverify a bounded set of retained MSI workspaces without executing or comparing them.
+    ReportWsbMsiSet {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long, value_enum, default_value_t = AssessmentReportFormat::Json)]
+        format: AssessmentReportFormat,
+    },
+    /// Reverify baseline, candidate, and replay for the fixed settings adaptation.
+    ReportWsbSettingsComparison {
+        #[arg(long)]
+        input: PathBuf,
+    },
+    /// Start only the already-approved, hash-bound Windows Sandbox preparation profile.
     /// No arbitrary command, script, policy fragment, or provider verb is accepted.
     Start {
         #[arg(long)]
@@ -382,6 +625,27 @@ struct ProviderArgs {
 
 #[derive(Debug, Subcommand)]
 enum ProviderCommand {
+    /// Compile the fixed Bambu STL-to-3MF scenario for separate preparation and approval.
+    CompileBambuExportScenario {
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        scenario: String,
+    },
+    /// Compile the experimental Bambu STL information profile; execution is not yet supported.
+    CompileBambuScenario {
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        scenario: String,
+    },
+    /// Compile the fixed Notepad++ MSI scenario for review without executing it.
+    CompileMsiScenario {
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        scenario: String,
+    },
     /// Render a hardened Windows Sandbox configuration after checking mapped folders.
     Wsb {
         #[arg(long)]
@@ -415,6 +679,12 @@ enum ProviderCommand {
     },
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum AssessmentReportFormat {
+    Json,
+    Markdown,
+}
+
 #[derive(Debug, Args)]
 struct SchemaArgs {
     #[arg(value_enum)]
@@ -423,7 +693,48 @@ struct SchemaArgs {
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum SchemaKind {
+    ImportedMsiGuestRequest,
+    ImportedMsiScenarioResult,
+    WsbApprovedExecution,
+    MsiApplicationToken,
+    MsiRuntimeContext,
+    #[value(name = "msi-registry")]
+    MsiRegistry,
+    ImportedMsiBehaviorEvidence,
+    WsbMsiAssessmentReport,
+    WsbMsiRunReport,
+    #[value(name = "wsb-msi-document-export")]
+    WsbMsiDocumentExport,
+    WsbMsiRecipeInspection,
+    #[value(name = "wsb-report-set-input")]
+    WsbReportSetInput,
+    #[value(name = "wsb-report-set")]
+    WsbReportSet,
+    #[value(name = "wsb-msi-report-set-input")]
+    WsbMsiReportSetInput,
+    #[value(name = "wsb-msi-report-set")]
+    WsbMsiReportSet,
+    WsbSettingsComparison,
+    ImportedMsiStageProgress,
+    ImportedMsiFailedAttempt,
+    #[value(name = "msi-failed-snapshots")]
+    MsiFailedSnapshots,
+    #[value(name = "msi-product-registration")]
+    MsiProductRegistration,
+    CompiledMsiScenario,
+    CompiledBambuScenario,
+    CompiledBambuExportScenario,
+    ImportedBambuGuestRequest,
+    BambuRunReport,
+    BambuScenarioCompilation,
+    MsiScenarioCompilation,
+    ApplicationFileAuthority,
+    ApplicationFileImportReceipt,
+    ApplicationFileImportVerification,
+    PortableDirectoryImportReceipt,
+    PortableDirectoryImportVerification,
     ApplicationInspection,
+    PortableDirectoryAuthority,
     PortableContentManifest,
     /// Current project schema. Retained as the stable alias for project-v0alpha2.
     Project,
@@ -438,6 +749,8 @@ enum SchemaKind {
     RunPlanV0Alpha2,
     #[value(name = "run-plan-v0alpha3")]
     RunPlanV0Alpha3,
+    #[value(name = "run-plan-v0alpha4")]
+    RunPlanV0Alpha4,
     ApprovalRecord,
     RunEvent,
     RunResult,
@@ -473,6 +786,27 @@ enum SchemaKind {
     WindowsSandboxCompletionReceipt,
     WindowsSandboxCompletionVerification,
     MxcGoldenProbePlan,
+}
+
+/// Review output only; this object is not an imported preparation or approval.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct MsiScenarioCompilation {
+    schema_version: &'static str,
+    project_revision_sha256: String,
+    scenario_sha256: String,
+    scenario: CompiledMsiScenario,
+}
+
+/// Review output only. No Bambu preparation, execution, or report path consumes it yet.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct BambuScenarioCompilation {
+    schema_version: &'static str,
+    execution_supported: bool,
+    project_revision_sha256: String,
+    scenario_sha256: String,
+    scenario: CompiledBambuScenario,
 }
 
 #[derive(Debug, Args)]
@@ -615,6 +949,18 @@ impl std::fmt::Display for RunRecoveryFailed {
 impl std::error::Error for RunRecoveryFailed {}
 
 #[derive(Debug)]
+struct RunReportFailed {
+    run_id: String,
+    source: RunnerError,
+}
+impl std::fmt::Display for RunReportFailed {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.source.fmt(formatter)
+    }
+}
+impl std::error::Error for RunReportFailed {}
+
+#[derive(Debug)]
 struct RunStartFailed {
     run_id: String,
     source: RunnerError,
@@ -650,6 +996,17 @@ impl std::fmt::Display for RunPreparationFailed {
 impl std::error::Error for RunPreparationFailed {}
 
 #[derive(Debug)]
+struct RecipeInspectionFailed(WsbPreparationError);
+
+impl std::fmt::Display for RecipeInspectionFailed {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+impl std::error::Error for RecipeInspectionFailed {}
+
+#[derive(Debug)]
 struct RunPreparationImportFailed {
     run_id: String,
     source: WsbPreparationError,
@@ -675,6 +1032,56 @@ impl std::fmt::Display for ApplicationInspectionFailed {
 }
 
 impl std::error::Error for ApplicationInspectionFailed {}
+
+#[cfg(windows)]
+#[derive(Debug)]
+struct ApplicationAuthorityFailed {
+    source: SourceInspectionError,
+}
+
+#[cfg(windows)]
+impl std::fmt::Display for ApplicationAuthorityFailed {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.source.fmt(formatter)
+    }
+}
+
+#[cfg(windows)]
+impl std::error::Error for ApplicationAuthorityFailed {}
+
+#[cfg(windows)]
+#[derive(Debug)]
+struct SourceImportFailed {
+    source: SourceImportError,
+    verification: bool,
+}
+
+#[cfg(windows)]
+impl std::fmt::Display for SourceImportFailed {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.source.fmt(formatter)
+    }
+}
+
+#[cfg(windows)]
+impl std::error::Error for SourceImportFailed {}
+
+#[cfg(windows)]
+#[derive(Debug)]
+struct PortableImportFailed {
+    source: PortableImportError,
+    verification: bool,
+}
+
+#[cfg(windows)]
+impl std::fmt::Display for PortableImportFailed {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.source.fmt(formatter)
+    }
+}
+
+#[cfg(windows)]
+impl std::error::Error for PortableImportFailed {}
 
 #[derive(Debug)]
 struct WsbSessionStatusInvalid {
@@ -725,11 +1132,354 @@ fn main() -> ExitCode {
 
 fn run(command: Command) -> Result<()> {
     match command {
+        Command::Package(args) => match args.command {
+            PackageCommand::InspectWsbMsiRecipe {
+                root,
+                project,
+                guest_agent_sha256,
+                format,
+            } => {
+                #[cfg(windows)]
+                {
+                    let loaded = read_project(&project)?;
+                    let inspection = aiw_runner::inspect_windows_sandbox_msi_recipe(
+                        &root,
+                        &loaded.project,
+                        &guest_agent_sha256,
+                    )
+                    .map_err(|source| anyhow!(RecipeInspectionFailed(source)))?;
+                    match format {
+                        AssessmentReportFormat::Json => write_json(&inspection),
+                        AssessmentReportFormat::Markdown => {
+                            print!("{}", inspection.to_markdown());
+                            Ok(())
+                        }
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (root, project, guest_agent_sha256, format);
+                    bail!("Sandbox recipe inspection requires Windows")
+                }
+            }
+            PackageCommand::ReportWsbMsi {
+                bundle,
+                manifest_sha256,
+                import_record,
+                root,
+                run_id,
+                guest_agent_sha256,
+                format,
+            } => {
+                #[cfg(windows)]
+                {
+                    let imported: aiw_runner::SandboxBundleImport =
+                        read_document(&import_record, 1024 * 1024)?;
+                    let report = aiw_runner::report_notepad_plus_plus_msi_bundle(
+                        &bundle,
+                        &manifest_sha256,
+                        &imported,
+                        &root,
+                        &run_id,
+                        &guest_agent_sha256,
+                    )?;
+                    match format {
+                        AssessmentReportFormat::Json => write_json(&report),
+                        AssessmentReportFormat::Markdown => {
+                            print!("{}", report.to_markdown());
+                            Ok(())
+                        }
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (
+                        bundle,
+                        manifest_sha256,
+                        import_record,
+                        root,
+                        run_id,
+                        guest_agent_sha256,
+                        format,
+                    );
+                    bail!("Sandbox bundle reporting requires Windows")
+                }
+            }
+            PackageCommand::ExportWsbMsi {
+                project,
+                import_receipt,
+                scenario,
+                output_parent,
+                bundle_id,
+            } => {
+                #[cfg(windows)]
+                {
+                    let loaded = read_project(&project)?;
+                    let receipt: ApplicationFileImportReceipt =
+                        read_document(&import_receipt, MAX_CONFIG_BYTES)?;
+                    write_json(&aiw_runner::export_notepad_plus_plus_msi_bundle(
+                        &output_parent,
+                        &bundle_id,
+                        &loaded.project,
+                        &scenario,
+                        &receipt,
+                    )?)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (project, import_receipt, scenario, output_parent, bundle_id);
+                    bail!("Sandbox packaging requires Windows")
+                }
+            }
+            PackageCommand::Verify {
+                bundle,
+                manifest_sha256,
+            } => {
+                #[cfg(windows)]
+                {
+                    write_json(&aiw_runner::verify_notepad_plus_plus_msi_bundle(
+                        &bundle,
+                        &manifest_sha256,
+                    )?)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (bundle, manifest_sha256);
+                    bail!("Sandbox packaging requires Windows")
+                }
+            }
+            PackageCommand::Import {
+                bundle,
+                manifest_sha256,
+                intake_parent,
+                intake_id,
+            } => {
+                #[cfg(windows)]
+                {
+                    write_json(&aiw_runner::import_notepad_plus_plus_msi_bundle(
+                        &bundle,
+                        &intake_parent,
+                        &intake_id,
+                        &manifest_sha256,
+                    )?)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (bundle, manifest_sha256, intake_parent, intake_id);
+                    bail!("Sandbox packaging requires Windows")
+                }
+            }
+        },
         Command::Application(args) => match args.command {
             ApplicationCommand::Inspect { source, kind } => {
-                let inspection = inspect_application_source(&source, kind.into())
+                #[cfg(windows)]
+                let held_file = matches!(kind, ApplicationKindArg::Msi | ApplicationKindArg::Exe)
+                    .then(|| {
+                        HeldApplicationFile::open_with_download_metadata(&source)
+                            .map_err(|source| anyhow!(ApplicationAuthorityFailed { source }))
+                    })
+                    .transpose()?;
+                #[cfg(windows)]
+                let held_portable = matches!(kind, ApplicationKindArg::PortableDirectory)
+                    .then(|| {
+                        HeldPortableDirectory::open(&source)
+                            .map_err(|source| anyhow!(ApplicationAuthorityFailed { source }))
+                    })
+                    .transpose()?;
+                let mut inspection = inspect_application_source(&source, kind.into())
                     .map_err(|source| anyhow!(ApplicationInspectionFailed { source }))?;
+                #[cfg(windows)]
+                if let Some(held) = held_file.as_ref() {
+                    let observed = held.observation();
+                    if inspection.sha256.as_deref() != Some(&observed.sha256)
+                        || inspection.size_bytes != Some(observed.size_bytes)
+                    {
+                        return Err(anyhow!(ApplicationAuthorityFailed {
+                            source: SourceInspectionError::Drift,
+                        }));
+                    }
+                    held.revalidate()
+                        .map_err(|source| anyhow!(ApplicationAuthorityFailed { source }))?;
+                    inspection.signature_status = held
+                        .embedded_signature_status()
+                        .map_err(|source| anyhow!(ApplicationAuthorityFailed { source }))?;
+                    inspection.canonical_path = observed.canonical_path.clone();
+                    inspection.file_authority = Some(ApplicationFileAuthority {
+                        schema_version: if observed.download_metadata.is_empty() {
+                            APPLICATION_FILE_AUTHORITY_SCHEMA
+                        } else {
+                            aiw_probe::APPLICATION_DOWNLOAD_AUTHORITY_SCHEMA
+                        }
+                        .to_owned(),
+                        identity: observed.identity.clone(),
+                        size_bytes: observed.size_bytes,
+                        sha256: observed.sha256.clone(),
+                        link_count: observed.link_count,
+                        only_unnamed_data_stream: observed.only_unnamed_data_stream,
+                        download_metadata: observed.download_metadata.clone(),
+                    });
+                    inspection.limitations.retain(|value| {
+                        !value.starts_with("Authenticode signer and trust")
+                            && !value.starts_with("Windows hard-link and alternate-stream")
+                            && !value.starts_with("Path checks are observational")
+                    });
+                    inspection.limitations.push(
+                        match inspection.signature_status {
+                            ReadinessState::Available => "The embedded Authenticode signature validated under cache-only whole-chain policy; signer identity and timestamp are not yet recorded.",
+                            ReadinessState::Missing => "No embedded Authenticode signature was found; catalog membership and signer identity are not yet assessed.",
+                            ReadinessState::Unknown => "The embedded Authenticode signature did not validate under cache-only whole-chain policy; unknown never means trusted.",
+                            ReadinessState::NeedsElevation => unreachable!("signature inspection never requests elevation"),
+                        }
+                        .to_owned(),
+                    );
+                }
+                #[cfg(windows)]
+                if let Some(held) = held_portable.as_ref() {
+                    let path_manifest = inspection.portable_manifest.as_ref().ok_or_else(|| {
+                        anyhow!(ApplicationAuthorityFailed {
+                            source: SourceInspectionError::Drift,
+                        })
+                    })?;
+                    if path_manifest.schema_version != held.manifest().schema_version
+                        || path_manifest.entries != held.manifest().entries
+                        || path_manifest.total_size_bytes != held.manifest().total_size_bytes
+                        || path_manifest.manifest_sha256 != held.manifest().manifest_sha256
+                    {
+                        return Err(anyhow!(ApplicationAuthorityFailed {
+                            source: SourceInspectionError::Drift,
+                        }));
+                    }
+                    held.revalidate()
+                        .map_err(|source| anyhow!(ApplicationAuthorityFailed { source }))?;
+                    inspection.canonical_path = held.manifest().root_path.clone();
+                    inspection.size_bytes = Some(held.manifest().total_size_bytes);
+                    inspection.portable_manifest = Some(held.manifest().clone());
+                    inspection.portable_directory_authority = Some(held.authority().clone());
+                    inspection.limitations.retain(|value| {
+                        !value.starts_with("Windows hard-link and alternate-stream")
+                            && !value.starts_with("Portable traversal is path-based")
+                    });
+                    inspection.limitations.push(
+                        "Held handle-relative traversal binds every observed object, but a directory namespace addition after final enumeration cannot be excluded until protected import."
+                            .to_owned(),
+                    );
+                }
                 write_json(&inspection)
+            }
+            ApplicationCommand::Import {
+                source,
+                kind,
+                intake_parent,
+                intake_id,
+                archive_download_metadata,
+            } => {
+                #[cfg(windows)]
+                {
+                    let inspection_kind: ApplicationInspectionKind = kind.into();
+                    let held = if archive_download_metadata {
+                        HeldApplicationFile::open_with_download_metadata(&source)
+                    } else {
+                        HeldApplicationFile::open(&source)
+                    }
+                    .map_err(|source| anyhow!(ApplicationAuthorityFailed { source }))?;
+                    let inspection = inspect_application_source(&source, inspection_kind)
+                        .map_err(|source| anyhow!(ApplicationInspectionFailed { source }))?;
+                    if inspection.sha256.as_deref() != Some(&held.observation().sha256)
+                        || inspection.size_bytes != Some(held.observation().size_bytes)
+                    {
+                        return Err(anyhow!(ApplicationAuthorityFailed {
+                            source: SourceInspectionError::Drift,
+                        }));
+                    }
+                    let receipt = import_application_file_with_metadata(
+                        &intake_parent,
+                        &intake_id,
+                        inspection_kind,
+                        &held,
+                        archive_download_metadata,
+                    )
+                    .map_err(|source| {
+                        anyhow!(SourceImportFailed {
+                            source,
+                            verification: false,
+                        })
+                    })?;
+                    write_json(&receipt)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (
+                        source,
+                        kind,
+                        intake_parent,
+                        intake_id,
+                        archive_download_metadata,
+                    );
+                    bail!("protected application import requires Windows")
+                }
+            }
+            ApplicationCommand::VerifyImport { receipt } => {
+                #[cfg(windows)]
+                {
+                    let receipt: ApplicationFileImportReceipt =
+                        read_document(&receipt, MAX_CONFIG_BYTES)?;
+                    let verified = verify_application_file_import(&receipt).map_err(|source| {
+                        anyhow!(SourceImportFailed {
+                            source,
+                            verification: true,
+                        })
+                    })?;
+                    write_json(&verified)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = receipt;
+                    bail!("protected application import verification requires Windows")
+                }
+            }
+            ApplicationCommand::ImportPortable {
+                source,
+                intake_parent,
+                intake_id,
+            } => {
+                #[cfg(windows)]
+                {
+                    let held = HeldPortableDirectory::open(&source)
+                        .map_err(|source| anyhow!(ApplicationAuthorityFailed { source }))?;
+                    let receipt = import_portable_directory(&intake_parent, &intake_id, &held)
+                        .map_err(|source| {
+                            anyhow!(PortableImportFailed {
+                                source,
+                                verification: false,
+                            })
+                        })?;
+                    write_json(&receipt)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (source, intake_parent, intake_id);
+                    bail!("protected portable import requires Windows")
+                }
+            }
+            ApplicationCommand::VerifyPortableImport { receipt } => {
+                #[cfg(windows)]
+                {
+                    let receipt: PortableDirectoryImportReceipt =
+                        read_document(&receipt, MAX_CONFIG_BYTES)?;
+                    let verified =
+                        verify_portable_directory_import(&receipt).map_err(|source| {
+                            anyhow!(PortableImportFailed {
+                                source,
+                                verification: true,
+                            })
+                        })?;
+                    write_json(&verified)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = receipt;
+                    bail!("protected portable import verification requires Windows")
+                }
             }
         },
         Command::Project(args) => match args.command {
@@ -817,6 +1567,99 @@ fn run(command: Command) -> Result<()> {
             HostCommand::Assess => write_json(&assess_windows_sandbox()),
         },
         Command::Run(args) => match args.command {
+            RunCommand::PrepareWsbBambu {
+                run_id,
+                project,
+                guest_agent,
+                guest_agent_sha256,
+                workspace_parent,
+                created_at,
+                import_receipt,
+                scenario,
+            } => {
+                let loaded = read_project(&project)?;
+                let receipt: ApplicationFileImportReceipt =
+                    read_document(&import_receipt, MAX_CONFIG_BYTES)?;
+                #[cfg(windows)]
+                {
+                    let prepared = aiw_runner::prepare_windows_sandbox_bambu_bundle(
+                        &run_id,
+                        &loaded.project,
+                        &guest_agent,
+                        &guest_agent_sha256,
+                        &workspace_parent,
+                        &created_at,
+                        aiw_runner::WsbBambuPreparationInput {
+                            import_receipt: &receipt,
+                            scenario_id: &scenario,
+                        },
+                    )
+                    .map_err(|source| anyhow!(RunPreparationFailed { run_id, source }))?;
+                    write_json(&preparation_result(prepared))
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (
+                        run_id,
+                        loaded,
+                        guest_agent,
+                        guest_agent_sha256,
+                        workspace_parent,
+                        created_at,
+                        receipt,
+                        scenario,
+                    );
+                    bail!("Bambu preparation requires Windows")
+                }
+            }
+            RunCommand::PrepareWsbMsi {
+                run_id,
+                project,
+                guest_agent,
+                guest_agent_sha256,
+                workspace_parent,
+                created_at,
+                import_receipt,
+                scenario,
+                document_input,
+            } => {
+                let loaded = read_project(&project)?;
+                let receipt: ApplicationFileImportReceipt =
+                    read_document(&import_receipt, MAX_CONFIG_BYTES)?;
+                #[cfg(windows)]
+                {
+                    let prepared = prepare_windows_sandbox_msi_bundle(
+                        &run_id,
+                        &loaded.project,
+                        &guest_agent,
+                        &guest_agent_sha256,
+                        &workspace_parent,
+                        &created_at,
+                        WsbMsiPreparationInput {
+                            import_receipt: &receipt,
+                            scenario_id: &scenario,
+                            document_input: document_input.as_deref(),
+                        },
+                    )
+                    .map_err(|source| anyhow!(RunPreparationFailed { run_id, source }))?;
+                    write_json(&preparation_result(prepared))
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (
+                        run_id,
+                        loaded,
+                        guest_agent,
+                        guest_agent_sha256,
+                        workspace_parent,
+                        created_at,
+                        receipt,
+                        scenario,
+                        document_input,
+                    );
+                    bail!("MSI preparation requires Windows")
+                }
+            }
             RunCommand::PrepareWsb {
                 run_id,
                 project,
@@ -1005,7 +1848,7 @@ fn run(command: Command) -> Result<()> {
                         return write_json(&RunRecoveryEnvelope {
                             schema_version: RUN_RECOVERY_SCHEMA_VERSION.to_owned(),
                             run_id: layout.run_id().to_owned(),
-                            core,
+                            core: layout.status()?,
                             windows_sandbox: Some(windows_sandbox),
                         });
                     }
@@ -1038,6 +1881,264 @@ fn run(command: Command) -> Result<()> {
                 let cancellation = layout.request_cancellation(requested_by, requested_at)?;
                 write_json(&cancellation)
             }
+            RunCommand::ReportWsbMsi {
+                root,
+                run_id,
+                project,
+                guest_agent_sha256,
+                format,
+            } => {
+                let loaded = read_project(&project)?;
+                #[cfg(windows)]
+                {
+                    let report = aiw_runner::report_windows_sandbox_msi(
+                        &root,
+                        &run_id,
+                        &loaded.project,
+                        &guest_agent_sha256,
+                    )
+                    .map_err(|source| {
+                        anyhow!(RunReportFailed {
+                            run_id: run_id.clone(),
+                            source
+                        })
+                    })?;
+                    match format {
+                        AssessmentReportFormat::Json => write_json(&report),
+                        AssessmentReportFormat::Markdown => {
+                            print!("{}", report.to_markdown());
+                            Ok(())
+                        }
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (root, loaded, guest_agent_sha256, format);
+                    Err(anyhow!(RunOperationUnavailable {
+                        code: "AIW_WINDOWS_REQUIRED",
+                        summary: "retained Windows workspace verification requires Windows",
+                        stage: "wsbReport",
+                        remediation: "Read the retained workspace on its original Windows host.",
+                        detail: "No files or provider state were changed.",
+                        run_id,
+                    }))
+                }
+            }
+            RunCommand::ReportWsbBambuRun {
+                root,
+                run_id,
+                project,
+                guest_agent_sha256,
+                format,
+            } => {
+                let loaded = read_project(&project)?;
+                #[cfg(windows)]
+                {
+                    let report = aiw_runner::report_windows_sandbox_bambu_run(
+                        &root,
+                        &run_id,
+                        &loaded.project,
+                        &guest_agent_sha256,
+                    )
+                    .map_err(|source| {
+                        anyhow!(RunReportFailed {
+                            run_id: run_id.clone(),
+                            source
+                        })
+                    })?;
+                    match format {
+                        AssessmentReportFormat::Json => write_json(&report),
+                        AssessmentReportFormat::Markdown => {
+                            print!("{}", aiw_runner::render_bambu_run_report_markdown(&report));
+                            Ok(())
+                        }
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (root, loaded, guest_agent_sha256, format);
+                    Err(anyhow!(RunOperationUnavailable {
+                        code: "AIW_WINDOWS_REQUIRED",
+                        summary: "retained Windows workspace verification requires Windows",
+                        stage: "wsbReport",
+                        remediation: "Read the retained workspace on its original Windows host.",
+                        detail: "No files or provider state were changed.",
+                        run_id,
+                    }))
+                }
+            }
+            RunCommand::ReportWsbMsiRun {
+                root,
+                run_id,
+                project,
+                guest_agent_sha256,
+                format,
+            } => {
+                let loaded = read_project(&project)?;
+                #[cfg(windows)]
+                {
+                    let report = aiw_runner::report_windows_sandbox_msi_run(
+                        &root,
+                        &run_id,
+                        &loaded.project,
+                        &guest_agent_sha256,
+                    )
+                    .map_err(|source| {
+                        anyhow!(RunReportFailed {
+                            run_id: run_id.clone(),
+                            source
+                        })
+                    })?;
+                    match format {
+                        AssessmentReportFormat::Json => write_json(&report),
+                        AssessmentReportFormat::Markdown => {
+                            print!("{}", report.to_markdown());
+                            Ok(())
+                        }
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (root, loaded, guest_agent_sha256, format);
+                    Err(anyhow!(RunOperationUnavailable {
+                        code: "AIW_WINDOWS_REQUIRED",
+                        summary: "retained Windows workspace verification requires Windows",
+                        stage: "wsbReport",
+                        remediation: "Read the retained workspace on its original Windows host.",
+                        detail: "No files or provider state were changed.",
+                        run_id,
+                    }))
+                }
+            }
+            RunCommand::ExportWsbMsiDocument {
+                root,
+                run_id,
+                project,
+                guest_agent_sha256,
+                destination,
+            } => {
+                let loaded = read_project(&project)?;
+                #[cfg(windows)]
+                {
+                    let export = aiw_runner::export_windows_sandbox_msi_document(
+                        &root,
+                        &run_id,
+                        &loaded.project,
+                        &guest_agent_sha256,
+                        &destination,
+                    )
+                    .map_err(|source| {
+                        anyhow!(RunReportFailed {
+                            run_id: run_id.clone(),
+                            source,
+                        })
+                    })?;
+                    write_json(&export)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (root, loaded, guest_agent_sha256, destination);
+                    Err(anyhow!(RunOperationUnavailable {
+                        code: "AIW_WINDOWS_REQUIRED",
+                        summary: "interactive document export requires Windows",
+                        stage: "wsbDocumentExport",
+                        remediation: "Export this exact retained interactive run on its original supported Windows host.",
+                        detail: "No files or provider state were changed.",
+                        run_id,
+                    }))
+                }
+            }
+            RunCommand::ReportWsbSet { input, format } => {
+                let manifest: aiw_runner::WsbReportSetInput = read_document(&input, 1024 * 1024)?;
+                manifest.validate().map_err(|error| anyhow!(error))?;
+                #[cfg(windows)]
+                {
+                    let report =
+                        aiw_runner::report_windows_sandbox_set(&manifest).map_err(|source| {
+                            anyhow!(RunReportFailed {
+                                run_id: "report-set".to_owned(),
+                                source: RunnerError::Receipt(source),
+                            })
+                        })?;
+                    match format {
+                        AssessmentReportFormat::Json => write_json(&report),
+                        AssessmentReportFormat::Markdown => {
+                            print!("{}", report.to_markdown());
+                            Ok(())
+                        }
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (manifest, format);
+                    Err(anyhow!(RunOperationUnavailable {
+                        code: "AIW_WINDOWS_REQUIRED",
+                        summary: "retained Windows workspace verification requires Windows",
+                        stage: "wsbReportSet",
+                        remediation: "Read the retained workspaces on their original Windows host.",
+                        detail: "No files or provider state were changed.",
+                        run_id: input.display().to_string(),
+                    }))
+                }
+            }
+            RunCommand::ReportWsbSettingsComparison { input } => {
+                let manifest: WsbMsiReportSetInput = read_document(&input, 1024 * 1024)?;
+                #[cfg(windows)]
+                {
+                    let report = aiw_runner::report_windows_sandbox_settings_comparison(&manifest)
+                        .map_err(|source| {
+                            anyhow!(RunReportFailed {
+                                run_id: "settings-comparison".to_owned(),
+                                source: RunnerError::Receipt(source),
+                            })
+                        })?;
+                    write_json(&report)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = manifest;
+                    Err(anyhow!(RunOperationUnavailable {
+                        code: "AIW_WINDOWS_REQUIRED",
+                        summary: "retained Windows workspace verification requires Windows",
+                        stage: "wsbSettingsComparison",
+                        remediation: "Read the retained workspaces on their original Windows host.",
+                        detail: "No files or provider state were changed.",
+                        run_id: input.display().to_string(),
+                    }))
+                }
+            }
+            RunCommand::ReportWsbMsiSet { input, format } => {
+                let manifest: WsbMsiReportSetInput = read_document(&input, 1024 * 1024)?;
+                manifest.validate().map_err(|error| anyhow!(error))?;
+                #[cfg(windows)]
+                {
+                    let report = report_windows_sandbox_msi_set(&manifest).map_err(|source| {
+                        anyhow!(RunReportFailed {
+                            run_id: "report-set".to_owned(),
+                            source: RunnerError::Receipt(source),
+                        })
+                    })?;
+                    match format {
+                        AssessmentReportFormat::Json => write_json(&report),
+                        AssessmentReportFormat::Markdown => {
+                            print!("{}", report.to_markdown());
+                            Ok(())
+                        }
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (manifest, format);
+                    Err(anyhow!(RunOperationUnavailable {
+                        code: "AIW_WINDOWS_REQUIRED",
+                        summary: "retained Windows workspace verification requires Windows",
+                        stage: "wsbReportSet",
+                        remediation: "Read the retained workspaces on their original Windows host.",
+                        detail: "No files or provider state were changed.",
+                        run_id: input.display().to_string(),
+                    }))
+                }
+            }
             RunCommand::Start {
                 root,
                 run_id,
@@ -1054,7 +2155,7 @@ fn run(command: Command) -> Result<()> {
                             source: RunnerError::ApprovalBinding,
                         }));
                     }
-                    let execution = start_approved_windows_sandbox_golden_probe(
+                    let execution = start_approved_windows_sandbox(
                         &root,
                         &project,
                         &loaded.project,
@@ -1084,6 +2185,40 @@ fn run(command: Command) -> Result<()> {
             }
         },
         Command::Provider(args) => match args.command {
+            ProviderCommand::CompileBambuExportScenario { project, scenario } => {
+                let loaded = read_project(&project)?;
+                let scenario = aiw_provider_wsb::compile_bambu_studio_export_scenario(
+                    &loaded.project,
+                    &scenario,
+                )?;
+                write_json(&serde_json::json!({
+                    "schemaVersion": "aiw.dev/bambu-export-scenario-compilation/v0alpha1",
+                    "projectRevisionSha256": project_revision_hash(&loaded.project)?,
+                    "scenarioSha256": scenario.canonical_sha256()?,
+                    "scenario": scenario,
+                }))
+            }
+            ProviderCommand::CompileBambuScenario { project, scenario } => {
+                let loaded = read_project(&project)?;
+                let scenario = compile_bambu_studio_info_scenario(&loaded.project, &scenario)?;
+                write_json(&BambuScenarioCompilation {
+                    schema_version: "aiw.dev/bambu-scenario-compilation/v0alpha1",
+                    execution_supported: false,
+                    project_revision_sha256: project_revision_hash(&loaded.project)?,
+                    scenario_sha256: scenario.canonical_sha256()?,
+                    scenario,
+                })
+            }
+            ProviderCommand::CompileMsiScenario { project, scenario } => {
+                let loaded = read_project(&project)?;
+                let scenario = compile_notepad_plus_plus_msi_scenario(&loaded.project, &scenario)?;
+                write_json(&MsiScenarioCompilation {
+                    schema_version: "aiw.dev/msi-scenario-compilation/v0alpha1",
+                    project_revision_sha256: project_revision_hash(&loaded.project)?,
+                    scenario_sha256: scenario.canonical_sha256()?,
+                    scenario,
+                })
+            }
             ProviderCommand::Wsb { plan } => {
                 let plan: WindowsSandboxPlan = read_document(&plan, MAX_CONFIG_BYTES)?;
                 validate_host_mappings(&plan)?;
@@ -1113,13 +2248,100 @@ fn run(command: Command) -> Result<()> {
             ProviderCommand::MxcProbe { binary } => write_json(&plan_capability_probe(&binary)?),
         },
         Command::Schema(args) => match args.kind {
+            SchemaKind::ImportedMsiGuestRequest => {
+                write_json(&schema_for!(aiw_provider_wsb::ImportedMsiGuestRequest))
+            }
+            SchemaKind::ImportedMsiScenarioResult => {
+                write_json(&schema_for!(aiw_provider_wsb::ImportedMsiScenarioResult))
+            }
+            SchemaKind::WsbMsiAssessmentReport => {
+                write_json(&schema_for!(aiw_runner::WsbMsiAssessmentReport))
+            }
+            SchemaKind::WsbMsiDocumentExport => {
+                write_json(&schema_for!(aiw_runner::WsbMsiDocumentExport))
+            }
+            SchemaKind::WsbMsiRecipeInspection => {
+                write_json(&schema_for!(aiw_runner::WsbMsiRecipeInspection))
+            }
+            SchemaKind::ImportedMsiStageProgress => {
+                write_json(&schema_for!(aiw_provider_wsb::ImportedMsiStageProgress))
+            }
+            SchemaKind::ImportedMsiFailedAttempt => {
+                write_json(&schema_for!(aiw_provider_wsb::ImportedMsiFailedAttempt))
+            }
+            SchemaKind::MsiFailedSnapshots => {
+                write_json(&schema_for!(aiw_provider_wsb::ImportedMsiFailedSnapshots))
+            }
+            SchemaKind::MsiProductRegistration => write_json(&schema_for!(
+                aiw_provider_wsb::ImportedMsiProductRegistrationEvidence
+            )),
+            SchemaKind::WsbMsiRunReport => write_json(&schema_for!(aiw_runner::WsbMsiRunReport)),
+            SchemaKind::WsbReportSetInput => {
+                write_json(&schema_for!(aiw_runner::WsbReportSetInput))
+            }
+            SchemaKind::WsbReportSet => write_json(&schema_for!(aiw_runner::WsbReportSet)),
+            SchemaKind::WsbMsiReportSetInput => {
+                write_json(&schema_for!(aiw_runner::WsbMsiReportSetInput))
+            }
+            SchemaKind::WsbMsiReportSet => write_json(&schema_for!(aiw_runner::WsbMsiReportSet)),
+            SchemaKind::WsbSettingsComparison => {
+                write_json(&schema_for!(aiw_runner::WsbSettingsComparison))
+            }
+            SchemaKind::ImportedMsiBehaviorEvidence => {
+                write_json(&schema_for!(aiw_provider_wsb::ImportedMsiBehaviorEvidence))
+            }
+            SchemaKind::MsiRuntimeContext => {
+                write_json(&schema_for!(aiw_provider_wsb::ImportedMsiRuntimeContext))
+            }
+            SchemaKind::MsiRegistry => {
+                write_json(&schema_for!(aiw_provider_wsb::ImportedMsiRegistryEvidence))
+            }
+            SchemaKind::MsiApplicationToken => {
+                write_json(&schema_for!(aiw_provider_wsb::ImportedMsiApplicationToken))
+            }
+            SchemaKind::WsbApprovedExecution => {
+                write_json(&schema_for!(aiw_runner::WsbApprovedExecution))
+            }
+            SchemaKind::CompiledMsiScenario => write_json(&schema_for!(CompiledMsiScenario)),
+            SchemaKind::CompiledBambuScenario => write_json(&schema_for!(CompiledBambuScenario)),
+            SchemaKind::CompiledBambuExportScenario => {
+                write_json(&schema_for!(aiw_provider_wsb::CompiledBambuExportScenario))
+            }
+            SchemaKind::ImportedBambuGuestRequest => {
+                write_json(&schema_for!(aiw_provider_wsb::ImportedBambuGuestRequest))
+            }
+            SchemaKind::BambuRunReport => write_json(&schema_for!(aiw_runner::WsbBambuRunReport)),
+            SchemaKind::BambuScenarioCompilation => {
+                write_json(&schema_for!(BambuScenarioCompilation))
+            }
+            SchemaKind::MsiScenarioCompilation => write_json(&schema_for!(MsiScenarioCompilation)),
+            SchemaKind::ApplicationFileAuthority => {
+                write_json(&schema_for!(ApplicationFileAuthority))
+            }
+            SchemaKind::ApplicationFileImportReceipt => {
+                write_json(&schema_for!(ApplicationFileImportReceipt))
+            }
+            SchemaKind::ApplicationFileImportVerification => {
+                write_json(&schema_for!(ApplicationFileImportVerification))
+            }
+            SchemaKind::PortableDirectoryImportReceipt => {
+                write_json(&schema_for!(PortableDirectoryImportReceipt))
+            }
+            SchemaKind::PortableDirectoryImportVerification => {
+                write_json(&schema_for!(PortableDirectoryImportVerification))
+            }
             SchemaKind::ApplicationInspection => write_json(&schema_for!(ApplicationInspection)),
+            SchemaKind::PortableDirectoryAuthority => {
+                write_json(&schema_for!(PortableDirectoryAuthority))
+            }
             SchemaKind::PortableContentManifest => {
                 write_json(&schema_for!(PortableContentManifest))
             }
             SchemaKind::Project | SchemaKind::ProjectV0Alpha2 => write_json(&schema_for!(Project)),
             SchemaKind::ProjectV0Alpha1 => write_json(&schema_for!(LegacyProjectV0Alpha1)),
-            SchemaKind::RunPlan | SchemaKind::RunPlanV0Alpha3 => write_json(&schema_for!(RunPlan)),
+            SchemaKind::RunPlan | SchemaKind::RunPlanV0Alpha3 | SchemaKind::RunPlanV0Alpha4 => {
+                write_json(&schema_for!(RunPlan))
+            }
             SchemaKind::RunPlanV0Alpha1 => write_json(&schema_for!(LegacyRunPlanV0Alpha1)),
             SchemaKind::RunPlanV0Alpha2 => write_json(&schema_for!(LegacyRunPlanV0Alpha2)),
             SchemaKind::ApprovalRecord => write_json(&schema_for!(ApprovalRecord)),
@@ -1693,6 +2915,90 @@ fn preparation_import_error_envelope(error: &RunPreparationImportFailed) -> Erro
 }
 
 fn emit_anyhow_error(error: &anyhow::Error) {
+    #[cfg(windows)]
+    if let Some(error) = error.downcast_ref::<PortableImportFailed>() {
+        emit_error(&ErrorEnvelope {
+            code: if error.verification {
+                "AIW_PORTABLE_IMPORT_VERIFICATION_REJECTED"
+            } else {
+                "AIW_PORTABLE_IMPORT_REJECTED"
+            }
+            .to_owned(),
+            summary: if error.verification {
+                "protected portable import could not be verified"
+            } else {
+                "protected portable import could not be completed"
+            }
+            .to_owned(),
+            stage: if error.verification {
+                "portableImportVerification"
+            } else {
+                "portableImport"
+            }
+            .to_owned(),
+            run_id: None,
+            retryable: matches!(
+                error.source,
+                PortableImportError::Source(
+                    SourceInspectionError::Busy | SourceInspectionError::Drift
+                )
+            ),
+            remediation: "Preserve incomplete or conflicting portable intake state for inspection. Retry with a new intake ID only after correcting the reported source, destination, or receipt condition."
+                .to_owned(),
+            detail: error.source.to_string().chars().take(512).collect(),
+        });
+        return;
+    }
+    #[cfg(windows)]
+    if let Some(error) = error.downcast_ref::<SourceImportFailed>() {
+        emit_error(&ErrorEnvelope {
+            code: if error.verification {
+                "AIW_APPLICATION_IMPORT_VERIFICATION_REJECTED"
+            } else {
+                "AIW_APPLICATION_IMPORT_REJECTED"
+            }
+            .to_owned(),
+            summary: if error.verification {
+                "protected application import could not be verified"
+            } else {
+                "protected application import could not be completed"
+            }
+            .to_owned(),
+            stage: if error.verification {
+                "applicationImportVerification"
+            } else {
+                "applicationImport"
+            }
+            .to_owned(),
+            run_id: None,
+            retryable: matches!(
+                error.source,
+                SourceImportError::Source(
+                    SourceInspectionError::Busy | SourceInspectionError::Drift
+                )
+            ),
+            remediation: "Preserve incomplete or conflicting intake state for inspection. Retry with a new intake ID only after correcting the reported source, destination, or receipt condition."
+                .to_owned(),
+            detail: error.source.to_string().chars().take(512).collect(),
+        });
+        return;
+    }
+    #[cfg(windows)]
+    if let Some(error) = error.downcast_ref::<ApplicationAuthorityFailed>() {
+        emit_error(&ErrorEnvelope {
+            code: "AIW_APPLICATION_AUTHORITY_REJECTED".to_owned(),
+            summary: "application file authority could not be established".to_owned(),
+            stage: "applicationInspection".to_owned(),
+            run_id: None,
+            retryable: matches!(
+                error.source,
+                SourceInspectionError::Drift | SourceInspectionError::Busy
+            ),
+            remediation: "Close processes that can modify the source, remove hard links or named streams, and retry from an absolute local fixed-volume path.".to_owned(),
+            detail: error.source.to_string().chars().take(512).collect(),
+        });
+        return;
+    }
     if let Some(error) = error.downcast_ref::<AiwError>() {
         emit_error(error);
     } else if let Some(error) = error.downcast_ref::<RunOperationUnavailable>() {
@@ -1725,15 +3031,43 @@ fn emit_anyhow_error(error: &anyhow::Error) {
             remediation: "Preserve the run directory and provider state, resolve the reported authority or drift condition, and retry the same run recovery command.".to_owned(),
             detail: error.source.to_string().chars().take(512).collect(),
         });
+    } else if let Some(error) = error.downcast_ref::<RunReportFailed>() {
+        emit_error(&ErrorEnvelope {
+            code: "AIW_WSB_REPORT_REJECTED".to_owned(),
+            summary: "retained MSI evidence could not be verified".to_owned(),
+            stage: "wsbReport".to_owned(), run_id: Some(error.run_id.clone()), retryable: false,
+            remediation: "Preserve the workspace; inspect run status and the original project and guest-agent hash. Reporting does not repair state.".to_owned(),
+            detail: error.source.to_string().chars().take(512).collect(),
+        });
     } else if let Some(error) = error.downcast_ref::<RunStartFailed>() {
         emit_error(&ErrorEnvelope {
             code: "AIW_WSB_START_REJECTED".to_owned(),
-            summary: "approved Windows Sandbox golden-probe run was not completed".to_owned(),
+            summary: "approved Windows Sandbox run was not completed".to_owned(),
             stage: "wsbRunner".to_owned(),
             run_id: Some(error.run_id.clone()),
             retryable: start_error_is_retryable(&error.source),
             remediation: "Preserve the run directory and provider state; inspect readiness, approval binding, drift, and recovery status before retrying.".to_owned(),
             detail: error.source.to_string().chars().take(512).collect(),
+        });
+    } else if let Some(error) = error.downcast_ref::<aiw_runner::SandboxBundleError>() {
+        emit_error(&ErrorEnvelope {
+            code: "AIW_SANDBOX_BUNDLE_REJECTED".to_owned(),
+            summary: "Sandbox bundle operation could not be completed".to_owned(),
+            stage: "sandboxBundle".to_owned(),
+            run_id: None,
+            retryable: false,
+            remediation: "Preserve the bundle and any incomplete destination. Resolve the reported identity, inventory, or copy failure; never adopt an incomplete intake.".to_owned(),
+            detail: error.to_string().chars().take(512).collect(),
+        });
+    } else if let Some(error) = error.downcast_ref::<RecipeInspectionFailed>() {
+        emit_error(&ErrorEnvelope {
+            code: "AIW_WSB_RECIPE_INSPECTION_REJECTED".to_owned(),
+            summary: "MSI preparation could not be inspected".to_owned(),
+            stage: "wsbRecipeInspection".to_owned(),
+            run_id: None,
+            retryable: false,
+            remediation: "Inspect before planning import. Preserve the workspace and resolve the reported identity, readiness, or preparation mismatch; use retained reports for completed runs.".to_owned(),
+            detail: error.0.to_string().chars().take(512).collect(),
         });
     } else if let Some(error) = error.downcast_ref::<RunPreparationFailed>() {
         emit_error(&preparation_error_envelope(error));
@@ -1749,10 +3083,40 @@ fn emit_anyhow_error(error: &anyhow::Error) {
             remediation: "Preserve the source, resolve the reported type, path, link, bounds, or drift condition, and retry without executing it.".to_owned(),
             detail: error.source.to_string().chars().take(512).collect(),
         });
+    } else if let Some(error) = error.downcast_ref::<aiw_provider_wsb::BambuExportCompileError>() {
+        emit_error(&ErrorEnvelope {
+            code: "AIW_BAMBU_EXPORT_SCENARIO_REJECTED".to_owned(),
+            summary: "project scenario is outside the approved Bambu export profile".to_owned(),
+            stage: "scenarioCompilation".to_owned(),
+            run_id: None,
+            retryable: false,
+            remediation: "Use the reviewed Bambu export example and fixed installer/fixture bindings; execution requires separate preparation and approval.".to_owned(),
+            detail: error.to_string().chars().take(512).collect(),
+        });
+    } else if let Some(error) = error.downcast_ref::<BambuScenarioCompileError>() {
+        emit_error(&ErrorEnvelope {
+            code: "AIW_BAMBU_SCENARIO_REJECTED".to_owned(),
+            summary: "project scenario is outside the experimental Bambu profile".to_owned(),
+            stage: "scenarioCompilation".to_owned(),
+            run_id: None,
+            retryable: false,
+            remediation: "Use the reviewed Bambu example and fixed profile; compilation does not enable execution.".to_owned(),
+            detail: error.to_string().chars().take(512).collect(),
+        });
+    } else if let Some(error) = error.downcast_ref::<ScenarioCompileError>() {
+        emit_error(&ErrorEnvelope {
+            code: "AIW_MSI_SCENARIO_REJECTED".to_owned(),
+            summary: "project scenario is outside the supported MSI profile".to_owned(),
+            stage: "scenarioCompilation".to_owned(),
+            run_id: None,
+            retryable: false,
+            remediation: "Review the typed MSI profile and correct unsupported project fields or steps before compiling again.".to_owned(),
+            detail: error.to_string().chars().take(512).collect(),
+        });
     } else if let Some(error) = error.downcast_ref::<RunnerError>() {
         emit_error(&ErrorEnvelope {
             code: "AIW_WSB_RUNNER_FAILED".to_owned(),
-            summary: "Windows Sandbox golden-probe run was not completed".to_owned(),
+            summary: "Windows Sandbox run was not completed".to_owned(),
             stage: "wsbRunner".to_owned(),
             run_id: None,
             retryable: false,
@@ -1773,6 +3137,37 @@ fn emit_error(envelope: &impl Serialize) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn package_import_requires_an_independent_manifest_hash() {
+        assert!(
+            super::Cli::try_parse_from([
+                "aiw",
+                "package",
+                "import",
+                "--bundle",
+                "bundle",
+                "--intake-parent",
+                "intakes",
+                "--intake-id",
+                "replay"
+            ])
+            .is_err()
+        );
+        assert!(matches!(
+            super::Cli::try_parse_from([
+                "aiw",
+                "package",
+                "verify",
+                "--bundle",
+                "bundle",
+                "--manifest-sha256",
+                &"a".repeat(64)
+            ])
+            .unwrap()
+            .command,
+            super::Command::Package(_)
+        ));
+    }
     use std::{
         fs,
         path::PathBuf,
@@ -1813,6 +3208,114 @@ mod tests {
         assert_eq!(loaded.source_schema_version, PROJECT_SCHEMA_VERSION);
         assert!(validate_project_for_planning(&loaded.project).is_empty());
         assert!(!project_requires_migration_review(&loaded.project));
+    }
+
+    #[test]
+    fn mixed_and_legacy_report_schema_names_are_distinct() {
+        for (kind, expected) in [
+            (SchemaKind::WsbReportSetInput, "wsb-report-set-input"),
+            (SchemaKind::WsbReportSet, "wsb-report-set"),
+            (SchemaKind::WsbMsiReportSetInput, "wsb-msi-report-set-input"),
+            (SchemaKind::WsbMsiReportSet, "wsb-msi-report-set"),
+            (SchemaKind::WsbSettingsComparison, "wsb-settings-comparison"),
+        ] {
+            assert_eq!(kind.to_possible_value().unwrap().get_name(), expected);
+        }
+    }
+
+    #[test]
+    fn bambu_export_example_uses_a_separate_fixed_command() {
+        let loaded = read_project(&example_path("bambu-studio-export.json")).unwrap();
+        let export = aiw_provider_wsb::compile_bambu_studio_export_scenario(
+            &loaded.project,
+            "local-file-export",
+        )
+        .unwrap();
+        assert_eq!(export.launch_arguments[0], "--export-3mf");
+        assert!(export.launch_arguments[1].ends_with("aiw-tetrahedron.3mf"));
+        assert!(
+            compile_notepad_plus_plus_msi_scenario(&loaded.project, "local-file-export").is_err()
+        );
+        assert_eq!(export.canonical_sha256().unwrap().len(), 64);
+    }
+
+    #[test]
+    fn bambu_compilation_is_explicitly_non_executable_and_separate_from_msi() {
+        let loaded = read_project(&example_path("bambu-studio-info.json")).unwrap();
+        let scenario =
+            compile_bambu_studio_info_scenario(&loaded.project, "local-file-info").unwrap();
+        assert!(
+            compile_notepad_plus_plus_msi_scenario(&loaded.project, "local-file-info").is_err()
+        );
+        let compilation = BambuScenarioCompilation {
+            schema_version: "aiw.dev/bambu-scenario-compilation/v0alpha1",
+            execution_supported: false,
+            project_revision_sha256: project_revision_hash(&loaded.project).unwrap(),
+            scenario_sha256: scenario.canonical_sha256().unwrap(),
+            scenario,
+        };
+        let wire = serde_json::to_value(compilation).unwrap();
+        assert_eq!(wire["executionSupported"], false);
+        assert_eq!(
+            wire["scenario"]["installArguments"],
+            serde_json::json!(["/S"])
+        );
+        assert_eq!(wire["scenario"]["launchArguments"][0], "--info");
+        assert!(wire.get("outcome").is_none());
+        let npp = read_project(&example_path("notepad-plus-plus-msi.aiw.yaml")).unwrap();
+        assert!(compile_bambu_studio_info_scenario(&npp.project, "install-launch-close").is_err());
+    }
+
+    #[test]
+    fn notepad_msi_example_compiles_without_reading_installer() {
+        let loaded = read_project(&example_path("notepad-plus-plus-msi.aiw.yaml")).unwrap();
+        let compiled =
+            compile_notepad_plus_plus_msi_scenario(&loaded.project, "install-launch-close")
+                .unwrap();
+        compiled.validate().unwrap();
+        assert_eq!(compiled.canonical_sha256().unwrap().len(), 64);
+        assert!(compile_notepad_plus_plus_msi_scenario(&loaded.project, "missing").is_err());
+
+        let mut changed_requirements = loaded.project.clone();
+        changed_requirements
+            .isolation_intent
+            .require_descendant_coverage = !changed_requirements
+            .isolation_intent
+            .require_descendant_coverage;
+        assert_ne!(
+            project_revision_hash(&loaded.project).unwrap(),
+            project_revision_hash(&changed_requirements).unwrap()
+        );
+        assert_eq!(
+            compiled.canonical_sha256().unwrap(),
+            compile_notepad_plus_plus_msi_scenario(&changed_requirements, "install-launch-close")
+                .unwrap()
+                .canonical_sha256()
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn report_set_input_validation_rejects_empty_and_oversized_manifests() {
+        use aiw_runner::WsbMsiReportSetEntry;
+
+        let empty = WsbMsiReportSetInput {
+            schema_version: "aiw.dev/wsb-msi-report-set-input/v0alpha1".to_owned(),
+            entries: vec![],
+        };
+        assert!(empty.validate().is_err());
+        let entry = WsbMsiReportSetEntry {
+            id: "one".to_owned(),
+            workspace_root: PathBuf::from(r"C:\AIW\retained\one"),
+            run_id: "run-one".to_owned(),
+            project_path: PathBuf::from(r"C:\AIW\projects\one.json"),
+            guest_agent_sha256: "a".repeat(64),
+        };
+        let oversized = WsbMsiReportSetInput {
+            schema_version: "aiw.dev/wsb-msi-report-set-input/v0alpha1".to_owned(),
+            entries: vec![entry; 33],
+        };
+        assert!(oversized.validate().is_err());
     }
 
     #[test]
