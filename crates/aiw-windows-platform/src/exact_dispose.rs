@@ -2890,7 +2890,7 @@ mod tests {
     use std::sync::{Mutex, MutexGuard};
 
     use super::*;
-    use crate::HeldRunWorkspace;
+    use crate::{HeldRunWorkspace, WorkspaceAclPolicy};
 
     static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(1);
     static CURRENT_DIRECTORY_LOCK: Mutex<()> = Mutex::new(());
@@ -2949,25 +2949,71 @@ mod tests {
             let workspace = HeldRunWorkspace::create(&parent, &leaf).unwrap();
             let root = workspace.root_path().to_owned();
             fs::write(&sibling, b"unrelated").unwrap();
-            write_file(&root.join("plan.json"), b"prepared-plan");
-            write_file(&root.join("wsb-plan.json"), b"wsb-plan");
-            write_file(&root.join("preparation.json"), b"preparation");
-            write_file(&root.join("tools").join("aiw-guest-agent.exe"), b"agent");
-            let run = root.join("runs").join(RUN_ID);
-            fs::create_dir_all(run.join("journal-heads")).unwrap();
-            fs::create_dir_all(root.join("runs").join(".locks")).unwrap();
-            write_file(&root.join("runs").join(".locks").join("run-one.lock"), b"");
-            write_file(&run.join("plan.json"), b"authoritative-plan");
-            write_file(&run.join("wsb-planning-import.json"), b"planning-import");
-            write_file(&run.join("events.jsonl"), b"events\n");
-            write_file(&run.join("wsb-revocation.json"), b"revocation");
+            // Explicitly bind TokenUser ownership, including on elevated runners
+            // whose default TokenOwner is the Administrators group.
+            for (leaf, bytes) in [
+                ("plan.json", b"prepared-plan".as_slice()),
+                ("wsb-plan.json", b"wsb-plan".as_slice()),
+                ("preparation.json", b"preparation".as_slice()),
+            ] {
+                write_created(workspace.create_root_file_new(leaf).unwrap(), bytes);
+            }
+            write_created(
+                workspace
+                    .create_tools_file_new("aiw-guest-agent.exe")
+                    .unwrap(),
+                b"agent",
+            );
+            drop(
+                workspace
+                    .create_root_directory_new_with_policy("runs", WorkspaceAclPolicy::Inherited)
+                    .unwrap(),
+            );
+            let runs = workspace
+                .reopen_root_directory("runs", WorkspaceAclPolicy::Inherited)
+                .unwrap();
+            drop(
+                runs.create_directory_new_with_policy(".locks", WorkspaceAclPolicy::Inherited)
+                    .unwrap(),
+            );
+            let locks = runs
+                .reopen_directory(".locks", WorkspaceAclPolicy::Inherited)
+                .unwrap();
+            write_created(locks.create_file_new("run-one.lock").unwrap(), b"");
+            drop(
+                runs.create_directory_new_with_policy(RUN_ID, WorkspaceAclPolicy::Inherited)
+                    .unwrap(),
+            );
+            let run = runs
+                .reopen_directory(RUN_ID, WorkspaceAclPolicy::Inherited)
+                .unwrap();
+            for (leaf, bytes) in [
+                ("plan.json", b"authoritative-plan".as_slice()),
+                ("wsb-planning-import.json", b"planning-import".as_slice()),
+                ("events.jsonl", b"events\n".as_slice()),
+                ("wsb-revocation.json", b"revocation".as_slice()),
+            ] {
+                write_created(run.create_file_new(leaf).unwrap(), bytes);
+            }
+            drop(
+                run.create_directory_new_with_policy(
+                    "journal-heads",
+                    WorkspaceAclPolicy::Inherited,
+                )
+                .unwrap(),
+            );
+            let heads = run
+                .reopen_directory("journal-heads", WorkspaceAclPolicy::Inherited)
+                .unwrap();
             for sequence in 1..=3 {
-                write_file(
-                    &run.join("journal-heads")
-                        .join(format!("{sequence:020}.json")),
+                write_created(
+                    heads
+                        .create_file_new(&format!("{sequence:020}.json"))
+                        .unwrap(),
                     format!("head-{sequence}").as_bytes(),
                 );
             }
+            drop((heads, run, locks, runs));
             let evidence = workspace.evidence().clone();
             drop(workspace);
             for key in ACQUIRE_ORDER.into_iter().skip(1) {
@@ -3022,6 +3068,11 @@ mod tests {
         fn drop(&mut self) {
             self.cleanup();
         }
+    }
+
+    fn write_created(mut file: crate::CreatedWorkspaceFile, bytes: &[u8]) {
+        file.as_file_mut().write_all(bytes).unwrap();
+        file.as_file_mut().sync_all().unwrap();
     }
 
     fn write_file(path: &Path, bytes: &[u8]) {

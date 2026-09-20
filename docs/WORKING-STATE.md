@@ -24,6 +24,8 @@ PR #63 integrates the accumulated branch. Local workspace tests, clippy, MSRV, f
 
 Benchmark 3 remains incomplete: evidence-attached reusable launch authorization and deployment-environment validation are still open. The measured control covers only fixed guest standard-user file ACL access, not host containment or descendants. Preserve recorded failures and exact recovery; do not repeat a successful installer trial solely for report-only changes.
 
+Hosted run 35485941390 passed the runner/export tests, then exposed token-default ownership in the native disposal fixture and an unelevated-only assertion on an elevated runner. Fixed descendants now use held workspace creation with explicit token-user ownership and the original inherited ACL policy. The ordinary mutex test accepts the current process environment; the separate explicit unelevated test retains its elevation assertion. Final native validation passed 156 tests (10 environment/helper skips), and the explicit unelevated check passed separately. Clippy, MSRV, format, and governance passed; logs are at `%LOCALAPPDATA%\Temp\aiw-local-checks-71c0caf7-b0a5-4eb7-bcca-ad987d5d5633`. Independent review found no issue. These fixture changes do not alter the successful guest trial or relax production ACL verification.
+
 ## Read only what the slice needs
 
 - [Execution control and retained proof](CONTROL-FIXTURE.md): fixed fixture, driver, normalizer and negative tests.

@@ -928,6 +928,15 @@ mod tests {
     }
 
     #[test]
+    fn current_process_creates_and_acquires_global_mutex() {
+        let key = key("global-current-process");
+        assert!(key.name.starts_with("Global\\"));
+        let lease = try_acquire_run_coordination(&key, RunCoordinationMode::Normal).unwrap();
+        assert!(!lease.was_abandoned());
+    }
+
+    #[test]
+    #[ignore = "requires an unelevated Windows process; run explicitly with --ignored"]
     fn unelevated_process_creates_and_acquires_global_mutex() {
         let mut token = HANDLE::default();
         unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) }.unwrap();

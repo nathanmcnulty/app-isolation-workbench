@@ -23,6 +23,14 @@ Each invocation writes a fresh `%TEMP%\aiw-local-checks-<uuid>` directory contai
 
 The helper deliberately does not perform live installation, start Sandbox, manage worktrees, commit, push, or trigger CI. Existing `scripts/verify.ps1` remains the full repository verification entry point, and meaningful live/retained-fixture tests remain necessary where the change requires them.
 
+The ordinary Windows suite verifies global mutex acquisition with the current process token. Hosted Windows runners can be elevated, so they cannot prove unelevated acquisition. Run the separate environment-specific check from an unelevated PowerShell session:
+
+```powershell
+cargo test -p aiw-windows-platform unelevated_process_creates_and_acquires_global_mutex --locked --offline -- --ignored
+```
+
+That check asserts the process is unelevated before acquiring the mutex; an elevated invocation fails rather than claiming unelevated coverage. Disposal fixtures explicitly assign the token user as owner and retain the production protected/inherited ACL contract, independent of the runner's default token owner.
+
 ## Reduce repeated reasoning
 
 - Update the short handoff at a milestone, with links to detailed evidence. Avoid rereading the entire roadmap and historical transcripts on every continuation.
