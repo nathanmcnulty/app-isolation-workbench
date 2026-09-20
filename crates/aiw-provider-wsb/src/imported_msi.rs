@@ -10,6 +10,8 @@ use crate::CompiledMsiScenario;
 
 pub const IMPORTED_MSI_GUEST_REQUEST_SCHEMA_VERSION: &str =
     "aiw.dev/windows-sandbox-imported-msi-guest-request/v0alpha1";
+pub const IMPORTED_MSI_OBSERVATION_REQUEST_SCHEMA_VERSION: &str =
+    "aiw.dev/windows-sandbox-imported-msi-guest-request/v0alpha2";
 pub const IMPORTED_MSI_SCENARIO_RESULT_SCHEMA_VERSION: &str =
     "aiw.dev/windows-sandbox-imported-msi-scenario-result/v0alpha1";
 pub const IMPORTED_MSI_DOCUMENT_SCENARIO_RESULT_SCHEMA_VERSION: &str =
@@ -41,6 +43,8 @@ pub struct ImportedMsiGuestRequest {
     pub scenario_result_path: String,
     pub evidence_log_path: String,
     pub receipt_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required_observations: Option<crate::MsiRequiredObservations>,
 }
 
 impl ImportedMsiGuestRequest {
@@ -75,11 +79,29 @@ impl ImportedMsiGuestRequest {
             scenario_result_path: SCENARIO_RESULT_PATH.to_owned(),
             evidence_log_path: EVIDENCE_LOG_PATH.to_owned(),
             receipt_path: RECEIPT_PATH.to_owned(),
+            required_observations: None,
         };
         value.validate_unbound()?;
         value.request_sha256 = value.recompute_request_sha256()?;
         value.validate()?;
         Ok(value)
+    }
+
+    pub fn with_required_observations(
+        mut self,
+        required: Option<crate::MsiRequiredObservations>,
+    ) -> Result<Self, ImportedMsiRequestError> {
+        self.validate()?;
+        self.required_observations = required;
+        self.schema_version = if required.is_some() {
+            IMPORTED_MSI_OBSERVATION_REQUEST_SCHEMA_VERSION
+        } else {
+            IMPORTED_MSI_GUEST_REQUEST_SCHEMA_VERSION
+        }
+        .into();
+        self.request_sha256 = self.recompute_request_sha256()?;
+        self.validate()?;
+        Ok(self)
     }
 
     pub fn validate(&self) -> Result<(), ImportedMsiRequestError> {
@@ -106,7 +128,15 @@ impl ImportedMsiGuestRequest {
     }
 
     fn validate_unbound(&self) -> Result<(), ImportedMsiRequestError> {
-        if self.schema_version != IMPORTED_MSI_GUEST_REQUEST_SCHEMA_VERSION
+        let expected_schema = if let Some(required) = self.required_observations {
+            required
+                .validate_for(&self.scenario)
+                .map_err(|_| ImportedMsiRequestError::InvalidRequest)?;
+            IMPORTED_MSI_OBSERVATION_REQUEST_SCHEMA_VERSION
+        } else {
+            IMPORTED_MSI_GUEST_REQUEST_SCHEMA_VERSION
+        };
+        if self.schema_version != expected_schema
             || !valid_id(&self.run_id)
             || !canonical_sandbox_id(&self.sandbox_id)
             || !lower_hex_sha256(&self.config_sha256)

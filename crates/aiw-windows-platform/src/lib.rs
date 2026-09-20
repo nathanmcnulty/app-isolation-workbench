@@ -15,6 +15,7 @@ pub use guest_msi::{
     GuestMsiFilesystemObservation, GuestMsiProductRegistrationObservation,
     GuestMsiRegistryObservation, GuestMsiRetainedSnapshots, GuestMsiStage, GuestMsiStageStatus,
     execute_fixed_notepad_plus_plus_msi, execute_fixed_notepad_plus_plus_msi_attempt,
+    execute_fixed_notepad_plus_plus_msi_attempt_with_observations,
 };
 
 #[cfg(windows)]

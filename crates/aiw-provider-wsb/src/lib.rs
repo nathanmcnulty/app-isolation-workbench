@@ -24,6 +24,11 @@ mod registry_observations;
 mod runtime_context;
 mod scenario;
 mod stage_progress;
+mod standard_user_acl;
+pub use standard_user_acl::{
+    MsiRequiredObservations, STANDARD_USER_ACL_CONTROL_BYTES, STANDARD_USER_ACL_POSITIVE_PATH,
+    STANDARD_USER_ACL_PROTECTED_PATH, StandardUserAclObservation,
+};
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -63,9 +68,10 @@ pub use failure_snapshots::{
 };
 pub use imported_msi::{
     IMPORTED_MSI_DOCUMENT_SCENARIO_RESULT_SCHEMA_VERSION,
-    IMPORTED_MSI_GUEST_REQUEST_SCHEMA_VERSION, IMPORTED_MSI_SCENARIO_RESULT_SCHEMA_VERSION,
-    ImportedMsiDocumentTransferResult, ImportedMsiGuestRequest, ImportedMsiRequestError,
-    ImportedMsiScenarioResult, ImportedMsiScenarioStatus,
+    IMPORTED_MSI_GUEST_REQUEST_SCHEMA_VERSION, IMPORTED_MSI_OBSERVATION_REQUEST_SCHEMA_VERSION,
+    IMPORTED_MSI_SCENARIO_RESULT_SCHEMA_VERSION, ImportedMsiDocumentTransferResult,
+    ImportedMsiGuestRequest, ImportedMsiRequestError, ImportedMsiScenarioResult,
+    ImportedMsiScenarioStatus,
 };
 pub use product_registration::{
     IMPORTED_MSI_PRODUCT_REGISTRATION_EVENT, IMPORTED_MSI_PRODUCT_REGISTRATION_SCHEMA_VERSION,
@@ -81,10 +87,11 @@ pub use registry_observations::{
     verify_msi_registry_evidence,
 };
 pub use runtime_context::{
-    IMPORTED_MSI_ENVIRONMENT_CONTEXT_SCHEMA_VERSION, IMPORTED_MSI_RUNTIME_CONTEXT_EVENT,
-    IMPORTED_MSI_RUNTIME_CONTEXT_SCHEMA, IMPORTED_MSI_RUNTIME_CONTEXT_SCHEMA_VERSION,
-    ImportedMsiRuntimeContext, STANDARD_USER_ACCOUNT_NAME, STANDARD_USER_PROFILE_PATH,
-    StandardUserRuntimeContext, verify_imported_msi_runtime_context, verify_msi_runtime_context,
+    IMPORTED_MSI_ACL_CONTEXT_SCHEMA_VERSION, IMPORTED_MSI_ENVIRONMENT_CONTEXT_SCHEMA_VERSION,
+    IMPORTED_MSI_RUNTIME_CONTEXT_EVENT, IMPORTED_MSI_RUNTIME_CONTEXT_SCHEMA,
+    IMPORTED_MSI_RUNTIME_CONTEXT_SCHEMA_VERSION, ImportedMsiRuntimeContext,
+    STANDARD_USER_ACCOUNT_NAME, STANDARD_USER_PROFILE_PATH, StandardUserRuntimeContext,
+    verify_imported_msi_runtime_context, verify_msi_runtime_context,
 };
 pub use scenario::{
     COMPILED_MSI_INTERACTIVE_DOCUMENT_SCENARIO_SCHEMA_VERSION,

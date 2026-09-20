@@ -284,7 +284,7 @@ impl ImportedMsiRegistryEvidence {
                     .into(),
             );
         }
-        context.validate_version()?;
+        context.validate_observation_coverage(request)?;
         context.context.validate()?;
         self.before_install.validate()?;
         self.after_install.validate()?;
@@ -560,6 +560,7 @@ mod tests {
         result: &ImportedMsiScenarioResult,
     ) -> ImportedMsiRuntimeContext {
         ImportedMsiRuntimeContext {
+            standard_user_acl: None,
             guest_os_version: None,
             schema_version: crate::IMPORTED_MSI_RUNTIME_CONTEXT_SCHEMA_VERSION.into(),
             run_id: request.run_id.clone(),

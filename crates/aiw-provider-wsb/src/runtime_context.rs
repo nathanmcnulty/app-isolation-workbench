@@ -13,6 +13,8 @@ pub const IMPORTED_MSI_RUNTIME_CONTEXT_SCHEMA: &str = IMPORTED_MSI_RUNTIME_CONTE
 pub const IMPORTED_MSI_RUNTIME_CONTEXT_EVENT: &str = "importedMsiRuntimeContext";
 pub const IMPORTED_MSI_ENVIRONMENT_CONTEXT_SCHEMA_VERSION: &str =
     "aiw.dev/windows-sandbox-imported-msi-runtime-context/v0alpha2";
+pub const IMPORTED_MSI_ACL_CONTEXT_SCHEMA_VERSION: &str =
+    "aiw.dev/windows-sandbox-imported-msi-runtime-context/v0alpha3";
 pub const STANDARD_USER_ACCOUNT_NAME: &str = "AiwStandardUser";
 pub const STANDARD_USER_PROFILE_PATH: &str = r"C:\Users\AiwStandardUser";
 
@@ -80,15 +82,42 @@ pub struct ImportedMsiRuntimeContext {
     pub context: StandardUserRuntimeContext,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub guest_os_version: Option<aiw_probe::WindowsVersionObservation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub standard_user_acl: Option<crate::StandardUserAclObservation>,
 }
 
 impl ImportedMsiRuntimeContext {
     pub(crate) fn validate_version(&self) -> Result<(), String> {
-        match (&self.guest_os_version, self.schema_version.as_str()) {
-            (None, IMPORTED_MSI_RUNTIME_CONTEXT_SCHEMA_VERSION) => Ok(()),
-            (Some(os), IMPORTED_MSI_ENVIRONMENT_CONTEXT_SCHEMA_VERSION) => os.validate(),
-            _ => Err("runtime context version does not match OS coverage".into()),
+        match (
+            &self.guest_os_version,
+            &self.standard_user_acl,
+            self.schema_version.as_str(),
+        ) {
+            (None, None, IMPORTED_MSI_RUNTIME_CONTEXT_SCHEMA_VERSION) => Ok(()),
+            (Some(os), None, IMPORTED_MSI_ENVIRONMENT_CONTEXT_SCHEMA_VERSION) => os.validate(),
+            (Some(os), Some(acl), IMPORTED_MSI_ACL_CONTEXT_SCHEMA_VERSION) => {
+                os.validate()?;
+                acl.validate()?;
+                if acl.process_id != self.process_id || acl.user_sid != self.context.user_sid {
+                    return Err(
+                        "ACL control does not match the observed application identity".into(),
+                    );
+                }
+                Ok(())
+            }
+            _ => Err("runtime context version does not match required observation coverage".into()),
         }
+    }
+
+    pub(crate) fn validate_observation_coverage(
+        &self,
+        request: &ImportedMsiGuestRequest,
+    ) -> Result<(), String> {
+        self.validate_version()?;
+        if request.required_observations.is_some() != self.standard_user_acl.is_some() {
+            return Err("runtime ACL coverage does not match the bound request requirement".into());
+        }
+        Ok(())
     }
     pub fn new(
         request: &ImportedMsiGuestRequest,
@@ -96,15 +125,34 @@ impl ImportedMsiRuntimeContext {
         application_token: &ImportedMsiApplicationToken,
         context: StandardUserRuntimeContext,
     ) -> Result<Self, String> {
+        Self::new_observed(request, result, application_token, context, None, None)
+    }
+
+    pub fn new_observed(
+        request: &ImportedMsiGuestRequest,
+        result: &ImportedMsiScenarioResult,
+        application_token: &ImportedMsiApplicationToken,
+        context: StandardUserRuntimeContext,
+        guest_os_version: Option<aiw_probe::WindowsVersionObservation>,
+        standard_user_acl: Option<crate::StandardUserAclObservation>,
+    ) -> Result<Self, String> {
         let value = Self {
-            schema_version: IMPORTED_MSI_RUNTIME_CONTEXT_SCHEMA_VERSION.to_owned(),
+            schema_version: if standard_user_acl.is_some() {
+                IMPORTED_MSI_ACL_CONTEXT_SCHEMA_VERSION
+            } else if guest_os_version.is_some() {
+                IMPORTED_MSI_ENVIRONMENT_CONTEXT_SCHEMA_VERSION
+            } else {
+                IMPORTED_MSI_RUNTIME_CONTEXT_SCHEMA_VERSION
+            }
+            .into(),
             run_id: request.run_id.clone(),
             sandbox_id: request.sandbox_id.clone(),
             request_sha256: request.request_sha256.clone(),
             scenario_sha256: request.scenario_sha256.clone(),
             process_id: result.launch_process_id,
             context,
-            guest_os_version: None,
+            guest_os_version,
+            standard_user_acl,
         };
         value.validate_for(request, result, application_token)?;
         Ok(value)
@@ -120,7 +168,7 @@ impl ImportedMsiRuntimeContext {
             .validate_for_request(request)
             .map_err(|e| e.to_string())?;
         application_token.validate_for(request, result)?;
-        self.validate_version()?;
+        self.validate_observation_coverage(request)?;
         let token = &application_token.token;
         if !request.scenario.requires_standard_user()
             || self.run_id != request.run_id
@@ -182,7 +230,7 @@ pub fn verify_msi_runtime_context(
     verify_imported_msi_runtime_context(bytes, expected_root, request, result, application_token)
 }
 
-fn valid_account_sid(value: &str) -> bool {
+pub(crate) fn valid_account_sid(value: &str) -> bool {
     let Some(account) = value.strip_prefix("S-1-5-21-") else {
         return false;
     };
@@ -303,6 +351,103 @@ mod tests {
             bytes.push(b'\n');
         }
         (bytes, root)
+    }
+
+    #[test]
+    fn required_acl_is_hash_bound_and_rejects_missing_downgraded_or_false_controls() {
+        let mut legacy = request();
+        assert!(
+            legacy
+                .clone()
+                .with_required_observations(Some(crate::MsiRequiredObservations::StandardUserAclV1))
+                .is_err()
+        );
+        legacy.scenario.schema_version = crate::COMPILED_MSI_SCENARIO_SCHEMA_VERSION.into();
+        legacy.scenario.profile = crate::NOTEPAD_PLUS_PLUS_MSI_PROFILE.into();
+        legacy.scenario_sha256 = legacy.scenario.canonical_sha256().unwrap();
+        legacy.request_sha256 = legacy.recompute_request_sha256().unwrap();
+        let request = legacy
+            .clone()
+            .with_required_observations(Some(crate::MsiRequiredObservations::StandardUserAclV1))
+            .unwrap();
+        assert_ne!(legacy.request_sha256, request.request_sha256);
+        let mut removed = request.clone();
+        removed.required_observations = None;
+        assert!(removed.validate().is_err());
+        removed.schema_version = crate::IMPORTED_MSI_GUEST_REQUEST_SCHEMA_VERSION.into();
+        assert!(removed.validate().is_err());
+        let result = ImportedMsiScenarioResult::succeeded(&request, 0, 42, 0).unwrap();
+        let token = ImportedMsiApplicationToken::new(&request, &result, token(42)).unwrap();
+        assert!(ImportedMsiRuntimeContext::new(&request, &result, &token, context()).is_err());
+        let hash = hex::encode(Sha256::digest(crate::STANDARD_USER_ACL_CONTROL_BYTES));
+        let control = crate::StandardUserAclObservation {
+            process_id: 42,
+            user_sid: context().user_sid,
+            protected_path: crate::STANDARD_USER_ACL_PROTECTED_PATH.into(),
+            protected_owner_sid: "S-1-5-21-1-2-3-500".into(),
+            protected_volume_serial: 1,
+            protected_file_id: 1,
+            protected_sha256: hash.clone(),
+            protected_size_bytes: crate::STANDARD_USER_ACL_CONTROL_BYTES.len() as u64,
+            protected_acl_verified: true,
+            denied_read_error: 5,
+            positive_path: crate::STANDARD_USER_ACL_POSITIVE_PATH.into(),
+            positive_volume_serial: 1,
+            positive_file_id: 2,
+            positive_sha256: hash,
+            positive_size_bytes: crate::STANDARD_USER_ACL_CONTROL_BYTES.len() as u64,
+        };
+        let event = ImportedMsiRuntimeContext::new_observed(
+            &request,
+            &result,
+            &token,
+            context(),
+            Some(aiw_probe::WindowsVersionObservation {
+                major: 10,
+                minor: 0,
+                build: 28000,
+                revision: 1,
+                observer_architecture: "x86_64".into(),
+            }),
+            Some(control),
+        )
+        .unwrap();
+        let payload = serde_json::to_value(&event).unwrap();
+        let (bytes, root) = log_bytes(vec![payload.clone()]);
+        assert_eq!(
+            verify_msi_runtime_context(&bytes, &root, &request, &result, Some(&token)).unwrap(),
+            Some(event.clone())
+        );
+        let mut downgraded = event.clone();
+        downgraded.standard_user_acl = None;
+        downgraded.schema_version = IMPORTED_MSI_ENVIRONMENT_CONTEXT_SCHEMA_VERSION.into();
+        assert!(downgraded.validate_for(&request, &result, &token).is_err());
+        for (field, changed) in [
+            ("processId", serde_json::json!(43)),
+            ("userSid", serde_json::json!("S-1-5-21-1-2-3-5")),
+            ("protectedOwnerSid", serde_json::json!(context().user_sid)),
+            ("protectedAclVerified", serde_json::json!(false)),
+            ("protectedPath", serde_json::json!(r"C:\other.txt")),
+            ("positiveSha256", serde_json::json!("0".repeat(64))),
+            ("positiveFileId", serde_json::json!(1)),
+            ("positiveSizeBytes", serde_json::json!(0)),
+            ("deniedReadError", serde_json::json!(0)),
+            ("deniedReadError", serde_json::json!(2)),
+            ("deniedReadError", serde_json::json!(3)),
+            ("deniedReadError", serde_json::json!(32)),
+        ] {
+            let mut altered = payload.clone();
+            altered["standardUserAcl"][field] = changed;
+            let (bytes, root) = log_bytes(vec![altered]);
+            assert!(
+                verify_msi_runtime_context(&bytes, &root, &request, &result, Some(&token)).is_err(),
+                "accepted {field}"
+            );
+        }
+        let (bytes, root) = log_bytes(vec![]);
+        assert!(
+            verify_msi_runtime_context(&bytes, &root, &request, &result, Some(&token)).is_err()
+        );
     }
 
     #[test]

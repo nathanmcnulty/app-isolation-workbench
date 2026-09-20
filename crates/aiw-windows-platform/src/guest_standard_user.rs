@@ -281,18 +281,7 @@ impl StandardUserSession {
         &self,
         operation: impl FnOnce() -> Result<T, GuestMsiExecutionError>,
     ) -> Result<T, GuestMsiExecutionError> {
-        // SAFETY: this is the validated primary token owned by the session.
-        if unsafe { ImpersonateLoggedOnUser(raw_handle(&self.token)) } == 0 {
-            return Err(last_error("ImpersonateLoggedOnUser"));
-        }
-        let guard = ImpersonationGuard { active: true };
-        let result = operation();
-        if guard.revert().is_err() {
-            // A normal error receipt would be unsafe while this thread may
-            // still impersonate the target user.
-            std::process::abort();
-        }
-        result
+        impersonate_primary_token(&self.token, operation)
     }
 
     pub(crate) fn validate_suspended_child(
@@ -459,6 +448,24 @@ impl Drop for ScopedPrivileges {
             }
         }
     }
+}
+
+/// Callers retain a validated primary token with query/duplicate access.
+/// Reversion is mandatory on success, error, and unwind.
+pub(crate) fn impersonate_primary_token<T>(
+    token: &OwnedHandle,
+    operation: impl FnOnce() -> Result<T, GuestMsiExecutionError>,
+) -> Result<T, GuestMsiExecutionError> {
+    // SAFETY: the caller retains the primary token throughout this scope.
+    if unsafe { ImpersonateLoggedOnUser(raw_handle(token)) } == 0 {
+        return Err(last_error("ImpersonateLoggedOnUser"));
+    }
+    let guard = ImpersonationGuard { active: true };
+    let result = operation();
+    if guard.revert().is_err() {
+        std::process::abort();
+    }
+    result
 }
 
 struct ImpersonationGuard {

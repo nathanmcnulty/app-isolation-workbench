@@ -85,4 +85,5 @@ Save-Json $setPath ([ordered]@{schemaVersion='aiw.dev/wsb-msi-report-set-input/v
 $null = Invoke-Aiw 'report-set' @('run', 'report-wsb-msi-set', '--input', $setPath)
 $comparison = Invoke-Aiw 'comparison' @('run', 'report-wsb-settings-comparison', '--input', $setPath)
 if ($comparison.boundaryCoverage.operatingSystem -ne 'matchedRecordedVersion') { throw 'Fresh trials require matching recorded host and guest OS versions; inspect comparison coverage' }
+if ($comparison.boundaryCoverage.canaries -ne 'measuredStandardUserFileAclOnly') { throw 'Fresh trials require the bound application-token file ACL control in every worker' }
 [ordered]@{evidenceRoot=$evidenceRoot; trialsCompleted=3; comparison=(Join-Path $evidenceRoot 'comparison.json')} | ConvertTo-Json

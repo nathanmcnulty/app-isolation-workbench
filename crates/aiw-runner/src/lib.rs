@@ -63,6 +63,7 @@ mod session;
 
 pub use preparation::{
     PreparedWsbArtifacts, WSB_MSI_DOCUMENT_PREPARATION_RECEIPT_SCHEMA_VERSION,
+    WSB_MSI_OBSERVATION_PREPARATION_RECEIPT_SCHEMA_VERSION,
     WSB_MSI_PREPARATION_RECEIPT_SCHEMA_VERSION, WSB_PLANNING_IMPORT_RESULT_SCHEMA_VERSION,
     WSB_PREPARATION_RECEIPT_SCHEMA_VERSION, WsbBambuApplication, WsbMsiApplication, WsbMsiDocument,
     WsbPlanningImportDisposition, WsbPlanningImportReceipt, WsbPlanningImportResult,
@@ -1504,6 +1505,7 @@ fn prepare_execution(
                 msi.staged_payload.size_bytes,
                 &msi.import_receipt_sha256,
             )
+            .and_then(|request| request.with_required_observations(msi.required_observations))
             .map_err(|e| RunnerError::Preparation(e.to_string()))?,
         ))
     } else if let Some(bambu) = &request.bambu {
@@ -4605,6 +4607,7 @@ mod tests {
         let import_receipt_sha256 =
             hex::encode(Sha256::digest(serde_json::to_vec(&import_receipt).unwrap()));
         let msi = WsbMsiApplication {
+            required_observations: None,
             import_receipt,
             import_receipt_sha256,
             scenario_sha256: canonical_hash(&scenario).unwrap(),

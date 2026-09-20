@@ -61,6 +61,20 @@ After the exact 19-record published chain and physical absence are proven, the p
 - A canary passes only with a successful baseline control, explicit native denial for the isolated attempt, evidence references for both phases, and verified ordering. Timeout, not-found, missing evidence, and generic errors are indeterminate.
 - Any fallback, unsupported API, provider drift, incomplete trace, missing descendant, forged/mismatched receipt, unexpected session/file, or failed cleanup invalidates the isolation conclusion and yields `insufficientEvidence`.
 
+The fixed automated MSI profile additionally requires a guest file ACL control.
+Before installation the elevated agent exclusively creates an owner/SYSTEM-only
+ordinary file and verifies its readable fixed bytes and protected DACL. During
+the application exercise it impersonates the primary token from the held root
+process, proves create/write/read access to a separate fixed local-data file,
+and requires Win32 access denied when opening the protected file for read.
+Compatible sharing prevents the agent's retained handle from supplying a false
+denial. File identity, ownership/DACL, and bytes remain bound through process
+exit. Reversion failure aborts the agent. Approval, request, and runtime versions
+bind this requirement; missing observations cannot silently downgrade it.
+These guest-authored observations cover only the two fixed file operations.
+They do not satisfy outer containment, descendants, registry, network, or
+independent host canary requirements and cannot change `insufficientEvidence`.
+
 ### Packaging and signing
 
 - Use disposable checkpointed Hyper-V authoring workers with pinned tools and allowlisted export channels. Revert/destroy workers after every run and require repeatable captures.

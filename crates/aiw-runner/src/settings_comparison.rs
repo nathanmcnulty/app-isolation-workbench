@@ -19,7 +19,7 @@ use serde::Serialize;
 
 use crate::WsbMsiReportSetInput;
 
-pub const WSB_SETTINGS_COMPARISON_SCHEMA_VERSION: &str = "aiw.dev/wsb-settings-comparison/v0alpha3";
+pub const WSB_SETTINGS_COMPARISON_SCHEMA_VERSION: &str = "aiw.dev/wsb-settings-comparison/v0alpha4";
 
 /// A retained, fixed-profile settings-placement comparison.
 ///
@@ -60,6 +60,8 @@ pub struct WsbSettingsComparisonTrial {
     pub recorded_execution: crate::WsbMsiRecordedExecution,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub guest_os_version: Option<aiw_probe::WindowsVersionObservation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub standard_user_acl: Option<aiw_provider_wsb::StandardUserAclObservation>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -88,6 +90,7 @@ pub enum WsbSettingsComparisonCoverage {
     MatchedRecordedIdentity,
     MatchedRequestedConfiguration,
     MatchedRecordedVersion,
+    MeasuredStandardUserFileAclOnly,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -220,12 +223,14 @@ pub fn report_windows_sandbox_settings_comparison(
             host_mappings: WsbSettingsComparisonCoverage::Unmeasured,
             registry: WsbSettingsComparisonCoverage::Unmeasured,
             descendant_processes: WsbSettingsComparisonCoverage::Unmeasured,
-            canaries: WsbSettingsComparisonCoverage::Unmeasured,
+            canaries: if trials.iter().all(|trial| app_acl(trial).is_some()) {
+                WsbSettingsComparisonCoverage::MeasuredStandardUserFileAclOnly
+            } else { WsbSettingsComparisonCoverage::Unmeasured },
         },
         limitations: vec![
             "This report reuses three retained fixed workflow observations; it does not authorize execution, packaging, host mappings, or a retry.".into(),
             "Recorded provider identity and requested configuration match. Matching recorded OS versions, when present, do not prove complete environment equivalence or effective enforcement; historical absence remains unmeasured.".into(),
-            "Boundary coverage for effective isolation, network, host mappings, registry, descendant processes, and canaries is unmeasured.".into(),
+            "Only the fixed guest standard-user file ACL control can be measured here. Effective isolation, network, host mappings, registry access boundaries, and descendant-process canaries remain unmeasured.".into(),
             "The fixed document workflow is not a complete adaptation validation or a general application compatibility verdict.".into(),
         ],
     })
@@ -265,7 +270,16 @@ fn trial_report(trial: &VerifiedTrial) -> WsbSettingsComparisonTrial {
         settings_file: trial.settings_file.clone(),
         recorded_execution: trial.report.recorded_execution.clone(),
         guest_os_version: guest_os(trial).cloned(),
+        standard_user_acl: app_acl(trial).cloned(),
     }
+}
+
+fn app_acl(trial: &VerifiedTrial) -> Option<&aiw_provider_wsb::StandardUserAclObservation> {
+    trial
+        .report
+        .standard_user_context
+        .as_ref()
+        .and_then(|context| context.standard_user_acl.as_ref())
 }
 
 fn select_settings_file(
@@ -353,6 +367,19 @@ fn validate_trials(trials: &[VerifiedTrial; 3]) -> Result<(), String> {
     }
 
     let baseline = &trials[0];
+    for trial in trials {
+        if trial
+            .report
+            .recorded_execution
+            .required_observations
+            .is_some()
+            != app_acl(trial).is_some()
+        {
+            return Err(
+                "required guest file ACL coverage differs from retained runtime evidence".into(),
+            );
+        }
+    }
     if trials[1..]
         .iter()
         .any(|trial| guest_os(trial) != guest_os(baseline))
@@ -484,6 +511,7 @@ mod tests {
 
     fn execution_context() -> crate::WsbMsiRecordedExecution {
         crate::WsbMsiRecordedExecution {
+            required_observations: None,
             host_os_version: None,
             provider: aiw_probe::BinaryIdentity {
                 canonical_path: r"C:\Provider\wsb.exe".into(),
@@ -618,6 +646,20 @@ mod tests {
     }
 
     #[test]
+    fn rejects_required_acl_without_runtime_control() {
+        let mut trials = valid_trials();
+        for trial in &mut trials {
+            trial.report.recorded_execution.required_observations =
+                Some(aiw_provider_wsb::MsiRequiredObservations::StandardUserAclV1);
+        }
+        assert!(
+            validate_trials(&trials)
+                .unwrap_err()
+                .contains("ACL coverage")
+        );
+    }
+
+    #[test]
     fn rejects_policy_drift_and_reused_identity() {
         let mut policy_drift = valid_trials();
         policy_drift[1]
@@ -679,6 +721,7 @@ mod tests {
         for trial in &mut trials {
             trial.report.standard_user_context =
                 Some(aiw_provider_wsb::ImportedMsiRuntimeContext {
+                    standard_user_acl: None,
                     schema_version:
                         aiw_provider_wsb::IMPORTED_MSI_ENVIRONMENT_CONTEXT_SCHEMA_VERSION.into(),
                     run_id: trial.report.run_id.clone(),

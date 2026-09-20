@@ -87,6 +87,8 @@ pub struct WsbMsiAssessmentReport {
 #[serde(rename_all = "camelCase")]
 pub struct WsbMsiRecordedExecution {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub required_observations: Option<aiw_provider_wsb::MsiRequiredObservations>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub host_os_version: Option<aiw_probe::WindowsVersionObservation>,
     pub provider: aiw_probe::BinaryIdentity,
     pub provider_package: aiw_probe::WindowsPackageIdentity,
@@ -103,6 +105,11 @@ fn recorded_execution(
         .validate()
         .map_err(|e| RunnerError::Preparation(e.to_string()))?;
     Ok(WsbMsiRecordedExecution {
+        required_observations: artifacts
+            .receipt
+            .msi
+            .as_ref()
+            .and_then(|msi| msi.required_observations),
         host_os_version: artifacts.receipt.host_os_version.clone(),
         provider: artifacts.receipt.provider.clone(),
         provider_package: artifacts.receipt.provider_package.clone(),
@@ -804,6 +811,7 @@ pub(crate) fn report_windows_sandbox_msi_run_bound(
         msi.staged_payload.size_bytes,
         &msi.import_receipt_sha256,
     )
+    .and_then(|request| request.with_required_observations(msi.required_observations))
     .map_err(|e| RunnerError::Receipt(e.to_string()))?;
     if transaction.session_id != request.sandbox_id
         || transaction.config_sha256 != request.config_sha256
@@ -1043,7 +1051,7 @@ pub(crate) fn report_windows_sandbox_msi_run_bound(
     }
     Ok(WsbMsiRunReport::CompletedAssessment(Box::new(
         WsbMsiAssessmentReport {
-            schema_version: "aiw.dev/wsb-msi-assessment-report/v0alpha9".into(),
+            schema_version: "aiw.dev/wsb-msi-assessment-report/v0alpha10".into(),
             recorded_execution: recorded_execution(&artifacts)?,
             run_id: run_id.to_owned(),
             project_revision_sha256: artifacts.receipt.project_revision_sha256,

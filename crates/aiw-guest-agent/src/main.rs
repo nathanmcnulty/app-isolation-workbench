@@ -194,7 +194,10 @@ fn execute_imported_msi_request(request: &ImportedMsiGuestRequest) -> Result<()>
     installer.revalidate()?;
 
     let attempt =
-        aiw_windows_platform::execute_fixed_notepad_plus_plus_msi_attempt(&request.scenario);
+        aiw_windows_platform::execute_fixed_notepad_plus_plus_msi_attempt_with_observations(
+            &request.scenario,
+            request.required_observations,
+        );
     installer.revalidate()?;
     let progress = if request.scenario.requires_application_exercise() {
         Some(
@@ -330,16 +333,15 @@ fn execute_imported_msi_request(request: &ImportedMsiGuestRequest) -> Result<()>
         payload: serde_json::to_value(&token)?,
     })?;
     let runtime = if let Some(context) = observation.standard_user_context {
-        let mut runtime =
-            aiw_provider_wsb::ImportedMsiRuntimeContext::new(request, &result, &token, context)
-                .map_err(anyhow::Error::msg)?;
-        runtime.guest_os_version =
-            Some(aiw_windows_platform::observe_windows_version().map_err(anyhow::Error::msg)?);
-        runtime.schema_version =
-            aiw_provider_wsb::IMPORTED_MSI_ENVIRONMENT_CONTEXT_SCHEMA_VERSION.into();
-        runtime
-            .validate_for(request, &result, &token)
-            .map_err(anyhow::Error::msg)?;
+        let runtime = aiw_provider_wsb::ImportedMsiRuntimeContext::new_observed(
+            request,
+            &result,
+            &token,
+            context,
+            Some(aiw_windows_platform::observe_windows_version().map_err(anyhow::Error::msg)?),
+            observation.standard_user_acl,
+        )
+        .map_err(anyhow::Error::msg)?;
         evidence.append(EvidenceEvent {
             observed_utc: "guest-agent-time-not-trusted".to_owned(),
             kind: aiw_provider_wsb::IMPORTED_MSI_RUNTIME_CONTEXT_EVENT.to_owned(),
@@ -898,7 +900,10 @@ fn read_request(path: &Path) -> Result<GuestRequest> {
             .map(Box::new)
             .map(GuestRequest::Golden)
             .context("parse strict golden-probe request"),
-        Some(IMPORTED_MSI_GUEST_REQUEST_SCHEMA_VERSION) => serde_json::from_value(value)
+        Some(
+            IMPORTED_MSI_GUEST_REQUEST_SCHEMA_VERSION
+            | aiw_provider_wsb::IMPORTED_MSI_OBSERVATION_REQUEST_SCHEMA_VERSION,
+        ) => serde_json::from_value(value)
             .map(Box::new)
             .map(GuestRequest::ImportedMsi)
             .context("parse strict imported-MSI request"),
@@ -1167,6 +1172,31 @@ mod tests {
             "d".repeat(64),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn required_acl_request_dispatches_without_execution() {
+        use aiw_provider_wsb::*;
+        let root = test_root("required-acl-request");
+        let path = root.join("request.json");
+        let mut request = msi_request();
+        request.scenario.schema_version = COMPILED_MSI_SCENARIO_SCHEMA_VERSION.into();
+        request.scenario.profile = NOTEPAD_PLUS_PLUS_MSI_PROFILE.into();
+        request.scenario.document_exercise = Some(FixedDocumentExercise {
+            document_path: STANDARD_USER_DOCUMENT_EXERCISE_PATH.into(),
+            initial_sha256: hex::encode(Sha256::digest(DOCUMENT_INITIAL_TEXT.as_bytes())),
+            expected_sha256: hex::encode(Sha256::digest(DOCUMENT_EXPECTED_TEXT.as_bytes())),
+        });
+        request.scenario_sha256 = request.scenario.canonical_sha256().unwrap();
+        request.request_sha256 = request.request_sha256().unwrap();
+        let request = request
+            .with_required_observations(Some(MsiRequiredObservations::StandardUserAclV1))
+            .unwrap();
+        fs::write(&path, serde_json::to_vec(&request).unwrap()).unwrap();
+        assert!(
+            matches!(read_request(&path).unwrap(), GuestRequest::ImportedMsi(decoded) if *decoded == request)
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

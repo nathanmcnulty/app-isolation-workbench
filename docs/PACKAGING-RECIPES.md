@@ -149,6 +149,23 @@ or configuration drift and show that normalization preserves resource and mappin
 suffix differences while rejecting outside mappings. OS equivalence and actual
 boundary enforcement remain unmeasured.
 
+### Required guest file ACL observation
+
+Fresh automated preparations bind `standardUserAclV1` to approval and execution.
+Recipe inspection includes the requirement in its complete preparation and
+trust delta. The guest probes a fixed protected file and a writable local-data
+control using the launched application's token, retaining identities and exact
+bytes through application exit. Only access-denied error 5 counts as the
+negative result; a missing file or sharing violation fails. See
+[the report contract](ASSESSMENT-REPORT.md) for version and downgrade rules.
+
+Settings comparison v0alpha4 includes each verified `standardUserAcl` and reports
+`measuredStandardUserFileAclOnly` only when all three trials supply the bound
+control. Mixed requirements or missing required evidence are rejected. Historical
+runs without the requirement remain unmeasured. The fresh-trial driver requires
+this limited coverage alongside matched recorded OS versions. Broader boundary
+and deployment-environment validation remain open.
+
 ### Recorded OS versions and fresh replay, 2026-09-19
 
 The complete driver passed uninterrupted in three fresh workers:

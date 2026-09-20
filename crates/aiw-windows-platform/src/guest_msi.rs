@@ -8,7 +8,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{Read as _, Seek as _, SeekFrom};
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
-use std::os::windows::io::{AsHandle as _, FromRawHandle, OwnedHandle};
+use std::os::windows::io::{AsHandle as _, AsRawHandle as _, FromRawHandle, OwnedHandle};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -24,6 +24,7 @@ use windows::Win32::Foundation::{
     ERROR_SUCCESS, GetLastError, HANDLE, HWND, LPARAM, SetLastError, WAIT_FAILED, WAIT_OBJECT_0,
     WAIT_TIMEOUT, WPARAM,
 };
+use windows::Win32::Security::{TOKEN_DUPLICATE, TOKEN_QUERY};
 use windows::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
@@ -32,8 +33,8 @@ use windows::Win32::System::JobObjects::{
 };
 use windows::Win32::System::Threading::{
     CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, GetCurrentThreadId,
-    GetExitCodeProcess, GetExitCodeThread, PROCESS_INFORMATION, ResumeThread, STARTUPINFOW,
-    TerminateProcess, WaitForSingleObject,
+    GetExitCodeProcess, GetExitCodeThread, OpenProcessToken, PROCESS_INFORMATION, ResumeThread,
+    STARTUPINFOW, TerminateProcess, WaitForSingleObject,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumChildWindows, EnumWindows, GetClassNameW, GetWindowThreadProcessId, IsWindowVisible,
@@ -124,6 +125,7 @@ const SCINTILLA_CLASS: &[u16] = &[83, 99, 105, 110, 116, 105, 108, 108, 97];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GuestMsiExecutionObservation {
+    pub standard_user_acl: Option<aiw_provider_wsb::StandardUserAclObservation>,
     pub install_exit_code: i32,
     pub launch_process_id: u32,
     pub launch_exit_code: i32,
@@ -362,6 +364,22 @@ pub fn execute_fixed_notepad_plus_plus_msi(
 pub fn execute_fixed_notepad_plus_plus_msi_attempt(
     scenario: &CompiledMsiScenario,
 ) -> GuestMsiAttempt {
+    execute_fixed_notepad_plus_plus_msi_attempt_with_observations(scenario, None)
+}
+
+pub fn execute_fixed_notepad_plus_plus_msi_attempt_with_observations(
+    scenario: &CompiledMsiScenario,
+    required: Option<aiw_provider_wsb::MsiRequiredObservations>,
+) -> GuestMsiAttempt {
+    if let Some(required) = required {
+        if let Err(error) = required.validate_for(scenario) {
+            return GuestMsiAttempt {
+                result: Err(GuestMsiExecutionError::Scenario(error)),
+                stages: Vec::new(),
+                failed_snapshots: None,
+            };
+        }
+    }
     if let Err(error) = scenario.validate() {
         return GuestMsiAttempt {
             result: Err(GuestMsiExecutionError::Scenario(error.to_string())),
@@ -374,7 +392,7 @@ pub fn execute_fixed_notepad_plus_plus_msi_attempt(
     stages.snapshots = scenario
         .requires_registry_observations()
         .then(GuestMsiRetainedSnapshots::default);
-    let result = execute_validated_fixed_notepad_plus_plus_msi(scenario, &mut stages);
+    let result = execute_validated_fixed_notepad_plus_plus_msi(scenario, required, &mut stages);
     let failed_snapshots = if result.is_err() {
         stages.snapshots
     } else {
@@ -389,8 +407,11 @@ pub fn execute_fixed_notepad_plus_plus_msi_attempt(
 
 fn execute_validated_fixed_notepad_plus_plus_msi(
     scenario: &CompiledMsiScenario,
+    required: Option<aiw_provider_wsb::MsiRequiredObservations>,
     stages: &mut StageRecorder,
 ) -> Result<GuestMsiExecutionObservation, GuestMsiExecutionError> {
+    let mut acl_control = None;
+    let mut standard_user_acl = None;
     let (standard_user, before_install, product_before) =
         if scenario.requires_standard_user() && scenario.requires_application_exercise() {
             stages.run(GuestMsiStage::BeforeInstallCapture, || {
@@ -399,6 +420,12 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
                     .then(crate::guest_msi_product::ProductCapture::before_install)
                     .transpose()?;
                 let standard_user = StandardUserSession::establish()?;
+                if required.is_some() {
+                    acl_control = Some(
+                        crate::guest_document::FixedGuestAclControl::prepare()
+                            .map_err(GuestMsiExecutionError::Process)?,
+                    );
+                }
                 // Capture issues are observation data, not failed capture attempts.
                 let snapshot = capture_application_state(scenario, Some(&standard_user));
                 Ok((Some(standard_user), Some(snapshot), product))
@@ -542,6 +569,28 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
         } else {
             None
         };
+        if let Some(control) = &mut acl_control {
+            standard_user
+                .as_ref()
+                .ok_or_else(|| {
+                    GuestMsiExecutionError::Process(
+                        "ACL control has no standard-user session".into(),
+                    )
+                })?
+                .context()
+                .validate_token(&application_token)
+                .map_err(GuestMsiExecutionError::Process)?;
+            application.impersonate_token(&application_token, || {
+                control
+                    .probe_as_application()
+                    .map_err(GuestMsiExecutionError::Process)
+            })?;
+            standard_user_acl = Some(
+                control
+                    .observation(application.process_id, &application_token.user_sid)
+                    .map_err(GuestMsiExecutionError::Process)?,
+            );
+        }
         Ok((window, application_token, editor))
     });
     let (window, application_token, editor) = match ready {
@@ -600,6 +649,7 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
         };
         let (launch_exit_code, document_transfer) = complete_process_operation(operation, cleanup)?;
         return Ok(GuestMsiExecutionObservation {
+            standard_user_acl: None,
             install_exit_code,
             launch_process_id,
             launch_exit_code,
@@ -664,6 +714,11 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
     let (filesystem_observations, registry_observations) =
         if let Some((before_install, after_install)) = before_install.zip(after_install) {
             let after_exercise = stages.run(GuestMsiStage::AfterExerciseCapture, || {
+                if let Some(control) = &acl_control {
+                    control
+                        .revalidate()
+                        .map_err(GuestMsiExecutionError::Process)?;
+                }
                 if let Some(settings) = &settings_directory {
                     settings
                         .revalidate()
@@ -707,6 +762,7 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
             (None, None)
         };
     Ok(GuestMsiExecutionObservation {
+        standard_user_acl,
         install_exit_code,
         launch_process_id,
         launch_exit_code,
@@ -1284,6 +1340,33 @@ pub(crate) struct GuestProcess {
 }
 
 impl GuestProcess {
+    fn impersonate_token<T>(
+        &self,
+        expected: &TokenEvidence,
+        operation: impl FnOnce() -> Result<T, GuestMsiExecutionError>,
+    ) -> Result<T, GuestMsiExecutionError> {
+        if &self.collect_token()? != expected {
+            return Err(GuestMsiExecutionError::Process(
+                "application token changed before ACL control".into(),
+            ));
+        }
+        let mut token = HANDLE::default();
+        // SAFETY: this is the retained process handle, never a PID lookup. A
+        // primary token needs QUERY|DUPLICATE for ImpersonateLoggedOnUser.
+        unsafe {
+            OpenProcessToken(
+                HANDLE(self.process.as_raw_handle()),
+                TOKEN_QUERY | TOKEN_DUPLICATE,
+                &mut token,
+            )
+        }
+        .map_err(|e| {
+            GuestMsiExecutionError::Process(format!("open application ACL-control token: {e}"))
+        })?;
+        // SAFETY: successful OpenProcessToken transfers this owned handle.
+        let token = unsafe { OwnedHandle::from_raw_handle(token.0) };
+        crate::guest_standard_user::impersonate_primary_token(&token, operation)
+    }
     pub(crate) fn process_id(&self) -> u32 {
         self.process_id
     }

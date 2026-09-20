@@ -34,6 +34,8 @@ pub const WSB_BAMBU_PREPARATION_RECEIPT_SCHEMA_VERSION: &str =
     "aiw.dev/wsb-preparation-receipt/v0alpha3";
 pub const WSB_MSI_DOCUMENT_PREPARATION_RECEIPT_SCHEMA_VERSION: &str =
     "aiw.dev/wsb-preparation-receipt/v0alpha4";
+pub const WSB_MSI_OBSERVATION_PREPARATION_RECEIPT_SCHEMA_VERSION: &str =
+    "aiw.dev/wsb-preparation-receipt/v0alpha5";
 pub const WSB_PLANNING_IMPORT_RESULT_SCHEMA_VERSION: &str =
     "aiw.dev/wsb-planning-import-result/v0alpha1";
 
@@ -47,6 +49,16 @@ const BAMBU_FILE: &str = "application.exe";
 const GUEST_MSI_RESULT: &str = r"C:\AIW\Output\scenario-result.json";
 const TRUST_DELTA_MSI: &str = "installs and exercises the approved imported MSI in Windows Sandbox";
 fn msi_trust_delta(msi: &WsbMsiApplication) -> String {
+    let execution = msi_execution_trust_delta(msi);
+    if msi.required_observations.is_some() {
+        format!(
+            "{execution}; requires fixed file ACL controls using the launched application's token: create and read a local-data control and deny reading an owner-and-SYSTEM-only guest control; both controls are discarded with the worker"
+        )
+    } else {
+        execution
+    }
+}
+fn msi_execution_trust_delta(msi: &WsbMsiApplication) -> String {
     if msi.scenario.requires_local_settings() {
         return format!(
             "installs and exercises the approved imported MSI in Windows Sandbox; creates the fresh directory {} as the standard user with inherited permissions and redirects Notepad++ settings there; settings are discarded with the worker; no additional host mappings, network access, capabilities, or ACL grants",
@@ -160,6 +172,8 @@ pub struct WsbPreparationReceipt {
 #[derive(Debug, Clone, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WsbMsiApplication {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required_observations: Option<aiw_provider_wsb::MsiRequiredObservations>,
     pub import_receipt: aiw_probe::ApplicationFileImportReceipt,
     pub import_receipt_sha256: String,
     pub scenario: aiw_provider_wsb::CompiledMsiScenario,
@@ -182,6 +196,11 @@ impl WsbMsiApplication {
         &self,
         workspace: &WorkspaceBindingEvidence,
     ) -> Result<(), WsbPreparationError> {
+        if let Some(required) = self.required_observations {
+            required
+                .validate_for(&self.scenario)
+                .map_err(WsbPreparationError::Contract)?;
+        }
         self.scenario
             .validate()
             .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
@@ -337,6 +356,12 @@ impl WsbPreparationReceipt {
             WSB_BAMBU_PREPARATION_RECEIPT_SCHEMA_VERSION
         } else if self.msi.is_some() {
             if self
+                .msi
+                .as_ref()
+                .is_some_and(|msi| msi.required_observations.is_some())
+            {
+                WSB_MSI_OBSERVATION_PREPARATION_RECEIPT_SCHEMA_VERSION
+            } else if self
                 .msi
                 .as_ref()
                 .is_some_and(|msi| msi.scenario.requires_document_transfer())
@@ -741,7 +766,9 @@ pub fn build_wsb_msi_preparation(
         .run_plan
         .hash()
         .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
-    artifacts.receipt.schema_version = if msi.scenario.requires_document_transfer() {
+    artifacts.receipt.schema_version = if msi.required_observations.is_some() {
+        WSB_MSI_OBSERVATION_PREPARATION_RECEIPT_SCHEMA_VERSION.to_owned()
+    } else if msi.scenario.requires_document_transfer() {
         WSB_MSI_DOCUMENT_PREPARATION_RECEIPT_SCHEMA_VERSION.to_owned()
     } else {
         WSB_MSI_PREPARATION_RECEIPT_SCHEMA_VERSION.to_owned()
@@ -1307,6 +1334,12 @@ fn prepare_bundle(
             match scenario {
                 PreparedApplicationScenario::Msi(scenario) => {
                     let binding = WsbMsiApplication {
+                        required_observations: scenario
+                            .interactive_session_seconds
+                            .is_none()
+                            .then_some(
+                                aiw_provider_wsb::MsiRequiredObservations::StandardUserAclV1,
+                            ),
                         import_receipt: expected_receipt.clone(),
                         import_receipt_sha256: held.verification().receipt_sha256.clone(),
                         scenario: scenario.clone(),
@@ -3086,6 +3119,7 @@ mod tests {
             hex::encode(Sha256::digest(serde_json::to_vec(&import_receipt).unwrap()));
         let staged_path = format!(r"C:\AIW\run-one\tools\{MSI_FILE}");
         WsbMsiApplication {
+            required_observations: None,
             import_receipt,
             import_receipt_sha256,
             scenario_sha256: canonical_hash(&scenario).unwrap(),
@@ -3173,6 +3207,50 @@ mod tests {
         let mut conflicting = artifacts.receipt.clone();
         conflicting.msi = Some(fake_msi_application());
         assert!(conflicting.validate().is_err());
+    }
+
+    #[test]
+    fn required_acl_changes_approval_and_cannot_be_downgraded_in_preparation() {
+        let build = |msi| {
+            build_wsb_msi_preparation(
+                "run-one",
+                &msi_project(),
+                &readiness(),
+                &workspace(),
+                &guest(),
+                "now",
+                msi,
+            )
+            .unwrap()
+        };
+        let legacy = build(fake_msi_application());
+        let mut msi = fake_msi_application();
+        msi.required_observations =
+            Some(aiw_provider_wsb::MsiRequiredObservations::StandardUserAclV1);
+        let required = build(msi);
+        assert_eq!(
+            required.receipt.schema_version,
+            WSB_MSI_OBSERVATION_PREPARATION_RECEIPT_SCHEMA_VERSION
+        );
+        assert_ne!(
+            required.receipt.run_plan_sha256,
+            legacy.receipt.run_plan_sha256
+        );
+        assert!(required.run_plan.trust_deltas[0].contains("application's token"));
+        let mut downgraded = required.clone();
+        downgraded
+            .receipt
+            .msi
+            .as_mut()
+            .unwrap()
+            .required_observations = None;
+        assert!(downgraded.validate().is_err());
+        downgraded.receipt.schema_version = WSB_MSI_PREPARATION_RECEIPT_SCHEMA_VERSION.into();
+        assert!(downgraded.validate().is_err());
+        let mut forged = required;
+        forged.run_plan = legacy.run_plan;
+        forged.receipt.run_plan_sha256 = forged.run_plan.hash().unwrap();
+        assert!(forged.validate().is_err());
     }
 
     #[test]

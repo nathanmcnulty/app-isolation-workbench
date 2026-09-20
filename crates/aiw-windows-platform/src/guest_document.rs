@@ -17,6 +17,9 @@ use std::os::windows::fs::OpenOptionsExt as _;
 use std::os::windows::io::{AsRawHandle as _, FromRawHandle};
 use std::path::Path;
 
+mod acl_control;
+pub(crate) use acl_control::FixedGuestAclControl;
+
 use aiw_provider_wsb::{DOCUMENT_EXPECTED_TEXT, DOCUMENT_INITIAL_TEXT};
 use sha2::{Digest, Sha256};
 use windows::Win32::Foundation::HANDLE;

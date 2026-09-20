@@ -72,6 +72,17 @@ impl WsbMsiAssessmentReport {
         if let Some(runtime) = &self.standard_user_context {
             out.push_str(&format!("\nStandard-user runtime: **AiwStandardUser**, SID {}. Profile: {}. Roaming application data: {}. Local application data: {}. Installation used the elevated guest agent; the application used the separately verified standard-user token. These are guest observations, not independent boundary or descendant attestation.\n", cell(&runtime.context.user_sid), cell(&runtime.context.profile_path), cell(&runtime.context.roaming_app_data), cell(&runtime.context.local_app_data)));
         }
+        // Only verified runtime observations can supply this result; old runs
+        // keep an explicit unmeasured row.
+        if let Some(acl) = self
+            .standard_user_context
+            .as_ref()
+            .and_then(|runtime| runtime.standard_user_acl.as_ref())
+        {
+            out.push_str(&format!("\nGuest file ACL control: **passed** using the launched application's token (PID {}). Created, wrote, and read `{}`; reading `{}` returned Win32 access denied ({}). Protected ownership, DACL, file identity, and fixed bytes were rechecked through application exit. This measures only these guest file accesses; host containment and descendant boundaries remain unmeasured.\n", acl.process_id, cell(&acl.positive_path), cell(&acl.protected_path), acl.denied_read_error));
+        } else {
+            out.push_str("\nGuest file ACL control: **not measured** in this retained run.\n");
+        }
         if let Some(progress) = &self.stage_progress {
             append_stages(&mut out, progress);
         }

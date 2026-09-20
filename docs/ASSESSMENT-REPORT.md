@@ -16,7 +16,7 @@ Reporting never acquires a provider lease, invokes a provider, repairs a journal
 
 ## Recorded execution context
 
-Newly rendered completed assessment reports use `v0alpha9` and include
+Newly rendered completed assessment reports use `v0alpha10` and include
 `recordedExecution`: the verified historical provider binary identity, package
 identity, CLI protocol, and normalized requested Sandbox configuration hash.
 The context is extracted inside the existing held-workspace verification; it is
@@ -25,6 +25,24 @@ are not queried from today's machine. Historical guest observations retain their
 own versions and optional coverage; the new report envelope does not fill any
 missing guest measurement. Interactive and unsuccessful report schemas are
 unchanged.
+
+Fresh automated MSI preparations require `standardUserAclV1` in preparation
+v0alpha5 and guest-request v0alpha2. The requirement is bound to the approved
+trust delta and canonical request hash. Runtime-context v0alpha3 must contain
+both the recorded guest OS and `standardUserAcl`; omission, schema downgrade,
+or a process/SID mismatch rejects the successful report. Historical requests
+without this requirement retain unmeasured ACL coverage.
+
+The guest creates a fixed owner-and-SYSTEM-only file before installation and
+holds its ancestry and identity. While impersonating the primary token opened
+from the held application process, it creates, writes, and reads a separate
+fixed local-data file, and attempts to read the protected file by path. Only
+Win32 access denied (5) is accepted: missing files, sharing failures, and
+unexpected success fail the exercise. Protected ownership/DACL, file identities,
+and fixed bytes are rechecked through application exit. JSON retains paths,
+identities, hashes, sizes, PID/SID, and the observed denial code; Markdown shows
+the measured result. This is a guest standard-user file ACL observation, not
+host containment, network, registry-boundary, or descendant-process evidence.
 
 Configuration normalization validates the original plan, replaces only the
 workspace prefix of each host mapping with a fixed comparison root, and hashes
