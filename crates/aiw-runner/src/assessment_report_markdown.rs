@@ -105,7 +105,8 @@ fn append_administrator_overview(out: &mut String, report: &WsbMsiAssessmentRepo
         cell(&report.scenario.installer_sha256)
     ));
     out.push_str("Function results:\n\n| Function | Result |\n|---|---|\n");
-    for (name, observed) in function_results(report) {
+    let functions = function_results(report);
+    for (name, observed) in functions {
         out.push_str(&format!("| {name} | {} |\n", result_label(observed)));
     }
     let missing = report
@@ -120,11 +121,22 @@ fn append_administrator_overview(out: &mut String, report: &WsbMsiAssessmentRepo
         missing
     };
     out.push_str(&format!(
-        "\nMeasured boundary coverage: {}. Requested Sandbox settings are not treated as measured containment.\n\nRecorded cleanup: **{}**. This is historical receipt-bound evidence, not a current-session query.\n\nAssessment: **insufficientEvidence** for broader isolation. The missing checks remain unmeasured: {}.\n\nSafe next action: use the passing function results for the fixed workflow and packaging investigation. Before relying on an isolation decision, collect the missing boundary evidence and a comparable baseline; inspect the retained detailed evidence and diagnostics before any recovery or rerun.\n",
+        "\nMeasured observations and controls: {}. Requested Sandbox settings are not treated as measured containment.\n\nRecorded cleanup: **{}**. This is historical receipt-bound evidence, not a current-session query.\n\nAssessment: **insufficientEvidence** for broader isolation. The missing checks remain unmeasured: {}.\n\nSafe next action: {}\n",
         measured_boundary_labels(report).join(", "),
         report.recorded_cleanup_verified,
-        missing
+        missing,
+        completed_next_action(&functions),
     ));
+}
+
+fn completed_next_action(functions: &[(&str, Option<bool>)]) -> &'static str {
+    if functions.iter().any(|(_, result)| *result == Some(false)) {
+        "Investigate the failed fixed-workflow functions and retained diagnostics before preparing a recipe or replay. A failed function is not an isolation verdict."
+    } else if functions.iter().any(|(_, result)| result.is_none()) {
+        "Treat unmeasured fixed-workflow functions as gaps and inspect the retained evidence before preparing a recipe or replay. Do not infer compatibility from the measured subset."
+    } else {
+        "Use this passing fixed-workflow result only for the exact application bytes and tested scenario when reviewing a recipe or replay. Collect the missing boundary evidence and a comparable baseline before relying on an isolation decision."
+    }
 }
 
 fn measured_boundary_labels(report: &WsbMsiAssessmentReport) -> Vec<&'static str> {
@@ -209,11 +221,12 @@ impl WsbMsiRunReport {
 impl WsbMsiUnsuccessfulReport {
     pub fn to_markdown(&self) -> String {
         let mut out = format!(
-            "# Notepad++ Windows Sandbox unsuccessful attempt\n\nRun: {}\n\n## Administrator overview\n\nInstaller SHA-256: `{}`. Recorded outcome: **{:?}**. Fixed workflow: privileged guest installation followed by launch, fixed-document open/edit/save, and graceful close. No completed application assessment is available; application functions are **not verified**. The failure may be in setup, the worker, the installer, the application, or the test driver, and does not establish application incompatibility.\n\nRecorded exact-session cleanup verified: **{}**. This historical record is not a current-session query.\n\nSafe next action: retain and inspect the lifecycle, receipt-bound diagnostics, and snapshots below; recover only through the documented cleanup path, then rerun the fixed workflow after the failure cause is understood.\n\n## Recorded provider lifecycle\n\n| Sequence | State | Reason code |\n|---|---|---|\n",
+            "# Notepad++ Windows Sandbox unsuccessful attempt\n\nRun: {}\n\n## Administrator overview\n\nInstaller SHA-256: `{}`. Recorded outcome: **{:?}**. Fixed workflow: privileged guest installation followed by launch, fixed-document open/edit/save, and graceful close. No completed application assessment is available; application functions are **not verified**. The failure may be in setup, the worker, the installer, the application, or the test driver, and does not establish application incompatibility.\n\nRecorded exact-session cleanup verified: **{}**. This historical record is not a current-session query.\n\nSafe next action: {}\n\n## Recorded provider lifecycle\n\n| Sequence | State | Reason code |\n|---|---|---|\n",
             cell(&self.run_id),
             cell(&self.installer_sha256),
             self.outcome,
             self.recorded_cleanup_verified,
+            unsuccessful_next_action(self.recorded_cleanup_verified),
         );
         for transition in &self.lifecycle {
             out.push_str(&format!(
@@ -265,6 +278,14 @@ impl WsbMsiUnsuccessfulReport {
         append_download_metadata_policy(&mut out, self.download_metadata_policy.as_ref());
         out.push_str(&format!("\n## Attempt identity\n\n- Session ID: {}\n- Project revision SHA-256: {}\n- Installer SHA-256: {}\n- Guest-agent SHA-256: {}\n- Scenario SHA-256: {}\n- Request SHA-256: {}\n\nOnly a fully verified failed receipt can supply the stage progress above. Other guest output cannot establish an accepted compatibility assessment, application token, or file-change claim.\n", cell(&self.session_id), cell(&self.project_revision_sha256), cell(&self.installer_sha256), cell(&self.guest_agent_sha256), cell(&self.scenario_sha256), cell(&self.request_sha256)));
         out
+    }
+}
+
+fn unsuccessful_next_action(cleanup_verified: bool) -> &'static str {
+    if cleanup_verified {
+        "Cleanup is already recorded for this attempt; do not recover the historical session. Retain and inspect the lifecycle, receipt-bound diagnostics, and snapshots below, then prepare a new run only after the failure cause is understood."
+    } else {
+        "Do not retry. Inspect current run status and use only the documented exact-session recovery path before preparing a new run."
     }
 }
 
@@ -560,6 +581,15 @@ mod tests {
         assert_eq!(result_label(Some(true)), "Passed");
         assert_eq!(result_label(Some(false)), "Failed");
         assert_eq!(result_label(None), "Not measured");
+    }
+
+    #[test]
+    fn next_actions_follow_function_and_cleanup_state() {
+        assert!(completed_next_action(&[("function", Some(false))]).contains("failed"));
+        assert!(completed_next_action(&[("function", None)]).contains("unmeasured"));
+        assert!(completed_next_action(&[("function", Some(true))]).contains("passing"));
+        assert!(unsuccessful_next_action(true).contains("do not recover"));
+        assert!(unsuccessful_next_action(false).contains("Do not retry"));
     }
 
     #[test]

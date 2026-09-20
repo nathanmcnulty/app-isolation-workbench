@@ -44,6 +44,13 @@ show the exact plan and approval identity, require the displayed hash, and recor
 through the existing service without a hand-authored approval file. Cancellation
 does not approve or execute anything; redirected input is rejected.
 
+The retained MSI Markdown report now starts with an administrator overview for
+exact application bytes and the fixed workflow. It separates function results,
+measured observations, cleanup, and broader missing isolation evidence, then
+gives a state-specific next action. Retained completed and controlled-failure
+workspaces rendered correctly without changing their files. See
+[ASSESSMENT-REPORT.md](ASSESSMENT-REPORT.md).
+
 Next: finish the remaining [administrator workflow acceptance cases](RELEASE-GATES.md),
 then the clean-host/second-operator trial. ROADMAP.md now makes this ordering
 authoritative; broader AppContainer research and application conversion do not

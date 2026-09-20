@@ -176,6 +176,24 @@ A completed document workflow does not become an isolation verdict. The overview
 
 Unsuccessful Markdown reports identify the exact installer bytes and fixed workflow, state that application functions are not verified, and distinguish setup, worker, installer, application, and test-driver failure from incompatibility. They retain the lifecycle, receipt-bound diagnostics, and any verified snapshots, then direct the administrator to inspect and recover safely before a rerun. Historical reports without a behavior or boundary observation continue to say `Not measured`; reporting never infers those results.
 
+The overview chooses its next action from recorded state. A failed fixed function
+must be investigated before recipe/replay; a historical unmeasured function stays
+a gap; an all-passing fixed workflow applies only to the exact bytes and scenario.
+An unsuccessful report with recorded cleanup explicitly says not to recover its
+historical session. An unsuccessful state without cleanup would direct the
+operator to status and exact-session recovery before any retry.
+
+Development validation rendered both the profile-bound completed replay
+`profile-6ecdc022b04347b1916b3be22f0d7ac0` and controlled failed-capture run
+`aiw-msi-live-12864-1788999078887288000` from retained workspaces. The completed
+overview showed all five fixed functions passed while broader isolation stayed
+`insufficientEvidence`; the failed overview kept application functions unverified,
+showed the failed/not-reached stages, and recognized recorded cleanup. All 25 and
+24 retained files respectively kept their hashes. Rendered outputs are retained
+at `%LOCALAPPDATA%\Temp\aiw-admin-overview-completed.md` and
+`%LOCALAPPDATA%\Temp\aiw-admin-overview-unsuccessful.md`. No Sandbox or installer
+was started for this report-only validation.
+
 The v4-v6 scenarios require receipt-bound `importedMsiRuntimeContext` evidence in addition to the application token, document exercise, scoped file snapshots and stage progress. Completed reports use schema v0alpha5 (v0alpha6 with registry evidence; v0alpha7 with product registration) and expose `standardUserContext`: actual account SID, profile, roaming/local AppData paths and administrator-membership observation. Markdown distinguishes privileged installation from standard-user application execution. Missing or contradictory runtime evidence rejects the report.
 
 The v4-v6 document is `C:\Users\AiwStandardUser\AppData\Local\AIW\Scenario\document.txt`; the AppData capture roots belong to that account, not the elevated collector. Historical v3 uses `C:\AIW\Scenario\document.txt` and keeps its elevated execution interpretation. Earlier report schema descriptions above document their respective evidence versions; retained reports are not silently upgraded with observations they lack.
