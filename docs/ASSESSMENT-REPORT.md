@@ -168,6 +168,14 @@ Stage-progress validation passed 36 provider tests, 66 runner tests (four opt-in
 
 ## Standard-user reports
 
+### Administrator overview
+
+The Markdown form starts with an administrator overview before the detailed evidence. It identifies the exact Notepad++ MSI SHA-256 and the fixed workflow (privileged guest installation, recorded application launch, fixed-document open/edit/save, and graceful close), then reports each function as `Passed`, `Failed`, or `Not measured`. It lists the boundary observations actually present in the typed report, the receipt-bound exact-session cleanup result, and a safe next action.
+
+A completed document workflow does not become an isolation verdict. The overview keeps the assessment at `insufficientEvidence` for broader isolation and names missing baseline, host, descendant, persistence, network/IPC, registry, or effective-backend evidence as applicable. Requested Sandbox settings are descriptive inputs, not measured containment.
+
+Unsuccessful Markdown reports identify the exact installer bytes and fixed workflow, state that application functions are not verified, and distinguish setup, worker, installer, application, and test-driver failure from incompatibility. They retain the lifecycle, receipt-bound diagnostics, and any verified snapshots, then direct the administrator to inspect and recover safely before a rerun. Historical reports without a behavior or boundary observation continue to say `Not measured`; reporting never infers those results.
+
 The v4-v6 scenarios require receipt-bound `importedMsiRuntimeContext` evidence in addition to the application token, document exercise, scoped file snapshots and stage progress. Completed reports use schema v0alpha5 (v0alpha6 with registry evidence; v0alpha7 with product registration) and expose `standardUserContext`: actual account SID, profile, roaming/local AppData paths and administrator-membership observation. Markdown distinguishes privileged installation from standard-user application execution. Missing or contradictory runtime evidence rejects the report.
 
 The v4-v6 document is `C:\Users\AiwStandardUser\AppData\Local\AIW\Scenario\document.txt`; the AppData capture roots belong to that account, not the elevated collector. Historical v3 uses `C:\AIW\Scenario\document.txt` and keeps its elevated execution interpretation. Earlier report schema descriptions above document their respective evidence versions; retained reports are not silently upgraded with observations they lack.
