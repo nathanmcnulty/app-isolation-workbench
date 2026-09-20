@@ -1,0 +1,51 @@
+schemaVersion: aiw.dev/v0alpha2
+kind: AppIsolationProject
+metadata:
+  name: notepad-plus-plus-interactive
+  displayName: Notepad++ scratch-only interactive Sandbox
+  owner: endpoint-engineering
+application:
+  type: msi
+  # Planning reference only. Execution must use a freshly verified protected intake.
+  path: inputs/npp.8.9.8.Installer.x64.msi
+  sha256: c29cbe1a9aaef322cc3f316ceeabe8a8071b18441a5e3c3ec348069739e59e80
+  entryPoints:
+    - id: notepad-plus-plus
+      path: notepad++.exe
+  architecture: x64
+  mayReboot: false
+isolationIntent:
+  runtimeBoundary: windowsSandbox
+  network: blocked
+  allowClipboard: false
+  allowHostFileAccess: false
+  allowHostRegistryAccess: false
+  requireDescendantCoverage: true
+executionProviders:
+  - type: windowsSandbox
+    id: windows-sandbox
+    version: planning-placeholder
+    # Replace from current host readiness during future preparation.
+    executableSha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+candidates:
+  - id: sandbox
+    type: isolationSession
+    config:
+      type: windowsSandbox
+      providerId: windows-sandbox
+      network: blocked
+scenarios:
+  - id: install-launch-close
+    description: Open a scratch-only editor; close it within five minutes. All files are discarded.
+    required: true
+    steps:
+      - type: install
+      - type: launch
+        entrypoint: notepad-plus-plus
+      - type: waitForProcess
+        image: notepad++.exe
+        timeoutSeconds: 30
+      - type: waitForUserClose
+        timeoutSeconds: 300
+      - type: expectExitCode
+        value: 0

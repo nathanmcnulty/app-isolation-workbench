@@ -356,13 +356,14 @@ pub fn validate_analyst_report(
             &recommendation.rationale,
             evidence_records,
         )?;
-        if let AnalystAction::TestPolicyRelaxation {
-            requires_new_disposable_run,
-            requires_human_approval,
-            ..
-        } = recommendation.action
-            && (!requires_new_disposable_run || !requires_human_approval)
-        {
+        if matches!(
+            recommendation.action,
+            AnalystAction::TestPolicyRelaxation {
+                requires_new_disposable_run,
+                requires_human_approval,
+                ..
+            } if !requires_new_disposable_run || !requires_human_approval
+        ) {
             return Err(AnalystReportError::UnsafeRelaxationProposal {
                 id: recommendation.id.clone(),
             });

@@ -22,12 +22,21 @@ Run the local checks from the repository root:
 
 The verification script is intentionally local and deterministic. Hosted CI runs the same checks on Windows, but CI does not prove that a provider actually isolates an application. A live provider claim requires an explicitly documented Windows 11 24H2 x64 proof with target-token, effective-backend, canary, completeness, and cleanup evidence.
 
+For selected checks, use `scripts/check-local.ps1 -Check Workspace` or
+`-Check Platform` (native Windows tests), alongside the existing `Format`,
+`Provider`, `Cli`, `Clippy`, `Msrv`, and `Governance` choices. Cargo test checks
+use a short, fresh temporary directory per check, retain its location in the logs,
+and restore the caller's `TEMP`/`TMP`. This keeps unrelated accumulated files
+from exceeding the native verifier's directory-entry bound. `verify.ps1` uses
+the same workspace-test path. These selected checks require cached dependencies
+(`--locked --offline`).
+
 ## Design and security expectations
 
 - Evidence is authoritative; model-generated text is advisory only.
 - Imported project content and installer output are untrusted.
 - Project files cannot contain free-form commands or scripts.
-- Every mutating operation has a typed plan, an explicit approval, and a run-bound journal.
+- Provider execution requires a typed plan, explicit approval, and run-bound journal. Non-executing intake and preparation use explicit create-new operations with protected receipt-bound state and never grant execution authority.
 - Unsupported, degraded, incomplete, or ambiguous isolation results are `insufficientEvidence`, never success.
 - There is no persistent privileged service and no automatic telemetry.
 - Master Packager is a manual export/import handoff; the project must not call or embed it.

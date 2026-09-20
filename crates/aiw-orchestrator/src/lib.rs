@@ -39,6 +39,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub const RUN_PLAN_SCHEMA_VERSION: &str = "aiw.dev/run-plan/v0alpha3";
+pub const IMPORTED_MSI_RUN_PLAN_SCHEMA_VERSION: &str = "aiw.dev/run-plan/v0alpha4";
+pub const IMPORTED_BAMBU_RUN_PLAN_SCHEMA_VERSION: &str = "aiw.dev/run-plan/v0alpha5";
 pub const LEGACY_RUN_PLAN_SCHEMA_VERSION: &str = "aiw.dev/run-plan/v0alpha1";
 const APPROVAL_SCHEMA: &str = "aiw.dev/approval-record/v0alpha1";
 const EVENT_SCHEMA: &str = "aiw.dev/run-event/v0alpha1";
@@ -54,6 +56,10 @@ const WSB_DISCARD_STAGE_PREFIX: &str = ".aiw-discard-stage-v1-";
 const MAX_DISCARD_INTENT_BYTES: u64 = 1024 * 1024;
 pub const WSB_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION: &str =
     "aiw.dev/wsb-planning-import-receipt/v0alpha1";
+pub const WSB_MSI_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION: &str =
+    "aiw.dev/wsb-planning-import-receipt/v0alpha2";
+pub const WSB_BAMBU_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION: &str =
+    "aiw.dev/wsb-planning-import-receipt/v0alpha3";
 const WSB_PLANNING_IMPORT_FILE: &str = "wsb-planning-import.json";
 const ZERO_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 const MAX_TEXT: usize = 4096;
@@ -99,6 +105,26 @@ pub enum PlannedAction {
         guest_agent_sha256: String,
         workspace: Box<WorkspaceBindingEvidence>,
         workspace_identity_sha256: String,
+    },
+    ExecuteWindowsSandboxImportedMsiScenario {
+        sandbox_plan_sha256: String,
+        provider_sha256: String,
+        guest_agent_sha256: String,
+        workspace: Box<WorkspaceBindingEvidence>,
+        workspace_identity_sha256: String,
+        import_receipt_sha256: String,
+        application_sha256: String,
+        scenario_sha256: String,
+    },
+    ExecuteWindowsSandboxImportedBambuScenario {
+        sandbox_plan_sha256: String,
+        provider_sha256: String,
+        guest_agent_sha256: String,
+        workspace: Box<WorkspaceBindingEvidence>,
+        workspace_identity_sha256: String,
+        import_receipt_sha256: String,
+        application_sha256: String,
+        scenario_sha256: String,
     },
     CollectEvidence,
     LaunchValidatedProfile {
@@ -193,7 +219,23 @@ impl RunPlan {
         trust_deltas: Vec<String>,
     ) -> Result<Self, AiwError> {
         let value = Self {
-            schema: RUN_PLAN_SCHEMA_VERSION.into(),
+            schema: if actions.iter().any(|action| {
+                matches!(
+                    action,
+                    PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { .. }
+                )
+            }) {
+                IMPORTED_BAMBU_RUN_PLAN_SCHEMA_VERSION.into()
+            } else if actions.iter().any(|action| {
+                matches!(
+                    action,
+                    PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
+                )
+            }) {
+                IMPORTED_MSI_RUN_PLAN_SCHEMA_VERSION.into()
+            } else {
+                RUN_PLAN_SCHEMA_VERSION.into()
+            },
             run_id: run_id.into(),
             project_id: project_id.into(),
             project_revision_hash: project_revision_hash.into(),
@@ -215,7 +257,12 @@ impl RunPlan {
     /// remain separately readable for inspection and fail closed here.
     pub fn from_value(value: serde_json::Value) -> Result<Self, AiwError> {
         let schema = value.get("schema").and_then(serde_json::Value::as_str);
-        if schema != Some(RUN_PLAN_SCHEMA_VERSION) {
+        if !matches!(
+            schema,
+            Some(RUN_PLAN_SCHEMA_VERSION)
+                | Some(IMPORTED_MSI_RUN_PLAN_SCHEMA_VERSION)
+                | Some(IMPORTED_BAMBU_RUN_PLAN_SCHEMA_VERSION)
+        ) {
             return Err(run_error(
                 "AIW_PLAN_SCHEMA_UNSUPPORTED",
                 "run plan schema is unsupported for mutation and must be replanned",
@@ -2023,9 +2070,7 @@ impl RunLayout {
         let records = self.load_records(false)?;
         self.verify_committed(&records)?;
         let last_sequence = records.last().map_or(0, |record| record.sequence);
-        if let Some(last) = records.last()
-            && is_intent(last.event.kind)
-        {
+        if let Some(last) = records.last().filter(|last| is_intent(last.event.kind)) {
             return Ok(RecoveryStatus::RecoveryRequired {
                 pending_event: last.event.kind,
                 last_sequence,
@@ -2053,6 +2098,56 @@ impl RunLayout {
             plan_hash: plan.hash()?,
             last_sequence,
         })
+    }
+
+    /// Reads a terminal run without taking a lock, repairing a journal, or
+    /// creating any missing storage.  The status is observed both before and
+    /// after the artifact reads so a concurrent lifecycle change is reported
+    /// instead of producing a mixed snapshot.
+    pub fn completed_snapshot(&self) -> Result<CompletedRunSnapshot, AiwError> {
+        let initial = self.status()?;
+        let RecoveryStatus::Terminal {
+            result: initial_result,
+            ..
+        } = initial
+        else {
+            return Err(run_error(
+                "AIW_RUN_NOT_TERMINAL",
+                "run has not reached a committed terminal state",
+                "snapshot",
+                &self.run_id,
+            ));
+        };
+
+        let plan = self.read_plan_locked()?;
+        let approval = self.read_approval_locked()?;
+        let result = self.read_result_locked()?;
+        if result != initial_result {
+            return Err(run_error(
+                "AIW_RUN_SNAPSHOT_CONFLICT",
+                "terminal result changed while reading the snapshot",
+                "snapshot",
+                &self.run_id,
+            ));
+        }
+
+        let confirmed = self.status()?;
+        match confirmed {
+            RecoveryStatus::Terminal {
+                result: confirmed_result,
+                ..
+            } if confirmed_result == result => Ok(CompletedRunSnapshot {
+                plan,
+                approval,
+                result,
+            }),
+            _ => Err(run_error(
+                "AIW_RUN_SNAPSHOT_CONFLICT",
+                "run lifecycle changed while reading the snapshot",
+                "snapshot",
+                &self.run_id,
+            )),
+        }
     }
 
     /// Holds the run lock across external intent publication and internal
@@ -2899,12 +2994,12 @@ impl RunLayout {
             return Ok(false);
         }
         for raw in bytes[..complete_len - 1].split(|byte| *byte == b'\n') {
-            if let Ok(record) = serde_json::from_slice::<JournalRecord>(raw)
-                && matches!(
+            if serde_json::from_slice::<JournalRecord>(raw).is_ok_and(|record| {
+                matches!(
                     record.event.kind,
                     RunEventKind::RevocationIntent | RunEventKind::RevocationRecorded
                 )
-            {
+            }) {
                 return Ok(true);
             }
         }
@@ -3528,11 +3623,46 @@ pub enum RecoveryStatus {
     },
 }
 
+/// The immutable lifecycle artifacts for a run whose terminal journal commit
+/// is currently visible.  This is an in-process view only; callers that need
+/// a wire representation should serialize the individual validated artifacts.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompletedRunSnapshot {
+    pub plan: RunPlan,
+    pub approval: ApprovalRecord,
+    pub result: RunResult,
+}
+
 fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
-    if plan.schema != RUN_PLAN_SCHEMA_VERSION {
+    let has_bambu_action = plan.actions.iter().any(|action| {
+        matches!(
+            action,
+            PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { .. }
+        )
+    });
+    let has_msi_action = plan.actions.iter().any(|action| {
+        matches!(
+            action,
+            PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
+        )
+    });
+    let expected_schema = if has_bambu_action {
+        IMPORTED_BAMBU_RUN_PLAN_SCHEMA_VERSION
+    } else if has_msi_action {
+        IMPORTED_MSI_RUN_PLAN_SCHEMA_VERSION
+    } else {
+        RUN_PLAN_SCHEMA_VERSION
+    };
+    if plan.schema != expected_schema {
         return Err(run_error(
             "AIW_PLAN_SCHEMA_UNSUPPORTED",
-            "run plan schema is unsupported",
+            if has_bambu_action {
+                "Bambu Windows Sandbox plans require the imported-scenario schema"
+            } else if has_msi_action {
+                "MSI Windows Sandbox plans require the imported-scenario schema"
+            } else {
+                "run plan schema is unsupported or does not match its action profile"
+            },
             "plan",
             &plan.run_id,
         ));
@@ -3561,7 +3691,11 @@ fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
             &plan.run_id,
         ));
     }
+    let mut wsb_action_count = 0usize;
     for action in &plan.actions {
+        if is_wsb_action(action) {
+            wsb_action_count += 1;
+        }
         match action {
             PlannedAction::ExecuteScenario { scenario_id } => {
                 validate_id("scenarioId", scenario_id)?
@@ -3599,6 +3733,84 @@ fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
                     ));
                 }
             }
+            PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+                import_receipt_sha256,
+                application_sha256,
+                scenario_sha256,
+            } => {
+                for (field, hash) in [
+                    ("sandboxPlanSha256", sandbox_plan_sha256),
+                    ("providerSha256", provider_sha256),
+                    ("guestAgentSha256", guest_agent_sha256),
+                    ("workspaceIdentitySha256", workspace_identity_sha256),
+                    ("importReceiptSha256", import_receipt_sha256),
+                    ("applicationSha256", application_sha256),
+                    ("scenarioSha256", scenario_sha256),
+                ] {
+                    if !is_hash(hash) {
+                        return Err(run_error(
+                            "AIW_PLAN_BINDING_INVALID",
+                            "Windows Sandbox MSI scenario binding is invalid",
+                            field,
+                            &plan.run_id,
+                        ));
+                    }
+                }
+                if workspace.validate().is_err()
+                    || hash_value(workspace)? != *workspace_identity_sha256
+                {
+                    return Err(run_error(
+                        "AIW_PLAN_BINDING_INVALID",
+                        "Windows Sandbox workspace evidence is invalid or does not match its hash",
+                        "workspace",
+                        &plan.run_id,
+                    ));
+                }
+            }
+            PlannedAction::ExecuteWindowsSandboxImportedBambuScenario {
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+                import_receipt_sha256,
+                application_sha256,
+                scenario_sha256,
+            } => {
+                for (field, hash) in [
+                    ("sandboxPlanSha256", sandbox_plan_sha256),
+                    ("providerSha256", provider_sha256),
+                    ("guestAgentSha256", guest_agent_sha256),
+                    ("workspaceIdentitySha256", workspace_identity_sha256),
+                    ("importReceiptSha256", import_receipt_sha256),
+                    ("applicationSha256", application_sha256),
+                    ("scenarioSha256", scenario_sha256),
+                ] {
+                    if !is_hash(hash) {
+                        return Err(run_error(
+                            "AIW_PLAN_BINDING_INVALID",
+                            "Windows Sandbox Bambu scenario binding is invalid",
+                            field,
+                            &plan.run_id,
+                        ));
+                    }
+                }
+                if workspace.validate().is_err()
+                    || hash_value(workspace)? != *workspace_identity_sha256
+                {
+                    return Err(run_error(
+                        "AIW_PLAN_BINDING_INVALID",
+                        "Windows Sandbox workspace evidence is invalid or does not match its hash",
+                        "workspace",
+                        &plan.run_id,
+                    ));
+                }
+            }
             PlannedAction::LaunchValidatedProfile { profile_id } => {
                 validate_id("profileId", profile_id)?
             }
@@ -3613,51 +3825,135 @@ fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
             ));
         }
     }
+    if wsb_action_count > 1 {
+        return Err(run_error(
+            "AIW_PLAN_BINDING_INVALID",
+            "a run plan may contain at most one Windows Sandbox profile action",
+            "actions",
+            &plan.run_id,
+        ));
+    }
     for delta in &plan.trust_deltas {
         validate_text("trustDelta", delta, &plan.run_id)?;
     }
     Ok(())
 }
 
+fn is_wsb_action(action: &PlannedAction) -> bool {
+    matches!(
+        action,
+        PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. }
+            | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
+            | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { .. }
+    )
+}
+
 fn has_wsb_action(plan: &RunPlan) -> bool {
-    plan.actions.iter().any(|action| {
-        matches!(
-            action,
-            PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. }
+    plan.actions.iter().any(is_wsb_action)
+}
+
+fn wsb_action(plan: &RunPlan) -> Result<Option<&PlannedAction>, AiwError> {
+    let mut found = None;
+    for action in &plan.actions {
+        if is_wsb_action(action) {
+            if found.is_some() {
+                return Err(run_error(
+                    "AIW_WSB_IMPORT_INVALID",
+                    "verified import requires exactly one Windows Sandbox profile action",
+                    "create",
+                    &plan.run_id,
+                ));
+            }
+            found = Some(action);
+        }
+    }
+    Ok(found)
+}
+
+fn wsb_workspace(plan: &RunPlan) -> Result<&WorkspaceBindingEvidence, AiwError> {
+    let action = wsb_action(plan)?.ok_or_else(|| {
+        run_error(
+            "AIW_WSB_REVOCATION_INVALID",
+            "Windows Sandbox revocation has no workspace binding",
+            "revocation",
+            &plan.run_id,
         )
-    })
+    })?;
+    match action {
+        PlannedAction::ExecuteWindowsSandboxGoldenProbe { workspace, .. }
+        | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { workspace, .. }
+        | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { workspace, .. } => {
+            Ok(workspace.as_ref())
+        }
+        _ => unreachable!("wsb_action only returns WSB profile actions"),
+    }
 }
 
 fn validate_wsb_import(receipt: &WsbPlanningImportReceipt, plan: &RunPlan) -> Result<(), AiwError> {
     validate_plan(plan)?;
-    let [
+    let action = wsb_action(plan)?.ok_or_else(|| {
+        run_error(
+            "AIW_WSB_IMPORT_INVALID",
+            "verified import requires exactly one Windows Sandbox action",
+            "create",
+            &plan.run_id,
+        )
+    })?;
+    let (
+        receipt_schema,
+        sandbox_plan_sha256,
+        provider_sha256,
+        guest_agent_sha256,
+        workspace,
+        workspace_identity_sha256,
+    ) = match action {
         PlannedAction::ExecuteWindowsSandboxGoldenProbe {
             sandbox_plan_sha256,
             provider_sha256,
             guest_agent_sha256,
             workspace,
             workspace_identity_sha256,
-        },
-    ] = plan
-        .actions
-        .iter()
-        .filter(|action| {
-            matches!(
-                action,
-                PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. }
-            )
-        })
-        .collect::<Vec<_>>()
-        .as_slice()
-    else {
-        return Err(run_error(
-            "AIW_WSB_IMPORT_INVALID",
-            "verified import requires exactly one Windows Sandbox action",
-            "create",
-            &plan.run_id,
-        ));
+        } => (
+            WSB_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION,
+            sandbox_plan_sha256,
+            provider_sha256,
+            guest_agent_sha256,
+            workspace,
+            workspace_identity_sha256,
+        ),
+        PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
+            sandbox_plan_sha256,
+            provider_sha256,
+            guest_agent_sha256,
+            workspace,
+            workspace_identity_sha256,
+            ..
+        } => (
+            WSB_MSI_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION,
+            sandbox_plan_sha256,
+            provider_sha256,
+            guest_agent_sha256,
+            workspace,
+            workspace_identity_sha256,
+        ),
+        PlannedAction::ExecuteWindowsSandboxImportedBambuScenario {
+            sandbox_plan_sha256,
+            provider_sha256,
+            guest_agent_sha256,
+            workspace,
+            workspace_identity_sha256,
+            ..
+        } => (
+            WSB_BAMBU_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION,
+            sandbox_plan_sha256,
+            provider_sha256,
+            guest_agent_sha256,
+            workspace,
+            workspace_identity_sha256,
+        ),
+        _ => unreachable!("wsb_action only returns WSB profile actions"),
     };
-    if receipt.schema_version != WSB_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION
+    if receipt.schema_version != receipt_schema
         || receipt.run_id != plan.run_id
         || receipt.status != WsbPlanningImportStatus::PendingApproval
         || receipt.project_revision_sha256 != plan.project_revision_hash
@@ -3711,6 +4007,8 @@ fn action_allowed(lifecycle: RunLifecycleKind, action: &PlannedAction) -> bool {
                 | PlannedAction::PrepareWorkspace
                 | PlannedAction::ExecuteScenario { .. }
                 | PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. }
+                | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
+                | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { .. }
                 | PlannedAction::CollectEvidence
         ),
         RunLifecycleKind::Launch => matches!(
@@ -3718,6 +4016,7 @@ fn action_allowed(lifecycle: RunLifecycleKind, action: &PlannedAction) -> bool {
             PlannedAction::AssessHost
                 | PlannedAction::PrepareWorkspace
                 | PlannedAction::LaunchValidatedProfile { .. }
+                | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
                 | PlannedAction::CollectEvidence
         ),
         RunLifecycleKind::Authoring => {
@@ -3837,23 +4136,7 @@ fn validate_wsb_revocation(
     import: &WsbPlanningImportReceipt,
     layout: &RunLayout,
 ) -> Result<(), AiwError> {
-    let workspace = plan
-        .actions
-        .iter()
-        .find_map(|action| match action {
-            PlannedAction::ExecuteWindowsSandboxGoldenProbe { workspace, .. } => {
-                Some(workspace.as_ref())
-            }
-            _ => None,
-        })
-        .ok_or_else(|| {
-            run_error(
-                "AIW_WSB_REVOCATION_INVALID",
-                "Windows Sandbox revocation has no workspace binding",
-                "revocation",
-                &plan.run_id,
-            )
-        })?;
+    let workspace = wsb_workspace(plan)?;
     let expected_control = layout.wsb_discard_control_path()?;
     validate_wsb_revocation_shape(value, workspace, &expected_control)?;
     let binding = &value.discard_intent_binding;
@@ -5326,14 +5609,14 @@ mod tests {
         .unwrap()
     }
 
-    fn wsb_plan(run_id: &str) -> RunPlan {
+    fn wsb_workspace(run_id: &str) -> WorkspaceBindingEvidence {
         let owner = "S-1-5-21-1";
         let identity = |path: &str, marker: char| aiw_probe::WindowsFileIdentity {
             final_path: path.to_owned(),
             volume_serial_number: "1".repeat(16),
             file_id: marker.to_string().repeat(32),
         };
-        let workspace = WorkspaceBindingEvidence {
+        WorkspaceBindingEvidence {
             schema_version: aiw_probe::WINDOWS_WORKSPACE_SCHEMA_VERSION.to_owned(),
             policy: aiw_probe::WINDOWS_WORKSPACE_SECURITY_POLICY.to_owned(),
             security_policy_sha256: aiw_probe::workspace_policy_hash(owner),
@@ -5344,7 +5627,11 @@ mod tests {
             root: identity(&format!(r"C:\AIW\{run_id}"), '2'),
             tools: identity(&format!(r"C:\AIW\{run_id}\tools"), '3'),
             output: identity(&format!(r"C:\AIW\{run_id}\output"), '4'),
-        };
+        }
+    }
+
+    fn wsb_plan(run_id: &str) -> RunPlan {
+        let workspace = wsb_workspace(run_id);
         let workspace_identity_sha256 = hash_value(&workspace).unwrap();
         RunPlan::new(
             run_id,
@@ -5360,6 +5647,30 @@ mod tests {
                 workspace_identity_sha256,
             }],
             vec!["starts one exact Windows Sandbox session".into()],
+        )
+        .unwrap()
+    }
+
+    fn msi_wsb_plan(run_id: &str) -> RunPlan {
+        let workspace = wsb_workspace(run_id);
+        let workspace_identity_sha256 = hash_value(&workspace).unwrap();
+        RunPlan::new(
+            run_id,
+            "project.one",
+            "f".repeat(64),
+            RunLifecycleKind::Assessment,
+            "2026-08-29T00:00:00Z",
+            vec![PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
+                sandbox_plan_sha256: "a".repeat(64),
+                provider_sha256: "b".repeat(64),
+                guest_agent_sha256: "c".repeat(64),
+                workspace: Box::new(workspace),
+                workspace_identity_sha256,
+                import_receipt_sha256: "d".repeat(64),
+                application_sha256: "e".repeat(64),
+                scenario_sha256: "f".repeat(64),
+            }],
+            vec!["starts one exact imported MSI Windows Sandbox session".into()],
         )
         .unwrap()
     }
@@ -5386,18 +5697,47 @@ mod tests {
     }
 
     fn wsb_import(plan: &RunPlan) -> WsbPlanningImportReceipt {
-        let PlannedAction::ExecuteWindowsSandboxGoldenProbe {
+        let (
+            schema_version,
             sandbox_plan_sha256,
             provider_sha256,
             guest_agent_sha256,
             workspace,
             workspace_identity_sha256,
-        } = &plan.actions[0]
-        else {
-            unreachable!();
+        ) = match &plan.actions[0] {
+            PlannedAction::ExecuteWindowsSandboxGoldenProbe {
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+            } => (
+                WSB_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION,
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+            ),
+            PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+                ..
+            } => (
+                WSB_MSI_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION,
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+            ),
+            _ => unreachable!(),
         };
         WsbPlanningImportReceipt {
-            schema_version: WSB_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION.to_owned(),
+            schema_version: schema_version.to_owned(),
             run_id: plan.run_id.clone(),
             imported_at: "2026-08-29T00:01:00Z".to_owned(),
             status: WsbPlanningImportStatus::PendingApproval,
@@ -5506,6 +5846,30 @@ mod tests {
     fn layout(root: &Path, run_id: &str) -> RunLayout {
         RunLayout::new(root, run_id).unwrap()
     }
+
+    fn tree_snapshot(path: &Path, root: &Path) -> Vec<(String, Option<Vec<u8>>)> {
+        let mut entries = fs::read_dir(path)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect::<Vec<_>>();
+        entries.sort();
+        let mut snapshot = Vec::new();
+        for entry in entries {
+            let relative = entry
+                .strip_prefix(root)
+                .unwrap()
+                .to_string_lossy()
+                .into_owned();
+            if entry.is_dir() {
+                snapshot.push((relative, None));
+                snapshot.extend(tree_snapshot(&entry, root));
+            } else {
+                snapshot.push((relative, Some(fs::read(&entry).unwrap())));
+            }
+        }
+        snapshot
+    }
+
     fn approve(layout: &RunLayout, plan: &RunPlan) {
         layout
             .write_approval(
@@ -5728,6 +6092,111 @@ mod tests {
                 ..
             }
         ));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn completed_snapshot_is_read_only_and_returns_terminal_artifacts() {
+        let root = root();
+        let layout = layout(&root, "run-one");
+        let expected_plan = plan("run-one");
+        let expected_result = success("run-one");
+        layout.create(&expected_plan).unwrap();
+        approve(&layout, &expected_plan);
+        layout.write_result(&expected_result).unwrap();
+        let before = tree_snapshot(&root, &root);
+
+        let snapshot = layout.completed_snapshot().unwrap();
+
+        assert_eq!(snapshot.plan, expected_plan);
+        assert_eq!(
+            snapshot.approval,
+            ApprovalRecord::for_plan(&expected_plan, "admin", "2026-08-27T00:01:00Z").unwrap()
+        );
+        assert_eq!(snapshot.result, expected_result);
+        assert_eq!(tree_snapshot(&root, &root), before);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn completed_snapshot_requires_current_terminal_artifacts() {
+        let root = root();
+        let missing = layout(&root, "missing");
+        assert!(missing.completed_snapshot().is_err());
+        assert!(!root.join("runs").exists());
+
+        let layout = layout(&root, "run-one");
+        let expected_plan = plan("run-one");
+        layout.create(&expected_plan).unwrap();
+        let before = tree_snapshot(&root, &root);
+        let error = layout.completed_snapshot().unwrap_err();
+        assert_eq!(error.code.as_ref(), "AIW_RUN_NOT_TERMINAL");
+        assert_eq!(tree_snapshot(&root, &root), before);
+
+        let interrupted = RunLayout::new(&root, "run-two").unwrap();
+        let interrupted_plan = plan("run-two");
+        interrupted.create(&interrupted_plan).unwrap();
+        let interrupted_approval =
+            ApprovalRecord::for_plan(&interrupted_plan, "admin", "2026-08-27T00:01:00Z").unwrap();
+        {
+            let _lock = interrupted.acquire_lock("test").unwrap();
+            let hash = hash_value(&interrupted_approval).unwrap();
+            interrupted
+                .append_record(
+                    artifact_event(RunEventKind::ApprovalIntent, "now", "intent", &hash).unwrap(),
+                )
+                .unwrap();
+        }
+        let before_interrupted = tree_snapshot(&root, &root);
+        let error = interrupted.completed_snapshot().unwrap_err();
+        assert_eq!(error.code.as_ref(), "AIW_RUN_NOT_TERMINAL");
+        assert_eq!(tree_snapshot(&root, &root), before_interrupted);
+
+        approve(&layout, &expected_plan);
+        let result = success("run-one");
+        layout.write_result(&result).unwrap();
+        let approval_bytes = fs::read(layout.approval_path()).unwrap();
+        let mut changed_approval =
+            ApprovalRecord::for_plan(&expected_plan, "different-admin", "2026-08-27T00:01:00Z")
+                .unwrap();
+        changed_approval.plan_hash = expected_plan.hash().unwrap();
+        fs::write(
+            layout.approval_path(),
+            serde_json::to_vec(&changed_approval).unwrap(),
+        )
+        .unwrap();
+        let error = layout.completed_snapshot().unwrap_err();
+        assert_eq!(error.code.as_ref(), "AIW_ARTIFACT_TAMPERED");
+        fs::write(layout.approval_path(), approval_bytes).unwrap();
+
+        let mut changed = result.clone();
+        changed.summary = "tampered".to_owned();
+        fs::write(layout.result_path(), serde_json::to_vec(&changed).unwrap()).unwrap();
+        let error = layout.completed_snapshot().unwrap_err();
+        assert_eq!(error.code.as_ref(), "AIW_ARTIFACT_TAMPERED");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn completed_snapshot_validates_current_windows_sandbox_import() {
+        let root = root();
+        let layout = layout(&root, "run-one");
+        let expected_plan = wsb_plan("run-one");
+        let receipt = wsb_import(&expected_plan);
+        layout
+            .create_or_verify_pending_wsb_import(&expected_plan, &receipt)
+            .unwrap();
+        approve(&layout, &expected_plan);
+        let expected_result = success("run-one");
+        layout.write_result(&expected_result).unwrap();
+        let before = tree_snapshot(&root, &root);
+
+        let snapshot = layout.completed_snapshot().unwrap();
+
+        assert_eq!(snapshot.plan, expected_plan);
+        assert_eq!(snapshot.result, expected_result);
+        assert_eq!(snapshot.approval.plan_hash, expected_plan.hash().unwrap());
+        assert_eq!(tree_snapshot(&root, &root), before);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -6076,12 +6545,99 @@ mod tests {
 
     #[test]
     fn generic_create_rejects_wsb_before_creating_run_storage() {
+        for plan in [wsb_plan("run-one"), msi_wsb_plan("run-one")] {
+            let root = root();
+            let layout = layout(&root, "run-one");
+            let error = layout.create(&plan).unwrap_err();
+            assert_eq!(error.code.as_ref(), "AIW_WSB_IMPORT_REQUIRED");
+            assert!(!root.join("runs").exists());
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn imported_msi_plan_uses_distinct_schema_and_receipt_contract() {
+        let plan = msi_wsb_plan("run-one");
+        assert_eq!(plan.schema, IMPORTED_MSI_RUN_PLAN_SCHEMA_VERSION);
+        assert_eq!(
+            wsb_import(&plan).schema_version,
+            WSB_MSI_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION
+        );
+        assert!(RunPlan::from_value(serde_json::to_value(&plan).unwrap()).is_ok());
+
+        let golden = wsb_plan("run-two");
+        assert_eq!(golden.schema, RUN_PLAN_SCHEMA_VERSION);
+        assert_eq!(
+            wsb_import(&golden).schema_version,
+            WSB_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION
+        );
+
+        let mut msi_with_golden_schema = serde_json::to_value(&plan).unwrap();
+        msi_with_golden_schema["schema"] = serde_json::json!(RUN_PLAN_SCHEMA_VERSION);
+        assert!(RunPlan::from_value(msi_with_golden_schema).is_err());
+        let mut golden_with_msi_schema = serde_json::to_value(&golden).unwrap();
+        golden_with_msi_schema["schema"] = serde_json::json!(IMPORTED_MSI_RUN_PLAN_SCHEMA_VERSION);
+        assert!(RunPlan::from_value(golden_with_msi_schema).is_err());
+
+        let mut wrong_golden_receipt = wsb_import(&golden);
+        wrong_golden_receipt.schema_version =
+            WSB_MSI_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION.to_owned();
+        assert!(validate_wsb_import(&wrong_golden_receipt, &golden).is_err());
+        let mut wrong_msi_receipt = wsb_import(&plan);
+        wrong_msi_receipt.schema_version = WSB_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION.to_owned();
+        assert!(validate_wsb_import(&wrong_msi_receipt, &plan).is_err());
+    }
+
+    #[test]
+    fn imported_msi_hash_change_invalidates_the_existing_receipt() {
         let root = root();
         let layout = layout(&root, "run-one");
-        let error = layout.create(&wsb_plan("run-one")).unwrap_err();
-        assert_eq!(error.code.as_ref(), "AIW_WSB_IMPORT_REQUIRED");
+        let expected = msi_wsb_plan("run-one");
+        let receipt = wsb_import(&expected);
+        let mut changed = expected.clone();
+        let PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
+            application_sha256, ..
+        } = &mut changed.actions[0]
+        else {
+            unreachable!();
+        };
+        *application_sha256 = "0".repeat(64);
+        let error = layout
+            .create_or_verify_pending_wsb_import(&changed, &receipt)
+            .unwrap_err();
+        assert_eq!(error.code.as_ref(), "AIW_WSB_IMPORT_INVALID");
         assert!(!root.join("runs").exists());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn imported_msi_launch_requires_fresh_lifecycle_approval() {
+        let assessment = msi_wsb_plan("run-one");
+        let approval = ApprovalRecord::for_plan(&assessment, "operator", "time").unwrap();
+        let mut launch = assessment.clone();
+        launch.lifecycle = RunLifecycleKind::Launch;
+        validate_plan(&launch).unwrap();
+        assert_ne!(launch.hash().unwrap(), assessment.hash().unwrap());
+        assert!(validate_approval(&approval, &launch).is_err());
+    }
+
+    #[test]
+    fn duplicate_windows_sandbox_profile_actions_are_rejected() {
+        let plan = msi_wsb_plan("run-one");
+        let mut actions = plan.actions.clone();
+        let duplicate = actions[0].clone();
+        actions.push(duplicate);
+        let error = RunPlan::new(
+            plan.run_id,
+            plan.project_id,
+            plan.project_revision_hash,
+            plan.lifecycle,
+            plan.created_at,
+            actions,
+            plan.trust_deltas,
+        )
+        .unwrap_err();
+        assert_eq!(error.code.as_ref(), "AIW_PLAN_BINDING_INVALID");
     }
 
     #[test]
@@ -7191,6 +7747,67 @@ mod tests {
     }
 
     #[test]
+    fn interrupted_terminal_publication_recovers_before_an_idempotent_retry() {
+        for published in [false, true] {
+            let root = root();
+            let layout = layout(&root, "run-one");
+            let plan = plan("run-one");
+            layout.create(&plan).unwrap();
+            approve(&layout, &plan);
+            let result = RunResult::new(
+                "run-one",
+                RunOutcome::Failed,
+                "recovery-time-not-trusted",
+                None,
+                true,
+                "interrupted completion processing after verified cleanup",
+            )
+            .unwrap();
+            {
+                let _lock = layout.acquire_lock("test").unwrap();
+                let hash = hash_value(&result).unwrap();
+                layout
+                    .append_record(
+                        artifact_event(
+                            RunEventKind::TerminalIntent,
+                            &result.completed_at,
+                            "result",
+                            &hash,
+                        )
+                        .unwrap(),
+                    )
+                    .unwrap();
+                if published {
+                    write_complete_new(&layout.result_path(), &result, "run-one", "test").unwrap();
+                }
+                let mut journal = OpenOptions::new()
+                    .append(true)
+                    .open(layout.journal_path())
+                    .unwrap();
+                journal.write_all(b"partial").unwrap();
+                journal.sync_all().unwrap();
+            }
+            let status = layout.recovery_status().unwrap();
+            if published {
+                assert!(matches!(status, RecoveryStatus::Terminal { .. }));
+            } else {
+                assert!(matches!(status, RecoveryStatus::Ready { .. }));
+                layout.write_result(&result).unwrap();
+            }
+            assert_eq!(layout.read_result().unwrap(), result);
+            let journal_before = fs::read(layout.journal_path()).unwrap();
+            let result_before = fs::read(layout.result_path()).unwrap();
+            assert!(matches!(
+                layout.recovery_status().unwrap(),
+                RecoveryStatus::Terminal { .. }
+            ));
+            assert_eq!(fs::read(layout.journal_path()).unwrap(), journal_before);
+            assert_eq!(fs::read(layout.result_path()).unwrap(), result_before);
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
     fn recovery_aborts_unpublished_intent_and_allows_a_clean_retry() {
         let root = root();
         let layout = layout(&root, "run-one");
@@ -7338,7 +7955,7 @@ mod tests {
         let error = layout
             .create_or_verify_pending_wsb_import(&expected, &receipt)
             .unwrap_err();
-        assert_eq!(error.code.as_ref(), "AIW_PATH_INVALID");
+        assert_eq!(error.code.as_ref(), "AIW_PATH_UNSAFE");
         assert!(
             fs::symlink_metadata(&link)
                 .unwrap()

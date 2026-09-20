@@ -25,7 +25,8 @@ jobs:
       - name: Select stable Rust
         shell: pwsh
         run: |
-          rustup toolchain install stable --profile minimal --no-self-update
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy --no-self-update
+          if ($LASTEXITCODE -ne 0) { throw 'Stable Rust installation failed' }
           rustup default stable
 
       - name: Restore cargo-audit
@@ -35,14 +36,14 @@ jobs:
           path: ~/.cargo/bin/cargo-audit.exe
           key: cargo-audit-${{ runner.os }}-${{ runner.arch }}-0.22.2
 
+      - name: Run repository verification
+        shell: pwsh
+        run: .\scripts\verify.ps1
+
       - name: Install cargo-audit
         if: steps.cargo-audit-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: cargo install cargo-audit --version 0.22.2 --locked
-
-      - name: Run repository verification
-        shell: pwsh
-        run: .\scripts\verify.ps1
 
       - name: Audit dependencies
         shell: pwsh
@@ -51,3 +52,18 @@ jobs:
       - name: Validate repository governance files
         shell: pwsh
         run: .\scripts\verify.ps1 -GovernanceOnly
+
+  msrv:
+    name: Minimum supported Rust
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Check all targets with Rust 1.85
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.85.0 --profile minimal --no-self-update
+          if ($LASTEXITCODE -ne 0) { throw 'Rust 1.85 installation failed' }
+          cargo +1.85.0 check --workspace --all-targets --locked

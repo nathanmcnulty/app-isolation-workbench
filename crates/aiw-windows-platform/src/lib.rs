@@ -6,7 +6,38 @@ use aiw_probe::WindowsSandboxReadiness;
 pub use windows_platform::{
     CanonicalSandboxId, WindowsSandboxExecutionLease, WindowsSandboxInvocationError,
     WsbConnectObservation, WsbListObservation, WsbStartObservation, WsbStopObservation,
+    observe_windows_version,
 };
+
+#[cfg(windows)]
+pub use guest_msi::{
+    GuestMsiAttempt, GuestMsiExecutionError, GuestMsiExecutionObservation,
+    GuestMsiFilesystemObservation, GuestMsiProductRegistrationObservation,
+    GuestMsiRegistryObservation, GuestMsiRetainedSnapshots, GuestMsiStage, GuestMsiStageStatus,
+    execute_fixed_notepad_plus_plus_msi, execute_fixed_notepad_plus_plus_msi_attempt,
+    execute_fixed_notepad_plus_plus_msi_attempt_with_observations,
+};
+
+#[cfg(windows)]
+pub use guest_bambu::{
+    GuestBambuAttempt, GuestBambuExecutionObservation, execute_fixed_bambu_export_attempt,
+};
+
+#[cfg(windows)]
+pub use control_appcontainer::{
+    ControlAppContainerError, ControlAppContainerObservation, execute_fixed_control_appcontainer,
+};
+
+#[cfg(windows)]
+pub use control_registry::{
+    ControlRegistryReadOutcome, ControlRegistryReadProbe, ControlRegistryReadStage,
+    ControlRegistryScope, read_fixed_control_registry_canary,
+};
+#[cfg(windows)]
+pub use guest_filesystem::snapshot_fixed_notepad_files;
+
+#[cfg(windows)]
+pub(crate) use guest_document::FixedGuestDocument;
 
 #[cfg(windows)]
 #[doc(hidden)]
@@ -26,7 +57,9 @@ pub use portable_import::{
 };
 #[cfg(windows)]
 pub use source_import::{
-    SourceImportError, import_application_file, verify_application_file_import,
+    HeldVerifiedApplicationFileImport, SourceImportError, import_application_file,
+    import_application_file_with_metadata, open_verified_application_file_import,
+    verify_application_file_import,
 };
 #[cfg(windows)]
 pub use source_inspection::{
@@ -129,6 +162,33 @@ mod exact_dispose;
 mod windows_platform;
 
 #[cfg(windows)]
+mod guest_msi;
+
+#[cfg(windows)]
+mod guest_bambu;
+
+#[cfg(windows)]
+mod control_appcontainer;
+#[cfg(windows)]
+mod control_registry;
+
+#[cfg(windows)]
+mod guest_desktop;
+#[cfg(windows)]
+mod guest_document;
+
+#[cfg(windows)]
+mod guest_filesystem;
+
+#[cfg(windows)]
+mod guest_msi_product;
+#[cfg(windows)]
+mod guest_registry;
+
+#[cfg(windows)]
+mod guest_standard_user;
+
+#[cfg(windows)]
 mod workspace;
 
 #[cfg(windows)]
@@ -173,6 +233,7 @@ mod platform {
             schema_version: "aiw.dev/windows-sandbox-readiness/v0alpha2".to_owned(),
             supported: false,
             os_build: None,
+            os_version: None,
             process_architecture: std::env::consts::ARCH.to_owned(),
             virtualization: ReadinessState::Unknown,
             sandbox_feature: ReadinessState::Missing,

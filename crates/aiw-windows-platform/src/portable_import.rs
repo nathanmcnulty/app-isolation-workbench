@@ -23,7 +23,8 @@ use windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBU
 use crate::exact_dispose::{
     ExactDisposeError, ExtendedAttributeBinding, FORBIDDEN_ATTRIBUTES, basic_info, file_size,
     hash_file, query_extended_attributes_for_import, reject_case_sensitive_directory,
-    source_directory_entries, stabilized_extended_attributes, standard_info, verify_stream_policy,
+    source_directory_entries, stabilized_import_extended_attributes, standard_info,
+    verify_stream_policy,
 };
 use crate::source_inspection::{HeldPortableDirectory, SourceInspectionError};
 use crate::workspace::{
@@ -612,11 +613,12 @@ fn capture_eas(
     file: &File,
     directory: bool,
 ) -> Result<ApplicationFileEaAuthority, PortableImportError> {
-    let binding = stabilized_extended_attributes(file, directory).map_err(exact)?;
+    let binding = stabilized_import_extended_attributes(file, directory).map_err(exact)?;
     Ok(ea_authority(binding))
 }
 
 fn ea_authority(binding: ExtendedAttributeBinding) -> ApplicationFileEaAuthority {
+    let binding = binding.for_import_receipt();
     ApplicationFileEaAuthority {
         entries: binding
             .entries
@@ -738,14 +740,7 @@ fn valid_identity(value: &WindowsFileIdentity) -> bool {
 }
 
 fn valid_eas(value: &ApplicationFileEaAuthority) -> bool {
-    valid_hex(&value.canonical_sha256, 64)
-        && value.entries.len() <= 4
-        && value.entries.iter().all(|entry| {
-            !entry.name.is_empty()
-                && entry.name.is_ascii()
-                && usize::from(entry.value_length) <= 64 * 1024
-                && valid_hex(&entry.value_sha256, 64)
-        })
+    crate::exact_dispose::valid_import_ea_authority(value)
 }
 
 fn valid_hex(value: &str, width: usize) -> bool {
@@ -823,6 +818,12 @@ mod tests {
         let receipt = import_portable_directory(&root.0, "portable-001", &held).unwrap();
         let verification = verify_portable_directory_import(&receipt).unwrap();
         assert!(verification.verified);
+        let mut legacy = receipt.clone();
+        legacy.schema_version = "aiw.dev/portable-directory-import-receipt/v0alpha1".to_owned();
+        assert!(matches!(
+            verify_portable_directory_import(&legacy),
+            Err(PortableImportError::Contract(_))
+        ));
         assert_eq!(verification.verified_entries, 4);
         assert_eq!(
             fs::read(

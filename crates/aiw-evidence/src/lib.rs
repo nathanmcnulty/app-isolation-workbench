@@ -150,6 +150,7 @@ pub fn verify_records(records: &[EvidenceRecord]) -> Result<EvidenceManifest, Ev
                 actual: record.schema_version.clone(),
             });
         }
+        validate_event_metadata(&record.observed_utc, &record.kind, &record.source)?;
         let expected_sequence = index as u64;
         if record.sequence != expected_sequence {
             return Err(EvidenceError::SequenceMismatch {
@@ -221,16 +222,25 @@ fn calculate_record_hash(
 }
 
 fn validate_event(event: &EvidenceEvent) -> Result<(), EvidenceError> {
+    validate_event_metadata(&event.observed_utc, &event.kind, &event.source)?;
+    canonical_json_bytes(&event.payload)?;
+    Ok(())
+}
+
+fn validate_event_metadata(
+    observed_utc: &str,
+    kind: &str,
+    source: &str,
+) -> Result<(), EvidenceError> {
     for (name, value) in [
-        ("observedUtc", event.observed_utc.as_str()),
-        ("kind", event.kind.as_str()),
-        ("source", event.source.as_str()),
+        ("observedUtc", observed_utc),
+        ("kind", kind),
+        ("source", source),
     ] {
         if value.trim().is_empty() {
             return Err(EvidenceError::EmptyEventField(name));
         }
     }
-    canonical_json_bytes(&event.payload)?;
     Ok(())
 }
 
@@ -325,6 +335,42 @@ mod tests {
         assert_eq!(manifest.record_count, 2);
         assert_eq!(manifest.kinds["token"], 1);
         assert_eq!(manifest.root_hash, log.records()[1].hash);
+    }
+
+    #[test]
+    fn self_consistent_hashes_do_not_authorize_empty_event_metadata() {
+        for field in ["observedUtc", "kind", "source"] {
+            for invalid in ["", " \t\r\n"] {
+                let mut log = EvidenceLog::new();
+                log.append(event("token", serde_json::json!({"appContainer": true})))
+                    .unwrap();
+                let mut records = log.records().to_vec();
+                let record = &mut records[0];
+                match field {
+                    "observedUtc" => record.observed_utc = invalid.to_owned(),
+                    "kind" => record.kind = invalid.to_owned(),
+                    "source" => record.source = invalid.to_owned(),
+                    _ => unreachable!(),
+                }
+                record.hash = calculate_record_hash(
+                    record.sequence,
+                    &record.observed_utc,
+                    &record.kind,
+                    &record.source,
+                    &record.payload,
+                    record.previous_hash.as_deref(),
+                )
+                .unwrap();
+                assert!(matches!(
+                    verify_records(&records),
+                    Err(EvidenceError::EmptyEventField(actual)) if actual == field
+                ));
+                assert!(matches!(
+                    EvidenceLog::from_verified(records),
+                    Err(EvidenceError::EmptyEventField(actual)) if actual == field
+                ));
+            }
+        }
     }
 
     #[test]

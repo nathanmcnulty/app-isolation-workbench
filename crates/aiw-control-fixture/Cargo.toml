@@ -1,0 +1,22 @@
+[package]
+name = "aiw-control-fixture"
+description = "Fixed local control fixture for App Isolation Workbench"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+aiw-token.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+aiw-windows-platform.workspace = true
+
+[lints]
+workspace = true

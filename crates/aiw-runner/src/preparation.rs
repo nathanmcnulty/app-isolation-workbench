@@ -28,6 +28,14 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 pub const WSB_PREPARATION_RECEIPT_SCHEMA_VERSION: &str = "aiw.dev/wsb-preparation-receipt/v0alpha1";
+pub const WSB_MSI_PREPARATION_RECEIPT_SCHEMA_VERSION: &str =
+    "aiw.dev/wsb-preparation-receipt/v0alpha2";
+pub const WSB_BAMBU_PREPARATION_RECEIPT_SCHEMA_VERSION: &str =
+    "aiw.dev/wsb-preparation-receipt/v0alpha3";
+pub const WSB_MSI_DOCUMENT_PREPARATION_RECEIPT_SCHEMA_VERSION: &str =
+    "aiw.dev/wsb-preparation-receipt/v0alpha4";
+pub const WSB_MSI_OBSERVATION_PREPARATION_RECEIPT_SCHEMA_VERSION: &str =
+    "aiw.dev/wsb-preparation-receipt/v0alpha5";
 pub const WSB_PLANNING_IMPORT_RESULT_SCHEMA_VERSION: &str =
     "aiw.dev/wsb-planning-import-result/v0alpha1";
 
@@ -36,6 +44,50 @@ const PINNED_CLI_VERSION: &str = "0.8.107.0";
 const PINNED_CLI_PROTOCOL: &str = "windowsSandboxCli/v0.8.107.0";
 const PINNED_LIST_SCHEMA: &str = "WindowsSandboxEnvironments/Id";
 const GUEST_AGENT_FILE: &str = "aiw-guest-agent.exe";
+const MSI_FILE: &str = "application.msi";
+const BAMBU_FILE: &str = "application.exe";
+const GUEST_MSI_RESULT: &str = r"C:\AIW\Output\scenario-result.json";
+const TRUST_DELTA_MSI: &str = "installs and exercises the approved imported MSI in Windows Sandbox";
+fn msi_trust_delta(msi: &WsbMsiApplication) -> String {
+    let execution = msi_execution_trust_delta(msi);
+    if msi.required_observations.is_some() {
+        format!(
+            "{execution}; requires fixed file ACL controls using the launched application's token: create and read a local-data control and deny reading an owner-and-SYSTEM-only guest control; both controls are discarded with the worker"
+        )
+    } else {
+        execution
+    }
+}
+fn msi_execution_trust_delta(msi: &WsbMsiApplication) -> String {
+    if msi.scenario.requires_local_settings() {
+        return format!(
+            "installs and exercises the approved imported MSI in Windows Sandbox; creates the fresh directory {} as the standard user with inherited permissions and redirects Notepad++ settings there; settings are discarded with the worker; no additional host mappings, network access, capabilities, or ACL grants",
+            aiw_provider_wsb::NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_DIRECTORY,
+        );
+    }
+    match (
+        msi.scenario.interactive_session_seconds,
+        &msi.scenario.interactive_document,
+    ) {
+        (Some(seconds), Some(document)) => format!(
+            "opens Notepad++ in Windows Sandbox for up to {seconds} seconds after window readiness with an approved {} byte UTF-8 document (SHA-256 {}); retains the staged input and receipt-bound output in the run workspace; export requires a separate explicit command; no personal folder mapping, clipboard, or network access",
+            document.input_size_bytes, document.input_sha256,
+        ),
+        (Some(seconds), None) => format!(
+            "opens scratch-only Notepad++ in Windows Sandbox for up to {seconds} seconds after window readiness; all user data is discarded; no host file, clipboard, or network access"
+        ),
+        (None, _) => TRUST_DELTA_MSI.to_owned(),
+    }
+}
+fn msi_lifecycle(msi: Option<&WsbMsiApplication>) -> RunLifecycleKind {
+    if msi.is_some_and(|value| value.scenario.interactive_session_seconds.is_some()) {
+        RunLifecycleKind::Launch
+    } else {
+        RunLifecycleKind::Assessment
+    }
+}
+const TRUST_DELTA_BAMBU: &str =
+    "installs and exports the approved Bambu Studio local 3MF scenario in Windows Sandbox";
 const GUEST_TOOLS: &str = r"C:\AIW\Tools";
 const GUEST_OUTPUT: &str = r"C:\AIW\Output";
 const GUEST_AGENT: &str = r"C:\AIW\Tools\aiw-guest-agent.exe";
@@ -96,6 +148,8 @@ pub struct WsbPreparationReceipt {
     pub workspace: WorkspaceBindingEvidence,
     pub workspace_identity_sha256: String,
     pub readiness_schema_version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_os_version: Option<aiw_probe::WindowsVersionObservation>,
     pub provider: BinaryIdentity,
     pub provider_package: WindowsPackageIdentity,
     pub provider_catalog: CatalogTrustIdentity,
@@ -109,11 +163,218 @@ pub struct WsbPreparationReceipt {
     pub approval_required: bool,
     pub provider_acquired: bool,
     pub provider_mutated: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub msi: Option<WsbMsiApplication>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bambu: Option<WsbBambuApplication>,
+}
+
+#[derive(Debug, Clone, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WsbMsiApplication {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required_observations: Option<aiw_provider_wsb::MsiRequiredObservations>,
+    pub import_receipt: aiw_probe::ApplicationFileImportReceipt,
+    pub import_receipt_sha256: String,
+    pub scenario: aiw_provider_wsb::CompiledMsiScenario,
+    pub scenario_sha256: String,
+    pub staged_payload: BinaryIdentity,
+    pub staged_identity: WindowsFileIdentity,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub staged_document: Option<WsbMsiDocument>,
+}
+
+#[derive(Debug, Clone, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WsbMsiDocument {
+    pub staged_payload: BinaryIdentity,
+    pub staged_identity: WindowsFileIdentity,
+}
+
+impl WsbMsiApplication {
+    pub(crate) fn validate(
+        &self,
+        workspace: &WorkspaceBindingEvidence,
+    ) -> Result<(), WsbPreparationError> {
+        if let Some(required) = self.required_observations {
+            required
+                .validate_for(&self.scenario)
+                .map_err(WsbPreparationError::Contract)?;
+        }
+        self.scenario
+            .validate()
+            .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+        let receipt_bytes = serde_json::to_vec(&self.import_receipt)
+            .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+        if !matches!(
+            self.import_receipt.schema_version.as_str(),
+            aiw_probe::APPLICATION_FILE_IMPORT_RECEIPT_SCHEMA
+                | aiw_probe::APPLICATION_DOWNLOAD_IMPORT_RECEIPT_SCHEMA
+        ) || self.import_receipt.source_kind != aiw_probe::ApplicationInspectionKind::Msi
+            || hex::encode(Sha256::digest(receipt_bytes)) != self.import_receipt_sha256
+            || canonical_hash(&self.scenario)? != self.scenario_sha256
+            || self.scenario.application_sha256 != self.import_receipt.sha256
+            || self.staged_payload.sha256 != self.import_receipt.sha256
+            || self.staged_payload.size_bytes != self.import_receipt.size_bytes
+            || self.staged_payload.size_bytes == 0
+            || self.staged_payload.size_bytes > 128 * 1024 * 1024
+            || self.staged_payload.version.is_some()
+            || self.staged_payload.signature_status != ReadinessState::Unknown
+            || normalized_windows_path(&self.staged_payload.canonical_path)
+                != format!(
+                    "{}\\{}",
+                    normalized_windows_path(&workspace.tools.final_path),
+                    MSI_FILE
+                )
+            || normalized_windows_path(&self.staged_identity.final_path)
+                != normalized_windows_path(&self.staged_payload.canonical_path)
+            || self.staged_identity.volume_serial_number != workspace.tools.volume_serial_number
+        {
+            return Err(WsbPreparationError::Contract(
+                "MSI preparation bindings are inconsistent".to_owned(),
+            ));
+        }
+        let transfer = self.scenario.requires_document_transfer();
+        match (transfer, self.staged_document.as_ref()) {
+            (false, None) => {}
+            (true, Some(document)) => {
+                let contract = self.scenario.interactive_document.as_ref().ok_or_else(|| {
+                    WsbPreparationError::Contract(
+                        "interactive document profile has no input contract".to_owned(),
+                    )
+                })?;
+                if document.staged_payload.sha256 != contract.input_sha256
+                    || document.staged_payload.size_bytes != contract.input_size_bytes
+                    || document.staged_payload.size_bytes
+                        > aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES
+                    || document.staged_payload.version.is_some()
+                    || document.staged_payload.signature_status != ReadinessState::Unknown
+                    || normalized_windows_path(&document.staged_payload.canonical_path)
+                        != format!(
+                            "{}\\document-input.txt",
+                            normalized_windows_path(&workspace.tools.final_path)
+                        )
+                    || normalized_windows_path(&document.staged_identity.final_path)
+                        != normalized_windows_path(&document.staged_payload.canonical_path)
+                    || document.staged_identity.volume_serial_number
+                        != workspace.tools.volume_serial_number
+                {
+                    return Err(WsbPreparationError::Contract(
+                        "interactive document preparation bindings are inconsistent".to_owned(),
+                    ));
+                }
+            }
+            (true, None) => {
+                return Err(WsbPreparationError::Contract(
+                    "interactive document profile requires a staged input".to_owned(),
+                ));
+            }
+            (false, Some(_)) => {
+                return Err(WsbPreparationError::Contract(
+                    "non-transfer MSI profile cannot stage an interactive document".to_owned(),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WsbBambuApplication {
+    pub import_receipt: aiw_probe::ApplicationFileImportReceipt,
+    pub import_receipt_sha256: String,
+    pub scenario: aiw_provider_wsb::CompiledBambuExportScenario,
+    pub scenario_sha256: String,
+    pub staged_payload: BinaryIdentity,
+    pub staged_identity: WindowsFileIdentity,
+}
+
+impl WsbBambuApplication {
+    pub(crate) fn validate(
+        &self,
+        workspace: &WorkspaceBindingEvidence,
+    ) -> Result<(), WsbPreparationError> {
+        self.scenario
+            .validate()
+            .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+        let receipt_bytes = serde_json::to_vec(&self.import_receipt)
+            .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+        if !matches!(
+            self.import_receipt.schema_version.as_str(),
+            aiw_probe::APPLICATION_FILE_IMPORT_RECEIPT_SCHEMA
+                | aiw_probe::APPLICATION_DOWNLOAD_IMPORT_RECEIPT_SCHEMA
+        ) || self.import_receipt.source_kind != aiw_probe::ApplicationInspectionKind::Exe
+            || hex::encode(Sha256::digest(receipt_bytes)) != self.import_receipt_sha256
+            || canonical_hash(&self.scenario)? != self.scenario_sha256
+            || self.scenario.application_sha256 != self.import_receipt.sha256
+            || self.staged_payload.sha256 != self.import_receipt.sha256
+            || self.staged_payload.size_bytes != self.import_receipt.size_bytes
+            || self.staged_payload.size_bytes == 0
+            || self.staged_payload.size_bytes > 512 * 1024 * 1024
+            || self.staged_payload.version.is_some()
+            || self.staged_payload.signature_status != ReadinessState::Unknown
+            || normalized_windows_path(&self.staged_payload.canonical_path)
+                != format!(
+                    "{}\\{}",
+                    normalized_windows_path(&workspace.tools.final_path),
+                    BAMBU_FILE
+                )
+            || normalized_windows_path(&self.staged_identity.final_path)
+                != normalized_windows_path(&self.staged_payload.canonical_path)
+            || self.staged_identity.volume_serial_number != workspace.tools.volume_serial_number
+        {
+            return Err(WsbPreparationError::Contract(
+                "Bambu preparation bindings are inconsistent".to_owned(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl WsbPreparationReceipt {
+    pub(crate) fn verify_host_os_version(
+        &self,
+        current: Option<&aiw_probe::WindowsVersionObservation>,
+    ) -> Result<(), WsbPreparationError> {
+        if self
+            .host_os_version
+            .as_ref()
+            .is_some_and(|recorded| Some(recorded) != current)
+        {
+            return Err(WsbPreparationError::Contract(
+                "host OS version changed since preparation or could not be reobserved".into(),
+            ));
+        }
+        Ok(())
+    }
     pub fn validate(&self) -> Result<(), WsbPreparationError> {
-        if self.schema_version != WSB_PREPARATION_RECEIPT_SCHEMA_VERSION
+        if let Some(os) = &self.host_os_version {
+            os.validate().map_err(WsbPreparationError::Contract)?;
+        }
+        let expected_schema = if self.bambu.is_some() {
+            WSB_BAMBU_PREPARATION_RECEIPT_SCHEMA_VERSION
+        } else if self.msi.is_some() {
+            if self
+                .msi
+                .as_ref()
+                .is_some_and(|msi| msi.required_observations.is_some())
+            {
+                WSB_MSI_OBSERVATION_PREPARATION_RECEIPT_SCHEMA_VERSION
+            } else if self
+                .msi
+                .as_ref()
+                .is_some_and(|msi| msi.scenario.requires_document_transfer())
+            {
+                WSB_MSI_DOCUMENT_PREPARATION_RECEIPT_SCHEMA_VERSION
+            } else {
+                WSB_MSI_PREPARATION_RECEIPT_SCHEMA_VERSION
+            }
+        } else {
+            WSB_PREPARATION_RECEIPT_SCHEMA_VERSION
+        };
+        if self.msi.is_some() && self.bambu.is_some()
+            || self.schema_version != expected_schema
             || self.status != WsbPreparationStatus::PendingApproval
             || self.run_id.is_empty()
             || self.created_at.is_empty()
@@ -172,6 +433,12 @@ impl WsbPreparationReceipt {
             ));
         }
         require_pinned_protocol(&self.provider_protocol)?;
+        if let Some(msi) = &self.msi {
+            msi.validate(&self.workspace)?;
+        }
+        if let Some(bambu) = &self.bambu {
+            bambu.validate(&self.workspace)?;
+        }
         Ok(())
     }
 }
@@ -186,15 +453,30 @@ pub struct PreparedWsbArtifacts {
 impl PreparedWsbArtifacts {
     pub fn validate(&self) -> Result<(), WsbPreparationError> {
         self.receipt.validate()?;
-        validate_fixed_wsb_plan(&self.wsb_plan, &self.receipt.workspace)?;
+        let mut profile_plan = self.wsb_plan.clone();
+        if self.receipt.msi.is_some() || self.receipt.bambu.is_some() {
+            if profile_plan.probe.output != GUEST_MSI_RESULT {
+                return Err(WsbPreparationError::Contract(
+                    "imported application output path is not fixed".to_owned(),
+                ));
+            }
+            profile_plan.probe.output = GUEST_TOKEN.to_owned();
+        }
+        validate_fixed_wsb_plan(&profile_plan, &self.receipt.workspace)?;
         if self.run_plan.run_id != self.receipt.run_id
             || self.run_plan.project_id != self.receipt.project_id
             || self.run_plan.project_revision_hash != self.receipt.project_revision_sha256
-            || self.run_plan.lifecycle != RunLifecycleKind::Assessment
+            || self.run_plan.lifecycle != msi_lifecycle(self.receipt.msi.as_ref())
             || self.run_plan.created_at != self.receipt.created_at
             || self.run_plan.trust_deltas
                 != [
-                    TRUST_DELTA_START.to_owned(),
+                    if let Some(msi) = &self.receipt.msi {
+                        msi_trust_delta(msi)
+                    } else if self.receipt.bambu.is_some() {
+                        TRUST_DELTA_BAMBU.to_owned()
+                    } else {
+                        TRUST_DELTA_START.to_owned()
+                    },
                     TRUST_DELTA_MAPPINGS.to_owned(),
                 ]
             || self
@@ -221,12 +503,62 @@ impl PreparedWsbArtifacts {
                 },
                 PlannedAction::CollectEvidence,
             ] => {
-                sandbox_plan_sha256 == &self.receipt.wsb_plan_sha256
+                self.receipt.msi.is_none()
+                    && self.receipt.bambu.is_none()
+                    && sandbox_plan_sha256 == &self.receipt.wsb_plan_sha256
                     && provider_sha256 == &self.receipt.provider.sha256
                     && guest_agent_sha256 == &self.receipt.guest_agent.sha256
                     && workspace.as_ref() == &self.receipt.workspace
                     && workspace_identity_sha256 == &self.receipt.workspace_identity_sha256
             }
+            [
+                PlannedAction::AssessHost,
+                PlannedAction::PrepareWorkspace,
+                PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
+                    sandbox_plan_sha256,
+                    provider_sha256,
+                    guest_agent_sha256,
+                    workspace,
+                    workspace_identity_sha256,
+                    import_receipt_sha256,
+                    application_sha256,
+                    scenario_sha256,
+                },
+                PlannedAction::CollectEvidence,
+            ] => self.receipt.msi.as_ref().is_some_and(|msi| {
+                sandbox_plan_sha256 == &self.receipt.wsb_plan_sha256
+                    && provider_sha256 == &self.receipt.provider.sha256
+                    && guest_agent_sha256 == &self.receipt.guest_agent.sha256
+                    && workspace.as_ref() == &self.receipt.workspace
+                    && workspace_identity_sha256 == &self.receipt.workspace_identity_sha256
+                    && import_receipt_sha256 == &msi.import_receipt_sha256
+                    && application_sha256 == &msi.staged_payload.sha256
+                    && scenario_sha256 == &msi.scenario_sha256
+            }),
+            [
+                PlannedAction::AssessHost,
+                PlannedAction::PrepareWorkspace,
+                PlannedAction::ExecuteWindowsSandboxImportedBambuScenario {
+                    sandbox_plan_sha256,
+                    provider_sha256,
+                    guest_agent_sha256,
+                    workspace,
+                    workspace_identity_sha256,
+                    import_receipt_sha256,
+                    application_sha256,
+                    scenario_sha256,
+                },
+                PlannedAction::CollectEvidence,
+            ] => self.receipt.bambu.as_ref().is_some_and(|bambu| {
+                sandbox_plan_sha256 == &self.receipt.wsb_plan_sha256
+                    && provider_sha256 == &self.receipt.provider.sha256
+                    && guest_agent_sha256 == &self.receipt.guest_agent.sha256
+                    && workspace.as_ref() == &self.receipt.workspace
+                    && workspace_identity_sha256 == &self.receipt.workspace_identity_sha256
+                    && import_receipt_sha256 == &bambu.import_receipt_sha256
+                    && application_sha256 == &bambu.staged_payload.sha256
+                    && scenario_sha256 == &bambu.scenario_sha256
+            }),
             _ => false,
         };
         if !matching_action {
@@ -344,6 +676,7 @@ pub fn build_wsb_preparation(
         workspace: workspace.clone(),
         workspace_identity_sha256,
         readiness_schema_version: readiness.schema_version.clone(),
+        host_os_version: readiness.os_version.clone(),
         provider,
         provider_package: trusted.package.clone(),
         provider_catalog: trusted.catalog.clone(),
@@ -357,12 +690,157 @@ pub fn build_wsb_preparation(
         approval_required: true,
         provider_acquired: false,
         provider_mutated: false,
+        msi: None,
+        bambu: None,
     };
     let artifacts = PreparedWsbArtifacts {
         run_plan,
         wsb_plan,
         receipt,
     };
+    artifacts.validate()?;
+    Ok(artifacts)
+}
+
+pub fn build_wsb_msi_preparation(
+    run_id: &str,
+    project: &Project,
+    readiness: &WindowsSandboxReadiness,
+    workspace: &WorkspaceBindingEvidence,
+    guest_agent: &BinaryIdentity,
+    created_at: &str,
+    msi: WsbMsiApplication,
+) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
+    msi.validate(workspace)?;
+    let compiled = if let Some(document) = &msi.staged_document {
+        aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario_with_document(
+            project,
+            &msi.scenario.scenario_id,
+            &document.staged_payload.sha256,
+            document.staged_payload.size_bytes,
+        )
+    } else {
+        aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(project, &msi.scenario.scenario_id)
+    }
+    .map_err(|e| WsbPreparationError::Project(e.to_string()))?;
+    if compiled != msi.scenario {
+        return Err(WsbPreparationError::Project(
+            "compiled scenario differs from project".to_owned(),
+        ));
+    }
+    let mut artifacts = build_wsb_preparation(
+        run_id,
+        project,
+        readiness,
+        workspace,
+        guest_agent,
+        created_at,
+    )?;
+    artifacts.wsb_plan.probe.output = GUEST_MSI_RESULT.to_owned();
+    artifacts.receipt.wsb_plan_sha256 = canonical_hash(&artifacts.wsb_plan)?;
+    artifacts.run_plan = RunPlan::new(
+        run_id,
+        &project.metadata.name,
+        &artifacts.receipt.project_revision_sha256,
+        msi_lifecycle(Some(&msi)),
+        created_at,
+        vec![
+            PlannedAction::AssessHost,
+            PlannedAction::PrepareWorkspace,
+            PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
+                sandbox_plan_sha256: artifacts.receipt.wsb_plan_sha256.clone(),
+                provider_sha256: artifacts.receipt.provider.sha256.clone(),
+                guest_agent_sha256: guest_agent.sha256.clone(),
+                workspace: Box::new(workspace.clone()),
+                workspace_identity_sha256: artifacts.receipt.workspace_identity_sha256.clone(),
+                import_receipt_sha256: msi.import_receipt_sha256.clone(),
+                application_sha256: msi.staged_payload.sha256.clone(),
+                scenario_sha256: msi.scenario_sha256.clone(),
+            },
+            PlannedAction::CollectEvidence,
+        ],
+        vec![msi_trust_delta(&msi), TRUST_DELTA_MAPPINGS.to_owned()],
+    )
+    .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+    artifacts.receipt.run_plan_sha256 = artifacts
+        .run_plan
+        .hash()
+        .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+    artifacts.receipt.schema_version = if msi.required_observations.is_some() {
+        WSB_MSI_OBSERVATION_PREPARATION_RECEIPT_SCHEMA_VERSION.to_owned()
+    } else if msi.scenario.requires_document_transfer() {
+        WSB_MSI_DOCUMENT_PREPARATION_RECEIPT_SCHEMA_VERSION.to_owned()
+    } else {
+        WSB_MSI_PREPARATION_RECEIPT_SCHEMA_VERSION.to_owned()
+    };
+    artifacts.receipt.msi = Some(msi);
+    artifacts.validate()?;
+    Ok(artifacts)
+}
+
+pub fn build_wsb_bambu_preparation(
+    run_id: &str,
+    project: &Project,
+    readiness: &WindowsSandboxReadiness,
+    workspace: &WorkspaceBindingEvidence,
+    guest_agent: &BinaryIdentity,
+    created_at: &str,
+    bambu: WsbBambuApplication,
+) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
+    bambu.validate(workspace)?;
+    let compiled = aiw_provider_wsb::compile_bambu_studio_export_scenario(
+        project,
+        &bambu.scenario.scenario_id,
+    )
+    .map_err(|e| WsbPreparationError::Project(e.to_string()))?;
+    if compiled != bambu.scenario {
+        return Err(WsbPreparationError::Project(
+            "compiled scenario differs from project".to_owned(),
+        ));
+    }
+    let mut artifacts = build_wsb_preparation(
+        run_id,
+        project,
+        readiness,
+        workspace,
+        guest_agent,
+        created_at,
+    )?;
+    artifacts.wsb_plan.probe.output = GUEST_MSI_RESULT.to_owned();
+    artifacts.receipt.wsb_plan_sha256 = canonical_hash(&artifacts.wsb_plan)?;
+    artifacts.run_plan = RunPlan::new(
+        run_id,
+        &project.metadata.name,
+        &artifacts.receipt.project_revision_sha256,
+        RunLifecycleKind::Assessment,
+        created_at,
+        vec![
+            PlannedAction::AssessHost,
+            PlannedAction::PrepareWorkspace,
+            PlannedAction::ExecuteWindowsSandboxImportedBambuScenario {
+                sandbox_plan_sha256: artifacts.receipt.wsb_plan_sha256.clone(),
+                provider_sha256: artifacts.receipt.provider.sha256.clone(),
+                guest_agent_sha256: guest_agent.sha256.clone(),
+                workspace: Box::new(workspace.clone()),
+                workspace_identity_sha256: artifacts.receipt.workspace_identity_sha256.clone(),
+                import_receipt_sha256: bambu.import_receipt_sha256.clone(),
+                application_sha256: bambu.staged_payload.sha256.clone(),
+                scenario_sha256: bambu.scenario_sha256.clone(),
+            },
+            PlannedAction::CollectEvidence,
+        ],
+        vec![
+            TRUST_DELTA_BAMBU.to_owned(),
+            TRUST_DELTA_MAPPINGS.to_owned(),
+        ],
+    )
+    .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+    artifacts.receipt.run_plan_sha256 = artifacts
+        .run_plan
+        .hash()
+        .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+    artifacts.receipt.schema_version = WSB_BAMBU_PREPARATION_RECEIPT_SCHEMA_VERSION.to_owned();
+    artifacts.receipt.bambu = Some(bambu);
     artifacts.validate()?;
     Ok(artifacts)
 }
@@ -619,9 +1097,156 @@ pub fn prepare_windows_sandbox_bundle(
     workspace_leaf: &str,
     created_at: &str,
 ) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
+    prepare_bundle(
+        run_id,
+        project,
+        guest_agent_source,
+        expected_guest_agent_sha256,
+        workspace_parent,
+        workspace_leaf,
+        created_at,
+        None,
+    )
+}
+
+#[cfg(windows)]
+pub struct WsbMsiPreparationInput<'a> {
+    pub import_receipt: &'a aiw_probe::ApplicationFileImportReceipt,
+    pub scenario_id: &'a str,
+    pub document_input: Option<&'a Path>,
+}
+
+#[cfg(windows)]
+pub struct WsbBambuPreparationInput<'a> {
+    pub import_receipt: &'a aiw_probe::ApplicationFileImportReceipt,
+    pub scenario_id: &'a str,
+}
+
+#[cfg(windows)]
+enum WsbPreparationApplicationInput<'a> {
+    Msi(WsbMsiPreparationInput<'a>),
+    Bambu(WsbBambuPreparationInput<'a>),
+}
+
+#[cfg(windows)]
+enum PreparedApplicationScenario {
+    Msi(aiw_provider_wsb::CompiledMsiScenario),
+    Bambu(aiw_provider_wsb::CompiledBambuExportScenario),
+}
+
+#[cfg(windows)]
+pub fn prepare_windows_sandbox_msi_bundle(
+    run_id: &str,
+    project: &Project,
+    guest_agent_source: &Path,
+    expected_guest_agent_sha256: &str,
+    workspace_parent: &Path,
+    created_at: &str,
+    msi: WsbMsiPreparationInput<'_>,
+) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
+    prepare_bundle(
+        run_id,
+        project,
+        guest_agent_source,
+        expected_guest_agent_sha256,
+        workspace_parent,
+        run_id,
+        created_at,
+        Some(WsbPreparationApplicationInput::Msi(msi)),
+    )
+}
+
+#[cfg(windows)]
+pub fn prepare_windows_sandbox_bambu_bundle(
+    run_id: &str,
+    project: &Project,
+    guest_agent_source: &Path,
+    expected_guest_agent_sha256: &str,
+    workspace_parent: &Path,
+    created_at: &str,
+    bambu: WsbBambuPreparationInput<'_>,
+) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
+    prepare_bundle(
+        run_id,
+        project,
+        guest_agent_source,
+        expected_guest_agent_sha256,
+        workspace_parent,
+        run_id,
+        created_at,
+        Some(WsbPreparationApplicationInput::Bambu(bambu)),
+    )
+}
+
+#[cfg(windows)]
+#[allow(clippy::too_many_arguments)]
+fn prepare_bundle(
+    run_id: &str,
+    project: &Project,
+    guest_agent_source: &Path,
+    expected_guest_agent_sha256: &str,
+    workspace_parent: &Path,
+    workspace_leaf: &str,
+    created_at: &str,
+    application_input: Option<WsbPreparationApplicationInput<'_>>,
+) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
     use aiw_windows_platform::{HeldRunWorkspace, WorkspaceError, assess_windows_sandbox};
 
     validate_request_contract(run_id, project, created_at)?;
+    let held_document_input = match &application_input {
+        Some(WsbPreparationApplicationInput::Msi(input)) => input
+            .document_input
+            .map(open_interactive_document_input)
+            .transpose()?,
+        _ => None,
+    };
+    let mut held_application = match &application_input {
+        Some(WsbPreparationApplicationInput::Msi(input)) => {
+            let scenario = if let Some(document) = held_document_input.as_ref() {
+                aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario_with_document(
+                    project,
+                    input.scenario_id,
+                    &document.observation().sha256,
+                    document.observation().size_bytes,
+                )
+            } else {
+                aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(project, input.scenario_id)
+            }
+            .map_err(|e| WsbPreparationError::Project(e.to_string()))?;
+            if input.import_receipt.source_kind != aiw_probe::ApplicationInspectionKind::Msi
+                || input.import_receipt.sha256 != scenario.application_sha256
+                || input.import_receipt.size_bytes > 128 * 1024 * 1024
+            {
+                return Err(WsbPreparationError::Contract(
+                    "MSI intake differs from scenario or exceeds size limit".to_owned(),
+                ));
+            }
+            Some((
+                aiw_windows_platform::open_verified_application_file_import(input.import_receipt)
+                    .map_err(|e| WsbPreparationError::Contract(e.to_string()))?,
+                PreparedApplicationScenario::Msi(scenario),
+            ))
+        }
+        Some(WsbPreparationApplicationInput::Bambu(input)) => {
+            let scenario =
+                aiw_provider_wsb::compile_bambu_studio_export_scenario(project, input.scenario_id)
+                    .map_err(|e| WsbPreparationError::Project(e.to_string()))?;
+            if input.import_receipt.source_kind != aiw_probe::ApplicationInspectionKind::Exe
+                || input.import_receipt.sha256 != scenario.application_sha256
+                || input.import_receipt.size_bytes > 512 * 1024 * 1024
+            {
+                return Err(WsbPreparationError::Contract(
+                    "Bambu intake differs from scenario or exceeds size limit".to_owned(),
+                ));
+            }
+            Some((
+                aiw_windows_platform::open_verified_application_file_import(input.import_receipt)
+                    .map_err(|e| WsbPreparationError::Contract(e.to_string()))?,
+                PreparedApplicationScenario::Bambu(scenario),
+            ))
+        }
+        None => None,
+    };
     if workspace_leaf != run_id {
         return Err(WsbPreparationError::Contract(
             "workspace leaf must exactly match the run ID".to_owned(),
@@ -650,8 +1275,17 @@ pub fn prepare_windows_sandbox_bundle(
         ensure_empty_directory(&workspace.output_path())?;
         require_tools_allowlist(&workspace.tools_path())?;
         let (_held_agent, guest_agent) = stage_guest_agent(&mut held_guest_agent, &workspace)?;
-        require_tools_allowlist(&workspace.tools_path())?;
-        let artifacts = build_wsb_preparation(
+        let staged_document = if let Some(document) = &held_document_input {
+            Some(stage_interactive_document(document, &workspace)?)
+        } else {
+            None
+        };
+        require_profile_tools_allowlist(
+            &workspace.tools_path(),
+            None, // The installer is staged only after the base preparation is built.
+            staged_document.is_some(),
+        )?;
+        let mut artifacts = build_wsb_preparation(
             run_id,
             project,
             &readiness,
@@ -659,6 +1293,107 @@ pub fn prepare_windows_sandbox_bundle(
             &guest_agent,
             created_at,
         )?;
+        let held_staged_application = if let Some((held, scenario)) = &mut held_application {
+            let (file_name, expected_receipt) = match (&application_input, &*scenario) {
+                (
+                    Some(WsbPreparationApplicationInput::Msi(input)),
+                    PreparedApplicationScenario::Msi(_),
+                ) => (MSI_FILE, input.import_receipt),
+                (
+                    Some(WsbPreparationApplicationInput::Bambu(input)),
+                    PreparedApplicationScenario::Bambu(_),
+                ) => (BAMBU_FILE, input.import_receipt),
+                _ => {
+                    return Err(WsbPreparationError::Contract(
+                        "application preparation input changed during staging".to_owned(),
+                    ));
+                }
+            };
+            let created = workspace
+                .create_tools_file_new(file_name)
+                .map_err(|e| WsbPreparationError::Workspace(e.to_string()))?;
+            let staged = held
+                .copy_to(created)
+                .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+            let staged_identity = staged.identity().clone();
+            drop(staged);
+            let staged = workspace
+                .reopen_tools_file_readonly(file_name)
+                .map_err(|e| WsbPreparationError::Workspace(e.to_string()))?;
+            let observed = aiw_windows_platform::HeldApplicationFile::open(staged.final_path())
+                .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+            if staged.identity() != &staged_identity
+                || observed.observation().identity != staged_identity
+                || observed.observation().sha256 != expected_receipt.sha256
+                || observed.observation().size_bytes != expected_receipt.size_bytes
+            {
+                return Err(WsbPreparationError::Contract(
+                    "staged application drifted during readonly reopen".to_owned(),
+                ));
+            }
+            match scenario {
+                PreparedApplicationScenario::Msi(scenario) => {
+                    let binding = WsbMsiApplication {
+                        required_observations: scenario
+                            .interactive_session_seconds
+                            .is_none()
+                            .then_some(
+                                aiw_provider_wsb::MsiRequiredObservations::StandardUserAclV1,
+                            ),
+                        import_receipt: expected_receipt.clone(),
+                        import_receipt_sha256: held.verification().receipt_sha256.clone(),
+                        scenario: scenario.clone(),
+                        scenario_sha256: canonical_hash(scenario)?,
+                        staged_payload: BinaryIdentity {
+                            canonical_path: provider_path(&staged.final_path().to_string_lossy()),
+                            sha256: expected_receipt.sha256.clone(),
+                            size_bytes: expected_receipt.size_bytes,
+                            version: None,
+                            signature_status: ReadinessState::Unknown,
+                        },
+                        staged_identity: staged.identity().clone(),
+                        staged_document: staged_document.clone(),
+                    };
+                    artifacts = build_wsb_msi_preparation(
+                        run_id,
+                        project,
+                        &readiness,
+                        workspace.evidence(),
+                        &guest_agent,
+                        created_at,
+                        binding,
+                    )?;
+                }
+                PreparedApplicationScenario::Bambu(scenario) => {
+                    let binding = WsbBambuApplication {
+                        import_receipt: expected_receipt.clone(),
+                        import_receipt_sha256: held.verification().receipt_sha256.clone(),
+                        scenario: scenario.clone(),
+                        scenario_sha256: canonical_hash(scenario)?,
+                        staged_payload: BinaryIdentity {
+                            canonical_path: provider_path(&staged.final_path().to_string_lossy()),
+                            sha256: expected_receipt.sha256.clone(),
+                            size_bytes: expected_receipt.size_bytes,
+                            version: None,
+                            signature_status: ReadinessState::Unknown,
+                        },
+                        staged_identity: staged.identity().clone(),
+                    };
+                    artifacts = build_wsb_bambu_preparation(
+                        run_id,
+                        project,
+                        &readiness,
+                        workspace.evidence(),
+                        &guest_agent,
+                        created_at,
+                        binding,
+                    )?;
+                }
+            }
+            Some((staged, observed))
+        } else {
+            None
+        };
         workspace
             .revalidate()
             .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?;
@@ -668,8 +1403,28 @@ pub fn prepare_windows_sandbox_bundle(
             .revalidate()
             .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?;
         ensure_empty_directory(&workspace.output_path())?;
-        require_tools_allowlist(&workspace.tools_path())?;
+        require_profile_tools_allowlist(
+            &workspace.tools_path(),
+            application_file_name(&artifacts.receipt),
+            document_file_present(&artifacts.receipt),
+        )?;
         require_workspace_allowlist(workspace.root_path(), PreparationWorkspaceState::Building)?;
+        if let Some((held, _)) = &mut held_application {
+            held.revalidate()
+                .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+        }
+        if let Some(document) = &held_document_input {
+            document
+                .revalidate()
+                .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+        }
+        if let Some((file, observed)) = &held_staged_application {
+            file.revalidate()
+                .map_err(|e| WsbPreparationError::Workspace(e.to_string()))?;
+            observed
+                .revalidate()
+                .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+        }
         complete_bundle(&workspace, &artifacts, staged)?;
         Ok(artifacts)
     })();
@@ -695,6 +1450,15 @@ pub(crate) struct HeldVerifiedWsbPreparation {
     run_plan_file: std::fs::File,
     wsb_plan_file: std::fs::File,
     _held_agent: HeldGuestAgentSource,
+    held_application: Option<(
+        aiw_windows_platform::BoundWorkspaceFile,
+        aiw_windows_platform::HeldApplicationFile,
+        aiw_windows_platform::HeldVerifiedApplicationFileImport,
+    )>,
+    held_document: Option<(
+        aiw_windows_platform::BoundWorkspaceFile,
+        aiw_windows_platform::HeldApplicationFile,
+    )>,
     workspace: aiw_windows_platform::HeldRunWorkspace,
 }
 
@@ -709,7 +1473,28 @@ impl HeldVerifiedWsbPreparation {
             .revalidate()
             .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?;
         ensure_empty_directory(&self.workspace.output_path())?;
-        require_tools_allowlist(&self.workspace.tools_path())?;
+        require_profile_tools_allowlist(
+            &self.workspace.tools_path(),
+            application_file_name(&self.artifacts.receipt),
+            document_file_present(&self.artifacts.receipt),
+        )?;
+        if let Some((file, observed, intake)) = &self.held_application {
+            intake
+                .revalidate()
+                .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+            file.revalidate()
+                .map_err(|e| WsbPreparationError::Workspace(e.to_string()))?;
+            observed
+                .revalidate()
+                .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+        }
+        if let Some((file, observed)) = &self.held_document {
+            file.revalidate()
+                .map_err(|e| WsbPreparationError::Workspace(e.to_string()))?;
+            observed
+                .revalidate()
+                .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+        }
         require_workspace_allowlist(self.workspace.root_path(), state)?;
         let receipt: WsbPreparationReceipt = read_json_bounded(&mut self.receipt_file)?;
         let run_plan: RunPlan = read_json_bounded(&mut self.run_plan_file)?;
@@ -757,6 +1542,12 @@ pub(crate) fn open_verified_windows_sandbox_preparation(
     let mut receipt_file = open_bundle_file(&workspace_root.join(RECEIPT_FILE))?;
     let receipt: WsbPreparationReceipt = read_json_bounded(&mut receipt_file)?;
     receipt.validate()?;
+    if allow_revoking && (receipt.msi.is_some() || receipt.bambu.is_some()) {
+        return Err(WsbPreparationError::Contract(
+            "private golden discard does not authorize imported application workspace deletion"
+                .to_owned(),
+        ));
+    }
     require_hash(expected_guest_agent_sha256).map_err(|_| {
         WsbPreparationError::GuestAgent(
             "expected guest-agent identity is not lowercase SHA-256".to_owned(),
@@ -794,7 +1585,11 @@ pub(crate) fn open_verified_windows_sandbox_preparation(
         .revalidate()
         .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?;
     ensure_empty_directory(&workspace.output_path())?;
-    require_tools_allowlist(&workspace.tools_path())?;
+    require_profile_tools_allowlist(
+        &workspace.tools_path(),
+        application_file_name(&receipt),
+        document_file_present(&receipt),
+    )?;
     let state = if workspace.root_path().join("runs").exists() {
         if !allow_imported {
             return Err(WsbPreparationError::Contract(
@@ -822,6 +1617,103 @@ pub(crate) fn open_verified_windows_sandbox_preparation(
             "staged guest-agent size differs from the preparation receipt".to_owned(),
         ));
     }
+    let held_application = if let Some((
+        import_receipt,
+        scenario_matches_project,
+        staged_identity,
+        staged_payload,
+        file_name,
+    )) = receipt
+        .msi
+        .as_ref()
+        .map(|msi| {
+            let compiled = if let Some(document) = &msi.staged_document {
+                aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario_with_document(
+                    project,
+                    &msi.scenario.scenario_id,
+                    &document.staged_payload.sha256,
+                    document.staged_payload.size_bytes,
+                )
+            } else {
+                aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
+                    project,
+                    &msi.scenario.scenario_id,
+                )
+            };
+            (
+                &msi.import_receipt,
+                compiled
+                    .map(|compiled| compiled == msi.scenario)
+                    .map_err(|error| WsbPreparationError::Project(error.to_string())),
+                &msi.staged_identity,
+                &msi.staged_payload,
+                MSI_FILE,
+            )
+        })
+        .or_else(|| {
+            receipt.bambu.as_ref().map(|bambu| {
+                (
+                    &bambu.import_receipt,
+                    aiw_provider_wsb::compile_bambu_studio_export_scenario(
+                        project,
+                        &bambu.scenario.scenario_id,
+                    )
+                    .map(|compiled| compiled == bambu.scenario)
+                    .map_err(|error| WsbPreparationError::Project(error.to_string())),
+                    &bambu.staged_identity,
+                    &bambu.staged_payload,
+                    BAMBU_FILE,
+                )
+            })
+        }) {
+        let intake = aiw_windows_platform::open_verified_application_file_import(import_receipt)
+            .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+        if !scenario_matches_project? {
+            return Err(WsbPreparationError::Project(
+                "persisted application scenario differs from project".to_owned(),
+            ));
+        }
+        let file = workspace
+            .reopen_tools_file_readonly(file_name)
+            .map_err(|e| WsbPreparationError::Workspace(e.to_string()))?;
+        let observed = aiw_windows_platform::HeldApplicationFile::open(file.final_path())
+            .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+        if file.identity() != staged_identity
+            || observed.observation().identity != *staged_identity
+            || observed.observation().sha256 != staged_payload.sha256
+            || observed.observation().size_bytes != staged_payload.size_bytes
+        {
+            return Err(WsbPreparationError::Contract(
+                "staged application identity or content drifted".to_owned(),
+            ));
+        }
+        Some((file, observed, intake))
+    } else {
+        None
+    };
+    let held_document = if let Some(document) = receipt
+        .msi
+        .as_ref()
+        .and_then(|msi| msi.staged_document.as_ref())
+    {
+        let file = workspace
+            .reopen_tools_file_readonly("document-input.txt")
+            .map_err(|e| WsbPreparationError::Workspace(e.to_string()))?;
+        let observed = aiw_windows_platform::HeldApplicationFile::open(file.final_path())
+            .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+        if file.identity() != &document.staged_identity
+            || observed.observation().identity != document.staged_identity
+            || observed.observation().sha256 != document.staged_payload.sha256
+            || observed.observation().size_bytes != document.staged_payload.size_bytes
+        {
+            return Err(WsbPreparationError::Contract(
+                "staged interactive document identity or content drifted".to_owned(),
+            ));
+        }
+        Some((file, observed))
+    } else {
+        None
+    };
     let observed = PreparedWsbArtifacts {
         run_plan,
         wsb_plan,
@@ -857,6 +1749,8 @@ pub(crate) fn open_verified_windows_sandbox_preparation(
         run_plan_file,
         wsb_plan_file,
         _held_agent: held_agent,
+        held_application,
+        held_document,
         workspace,
     };
     held.revalidate(state)?;
@@ -900,7 +1794,14 @@ pub fn import_windows_sandbox_preparation(
     )?;
     let run_id = held.artifacts.receipt.run_id.clone();
     let receipt = WsbPlanningImportReceipt {
-        schema_version: aiw_orchestrator::WSB_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION.to_owned(),
+        schema_version: if held.artifacts.receipt.bambu.is_some() {
+            aiw_orchestrator::WSB_BAMBU_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION
+        } else if held.artifacts.receipt.msi.is_some() {
+            aiw_orchestrator::WSB_MSI_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION
+        } else {
+            aiw_orchestrator::WSB_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION
+        }
+        .to_owned(),
         run_id: run_id.clone(),
         imported_at: imported_at.to_owned(),
         status: WsbPlanningImportStatus::PendingApproval,
@@ -1160,6 +2061,109 @@ fn open_guest_agent_source(
 }
 
 #[cfg(windows)]
+fn open_interactive_document_input(
+    source_path: &Path,
+) -> Result<aiw_windows_platform::HeldApplicationFile, WsbPreparationError> {
+    if !source_path.is_absolute() {
+        return Err(WsbPreparationError::Contract(
+            "interactive document input must be an absolute path".to_owned(),
+        ));
+    }
+    let metadata = std::fs::symlink_metadata(source_path)
+        .map_err(|error| WsbPreparationError::Contract(error.to_string()))?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(WsbPreparationError::Contract(
+            "interactive document input must be an ordinary file".to_owned(),
+        ));
+    }
+    let canonical = source_path
+        .canonicalize()
+        .map_err(|error| WsbPreparationError::Contract(error.to_string()))?;
+    if normalized_windows_path(&source_path.to_string_lossy())
+        != normalized_windows_path(&canonical.to_string_lossy())
+    {
+        return Err(WsbPreparationError::Contract(
+            "interactive document input must be supplied by its canonical path".to_owned(),
+        ));
+    }
+    let held = aiw_windows_platform::HeldApplicationFile::open_bounded(
+        &canonical,
+        aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES,
+    )
+    .map_err(|error| WsbPreparationError::Contract(error.to_string()))?;
+    if held.observation().size_bytes > aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES {
+        return Err(WsbPreparationError::Contract(
+            "interactive document input exceeds its fixed size bound".to_owned(),
+        ));
+    }
+    let bytes = held
+        .read_bounded(aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES)
+        .map_err(|error| WsbPreparationError::Contract(error.to_string()))?;
+    validate_interactive_document_bytes(&bytes)?;
+    if hex::encode(Sha256::digest(&bytes)) != held.observation().sha256 {
+        return Err(WsbPreparationError::Contract(
+            "interactive document input hash changed while it was read".to_owned(),
+        ));
+    }
+    Ok(held)
+}
+
+#[cfg(windows)]
+fn stage_interactive_document(
+    source: &aiw_windows_platform::HeldApplicationFile,
+    workspace: &aiw_windows_platform::HeldRunWorkspace,
+) -> Result<WsbMsiDocument, WsbPreparationError> {
+    let created = workspace
+        .create_tools_file_new("document-input.txt")
+        .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?;
+    let mut destination = created.into_file();
+    source
+        .copy_to(&mut destination)
+        .map_err(|error| WsbPreparationError::Contract(error.to_string()))?;
+    drop(destination);
+    let staged = workspace
+        .reopen_tools_file_readonly("document-input.txt")
+        .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?;
+    let observed = aiw_windows_platform::HeldApplicationFile::open(staged.final_path())
+        .map_err(|error| WsbPreparationError::Contract(error.to_string()))?;
+    let bytes = observed
+        .read_bounded(aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES)
+        .map_err(|error| WsbPreparationError::Contract(error.to_string()))?;
+    validate_interactive_document_bytes(&bytes)?;
+    if observed.observation().sha256 != source.observation().sha256
+        || observed.observation().size_bytes != source.observation().size_bytes
+        || hex::encode(Sha256::digest(&bytes)) != source.observation().sha256
+    {
+        return Err(WsbPreparationError::Contract(
+            "staged interactive document differs from the held source".to_owned(),
+        ));
+    }
+    Ok(WsbMsiDocument {
+        staged_payload: BinaryIdentity {
+            canonical_path: provider_path(&staged.final_path().to_string_lossy()),
+            sha256: observed.observation().sha256.clone(),
+            size_bytes: observed.observation().size_bytes,
+            version: None,
+            signature_status: ReadinessState::Unknown,
+        },
+        staged_identity: staged.identity().clone(),
+    })
+}
+
+#[cfg(windows)]
+fn validate_interactive_document_bytes(bytes: &[u8]) -> Result<(), WsbPreparationError> {
+    if bytes.len() as u64 > aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES
+        || std::str::from_utf8(bytes).is_err()
+        || bytes.contains(&0)
+    {
+        return Err(WsbPreparationError::Contract(
+            "interactive document input must be bounded UTF-8 text without NUL bytes".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
 fn ensure_empty_directory(path: &Path) -> Result<(), WsbPreparationError> {
     let mut entries = std::fs::read_dir(path)
         .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?;
@@ -1173,6 +2177,34 @@ fn ensure_empty_directory(path: &Path) -> Result<(), WsbPreparationError> {
 
 #[cfg(windows)]
 fn require_tools_allowlist(path: &Path) -> Result<(), WsbPreparationError> {
+    require_profile_tools_allowlist(path, None, false)
+}
+
+#[cfg(windows)]
+fn application_file_name(receipt: &WsbPreparationReceipt) -> Option<&'static str> {
+    if receipt.msi.is_some() {
+        Some(MSI_FILE)
+    } else if receipt.bambu.is_some() {
+        Some(BAMBU_FILE)
+    } else {
+        None
+    }
+}
+
+#[cfg(windows)]
+fn document_file_present(receipt: &WsbPreparationReceipt) -> bool {
+    receipt
+        .msi
+        .as_ref()
+        .is_some_and(|msi| msi.staged_document.is_some())
+}
+
+#[cfg(windows)]
+fn require_profile_tools_allowlist(
+    path: &Path,
+    application_file: Option<&str>,
+    document_file: bool,
+) -> Result<(), WsbPreparationError> {
     let mut observed = std::fs::read_dir(path)
         .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?
         .map(|entry| {
@@ -1186,7 +2218,23 @@ fn require_tools_allowlist(path: &Path) -> Result<(), WsbPreparationError> {
         })
         .collect::<Result<Vec<_>, _>>()?;
     observed.sort();
-    if !observed.is_empty() && observed.as_slice() != [GUEST_AGENT_FILE] {
+    let mut expected = Vec::new();
+    if application_file.is_some() || document_file {
+        expected.push(GUEST_AGENT_FILE);
+    }
+    if let Some(application_file) = application_file {
+        expected.push(application_file);
+    }
+    if document_file {
+        expected.push("document-input.txt");
+    }
+    expected.sort_unstable();
+    let valid = if application_file.is_none() && !document_file {
+        observed.is_empty() || observed == [GUEST_AGENT_FILE]
+    } else {
+        observed == expected
+    };
+    if !valid {
         return Err(WsbPreparationError::Workspace(
             "tools directory contains entries outside the fixed preparation allowlist".to_owned(),
         ));
@@ -1549,6 +2597,7 @@ mod tests {
             schema_version: READINESS_SCHEMA.to_owned(),
             supported: true,
             os_build: Some(26_100),
+            os_version: None,
             process_architecture: "x86_64".to_owned(),
             virtualization: ReadinessState::Available,
             sandbox_feature: ReadinessState::Available,
@@ -1756,6 +2805,33 @@ mod tests {
             "now",
         )
         .unwrap();
+        let mut invalid_os = artifacts.clone();
+        invalid_os.receipt.host_os_version = Some(aiw_probe::WindowsVersionObservation {
+            major: 10,
+            minor: 0,
+            build: 0,
+            revision: 1,
+            observer_architecture: "x86_64".into(),
+        });
+        assert!(invalid_os.validate().is_err());
+        invalid_os.receipt.host_os_version.as_mut().unwrap().build = 28000;
+        let recorded = invalid_os.receipt.host_os_version.clone().unwrap();
+        assert!(artifacts.receipt.verify_host_os_version(None).is_ok());
+        assert!(
+            invalid_os
+                .receipt
+                .verify_host_os_version(Some(&recorded))
+                .is_ok()
+        );
+        assert!(invalid_os.receipt.verify_host_os_version(None).is_err());
+        let mut changed = recorded;
+        changed.revision += 1;
+        assert!(
+            invalid_os
+                .receipt
+                .verify_host_os_version(Some(&changed))
+                .is_err()
+        );
         let mut lifecycle = artifacts.clone();
         lifecycle.run_plan.lifecycle = RunLifecycleKind::Launch;
         assert!(lifecycle.validate().is_err());
@@ -1934,6 +3010,27 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
+    fn tools_allowlist_tracks_document_and_installer_staging_phases() {
+        for installer in [MSI_FILE, BAMBU_FILE] {
+            for document in [false, true] {
+                let temp = TempDir::new("staging-phases");
+                std::fs::write(temp.0.join(GUEST_AGENT_FILE), b"agent").unwrap();
+                if document {
+                    std::fs::write(temp.0.join("document-input.txt"), b"text").unwrap();
+                }
+                require_profile_tools_allowlist(&temp.0, None, document).unwrap();
+                assert!(
+                    require_profile_tools_allowlist(&temp.0, Some(installer), document).is_err()
+                );
+                std::fs::write(temp.0.join(installer), b"installer fixture").unwrap();
+                require_profile_tools_allowlist(&temp.0, Some(installer), document).unwrap();
+                assert!(require_profile_tools_allowlist(&temp.0, None, document).is_err());
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
     fn importable_run_storage_accepts_only_exact_recovery_shapes() {
         let temp = TempDir::new("importable-runs");
         let runs = temp.0.join("runs");
@@ -1960,5 +3057,576 @@ mod tests {
             std::fs::read(runs.join(".locks/run-two.lock")).unwrap(),
             b""
         );
+    }
+
+    fn msi_project() -> Project {
+        serde_yaml::from_str(include_str!(
+            "../../../examples/notepad-plus-plus-msi.aiw.yaml"
+        ))
+        .unwrap()
+    }
+
+    fn fake_import_receipt(
+        scenario: &aiw_provider_wsb::CompiledMsiScenario,
+    ) -> aiw_probe::ApplicationFileImportReceipt {
+        let size_bytes = 1024;
+        let sha256 = scenario.application_sha256.clone();
+        let intake_id = "intake-one";
+        let intake_root = identity(r"C:\AIW\intake-one", '5');
+        let source_directory = identity(r"C:\AIW\intake-one\source", '6');
+        let payload = identity(r"C:\AIW\intake-one\source\payload.msi", '7');
+        let receipt = identity(r"C:\AIW\intake-one\import-receipt.json", '8');
+        let eas = aiw_probe::ApplicationFileEaAuthority {
+            entries: vec![],
+            canonical_sha256: "0".repeat(64),
+        };
+        aiw_probe::ApplicationFileImportReceipt {
+            schema_version: aiw_probe::APPLICATION_FILE_IMPORT_RECEIPT_SCHEMA.to_owned(),
+            intake_id: intake_id.to_owned(),
+            source_kind: aiw_probe::ApplicationInspectionKind::Msi,
+            download_metadata_archive: None,
+            source: aiw_probe::ApplicationFileAuthority {
+                schema_version: aiw_probe::APPLICATION_FILE_AUTHORITY_SCHEMA.to_owned(),
+                identity: identity(r"C:\source\application.msi", '4'),
+                size_bytes,
+                sha256: sha256.clone(),
+                link_count: 1,
+                only_unnamed_data_stream: true,
+                download_metadata: Vec::new(),
+            },
+            intake_root,
+            intake_root_eas: eas.clone(),
+            source_directory,
+            source_directory_eas: eas.clone(),
+            payload_relative_path: "source/payload.msi".to_owned(),
+            payload,
+            payload_eas: eas,
+            receipt,
+            size_bytes,
+            sha256,
+        }
+    }
+
+    fn fake_msi_application() -> WsbMsiApplication {
+        let project = msi_project();
+        let scenario = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
+            &project,
+            "install-launch-close",
+        )
+        .unwrap();
+        let import_receipt = fake_import_receipt(&scenario);
+        let import_receipt_sha256 =
+            hex::encode(Sha256::digest(serde_json::to_vec(&import_receipt).unwrap()));
+        let staged_path = format!(r"C:\AIW\run-one\tools\{MSI_FILE}");
+        WsbMsiApplication {
+            required_observations: None,
+            import_receipt,
+            import_receipt_sha256,
+            scenario_sha256: canonical_hash(&scenario).unwrap(),
+            staged_payload: BinaryIdentity {
+                canonical_path: staged_path.clone(),
+                sha256: scenario.application_sha256.clone(),
+                size_bytes: 1024,
+                version: None,
+                signature_status: ReadinessState::Unknown,
+            },
+            staged_identity: identity(&staged_path, '9'),
+            scenario,
+            staged_document: None,
+        }
+    }
+
+    fn bambu_project() -> Project {
+        let mut value: serde_json::Value =
+            serde_json::from_str(include_str!("../../../examples/bambu-studio-info.json")).unwrap();
+        value["scenarios"][0]["id"] = serde_json::json!("export-3mf");
+        value["scenarios"][0]["description"] =
+            serde_json::json!("Export the fixed local tetrahedron.");
+        serde_json::from_value(value).unwrap()
+    }
+
+    fn fake_bambu_application() -> WsbBambuApplication {
+        let project = bambu_project();
+        let scenario =
+            aiw_provider_wsb::compile_bambu_studio_export_scenario(&project, "export-3mf").unwrap();
+        let mut import_receipt = fake_import_receipt(
+            &aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
+                &msi_project(),
+                "install-launch-close",
+            )
+            .unwrap(),
+        );
+        import_receipt.source_kind = aiw_probe::ApplicationInspectionKind::Exe;
+        import_receipt.sha256 = scenario.application_sha256.clone();
+        import_receipt.source.sha256 = scenario.application_sha256.clone();
+        let import_receipt_sha256 =
+            hex::encode(Sha256::digest(serde_json::to_vec(&import_receipt).unwrap()));
+        let staged_path = format!(r"C:\AIW\run-one\tools\{BAMBU_FILE}");
+        WsbBambuApplication {
+            import_receipt,
+            import_receipt_sha256,
+            scenario_sha256: canonical_hash(&scenario).unwrap(),
+            staged_payload: BinaryIdentity {
+                canonical_path: staged_path.clone(),
+                sha256: scenario.application_sha256.clone(),
+                size_bytes: 1024,
+                version: None,
+                signature_status: ReadinessState::Unknown,
+            },
+            staged_identity: identity(&staged_path, '9'),
+            scenario,
+        }
+    }
+
+    #[test]
+    fn imported_bambu_preparation_binds_the_distinct_profile_and_excludes_msi() {
+        let artifacts = build_wsb_bambu_preparation(
+            "run-one",
+            &bambu_project(),
+            &readiness(),
+            &workspace(),
+            &guest(),
+            "now",
+            fake_bambu_application(),
+        )
+        .unwrap();
+        assert_eq!(
+            artifacts.receipt.schema_version,
+            WSB_BAMBU_PREPARATION_RECEIPT_SCHEMA_VERSION
+        );
+        assert_eq!(
+            artifacts.run_plan.schema,
+            aiw_orchestrator::IMPORTED_BAMBU_RUN_PLAN_SCHEMA_VERSION
+        );
+        assert!(artifacts.receipt.msi.is_none());
+        assert!(artifacts.receipt.bambu.is_some());
+        assert!(matches!(
+            artifacts.run_plan.actions[2],
+            PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { .. }
+        ));
+        let mut conflicting = artifacts.receipt.clone();
+        conflicting.msi = Some(fake_msi_application());
+        assert!(conflicting.validate().is_err());
+    }
+
+    #[test]
+    fn required_acl_changes_approval_and_cannot_be_downgraded_in_preparation() {
+        let build = |msi| {
+            build_wsb_msi_preparation(
+                "run-one",
+                &msi_project(),
+                &readiness(),
+                &workspace(),
+                &guest(),
+                "now",
+                msi,
+            )
+            .unwrap()
+        };
+        let legacy = build(fake_msi_application());
+        let mut msi = fake_msi_application();
+        msi.required_observations =
+            Some(aiw_provider_wsb::MsiRequiredObservations::StandardUserAclV1);
+        let required = build(msi);
+        assert_eq!(
+            required.receipt.schema_version,
+            WSB_MSI_OBSERVATION_PREPARATION_RECEIPT_SCHEMA_VERSION
+        );
+        assert_ne!(
+            required.receipt.run_plan_sha256,
+            legacy.receipt.run_plan_sha256
+        );
+        assert!(required.run_plan.trust_deltas[0].contains("application's token"));
+        let mut downgraded = required.clone();
+        downgraded
+            .receipt
+            .msi
+            .as_mut()
+            .unwrap()
+            .required_observations = None;
+        assert!(downgraded.validate().is_err());
+        downgraded.receipt.schema_version = WSB_MSI_PREPARATION_RECEIPT_SCHEMA_VERSION.into();
+        assert!(downgraded.validate().is_err());
+        let mut forged = required;
+        forged.run_plan = legacy.run_plan;
+        forged.receipt.run_plan_sha256 = forged.run_plan.hash().unwrap();
+        assert!(forged.validate().is_err());
+    }
+
+    #[test]
+    fn imported_msi_preparation_binds_the_distinct_profile_and_all_hashes() {
+        let project = msi_project();
+        let msi = fake_msi_application();
+        let artifacts = build_wsb_msi_preparation(
+            "run-one",
+            &project,
+            &readiness(),
+            &workspace(),
+            &guest(),
+            "now",
+            msi,
+        )
+        .unwrap();
+        assert_eq!(
+            artifacts.receipt.schema_version,
+            WSB_MSI_PREPARATION_RECEIPT_SCHEMA_VERSION
+        );
+        assert_eq!(
+            artifacts.run_plan.schema,
+            aiw_orchestrator::IMPORTED_MSI_RUN_PLAN_SCHEMA_VERSION
+        );
+        assert_eq!(artifacts.wsb_plan.probe.output, GUEST_MSI_RESULT);
+        let receipt_msi = artifacts.receipt.msi.as_ref().unwrap();
+        let [
+            PlannedAction::AssessHost,
+            PlannedAction::PrepareWorkspace,
+            PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace_identity_sha256,
+                import_receipt_sha256,
+                application_sha256,
+                scenario_sha256,
+                ..
+            },
+            PlannedAction::CollectEvidence,
+        ] = artifacts.run_plan.actions.as_slice()
+        else {
+            panic!("MSI preparation did not produce the exact imported profile");
+        };
+        assert_eq!(sandbox_plan_sha256, &artifacts.receipt.wsb_plan_sha256);
+        assert_eq!(provider_sha256, &artifacts.receipt.provider.sha256);
+        assert_eq!(guest_agent_sha256, &artifacts.receipt.guest_agent.sha256);
+        assert_eq!(
+            workspace_identity_sha256,
+            &artifacts.receipt.workspace_identity_sha256
+        );
+        assert_eq!(import_receipt_sha256, &receipt_msi.import_receipt_sha256);
+        assert_eq!(application_sha256, &receipt_msi.staged_payload.sha256);
+        assert_eq!(scenario_sha256, &receipt_msi.scenario_sha256);
+        assert_eq!(
+            artifacts.receipt.run_plan_sha256,
+            artifacts.run_plan.hash().unwrap()
+        );
+        artifacts.validate().unwrap();
+    }
+
+    #[test]
+    fn recipe_inspection_binds_settings_and_rejects_inconsistent_preparation() {
+        let artifacts = build_wsb_msi_preparation(
+            "run-one",
+            &msi_project(),
+            &readiness(),
+            &workspace(),
+            &guest(),
+            "now",
+            fake_msi_application(),
+        )
+        .unwrap();
+        let inspect = crate::packaging_recipe::inspect_artifacts;
+        let recipe = inspect(&artifacts).unwrap();
+        assert_eq!(
+            recipe.recipe_sha256,
+            inspect(&artifacts).unwrap().recipe_sha256
+        );
+        assert_eq!(
+            recipe.recipe.working_directory,
+            r"C:\Program Files\Notepad++"
+        );
+        assert_eq!(recipe.recipe.data.mode, "fixedDocumentAssessment");
+        assert!(
+            recipe
+                .recipe
+                .sandbox_config
+                .xml
+                .contains("<Networking>Disable</Networking>")
+        );
+        assert!(
+            recipe
+                .recipe
+                .sandbox_config
+                .xml
+                .contains("<ReadOnly>false</ReadOnly>")
+        );
+        assert_eq!(
+            recipe.recipe.preparation.run_plan_sha256,
+            artifacts.run_plan.hash().unwrap()
+        );
+        for field in ["source", "scenario", "grant", "approval"] {
+            let mut changed = artifacts.clone();
+            match field {
+                "source" => {
+                    changed.receipt.msi.as_mut().unwrap().staged_payload.sha256 = "f".repeat(64)
+                }
+                "scenario" => changed
+                    .receipt
+                    .msi
+                    .as_mut()
+                    .unwrap()
+                    .scenario
+                    .launch_arguments
+                    .push("-plugin".into()),
+                "grant" => changed.wsb_plan.mappings[0].host_folder = r"C:\Users".into(),
+                "approval" => changed.run_plan.trust_deltas.clear(),
+                _ => unreachable!(),
+            }
+            assert!(inspect(&changed).is_err(), "{field}");
+        }
+    }
+
+    #[test]
+    fn recipe_scratch_lifetime_change_changes_inspection_hash() {
+        let inspect = |seconds| {
+            let mut project = msi_project();
+            project.scenarios[0].steps[3] = aiw_schema::ScenarioStep::WaitForUserClose {
+                timeout_seconds: seconds,
+            };
+            let mut msi = fake_msi_application();
+            msi.scenario = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
+                &project,
+                "install-launch-close",
+            )
+            .unwrap();
+            msi.scenario_sha256 = msi.scenario.canonical_sha256().unwrap();
+            let artifacts = build_wsb_msi_preparation(
+                "run-one",
+                &project,
+                &readiness(),
+                &workspace(),
+                &guest(),
+                "now",
+                msi,
+            )
+            .unwrap();
+            crate::packaging_recipe::inspect_artifacts(&artifacts).unwrap()
+        };
+        let short = inspect(30);
+        let long = inspect(60);
+        assert_ne!(short.recipe_sha256, long.recipe_sha256);
+        assert_eq!(short.recipe.data.mode, "ephemeralInteractiveScratch");
+        assert!(short.recipe.data.retained_output_path.is_none());
+        assert!(short.recipe.effective_launch_arguments.is_empty());
+    }
+
+    #[test]
+    fn local_settings_preparation_discloses_the_fixed_adaptation() {
+        let mut project = msi_project();
+        let aiw_schema::ScenarioStep::Launch { arguments, .. } = &mut project.scenarios[0].steps[1]
+        else {
+            panic!("launch")
+        };
+        arguments.push(aiw_provider_wsb::NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_ARGUMENT.into());
+        let mut msi = fake_msi_application();
+        msi.scenario = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
+            &project,
+            "install-launch-close",
+        )
+        .unwrap();
+        msi.scenario_sha256 = msi.scenario.canonical_sha256().unwrap();
+        let artifacts = build_wsb_msi_preparation(
+            "run-one",
+            &project,
+            &readiness(),
+            &workspace(),
+            &guest(),
+            "now",
+            msi,
+        )
+        .unwrap();
+        let inspection = crate::packaging_recipe::inspect_artifacts(&artifacts).unwrap();
+        assert_eq!(
+            inspection.recipe.settings_directory.as_deref(),
+            Some(aiw_provider_wsb::NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_DIRECTORY)
+        );
+        assert_eq!(
+            inspection.recipe.effective_launch_arguments[0],
+            aiw_provider_wsb::NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_ARGUMENT
+        );
+        assert!(artifacts.run_plan.trust_deltas[0].contains("no additional host mappings"));
+        assert!(
+            artifacts.run_plan.trust_deltas[0]
+                .contains(aiw_provider_wsb::NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_DIRECTORY)
+        );
+    }
+
+    #[test]
+    fn transfer_preparation_approval_discloses_retained_input_and_output() {
+        let mut project = msi_project();
+        project.scenarios[0].steps[3] = aiw_schema::ScenarioStep::WaitForUserClose {
+            timeout_seconds: 60,
+        };
+        let mut msi = fake_msi_application();
+        msi.scenario = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario_with_document(
+            &project,
+            "install-launch-close",
+            &"e".repeat(64),
+            7,
+        )
+        .unwrap();
+        msi.scenario_sha256 = msi.scenario.canonical_sha256().unwrap();
+        let path = r"C:\AIW\run-one\tools\document-input.txt";
+        msi.staged_document = Some(WsbMsiDocument {
+            staged_payload: BinaryIdentity {
+                canonical_path: path.into(),
+                sha256: "e".repeat(64),
+                size_bytes: 7,
+                version: None,
+                signature_status: ReadinessState::Unknown,
+            },
+            staged_identity: identity(path, 'a'),
+        });
+        let artifacts = build_wsb_msi_preparation(
+            "run-one",
+            &project,
+            &readiness(),
+            &workspace(),
+            &guest(),
+            "now",
+            msi,
+        )
+        .unwrap();
+        let warnings = artifacts.run_plan.trust_deltas.join("\n");
+        assert!(warnings.contains("retains the staged input and receipt-bound output"));
+        assert!(warnings.contains("export requires a separate explicit command"));
+        assert!(warnings.contains(&"e".repeat(64)));
+        assert!(!warnings.contains("all user data is discarded"));
+        assert_eq!(
+            artifacts.receipt.schema_version,
+            WSB_MSI_DOCUMENT_PREPARATION_RECEIPT_SCHEMA_VERSION
+        );
+        let recipe = crate::packaging_recipe::inspect_artifacts(&artifacts).unwrap();
+        assert_eq!(recipe.recipe.data.mode, "boundedUtf8DocumentTransfer");
+        assert_eq!(recipe.recipe.data.maximum_document_bytes, Some(1024 * 1024));
+        assert!(recipe.recipe.data.retained_output_path.is_some());
+        assert_eq!(
+            recipe.recipe.effective_launch_arguments,
+            [aiw_provider_wsb::STANDARD_USER_DOCUMENT_EXERCISE_PATH]
+        );
+        assert_eq!(
+            recipe
+                .recipe
+                .scenario
+                .interactive_document
+                .unwrap()
+                .input_sha256,
+            "e".repeat(64)
+        );
+    }
+
+    #[test]
+    fn imported_msi_preparation_rejects_source_project_scenario_and_staged_hash_drift() {
+        let readiness = readiness();
+        let workspace = workspace();
+        let guest = guest();
+
+        let mut source_kind = fake_msi_application();
+        source_kind.import_receipt.source_kind = aiw_probe::ApplicationInspectionKind::Exe;
+        assert!(
+            build_wsb_msi_preparation(
+                "run-one",
+                &msi_project(),
+                &readiness,
+                &workspace,
+                &guest,
+                "now",
+                source_kind,
+            )
+            .is_err()
+        );
+
+        let mut changed_project = msi_project();
+        if let aiw_schema::ApplicationSource::Msi(source) = &mut changed_project.application {
+            source.sha256 = "0".repeat(64);
+        } else {
+            panic!("MSI fixture did not contain an MSI application source");
+        }
+        assert!(
+            build_wsb_msi_preparation(
+                "run-one",
+                &changed_project,
+                &readiness,
+                &workspace,
+                &guest,
+                "now",
+                fake_msi_application(),
+            )
+            .is_err()
+        );
+
+        let mut changed_scenario = fake_msi_application();
+        changed_scenario.scenario.scenario_id = "changed-scenario".to_owned();
+        assert!(
+            build_wsb_msi_preparation(
+                "run-one",
+                &msi_project(),
+                &readiness,
+                &workspace,
+                &guest,
+                "now",
+                changed_scenario,
+            )
+            .is_err()
+        );
+
+        let mut changed_staged_hash = fake_msi_application();
+        changed_staged_hash.staged_payload.sha256 = "0".repeat(64);
+        assert!(
+            build_wsb_msi_preparation(
+                "run-one",
+                &msi_project(),
+                &readiness,
+                &workspace,
+                &guest,
+                "now",
+                changed_staged_hash,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn msi_preparation_rejects_v1_receipt_and_golden_preparation_stays_v1_without_msi() {
+        let msi_project_value = msi_project();
+        let mut msi = build_wsb_msi_preparation(
+            "run-one",
+            &msi_project_value,
+            &readiness(),
+            &workspace(),
+            &guest(),
+            "now",
+            fake_msi_application(),
+        )
+        .unwrap();
+        msi.receipt.schema_version = WSB_PREPARATION_RECEIPT_SCHEMA_VERSION.to_owned();
+        assert!(msi.receipt.validate().is_err());
+
+        let golden = build_wsb_preparation(
+            "run-one",
+            &project(),
+            &readiness(),
+            &workspace(),
+            &guest(),
+            "now",
+        )
+        .unwrap();
+        assert_eq!(
+            golden.receipt.schema_version,
+            WSB_PREPARATION_RECEIPT_SCHEMA_VERSION
+        );
+        assert!(golden.receipt.msi.is_none());
+        assert_eq!(
+            golden.run_plan.schema,
+            aiw_orchestrator::RUN_PLAN_SCHEMA_VERSION
+        );
+        assert!(matches!(
+            golden.run_plan.actions.as_slice(),
+            [
+                PlannedAction::AssessHost,
+                PlannedAction::PrepareWorkspace,
+                PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. },
+                PlannedAction::CollectEvidence
+            ]
+        ));
     }
 }

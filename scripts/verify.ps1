@@ -62,11 +62,17 @@ try {
     cargo clippy --workspace --all-targets --locked -- -D warnings
     if ($LASTEXITCODE -ne 0) { throw 'cargo clippy failed' }
 
-    cargo test --workspace --locked
+    & (Join-Path $PSScriptRoot 'check-local.ps1') -Check Workspace
     if ($LASTEXITCODE -ne 0) { throw 'cargo test failed' }
 
     cargo run --quiet --locked -p aiw-cli -- project validate --path .\examples\minimal.aiw.yaml | ConvertFrom-Json | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'example project validation failed' }
+
+    cargo run --quiet --locked -p aiw-cli -- provider compile-msi-scenario --project .\examples\notepad-plus-plus-msi.aiw.yaml --scenario install-launch-close | ConvertFrom-Json | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'typed MSI scenario compilation failed' }
+
+    cargo run --quiet --locked -p aiw-cli -- provider compile-bambu-scenario --project .\examples\bambu-studio-info.json --scenario local-file-info | ConvertFrom-Json | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'typed Bambu scenario compilation failed' }
 
     cargo run --quiet --locked -p aiw-cli -- model-pack validate --path .\examples\model-pack.json | ConvertFrom-Json | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'example model-pack validation failed' }
@@ -110,6 +116,20 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'canary evaluation failed' }
 
     foreach ($schemaKind in @(
+        'compiled-msi-scenario',
+        'msi-scenario-compilation',
+        'compiled-bambu-scenario',
+        'bambu-scenario-compilation',
+        'msi-application-token',
+        'msi-runtime-context',
+        'msi-registry',
+        'msi-failed-snapshots',
+        'msi-product-registration',
+        'wsb-msi-assessment-report',
+        'wsb-msi-report-set-input',
+        'wsb-report-set-input',
+        'wsb-report-set',
+        'wsb-msi-report-set',
         'application-file-authority',
         'application-file-import-receipt',
         'application-file-import-verification',
@@ -130,6 +150,10 @@ try {
         'run-plan-v0alpha1',
         'run-plan-v0alpha2',
         'run-plan-v0alpha3',
+        'run-plan-v0alpha4',
+        'imported-msi-guest-request',
+        'imported-msi-scenario-result',
+        'wsb-approved-execution',
         'workspace-binding-evidence',
         'wsb-golden-probe-start',
         'wsb-golden-probe-execution',

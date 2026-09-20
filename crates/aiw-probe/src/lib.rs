@@ -13,12 +13,16 @@ use thiserror::Error;
 
 const APPLICATION_INSPECTION_SCHEMA: &str = "aiw.dev/application-inspection/v0alpha1";
 pub const APPLICATION_FILE_AUTHORITY_SCHEMA: &str = "aiw.dev/application-file-authority/v0alpha1";
+pub const APPLICATION_DOWNLOAD_AUTHORITY_SCHEMA: &str =
+    "aiw.dev/application-file-authority/v0alpha2";
+pub const APPLICATION_DOWNLOAD_IMPORT_RECEIPT_SCHEMA: &str =
+    "aiw.dev/application-file-import-receipt/v0alpha3";
 pub const APPLICATION_FILE_IMPORT_RECEIPT_SCHEMA: &str =
-    "aiw.dev/application-file-import-receipt/v0alpha1";
+    "aiw.dev/application-file-import-receipt/v0alpha2";
 pub const APPLICATION_FILE_IMPORT_VERIFICATION_SCHEMA: &str =
     "aiw.dev/application-file-import-verification/v0alpha1";
 pub const PORTABLE_DIRECTORY_IMPORT_RECEIPT_SCHEMA: &str =
-    "aiw.dev/portable-directory-import-receipt/v0alpha1";
+    "aiw.dev/portable-directory-import-receipt/v0alpha2";
 pub const PORTABLE_DIRECTORY_IMPORT_VERIFICATION_SCHEMA: &str =
     "aiw.dev/portable-directory-import-verification/v0alpha1";
 pub const PORTABLE_MANIFEST_SCHEMA: &str = "aiw.dev/portable-content-manifest/v0alpha1";
@@ -82,6 +86,38 @@ pub struct ApplicationFileAuthority {
     pub sha256: String,
     pub link_count: u32,
     pub only_unnamed_data_stream: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub download_metadata: Vec<ApplicationDownloadMetadataEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApplicationDownloadMetadataEntry {
+    pub name: String,
+    pub size_bytes: u64,
+    pub sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArchivedDownloadMetadata {
+    pub source: ApplicationDownloadMetadataEntry,
+    pub relative_path: String,
+    pub identity: WindowsFileIdentity,
+    pub eas: ApplicationFileEaAuthority,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum DownloadMetadataPolicy {
+    ArchiveForSandbox,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DownloadMetadataArchive {
+    pub policy: DownloadMetadataPolicy,
+    pub entries: Vec<ArchivedDownloadMetadata>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -107,6 +143,8 @@ pub struct ApplicationFileImportReceipt {
     pub intake_id: String,
     pub source_kind: ApplicationInspectionKind,
     pub source: ApplicationFileAuthority,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub download_metadata_archive: Option<DownloadMetadataArchive>,
     pub intake_root: WindowsFileIdentity,
     pub intake_root_eas: ApplicationFileEaAuthority,
     pub source_directory: WindowsFileIdentity,
@@ -942,6 +980,8 @@ pub struct WindowsSandboxReadiness {
     pub schema_version: String,
     pub supported: bool,
     pub os_build: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub os_version: Option<WindowsVersionObservation>,
     pub process_architecture: String,
     pub virtualization: ReadinessState,
     pub sandbox_feature: ReadinessState,
@@ -961,6 +1001,66 @@ pub struct WindowsSandboxReadiness {
     pub current_session_ids: Vec<String>,
     pub blockers: Vec<String>,
     pub warnings: Vec<String>,
+}
+
+/// Windows-reported version at observation time, not an environment equivalence verdict.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WindowsVersionObservation {
+    pub major: u16,
+    pub minor: u16,
+    pub build: u16,
+    pub revision: u16,
+    pub observer_architecture: String,
+}
+
+impl WindowsVersionObservation {
+    pub fn from_device_family_version(
+        value: &str,
+        observer_architecture: &str,
+    ) -> Result<Self, String> {
+        let packed = value.parse::<u64>().map_err(|e| e.to_string())?;
+        let observation = Self {
+            major: (packed >> 48) as u16,
+            minor: (packed >> 32) as u16,
+            build: (packed >> 16) as u16,
+            revision: packed as u16,
+            observer_architecture: observer_architecture.into(),
+        };
+        observation.validate()?;
+        Ok(observation)
+    }
+    pub fn validate(&self) -> Result<(), String> {
+        if self.major == 0
+            || self.build == 0
+            || !matches!(
+                self.observer_architecture.as_str(),
+                "x86" | "x86_64" | "aarch64"
+            )
+        {
+            return Err("invalid Windows version observation".into());
+        }
+        Ok(())
+    }
+}
+
+#[test]
+fn windows_version_decoding_is_bounded() {
+    let packed = (10_u64 << 48) | (1_u64 << 32) | (28000_u64 << 16) | 123;
+    let value =
+        WindowsVersionObservation::from_device_family_version(&packed.to_string(), "x86_64")
+            .unwrap();
+    assert_eq!(
+        (value.major, value.minor, value.build, value.revision),
+        (10, 1, 28000, 123)
+    );
+    for invalid in ["0", "invalid", "18446744073709551616"] {
+        assert!(WindowsVersionObservation::from_device_family_version(invalid, "x86_64").is_err());
+    }
+    assert!(
+        WindowsVersionObservation::from_device_family_version(&packed.to_string(), "unknown")
+            .is_err()
+    );
 }
 
 #[must_use]
@@ -1005,6 +1105,7 @@ pub fn assess_windows_sandbox() -> WindowsSandboxReadiness {
         schema_version: "aiw.dev/windows-sandbox-readiness/v0alpha1".to_owned(),
         supported: false,
         os_build: None,
+        os_version: None,
         process_architecture: "unknown".to_owned(),
         virtualization: ReadinessState::Unknown,
         sandbox_feature: ReadinessState::Unknown,
@@ -1723,6 +1824,13 @@ mod tests {
             value_sha256: hex::encode(Sha256::digest([4_u8; 32])),
         }];
         triple_entries.extend(entries.clone());
+        let singleton_entries = vec![triple_entries[0].clone()];
+        let mut file_hash_only = fixed_tree_inventory();
+        file_hash_only.objects[7].ea = WsbFixedTreeEaBinding {
+            canonical_sha256: canonical(&singleton_entries),
+            entries: singleton_entries,
+        };
+        assert!(file_hash_only.validate().is_err());
         let mut file_hash_triple = fixed_tree_inventory();
         file_hash_triple.objects[7].ea = WsbFixedTreeEaBinding {
             canonical_sha256: canonical(&triple_entries),

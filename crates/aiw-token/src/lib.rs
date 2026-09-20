@@ -97,6 +97,16 @@ pub fn collect_current_process_token() -> Result<TokenEvidence, TokenEvidenceErr
     platform::collect_current_process_token()
 }
 
+/// Collects token evidence for the exact Windows process handle supplied by
+/// the caller. The process ID is obtained from that same handle; this API
+/// never reopens a process by PID. A non-process handle is rejected.
+#[cfg(windows)]
+pub fn collect_process_token(
+    process: std::os::windows::io::BorrowedHandle<'_>,
+) -> Result<TokenEvidence, TokenEvidenceError> {
+    platform::collect_process_token(process)
+}
+
 pub fn classify_integrity_rid(rid: u32) -> IntegrityLevel {
     match rid {
         0x0000..=0x0fff => IntegrityLevel::Untrusted,
@@ -148,5 +158,32 @@ mod tests {
         assert_eq!(evidence.schema_version, TOKEN_EVIDENCE_SCHEMA_VERSION);
         assert!(!evidence.user_sid.is_empty());
         assert!(!evidence.integrity.sid.is_empty());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn borrowed_current_process_handle_matches_current_collector_essentials() {
+        use std::os::windows::io::BorrowedHandle;
+        use windows::Win32::System::Threading::GetCurrentProcess;
+
+        // SAFETY: The pseudo-handle is valid for the current process for the
+        // duration of this call and is not owned or closed by BorrowedHandle.
+        let process = unsafe { BorrowedHandle::borrow_raw(GetCurrentProcess().0.cast()) };
+        let from_handle =
+            collect_process_token(process).expect("current process handle is queryable");
+        let current = collect_current_process_token().expect("current token is queryable");
+        assert_eq!(from_handle.process_id, current.process_id);
+        assert_eq!(from_handle.user_sid, current.user_sid);
+        assert_eq!(from_handle.integrity, current.integrity);
+        assert_eq!(from_handle.is_app_container, current.is_app_container);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn non_process_borrowed_handle_is_rejected() {
+        use std::os::windows::io::AsHandle as _;
+
+        let file = std::fs::File::open(std::env::current_exe().unwrap()).unwrap();
+        assert!(collect_process_token(file.as_handle()).is_err());
     }
 }
