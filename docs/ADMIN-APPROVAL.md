@@ -45,6 +45,12 @@ A real terminal control trial cancelled without writing approval, then accepted
 the exact displayed hash through the ordinary approval service. Retained status
 reports approval ready and no Sandbox session. Control evidence:
 `%LOCALAPPDATA%\Temp\aiw-terminal-approval-proof`. This proves the terminal approval
-path, not application execution. No installer was run. Independent review was
-requested but unavailable due to reviewer usage limits; this slice has local
-review and validation, not a completed independent review.
+path, not application execution. No installer was run.
+
+An independent Sol high-effort review of exact commit `5766a55` found no
+actionable issue. It confirmed exact-hash input, escaped terminal rendering,
+terminal-only review, cancellation without mutation, and service-side plan,
+provenance, lifecycle, hash, and trust-delta revalidation under the run lock.
+There is no automated pseudo-terminal success/cancellation test or forced plan
+replacement race harness. Focused unit/service coverage plus the retained real
+terminal proof cover those paths; the reviewer did not consider this a blocker.

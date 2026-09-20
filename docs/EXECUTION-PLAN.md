@@ -7,9 +7,10 @@ are project recommendations, not measured cost or quality guarantees.
 ## Starting point
 
 Run `scripts/work-status.ps1`, then read WORKING-STATE.md. At writing, branch
-`codex/admin-assessment-summary` contains pushed commit `5766a55`; PR #66 is
-merged. Terminal approval review is implemented and locally tested, but its
-independent review is pending. Do not rebuild this work or assume it is on main.
+`codex/admin-assessment-summary` contains pushed commits `5766a55` and `340590e`;
+PR #66 is merged. Terminal approval review is implemented, validated, and its
+exact-commit Sol review found no actionable issue. Do not rebuild this work or
+assume it is on main.
 
 Use **Sol, medium** for the main task. It owns integration and the milestone.
 Use **Luna, medium** for a bounded implementation with an explicit contract,
@@ -26,7 +27,7 @@ use one worker, with one independent reviewer only when warranted.
 
 ## Ordered work packets
 
-### 1. Close the pending approval review — Sol, high, read-only first
+### 1. Closed: terminal approval review
 
 Inspect `5766a55` against its parent, especially
 `crates/aiw-cli/src/approval_review.rs`, the `ReviewApproval` command in `main.rs`,
@@ -34,10 +35,9 @@ and its CLI contract test. Check terminal visibility, exact-hash confirmation,
 escaped display, cancellation, error reporting, and service validation if a plan
 changes during review. Read ADMIN-APPROVAL.md for retained proof and local logs.
 
-Return actionable findings or a scoped no-findings result. Fix concrete findings
-only. Do not rerun the entire workspace or a Sandbox trial for unchanged display
-code. Acceptance: review completed, any findings resolved with relevant tests,
-and no weakening of the existing approval service. This closes existing work.
+Sol's exact-commit review found no actionable issue. It confirmed the display,
+confirmation, cancellation, terminal, and service-side validation boundaries.
+The documented missing pseudo-terminal/race harness was not judged a blocker.
 
 ### 2. Make retained assessment results understandable — Luna, medium
 

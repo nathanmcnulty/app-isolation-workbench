@@ -20,8 +20,9 @@ Updated 2026-09-20. This is a compact handoff, not a run receipt or authorizatio
 
 Follow [EXECUTION-PLAN.md](EXECUTION-PLAN.md) for bounded work packets and model
 assignments. Recommended main model: Sol medium; Luna for bounded implementation;
-stronger models for specific review/escalation. Close the pending independent
-approval review before adding the administrator summary and guided workflow.
+stronger models for specific review/escalation. The exact-commit Sol review of
+terminal approval found no actionable issue. Next add the administrator summary,
+then the guided workflow.
 
 Approved profile replay passed at runtime commit `fc22efb`: preparation v0alpha6
 embeds the reverified profile, approval binds its exact identity, and start
