@@ -1,4 +1,4 @@
-# Evidence-backed Sandbox replay preflight
+# Evidence-backed approved Sandbox replay
 
 The first launch profile checks whether a fresh preparation matches the verified
 Notepad++ local-settings assessment. It supports the fixed install/open/edit/save/close
@@ -76,8 +76,8 @@ Do not reuse a preflight result after changing the preparation or environment.
 Retained evidence must remain accessible on the same host. The new guest's OS,
 workflow, ACL observations, and cleanup must still be verified after execution.
 Cross-host deployment, persistent settings, general installer conversion, and
-broader containment remain unvalidated. This completes an evidence-backed
-preflight slice, not all of Roadmap Benchmark 3 or a general packaging release.
+broader containment remain unvalidated. This completes an evidence-backed approved replay and
+preflight milestone, not all of Roadmap Benchmark 3 or a general packaging release.
 
 ## Development proof
 
@@ -101,3 +101,27 @@ code changes. The cause remains unconfirmed. Preserve
 `%LOCALAPPDATA%\Temp\aiw-launch-profile-runner-tests.log`, the corresponding
 `runner-isolated.log` and `runner-recheck.log`, and
 `%LOCALAPPDATA%\Temp\aiw-local-checks-ef92da3b-f935-4c44-8add-dc50da34749e`.
+
+## Approved replay proof
+
+The codified one-worker trial passed using runtime commit `fc22efb` and the same
+profile hash above. Run `profile-6ecdc022b04347b1916b3be22f0d7ac0` retained its
+v0alpha6 preparation, bound approval, execution, v0alpha11 report, and v0alpha4
+comparison under
+`%LOCALAPPDATA%\Temp\aiw-approved-profile-b35d64d66011494aad18220483995efd`.
+The fixed document save, local settings, required standard-user file ACL controls,
+matching recorded provider/configuration/OS, and exact cleanup passed. The provider
+session list was empty afterward. The report still says `insufficientEvidence`
+for broader isolation assertions; those missing measurements were not waived.
+
+Local validation passed 518 workspace tests (26 explicit skips), clippy with
+warnings denied, Rust 1.85, formatting, and governance. Independent implementation
+review found no production blocker. Full logs are in
+`%LOCALAPPDATA%\Temp\aiw-local-checks-8bce4312-4207-4b7f-8f7b-7133a20fa136`.
+An earlier generated runner test executable crashed before its harness, including
+on `--list`. It is preserved as
+`%LOCALAPPDATA%\Temp\aiw-runner-profile-crash-20260920.exe`; relinking unchanged
+source resolved the crash and the full suite passed. The cause is unconfirmed.
+The focused quality checkpoint includes this build/test reliability issue,
+approval/evidence bindings, historical reporting, and exact recovery before
+expanding the administrator workflow. See [release gates](RELEASE-GATES.md).

@@ -18,16 +18,22 @@ Updated 2026-09-19. This is a compact handoff, not a run receipt or authorizatio
 
 ## Next coherent slice
 
-The required app-token file ACL milestone passed: baseline, candidate, and relocated replay all verified document save, explicit protected-file read denial, allowed local-data create/write/read, and exact cleanup. Comparison v0alpha4 and report v0alpha10 preserve historical absence as unmeasured. The successful comparison resumed after a user-requested pause; the interrupted candidate was cancelled and exactly recovered. Full evidence pointers and limits are in PACKAGING-RECIPES.md. The Sandbox provider list was empty afterward.
+Approved profile replay passed at runtime commit `fc22efb`: preparation v0alpha6
+embeds the reverified profile, approval binds its exact identity, and start
+re-verifies source evidence before acquiring Sandbox. A fresh fixed trial passed
+document save, local settings, required standard-user file ACL controls, matching
+recorded provider/configuration/OS, and cleanup. Report v0alpha11 identifies the
+approved profile. The provider list was empty afterward. See
+[VALIDATED-SANDBOX-LAUNCH.md](VALIDATED-SANDBOX-LAUNCH.md) for exact evidence and
+validation logs, including the preserved pre-harness executable crash.
 
-PR #63 integrated the accumulated branch with passing hosted verification and audit (run 35486725176). The next slice adds [evidence-backed replay preflight](VALIDATED-SANDBOX-LAUNCH.md): profile creation from three reverified trials, independent profile hash binding, and a fresh preparation check. It remains a same-host fixed assessment profile; it does not replace per-run approval or claim arbitrary interactive deployment.
-
-The preflight slice passed a fresh preparation check using the retained three-run evidence, JSON schema/Markdown checks, tampered-profile rejection, 42 CLI tests, 101 runner tests (four skips), clippy, MSRV, formatting, and governance. Original evidence inventory and hashes (75 files) are unchanged. Detailed proof and one unreproduced native storage setup failure are recorded in VALIDATED-SANDBOX-LAUNCH.md. Next: integrate the profile binding into per-run approval, then validate the deployment handoff; do not treat the preflight output as execution authority.
-
-Benchmark 3 remains incomplete: evidence-attached reusable launch authorization and deployment-environment validation are still open. The measured control covers only fixed guest standard-user file ACL access, not host containment or descendants. Preserve recorded failures and exact recovery; do not repeat a successful installer trial solely for report-only changes.
-
-Hosted run 35485941390 passed the runner/export tests, then exposed token-default ownership in the native disposal fixture and an unelevated-only assertion on an elevated runner. Fixed descendants now use held workspace creation with explicit token-user ownership and the original inherited ACL policy. The ordinary mutex test accepts the current process environment; the separate explicit unelevated test retains its elevation assertion. Final native validation passed 156 tests (10 environment/helper skips), and the explicit unelevated check passed separately. Clippy, MSRV, format, and governance passed; logs are at `%LOCALAPPDATA%\Temp\aiw-local-checks-71c0caf7-b0a5-4eb7-bcca-ad987d5d5633`. Independent review found no issue. These fixture changes do not alter the successful guest trial or relax production ACL verification.
-
+One of the three [first preview gates](RELEASE-GATES.md) is demonstrated. Next:
+pause feature expansion for a focused quality review of approval/evidence,
+historical reporting, exact recovery, and build/test reliability. Resolve blocking
+findings, then finish the guided administrator workflow and clean-host distribution
+trial. This is not a promise of general application compatibility or isolation.
+Benchmark 3's deployment-environment validation remains open; broader boundaries
+remain unmeasured. Do not repeat a successful installer trial for report-only edits.
 ## Read only what the slice needs
 
 - [Execution control and retained proof](CONTROL-FIXTURE.md): fixed fixture, driver, normalizer and negative tests.

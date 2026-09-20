@@ -24,11 +24,11 @@ This is substantial execution and evidence infrastructure. It is not yet a
 complete administrator-facing release. Counts of commits, tests, or reports do
 not measure that final product outcome.
 
-## Remaining release-critical gates
+## Release-critical gates
 
 | Gate | Concrete completion evidence |
 |---|---|
-| Approved profile replay | Profile identity is bound into approval; stripping/substitution/drift is rejected; a fresh worker completes the workflow, required controls, and cleanup; the retained report identifies the profile used. |
+| Approved profile replay — demonstrated | Profile identity is bound into approval; stripping/substitution/drift is rejected. The fresh worker at `fc22efb` completed the fixed workflow, required file ACL controls, and cleanup; report v0alpha11 identifies the approved profile. See [retained proof](VALIDATED-SANDBOX-LAUNCH.md#approved-replay-proof). |
 | Administrator workflow | A documented, guided path from intake through assessment, plain-language summary, recipe selection, and approved replay. Failures and unmeasured functions remain visible, with specific next steps and accessible diagnostics. |
 | Clean-host distribution trial | A versioned Workbench build can be installed or unpacked on a clean supported host, prerequisites are detected correctly, and a second operator completes the documented assessment/replay path with retained evidence. Publish the exact build identity, support scope, and known limitations. |
 
