@@ -1,0 +1,50 @@
+schemaVersion: aiw.dev/v0alpha2
+kind: AppIsolationProject
+metadata:
+  name: notepad-plus-plus-local-settings
+  displayName: Notepad++ local settings adaptation
+  owner: endpoint-engineering
+application:
+  type: msi
+  path: inputs/npp.8.9.8.Installer.x64.msi
+  sha256: c29cbe1a9aaef322cc3f316ceeabe8a8071b18441a5e3c3ec348069739e59e80
+  entryPoints:
+    - id: notepad-plus-plus
+      path: notepad++.exe
+  architecture: x64
+  mayReboot: false
+isolationIntent:
+  runtimeBoundary: windowsSandbox
+  network: blocked
+  allowClipboard: false
+  allowHostFileAccess: false
+  allowHostRegistryAccess: false
+  requireDescendantCoverage: true
+executionProviders:
+  - type: windowsSandbox
+    id: windows-sandbox
+    version: planning-placeholder
+    executableSha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+candidates:
+  - id: sandbox
+    type: isolationSession
+    config:
+      type: windowsSandbox
+      providerId: windows-sandbox
+      network: blocked
+scenarios:
+  - id: install-launch-close
+    description: Install Notepad++, observe it, and close it gracefully.
+    required: true
+    steps:
+      - type: install
+      - type: launch
+        entrypoint: notepad-plus-plus
+        arguments:
+          - '-settingsDir=C:\Users\AiwStandardUser\AppData\Local\Notepad++'
+      - type: waitForProcess
+        image: notepad++.exe
+        timeoutSeconds: 30
+      - type: gracefulClose
+      - type: expectExitCode
+        value: 0

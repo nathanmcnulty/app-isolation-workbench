@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+mod admin_workflow;
 mod approval_review;
 
 use aiw_core::{
@@ -85,6 +86,7 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    Admin(AdminArgs),
     Project(ProjectArgs),
     Application(ApplicationArgs),
     Package(PackageArgs),
@@ -99,6 +101,25 @@ enum Command {
     Provider(ProviderArgs),
     Schema(SchemaArgs),
     Compare(CompareArgs),
+}
+
+#[derive(Debug, Args)]
+struct AdminArgs {
+    #[command(subcommand)]
+    command: AdminCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum AdminCommand {
+    /// Assess supported Notepad++ bytes through the packaged fixed workflow.
+    Assess {
+        #[arg(long)]
+        installer: PathBuf,
+        #[arg(long)]
+        evidence: PathBuf,
+        #[arg(long)]
+        identity: String,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -1186,6 +1207,16 @@ fn main() -> ExitCode {
 
 fn run(command: Command) -> Result<()> {
     match command {
+        Command::Admin(args) => match args.command {
+            AdminCommand::Assess {
+                installer,
+                evidence,
+                identity,
+            } => {
+                let result = admin_workflow::assess(&installer, &evidence, &identity)?;
+                write_json(&result)
+            }
+        },
         Command::Package(args) => match args.command {
             PackageCommand::CreateWsbLaunchProfile { input, format } => {
                 #[cfg(windows)]
