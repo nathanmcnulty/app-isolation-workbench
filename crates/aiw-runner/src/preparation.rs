@@ -36,6 +36,8 @@ pub const WSB_MSI_DOCUMENT_PREPARATION_RECEIPT_SCHEMA_VERSION: &str =
     "aiw.dev/wsb-preparation-receipt/v0alpha4";
 pub const WSB_MSI_OBSERVATION_PREPARATION_RECEIPT_SCHEMA_VERSION: &str =
     "aiw.dev/wsb-preparation-receipt/v0alpha5";
+pub const WSB_MSI_PROFILE_PREPARATION_RECEIPT_SCHEMA_VERSION: &str =
+    "aiw.dev/wsb-preparation-receipt/v0alpha6";
 pub const WSB_PLANNING_IMPORT_RESULT_SCHEMA_VERSION: &str =
     "aiw.dev/wsb-planning-import-result/v0alpha1";
 
@@ -49,7 +51,10 @@ const BAMBU_FILE: &str = "application.exe";
 const GUEST_MSI_RESULT: &str = r"C:\AIW\Output\scenario-result.json";
 const TRUST_DELTA_MSI: &str = "installs and exercises the approved imported MSI in Windows Sandbox";
 fn msi_trust_delta(msi: &WsbMsiApplication) -> String {
-    let execution = msi_execution_trust_delta(msi);
+    let mut execution = msi_execution_trust_delta(msi);
+    if let Some(profile) = &msi.launch_profile {
+        execution.push_str(&format!("; replay requires validated launch profile SHA-256 {} with comparison SHA-256 {}; retained source evidence must reverify before start; fresh run approval is required", profile.profile_sha256, profile.profile.comparison_sha256));
+    }
     if msi.required_observations.is_some() {
         format!(
             "{execution}; requires fixed file ACL controls using the launched application's token: create and read a local-data control and deny reading an owner-and-SYSTEM-only guest control; both controls are discarded with the worker"
@@ -173,6 +178,8 @@ pub struct WsbPreparationReceipt {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WsbMsiApplication {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_profile: Option<crate::WsbLaunchProfileExport>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub required_observations: Option<aiw_provider_wsb::MsiRequiredObservations>,
     pub import_receipt: aiw_probe::ApplicationFileImportReceipt,
     pub import_receipt_sha256: String,
@@ -196,6 +203,19 @@ impl WsbMsiApplication {
         &self,
         workspace: &WorkspaceBindingEvidence,
     ) -> Result<(), WsbPreparationError> {
+        if let Some(profile) = &self.launch_profile {
+            crate::launch_profile::verify_profile_hash(profile, &profile.profile_sha256)
+                .map_err(WsbPreparationError::Contract)?;
+            if !self.scenario.requires_local_settings()
+                || self.required_observations.is_none()
+                || profile.profile.application_sha256 != self.staged_payload.sha256
+                || profile.profile.scenario_sha256 != self.scenario_sha256
+            {
+                return Err(WsbPreparationError::Contract(
+                    "launch profile differs from the fixed required-ACL MSI scenario".into(),
+                ));
+            }
+        }
         if let Some(required) = self.required_observations {
             required
                 .validate_for(&self.scenario)
@@ -358,6 +378,12 @@ impl WsbPreparationReceipt {
             if self
                 .msi
                 .as_ref()
+                .is_some_and(|msi| msi.launch_profile.is_some())
+            {
+                WSB_MSI_PROFILE_PREPARATION_RECEIPT_SCHEMA_VERSION
+            } else if self
+                .msi
+                .as_ref()
                 .is_some_and(|msi| msi.required_observations.is_some())
             {
                 WSB_MSI_OBSERVATION_PREPARATION_RECEIPT_SCHEMA_VERSION
@@ -435,6 +461,16 @@ impl WsbPreparationReceipt {
         require_pinned_protocol(&self.provider_protocol)?;
         if let Some(msi) = &self.msi {
             msi.validate(&self.workspace)?;
+            if let Some(profile) = &msi.launch_profile {
+                if self.host_os_version.is_none()
+                    || profile.profile.project_revision_sha256 != self.project_revision_sha256
+                    || profile.profile.guest_agent_sha256 != self.guest_agent.sha256
+                {
+                    return Err(WsbPreparationError::Contract(
+                        "launch profile project or agent binding differs from preparation".into(),
+                    ));
+                }
+            }
         }
         if let Some(bambu) = &self.bambu {
             bambu.validate(&self.workspace)?;
@@ -766,7 +802,9 @@ pub fn build_wsb_msi_preparation(
         .run_plan
         .hash()
         .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
-    artifacts.receipt.schema_version = if msi.required_observations.is_some() {
+    artifacts.receipt.schema_version = if msi.launch_profile.is_some() {
+        WSB_MSI_PROFILE_PREPARATION_RECEIPT_SCHEMA_VERSION.to_owned()
+    } else if msi.required_observations.is_some() {
         WSB_MSI_OBSERVATION_PREPARATION_RECEIPT_SCHEMA_VERSION.to_owned()
     } else if msi.scenario.requires_document_transfer() {
         WSB_MSI_DOCUMENT_PREPARATION_RECEIPT_SCHEMA_VERSION.to_owned()
@@ -1114,6 +1152,7 @@ pub struct WsbMsiPreparationInput<'a> {
     pub import_receipt: &'a aiw_probe::ApplicationFileImportReceipt,
     pub scenario_id: &'a str,
     pub document_input: Option<&'a Path>,
+    pub launch_profile: Option<(&'a crate::WsbLaunchProfileExport, &'a str)>,
 }
 
 #[cfg(windows)]
@@ -1193,6 +1232,14 @@ fn prepare_bundle(
     use aiw_windows_platform::{HeldRunWorkspace, WorkspaceError, assess_windows_sandbox};
 
     validate_request_contract(run_id, project, created_at)?;
+    let profile_validation = match &application_input {
+        Some(WsbPreparationApplicationInput::Msi(input)) => input
+            .launch_profile
+            .map(|(profile, expected)| crate::launch_profile::reverify_profile(profile, expected))
+            .transpose()
+            .map_err(WsbPreparationError::Contract)?,
+        _ => None,
+    };
     let held_document_input = match &application_input {
         Some(WsbPreparationApplicationInput::Msi(input)) => input
             .document_input
@@ -1334,6 +1381,12 @@ fn prepare_bundle(
             match scenario {
                 PreparedApplicationScenario::Msi(scenario) => {
                     let binding = WsbMsiApplication {
+                        launch_profile: match &application_input {
+                            Some(WsbPreparationApplicationInput::Msi(input)) => {
+                                input.launch_profile.map(|(profile, _)| profile.clone())
+                            }
+                            _ => None,
+                        },
                         required_observations: scenario
                             .interactive_session_seconds
                             .is_none()
@@ -1363,6 +1416,24 @@ fn prepare_bundle(
                         created_at,
                         binding,
                     )?;
+                    if let Some(comparison) = &profile_validation {
+                        let profile = artifacts
+                            .receipt
+                            .msi
+                            .as_ref()
+                            .and_then(|msi| msi.launch_profile.as_ref())
+                            .ok_or_else(|| {
+                                WsbPreparationError::Contract(
+                                    "validated launch profile missing".into(),
+                                )
+                            })?;
+                        crate::launch_profile::match_preparation(
+                            &profile.profile,
+                            &comparison.replay.recorded_execution,
+                            &artifacts,
+                        )
+                        .map_err(WsbPreparationError::Contract)?;
+                    }
                 }
                 PreparedApplicationScenario::Bambu(scenario) => {
                     let binding = WsbBambuApplication {
@@ -3119,6 +3190,7 @@ mod tests {
             hex::encode(Sha256::digest(serde_json::to_vec(&import_receipt).unwrap()));
         let staged_path = format!(r"C:\AIW\run-one\tools\{MSI_FILE}");
         WsbMsiApplication {
+            launch_profile: None,
             required_observations: None,
             import_receipt,
             import_receipt_sha256,
@@ -3207,6 +3279,125 @@ mod tests {
         let mut conflicting = artifacts.receipt.clone();
         conflicting.msi = Some(fake_msi_application());
         assert!(conflicting.validate().is_err());
+    }
+
+    #[test]
+    fn launch_profile_is_bound_to_approval_and_cannot_be_stripped_or_substituted() {
+        let mut project = msi_project();
+        let aiw_schema::ScenarioStep::Launch { arguments, .. } = &mut project.scenarios[0].steps[1]
+        else {
+            panic!("launch")
+        };
+        arguments.push(aiw_provider_wsb::NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_ARGUMENT.into());
+        let mut ready = readiness();
+        ready.os_version = Some(aiw_probe::WindowsVersionObservation {
+            major: 10,
+            minor: 0,
+            build: 28000,
+            revision: 1,
+            observer_architecture: "x86_64".into(),
+        });
+        let mut msi = fake_msi_application();
+        msi.required_observations =
+            Some(aiw_provider_wsb::MsiRequiredObservations::StandardUserAclV1);
+        msi.scenario = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
+            &project,
+            "install-launch-close",
+        )
+        .unwrap();
+        msi.scenario_sha256 = msi.scenario.canonical_sha256().unwrap();
+        let build = |msi| {
+            build_wsb_msi_preparation(
+                "run-one",
+                &project,
+                &ready,
+                &workspace(),
+                &guest(),
+                "now",
+                msi,
+            )
+            .unwrap()
+        };
+        let unbound = build(msi.clone());
+        let profile = crate::WsbLaunchProfile {
+            schema_version: "aiw.dev/wsb-local-settings-launch-profile/v0alpha1".into(),
+            evidence: crate::WsbMsiReportSetInput {
+                schema_version: crate::WSB_MSI_REPORT_SET_INPUT_SCHEMA.into(),
+                entries: ["baseline", "candidate", "replay"]
+                    .into_iter()
+                    .map(|id| crate::WsbMsiReportSetEntry {
+                        id: id.into(),
+                        run_id: id.into(),
+                        workspace_root: std::env::temp_dir().join(id),
+                        project_path: std::env::temp_dir().join(format!("{id}.json")),
+                        guest_agent_sha256: guest().sha256,
+                    })
+                    .collect(),
+            },
+            comparison_sha256: "a".repeat(64),
+            application_sha256: msi.staged_payload.sha256.clone(),
+            project_revision_sha256: project_revision_hash(&project).unwrap(),
+            scenario_sha256: msi.scenario_sha256.clone(),
+            guest_agent_sha256: guest().sha256,
+        };
+        let export = crate::WsbLaunchProfileExport {
+            profile_sha256: canonical_hash(&profile).unwrap(),
+            profile,
+        };
+        msi.launch_profile = Some(export.clone());
+        let bound = build(msi);
+        crate::launch_profile::verify_bound_profile(&unbound).unwrap();
+        assert!(
+            crate::launch_profile::verify_bound_profile(&bound).is_err(),
+            "synthetic missing source evidence cannot authorize execution"
+        );
+        assert_eq!(
+            bound.receipt.schema_version,
+            WSB_MSI_PROFILE_PREPARATION_RECEIPT_SCHEMA_VERSION
+        );
+        assert!(bound.run_plan.trust_deltas[0].contains(&export.profile_sha256));
+        assert_ne!(
+            unbound.run_plan.hash().unwrap(),
+            bound.run_plan.hash().unwrap()
+        );
+        let approval =
+            aiw_orchestrator::ApprovalRecord::for_plan(&bound.run_plan, "reviewer", "now").unwrap();
+        assert_eq!(approval.plan_hash, bound.run_plan.hash().unwrap());
+
+        let mut stripped = bound.clone();
+        stripped.receipt.msi.as_mut().unwrap().launch_profile = None;
+        assert!(stripped.validate().is_err());
+        stripped.receipt.schema_version =
+            WSB_MSI_OBSERVATION_PREPARATION_RECEIPT_SCHEMA_VERSION.into();
+        assert!(stripped.validate().is_err());
+        stripped.run_plan = unbound.run_plan.clone();
+        stripped.receipt.run_plan_sha256 = stripped.run_plan.hash().unwrap();
+        stripped.validate().unwrap();
+        assert_ne!(approval.plan_hash, stripped.run_plan.hash().unwrap());
+
+        let mut substituted = bound.clone();
+        let profile = substituted
+            .receipt
+            .msi
+            .as_mut()
+            .unwrap()
+            .launch_profile
+            .as_mut()
+            .unwrap();
+        profile.profile.comparison_sha256 = "b".repeat(64);
+        profile.profile_sha256 = canonical_hash(&profile.profile).unwrap();
+        assert!(substituted.validate().is_err());
+        let mut downgraded = bound.clone();
+        downgraded
+            .receipt
+            .msi
+            .as_mut()
+            .unwrap()
+            .required_observations = None;
+        assert!(downgraded.validate().is_err());
+        let mut missing_os = bound;
+        missing_os.receipt.host_os_version = None;
+        assert!(missing_os.validate().is_err());
     }
 
     #[test]
@@ -3448,6 +3639,65 @@ mod tests {
             artifacts.run_plan.trust_deltas[0]
                 .contains(aiw_provider_wsb::NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_DIRECTORY)
         );
+        let profile = crate::WsbLaunchProfile {
+            schema_version: "aiw.dev/wsb-local-settings-launch-profile/v0alpha1".into(),
+            evidence: crate::WsbMsiReportSetInput {
+                schema_version: crate::WSB_MSI_REPORT_SET_INPUT_SCHEMA.into(),
+                entries: vec![],
+            },
+            comparison_sha256: "a".repeat(64),
+            application_sha256: artifacts
+                .receipt
+                .msi
+                .as_ref()
+                .unwrap()
+                .staged_payload
+                .sha256
+                .clone(),
+            project_revision_sha256: artifacts.receipt.project_revision_sha256.clone(),
+            scenario_sha256: artifacts
+                .receipt
+                .msi
+                .as_ref()
+                .unwrap()
+                .scenario_sha256
+                .clone(),
+            guest_agent_sha256: artifacts.receipt.guest_agent.sha256.clone(),
+        };
+        // This exercises only the preparation matcher. Production re-verifies
+        // the profile's evidence and independent hash before reaching it.
+        let recorded = crate::assessment_report::recorded_execution(&artifacts).unwrap();
+        let check = crate::launch_profile::match_preparation;
+        check(&profile, &recorded, &artifacts).unwrap();
+        for field in [
+            "applicationSha256",
+            "projectRevisionSha256",
+            "scenarioSha256",
+            "guestAgentSha256",
+        ] {
+            let mut changed = serde_json::to_value(&profile).unwrap();
+            changed[field] = serde_json::json!("f".repeat(64));
+            let changed = serde_json::from_value(changed).unwrap();
+            assert!(check(&changed, &recorded, &artifacts).is_err(), "{field}");
+        }
+        let mut changed = recorded.clone();
+        changed.provider.sha256 = "f".repeat(64);
+        assert!(check(&profile, &changed, &artifacts).is_err());
+        let mut changed = recorded.clone();
+        changed.provider_package.version = "different".into();
+        assert!(check(&profile, &changed, &artifacts).is_err());
+        let mut changed = recorded.clone();
+        changed.normalized_sandbox_config_sha256 = "f".repeat(64);
+        assert!(check(&profile, &changed, &artifacts).is_err());
+        let mut changed = recorded.clone();
+        changed.host_os_version = Some(aiw_probe::WindowsVersionObservation {
+            major: 10,
+            minor: 0,
+            build: 28000,
+            revision: 1,
+            observer_architecture: "x86_64".into(),
+        });
+        assert!(check(&profile, &changed, &artifacts).is_err());
     }
 
     #[test]

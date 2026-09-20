@@ -47,6 +47,49 @@ fn aiw() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_aiw"))
 }
 
+#[cfg(windows)]
+#[test]
+fn launch_profile_rejection_preserves_actionable_diagnostics() {
+    let temp = TempDir::new();
+    let profile = temp.path().join("profile.json");
+    fs::write(&profile, serde_json::to_vec(&serde_json::json!({
+        "profileSha256": "a".repeat(64),
+        "profile": {
+            "schemaVersion": "aiw.dev/wsb-local-settings-launch-profile/v0alpha1",
+            "evidence": {"schemaVersion": "aiw.dev/wsb-msi-report-set-input/v0alpha1", "entries": []},
+            "comparisonSha256": "a".repeat(64),
+            "applicationSha256": "a".repeat(64),
+            "projectRevisionSha256": "a".repeat(64),
+            "scenarioSha256": "a".repeat(64),
+            "guestAgentSha256": "a".repeat(64)
+        }
+    })).unwrap()).unwrap();
+    let output = Command::new(aiw())
+        .args(["package", "check-wsb-launch-profile", "--profile"])
+        .arg(&profile)
+        .args(["--profile-sha256", &"b".repeat(64), "--root"])
+        .arg(temp.path().join("never-created"))
+        .arg("--project")
+        .arg(repo_path(
+            "examples/notepad-plus-plus-local-settings.aiw.yaml",
+        ))
+        .args(["--guest-agent-sha256", &"a".repeat(64)])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(error["code"], "AIW_WSB_LAUNCH_PROFILE_REJECTED");
+    assert_eq!(error["stage"], "wsbLaunchProfile");
+    assert!(
+        error["detail"]
+            .as_str()
+            .unwrap()
+            .contains("independently retained profile hash")
+    );
+    assert!(!temp.path().join("never-created").exists());
+}
+
 fn repo_path(path: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")

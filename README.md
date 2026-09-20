@@ -9,7 +9,7 @@ The delivery loop is `Assess -> Adapt -> Package -> Validate`. We will complete 
 
 ## Current status
 
-AIW is pre-alpha. The W0 contracts, fixed Windows Sandbox golden probe, and approved typed Notepad++ MSI scenario are implemented; complete application assessment, validated application launch, the desktop UI, and Studio authoring remain future work. Projects use `aiw.dev/v0alpha2`; legacy `v0alpha1` projects remain readable and migrate non-destructively with an explicit review gate.
+AIW is an experimental CLI with verified fixed Notepad++ and Bambu workflows, retained reports, reusable MSI Sandbox bundles, and an evidence-bound local-settings replay path. General application coverage, a guided administrator workflow, clean-host distribution validation, the desktop UI, and Studio authoring remain future work. The [first administrator preview gates](docs/RELEASE-GATES.md) separate demonstrated capabilities from the remaining release work. Projects use `aiw.dev/v0alpha2`; legacy `v0alpha1` projects remain readable and migrate non-destructively with an explicit review gate.
 
 | Capability | Current boundary |
 |---|---|

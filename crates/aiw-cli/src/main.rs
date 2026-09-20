@@ -113,6 +113,28 @@ struct PackageArgs {
 
 #[derive(Debug, Subcommand)]
 enum PackageCommand {
+    /// Create a replay profile from three reverified local-settings trials.
+    CreateWsbLaunchProfile {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long, value_enum, default_value_t = AssessmentReportFormat::Json)]
+        format: AssessmentReportFormat,
+    },
+    /// Check a fresh preparation against a hash-bound replay profile; does not launch or approve.
+    CheckWsbLaunchProfile {
+        #[arg(long)]
+        profile: PathBuf,
+        #[arg(long)]
+        profile_sha256: String,
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        guest_agent_sha256: String,
+        #[arg(long, value_enum, default_value_t = AssessmentReportFormat::Json)]
+        format: AssessmentReportFormat,
+    },
     /// Inspect a verified MSI preparation before planning import, approval, or launch.
     InspectWsbMsiRecipe {
         #[arg(long)]
@@ -435,6 +457,11 @@ enum RunCommand {
         /// Optional absolute canonical UTF-8 text file for the interactive transfer profile.
         #[arg(long)]
         document_input: Option<PathBuf>,
+        /// Bind an independently verified replay profile into this run's approval.
+        #[arg(long, requires = "launch_profile_sha256")]
+        launch_profile: Option<PathBuf>,
+        #[arg(long, requires = "launch_profile")]
+        launch_profile_sha256: Option<String>,
     },
     /// Create and verify a fresh Windows Sandbox workspace and approvable plan bundle.
     /// This does not approve, acquire, start, connect, stop, or recover a provider.
@@ -706,6 +733,8 @@ enum SchemaKind {
     #[value(name = "wsb-msi-document-export")]
     WsbMsiDocumentExport,
     WsbMsiRecipeInspection,
+    WsbLaunchProfile,
+    WsbLaunchPreflight,
     #[value(name = "wsb-report-set-input")]
     WsbReportSetInput,
     #[value(name = "wsb-report-set")]
@@ -1007,6 +1036,17 @@ impl std::fmt::Display for RecipeInspectionFailed {
 impl std::error::Error for RecipeInspectionFailed {}
 
 #[derive(Debug)]
+struct LaunchProfileFailed(String);
+
+impl std::fmt::Display for LaunchProfileFailed {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+impl std::error::Error for LaunchProfileFailed {}
+
+#[derive(Debug)]
 struct RunPreparationImportFailed {
     run_id: String,
     source: WsbPreparationError,
@@ -1133,6 +1173,69 @@ fn main() -> ExitCode {
 fn run(command: Command) -> Result<()> {
     match command {
         Command::Package(args) => match args.command {
+            PackageCommand::CreateWsbLaunchProfile { input, format } => {
+                #[cfg(windows)]
+                {
+                    let input: aiw_runner::WsbMsiReportSetInput =
+                        read_document(&input, 1024 * 1024)?;
+                    let profile = aiw_runner::create_windows_sandbox_launch_profile(&input)
+                        .map_err(|source| anyhow!(LaunchProfileFailed(source)))?;
+                    match format {
+                        AssessmentReportFormat::Json => write_json(&profile),
+                        AssessmentReportFormat::Markdown => {
+                            print!("{}", profile.to_markdown());
+                            Ok(())
+                        }
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (input, format);
+                    bail!("Sandbox launch profiles require Windows")
+                }
+            }
+            PackageCommand::CheckWsbLaunchProfile {
+                profile,
+                profile_sha256,
+                root,
+                project,
+                guest_agent_sha256,
+                format,
+            } => {
+                #[cfg(windows)]
+                {
+                    let profile: aiw_runner::WsbLaunchProfileExport =
+                        read_document(&profile, 1024 * 1024)?;
+                    let loaded = read_project(&project)?;
+                    let result = aiw_runner::check_windows_sandbox_launch_profile(
+                        &profile,
+                        &profile_sha256,
+                        &root,
+                        &loaded.project,
+                        &guest_agent_sha256,
+                    )
+                    .map_err(|source| anyhow!(LaunchProfileFailed(source)))?;
+                    match format {
+                        AssessmentReportFormat::Json => write_json(&result),
+                        AssessmentReportFormat::Markdown => {
+                            print!("{}", result.to_markdown());
+                            Ok(())
+                        }
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (
+                        profile,
+                        profile_sha256,
+                        root,
+                        project,
+                        guest_agent_sha256,
+                        format,
+                    );
+                    bail!("Sandbox launch profiles require Windows")
+                }
+            }
             PackageCommand::InspectWsbMsiRecipe {
                 root,
                 project,
@@ -1622,12 +1725,18 @@ fn run(command: Command) -> Result<()> {
                 import_receipt,
                 scenario,
                 document_input,
+                launch_profile,
+                launch_profile_sha256,
             } => {
                 let loaded = read_project(&project)?;
                 let receipt: ApplicationFileImportReceipt =
                     read_document(&import_receipt, MAX_CONFIG_BYTES)?;
                 #[cfg(windows)]
                 {
+                    let profile: Option<aiw_runner::WsbLaunchProfileExport> = launch_profile
+                        .as_ref()
+                        .map(|path| read_document(path, 1024 * 1024))
+                        .transpose()?;
                     let prepared = prepare_windows_sandbox_msi_bundle(
                         &run_id,
                         &loaded.project,
@@ -1639,6 +1748,7 @@ fn run(command: Command) -> Result<()> {
                             import_receipt: &receipt,
                             scenario_id: &scenario,
                             document_input: document_input.as_deref(),
+                            launch_profile: profile.as_ref().zip(launch_profile_sha256.as_deref()),
                         },
                     )
                     .map_err(|source| anyhow!(RunPreparationFailed { run_id, source }))?;
@@ -1656,6 +1766,8 @@ fn run(command: Command) -> Result<()> {
                         receipt,
                         scenario,
                         document_input,
+                        launch_profile,
+                        launch_profile_sha256,
                     );
                     bail!("MSI preparation requires Windows")
                 }
@@ -2262,6 +2374,12 @@ fn run(command: Command) -> Result<()> {
             }
             SchemaKind::WsbMsiRecipeInspection => {
                 write_json(&schema_for!(aiw_runner::WsbMsiRecipeInspection))
+            }
+            SchemaKind::WsbLaunchProfile => {
+                write_json(&schema_for!(aiw_runner::WsbLaunchProfileExport))
+            }
+            SchemaKind::WsbLaunchPreflight => {
+                write_json(&schema_for!(aiw_runner::WsbLaunchPreflight))
             }
             SchemaKind::ImportedMsiStageProgress => {
                 write_json(&schema_for!(aiw_provider_wsb::ImportedMsiStageProgress))
@@ -3058,6 +3176,16 @@ fn emit_anyhow_error(error: &anyhow::Error) {
             retryable: false,
             remediation: "Preserve the bundle and any incomplete destination. Resolve the reported identity, inventory, or copy failure; never adopt an incomplete intake.".to_owned(),
             detail: error.to_string().chars().take(512).collect(),
+        });
+    } else if let Some(error) = error.downcast_ref::<LaunchProfileFailed>() {
+        emit_error(&ErrorEnvelope {
+            code: "AIW_WSB_LAUNCH_PROFILE_REJECTED".to_owned(),
+            summary: "Sandbox replay profile or preparation did not pass preflight".to_owned(),
+            stage: "wsbLaunchProfile".to_owned(),
+            run_id: None,
+            retryable: false,
+            remediation: "Preserve the profile and evidence. Resolve the reported mismatch; changed application or environment requires fresh validation and a reviewed profile hash.".to_owned(),
+            detail: error.0.chars().take(512).collect(),
         });
     } else if let Some(error) = error.downcast_ref::<RecipeInspectionFailed>() {
         emit_error(&ErrorEnvelope {

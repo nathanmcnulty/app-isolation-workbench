@@ -10,7 +10,13 @@
 //! script, URL, or arbitrary policy API.
 
 mod bambu_report;
+mod launch_profile;
 mod packaging_recipe;
+pub use launch_profile::{WsbLaunchPreflight, WsbLaunchProfile, WsbLaunchProfileExport};
+#[cfg(windows)]
+pub use launch_profile::{
+    check_windows_sandbox_launch_profile, create_windows_sandbox_launch_profile,
+};
 mod sandbox_bundle;
 #[cfg(windows)]
 pub use bambu_report::report_windows_sandbox_bambu_run;
@@ -1023,6 +1029,8 @@ fn start_approved_windows_sandbox_inner(
         return Err(RunnerError::ApprovalBinding);
     }
     ensure_approval(&artifacts.run_plan, &approval, &request)?;
+
+    crate::launch_profile::verify_bound_profile(&artifacts).map_err(RunnerError::Preparation)?;
 
     let mut native_lease =
         aiw_windows_platform::acquire_windows_sandbox(&artifacts.receipt.provider.sha256)
@@ -4624,6 +4632,7 @@ mod tests {
         let import_receipt_sha256 =
             hex::encode(Sha256::digest(serde_json::to_vec(&import_receipt).unwrap()));
         let msi = WsbMsiApplication {
+            launch_profile: None,
             required_observations: None,
             import_receipt,
             import_receipt_sha256,

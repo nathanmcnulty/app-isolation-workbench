@@ -4,7 +4,7 @@ Updated 2026-09-19. This is a compact handoff, not a run receipt or authorizatio
 
 ## Where to resume
 
-- Active development branch: `codex/wsb-typed-scenarios`. Locate it with `git worktree list` if this checkout differs. The main checkout has historically been behind this worktree.
+- Active development branch: `codex/validated-sandbox-launch` in the main checkout. PR #63 merged at `d387641` after hosted verification, audit, and MSRV passed; the earlier worktree and retained evidence remain preserved. Use the status helper to verify current state.
 - Latest slice: required app-token file ACL observations are bound to preparation, approval, guest results, and retained reports. The baseline/candidate/relocated comparison passed with report v0alpha10 and comparison v0alpha4; provider, requested configuration, and recorded Windows versions match. Broader containment remains unmeasured. Recipe inspection exposes exact launch settings, mappings, data lifetime, and requirements. See PACKAGING-RECIPES.md for the resumed live proof and retained failures, and INTERACTIVE-SANDBOX.md for the earlier human edit/save/close/export proof. Use scripts/work-status.ps1 for current HEAD and dirty files.
 - Goal: report tested functions for exact application bytes and measured isolation configurations, then use the evidence for adaptation/repackaging. Free community project; feedback collection is not a development gate.
 
@@ -18,14 +18,22 @@ Updated 2026-09-19. This is a compact handoff, not a run receipt or authorizatio
 
 ## Next coherent slice
 
-The required app-token file ACL milestone passed: baseline, candidate, and relocated replay all verified document save, explicit protected-file read denial, allowed local-data create/write/read, and exact cleanup. Comparison v0alpha4 and report v0alpha10 preserve historical absence as unmeasured. The successful comparison resumed after a user-requested pause; the interrupted candidate was cancelled and exactly recovered. Full evidence pointers and limits are in PACKAGING-RECIPES.md. The Sandbox provider list was empty afterward.
+Approved profile replay passed at runtime commit `fc22efb`: preparation v0alpha6
+embeds the reverified profile, approval binds its exact identity, and start
+re-verifies source evidence before acquiring Sandbox. A fresh fixed trial passed
+document save, local settings, required standard-user file ACL controls, matching
+recorded provider/configuration/OS, and cleanup. Report v0alpha11 identifies the
+approved profile. The provider list was empty afterward. See
+[VALIDATED-SANDBOX-LAUNCH.md](VALIDATED-SANDBOX-LAUNCH.md) for exact evidence and
+validation logs, including the preserved pre-harness executable crash.
 
-PR #63 integrates the accumulated branch. Local workspace tests, clippy, MSRV, format, and governance passed. Hosted validation caught an interactive-transfer export Drift error; CI now preserves full failed-check logs and export errors retain phase details. The synthetic protected-output publisher now uses the exact workspace owner/SYSTEM contract instead of token-default ownership. A fixed-clock regression also closes a real same-tick diagnostic-filename collision using a process-local atomic sequence, without adopting or overwriting files. Check PR status before merging; do not infer CI success from local results.
-
-Benchmark 3 remains incomplete: evidence-attached reusable launch authorization and deployment-environment validation are still open. The measured control covers only fixed guest standard-user file ACL access, not host containment or descendants. Preserve recorded failures and exact recovery; do not repeat a successful installer trial solely for report-only changes.
-
-Hosted run 35485941390 passed the runner/export tests, then exposed token-default ownership in the native disposal fixture and an unelevated-only assertion on an elevated runner. Fixed descendants now use held workspace creation with explicit token-user ownership and the original inherited ACL policy. The ordinary mutex test accepts the current process environment; the separate explicit unelevated test retains its elevation assertion. Final native validation passed 156 tests (10 environment/helper skips), and the explicit unelevated check passed separately. Clippy, MSRV, format, and governance passed; logs are at `%LOCALAPPDATA%\Temp\aiw-local-checks-71c0caf7-b0a5-4eb7-bcca-ad987d5d5633`. Independent review found no issue. These fixture changes do not alter the successful guest trial or relax production ACL verification.
-
+One of the three [first preview gates](RELEASE-GATES.md) is demonstrated. Next:
+pause feature expansion for a focused quality review of approval/evidence,
+historical reporting, exact recovery, and build/test reliability. Resolve blocking
+findings, then finish the guided administrator workflow and clean-host distribution
+trial. This is not a promise of general application compatibility or isolation.
+Benchmark 3's deployment-environment validation remains open; broader boundaries
+remain unmeasured. Do not repeat a successful installer trial for report-only edits.
 ## Read only what the slice needs
 
 - [Execution control and retained proof](CONTROL-FIXTURE.md): fixed fixture, driver, normalizer and negative tests.

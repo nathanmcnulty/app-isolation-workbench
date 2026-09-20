@@ -83,7 +83,7 @@ fn completed_msi_report_is_readonly_and_rejects_drift() {
         serde_json::from_slice(&fs::read(root.join("preparation.json")).unwrap()).unwrap();
     assert_eq!(
         report.schema_version,
-        "aiw.dev/wsb-msi-assessment-report/v0alpha10"
+        "aiw.dev/wsb-msi-assessment-report/v0alpha11"
     );
     assert_eq!(report.recorded_execution.provider, preparation.provider);
     assert_eq!(
@@ -153,7 +153,7 @@ fn completed_msi_report_is_readonly_and_rejects_drift() {
     } else {
         assert_eq!(
             report.schema_version,
-            "aiw.dev/wsb-msi-assessment-report/v0alpha10"
+            "aiw.dev/wsb-msi-assessment-report/v0alpha11"
         );
         assert!(report.behavior.is_none());
         assert!(report.installation_file_changes.is_none());
