@@ -166,6 +166,25 @@ runs without the requirement remain unmeasured. The fresh-trial driver requires
 this limited coverage alongside matched recorded OS versions. Broader boundary
 and deployment-environment validation remain open.
 
+The initial required-ACL trial was blocked before worker startup by existing
+session `b3e5b36e-e181-4e2d-8111-721e4c3f0959`; its preparation error is retained
+in `%TEMP%\aiw-local-settings-f0f9d6c216354bc1add9300626525ef4`.
+The driver now saves `host-readiness.json` before creating any intake or run.
+The focused blocked-preflight check in
+`%TEMP%\aiw-local-settings-ead6fe44669e443cb9e45043b1c6fdc2` retained that exact
+session and left bundles, intakes, and runs empty. This session has no verified
+ownership record in these trials and was not stopped. Fresh ACL execution
+remains pending its identification/closure; this is not a successful live result.
+
+Local validation passed 514 workspace tests (25 explicit live/privileged skips),
+warnings-as-errors clippy, Rust 1.85 all-target checking, formatting, governance,
+and static x64 guest build. Guest SHA-256:
+`121daa7e6b93212037813dea948675431d1a1680bbb106cd396a2647454cfee5`.
+Historical comparison checks in
+`%TEMP%\aiw-acl-historical-4cfaf41c39d7440995ab7ebeb49b6c40` passed seven
+positive/negative cases, generated-schema validation, deterministic output,
+and unchanged inventories for 75 files. Their ACL coverage remains unmeasured.
+
 ### Recorded OS versions and fresh replay, 2026-09-19
 
 The complete driver passed uninterrupted in three fresh workers:

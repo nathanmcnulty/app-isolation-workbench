@@ -29,6 +29,10 @@ function Invoke-Aiw([string]$name, [string[]]$arguments) {
 function Save-Json([string]$path, $value) {
     [IO.File]::WriteAllText($path, (ConvertTo-Json -InputObject $value -Depth 64), [Text.UTF8Encoding]::new($false))
 }
+$readiness = Invoke-Aiw 'host-readiness' @('host', 'assess')
+if (!$readiness.supported -or $readiness.currentSessions -ne 'available' -or @($readiness.currentSessionIds).Count -ne 0 -or @($readiness.blockers).Count -ne 0) {
+    throw "Host readiness blocks the trial before intake or preparation. See $evidenceRoot\host-readiness.json for exact session IDs, provider state, and blockers."
+}
 $source = Invoke-Aiw 'source-verification' @('application', 'verify-import', '--receipt', $ImportReceipt)
 if (!$source.verified) { throw 'Source intake verification did not pass' }
 $bundle = $null
