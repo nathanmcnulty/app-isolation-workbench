@@ -6,7 +6,8 @@ param(
     [string]$GuestAgent,
     [string]$GuestAgentSha256,
     [string]$LaunchProfile,
-    [string]$LaunchProfileSha256
+    [string]$LaunchProfileSha256,
+    [string]$ArchivePath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,8 +21,12 @@ $buildTarget = if ([string]::IsNullOrWhiteSpace($env:CARGO_TARGET_DIR)) {
 $cliSource = Join-Path $buildTarget 'release\aiw.exe'
 $projectSource = Join-Path $productRoot 'project.yaml'
 $manifestSource = Join-Path $productRoot 'manifest.json'
+$readmeTemplate = Join-Path $repoRoot 'packaging\preview\README.txt'
+$verifierSource = Join-Path $PSScriptRoot 'verify-preview-package.ps1'
+$licenseSource = Join-Path $repoRoot 'LICENSE'
 $output = [IO.Path]::GetFullPath($OutputDirectory)
 $packagedProductRoot = Join-Path $output 'product\notepad-plus-plus'
+$targetTriple = 'x86_64-pc-windows-msvc'
 
 function Write-Utf8NoBom([string]$Path, [string]$Text) {
     [IO.File]::WriteAllText($Path, $Text + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
@@ -31,19 +36,94 @@ function Assert-LowerSha256([string]$Value, [string]$Name) {
     if ($Value -notmatch '^[0-9a-f]{64}$') { throw "$Name must be a lowercase SHA-256" }
 }
 
+function Assert-SourceUnchanged([string]$ExpectedRevision) {
+    $currentRevision = (& git -C $repoRoot rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0 -or $currentRevision -cne $ExpectedRevision) {
+        throw 'Source revision changed during clean-host archive assembly'
+    }
+    $currentStatus = & git -C $repoRoot status --porcelain=v1 --untracked-files=all
+    if ($LASTEXITCODE -ne 0 -or $currentStatus) {
+        throw 'Source tree changed during clean-host archive assembly'
+    }
+}
+
 function Get-CanonicalJsonBytes([object]$Value) {
     $json = $Value | ConvertTo-Json -Depth 20 -Compress
     return ,([Text.UTF8Encoding]::new($false).GetBytes($json))
 }
 
+function Get-Dumpbin {
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+    if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) {
+        throw 'Visual Studio discovery tool is required to verify the guest-agent PE imports'
+    }
+    $visualStudio = & $vswhere -latest -products * -property installationPath
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($visualStudio)) {
+        throw 'Visual Studio Build Tools could not be resolved for PE verification'
+    }
+    $dumpbin = Get-ChildItem -LiteralPath (Join-Path $visualStudio 'VC\Tools\MSVC') `
+        -Filter dumpbin.exe -Recurse -File | Sort-Object FullName -Descending | `
+        Select-Object -First 1 -ExpandProperty FullName
+    if ([string]::IsNullOrWhiteSpace($dumpbin)) {
+        throw 'dumpbin.exe is required to verify the guest-agent PE imports'
+    }
+    $dumpbin
+}
+
+function Assert-StaticX64Guest([string]$Path) {
+    $dumpbin = Get-Dumpbin
+    $headers = & $dumpbin /headers $Path 2>&1
+    if ($LASTEXITCODE -ne 0 -or ($headers -join "`n") -notmatch '(?m)^\s+8664 machine \(x64\)') {
+        throw 'guest-agent artifact is not an x64 PE image'
+    }
+    $dependencies = & $dumpbin /dependents $Path 2>&1
+    if ($LASTEXITCODE -ne 0) { throw 'guest-agent PE dependency inspection failed' }
+    if (($dependencies -join "`n") -match '(?im)^\s+((?:VCRUNTIME|MSVCP|MSVCR)[^\s]*\.dll|UCRTBASE\.dll|api-ms-win-crt-[^\s]+\.dll)\s*$') {
+        throw 'guest-agent artifact still imports a dynamic Visual C++ runtime'
+    }
+}
+
 if (Test-Path -LiteralPath $output) { throw "Output directory already exists; choose a new path: $output" }
 if (-not (Test-Path -LiteralPath $productRoot -PathType Container)) { throw "Required product asset directory is missing: $productRoot" }
-foreach ($path in @($projectSource, $manifestSource)) {
+foreach ($path in @($projectSource, $manifestSource, $readmeTemplate, $verifierSource, $licenseSource)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required product asset is missing: $path" }
+}
+$archive = if ([string]::IsNullOrWhiteSpace($ArchivePath)) { $null } else { [IO.Path]::GetFullPath($ArchivePath) }
+if ($archive) {
+    if (-not $GuestAgent -or -not $LaunchProfile) {
+        throw 'Clean-host archive assembly requires an independently retained guest agent and validated launch profile'
+    }
+    if (Test-Path -LiteralPath $archive) { throw "Archive already exists; choose a new path: $archive" }
+    if (Test-Path -LiteralPath "$archive.json") { throw "Distribution manifest already exists: $archive.json" }
+    if (-not (Test-Path -LiteralPath (Split-Path -Parent $archive) -PathType Container)) {
+        throw 'Archive parent directory must already exist'
+    }
+    $sourceStatus = & git -C $repoRoot status --porcelain=v1 --untracked-files=all
+    if ($LASTEXITCODE -ne 0 -or $sourceStatus) {
+        throw 'Clean-host archive assembly requires a clean source checkout'
+    }
 }
 
 Push-Location -LiteralPath $repoRoot
 try {
+    $sourceRevision = (& git rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0 -or $sourceRevision -notmatch '^[0-9a-f]{40}$') {
+        throw 'Source revision could not be resolved'
+    }
+    $sourceTreeClean = -not [bool](& git status --porcelain=v1 --untracked-files=all)
+    if ($LASTEXITCODE -ne 0) { throw 'Source tree state could not be resolved' }
+    $metadata = & cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0) { throw 'Cargo package metadata could not be resolved' }
+    $packageVersion = [string]($metadata.packages | Where-Object name -eq 'aiw-cli' | Select-Object -First 1 -ExpandProperty version)
+    if ([string]::IsNullOrWhiteSpace($packageVersion)) { throw 'AIW package version is missing' }
+    $rustcText = & rustc -vV
+    if ($LASTEXITCODE -ne 0) { throw 'Rust toolchain identity could not be resolved' }
+    $rustcRelease = [string](($rustcText | Where-Object { $_ -like 'release:*' }) -replace '^release:\s*', '')
+    $rustcHost = [string](($rustcText | Where-Object { $_ -like 'host:*' }) -replace '^host:\s*', '')
+    if ([string]::IsNullOrWhiteSpace($rustcRelease) -or [string]::IsNullOrWhiteSpace($rustcHost)) {
+        throw 'Rust toolchain release or host is missing'
+    }
+
     & cargo build --locked --release -p aiw-cli
     if ($LASTEXITCODE -ne 0) { throw 'release aiw-cli build failed' }
 
@@ -62,6 +142,7 @@ try {
     }
     if (-not (Test-Path -LiteralPath $guestSource -PathType Leaf)) { throw "guest-agent artifact is missing: $guestSource" }
     if (-not (Test-Path -LiteralPath $cliSource -PathType Leaf)) { throw "release CLI artifact is missing: $cliSource" }
+    Assert-StaticX64Guest $guestSource
 
     $manifest = Get-Content -Raw -LiteralPath $manifestSource | ConvertFrom-Json
     if ($manifest.schemaVersion -ne 'aiw.dev/admin-product-assets/v0alpha1' -or $manifest.productId -notlike 'notepad-plus-plus-*') {
@@ -75,6 +156,9 @@ try {
         Assert-LowerSha256 $LaunchProfileSha256 'LaunchProfileSha256'
         $profile = Get-Content -Raw -LiteralPath $profileSource | ConvertFrom-Json
         if ($profile.profileSha256 -ne $LaunchProfileSha256) { throw 'launch profile JSON does not match the supplied profile hash' }
+        & $cliSource package verify-wsb-launch-profile-identity `
+            --profile $profileSource --profile-sha256 $LaunchProfileSha256 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'launch profile canonical identity verification failed' }
     }
 
     New-Item -ItemType Directory -Path $output -Force:$false | Out-Null
@@ -82,17 +166,26 @@ try {
     Copy-Item -LiteralPath $cliSource -Destination (Join-Path $output 'aiw.exe')
     Copy-Item -LiteralPath $guestSource -Destination (Join-Path $packagedProductRoot 'tools\aiw-guest-agent.exe')
     Copy-Item -LiteralPath $projectSource -Destination (Join-Path $packagedProductRoot 'project.yaml')
-    if ($profileSource) { Copy-Item -LiteralPath $profileSource -Destination (Join-Path $packagedProductRoot 'launch-profile.json') }
+    Copy-Item -LiteralPath $verifierSource -Destination (Join-Path $output 'verify-preview-package.ps1')
+    Copy-Item -LiteralPath $licenseSource -Destination (Join-Path $output 'LICENSE')
+    if ($profileSource) {
+        $packagedProfile = Join-Path $packagedProductRoot 'launch-profile.json'
+        Copy-Item -LiteralPath $profileSource -Destination $packagedProfile
+        & $cliSource package verify-wsb-launch-profile-identity `
+            --profile $packagedProfile --profile-sha256 $LaunchProfileSha256 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'packaged launch profile canonical identity verification failed' }
+        $profile = Get-Content -Raw -LiteralPath $packagedProfile | ConvertFrom-Json
+    }
 
     $manifest.projectPath = 'project.yaml'
     $manifest.guestAgentPath = 'tools/aiw-guest-agent.exe'
     $manifest.projectSha256 = (Get-FileHash -LiteralPath (Join-Path $packagedProductRoot 'project.yaml') -Algorithm SHA256).Hash.ToLowerInvariant()
     $manifest.guestAgentSha256 = (Get-FileHash -LiteralPath (Join-Path $packagedProductRoot 'tools\aiw-guest-agent.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+    $compiledText = & (Join-Path $output 'aiw.exe') provider compile-msi-scenario `
+        --project (Join-Path $packagedProductRoot 'project.yaml') --scenario ([string]$manifest.scenarioId) | Out-String
+    if ($LASTEXITCODE -ne 0) { throw 'packaged fixed scenario compilation failed' }
+    $compiled = $compiledText | ConvertFrom-Json
     if ($profileSource) {
-        $compiledText = & (Join-Path $output 'aiw.exe') provider compile-msi-scenario `
-            --project (Join-Path $packagedProductRoot 'project.yaml') --scenario ([string]$manifest.scenarioId) | Out-String
-        if ($LASTEXITCODE -ne 0) { throw 'packaged fixed scenario compilation failed' }
-        $compiled = $compiledText | ConvertFrom-Json
         if ($profile.profile.applicationSha256 -ne $compiled.scenario.applicationSha256 -or
             $profile.profile.projectRevisionSha256 -ne $compiled.projectRevisionSha256 -or
             $profile.profile.scenarioSha256 -ne $compiled.scenarioSha256 -or
@@ -107,11 +200,49 @@ try {
     }
     Write-Utf8NoBom (Join-Path $packagedProductRoot 'manifest.json') ($manifest | ConvertTo-Json -Depth 20)
 
+    $readme = (Get-Content -Raw -LiteralPath $readmeTemplate).
+        Replace('{{VERSION}}', $packageVersion).
+        Replace('{{SOURCE_REVISION}}', $sourceRevision).
+        Replace('{{TARGET}}', $targetTriple)
+    Write-Utf8NoBom (Join-Path $output 'README.txt') $readme.TrimEnd()
+    $release = [ordered]@{
+        schemaVersion = 'aiw.dev/preview-release/v0alpha1'
+        version = $packageVersion
+        sourceRevision = $sourceRevision
+        sourceTreeClean = $sourceTreeClean
+        target = $targetTriple
+        toolchain = [ordered]@{ rustc = $rustcRelease; buildHost = $rustcHost }
+        cliSha256 = (Get-FileHash -LiteralPath (Join-Path $output 'aiw.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+        guest = [ordered]@{
+            sha256 = [string]$manifest.guestAgentSha256
+            target = $targetTriple
+            crt = 'static'
+            peVerification = 'dumpbinHeadersAndDependents'
+        }
+        product = [ordered]@{
+            id = [string]$manifest.productId
+            installerSha256 = [string]$compiled.scenario.applicationSha256
+            projectSha256 = [string]$manifest.projectSha256
+            launchProfileSha256 = if ($profileSource) { $LaunchProfileSha256 } else { $null }
+        }
+        supportedHost = [ordered]@{
+            os = 'Windows 11 24H2 or later'
+            minimumBuild = 26100
+            architecture = 'x64'
+            provider = 'Microsoft Windows Sandbox Store package'
+            providerProtocol = 'windowsSandboxCli/v0.8.107.0'
+        }
+        signingStatus = 'unsignedDevelopmentPreview'
+    }
+    Write-Utf8NoBom (Join-Path $output 'release.json') ($release | ConvertTo-Json -Depth 20)
+
+    if ($archive) { Assert-SourceUnchanged $sourceRevision }
+
     $payloadFiles = Get-ChildItem -LiteralPath $output -File -Recurse | Where-Object { $_.Name -ne 'receipt.json' } |
         ForEach-Object {
             $relative = [IO.Path]::GetRelativePath($output, $_.FullName).Replace('\', '/')
             [ordered]@{ path = $relative; sizeBytes = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
-        } | Sort-Object path
+        } | Sort-Object { $_.path }
     $receiptCore = [ordered]@{
         schemaVersion = 'aiw.dev/preview-package-receipt/v0alpha1'
         productId = [string]$manifest.productId
@@ -120,7 +251,60 @@ try {
     }
     $receiptHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData((Get-CanonicalJsonBytes $receiptCore))).ToLowerInvariant()
     $receipt = [ordered]@{ schemaVersion = $receiptCore.schemaVersion; productId = $receiptCore.productId; files = $receiptCore.files; receiptLast = $true; receiptSha256 = $receiptHash }
-    Write-Utf8NoBom (Join-Path $output 'receipt.json') ($receipt | ConvertTo-Json -Depth 20)
-    Write-Output ($receipt | ConvertTo-Json -Depth 20 -Compress)
+    $receiptPath = Join-Path $output 'receipt.json'
+    Write-Utf8NoBom $receiptPath ($receipt | ConvertTo-Json -Depth 20)
+    $verificationText = & $verifierSource -PackageRoot $output -ReceiptSha256 $receiptHash | Out-String
+    if ($LASTEXITCODE -ne 0) { throw 'assembled preview package verification failed' }
+    $verification = $verificationText | ConvertFrom-Json
+    if ($verification.exactInventory -ne $true) { throw 'assembled preview package inventory was not verified' }
+
+    if ($archive) {
+        Compress-Archive -Path (Join-Path $output '*') -DestinationPath $archive -CompressionLevel Optimal
+        if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) { throw 'preview archive was not created' }
+        $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+        $archiveVerificationRoot = Join-Path $temporaryRoot "aiw-preview-archive-verify-$([guid]::NewGuid().ToString('N'))"
+        if (-not $archiveVerificationRoot.StartsWith($temporaryRoot, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Archive verification directory escaped the temporary root'
+        }
+        try {
+            Expand-Archive -LiteralPath $archive -DestinationPath $archiveVerificationRoot
+            $extractedReceipt = Join-Path $archiveVerificationRoot 'receipt.json'
+            if ((Get-FileHash -LiteralPath $extractedReceipt -Algorithm SHA256).Hash -cne
+                (Get-FileHash -LiteralPath $receiptPath -Algorithm SHA256).Hash) {
+                throw 'Archive receipt bytes differ from the assembled package'
+            }
+            $archiveVerificationText = & $verifierSource -PackageRoot $archiveVerificationRoot -ReceiptSha256 $receiptHash | Out-String
+            if ($LASTEXITCODE -ne 0 -or ($archiveVerificationText | ConvertFrom-Json).exactInventory -ne $true) {
+                throw 'Extracted preview archive verification failed'
+            }
+        }
+        finally {
+            Remove-Item -LiteralPath $archiveVerificationRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        Assert-SourceUnchanged $sourceRevision
+        $archiveItem = Get-Item -LiteralPath $archive
+        $distribution = [ordered]@{
+            schemaVersion = 'aiw.dev/preview-distribution/v0alpha1'
+            version = $packageVersion
+            sourceRevision = $sourceRevision
+            target = $targetTriple
+            archive = [ordered]@{
+                fileName = $archiveItem.Name
+                sizeBytes = $archiveItem.Length
+                sha256 = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+                format = 'zip'
+            }
+            receiptFileSha256 = (Get-FileHash -LiteralPath $receiptPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            receiptSha256 = $receiptHash
+            verifierSha256 = (Get-FileHash -LiteralPath (Join-Path $output 'verify-preview-package.ps1') -Algorithm SHA256).Hash.ToLowerInvariant()
+            signingStatus = 'unsignedDevelopmentPreview'
+            authenticity = 'notEstablished'
+        }
+        Write-Utf8NoBom "$archive.json" ($distribution | ConvertTo-Json -Depth 20)
+        Write-Output ($distribution | ConvertTo-Json -Depth 20 -Compress)
+    }
+    else {
+        Write-Output ($receipt | ConvertTo-Json -Depth 20 -Compress)
+    }
 }
 finally { Pop-Location }

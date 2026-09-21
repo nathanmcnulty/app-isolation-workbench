@@ -143,6 +143,13 @@ enum PackageCommand {
         #[arg(long, value_enum, default_value_t = AssessmentReportFormat::Json)]
         format: AssessmentReportFormat,
     },
+    /// Verify a replay profile's canonical identity without reopening its source trials.
+    VerifyWsbLaunchProfileIdentity {
+        #[arg(long)]
+        profile: PathBuf,
+        #[arg(long)]
+        profile_sha256: String,
+    },
     /// Check a fresh preparation against a hash-bound replay profile; does not launch or approve.
     CheckWsbLaunchProfile {
         #[arg(long)]
@@ -1239,6 +1246,19 @@ fn run(command: Command) -> Result<()> {
                     let _ = (input, format);
                     bail!("Sandbox launch profiles require Windows")
                 }
+            }
+            PackageCommand::VerifyWsbLaunchProfileIdentity {
+                profile,
+                profile_sha256,
+            } => {
+                let profile: aiw_runner::WsbLaunchProfileExport =
+                    read_document(&profile, 1024 * 1024)?;
+                aiw_runner::verify_windows_sandbox_launch_profile_identity(
+                    &profile,
+                    &profile_sha256,
+                )
+                .map_err(|source| anyhow!(LaunchProfileFailed(source)))?;
+                write_json(&profile)
             }
             PackageCommand::CheckWsbLaunchProfile {
                 profile,

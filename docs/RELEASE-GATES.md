@@ -81,6 +81,14 @@ all profile/project/scenario/guest mismatches. `receipt.json`
 is written last and binds the package inventory; this assembles release inputs
 but does not prove clean-host installation, signing, or Sandbox execution.
 
+For the clean-host handoff, also supply `-ArchivePath`, the independently
+retained guest and hash, and the validated profile and hash. Archive mode
+requires a clean committed source tree, verifies the exact package inventory,
+and emits a ZIP plus companion distribution manifest with version, source,
+archive, receipt-file, receipt-core, and verifier identities. See
+[clean-host preview handoff](CLEAN-HOST-PREVIEW.md). These controls prepare the
+second-operator trial; the separate-host evidence remains the release gate.
+
 The profile-bound package assembled on 2026-09-20 uses exact retained guest
 SHA-256 `121daa7e6b93212037813dea948675431d1a1680bbb106cd396a2647454cfee5`,
 profile `d8d7e4daddda76c535e6da1f897c210fa6b0798275640777747cea3df025d987`,
