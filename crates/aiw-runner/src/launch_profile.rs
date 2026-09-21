@@ -101,6 +101,15 @@ pub(crate) fn verify_profile_hash(
     profile.profile.evidence.validate()
 }
 
+/// Verify the canonical identity of an exported launch profile without
+/// reopening its retained source evidence.
+pub fn verify_windows_sandbox_launch_profile_identity(
+    profile: &WsbLaunchProfileExport,
+    expected: &str,
+) -> Result<(), String> {
+    verify_profile_hash(profile, expected)
+}
+
 #[cfg(windows)]
 pub(crate) fn reverify_profile(
     profile: &WsbLaunchProfileExport,

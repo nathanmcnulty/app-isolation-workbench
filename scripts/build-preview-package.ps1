@@ -36,6 +36,17 @@ function Assert-LowerSha256([string]$Value, [string]$Name) {
     if ($Value -notmatch '^[0-9a-f]{64}$') { throw "$Name must be a lowercase SHA-256" }
 }
 
+function Assert-SourceUnchanged([string]$ExpectedRevision) {
+    $currentRevision = (& git -C $repoRoot rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0 -or $currentRevision -cne $ExpectedRevision) {
+        throw 'Source revision changed during clean-host archive assembly'
+    }
+    $currentStatus = & git -C $repoRoot status --porcelain=v1 --untracked-files=all
+    if ($LASTEXITCODE -ne 0 -or $currentStatus) {
+        throw 'Source tree changed during clean-host archive assembly'
+    }
+}
+
 function Get-CanonicalJsonBytes([object]$Value) {
     $json = $Value | ConvertTo-Json -Depth 20 -Compress
     return ,([Text.UTF8Encoding]::new($false).GetBytes($json))
@@ -145,6 +156,9 @@ try {
         Assert-LowerSha256 $LaunchProfileSha256 'LaunchProfileSha256'
         $profile = Get-Content -Raw -LiteralPath $profileSource | ConvertFrom-Json
         if ($profile.profileSha256 -ne $LaunchProfileSha256) { throw 'launch profile JSON does not match the supplied profile hash' }
+        & $cliSource package verify-wsb-launch-profile-identity `
+            --profile $profileSource --profile-sha256 $LaunchProfileSha256 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'launch profile canonical identity verification failed' }
     }
 
     New-Item -ItemType Directory -Path $output -Force:$false | Out-Null
@@ -215,6 +229,8 @@ try {
     }
     Write-Utf8NoBom (Join-Path $output 'release.json') ($release | ConvertTo-Json -Depth 20)
 
+    if ($archive) { Assert-SourceUnchanged $sourceRevision }
+
     $payloadFiles = Get-ChildItem -LiteralPath $output -File -Recurse | Where-Object { $_.Name -ne 'receipt.json' } |
         ForEach-Object {
             $relative = [IO.Path]::GetRelativePath($output, $_.FullName).Replace('\', '/')
@@ -258,6 +274,7 @@ try {
         finally {
             Remove-Item -LiteralPath $archiveVerificationRoot -Recurse -Force -ErrorAction SilentlyContinue
         }
+        Assert-SourceUnchanged $sourceRevision
         $archiveItem = Get-Item -LiteralPath $archive
         $distribution = [ordered]@{
             schemaVersion = 'aiw.dev/preview-distribution/v0alpha1'

@@ -12,7 +12,10 @@
 mod bambu_report;
 mod launch_profile;
 mod packaging_recipe;
-pub use launch_profile::{WsbLaunchPreflight, WsbLaunchProfile, WsbLaunchProfileExport};
+pub use launch_profile::{
+    WsbLaunchPreflight, WsbLaunchProfile, WsbLaunchProfileExport,
+    verify_windows_sandbox_launch_profile_identity,
+};
 #[cfg(windows)]
 pub use launch_profile::{
     check_windows_sandbox_launch_profile, create_windows_sandbox_launch_profile,

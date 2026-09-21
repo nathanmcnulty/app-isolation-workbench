@@ -87,6 +87,20 @@ if ($calculatedReceiptSha256 -cne $ReceiptSha256 -or
 $rootPrefix = $root.TrimEnd('\') + '\'
 foreach ($record in $safeRecords) {
     $relative = [string]$record.path
+    $segments = $relative.Split('/')
+    $parent = $root
+    if ($segments.Count -gt 1) {
+        foreach ($segment in $segments[0..($segments.Count - 2)]) {
+            $parent = Join-Path $parent $segment
+            if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
+                throw "Package payload parent is missing: $relative"
+            }
+            $parentItem = Get-Item -LiteralPath $parent -Force
+            if (($parentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "Package payload parent is a reparse point: $relative"
+            }
+        }
+    }
     $path = [IO.Path]::GetFullPath((Join-Path $root ($relative.Replace('/', '\'))))
     if (-not $path.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase) -or
         -not (Test-Path -LiteralPath $path -PathType Leaf)) {
