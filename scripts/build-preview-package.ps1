@@ -168,7 +168,14 @@ try {
     Copy-Item -LiteralPath $projectSource -Destination (Join-Path $packagedProductRoot 'project.yaml')
     Copy-Item -LiteralPath $verifierSource -Destination (Join-Path $output 'verify-preview-package.ps1')
     Copy-Item -LiteralPath $licenseSource -Destination (Join-Path $output 'LICENSE')
-    if ($profileSource) { Copy-Item -LiteralPath $profileSource -Destination (Join-Path $packagedProductRoot 'launch-profile.json') }
+    if ($profileSource) {
+        $packagedProfile = Join-Path $packagedProductRoot 'launch-profile.json'
+        Copy-Item -LiteralPath $profileSource -Destination $packagedProfile
+        & $cliSource package verify-wsb-launch-profile-identity `
+            --profile $packagedProfile --profile-sha256 $LaunchProfileSha256 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'packaged launch profile canonical identity verification failed' }
+        $profile = Get-Content -Raw -LiteralPath $packagedProfile | ConvertFrom-Json
+    }
 
     $manifest.projectPath = 'project.yaml'
     $manifest.guestAgentPath = 'tools/aiw-guest-agent.exe'
