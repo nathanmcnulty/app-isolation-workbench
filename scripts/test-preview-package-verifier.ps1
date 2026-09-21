@@ -15,7 +15,13 @@ function Get-CanonicalJsonBytes([object]$Value) {
 }
 
 function Get-LowerSha256([byte[]]$Bytes) {
-    [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant()
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+        ([BitConverter]::ToString($sha256.ComputeHash($Bytes))).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $sha256.Dispose()
+    }
 }
 
 function Assert-Rejected([scriptblock]$Operation, [string]$Case) {
@@ -71,6 +77,17 @@ try {
     $verified = & $verifier -PackageRoot $root -ReceiptSha256 $receiptSha256 | ConvertFrom-Json
     if ($verified.exactInventory -ne $true -or $verified.filesVerified -ne 2) {
         throw 'Preview package verifier did not confirm the valid fixture'
+    }
+    $windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    if (-not (Test-Path -LiteralPath $windowsPowerShell -PathType Leaf)) {
+        throw 'Windows PowerShell is required for the clean-host verifier compatibility check'
+    }
+    $windowsVerificationText = & $windowsPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+        -File $verifier -PackageRoot $root -ReceiptSha256 $receiptSha256 | Out-String
+    if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell preview package verification failed' }
+    $windowsVerification = $windowsVerificationText | ConvertFrom-Json
+    if ($windowsVerification.exactInventory -ne $true -or $windowsVerification.filesVerified -ne 2) {
+        throw 'Windows PowerShell did not confirm the valid preview package fixture'
     }
 
     $receiptPath = Join-Path $root 'receipt.json'

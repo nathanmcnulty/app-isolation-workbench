@@ -18,7 +18,13 @@ function Get-CanonicalJsonBytes([object]$Value) {
 }
 
 function Get-LowerSha256([byte[]]$Bytes) {
-    [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant()
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+        ([BitConverter]::ToString($sha256.ComputeHash($Bytes))).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $sha256.Dispose()
+    }
 }
 
 if (-not (Test-Path -LiteralPath $root -PathType Container)) {
@@ -126,7 +132,7 @@ if ($reparse) { throw 'Package tree contains a reparse point' }
 
 $actualPaths = @(Get-ChildItem -LiteralPath $root -Recurse -File -Force |
     Where-Object { $_.FullName -ne $receiptPath } |
-    ForEach-Object { [IO.Path]::GetRelativePath($root, $_.FullName).Replace('\', '/') } |
+    ForEach-Object { $_.FullName.Substring($rootPrefix.Length).Replace('\', '/') } |
     Sort-Object)
 if ((ConvertTo-Json $actualPaths -Compress) -cne (ConvertTo-Json $recordPaths -Compress)) {
     throw 'Package inventory contains missing or unexpected files'
