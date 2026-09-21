@@ -238,6 +238,26 @@ try {
     if ($archive) {
         Compress-Archive -Path (Join-Path $output '*') -DestinationPath $archive -CompressionLevel Optimal
         if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) { throw 'preview archive was not created' }
+        $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+        $archiveVerificationRoot = Join-Path $temporaryRoot "aiw-preview-archive-verify-$([guid]::NewGuid().ToString('N'))"
+        if (-not $archiveVerificationRoot.StartsWith($temporaryRoot, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Archive verification directory escaped the temporary root'
+        }
+        try {
+            Expand-Archive -LiteralPath $archive -DestinationPath $archiveVerificationRoot
+            $extractedReceipt = Join-Path $archiveVerificationRoot 'receipt.json'
+            if ((Get-FileHash -LiteralPath $extractedReceipt -Algorithm SHA256).Hash -cne
+                (Get-FileHash -LiteralPath $receiptPath -Algorithm SHA256).Hash) {
+                throw 'Archive receipt bytes differ from the assembled package'
+            }
+            $archiveVerificationText = & $verifierSource -PackageRoot $archiveVerificationRoot -ReceiptSha256 $receiptHash | Out-String
+            if ($LASTEXITCODE -ne 0 -or ($archiveVerificationText | ConvertFrom-Json).exactInventory -ne $true) {
+                throw 'Extracted preview archive verification failed'
+            }
+        }
+        finally {
+            Remove-Item -LiteralPath $archiveVerificationRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
         $archiveItem = Get-Item -LiteralPath $archive
         $distribution = [ordered]@{
             schemaVersion = 'aiw.dev/preview-distribution/v0alpha1'

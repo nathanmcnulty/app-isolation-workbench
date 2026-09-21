@@ -24,8 +24,16 @@ function Get-LowerSha256([byte[]]$Bytes) {
 if (-not (Test-Path -LiteralPath $root -PathType Container)) {
     throw "Package root does not exist: $root"
 }
+$rootItem = Get-Item -LiteralPath $root -Force
+if (($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+    throw 'Package root is a reparse point'
+}
 if (-not (Test-Path -LiteralPath $receiptPath -PathType Leaf)) {
     throw 'Package receipt is missing'
+}
+$receiptItem = Get-Item -LiteralPath $receiptPath -Force
+if (($receiptItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+    throw 'Package receipt is a reparse point'
 }
 
 $receipt = Get-Content -Raw -LiteralPath $receiptPath | ConvertFrom-Json
@@ -42,22 +50,43 @@ $expectedOrder = @($recordPaths | Sort-Object)
 if ((ConvertTo-Json $recordPaths -Compress) -cne (ConvertTo-Json $expectedOrder -Compress)) {
     throw 'Package receipt paths are not sorted'
 }
-if (@($recordPaths | Select-Object -Unique).Count -ne $recordPaths.Count) {
-    throw 'Package receipt contains duplicate paths'
-}
-
-$rootPrefix = $root.TrimEnd('\') + '\'
+$seenPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+$safeRecords = @()
 foreach ($record in $records) {
     $relative = [string]$record.path
-    if ($relative -eq 'receipt.json' -or $relative -match '\\' -or
+    if ($relative -eq 'receipt.json' -or
+        $relative -notmatch '^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$' -or
         [IO.Path]::IsPathRooted($relative) -or
         @($relative.Split('/') | Where-Object { $_ -in @('', '.', '..') }).Count -ne 0) {
         throw "Package receipt contains an unsafe path: $relative"
     }
+    if (-not $seenPaths.Add($relative)) { throw 'Package receipt contains duplicate paths' }
     if ([string]$record.sha256 -notmatch '^[0-9a-f]{64}$' -or
         [long]$record.sizeBytes -lt 0) {
         throw "Package receipt contains an invalid file record: $relative"
     }
+    $safeRecords += [ordered]@{
+        path = $relative
+        sizeBytes = [long]$record.sizeBytes
+        sha256 = [string]$record.sha256
+    }
+}
+
+$receiptCore = [ordered]@{
+    schemaVersion = [string]$receipt.schemaVersion
+    productId = [string]$receipt.productId
+    files = $safeRecords
+    receiptLast = $true
+}
+$calculatedReceiptSha256 = Get-LowerSha256 (Get-CanonicalJsonBytes $receiptCore)
+if ($calculatedReceiptSha256 -cne $ReceiptSha256 -or
+    [string]$receipt.receiptSha256 -cne $ReceiptSha256) {
+    throw 'Package receipt identity differs from the independently supplied hash'
+}
+
+$rootPrefix = $root.TrimEnd('\') + '\'
+foreach ($record in $safeRecords) {
+    $relative = [string]$record.path
     $path = [IO.Path]::GetFullPath((Join-Path $root ($relative.Replace('/', '\'))))
     if (-not $path.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase) -or
         -not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -87,24 +116,6 @@ $actualPaths = @(Get-ChildItem -LiteralPath $root -Recurse -File -Force |
     Sort-Object)
 if ((ConvertTo-Json $actualPaths -Compress) -cne (ConvertTo-Json $recordPaths -Compress)) {
     throw 'Package inventory contains missing or unexpected files'
-}
-
-$receiptCore = [ordered]@{
-    schemaVersion = [string]$receipt.schemaVersion
-    productId = [string]$receipt.productId
-    files = @($records | ForEach-Object {
-        [ordered]@{
-            path = [string]$_.path
-            sizeBytes = [long]$_.sizeBytes
-            sha256 = [string]$_.sha256
-        }
-    })
-    receiptLast = $true
-}
-$calculatedReceiptSha256 = Get-LowerSha256 (Get-CanonicalJsonBytes $receiptCore)
-if ($calculatedReceiptSha256 -cne $ReceiptSha256 -or
-    [string]$receipt.receiptSha256 -cne $ReceiptSha256) {
-    throw 'Package receipt identity differs from the independently supplied hash'
 }
 
 [ordered]@{
