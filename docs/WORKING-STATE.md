@@ -75,10 +75,12 @@ overview correctly reports all fixed functions as passed and broader isolation
 as `insufficientEvidence`. A separate visibility retry is preserved as an
 unapproved preparation and never acquired Sandbox.
 
-Next: integrate this administrator milestone through one reviewed PR with both
-required hosted checks, then begin Packet 5's clean-host package and second-
-operator trial. Broader AppContainer research and application conversion do not
-block the narrow preview.
+PR #67 merged the administrator milestone as `cc811cf` after both required
+hosted checks passed. Packet 5 is now active: add exact archive and unpacked-
+package verification, recorded build provenance, and package-local operator
+instructions, then perform the separate-host second-operator trial described in
+[CLEAN-HOST-PREVIEW.md](CLEAN-HOST-PREVIEW.md). Broader AppContainer research and
+application conversion do not block the narrow preview.
 
 ## Read only what the slice needs
 

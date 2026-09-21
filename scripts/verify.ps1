@@ -65,6 +65,9 @@ try {
     & (Join-Path $PSScriptRoot 'check-local.ps1') -Check Workspace
     if ($LASTEXITCODE -ne 0) { throw 'cargo test failed' }
 
+    & (Join-Path $PSScriptRoot 'test-preview-package-verifier.ps1')
+    if ($LASTEXITCODE -ne 0) { throw 'preview package verifier contract failed' }
+
     cargo run --quiet --locked -p aiw-cli -- project validate --path .\examples\minimal.aiw.yaml | ConvertFrom-Json | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'example project validation failed' }
 
