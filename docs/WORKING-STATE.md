@@ -82,7 +82,7 @@ instructions, then perform the separate-host second-operator trial described in
 [CLEAN-HOST-PREVIEW.md](CLEAN-HOST-PREVIEW.md). Broader AppContainer research and
 application conversion do not block the narrow preview.
 
-Packet 5's construction slice is now implemented at `57e1896`. A clean-source
+Packet 5's construction slice is now implemented through `492c7c9`. A clean-source
 `0.1.0-alpha.1` x64 ZIP and companion distribution manifest were built, freshly
 extracted, and verified against exact archive, receipt-file, receipt-core, and
 verifier hashes. The package records the clean source revision, toolchain,

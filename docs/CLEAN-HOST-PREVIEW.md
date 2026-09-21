@@ -87,23 +87,23 @@ host, descendant, network/UI/IPC, persistence, or effective-backend evidence.
 
 Package construction and same-host public-entry replay are demonstrated. A
 clean-source candidate was assembled from revision
-`57e1896612da50fc1acb4d47ce82e51601ba4e5a` as
+`492c7c91a34635a5eb4df142f4d3f1c235fb1f74` as
 `AppIsolationWorkbench-0.1.0-alpha.1-x64.zip` with these independently checked
 identities:
 
 - archive SHA-256
-  `edb865353e6f1170dde26529b1bb3637ef5fb1de9a1c4dfe96596aa8591bdbf6`;
+  `a793f579cbc5e87ed5dbf689f55a51c8a1bc1f3dd0a8a591e4b20f04459979e0`;
 - receipt file SHA-256
-  `be19af4f87ddb30212f19b6504d116a19282e8954b6583754f29ff7cc139d089`;
+  `cff687a78dbd30c9a761f5249155c41aa3d839977c2b5cf2d70d2658d111ce55`;
 - canonical package receipt SHA-256
-  `b59b29267624ff8e92e835940e533d25e03b20d4b66dac201ff187b5493d1466`;
+  `e0c09fa0fd5ed6234f476eb3b326c30752bad01149a9f7132c5106a6541e0cf7`;
 - verifier SHA-256
-  `746e094c97c0c647d32c6ea20974c5b7ae4c77d82c34e70da820a37a9849a73c`.
+  `d178ec6033c9084f31949e869969ae840f5698bdde2146377c3ed971222dd6b4`.
 
 Fresh extraction verified all nine payload files, the clean source marker,
 version, target, static-CRT guest, profile, provider protocol, and package-local
 administrator help. The candidate and companion manifest are retained under
-`%LOCALAPPDATA%\Temp\aiw-clean-host-preview-e5c01ec70030465f803fd858d378c339`.
+`%LOCALAPPDATA%\Temp\aiw-clean-host-preview-5762ba64ddb44558adf2c7187062854d`.
 They are unsigned and have not been published.
 
 The separate-host, second-operator acceptance record above is still required.

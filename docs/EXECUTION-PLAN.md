@@ -129,10 +129,11 @@ assistant. Recreate validation on that host where required; copying same-host
 evidence paths does not validate deployment. This is the release gate, not a
 request to complete generic MSI/MSIX conversion or all isolation providers.
 
-Construction is prepared at `57e1896`: archive mode requires a clean committed
+Construction is prepared through `492c7c9`: archive mode requires a clean committed
 source, exact retained guest and validated profile, records build and support
-identity, verifies the unpacked inventory, and emits an immutable ZIP plus
-companion distribution manifest. A fresh extraction of the first candidate
+identity, recomputes the canonical profile identity, rejects source drift before
+publication, verifies the unpacked inventory, and emits an immutable ZIP plus
+companion distribution manifest. A fresh extraction of the current candidate
 passed. The separate-host second-operator run remains the gate; same-host replay
 and archive construction do not satisfy it.
 
