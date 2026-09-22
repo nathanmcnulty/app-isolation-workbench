@@ -124,17 +124,25 @@ try {
         throw 'Rust toolchain release or host is missing'
     }
 
-    $hadRustFlags = Test-Path Env:RUSTFLAGS
-    $originalRustFlags = $env:RUSTFLAGS
+    $targetRustFlagsName = 'CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS'
+    $targetRustFlagsPath = "Env:$targetRustFlagsName"
+    $hadTargetRustFlags = Test-Path $targetRustFlagsPath
+    $originalTargetRustFlags = if ($hadTargetRustFlags) {
+        (Get-Item $targetRustFlagsPath).Value
+    }
+    else {
+        $null
+    }
     try {
-        $env:RUSTFLAGS = (@($originalRustFlags, '-C target-feature=+crt-static') |
+        $targetRustFlags = (@($originalTargetRustFlags, '-C target-feature=+crt-static') |
             Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ' '
+        Set-Item -Path $targetRustFlagsPath -Value $targetRustFlags
         & cargo build --locked --release -p aiw-cli
         if ($LASTEXITCODE -ne 0) { throw 'release aiw-cli build failed' }
     }
     finally {
-        if ($hadRustFlags) { $env:RUSTFLAGS = $originalRustFlags }
-        else { Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue }
+        if ($hadTargetRustFlags) { Set-Item -Path $targetRustFlagsPath -Value $originalTargetRustFlags }
+        else { Remove-Item $targetRustFlagsPath -ErrorAction SilentlyContinue }
     }
 
     if ($null -ne $GuestAgent -xor $null -ne $GuestAgentSha256) { throw 'GuestAgent and GuestAgentSha256 must be supplied together' }
