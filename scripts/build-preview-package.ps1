@@ -211,10 +211,24 @@ try {
     }
     Write-Utf8NoBom (Join-Path $packagedProductRoot 'manifest.json') ($manifest | ConvertTo-Json -Depth 20)
 
+    $workflowDescription = if ($profileSource) {
+        'the recorded Notepad++ 8.9.8 x64 MSI in Windows Sandbox, using the packaged fixed project, guest agent, and validated local-settings replay profile.'
+    }
+    else {
+        'the recorded Notepad++ 8.9.8 x64 MSI in Windows Sandbox, using the packaged fixed project and guest agent without a validated replay profile.'
+    }
+    $profileBoundary = if ($profileSource) {
+        'This package is bound to the included validated replay profile.'
+    }
+    else {
+        'This package is assessment-only and is not profile-bound. It cannot close the profile-bound clean-host release gate.'
+    }
     $readme = (Get-Content -Raw -LiteralPath $readmeTemplate).
         Replace('{{VERSION}}', $packageVersion).
         Replace('{{SOURCE_REVISION}}', $sourceRevision).
-        Replace('{{TARGET}}', $targetTriple)
+        Replace('{{TARGET}}', $targetTriple).
+        Replace('{{WORKFLOW_DESCRIPTION}}', $workflowDescription).
+        Replace('{{PROFILE_BOUNDARY}}', $profileBoundary)
     Write-Utf8NoBom (Join-Path $output 'README.txt') $readme.TrimEnd()
     $release = [ordered]@{
         schemaVersion = 'aiw.dev/preview-release/v0alpha1'

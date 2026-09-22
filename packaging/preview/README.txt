@@ -1,9 +1,9 @@
 App Isolation Workbench {{VERSION}} clean-host preview
 ========================================================
 
-This unsigned preview supports one exact workflow: the recorded Notepad++ 8.9.8
-x64 MSI in Windows Sandbox, using the packaged fixed project, guest agent, and
-validated local-settings replay profile. It does not support arbitrary installers,
+This unsigned preview supports one exact workflow:
+{{WORKFLOW_DESCRIPTION}}
+It does not support arbitrary installers,
 general EXE conversion, persistent application state, or a complete containment
 verdict.
 
@@ -71,6 +71,8 @@ operator-selected host directory. AIW performs no telemetry or upload.
 
 Known limits
 ------------
+{{PROFILE_BOUNDARY}}
+
 This same-host package construction is not the clean-host release proof. The
 second-operator trial must record the exact archive, host/provider identity,
 approval, report, and cleanup. Code signing, timestamping, SBOM publication, and
