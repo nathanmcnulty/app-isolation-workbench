@@ -70,16 +70,16 @@ function Get-Dumpbin {
     $dumpbin
 }
 
-function Assert-StaticX64Guest([string]$Path) {
+function Assert-StaticX64Pe([string]$Path, [string]$ArtifactName) {
     $dumpbin = Get-Dumpbin
     $headers = & $dumpbin /headers $Path 2>&1
     if ($LASTEXITCODE -ne 0 -or ($headers -join "`n") -notmatch '(?m)^\s+8664 machine \(x64\)') {
-        throw 'guest-agent artifact is not an x64 PE image'
+        throw "$ArtifactName is not an x64 PE image"
     }
     $dependencies = & $dumpbin /dependents $Path 2>&1
-    if ($LASTEXITCODE -ne 0) { throw 'guest-agent PE dependency inspection failed' }
+    if ($LASTEXITCODE -ne 0) { throw "$ArtifactName PE dependency inspection failed" }
     if (($dependencies -join "`n") -match '(?im)^\s+((?:VCRUNTIME|MSVCP|MSVCR)[^\s]*\.dll|UCRTBASE\.dll|api-ms-win-crt-[^\s]+\.dll)\s*$') {
-        throw 'guest-agent artifact still imports a dynamic Visual C++ runtime'
+        throw "$ArtifactName still imports a dynamic Visual C++ runtime"
     }
 }
 
@@ -124,8 +124,26 @@ try {
         throw 'Rust toolchain release or host is missing'
     }
 
-    & cargo build --locked --release -p aiw-cli
-    if ($LASTEXITCODE -ne 0) { throw 'release aiw-cli build failed' }
+    $targetRustFlagsName = 'CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS'
+    $targetRustFlagsPath = "Env:$targetRustFlagsName"
+    $hadTargetRustFlags = Test-Path $targetRustFlagsPath
+    $originalTargetRustFlags = if ($hadTargetRustFlags) {
+        (Get-Item $targetRustFlagsPath).Value
+    }
+    else {
+        $null
+    }
+    try {
+        $targetRustFlags = (@($originalTargetRustFlags, '-C target-feature=+crt-static') |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ' '
+        Set-Item -Path $targetRustFlagsPath -Value $targetRustFlags
+        & cargo build --locked --release -p aiw-cli
+        if ($LASTEXITCODE -ne 0) { throw 'release aiw-cli build failed' }
+    }
+    finally {
+        if ($hadTargetRustFlags) { Set-Item -Path $targetRustFlagsPath -Value $originalTargetRustFlags }
+        else { Remove-Item $targetRustFlagsPath -ErrorAction SilentlyContinue }
+    }
 
     if ($null -ne $GuestAgent -xor $null -ne $GuestAgentSha256) { throw 'GuestAgent and GuestAgentSha256 must be supplied together' }
     if ($GuestAgent) {
@@ -142,7 +160,8 @@ try {
     }
     if (-not (Test-Path -LiteralPath $guestSource -PathType Leaf)) { throw "guest-agent artifact is missing: $guestSource" }
     if (-not (Test-Path -LiteralPath $cliSource -PathType Leaf)) { throw "release CLI artifact is missing: $cliSource" }
-    Assert-StaticX64Guest $guestSource
+    Assert-StaticX64Pe $guestSource 'guest-agent artifact'
+    Assert-StaticX64Pe $cliSource 'aiw CLI artifact'
 
     $manifest = Get-Content -Raw -LiteralPath $manifestSource | ConvertFrom-Json
     if ($manifest.schemaVersion -ne 'aiw.dev/admin-product-assets/v0alpha1' -or $manifest.productId -notlike 'notepad-plus-plus-*') {
@@ -200,10 +219,24 @@ try {
     }
     Write-Utf8NoBom (Join-Path $packagedProductRoot 'manifest.json') ($manifest | ConvertTo-Json -Depth 20)
 
+    $workflowDescription = if ($profileSource) {
+        'the recorded Notepad++ 8.9.8 x64 MSI in Windows Sandbox, using the packaged fixed project, guest agent, and validated local-settings replay profile.'
+    }
+    else {
+        'the recorded Notepad++ 8.9.8 x64 MSI in Windows Sandbox, using the packaged fixed project and guest agent without a validated replay profile.'
+    }
+    $profileBoundary = if ($profileSource) {
+        'This package is bound to the included validated replay profile.'
+    }
+    else {
+        'This package is assessment-only and is not profile-bound. It cannot close the profile-bound clean-host release gate.'
+    }
     $readme = (Get-Content -Raw -LiteralPath $readmeTemplate).
         Replace('{{VERSION}}', $packageVersion).
         Replace('{{SOURCE_REVISION}}', $sourceRevision).
-        Replace('{{TARGET}}', $targetTriple)
+        Replace('{{TARGET}}', $targetTriple).
+        Replace('{{WORKFLOW_DESCRIPTION}}', $workflowDescription).
+        Replace('{{PROFILE_BOUNDARY}}', $profileBoundary)
     Write-Utf8NoBom (Join-Path $output 'README.txt') $readme.TrimEnd()
     $release = [ordered]@{
         schemaVersion = 'aiw.dev/preview-release/v0alpha1'
@@ -213,6 +246,7 @@ try {
         target = $targetTriple
         toolchain = [ordered]@{ rustc = $rustcRelease; buildHost = $rustcHost }
         cliSha256 = (Get-FileHash -LiteralPath (Join-Path $output 'aiw.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+        cliCrt = 'static'
         guest = [ordered]@{
             sha256 = [string]$manifest.guestAgentSha256
             target = $targetTriple

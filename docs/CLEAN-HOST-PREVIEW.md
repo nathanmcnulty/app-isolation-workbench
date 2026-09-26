@@ -4,6 +4,61 @@ This is the release-candidate handoff for the first supported administrator
 preview. It prepares one immutable, verifiable archive for a second operator on
 a separate supported host. It does not itself close the clean-host gate.
 
+## Current separate-host trial
+
+The Azure clean-host VM `aiw-clean-host-0921` in subscription
+`43babb60-9e73-4dc8-b769-4401c01aad73` ran the assessment-only v6 package
+from `C:\AIW-Trial-v6` with separate installer input at `C:\AIW-Input-v6` on
+2026-09-26. The second operator used the desktop launcher and typed the displayed
+plan hash after reviewing the recipe. The exact package inventory was verified
+on the VM; its compiled local-settings scenario is v0alpha10/v0alpha2 with a
+fixed 300-second MSI install deadline.
+
+The v6 source revision is `3e04f1ba520f8b516fa2c1a00ced282d8c8b89dc`;
+archive SHA-256 is
+`4acab6d323b8b846aee2552720f8277035af2ba432689ceea8a931c4e0890520`;
+package receipt SHA-256 is
+`d979af8894d628d04d022b6c6d5c29c57a4532085ac2ed3e6d45ba6642bad353`.
+The CLI and guest SHA-256 values are respectively
+`109d7cc4ac62ff58299349d697df9d7b3447f0087e2435ea58d76d83b79ff503`
+and `3820362b4ab8f1c5c85456cc4f2531b251d28041c62373e17b2190e527de1999`.
+The installer matched the supported hash below. This assessment-only package
+has no validated launch profile, so this successful workflow does not close the
+profile-bound release gate.
+
+Run `admin-1790455699199696400` completed with process exit code 0. Its
+receipt-bound report records all nine stages passed: installation returned 0,
+Notepad++ launched in the recorded standard-user context, the fixed document
+opened, saved with the expected SHA-256
+`55666bc7399b14c1cdb77f1e0261e3b6f09e49aec11cda7de1685d73b8a7c9fc`,
+and closed. The required guest file ACL control passed. The report records
+`recordedCleanupVerified: true` and outcome `insufficientEvidence` for broader
+isolation. A fresh `aiw.exe run status` call from the original RDP operator
+context returned terminal status, evidence root
+`c2e2d001a03dc2f9ddd47bd04ee6ab54f1dac70485650454b3db3a370469df66`,
+and Sandbox state `cleanupVerified`. The provider's raw session list was empty
+after the run. The full evidence archive is retained on the VM at
+`C:\AIW-Retained\clean-host-evidence-admin-1790455699199696400.zip` and locally
+at `E:\aiw-artifacts\clean-host-evidence-admin-1790455699199696400.zip`
+(SHA-256 `b3b2376ca832eb4d8c012211227a429ccbce46f5a9703db03ef8e9da90d0c98e`),
+with a private Azure handoff copy. Local verification matched the guest, MSI,
+scenario result, evidence journal, completion receipt, and saved-document hashes.
+
+One unsupported-input control used the package README as `--installer` in a
+separate evidence parent `C:\AIW-Negative-v6`. It returned
+`AIW_ADMIN_UNSUPPORTED_INSTALLER` at `adminInstallerInspection`, run
+`admin-1790456937602758500`, and retained `installer-rejection.json`. No
+protected intake or Sandbox session was acquired. This control did not execute
+an installer.
+
+The preceding v4 run `admin-1790038437201088600` reached the guest install
+stage and failed when the fixed guest process timed out at 120 seconds. Its
+terminal failed report and verified exact-session cleanup are retained under
+`C:\AIW-Evidence-v4` on the VM and in the separately preserved evidence archive.
+The timeout did not establish application incompatibility. The v6 run shows the
+fixed workflow can finish with the 300-second bound on this host; it does not
+isolate the timing change as the only cause. Preserve both runs.
+
 ## Build the handoff
 
 Build only from a clean committed checkout. Supply the exact retained guest and
@@ -83,7 +138,7 @@ A successful fixed workflow can still be `insufficientEvidence` for broader
 isolation. Cross-host success does not waive the report's missing independent
 host, descendant, network/UI/IPC, persistence, or effective-backend evidence.
 
-## Current state
+## Earlier same-host candidate
 
 Package construction and same-host public-entry replay are demonstrated. A
 clean-source candidate was assembled from revision
@@ -106,6 +161,9 @@ administrator help. The candidate and companion manifest are retained under
 `%LOCALAPPDATA%\Temp\aiw-clean-host-preview-2c9bbb1faa454791a9c8d4c683a4e45c`.
 They are unsigned and have not been published.
 
-The separate-host, second-operator acceptance record above is still required.
-Do not copy same-host evidence paths to the target or count archive construction
-as a clean-host trial.
+This earlier profile-bound candidate has not been replayed by the second
+operator. Its profile is bound to an earlier guest and scenario identity, so the
+successful v6 assessment does not validate that candidate on the clean host.
+Build and verify a new profile-bound candidate against the current guest and
+scenario, then complete the separate-host acceptance record. Do not substitute
+same-host evidence paths for a clean-host trial.

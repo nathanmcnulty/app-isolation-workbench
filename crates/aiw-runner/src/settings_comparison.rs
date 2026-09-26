@@ -418,11 +418,10 @@ fn validate_trials(trials: &[VerifiedTrial; 3]) -> Result<(), String> {
     if trials[1].compiled != trials[2].compiled {
         return Err("candidate and replay compiled scenarios differ".into());
     }
-    if trials
-        .iter()
-        .skip(1)
-        .any(|trial| normalized_compiled(&trial.compiled) != baseline.compiled)
-    {
+    if trials.iter().skip(1).any(|trial| {
+        normalized_compiled(&trial.compiled, baseline.compiled.install_timeout_seconds)
+            != baseline.compiled
+    }) {
         return Err(
             "baseline and local-settings scenarios differ beyond the fixed adaptation".into(),
         );
@@ -467,10 +466,14 @@ fn validate_trials(trials: &[VerifiedTrial; 3]) -> Result<(), String> {
     Ok(())
 }
 
-fn normalized_compiled(scenario: &CompiledMsiScenario) -> CompiledMsiScenario {
+fn normalized_compiled(
+    scenario: &CompiledMsiScenario,
+    baseline_install_timeout_seconds: u32,
+) -> CompiledMsiScenario {
     let mut normalized = scenario.clone();
     normalized.schema_version = COMPILED_MSI_SCENARIO_SCHEMA_VERSION.to_owned();
     normalized.profile = NOTEPAD_PLUS_PLUS_MSI_PROFILE.to_owned();
+    normalized.install_timeout_seconds = baseline_install_timeout_seconds;
     normalized.launch_arguments.clear();
     normalized
 }

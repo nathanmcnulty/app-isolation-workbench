@@ -22,6 +22,7 @@ impl MsiRequiredObservations {
             scenario.schema_version.as_str(),
             crate::COMPILED_MSI_SCENARIO_SCHEMA_VERSION
                 | crate::COMPILED_MSI_LOCAL_SETTINGS_SCENARIO_SCHEMA_VERSION
+                | crate::scenario::LEGACY_COMPILED_MSI_LOCAL_SETTINGS_SCENARIO_SCHEMA_VERSION
         ) || !scenario.requires_standard_user()
             || !scenario.requires_application_exercise()
             || scenario.interactive_session_seconds.is_some()

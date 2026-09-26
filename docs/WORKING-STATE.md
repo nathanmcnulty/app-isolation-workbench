@@ -1,11 +1,12 @@
 # Working state
 
-Updated 2026-09-20. This is a compact handoff, not a run receipt or authorization.
+Updated 2026-09-26. This is a compact handoff, not a run receipt or authorization.
 
 ## Where to resume
 
-- Active branch: `codex/admin-assessment-summary`, based on PR #66 merge `6f19136`. PR #66 merged only after hosted verification/audit and MSRV passed. Use the status helper rather than assuming another checkout has these changes.
-- Latest milestone: profile-bound approved replay passed the fixed document workflow, required guest file ACL controls, recorded environment comparison, and cleanup. PR #65 hosted verification/audit and MSRV passed; its main run was superseded and cancelled. Source evidence and the earlier worktree remain preserved. See VALIDATED-SANDBOX-LAUNCH.md.
+- Active branch: `codex/clean-host-preview` at `14e77b2` before this handoff update. PR #68 merged the earlier preview package; later branch commits await integration. Verify with `scripts/work-status.ps1` before editing.
+- Current gate: the second operator completed the v6 assessment-only trial on the separate clean-host VM. Run `admin-1790455699199696400` passed the fixed install/open/edit/save/close workflow and ACL control; the retained run status and exact Sandbox cleanup verified. The broader isolation outcome remains `insufficientEvidence`. An unsupported-input control rejected before intake or Sandbox acquisition. The v4 120-second timeout and v6 300-second success are both retained; the cause of the timing difference is not isolated. See [CLEAN-HOST-PREVIEW.md](CLEAN-HOST-PREVIEW.md).
+- The earlier profile-bound approved replay passed its fixed document workflow, required guest file ACL controls, recorded environment comparison, and cleanup. That remains same-host evidence for its recorded source and provider identities. See [VALIDATED-SANDBOX-LAUNCH.md](VALIDATED-SANDBOX-LAUNCH.md).
 - Goal: report tested functions for exact application bytes and measured isolation configurations, then use the evidence for adaptation/repackaging. Free community project; feedback collection is not a development gate.
 
 ## Implemented versus exploratory
@@ -18,78 +19,15 @@ Updated 2026-09-20. This is a compact handoff, not a run receipt or authorizatio
 
 ## Next coherent slice
 
-Follow [EXECUTION-PLAN.md](EXECUTION-PLAN.md) for bounded work packets and model
-assignments. Recommended main model: Sol medium; Luna for bounded implementation;
-stronger models for specific review/escalation. The exact-commit Sol review of
-terminal approval found no actionable issue. Next add the administrator summary,
-then the guided workflow.
-
-Approved profile replay passed at runtime commit `fc22efb`: preparation v0alpha6
-embeds the reverified profile, approval binds its exact identity, and start
-re-verifies source evidence before acquiring Sandbox. A fresh fixed trial passed
-document save, local settings, required standard-user file ACL controls, matching
-recorded provider/configuration/OS, and cleanup. Report v0alpha11 identifies the
-approved profile. The provider list was empty afterward. See
-[VALIDATED-SANDBOX-LAUNCH.md](VALIDATED-SANDBOX-LAUNCH.md) for exact evidence and
-validation logs, including the preserved pre-harness executable crash.
-
-The [focused quality review](QUALITY-REVIEW-2026-09-20.md) found and corrected
-misleading preflight advice for unbound/differently bound preparations. No other
-production blocker was found in the reviewed authority, historical report, or
-recovery paths. Test/build failure causes remain unconfirmed; retained diagnostics
-and the missing direct start-before-acquisition regression are tracked in the review.
-
-The first administrator improvement adds [terminal approval review](ADMIN-APPROVAL.md):
-show the exact plan and approval identity, require the displayed hash, and record
-through the existing service without a hand-authored approval file. Cancellation
-does not approve or execute anything; redirected input is rejected.
-
-The retained MSI Markdown report now starts with an administrator overview for
-exact application bytes and the fixed workflow. It separates function results,
-measured observations, cleanup, and broader missing isolation evidence, then
-gives a state-specific next action. Retained completed and controlled-failure
-workspaces rendered correctly without changing their files. See
-[ASSESSMENT-REPORT.md](ASSESSMENT-REPORT.md).
-
-The packaged `aiw admin assess` route now composes protected intake, preparation,
-visible recipe review, exact-plan terminal approval, execution, and retained
-JSON/Markdown reporting. Product assets bind the fixed local-settings project,
-static guest, and optional approved replay profile. A real profile-bound preview
-package was assembled with a receipt.
-Assembly now verifies the profile's application, project, scenario, and guest
-bindings. The runnable replay package uses the exact retained validated guest;
-an incompatible freshly built release guest was rejected before receipt.
-The public package also passed the occupied-session negative case with a specific
-retained readiness path and no intake/provider mutation. Another task's session
-`8fd60024-30fd-41d7-8fa8-04571a405184` was later explicitly stopped with user
-authorization.
-
-The public profile-bound replay then completed as run
-`admin-1789947096248087800` under
-`%LOCALAPPDATA%\Temp\aiw-admin-public-replay-783a99b8f9a24fcb9c1f6d25cfe90ecf`.
-The exact supported MSI installed; Notepad++ launched under the fixed medium-
-integrity, non-elevated standard user; the document opened and saved the expected
-bytes; the guest file ACL control passed; and the retained status is terminal
-with cleanup verified. The provider list was empty afterward. The administrator
-overview correctly reports all fixed functions as passed and broader isolation
-as `insufficientEvidence`. A separate visibility retry is preserved as an
-unapproved preparation and never acquired Sandbox.
-
-PR #67 merged the administrator milestone as `cc811cf` after both required
-hosted checks passed. Packet 5 is now active: add exact archive and unpacked-
-package verification, recorded build provenance, and package-local operator
-instructions, then perform the separate-host second-operator trial described in
-[CLEAN-HOST-PREVIEW.md](CLEAN-HOST-PREVIEW.md). Broader AppContainer research and
-application conversion do not block the narrow preview.
-
-Packet 5's construction slice is now implemented through `42d2b42`. A clean-source
-`0.1.0-alpha.1` x64 ZIP and companion distribution manifest were built, freshly
-extracted, and verified against exact archive, receipt-file, receipt-core, and
-verifier hashes. The package records the clean source revision, toolchain,
-target, static guest, profile, supported host/protocol, and unsigned-preview
-boundary. It is retained locally and not published. Next: close review findings,
-integrate this slice, then hand the immutable candidate to a second operator on
-a separate supported host. Do not repeat the same-host Sandbox replay.
+Integrate the completed v6 evidence and branch commits through one reviewed PR
+with the required hosted checks. Then build a profile-bound candidate for the
+current guest and scenario identities, verify its fresh extraction, and repeat
+the public-entry replay with the second operator. The successful assessment-only
+run does not satisfy that release gate. [EXECUTION-PLAN.md](EXECUTION-PLAN.md)
+gives the packet order. Detailed older evidence remains in
+[VALIDATED-SANDBOX-LAUNCH.md](VALIDATED-SANDBOX-LAUNCH.md),
+[ADMINISTRATOR-WORKFLOW.md](ADMINISTRATOR-WORKFLOW.md), and
+[QUALITY-REVIEW-2026-09-20.md](QUALITY-REVIEW-2026-09-20.md).
 
 ## Read only what the slice needs
 

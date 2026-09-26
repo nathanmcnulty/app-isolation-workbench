@@ -70,13 +70,18 @@ This experiment asks whether settings move to local application data while the
 document function remains intact; it does not assert that the default location
 is a compatibility failure or that redirecting settings restricts access.
 
-The compiled scenario has schema `windows-sandbox-compiled-msi-scenario/v0alpha9`
-and profile `windows-sandbox/notepad-plus-plus-local-settings/v0alpha1` (both with
-the `aiw.dev/` prefix). It is separately hashed and disclosed in approval. The
-compiler accepts only that exact argument in the automated scenario; altered
-paths, extra flags, and interactive use are rejected. Existing no-argument and
-interactive profiles retain their wire hashes. Bundles preserve the typed
-scenario through ordinary export, relocation, fresh intake, and replay.
+The current compiled scenario has schema
+`windows-sandbox-compiled-msi-scenario/v0alpha10` and profile
+`windows-sandbox/notepad-plus-plus-local-settings/v0alpha2` (both with the
+`aiw.dev/` prefix). This revision raises the fixed MSI install deadline from 120
+to 300 seconds for slower nested-virtualization workers. The deadline remains
+bounded and part of the separately hashed scenario disclosed in approval.
+Historical v0alpha9/v0alpha1 records remain verifiable with their original
+120-second deadline. The compiler accepts only the exact settings argument in
+the automated scenario; altered paths, extra flags, and interactive use are
+rejected. Existing no-argument and interactive profiles retain their wire
+hashes. Bundles preserve the typed scenario through ordinary export,
+relocation, fresh intake, and replay.
 
 After building the CLI and production static guest, an explicitly approved
 three-worker trial can be run with:
