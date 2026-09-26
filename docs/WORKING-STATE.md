@@ -4,7 +4,7 @@ Updated 2026-09-26. This is a compact handoff, not a run receipt or authorizatio
 
 ## Where to resume
 
-- Active branch: `codex/clean-host-preview` at `14e77b2` before this handoff update. PR #68 merged the earlier preview package; later branch commits await integration. Verify with `scripts/work-status.ps1` before editing.
+- Active branch: `codex/profile-bound-clean-host`, based on merged `main` at `ed250d0`. PR #70 integrated the separate-host assessment and preview fixes after both required hosted checks passed. Verify with `scripts/work-status.ps1` before editing.
 - Current gate: the second operator completed the v6 assessment-only trial on the separate clean-host VM. Run `admin-1790455699199696400` passed the fixed install/open/edit/save/close workflow and ACL control; the retained run status and exact Sandbox cleanup verified. The broader isolation outcome remains `insufficientEvidence`. An unsupported-input control rejected before intake or Sandbox acquisition. The v4 120-second timeout and v6 300-second success are both retained; the cause of the timing difference is not isolated. See [CLEAN-HOST-PREVIEW.md](CLEAN-HOST-PREVIEW.md).
 - The earlier profile-bound approved replay passed its fixed document workflow, required guest file ACL controls, recorded environment comparison, and cleanup. That remains same-host evidence for its recorded source and provider identities. See [VALIDATED-SANDBOX-LAUNCH.md](VALIDATED-SANDBOX-LAUNCH.md).
 - Goal: report tested functions for exact application bytes and measured isolation configurations, then use the evidence for adaptation/repackaging. Free community project; feedback collection is not a development gate.
@@ -19,12 +19,13 @@ Updated 2026-09-26. This is a compact handoff, not a run receipt or authorizatio
 
 ## Next coherent slice
 
-Integrate the completed v6 evidence and branch commits through one reviewed PR
-with the required hosted checks. Then build a profile-bound candidate for the
-current guest and scenario identities, verify its fresh extraction, and repeat
-the public-entry replay with the second operator. The successful assessment-only
-run does not satisfy that release gate. [EXECUTION-PLAN.md](EXECUTION-PLAN.md)
-gives the packet order. Detailed older evidence remains in
+Build a profile-bound candidate for the current guest and scenario identities.
+First establish retained baseline/candidate/replay evidence on the clean host,
+then create and verify the bound profile and fresh package. Repeat the public
+entry with the second operator and preserve its report and exact cleanup. The
+successful assessment-only run does not satisfy that release gate. See
+[EXECUTION-PLAN.md](EXECUTION-PLAN.md) for the packet order. Detailed older
+evidence remains in
 [VALIDATED-SANDBOX-LAUNCH.md](VALIDATED-SANDBOX-LAUNCH.md),
 [ADMINISTRATOR-WORKFLOW.md](ADMINISTRATOR-WORKFLOW.md), and
 [QUALITY-REVIEW-2026-09-20.md](QUALITY-REVIEW-2026-09-20.md).
