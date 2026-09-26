@@ -4,8 +4,8 @@ Updated 2026-09-26. This is a compact handoff, not a run receipt or authorizatio
 
 ## Where to resume
 
-- Active branch: `codex/clean-host-preview` at `3e04f1b`, pushed and clean at the last check. PR #68 merged the earlier preview package at `9c7cb4c`; five later branch commits have not been integrated. Verify with `scripts/work-status.ps1` before editing.
-- Current gate: a separate-host administrator trial. The v4 assessment reached the guest MSI installation, timed out at its fixed 120-second deadline, retained a failed report, and cleaned up its exact Sandbox session. The reason the MSI did not finish within that bound is unconfirmed. The v6 assessment-only package uses a separately versioned 300-second install bound and is staged on the clean-host VM. Its evidence directory was empty on 2026-09-26; the operator trial has not been recorded. See [CLEAN-HOST-PREVIEW.md](CLEAN-HOST-PREVIEW.md).
+- Active branch: `codex/clean-host-preview` at `14e77b2` before this handoff update. PR #68 merged the earlier preview package; later branch commits await integration. Verify with `scripts/work-status.ps1` before editing.
+- Current gate: the second operator completed the v6 assessment-only trial on the separate clean-host VM. Run `admin-1790455699199696400` passed the fixed install/open/edit/save/close workflow and ACL control; the retained run status and exact Sandbox cleanup verified. The broader isolation outcome remains `insufficientEvidence`. An unsupported-input control rejected before intake or Sandbox acquisition. The v4 120-second timeout and v6 300-second success are both retained; the cause of the timing difference is not isolated. See [CLEAN-HOST-PREVIEW.md](CLEAN-HOST-PREVIEW.md).
 - The earlier profile-bound approved replay passed its fixed document workflow, required guest file ACL controls, recorded environment comparison, and cleanup. That remains same-host evidence for its recorded source and provider identities. See [VALIDATED-SANDBOX-LAUNCH.md](VALIDATED-SANDBOX-LAUNCH.md).
 - Goal: report tested functions for exact application bytes and measured isolation configurations, then use the evidence for adaptation/repackaging. Free community project; feedback collection is not a development gate.
 
@@ -19,18 +19,12 @@ Updated 2026-09-26. This is a compact handoff, not a run receipt or authorizatio
 
 ## Next coherent slice
 
-Run the staged v6 package through its visible desktop launcher with the second
-operator. Preserve the terminal output and retained run. Verify the completed
-report, the exact guest session cleanup, and the provider's empty session list.
-If installation times out again, inspect its bounded diagnostic and stage record
-before changing the recipe. Do not treat the longer bound as a demonstrated fix
-until a trial finishes. The package is assessment-only; a successful run still
-needs a validated profile-bound candidate to close the stated release gate.
-
-After the trial, update [CLEAN-HOST-PREVIEW.md](CLEAN-HOST-PREVIEW.md) with exact
-evidence and integrate the five post-PR-#68 commits through a reviewed PR with
-the required hosted checks. [EXECUTION-PLAN.md](EXECUTION-PLAN.md) gives the packet
-order. Detailed older evidence remains in
+Integrate the completed v6 evidence and branch commits through one reviewed PR
+with the required hosted checks. Then build a profile-bound candidate for the
+current guest and scenario identities, verify its fresh extraction, and repeat
+the public-entry replay with the second operator. The successful assessment-only
+run does not satisfy that release gate. [EXECUTION-PLAN.md](EXECUTION-PLAN.md)
+gives the packet order. Detailed older evidence remains in
 [VALIDATED-SANDBOX-LAUNCH.md](VALIDATED-SANDBOX-LAUNCH.md),
 [ADMINISTRATOR-WORKFLOW.md](ADMINISTRATOR-WORKFLOW.md), and
 [QUALITY-REVIEW-2026-09-20.md](QUALITY-REVIEW-2026-09-20.md).
