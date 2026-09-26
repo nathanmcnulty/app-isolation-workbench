@@ -32,7 +32,7 @@ Notepad++ launched in the recorded standard-user context, the fixed document
 opened, saved with the expected SHA-256
 `55666bc7399b14c1cdb77f1e0261e3b6f09e49aec11cda7de1685d73b8a7c9fc`,
 and closed. The required guest file ACL control passed. The report records
-`cleanupVerified: true` and outcome `insufficientEvidence` for broader
+`recordedCleanupVerified: true` and outcome `insufficientEvidence` for broader
 isolation. A fresh `aiw.exe run status` call from the original RDP operator
 context returned terminal status, evidence root
 `c2e2d001a03dc2f9ddd47bd04ee6ab54f1dac70485650454b3db3a370469df66`,
