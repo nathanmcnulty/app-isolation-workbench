@@ -4,6 +4,35 @@ This is the release-candidate handoff for the first supported administrator
 preview. It prepares one immutable, verifiable archive for a second operator on
 a separate supported host. It does not itself close the clean-host gate.
 
+## Current separate-host trial
+
+The Azure clean-host VM `aiw-clean-host-0921` in subscription
+`43babb60-9e73-4dc8-b769-4401c01aad73` has a staged, assessment-only v6
+package at `C:\AIW-Trial-v6`, a separate installer input at `C:\AIW-Input-v6`,
+and an empty evidence parent at `C:\AIW-Evidence-v6` as of 2026-09-26. The
+operator's desktop launcher is `Run AIW Assessment v6.cmd`. The exact package
+inventory verified on the VM, and its compiled local-settings scenario is
+v0alpha10/v0alpha2 with a fixed 300-second MSI install deadline.
+
+The v6 source revision is `3e04f1ba520f8b516fa2c1a00ced282d8c8b89dc`;
+archive SHA-256 is
+`4acab6d323b8b846aee2552720f8277035af2ba432689ceea8a931c4e0890520`;
+package receipt SHA-256 is
+`d979af8894d628d04d022b6c6d5c29c57a4532085ac2ed3e6d45ba6642bad353`.
+The CLI and guest SHA-256 values are respectively
+`109d7cc4ac62ff58299349d697df9d7b3447f0087e2435ea58d76d83b79ff503`
+and `3820362b4ab8f1c5c85456cc4f2531b251d28041c62373e17b2190e527de1999`.
+The installer still matches the supported hash below. This assessment-only
+package has no validated launch profile; a successful v6 workflow will test the
+new timing bound but will not alone close the profile-bound release gate.
+
+The preceding v4 run `admin-1790038437201088600` reached the guest install
+stage and failed when the fixed guest process timed out at 120 seconds. Its
+terminal failed report and verified exact-session cleanup are retained under
+`C:\AIW-Evidence-v4` on the VM and in the separately preserved evidence archive.
+The timeout does not establish application incompatibility or prove that a
+longer deadline will succeed. Preserve that run when evaluating v6.
+
 ## Build the handoff
 
 Build only from a clean committed checkout. Supply the exact retained guest and
@@ -83,7 +112,7 @@ A successful fixed workflow can still be `insufficientEvidence` for broader
 isolation. Cross-host success does not waive the report's missing independent
 host, descendant, network/UI/IPC, persistence, or effective-backend evidence.
 
-## Current state
+## Earlier same-host candidate
 
 Package construction and same-host public-entry replay are demonstrated. A
 clean-source candidate was assembled from revision
