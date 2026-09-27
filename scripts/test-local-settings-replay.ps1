@@ -1,8 +1,9 @@
 #requires -Version 5.1
 <#
-Runs three approved disposable Sandbox trials: baseline, fixed local-settings
-adaptation, and relocated-bundle replay. Never installs on the host. Evidence is
-retained on failure; the CLI owns exact-session cleanup/recovery.
+Runs approved disposable Sandbox trials: baseline, fixed local-settings
+adaptation, and relocated-bundle replay. An already completed baseline may be
+reverified without relaunching its worker. Never installs on the host. Evidence
+is retained on failure; the CLI owns exact-session cleanup/recovery.
 #>
 [CmdletBinding()]
 param(
@@ -13,6 +14,7 @@ param(
     [ValidatePattern('^[0-9a-f]{64}$')][string]$CliSha256,
     [string]$BaselineProject,
     [string]$CandidateProject,
+    [string]$BaselineEvidenceRoot,
     [Parameter(Mandatory)][string]$EvidenceParent,
     [Parameter(Mandatory)][string]$ApprovedBy,
     [Parameter(Mandatory)][switch]$Approve
@@ -31,6 +33,7 @@ foreach ($inputPath in @($aiw, $GuestAgent, $ImportReceipt, $baselineProjectPath
 if ($CliSha256 -and (Get-FileHash -LiteralPath $aiw -Algorithm SHA256).Hash.ToLowerInvariant() -cne $CliSha256) { throw 'CLI bytes differ from the supplied SHA-256' }
 if ((Get-FileHash -LiteralPath $GuestAgent -Algorithm SHA256).Hash.ToLowerInvariant() -cne $GuestAgentSha256) { throw 'Guest-agent bytes differ from the supplied SHA-256' }
 if (!(Test-Path -LiteralPath $EvidenceParent -PathType Container)) { throw 'EvidenceParent must be an existing directory' }
+if ($BaselineEvidenceRoot -and !(Test-Path -LiteralPath $BaselineEvidenceRoot -PathType Container)) { throw 'BaselineEvidenceRoot must be an existing directory' }
 $evidenceRoot = Join-Path $EvidenceParent ('aiw-local-settings-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $evidenceRoot | Out-Null
 Write-Host "Retaining trial evidence at $evidenceRoot"
@@ -40,13 +43,17 @@ function Invoke-Aiw([string]$name, [string[]]$arguments) {
     # ErrorActionPreference is Stop, even if the process will exit successfully.
     # The CLI writes a provider diagnostics path to stderr while starting a run.
     $previousErrorActionPreference = $ErrorActionPreference
+    $previousConsoleEncoding = [Console]::OutputEncoding
     try {
         $ErrorActionPreference = 'Continue'
-        & $aiw @arguments 1> (Join-Path $evidenceRoot "$name.json") 2> (Join-Path $evidenceRoot "$name.stderr.log")
+        [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+        $outputLines = @(& $aiw @arguments 2> (Join-Path $evidenceRoot "$name.stderr.log"))
         $exitCode = $LASTEXITCODE
     } finally {
+        [Console]::OutputEncoding = $previousConsoleEncoding
         $ErrorActionPreference = $previousErrorActionPreference
     }
+    [IO.File]::WriteAllText((Join-Path $evidenceRoot "$name.json"), ($outputLines -join [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
     if ($exitCode -ne 0) { throw "AIW failed at $name (exit $exitCode); inspect $evidenceRoot\$name.stderr.log and retained run status before retrying" }
     Get-Content -LiteralPath (Join-Path $evidenceRoot "$name.json") -Raw | ConvertFrom-Json
 }
@@ -63,40 +70,57 @@ $bundle = $null
 $entries = @()
 $observations = @()
 foreach ($mode in @('baseline', 'candidate', 'replay')) {
-    if ($mode -ne 'replay') {
-        $example = if ($mode -eq 'baseline') { $baselineProjectPath } else { $candidateProjectPath }
-        $bundle = Invoke-Aiw "$mode-bundle" @('package', 'export-wsb-msi', '--project', $example, '--import-receipt', $ImportReceipt, '--scenario', 'install-launch-close', '--output-parent', (Join-Path $evidenceRoot 'bundles'), '--bundle-id', $mode)
+    if ($mode -eq 'baseline' -and $BaselineEvidenceRoot) {
+        $bundle = Get-Content -LiteralPath (Join-Path $BaselineEvidenceRoot 'baseline-bundle.json') -Raw | ConvertFrom-Json
+        $prepared = Get-Content -LiteralPath (Join-Path $BaselineEvidenceRoot 'baseline-preparation.json') -Raw | ConvertFrom-Json
+        $execution = Get-Content -LiteralPath (Join-Path $BaselineEvidenceRoot 'baseline-execution.json') -Raw | ConvertFrom-Json
         $bundlePath = $bundle.bundlePath
+        $workspace = $prepared.receipt.workspace.root.finalPath
+        $runId = $prepared.receipt.runId
+        $projectPath = Join-Path $BaselineEvidenceRoot 'baseline-project.json'
+        $importRecordPath = Join-Path $evidenceRoot 'baseline-import-utf8.json'
+        $importRecord = Get-Content -LiteralPath (Join-Path $BaselineEvidenceRoot 'baseline-import.json') -Raw
+        [IO.File]::WriteAllText($importRecordPath, $importRecord, [Text.UTF8Encoding]::new($false))
+        Write-Host "Reverifying completed baseline $runId without launching a worker"
+        $runReport = Invoke-Aiw 'baseline-report' @('run', 'report-wsb-msi-run', '--root', $workspace, '--run-id', $runId, '--project', $projectPath, '--guest-agent-sha256', $GuestAgentSha256)
+        $null = Invoke-Aiw 'baseline-bundle-report' @('package', 'report-wsb-msi', '--bundle', $bundlePath, '--manifest-sha256', $bundle.manifestSha256, '--import-record', $importRecordPath, '--root', $workspace, '--run-id', $runId, '--guest-agent-sha256', $GuestAgentSha256)
     } else {
-        $bundlePath = Join-Path $evidenceRoot 'relocated-candidate'
-        Copy-Item -LiteralPath $bundle.bundlePath -Destination $bundlePath -Recurse
-    }
-    $imported = Invoke-Aiw "$mode-import" @('package', 'import', '--bundle', $bundlePath, '--manifest-sha256', $bundle.manifestSha256, '--intake-parent', (Join-Path $evidenceRoot 'intakes'), '--intake-id', $mode)
-    $projectPath = Join-Path $evidenceRoot "$mode-project.json"
-    $receiptPath = Join-Path $evidenceRoot "$mode-intake.json"
-    Save-Json $projectPath $imported.project
-    Save-Json $receiptPath $imported.importReceipt
-    $runId = "$mode-" + [guid]::NewGuid().ToString('N')
-    $prepared = Invoke-Aiw "$mode-preparation" @('run', 'prepare-wsb-msi', '--run-id', $runId, '--project', $projectPath, '--guest-agent', $GuestAgent, '--guest-agent-sha256', $GuestAgentSha256, '--workspace-parent', (Join-Path $evidenceRoot 'runs'), '--import-receipt', $receiptPath, '--scenario', 'install-launch-close', '--created-at', ([DateTime]::UtcNow.ToString('o')))
-    $workspace = $prepared.receipt.workspace.root.finalPath
-    $null = Invoke-Aiw "$mode-recipe" @('package', 'inspect-wsb-msi-recipe', '--root', $workspace, '--project', $projectPath, '--guest-agent-sha256', $GuestAgentSha256)
-    $null = Invoke-Aiw "$mode-planning-import" @('run', 'import-prepared-wsb', '--workspace', $workspace, '--project', $projectPath, '--guest-agent-sha256', $GuestAgentSha256, '--imported-at', ([DateTime]::UtcNow.ToString('o')))
-    $plan = Get-Content -LiteralPath (Join-Path $workspace 'plan.json') -Raw | ConvertFrom-Json
-    $approvalPath = Join-Path $evidenceRoot "$mode-approval.json"
-    Save-Json $approvalPath ([ordered]@{ schema='aiw.dev/approval-record/v0alpha1'; runId=$runId; planHash=$prepared.receipt.runPlanSha256; trustDeltas=$plan.trustDeltas; approvedBy=$ApprovedBy; approvedAt=[DateTime]::UtcNow.ToString('o') })
-    $null = Invoke-Aiw "$mode-approved" @('run', 'approve', '--root', $workspace, '--run-id', $runId, '--approval', $approvalPath)
-    Write-Host "Starting $mode in its own disposable Sandbox"
-    try {
-        $execution = Invoke-Aiw "$mode-execution" @('run', 'start', '--root', $workspace, '--run-id', $runId, '--project', $projectPath, '--guest-agent-sha256', $GuestAgentSha256, '--timeout-seconds', '900')
-    } catch {
-        $executionError = $_
+        if ($mode -ne 'replay') {
+            $example = if ($mode -eq 'baseline') { $baselineProjectPath } else { $candidateProjectPath }
+            $bundle = Invoke-Aiw "$mode-bundle" @('package', 'export-wsb-msi', '--project', $example, '--import-receipt', $ImportReceipt, '--scenario', 'install-launch-close', '--output-parent', (Join-Path $evidenceRoot 'bundles'), '--bundle-id', $mode)
+            $bundlePath = $bundle.bundlePath
+        } else {
+            $bundlePath = Join-Path $evidenceRoot 'relocated-candidate'
+            Copy-Item -LiteralPath $bundle.bundlePath -Destination $bundlePath -Recurse
+        }
+        $imported = Invoke-Aiw "$mode-import" @('package', 'import', '--bundle', $bundlePath, '--manifest-sha256', $bundle.manifestSha256, '--intake-parent', (Join-Path $evidenceRoot 'intakes'), '--intake-id', $mode)
+        $importRecordPath = Join-Path $evidenceRoot "$mode-import.json"
+        $projectPath = Join-Path $evidenceRoot "$mode-project.json"
+        $receiptPath = Join-Path $evidenceRoot "$mode-intake.json"
+        Save-Json $projectPath $imported.project
+        Save-Json $receiptPath $imported.importReceipt
+        $runId = "$mode-" + [guid]::NewGuid().ToString('N')
+        $prepared = Invoke-Aiw "$mode-preparation" @('run', 'prepare-wsb-msi', '--run-id', $runId, '--project', $projectPath, '--guest-agent', $GuestAgent, '--guest-agent-sha256', $GuestAgentSha256, '--workspace-parent', (Join-Path $evidenceRoot 'runs'), '--import-receipt', $receiptPath, '--scenario', 'install-launch-close', '--created-at', ([DateTime]::UtcNow.ToString('o')))
+        $workspace = $prepared.receipt.workspace.root.finalPath
+        $null = Invoke-Aiw "$mode-recipe" @('package', 'inspect-wsb-msi-recipe', '--root', $workspace, '--project', $projectPath, '--guest-agent-sha256', $GuestAgentSha256)
+        $null = Invoke-Aiw "$mode-planning-import" @('run', 'import-prepared-wsb', '--workspace', $workspace, '--project', $projectPath, '--guest-agent-sha256', $GuestAgentSha256, '--imported-at', ([DateTime]::UtcNow.ToString('o')))
+        $plan = Get-Content -LiteralPath (Join-Path $workspace 'plan.json') -Raw | ConvertFrom-Json
+        $approvalPath = Join-Path $evidenceRoot "$mode-approval.json"
+        Save-Json $approvalPath ([ordered]@{ schema='aiw.dev/approval-record/v0alpha1'; runId=$runId; planHash=$prepared.receipt.runPlanSha256; trustDeltas=$plan.trustDeltas; approvedBy=$ApprovedBy; approvedAt=[DateTime]::UtcNow.ToString('o') })
+        $null = Invoke-Aiw "$mode-approved" @('run', 'approve', '--root', $workspace, '--run-id', $runId, '--approval', $approvalPath)
+        Write-Host "Starting $mode in its own disposable Sandbox"
         try {
-            $null = Invoke-Aiw "$mode-failed-report" @('run', 'report-wsb-msi-run', '--root', $workspace, '--run-id', $runId, '--project', $projectPath, '--guest-agent-sha256', $GuestAgentSha256)
-        } catch { Write-Warning "Failure report unavailable; retain the original execution diagnostics: $_" }
-        throw $executionError
+            $execution = Invoke-Aiw "$mode-execution" @('run', 'start', '--root', $workspace, '--run-id', $runId, '--project', $projectPath, '--guest-agent-sha256', $GuestAgentSha256, '--timeout-seconds', '900')
+        } catch {
+            $executionError = $_
+            try {
+                $null = Invoke-Aiw "$mode-failed-report" @('run', 'report-wsb-msi-run', '--root', $workspace, '--run-id', $runId, '--project', $projectPath, '--guest-agent-sha256', $GuestAgentSha256)
+            } catch { Write-Warning "Failure report unavailable; retain the original execution diagnostics: $_" }
+            throw $executionError
+        }
+        $runReport = Invoke-Aiw "$mode-report" @('run', 'report-wsb-msi-run', '--root', $workspace, '--run-id', $runId, '--project', $projectPath, '--guest-agent-sha256', $GuestAgentSha256)
+        $null = Invoke-Aiw "$mode-bundle-report" @('package', 'report-wsb-msi', '--bundle', $bundlePath, '--manifest-sha256', $bundle.manifestSha256, '--import-record', $importRecordPath, '--root', $workspace, '--run-id', $runId, '--guest-agent-sha256', $GuestAgentSha256)
     }
-    $runReport = Invoke-Aiw "$mode-report" @('run', 'report-wsb-msi-run', '--root', $workspace, '--run-id', $runId, '--project', $projectPath, '--guest-agent-sha256', $GuestAgentSha256)
-    $null = Invoke-Aiw "$mode-bundle-report" @('package', 'report-wsb-msi', '--bundle', $bundlePath, '--manifest-sha256', $bundle.manifestSha256, '--import-record', (Join-Path $evidenceRoot "$mode-import.json"), '--root', $workspace, '--run-id', $runId, '--guest-agent-sha256', $GuestAgentSha256)
     $report = $runReport.report
     if ($runReport.reportKind -ne 'completedAssessment' -or !$execution.cleanupComplete -or !$report.recordedCleanupVerified -or !$report.behavior.functionalExercise.savedDocument -or $report.behavior.functionalExercise.expectedSha256 -ne $report.behavior.functionalExercise.observedSha256) { throw "$mode did not pass the bound document workflow and cleanup" }
     $issues = @($report.behavior.afterExercise.issues | Where-Object { $_.root -in @('roamingAppData', 'localAppData') })
