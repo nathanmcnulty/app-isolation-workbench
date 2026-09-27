@@ -113,6 +113,9 @@ struct AdminArgs {
 enum AdminCommand {
     /// Assess supported Notepad++ bytes through the packaged fixed workflow.
     Assess {
+        /// Select one packaged fixed application workflow.
+        #[arg(long, value_enum, default_value_t = AdminProduct::NotepadPlusPlus)]
+        product: AdminProduct,
         #[arg(long)]
         installer: PathBuf,
         #[arg(long)]
@@ -129,6 +132,12 @@ enum AdminCommand {
 enum AdminOutputFormat {
     Summary,
     Json,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum AdminProduct {
+    NotepadPlusPlus,
+    BambuStudioExport,
 }
 
 #[derive(Debug, Args)]
@@ -1238,13 +1247,21 @@ fn run(command: Command) -> Result<()> {
     match command {
         Command::Admin(args) => match args.command {
             AdminCommand::Assess {
+                product,
                 installer,
                 evidence,
                 identity,
                 format,
             } => {
-                let result = admin_workflow::assess(&installer, &evidence, &identity)
-                    .map_err(admin_workflow::public_error)?;
+                let result = match product {
+                    AdminProduct::NotepadPlusPlus => {
+                        admin_workflow::assess(&installer, &evidence, &identity)
+                    }
+                    AdminProduct::BambuStudioExport => {
+                        admin_workflow::assess_bambu(&installer, &evidence, &identity)
+                    }
+                }
+                .map_err(admin_workflow::public_error)?;
                 match format {
                     AdminOutputFormat::Summary => result
                         .write_summary(&mut std::io::stdout())

@@ -358,39 +358,15 @@ pub fn render_bambu_run_report_markdown(report: &WsbBambuRunReport) -> String {
 }
 
 fn append_bambu_administrator_overview(text: &mut String, report: &WsbBambuRunReport) {
-    use aiw_provider_wsb::BambuExecutionStage as Stage;
-
     text.push_str("## Administrator overview\n\n");
     text.push_str(&format!(
         "Application bytes: Bambu Studio installer SHA-256 `{}`. Fixed workflow: privileged installation, then standard-user STL-to-3MF export of the bundled tetrahedron fixture. Other model, slicing, printer, cloud, and graphical workflows were not tested.\n\n",
         report.compiled_scenario.application_sha256
     ));
     text.push_str("Function results:\n\n| Function | Result |\n|---|---|\n");
-    for (name, stage) in [
-        ("Install", Stage::Install),
-        ("Prepare fixed STL", Stage::PrepareFixture),
-        ("Export 3MF", Stage::Export),
-        ("Collect 3MF", Stage::CollectArtifact),
-    ] {
-        text.push_str(&format!(
-            "| {name} | {} |\n",
-            bambu_stage_result(report, stage)
-        ));
+    for (name, result) in report.administrator_function_results() {
+        text.push_str(&format!("| {name} | {result} |\n"));
     }
-    let verified_artifact = report.evidence_status == BambuReportEvidenceStatus::Verified
-        && report
-            .scenario
-            .as_ref()
-            .is_some_and(|scenario| scenario.successful())
-        && report.artifact.is_some();
-    text.push_str(&format!(
-        "| Verify fixed 3MF geometry | {} |\n",
-        if verified_artifact {
-            "passed"
-        } else {
-            "not verified"
-        }
-    ));
     let runtime = if report.evidence_status == BambuReportEvidenceStatus::Verified
         && report
             .scenario
@@ -406,6 +382,40 @@ fn append_bambu_administrator_overview(text: &mut String, report: &WsbBambuRunRe
         if report.recorded_cleanup_verified { "verified" } else { "not verified" },
         bambu_next_action(report)
     ));
+}
+
+impl WsbBambuRunReport {
+    /// Function labels from retained report evidence; missing evidence cannot
+    /// be promoted into a successful application observation.
+    pub fn administrator_function_results(&self) -> [(&'static str, &'static str); 5] {
+        use aiw_provider_wsb::BambuExecutionStage as Stage;
+        let verified_artifact = self.evidence_status == BambuReportEvidenceStatus::Verified
+            && self
+                .scenario
+                .as_ref()
+                .is_some_and(|scenario| scenario.successful())
+            && self.artifact.is_some();
+        [
+            ("Install", bambu_stage_result(self, Stage::Install)),
+            (
+                "Prepare fixed STL",
+                bambu_stage_result(self, Stage::PrepareFixture),
+            ),
+            ("Export 3MF", bambu_stage_result(self, Stage::Export)),
+            (
+                "Collect 3MF",
+                bambu_stage_result(self, Stage::CollectArtifact),
+            ),
+            (
+                "Verify fixed 3MF geometry",
+                if verified_artifact {
+                    "passed"
+                } else {
+                    "not verified"
+                },
+            ),
+        ]
+    }
 }
 
 fn bambu_stage_result(

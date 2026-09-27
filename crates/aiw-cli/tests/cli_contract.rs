@@ -122,6 +122,30 @@ fn administrator_route_rejects_redirected_input_before_evidence_mutation() {
     assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 0);
 }
 
+#[test]
+fn bambu_administrator_route_requires_visible_approval_before_mutation() {
+    let temp = TempDir::new();
+    let output = Command::new(aiw())
+        .args([
+            "admin",
+            "assess",
+            "--product",
+            "bambu-studio-export",
+            "--installer",
+            "missing.exe",
+            "--evidence",
+        ])
+        .arg(temp.path())
+        .args(["--identity", "operator"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let message = String::from_utf8(output.stderr).unwrap();
+    assert!(message.contains("requires terminal input"));
+    assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 0);
+}
+
 #[cfg(windows)]
 #[test]
 fn launch_profile_rejection_preserves_actionable_diagnostics() {
