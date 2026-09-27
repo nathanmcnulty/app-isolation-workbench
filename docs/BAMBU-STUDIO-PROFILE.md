@@ -99,6 +99,32 @@ All three trials used Windows build 28000 and Sandbox CLI 0.8.107.0. Cleanup was
 
 **Roadmap consequence:** prefer a separate approved STL-to-3MF export profile for the first Bambu functional report. Verify bounded model geometry and package references, not an output hash or empty redirected console text. Keep the current information-query compiler available as metadata-only research intent; its fixed arguments do not silently become the export command. No slicing, cloud account, printer, or additional downloaded runtime was required for this exploratory export.
 
+## Separate-host administrator trial, 2026-09-27
+
+The independent operator approved the visible fixed recipe for unsigned package
+source `ee8eb34055d86bce6c68fee78f9e62423b4c65e2` on the dedicated
+`aiw-clean-host-0921` VM. Its archive SHA-256 was
+`4b76e12a6dfdfc184149fd3643c7b9be46f70b3848c9bbb2a1106c992c1a3f2e`;
+the extracted eight-file package verified against receipt
+`aaaaa53e479c61f41378b54c82777bd9e09196e0971c32e128a41c7db7eb1e88`.
+The separate installer on that VM matched the fixed
+`cd2f8f2c789a22efee1300e993827cfdb047f27cfb0b8f5dd7395fbafadef4c7`
+hash. Run `admin-1790501499861166000` is retained at
+`C:\AIW-Bambu-Evidence-ee8eb34` on the VM.
+
+The approved worker started and connected, but the fixed guest installer
+process reached its 300-second wait limit. The retained result has
+`failedStage: install`, no completed stages or installer exit code, and no
+application-token or export evidence. The zero-byte 3MF is the required
+failure placeholder, not a produced model. The verified failure report
+(`failed-report.json` SHA-256
+`ace27e64405f1cff7fc50c6bd1e8412d827712055df283abcb094a5e986a9f4a`)
+records `recordedCleanupVerified: true`; the provider diagnostic records the
+exact session stop, and a fresh provider list was empty. This does not establish
+whether the installer was still progressing, blocked, or incompatible on this
+host. Do not count the export as tested or rerun blindly. The remaining gate is
+a bounded diagnosis of installer progress and a new operator-approved trial.
+
 ## Remaining integration
 
 Mixed report sets now combine the two concrete reporting consumers. Keep Bambu export and Notepad++ editing as distinct function columns; missing functions stay unmeasured. Research scripts and raw exploratory output are not production evidence and cannot be imported as successful retained runs. Add clean repetitions and control-fixture coverage before declaring the broader repeatability benchmark complete.

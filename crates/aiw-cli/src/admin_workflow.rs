@@ -421,6 +421,26 @@ fn retained_result_error(
     })
 }
 
+fn retained_execution_error(
+    evidence_root: &Path,
+    run_id: &str,
+    error: impl std::fmt::Display,
+) -> anyhow::Error {
+    anyhow!(AiwError {
+        code: "AIW_ADMIN_EXECUTION_FAILED".into(),
+        summary: "approved assessment did not complete".into(),
+        stage: "adminExecution".into(),
+        run_id: Some(run_id.to_owned().into()),
+        retryable: false,
+        remediation: format!(
+            "Inspect failed-status.json and failed-report.md, when present, under {}. Do not repeat the trial or recover a session until the exact retained status and cause are understood.",
+            evidence_root.display()
+        )
+        .into(),
+        detail: error.to_string().into(),
+    })
+}
+
 #[cfg(windows)]
 pub fn assess(
     installer: &Path,
@@ -612,9 +632,7 @@ pub fn assess(
                 let _ =
                     std::fs::write(evidence_root.join("failed-report.md"), report.to_markdown());
             }
-            bail!(
-                "execution failed; retained status/report diagnostics were attempted. Inspect this exact run and only run explicit recovery when status reports recovery required: {error}"
-            );
+            return Err(retained_execution_error(&evidence_root, &run_id, error));
         }
     };
     save_stage(&evidence_root, "execution", &execution).map_err(|error| {
@@ -880,9 +898,7 @@ pub fn assess_bambu(
                     aiw_runner::render_bambu_run_report_markdown(&report),
                 );
             }
-            bail!(
-                "execution failed; retained status/report diagnostics were attempted. Inspect this exact run and only run explicit recovery when status reports recovery required: {error}"
-            );
+            return Err(retained_execution_error(&evidence_root, &run_id, error));
         }
     };
     save_stage(&evidence_root, "execution", &execution).map_err(|error| {
@@ -926,9 +942,25 @@ pub fn assess_bambu(_: &Path, _: &Path, _: &str) -> Result<AdminAssessmentResult
 }
 
 fn create_evidence_root(parent: &Path, run_id: &str) -> Result<PathBuf> {
-    let parent = parent
-        .canonicalize()
-        .map_err(|_| anyhow!("evidence location must already exist"))?;
+    let parent = parent.canonicalize().map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            anyhow!(AiwError {
+                code: "AIW_ADMIN_EVIDENCE_NOT_READY".into(),
+                summary: "evidence directory does not exist".into(),
+                stage: "adminEvidenceRoot".into(),
+                run_id: None,
+                retryable: false,
+                remediation: format!(
+                    "Create {} as the current operator, then rerun this command. No intake or Sandbox session was created.",
+                    parent.display()
+                )
+                .into(),
+                detail: "The evidence parent must exist before assessment.".into(),
+            })
+        } else {
+            anyhow!("evidence location could not be opened: {error}")
+        }
+    })?;
     if !parent.is_dir() {
         bail!("evidence location must be a directory");
     }
@@ -995,6 +1027,42 @@ fn lowercase_sha256(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn missing_evidence_parent_gives_specific_safe_action() {
+        let missing = std::env::temp_dir().join(format!(
+            "aiw-admin-missing-evidence-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let error = public_error(create_evidence_root(&missing, "admin-test").unwrap_err());
+        let structured = error.downcast_ref::<AiwError>().unwrap();
+        assert_eq!(structured.code.as_ref(), "AIW_ADMIN_EVIDENCE_NOT_READY");
+        assert!(structured.remediation.contains("Create"));
+        assert!(
+            structured
+                .remediation
+                .contains("No intake or Sandbox session was created")
+        );
+        assert!(!missing.exists());
+    }
+
+    #[test]
+    fn approved_execution_error_preserves_run_and_retained_failure_paths() {
+        let error = retained_execution_error(
+            Path::new("evidence/admin-test"),
+            "admin-test",
+            "guest install timed out",
+        );
+        let structured = error.downcast_ref::<AiwError>().unwrap();
+        assert_eq!(structured.code.as_ref(), "AIW_ADMIN_EXECUTION_FAILED");
+        assert_eq!(structured.run_id.as_deref(), Some("admin-test"));
+        assert!(structured.remediation.contains("failed-report.md"));
+        assert!(structured.detail.contains("guest install timed out"));
+    }
+
     #[test]
     fn summary_keeps_cancellation_distinct_and_escapes_evidence_path() {
         let result = AdminAssessmentResult {

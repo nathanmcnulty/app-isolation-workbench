@@ -21,11 +21,13 @@ Updated 2026-09-27. This is a compact handoff, not a run receipt or authorizatio
 ## Next coherent slice
 
 The fixed Bambu package and `admin assess --product bambu-studio-export` route
-are implemented on the existing typed services. [BAMBU-ADMIN-ENTRY.md](BAMBU-ADMIN-ENTRY.md)
-defines the negative, package, operator, and evidence gates. The next gate is a
-fresh independent operator approval and disposable-worker trial, followed by
-verification of the retained report. Do not infer general compatibility from
-either fixed workflow. See [ROADMAP.md](ROADMAP.md) and [RELEASE-GATES.md](RELEASE-GATES.md).
+are implemented on the existing typed services. The first separate-host
+operator-approved run failed at the 300-second guest installer wait; its failure
+report and exact-session cleanup are retained. Diagnose installer progress
+before changing the bound or repeating the trial. [BAMBU-STUDIO-PROFILE.md](BAMBU-STUDIO-PROFILE.md)
+records the exact evidence; [BAMBU-ADMIN-ENTRY.md](BAMBU-ADMIN-ENTRY.md)
+defines the remaining acceptance gates. Do not infer general compatibility
+from either fixed workflow. See [ROADMAP.md](ROADMAP.md) and [RELEASE-GATES.md](RELEASE-GATES.md).
 
 ## Read only what the slice needs
 
