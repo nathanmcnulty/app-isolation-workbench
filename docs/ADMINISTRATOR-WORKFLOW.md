@@ -23,9 +23,15 @@ stage and leaves the imported run pending approval. Failed attempts remain in
 their retained stage/workspace state: inspect `aiw run status` and use explicit
 `aiw run recover` only if that exact status requires recovery. The workflow never
 retries, repairs state, stops another session, or accepts arbitrary commands.
-The retained Markdown report is the operator result; its assessment remains
-`insufficientEvidence` for broader isolation even when the fixed document
-workflow succeeds.
+After the run, the console defaults to a short summary of the verified fixed
+functions, recorded cleanup, broader-isolation gap, evidence location, and next
+action. `--format json` restores the structured command result and error
+envelopes for automation. The retained `report.md` is the detailed operator
+view; `report.json` and stage files preserve advanced evidence in either mode.
+The assessment remains `insufficientEvidence` for broader isolation even when
+the fixed document workflow succeeds. Approval still displays the complete
+recipe and exact plan before the operator enters the plan hash; completion
+format does not shorten that trust-boundary review.
 
 ## Public-entry proof
 

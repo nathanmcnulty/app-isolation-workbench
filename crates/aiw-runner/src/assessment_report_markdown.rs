@@ -105,7 +105,7 @@ fn append_administrator_overview(out: &mut String, report: &WsbMsiAssessmentRepo
         cell(&report.scenario.installer_sha256)
     ));
     out.push_str("Function results:\n\n| Function | Result |\n|---|---|\n");
-    let functions = function_results(report);
+    let functions = report.administrator_function_results();
     for (name, observed) in functions {
         out.push_str(&format!("| {name} | {} |\n", result_label(observed)));
     }
@@ -165,39 +165,41 @@ fn measured_boundary_labels(report: &WsbMsiAssessmentReport) -> Vec<&'static str
     labels
 }
 
-fn function_results(report: &WsbMsiAssessmentReport) -> [(&'static str, Option<bool>); 5] {
-    [
-        (
-            "Silent installation",
-            Some(report.scenario.install_exit_code == 0),
-        ),
-        (
-            "Launch and visible window",
-            Some(report.scenario.process_observed),
-        ),
-        (
-            "Open fixed text document",
-            report
-                .behavior
-                .as_ref()
-                .map(|b| b.functional_exercise.opened_document),
-        ),
-        (
-            "Edit and save expected bytes",
-            report
-                .behavior
-                .as_ref()
-                .map(|b| b.functional_exercise.saved_document),
-        ),
-        (
-            "Graceful close",
-            Some(
-                report.scenario.process_closed
-                    && report.scenario.graceful_close_requested
-                    && report.scenario.launch_exit_code == 0,
+impl WsbMsiAssessmentReport {
+    /// Fixed-workflow observations from an already reverified completed report.
+    /// None means the function was not measured, never that it passed.
+    pub fn administrator_function_results(&self) -> [(&'static str, Option<bool>); 5] {
+        [
+            (
+                "Silent installation",
+                Some(self.scenario.install_exit_code == 0),
             ),
-        ),
-    ]
+            (
+                "Launch and visible window",
+                Some(self.scenario.process_observed),
+            ),
+            (
+                "Open fixed text document",
+                self.behavior
+                    .as_ref()
+                    .map(|b| b.functional_exercise.opened_document),
+            ),
+            (
+                "Edit and save expected bytes",
+                self.behavior
+                    .as_ref()
+                    .map(|b| b.functional_exercise.saved_document),
+            ),
+            (
+                "Graceful close",
+                Some(
+                    self.scenario.process_closed
+                        && self.scenario.graceful_close_requested
+                        && self.scenario.launch_exit_code == 0,
+                ),
+            ),
+        ]
+    }
 }
 
 fn result_label(observed: Option<bool>) -> &'static str {

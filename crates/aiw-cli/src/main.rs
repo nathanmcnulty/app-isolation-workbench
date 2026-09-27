@@ -119,7 +119,16 @@ enum AdminCommand {
         evidence: PathBuf,
         #[arg(long)]
         identity: String,
+        /// Completion output. Detailed evidence is always retained on disk.
+        #[arg(long, value_enum, default_value_t = AdminOutputFormat::Summary)]
+        format: AdminOutputFormat,
     },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum AdminOutputFormat {
+    Summary,
+    Json,
 }
 
 #[derive(Debug, Args)]
@@ -1203,10 +1212,23 @@ fn main() -> ExitCode {
         }
     };
 
+    let admin_summary = matches!(
+        &command,
+        Command::Admin(AdminArgs {
+            command: AdminCommand::Assess {
+                format: AdminOutputFormat::Summary,
+                ..
+            }
+        })
+    );
     match run(command) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            emit_anyhow_error(&error);
+            if admin_summary {
+                admin_workflow::emit_summary_error(&error);
+            } else {
+                emit_anyhow_error(&error);
+            }
             ExitCode::FAILURE
         }
     }
@@ -1219,10 +1241,20 @@ fn run(command: Command) -> Result<()> {
                 installer,
                 evidence,
                 identity,
+                format,
             } => {
                 let result = admin_workflow::assess(&installer, &evidence, &identity)
                     .map_err(admin_workflow::public_error)?;
-                write_json(&result)
+                match format {
+                    AdminOutputFormat::Summary => result
+                        .write_summary(&mut std::io::stdout())
+                        .map_err(|error| {
+                            admin_workflow::AdminOutputFailed::from_result(&result, error)
+                        }),
+                    AdminOutputFormat::Json => write_json(&result).map_err(|error| {
+                        admin_workflow::AdminOutputFailed::from_result(&result, error)
+                    }),
+                }
             }
         },
         Command::Package(args) => match args.command {
@@ -3218,7 +3250,9 @@ fn emit_anyhow_error(error: &anyhow::Error) {
         });
         return;
     }
-    if let Some(error) = error.downcast_ref::<AiwError>() {
+    if let Some(error) = error.downcast_ref::<admin_workflow::AdminOutputFailed>() {
+        emit_error(&error.structured_error());
+    } else if let Some(error) = error.downcast_ref::<AiwError>() {
         emit_error(error);
     } else if let Some(error) = error.downcast_ref::<RunOperationUnavailable>() {
         emit_error(&ErrorEnvelope {
