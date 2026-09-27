@@ -1,4 +1,4 @@
-#requires -Version 7.0
+#requires -Version 5.1
 <#
 Runs three approved disposable Sandbox trials: baseline, fixed local-settings
 adaptation, and relocated-bundle replay. Never installs on the host. Evidence is
@@ -9,6 +9,10 @@ param(
     [Parameter(Mandatory)][string]$ImportReceipt,
     [Parameter(Mandatory)][string]$GuestAgent,
     [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{64}$')][string]$GuestAgentSha256,
+    [string]$CliPath,
+    [ValidatePattern('^[0-9a-f]{64}$')][string]$CliSha256,
+    [string]$BaselineProject,
+    [string]$CandidateProject,
     [Parameter(Mandatory)][string]$EvidenceParent,
     [Parameter(Mandatory)][string]$ApprovedBy,
     [Parameter(Mandatory)][switch]$Approve
@@ -16,7 +20,17 @@ param(
 $ErrorActionPreference = 'Stop'
 if (!$Approve -or [string]::IsNullOrWhiteSpace($ApprovedBy)) { throw 'Explicit approval for all three fixed Sandbox trials is required' }
 $repo = Split-Path -Parent $PSScriptRoot
-$aiw = Join-Path $repo 'target\debug\aiw.exe'
+$aiw = if ($CliPath) { $CliPath } else { Join-Path $repo 'target\debug\aiw.exe' }
+if ($CliPath -and !$CliSha256) { throw 'CliSha256 is required when using an external CLI' }
+if (!$CliPath -and $CliSha256) { throw 'CliPath is required when supplying CliSha256' }
+$baselineProjectPath = if ($BaselineProject) { $BaselineProject } else { Join-Path $repo 'examples\notepad-plus-plus-msi.aiw.yaml' }
+$candidateProjectPath = if ($CandidateProject) { $CandidateProject } else { Join-Path $repo 'examples\notepad-plus-plus-local-settings.aiw.yaml' }
+foreach ($inputPath in @($aiw, $GuestAgent, $ImportReceipt, $baselineProjectPath, $candidateProjectPath)) {
+    if (!(Test-Path -LiteralPath $inputPath -PathType Leaf)) { throw "Trial input is missing: $inputPath" }
+}
+if ($CliSha256 -and (Get-FileHash -LiteralPath $aiw -Algorithm SHA256).Hash.ToLowerInvariant() -cne $CliSha256) { throw 'CLI bytes differ from the supplied SHA-256' }
+if ((Get-FileHash -LiteralPath $GuestAgent -Algorithm SHA256).Hash.ToLowerInvariant() -cne $GuestAgentSha256) { throw 'Guest-agent bytes differ from the supplied SHA-256' }
+if (!(Test-Path -LiteralPath $EvidenceParent -PathType Container)) { throw 'EvidenceParent must be an existing directory' }
 $evidenceRoot = Join-Path $EvidenceParent ('aiw-local-settings-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $evidenceRoot | Out-Null
 Write-Host "Retaining trial evidence at $evidenceRoot"
@@ -40,8 +54,8 @@ $entries = @()
 $observations = @()
 foreach ($mode in @('baseline', 'candidate', 'replay')) {
     if ($mode -ne 'replay') {
-        $example = if ($mode -eq 'baseline') { 'notepad-plus-plus-msi.aiw.yaml' } else { 'notepad-plus-plus-local-settings.aiw.yaml' }
-        $bundle = Invoke-Aiw "$mode-bundle" @('package', 'export-wsb-msi', '--project', (Join-Path $repo "examples\$example"), '--import-receipt', $ImportReceipt, '--scenario', 'install-launch-close', '--output-parent', (Join-Path $evidenceRoot 'bundles'), '--bundle-id', $mode)
+        $example = if ($mode -eq 'baseline') { $baselineProjectPath } else { $candidateProjectPath }
+        $bundle = Invoke-Aiw "$mode-bundle" @('package', 'export-wsb-msi', '--project', $example, '--import-receipt', $ImportReceipt, '--scenario', 'install-launch-close', '--output-parent', (Join-Path $evidenceRoot 'bundles'), '--bundle-id', $mode)
         $bundlePath = $bundle.bundlePath
     } else {
         $bundlePath = Join-Path $evidenceRoot 'relocated-candidate'
