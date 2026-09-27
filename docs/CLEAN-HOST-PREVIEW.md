@@ -192,3 +192,12 @@ provider session list was empty. The broader result remains
 `insufficientEvidence` for effective isolation. This is development evidence,
 not the independent second-operator acceptance record above; that gate remains
 open for the current package.
+
+The same packaged CLI rejected its own `README.txt` as an unsupported installer
+on the VM in run `admin-1790482235083588800` under
+`C:\AIW-Negative-Profile-v1`. It returned `AIW_ADMIN_UNSUPPORTED_INSTALLER`
+at `adminInstallerInspection`; the run directory contains only
+`host-readiness.json` and `installer-rejection.json`. No protected intake or
+Sandbox session was created, and a fresh `aiw host assess` reported no current
+sessions or blockers. This agent-run control does not replace the second
+operator's acceptance record.
