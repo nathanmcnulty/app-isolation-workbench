@@ -17,8 +17,12 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 pub const COMPILED_MSI_SCENARIO_SCHEMA_VERSION: &str =
-    "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha6";
+    "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha11";
 pub const NOTEPAD_PLUS_PLUS_MSI_PROFILE: &str =
+    "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha7";
+pub(crate) const LEGACY_COMPILED_MSI_SCENARIO_SCHEMA_VERSION: &str =
+    "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha6";
+pub(crate) const LEGACY_NOTEPAD_PLUS_PLUS_MSI_PROFILE: &str =
     "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha6";
 pub const NOTEPAD_PLUS_PLUS_INTERACTIVE_PROFILE: &str =
     "aiw.dev/windows-sandbox/notepad-plus-plus-interactive/v0alpha1";
@@ -48,7 +52,7 @@ pub const INTERACTIVE_DOCUMENT_INPUT_PATH: &str = r"C:\AIW\Tools\document-input.
 pub const INTERACTIVE_DOCUMENT_OUTPUT_PATH: &str = r"C:\AIW\Output\document-output.txt";
 pub const MAX_INTERACTIVE_DOCUMENT_BYTES: u64 = 1024 * 1024;
 const INSTALL_TIMEOUT_SECONDS: u32 = 120;
-const LOCAL_SETTINGS_INSTALL_TIMEOUT_SECONDS: u32 = 300;
+const CURRENT_INSTALL_TIMEOUT_SECONDS: u32 = 300;
 const MAX_PROCESS_WAIT_TIMEOUT_SECONDS: u32 = 60;
 const GRACEFUL_CLOSE_TIMEOUT_SECONDS: u32 = 15;
 
@@ -129,6 +133,8 @@ impl CompiledMsiScenario {
     pub fn validate(&self) -> Result<(), ScenarioCompileError> {
         let current = self.schema_version == COMPILED_MSI_SCENARIO_SCHEMA_VERSION
             && self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE;
+        let legacy_current = self.schema_version == LEGACY_COMPILED_MSI_SCENARIO_SCHEMA_VERSION
+            && self.profile == LEGACY_NOTEPAD_PLUS_PLUS_MSI_PROFILE;
         let local_settings = self.schema_version
             == COMPILED_MSI_LOCAL_SETTINGS_SCENARIO_SCHEMA_VERSION
             && self.profile == NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_PROFILE;
@@ -157,6 +163,7 @@ impl CompiledMsiScenario {
             == "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha1"
             && self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha1";
         if !(current
+            || legacy_current
             || local_settings
             || legacy_local_settings
             || interactive
@@ -169,12 +176,14 @@ impl CompiledMsiScenario {
             || (legacy_exercise
                 && self.document_exercise.as_ref() != Some(&FixedDocumentExercise::legacy()))
             || ((current
+                || legacy_current
                 || local_settings
                 || legacy_local_settings
                 || registry_profile
                 || standard_user_legacy)
                 && self.document_exercise.as_ref() != Some(&FixedDocumentExercise::standard_user()))
             || (!current
+                && !legacy_current
                 && !local_settings
                 && !legacy_local_settings
                 && !registry_profile
@@ -204,8 +213,8 @@ impl CompiledMsiScenario {
                     "/norestart".to_owned(),
                 ]
             || self.install_timeout_seconds
-                != if local_settings {
-                    LOCAL_SETTINGS_INSTALL_TIMEOUT_SECONDS
+                != if current || local_settings {
+                    CURRENT_INSTALL_TIMEOUT_SECONDS
                 } else {
                     INSTALL_TIMEOUT_SECONDS
                 }
@@ -231,6 +240,7 @@ impl CompiledMsiScenario {
         self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_PROFILE
             || self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_DOCUMENT_PROFILE
             || self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
+            || self.profile == LEGACY_NOTEPAD_PLUS_PLUS_MSI_PROFILE
             || self.is_local_settings_profile()
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha5"
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha3"
@@ -240,6 +250,7 @@ impl CompiledMsiScenario {
 
     pub fn requires_application_exercise(&self) -> bool {
         self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
+            || self.profile == LEGACY_NOTEPAD_PLUS_PLUS_MSI_PROFILE
             || self.is_local_settings_profile()
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha5"
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha3"
@@ -250,6 +261,7 @@ impl CompiledMsiScenario {
         self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_PROFILE
             || self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_DOCUMENT_PROFILE
             || self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
+            || self.profile == LEGACY_NOTEPAD_PLUS_PLUS_MSI_PROFILE
             || self.is_local_settings_profile()
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha5"
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha4"
@@ -257,12 +269,15 @@ impl CompiledMsiScenario {
 
     pub fn requires_registry_observations(&self) -> bool {
         self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
+            || self.profile == LEGACY_NOTEPAD_PLUS_PLUS_MSI_PROFILE
             || self.is_local_settings_profile()
             || self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha5"
     }
 
     pub fn requires_product_registration(&self) -> bool {
-        self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE || self.is_local_settings_profile()
+        self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
+            || self.profile == LEGACY_NOTEPAD_PLUS_PLUS_MSI_PROFILE
+            || self.is_local_settings_profile()
     }
 
     pub fn requires_document_transfer(&self) -> bool {
@@ -406,7 +421,7 @@ pub fn compile_notepad_plus_plus_msi_scenario(
             "/qn".to_owned(),
             "/norestart".to_owned(),
         ],
-        install_timeout_seconds: INSTALL_TIMEOUT_SECONDS,
+        install_timeout_seconds: CURRENT_INSTALL_TIMEOUT_SECONDS,
         launch_path: NOTEPAD_PLUS_PLUS_INSTALLED_PATH.to_owned(),
         launch_arguments: match scenario.steps.as_slice() {
             [
@@ -430,10 +445,11 @@ pub fn compile_notepad_plus_plus_msi_scenario(
         compiled.schema_version = "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha7".into();
         compiled.profile = NOTEPAD_PLUS_PLUS_INTERACTIVE_PROFILE.into();
         compiled.document_exercise = None;
+        compiled.install_timeout_seconds = INSTALL_TIMEOUT_SECONDS;
     } else if has_local_settings_argument(&compiled.launch_arguments) {
         compiled.schema_version = COMPILED_MSI_LOCAL_SETTINGS_SCENARIO_SCHEMA_VERSION.to_owned();
         compiled.profile = NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_PROFILE.to_owned();
-        compiled.install_timeout_seconds = LOCAL_SETTINGS_INSTALL_TIMEOUT_SECONDS;
+        compiled.install_timeout_seconds = CURRENT_INSTALL_TIMEOUT_SECONDS;
     }
     compiled.validate()?;
     Ok(compiled)
@@ -578,7 +594,10 @@ mod tests {
         let compiled = compile_notepad_plus_plus_msi_scenario(&project(), "first-run").unwrap();
         assert_eq!(compiled.profile, NOTEPAD_PLUS_PLUS_MSI_PROFILE);
         assert_eq!(compiled.installer_path, STAGED_INSTALLER_PATH);
-        assert_eq!(compiled.install_timeout_seconds, INSTALL_TIMEOUT_SECONDS);
+        assert_eq!(
+            compiled.install_timeout_seconds,
+            CURRENT_INSTALL_TIMEOUT_SECONDS
+        );
         assert_eq!(compiled.process_wait_timeout_seconds, 30);
         assert_eq!(
             compiled.graceful_close_timeout_seconds,
@@ -604,6 +623,25 @@ mod tests {
     }
 
     #[test]
+    fn legacy_baseline_retains_its_original_deadline_and_observations() {
+        let mut compiled = compile_notepad_plus_plus_msi_scenario(&project(), "first-run").unwrap();
+        compiled.schema_version = LEGACY_COMPILED_MSI_SCENARIO_SCHEMA_VERSION.to_owned();
+        compiled.profile = LEGACY_NOTEPAD_PLUS_PLUS_MSI_PROFILE.to_owned();
+        compiled.install_timeout_seconds = INSTALL_TIMEOUT_SECONDS;
+        compiled.validate().unwrap();
+        assert!(compiled.requires_application_token());
+        assert!(compiled.requires_application_exercise());
+        assert!(compiled.requires_standard_user());
+        assert!(compiled.requires_registry_observations());
+        assert!(compiled.requires_product_registration());
+        compiled.install_timeout_seconds = CURRENT_INSTALL_TIMEOUT_SECONDS;
+        assert_eq!(
+            compiled.validate(),
+            Err(ScenarioCompileError::InvalidCompiledProfile)
+        );
+    }
+
+    #[test]
     fn compiles_the_fixed_local_settings_profile() {
         let compiled =
             compile_notepad_plus_plus_msi_scenario(&local_settings_project(), "first-run").unwrap();
@@ -614,7 +652,7 @@ mod tests {
         assert_eq!(compiled.profile, NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_PROFILE);
         assert_eq!(
             compiled.install_timeout_seconds,
-            LOCAL_SETTINGS_INSTALL_TIMEOUT_SECONDS
+            CURRENT_INSTALL_TIMEOUT_SECONDS
         );
         assert_eq!(
             compiled.launch_arguments,
@@ -715,8 +753,10 @@ mod tests {
 
     #[test]
     fn local_settings_does_not_change_the_v6_compiled_hash() {
-        let compiled = compile_notepad_plus_plus_msi_scenario(&project(), "first-run").unwrap();
-        assert_eq!(compiled.profile, NOTEPAD_PLUS_PLUS_MSI_PROFILE);
+        let mut compiled = compile_notepad_plus_plus_msi_scenario(&project(), "first-run").unwrap();
+        compiled.schema_version = LEGACY_COMPILED_MSI_SCENARIO_SCHEMA_VERSION.to_owned();
+        compiled.profile = LEGACY_NOTEPAD_PLUS_PLUS_MSI_PROFILE.to_owned();
+        compiled.install_timeout_seconds = INSTALL_TIMEOUT_SECONDS;
         assert_eq!(
             compiled.canonical_sha256().unwrap(),
             "20919d9d2a6de4de3723b567c25fc18e220f984b050fd3e8983d504f70b3bda8"

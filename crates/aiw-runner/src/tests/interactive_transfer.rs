@@ -469,6 +469,7 @@ fn execution_schemas_preserve_assessment_versions_and_distinguish_transfer() {
             format!("aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha{version}");
         historical.profile =
             format!("aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha{version}");
+        historical.install_timeout_seconds = 120;
         if version < 3 {
             historical.document_exercise = None;
         } else if version == 3 {

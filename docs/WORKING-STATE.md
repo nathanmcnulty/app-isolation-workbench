@@ -1,12 +1,13 @@
 # Working state
 
-Updated 2026-09-26. This is a compact handoff, not a run receipt or authorization.
+Updated 2026-09-27. This is a compact handoff, not a run receipt or authorization.
 
 ## Where to resume
 
-- Active branch: `codex/profile-bound-clean-host`, based on merged `main` at `ed250d0`. PR #70 integrated the separate-host assessment and preview fixes after both required hosted checks passed. Verify with `scripts/work-status.ps1` before editing.
+- Active branch: `codex/profile-bound-clean-host`, based on merged `main` at `ed250d0`. PR #70 integrated the separate-host assessment and preview fixes after both required hosted checks passed. Verify the current commit and clean state with `scripts/work-status.ps1` before editing.
 - Current gate: the second operator completed the v6 assessment-only trial on the separate clean-host VM. Run `admin-1790455699199696400` passed the fixed install/open/edit/save/close workflow and ACL control; the retained run status and exact Sandbox cleanup verified. The broader isolation outcome remains `insufficientEvidence`. An unsupported-input control rejected before intake or Sandbox acquisition. The v4 120-second timeout and v6 300-second success are both retained; the cause of the timing difference is not isolated. See [CLEAN-HOST-PREVIEW.md](CLEAN-HOST-PREVIEW.md).
 - The earlier profile-bound approved replay passed its fixed document workflow, required guest file ACL controls, recorded environment comparison, and cleanup. That remains same-host evidence for its recorded source and provider identities. See [VALIDATED-SANDBOX-LAUNCH.md](VALIDATED-SANDBOX-LAUNCH.md).
+- The clean-host baseline/candidate/replay development trial is not complete. A PowerShell 5.1 stderr-handling defect first interrupted a prepared run before Sandbox acquisition. The corrected driver reached a disposable worker, where baseline install hit the historical 120-second deadline; its failed report verified exact cleanup. The new automated baseline has a versioned 300-second deadline while historical records stay readable. Local workspace, Clippy, Rust 1.85, formatting, and governance checks passed for this change. Rebuild and stage exact CLI/static guest bytes before a fresh three-worker run; see [PACKAGING-RECIPES.md](PACKAGING-RECIPES.md).
 - Goal: report tested functions for exact application bytes and measured isolation configurations, then use the evidence for adaptation/repackaging. Free community project; feedback collection is not a development gate.
 
 ## Implemented versus exploratory

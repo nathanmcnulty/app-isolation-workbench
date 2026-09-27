@@ -1182,6 +1182,7 @@ mod tests {
         let mut request = msi_request();
         request.scenario.schema_version = COMPILED_MSI_SCENARIO_SCHEMA_VERSION.into();
         request.scenario.profile = NOTEPAD_PLUS_PLUS_MSI_PROFILE.into();
+        request.scenario.install_timeout_seconds = 300;
         request.scenario.document_exercise = Some(FixedDocumentExercise {
             document_path: STANDARD_USER_DOCUMENT_EXERCISE_PATH.into(),
             initial_sha256: hex::encode(Sha256::digest(DOCUMENT_INITIAL_TEXT.as_bytes())),

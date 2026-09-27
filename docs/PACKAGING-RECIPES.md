@@ -104,6 +104,24 @@ and stops on failure. `comparison.json` is a bounded experiment observation;
 the underlying CLI reports remain the reverified evidence source. There is no
 new compatibility verdict or reusable host-launch authorization.
 
+For a separately staged package on Windows PowerShell 5.1, pass `-CliPath`,
+`-CliSha256`, `-BaselineProject`, and `-CandidateProject` with independently
+verified package and project bytes. Native CLI diagnostics on stderr are retained
+without interrupting the process before its exit code is known.
+
+On the nested clean-host VM, baseline run
+`baseline-3e4d31079d9b4e2e98b0996fb45289fd` passed before-install capture
+but hit the legacy baseline's fixed 120-second MSI install deadline. Its
+unsuccessful report verified exact Sandbox cleanup, and the provider session
+list was empty afterward. This is a measured deadline failure, not an
+application compatibility result. The current automated baseline now has a
+separately versioned compiled scenario `v0alpha11` and profile `v0alpha7`
+with a bounded 300-second install deadline, matching the current local-settings
+profile. Historical baseline `v0alpha6` records retain their 120-second
+deadline and remain verifiable; interactive profiles retain their prior deadline
+and wire hashes. A new three-worker run and public-entry replay are still
+required before this profile can be packaged as a release candidate.
+
 ### Retained settings comparison
 
 `run report-wsb-settings-comparison --input <report-set-input.json>` reopens the
