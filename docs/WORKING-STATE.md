@@ -4,7 +4,7 @@ Updated 2026-09-27. This is a compact handoff, not a run receipt or authorizatio
 
 ## Where to resume
 
-- PR #71 merged at `4b9054512213c64839a664997504a84d7c911cdb`; PR #72 merged at `13b12d1c1e34088f6da31ca107ae4b5bf3e15683`. The current administrator-output slice is on `codex/admin-simple-output`; verify the checkout with `scripts/work-status.ps1` before editing.
+- PR #71 merged at `4b9054512213c64839a664997504a84d7c911cdb`; PR #72 merged at `13b12d1c1e34088f6da31ca107ae4b5bf3e15683`. PR #73 contains the concise administrator-output slice. The current Bambu entry acceptance slice is on `codex/bambu-admin-entry`; verify the checkout with `scripts/work-status.ps1` before editing.
 - The exact unsigned `08ab440` profile-bound package passed the separate-host second-operator trial. Run `admin-1790485297308064300` passed all nine fixed stages, document hash and ACL controls, and terminal cleanup; negative run `admin-1790486242125347900` rejected before intake or provider acquisition. The provider has no active session. The broader isolation outcome remains `insufficientEvidence`. See [CLEAN-HOST-PREVIEW.md](CLEAN-HOST-PREVIEW.md).
 - The earlier profile-bound approved replay passed its fixed document workflow, required guest file ACL controls, recorded environment comparison, and cleanup. That remains same-host evidence for its recorded source and provider identities. See [VALIDATED-SANDBOX-LAUNCH.md](VALIDATED-SANDBOX-LAUNCH.md).
 - The earlier development baseline/candidate/relocated-replay and agent-run packaged smoke remain separately recorded in [PACKAGING-RECIPES.md](PACKAGING-RECIPES.md) and [CLEAN-HOST-PREVIEW.md](CLEAN-HOST-PREVIEW.md). They are not substituted for the independent operator run.
@@ -20,11 +20,10 @@ Updated 2026-09-27. This is a compact handoff, not a run receipt or authorizatio
 
 ## Next coherent slice
 
-The current slice makes the packaged Notepad++ completion summary concise by
-default while retaining JSON for automation and detailed evidence on disk.
-After this, use Bambu Studio as the tentative next application and define a
-bounded Assess -> Adapt -> Package -> Validate acceptance for its fixed local
-export before changing the admin package entry. See
+The current slice defines a fixed, explicit Bambu administrator entry and its
+negative, package, operator, and evidence gates in [BAMBU-ADMIN-ENTRY.md](BAMBU-ADMIN-ENTRY.md).
+Implement the package and assessment route on those existing typed services;
+the fresh independent operator approval/trial remains a separate gate. See
 [ROADMAP.md](ROADMAP.md) and [RELEASE-GATES.md](RELEASE-GATES.md); do not infer
 general compatibility from either fixed workflow.
 
