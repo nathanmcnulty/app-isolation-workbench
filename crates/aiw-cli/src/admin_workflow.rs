@@ -31,6 +31,30 @@ pub fn public_error(error: anyhow::Error) -> anyhow::Error {
     })
 }
 
+pub fn emit_summary_error(error: &anyhow::Error) {
+    let mut terminal = std::io::stderr().lock();
+    let _ = write_summary_error(&mut terminal, error);
+}
+
+fn write_summary_error(output: &mut impl Write, error: &anyhow::Error) -> Result<()> {
+    let Some(error) = error.downcast_ref::<AiwError>() else {
+        return writeln!(output, "Assessment stopped. Inspect the retained evidence and retry only after resolving the cause.").map_err(Into::into);
+    };
+    write!(output, "Assessment stopped: ")?;
+    approval_review::write_review_json(output, &error.summary)?;
+    write!(output, "\nCode: {}", error.code)?;
+    if let Some(run_id) = &error.run_id {
+        write!(output, "\nRun: ")?;
+        approval_review::write_review_json(output, run_id)?;
+    }
+    write!(output, "\nNext: ")?;
+    approval_review::write_review_json(output, &error.remediation)?;
+    write!(output, "\nDetail: ")?;
+    approval_review::write_review_json(output, &error.detail)?;
+    writeln!(output)?;
+    Ok(())
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ProductAssetManifest {
@@ -65,6 +89,71 @@ pub struct AdminAssessmentResult {
     pub execution_mode: &'static str,
     pub approval_recorded: bool,
     pub next: &'static str,
+    #[serde(skip)]
+    summary: Option<String>,
+}
+
+impl AdminAssessmentResult {
+    pub fn write_summary(&self, output: &mut impl Write) -> Result<()> {
+        if self.approval_recorded {
+            writeln!(output, "Run: {}", self.run_id)?;
+            if let Some(summary) = &self.summary {
+                write!(output, "{summary}")?;
+            } else {
+                writeln!(output, "No completed assessment is available.")?;
+            }
+        } else {
+            writeln!(output, "Approval cancelled. No Sandbox was started.")?;
+            writeln!(output, "Run: {}", self.run_id)?;
+        }
+        write!(output, "Evidence: ")?;
+        approval_review::write_review_json(output, &self.evidence_root.display().to_string())?;
+        writeln!(output, "\nNext: {}", self.next)?;
+        Ok(())
+    }
+}
+
+fn report_summary(report: &aiw_runner::WsbMsiRunReport) -> (String, &'static str) {
+    match report {
+        aiw_runner::WsbMsiRunReport::CompletedAssessment(assessment) => {
+            let mut summary = String::from("Fixed Notepad++ workflow (verified report):\n");
+            for (name, result) in assessment.administrator_function_results() {
+                let label = match result {
+                    Some(true) => "passed",
+                    Some(false) => "failed",
+                    None => "not measured",
+                };
+                summary.push_str(&format!("  {name}: {label}\n"));
+            }
+            summary.push_str(&format!(
+                "Recorded cleanup: {}\nBroader isolation: insufficient evidence; this fixed workflow is not a general compatibility verdict.\n",
+                if assessment.recorded_cleanup_verified {
+                    "verified"
+                } else {
+                    "not verified"
+                }
+            ));
+            (
+                summary,
+                "Read report.md for the administrator overview; report.json and stage files retain the advanced evidence.",
+            )
+        }
+        aiw_runner::WsbMsiRunReport::UnsuccessfulAttempt(attempt) => (
+            format!(
+                "No completed application assessment. Fixed workflow functions are not verified.\nRecorded cleanup: {}\n",
+                if attempt.recorded_cleanup_verified {
+                    "verified"
+                } else {
+                    "not verified"
+                }
+            ),
+            "Read report.md and the exact run status before a new trial or any explicit recovery.",
+        ),
+        aiw_runner::WsbMsiRunReport::InteractiveSession(_) => (
+            "No completed application assessment. This result needs detailed review.\n".into(),
+            "Read report.md and the exact run status before a new trial.",
+        ),
+    }
 }
 
 impl ProductAssetManifest {
@@ -325,6 +414,7 @@ pub fn assess(
             execution_mode,
             approval_recorded: false,
             next: "Approval was cancelled. The run remains pending approval; no Sandbox was started.",
+            summary: None,
         });
     }
     layout.write_approval(&approval)?;
@@ -368,6 +458,7 @@ pub fn assess(
     })?;
     save_stage(&evidence_root, "report", &report)?;
     std::fs::write(evidence_root.join("report.md"), report.to_markdown())?;
+    let (summary, next) = report_summary(&report);
     Ok(AdminAssessmentResult {
         schema_version: MANIFEST_SCHEMA,
         product_id: PRODUCT_ID,
@@ -377,7 +468,8 @@ pub fn assess(
         workspace,
         execution_mode,
         approval_recorded: true,
-        next: "Assessment completed. Read report.md; use the retained run status for any later recovery decision.",
+        next,
+        summary: Some(summary),
     })
 }
 
@@ -456,6 +548,49 @@ fn lowercase_sha256(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn summary_keeps_cancellation_distinct_and_escapes_evidence_path() {
+        let result = AdminAssessmentResult {
+            schema_version: MANIFEST_SCHEMA,
+            product_id: PRODUCT_ID,
+            operator_identity: "operator".into(),
+            evidence_root: PathBuf::from("evidence-\u{1b}[2J"),
+            run_id: "admin-test".into(),
+            workspace: PathBuf::from("workspace"),
+            execution_mode: "assessment",
+            approval_recorded: false,
+            next: "Review the retained recipe.",
+            summary: None,
+        };
+        let mut output = Vec::new();
+        result.write_summary(&mut output).unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("Approval cancelled. No Sandbox was started."));
+        assert!(output.contains("evidence-\\u001b[2J"));
+        assert!(!output.contains('\u{1b}'));
+        let json = serde_json::to_value(&result).unwrap();
+        assert!(json.get("summary").is_none());
+    }
+
+    #[test]
+    fn summary_error_preserves_action_without_terminal_controls() {
+        let error = anyhow!(AiwError {
+            code: "AIW_ADMIN_HOST_NOT_READY".into(),
+            summary: "Sandbox busy".into(),
+            stage: "adminReadiness".into(),
+            run_id: Some("admin-test".into()),
+            retryable: false,
+            remediation: "Wait for the other session.\u{1b}[2J".into(),
+            detail: "No worker acquired.".into(),
+        });
+        let mut output = Vec::new();
+        write_summary_error(&mut output, &error).unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("AIW_ADMIN_HOST_NOT_READY"));
+        assert!(output.contains("Wait for the other session.\\u001b[2J"));
+        assert!(!output.contains('\u{1b}'));
+    }
+
     #[test]
     fn manifest_paths_and_hash_are_fail_closed() {
         let manifest = ProductAssetManifest {

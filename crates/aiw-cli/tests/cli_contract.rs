@@ -97,15 +97,28 @@ fn administrator_route_rejects_redirected_input_before_evidence_mutation() {
         .unwrap();
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
-    let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+    let message = String::from_utf8(output.stderr).unwrap();
+    assert!(message.contains("Assessment stopped:"));
+    assert!(message.contains("AIW_ADMIN_WORKFLOW_FAILED"));
+    assert!(message.contains("requires terminal input"));
+    assert!(!message.contains("\"stage\""));
+    let advanced = Command::new(aiw())
+        .args([
+            "admin",
+            "assess",
+            "--installer",
+            "missing.msi",
+            "--evidence",
+        ])
+        .arg(temp.path())
+        .args(["--identity", "operator", "--format", "json"])
+        .output()
+        .unwrap();
+    assert!(!advanced.status.success());
+    assert!(advanced.stdout.is_empty());
+    let error: Value = serde_json::from_slice(&advanced.stderr).unwrap();
     assert_eq!(error["code"], "AIW_ADMIN_WORKFLOW_FAILED");
     assert_eq!(error["stage"], "adminWorkflow");
-    assert!(
-        error["detail"]
-            .as_str()
-            .unwrap()
-            .contains("requires terminal input")
-    );
     assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 0);
 }
 
