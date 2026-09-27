@@ -36,7 +36,68 @@ pub fn emit_summary_error(error: &anyhow::Error) {
     let _ = write_summary_error(&mut terminal, error);
 }
 
+#[derive(Debug)]
+pub struct AdminOutputFailed {
+    run_id: String,
+    evidence_root: PathBuf,
+    detail: String,
+}
+
+impl std::fmt::Display for AdminOutputFailed {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "administrator result output failed: {}",
+            self.detail
+        )
+    }
+}
+
+impl std::error::Error for AdminOutputFailed {}
+
+impl AdminOutputFailed {
+    pub fn from_result(result: &AdminAssessmentResult, error: anyhow::Error) -> anyhow::Error {
+        anyhow!(Self {
+            run_id: result.run_id.clone(),
+            evidence_root: result.evidence_root.clone(),
+            detail: error.to_string(),
+        })
+    }
+
+    pub fn structured_error(&self) -> AiwError {
+        AiwError {
+            code: "AIW_ADMIN_OUTPUT_FAILED".into(),
+            summary: "assessment result retained but console output failed".into(),
+            stage: "adminOutput".into(),
+            run_id: Some(self.run_id.clone().into()),
+            retryable: false,
+            remediation: format!(
+                "Read the retained report and exact run status under {}. Do not repeat the trial because console output failed.",
+                self.evidence_root.display()
+            )
+            .into(),
+            detail: self.detail.clone().into(),
+        }
+    }
+}
+
 fn write_summary_error(output: &mut impl Write, error: &anyhow::Error) -> Result<()> {
+    if let Some(failure) = error.downcast_ref::<AdminOutputFailed>() {
+        writeln!(
+            output,
+            "Assessment result retained, but console output failed."
+        )?;
+        writeln!(output, "Run: {}", failure.run_id)?;
+        write!(output, "Evidence: ")?;
+        approval_review::write_review_json(output, &failure.evidence_root.display().to_string())?;
+        write!(output, "\nOutput error: ")?;
+        approval_review::write_review_json(output, &failure.detail)?;
+        writeln!(
+            output,
+            "\nRead the retained report and exact run status. Do not repeat the trial because console output failed."
+        )?;
+        return Ok(());
+    }
     let Some(error) = error.downcast_ref::<AiwError>() else {
         return writeln!(output, "Assessment stopped. Inspect the retained evidence and retry only after resolving the cause.").map_err(Into::into);
     };
@@ -589,6 +650,36 @@ mod tests {
         assert!(output.contains("AIW_ADMIN_HOST_NOT_READY"));
         assert!(output.contains("Wait for the other session.\\u001b[2J"));
         assert!(!output.contains('\u{1b}'));
+    }
+
+    #[test]
+    fn output_failure_does_not_claim_the_assessment_stopped() {
+        let result = AdminAssessmentResult {
+            schema_version: MANIFEST_SCHEMA,
+            product_id: PRODUCT_ID,
+            operator_identity: "operator".into(),
+            evidence_root: PathBuf::from("evidence-\u{1b}[2J"),
+            run_id: "admin-test".into(),
+            workspace: PathBuf::from("workspace"),
+            execution_mode: "assessment",
+            approval_recorded: true,
+            next: "Read the report.",
+            summary: Some("Fixed workflow results retained.\n".into()),
+        };
+        let error = AdminOutputFailed::from_result(&result, anyhow!("broken pipe"));
+        let mut output = Vec::new();
+        write_summary_error(&mut output, &error).unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("Assessment result retained, but console output failed."));
+        assert!(output.contains("Do not repeat the trial"));
+        assert!(output.contains("evidence-\\u001b[2J"));
+        assert!(!output.contains("Assessment stopped"));
+        assert!(!output.contains('\u{1b}'));
+        let structured = error
+            .downcast_ref::<AdminOutputFailed>()
+            .unwrap()
+            .structured_error();
+        assert_eq!(structured.code.as_ref(), "AIW_ADMIN_OUTPUT_FAILED");
     }
 
     #[test]

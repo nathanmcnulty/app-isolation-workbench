@@ -1246,8 +1246,14 @@ fn run(command: Command) -> Result<()> {
                 let result = admin_workflow::assess(&installer, &evidence, &identity)
                     .map_err(admin_workflow::public_error)?;
                 match format {
-                    AdminOutputFormat::Summary => result.write_summary(&mut std::io::stdout()),
-                    AdminOutputFormat::Json => write_json(&result),
+                    AdminOutputFormat::Summary => result
+                        .write_summary(&mut std::io::stdout())
+                        .map_err(|error| {
+                            admin_workflow::AdminOutputFailed::from_result(&result, error)
+                        }),
+                    AdminOutputFormat::Json => write_json(&result).map_err(|error| {
+                        admin_workflow::AdminOutputFailed::from_result(&result, error)
+                    }),
                 }
             }
         },
@@ -3244,7 +3250,9 @@ fn emit_anyhow_error(error: &anyhow::Error) {
         });
         return;
     }
-    if let Some(error) = error.downcast_ref::<AiwError>() {
+    if let Some(error) = error.downcast_ref::<admin_workflow::AdminOutputFailed>() {
+        emit_error(&error.structured_error());
+    } else if let Some(error) = error.downcast_ref::<AiwError>() {
         emit_error(error);
     } else if let Some(error) = error.downcast_ref::<RunOperationUnavailable>() {
         emit_error(&ErrorEnvelope {
