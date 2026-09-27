@@ -36,8 +36,18 @@ New-Item -ItemType Directory -Path $evidenceRoot | Out-Null
 Write-Host "Retaining trial evidence at $evidenceRoot"
 foreach ($leaf in @('bundles', 'intakes', 'runs')) { New-Item -ItemType Directory -Path (Join-Path $evidenceRoot $leaf) | Out-Null }
 function Invoke-Aiw([string]$name, [string[]]$arguments) {
-    & $aiw @arguments 1> (Join-Path $evidenceRoot "$name.json") 2> (Join-Path $evidenceRoot "$name.stderr.log")
-    if ($LASTEXITCODE -ne 0) { throw "AIW failed at $name; inspect $evidenceRoot\$name.stderr.log and retained run status before retrying" }
+    # Windows PowerShell 5.1 promotes native stderr to a terminating error when
+    # ErrorActionPreference is Stop, even if the process will exit successfully.
+    # The CLI writes a provider diagnostics path to stderr while starting a run.
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & $aiw @arguments 1> (Join-Path $evidenceRoot "$name.json") 2> (Join-Path $evidenceRoot "$name.stderr.log")
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($exitCode -ne 0) { throw "AIW failed at $name (exit $exitCode); inspect $evidenceRoot\$name.stderr.log and retained run status before retrying" }
     Get-Content -LiteralPath (Join-Path $evidenceRoot "$name.json") -Raw | ConvertFrom-Json
 }
 function Save-Json([string]$path, $value) {
