@@ -40,6 +40,7 @@ pub fn emit_summary_error(error: &anyhow::Error) {
 pub struct AdminOutputFailed {
     run_id: String,
     evidence_root: PathBuf,
+    approval_recorded: bool,
     detail: String,
 }
 
@@ -60,6 +61,7 @@ impl AdminOutputFailed {
         anyhow!(Self {
             run_id: result.run_id.clone(),
             evidence_root: result.evidence_root.clone(),
+            approval_recorded: result.approval_recorded,
             detail: error.to_string(),
         })
     }
@@ -67,14 +69,26 @@ impl AdminOutputFailed {
     pub fn structured_error(&self) -> AiwError {
         AiwError {
             code: "AIW_ADMIN_OUTPUT_FAILED".into(),
-            summary: "assessment result retained but console output failed".into(),
+            summary: if self.approval_recorded {
+                "assessment result retained but console output failed"
+            } else {
+                "approval cancellation retained but console output failed"
+            }
+            .into(),
             stage: "adminOutput".into(),
             run_id: Some(self.run_id.clone().into()),
             retryable: false,
-            remediation: format!(
-                "Read the retained report and exact run status under {}. Do not repeat the trial because console output failed.",
-                self.evidence_root.display()
-            )
+            remediation: if self.approval_recorded {
+                format!(
+                    "Read the retained report and exact run status under {}. Do not repeat the trial because console output failed.",
+                    self.evidence_root.display()
+                )
+            } else {
+                format!(
+                    "Read approval-cancelled.json under {}. No Sandbox was started; use fresh evidence if you later choose to approve.",
+                    self.evidence_root.display()
+                )
+            }
             .into(),
             detail: self.detail.clone().into(),
         }
@@ -85,7 +99,12 @@ fn write_summary_error(output: &mut impl Write, error: &anyhow::Error) -> Result
     if let Some(failure) = error.downcast_ref::<AdminOutputFailed>() {
         writeln!(
             output,
-            "Assessment result retained, but console output failed."
+            "{}",
+            if failure.approval_recorded {
+                "Assessment result retained, but console output failed."
+            } else {
+                "Approval cancellation retained, but console output failed. No Sandbox was started."
+            }
         )?;
         writeln!(output, "Run: {}", failure.run_id)?;
         write!(output, "Evidence: ")?;
@@ -94,7 +113,12 @@ fn write_summary_error(output: &mut impl Write, error: &anyhow::Error) -> Result
         approval_review::write_review_json(output, &failure.detail)?;
         writeln!(
             output,
-            "\nRead the retained report and exact run status. Do not repeat the trial because console output failed."
+            "\n{}",
+            if failure.approval_recorded {
+                "Read the retained report and exact run status. Do not repeat the trial because console output failed."
+            } else {
+                "Read approval-cancelled.json. Use fresh evidence if you later choose to approve."
+            }
         )?;
         return Ok(());
     }
@@ -680,6 +704,35 @@ mod tests {
             .unwrap()
             .structured_error();
         assert_eq!(structured.code.as_ref(), "AIW_ADMIN_OUTPUT_FAILED");
+    }
+
+    #[test]
+    fn cancelled_output_failure_points_to_cancellation_record() {
+        let result = AdminAssessmentResult {
+            schema_version: MANIFEST_SCHEMA,
+            product_id: PRODUCT_ID,
+            operator_identity: "operator".into(),
+            evidence_root: PathBuf::from("evidence"),
+            run_id: "admin-cancelled".into(),
+            workspace: PathBuf::from("workspace"),
+            execution_mode: "assessment",
+            approval_recorded: false,
+            next: "Use fresh evidence if later approved.",
+            summary: None,
+        };
+        let error = AdminOutputFailed::from_result(&result, anyhow!("broken pipe"));
+        let mut output = Vec::new();
+        write_summary_error(&mut output, &error).unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("No Sandbox was started"));
+        assert!(output.contains("approval-cancelled.json"));
+        assert!(!output.contains("retained report"));
+        let structured = error
+            .downcast_ref::<AdminOutputFailed>()
+            .unwrap()
+            .structured_error();
+        assert!(structured.remediation.contains("approval-cancelled.json"));
+        assert!(!structured.remediation.contains("retained report"));
     }
 
     #[test]
