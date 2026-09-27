@@ -201,3 +201,33 @@ at `adminInstallerInspection`; the run directory contains only
 Sandbox session was created, and a fresh `aiw host assess` reported no current
 sessions or blockers. This agent-run control does not replace the second
 operator's acceptance record.
+
+## Independent operator acceptance for this package
+
+On 2026-09-27, the second operator extracted the exact `08ab440` archive to a
+new `C:\AIW-Operator-Preview-08ab440` directory on the separate Windows VM.
+The transcript at `C:\AIW-Operator-Evidence-08ab440\operator-transcript.txt`
+records the archive, receipt, verifier, CLI, guest, profile, and installer
+hashes matching the separately retained distribution identities, package
+verification, host assessment, and interactive `admin assess` command. Native
+CLI output was checked in retained evidence and the operator terminal rather
+than inferred from the PowerShell transcript.
+
+Operator `nathanmcnulty` reviewed the recipe and approved fresh plan hash
+`39e79c84212cf70e90ed481912bde72bc1aeb59fb117e407482b746d6c27eaae`.
+Run `admin-1790485297308064300` under `C:\AIW-Operator-Evidence-08ab440`
+completed all nine fixed stages. The report binds profile
+`16da5a97a7cab5018b1712265aa4d82f25c885cf3cc47a8b827b46711493ca98`,
+records a saved document with matching expected and observed SHA-256, verifies
+the standard-user protected-file denial and positive control, and records
+cleanup. Operator-bound `run status` was terminal with `cleanupVerified`;
+subsequent host assessment listed no current sessions or blockers.
+
+The separate operator control `admin-1790486242125347900` under
+`C:\AIW-Operator-Negative-08ab440` rejected `README.txt` as an unsupported MSI
+input. Its only files are `host-readiness.json` and
+`installer-rejection.json`; the latter records `intakeCreated: false` and
+`providerAcquired: false`. The fixed workflow's broader isolation outcome is
+still `insufficientEvidence`. This closes the second-operator trial gate for
+the exact unsigned development preview, not publisher authentication,
+general application compatibility, or effective host containment.

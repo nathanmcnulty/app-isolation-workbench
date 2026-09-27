@@ -30,7 +30,7 @@ not measure that final product outcome.
 |---|---|
 | Approved profile replay — demonstrated | Profile identity is bound into approval; stripping/substitution/drift is rejected. The fresh worker at `fc22efb` completed the fixed workflow, required file ACL controls, and cleanup; report v0alpha11 identifies the approved profile. See [retained proof](VALIDATED-SANDBOX-LAUNCH.md#approved-replay-proof). |
 | Administrator workflow — demonstrated | The packaged `aiw admin assess` route completed protected intake, complete recipe display, operator exact-hash approval, profile-bound replay, retained JSON/Markdown reporting, and verified cleanup for run `admin-1789947096248087800`. The report records every fixed function as passed while retaining `insufficientEvidence` for broader isolation. Occupied-session, unsupported-input, cancellation, and profile/package drift controls are retained or covered by the exact package checks and tests. See [administrator workflow proof](ADMINISTRATOR-WORKFLOW.md#public-entry-proof). |
-| Clean-host distribution trial | A versioned Workbench build can be installed or unpacked on a clean supported host, prerequisites are detected correctly, and a second operator completes the documented assessment/replay path with retained evidence. Publish the exact build identity, support scope, and known limitations. |
+| Clean-host distribution trial — demonstrated for the exact unsigned preview | A second operator freshly extracted and verified the `08ab440` package on the separate supported VM, approved the profile-bound recipe, and completed run `admin-1790485297308064300` with nine passed stages, saved-document and ACL controls, terminal cleanup, and no remaining Sandbox session. Unsupported input was rejected before intake or provider acquisition in `admin-1790486242125347900`. See [clean-host acceptance](CLEAN-HOST-PREVIEW.md#independent-operator-acceptance-for-this-package). Signing, publisher authentication, and broader isolation claims remain outside this proof. |
 
 After approved profile replay, pause feature expansion for a focused quality
 review of approval/evidence bindings, historical reporting, recovery, and test
@@ -114,9 +114,11 @@ provider reported no sessions afterward. The report's broader outcome remains
 `insufficientEvidence`, with its missing independent host, descendant, network,
 IPC, persistence, and effective-backend measurements listed explicitly.
 
-These are outcome gates, not a calendar or quota estimate. The remaining
-release uncertainty is concentrated in the clean-host trial; new application
-classes and new isolation mechanisms are not prerequisites.
+These are outcome gates, not a calendar or quota estimate. The narrow
+clean-host preview loop is demonstrated for the exact unsigned package; public
+distribution still needs an authenticated publication channel and signing
+decision. New application classes and isolation mechanisms are not evidence
+for this preview and require their own bounded validation.
 Update this table when evidence closes a gate rather than repeatedly labelling
 implementation slices as a release milestone.
 

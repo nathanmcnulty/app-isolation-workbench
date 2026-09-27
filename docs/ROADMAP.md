@@ -1,6 +1,6 @@
 # Roadmap
 
-Reviewed 2026-09-20 against the implemented runner and retained live evidence. The release sequence below is authoritative; numbered capability benchmarks retain research acceptance criteria, not a serial release backlog. External platform research below is dated context and must be reverified before implementation.
+Reviewed 2026-09-27 against the implemented runner and retained live evidence. The release sequence below is authoritative; numbered capability benchmarks retain research acceptance criteria, not a serial release backlog. External platform research below is dated context and must be reverified before implementation.
 
 The goal is a free community tool that answers **which tested application functions work under which measured isolation configuration**, helps an administrator adapt the application, and produces a launch profile or package that passes the same tests. Workbench evolves into Studio when authoring is useful; this is one product.
 
@@ -17,28 +17,28 @@ evidence that an arbitrary MSI is compatible or a claim of broad market coverage
    workflow, ephemeral local settings, required guest file ACL controls, and exact
    cleanup. [Quality review](QUALITY-REVIEW-2026-09-20.md) records the inspected
    boundaries, corrected guidance, and remaining validation gaps.
-2. **Next milestone: administrator assessment and replay workflow.** Provide one
-   documented entry path, a plain-language report with specific next actions,
-   discoverable supported profiles, and reviewed recipe/replay approval. An
-   operator must not need development TEMP paths, hand-authored approval JSON,
-   a compiler, or an agent to reconstruct runtime parameters. Use the existing
-   services; a desktop UI and general scenario engine are not prerequisites.
-3. **Then: clean-host preview validation and distribution.** Ship identified CLI
-   and guest builds together, detect prerequisites, and have a second operator
-   complete the documented loop. Reassess and create fresh approval/evidence on
-   that host; copying a same-host validation profile is not deployment validation.
+2. **Demonstrated:** the packaged administrator entry path presents the recipe,
+   collects exact-plan approval, runs the fixed profile-bound workflow, and
+   retains a plain-language report and safe recovery guidance. See
+   [administrator workflow](ADMINISTRATOR-WORKFLOW.md).
+3. **Demonstrated for the exact unsigned preview:** an identified CLI, guest,
+   and profile were packaged and verified on a separate supported VM. A second
+   operator completed the documented loop with fresh approval, report, negative
+   control, and cleanup. See [clean-host acceptance](CLEAN-HOST-PREVIEW.md#independent-operator-acceptance-for-this-package).
 
 The exact acceptance cases are in [RELEASE-GATES.md](RELEASE-GATES.md). A release
 requires successful supported use and understandable failure handling, not only
 a successful developer script. Preserve explicit data-loss/export warnings for
 ephemeral sessions, evidence retention needs, and unsupported application behavior.
 
-After the narrow preview loop is usable, choose the next real application by a
+Next, choose the next real application by a
 concrete admin need (for example a useful local-file workflow), and measure how
 much profile-specific code it requires. Bambu already supplies a second reporting
 consumer. Broader utility is a subsequent product outcome, not something inferred
 from repeated Notepad++ trials. Do not expand providers or collectors unless they
 answer a documented workflow failure or a claim the next release actually makes.
+Public distribution also needs a publisher-authentication and signing decision;
+the present package is an unsigned development preview.
 
 ## What is already working
 

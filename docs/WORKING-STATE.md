@@ -4,10 +4,10 @@ Updated 2026-09-27. This is a compact handoff, not a run receipt or authorizatio
 
 ## Where to resume
 
-- Active branch: `codex/profile-bound-clean-host`, based on merged `main` at `ed250d0`. PR #70 integrated the separate-host assessment and preview fixes after both required hosted checks passed. Verify the current commit and clean state with `scripts/work-status.ps1` before editing.
-- Current gate: the second operator completed the v6 assessment-only trial on the separate clean-host VM. Run `admin-1790455699199696400` passed the fixed install/open/edit/save/close workflow and ACL control; the retained run status and exact Sandbox cleanup verified. The broader isolation outcome remains `insufficientEvidence`. An unsupported-input control rejected before intake or Sandbox acquisition. The v4 120-second timeout and v6 300-second success are both retained; the cause of the timing difference is not isolated. See [CLEAN-HOST-PREVIEW.md](CLEAN-HOST-PREVIEW.md).
+- Active branch: `codex/profile-bound-clean-host`, with draft PR #71. Verify the current commit and clean state with `scripts/work-status.ps1` before editing.
+- The exact unsigned `08ab440` profile-bound package passed the separate-host second-operator trial. Run `admin-1790485297308064300` passed all nine fixed stages, document hash and ACL controls, and terminal cleanup; negative run `admin-1790486242125347900` rejected before intake or provider acquisition. The provider has no active session. The broader isolation outcome remains `insufficientEvidence`. See [CLEAN-HOST-PREVIEW.md](CLEAN-HOST-PREVIEW.md).
 - The earlier profile-bound approved replay passed its fixed document workflow, required guest file ACL controls, recorded environment comparison, and cleanup. That remains same-host evidence for its recorded source and provider identities. See [VALIDATED-SANDBOX-LAUNCH.md](VALIDATED-SANDBOX-LAUNCH.md).
-- The clean-host baseline/candidate/relocated-replay development trial passed from exact `2c18f7e` CLI and static guest bytes. A fresh profile-bound replay also passed on that VM. Profile hash: `16da5a97a7cab5018b1712265aa4d82f25c885cf3cc47a8b827b46711493ca98`. The clean-source `08ab440` package verified on the build host and VM, and agent-run public entry `admin-1790480009430263000` passed the fixed workflow with terminal cleanup. The provider session list is empty. See [PACKAGING-RECIPES.md](PACKAGING-RECIPES.md) and [CLEAN-HOST-PREVIEW.md](CLEAN-HOST-PREVIEW.md); the separate second-operator acceptance gate remains open.
+- The earlier development baseline/candidate/relocated-replay and agent-run packaged smoke remain separately recorded in [PACKAGING-RECIPES.md](PACKAGING-RECIPES.md) and [CLEAN-HOST-PREVIEW.md](CLEAN-HOST-PREVIEW.md). They are not substituted for the independent operator run.
 - Goal: report tested functions for exact application bytes and measured isolation configurations, then use the evidence for adaptation/repackaging. Free community project; feedback collection is not a development gate.
 
 ## Implemented versus exploratory
@@ -20,15 +20,12 @@ Updated 2026-09-27. This is a compact handoff, not a run receipt or authorizatio
 
 ## Next coherent slice
 
-Have the second operator run the verified `08ab440` preview package from its
-staged VM extraction, review the complete recipe, type its fresh plan hash,
-and preserve the report and exact cleanup. The agent-run development replay
-and public-entry smoke do not satisfy that release gate. See
-[EXECUTION-PLAN.md](EXECUTION-PLAN.md) for the packet order. Detailed older
-evidence remains in
-[VALIDATED-SANDBOX-LAUNCH.md](VALIDATED-SANDBOX-LAUNCH.md),
-[ADMINISTRATOR-WORKFLOW.md](ADMINISTRATOR-WORKFLOW.md), and
-[QUALITY-REVIEW-2026-09-20.md](QUALITY-REVIEW-2026-09-20.md).
+Integrate PR #71 after its exact-head required checks, preserving the unsigned
+preview and `insufficientEvidence` limits. Then select one next real application
+by an administrator need and define its bounded Assess -> Adapt -> Package ->
+Validate acceptance before implementation. See [ROADMAP.md](ROADMAP.md) and
+[RELEASE-GATES.md](RELEASE-GATES.md); do not infer general compatibility from
+the Notepad++ proof.
 
 ## Read only what the slice needs
 
