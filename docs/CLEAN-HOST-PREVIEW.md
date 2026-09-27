@@ -164,6 +164,31 @@ They are unsigned and have not been published.
 This earlier profile-bound candidate has not been replayed by the second
 operator. Its profile is bound to an earlier guest and scenario identity, so the
 successful v6 assessment does not validate that candidate on the clean host.
-Build and verify a new profile-bound candidate against the current guest and
-scenario, then complete the separate-host acceptance record. Do not substitute
-same-host evidence paths for a clean-host trial.
+Do not substitute same-host evidence paths for a clean-host trial.
+
+## Current bound development candidate
+
+A new unsigned candidate was assembled from clean revision
+`08ab4406efaeb5c3a674d70db724b106048682a8` using profile SHA-256
+`16da5a97a7cab5018b1712265aa4d82f25c885cf3cc47a8b827b46711493ca98`.
+The archive is retained at
+`E:\aiw-artifacts\AppIsolationWorkbench-profile-08ab440.zip`, with its
+companion distribution manifest at the same path plus `.json`:
+
+- archive SHA-256: `0ff27fe2d0a2f283a02bb2806b29b5e23000aca2e2bc6314b61baad8e4ae6f19`;
+- receipt file SHA-256: `fc99d0fb7d45ccf081773dab09bb051989cff3606dd94e79f9dd9c81be1d5272`;
+- canonical package receipt SHA-256: `d5d9687daad50f1f5ec72ffcb08bd25baca879ec2f73ae2443e4077b08d6454f`;
+- verifier SHA-256: `21d06626a01a063162704a0129a981c3815b3efa69881b7841c4631dc341b88b`.
+
+Fresh extractions on the build host and dedicated VM verified the exact nine-file
+inventory. The VM copies are `C:\AIW-Preview-08ab440.zip` and
+`C:\AIW-Preview-08ab440`; the short-lived Azure handoff blobs were removed.
+An agent-run packaged public-entry smoke test on that VM produced
+`admin-1790480009430263000` under `C:\AIW-Evidence-Profile-v1`. The retained
+report records the bound profile, fixed document save with matching hashes,
+standard-user file ACL denial and positive control, and verified cleanup.
+Operator-bound `run status` was terminal with `cleanupVerified`, and the
+provider session list was empty. The broader result remains
+`insufficientEvidence` for effective isolation. This is development evidence,
+not the independent second-operator acceptance record above; that gate remains
+open for the current package.
