@@ -104,6 +104,50 @@ and stops on failure. `comparison.json` is a bounded experiment observation;
 the underlying CLI reports remain the reverified evidence source. There is no
 new compatibility verdict or reusable host-launch authorization.
 
+For a separately staged package on Windows PowerShell 5.1, pass `-CliPath`,
+`-CliSha256`, `-BaselineProject`, and `-CandidateProject` with independently
+verified package and project bytes. Native CLI diagnostics on stderr are retained
+without interrupting the process before its exit code is known. CLI JSON is
+written as UTF-8; PowerShell 5.1 native-output redirection writes UTF-16 and
+cannot be passed back as an AIW JSON input. `-BaselineEvidenceRoot` may point
+to a completed baseline from the same host for read-only re-verification while
+candidate and relocated replay each launch a fresh worker.
+
+On the nested clean-host VM, baseline run
+`baseline-3e4d31079d9b4e2e98b0996fb45289fd` passed before-install capture
+but hit the legacy baseline's fixed 120-second MSI install deadline. Its
+unsuccessful report verified exact Sandbox cleanup, and the provider session
+list was empty afterward. This is a measured deadline failure, not an
+application compatibility result. The current automated baseline now has a
+separately versioned compiled scenario `v0alpha11` and profile `v0alpha7`
+with a bounded 300-second install deadline, matching the current local-settings
+profile. Historical baseline `v0alpha6` records retain their 120-second
+deadline and remain verifiable; interactive profiles retain their prior deadline
+and wire hashes.
+
+The corrected driver reverified completed baseline
+`baseline-d79610c213e944bfbbe8918eb2dc46b9` without reinstalling, then
+completed fresh candidate `candidate-6fc4021242884c35a874a120d2c0a24b`
+and relocated replay `replay-b4073bb7202c4e41970edcde3bb63b95`. Retained
+evidence is under
+`C:\AIW-Profile-Evidence-v1\aiw-local-settings-7d0866f70cce4b29b7595dcdb4a65dc6`
+on the dedicated VM. All three saved the bound document and verified exact
+cleanup. The baseline recorded `config.xml` under roaming AppData; candidate
+and replay recorded the same 9,184-byte SHA-256
+`20f1ab3271e121dbf083821c43457fca85d06e45ffdcbdbcacb823edef4fd50c`
+under local AppData. The comparison matched recorded provider and OS versions
+and measured only the standard-user file ACL boundary; broader effective
+isolation remains unmeasured. The provider session list was empty afterward.
+
+The resulting launch profile has canonical SHA-256
+`16da5a97a7cab5018b1712265aa4d82f25c885cf3cc47a8b827b46711493ca98`.
+Fresh same-host profile-bound replay `profile-912e1fa316824c1fa8eb86ecf16468b1`
+passed the fixed workflow, required ACL control, retained report and comparison,
+and verified cleanup. Its evidence is under
+`C:\AIW-Profile-Evidence-v1\aiw-approved-profile-f53f6c58c556422a9049d57f39866885`.
+This is development validation; the clean-host public-entry second-operator
+gate remains open.
+
 ### Retained settings comparison
 
 `run report-wsb-settings-comparison --input <report-set-input.json>` reopens the

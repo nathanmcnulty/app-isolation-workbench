@@ -364,6 +364,7 @@ mod tests {
         );
         legacy.scenario.schema_version = crate::COMPILED_MSI_SCENARIO_SCHEMA_VERSION.into();
         legacy.scenario.profile = crate::NOTEPAD_PLUS_PLUS_MSI_PROFILE.into();
+        legacy.scenario.install_timeout_seconds = 300;
         legacy.scenario_sha256 = legacy.scenario.canonical_sha256().unwrap();
         legacy.request_sha256 = legacy.recompute_request_sha256().unwrap();
         let request = legacy

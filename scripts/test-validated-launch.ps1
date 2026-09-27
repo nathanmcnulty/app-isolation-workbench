@@ -1,4 +1,4 @@
-#requires -Version 7.0
+#requires -Version 5.1
 <# One explicitly approved, fixed Sandbox replay with durable stage diagnostics.
 The CLI verifies all execution authority and owns exact cleanup/recovery. #>
 [CmdletBinding()]
@@ -9,6 +9,8 @@ param(
     [Parameter(Mandatory)][string]$ImportReceipt,
     [Parameter(Mandatory)][string]$GuestAgent,
     [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{64}$')][string]$GuestAgentSha256,
+    [string]$CliPath,
+    [ValidatePattern('^[0-9a-f]{64}$')][string]$CliSha256,
     [Parameter(Mandatory)][string]$EvidenceParent,
     [Parameter(Mandatory)][string]$ApprovedBy,
     [Parameter(Mandatory)][switch]$Approve
@@ -17,7 +19,15 @@ $ErrorActionPreference = 'Stop'
 if (!$Approve -or [string]::IsNullOrWhiteSpace($ApprovedBy)) { throw 'Explicit approval for this fixed Sandbox trial is required' }
 $Project = (Resolve-Path -LiteralPath $Project).ProviderPath
 $repo = Split-Path -Parent $PSScriptRoot
-$aiw = Join-Path $repo 'target\debug\aiw.exe'
+$aiw = if ($CliPath) { $CliPath } else { Join-Path $repo 'target\debug\aiw.exe' }
+if ($CliPath -and !$CliSha256) { throw 'CliSha256 is required when using an external CLI' }
+if (!$CliPath -and $CliSha256) { throw 'CliPath is required when supplying CliSha256' }
+foreach ($inputPath in @($aiw, $Profile, $Project, $ImportReceipt, $GuestAgent)) {
+    if (!(Test-Path -LiteralPath $inputPath -PathType Leaf)) { throw "Trial input is missing: $inputPath" }
+}
+if ($CliSha256 -and (Get-FileHash -LiteralPath $aiw -Algorithm SHA256).Hash.ToLowerInvariant() -cne $CliSha256) { throw 'CLI bytes differ from the supplied SHA-256' }
+if ((Get-FileHash -LiteralPath $GuestAgent -Algorithm SHA256).Hash.ToLowerInvariant() -cne $GuestAgentSha256) { throw 'Guest-agent bytes differ from the supplied SHA-256' }
+if (!(Test-Path -LiteralPath $EvidenceParent -PathType Container)) { throw 'EvidenceParent must be an existing directory' }
 $evidenceRoot = Join-Path $EvidenceParent ('aiw-approved-profile-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $evidenceRoot | Out-Null
 Write-Host "Retaining trial evidence at $evidenceRoot"
@@ -25,8 +35,19 @@ function Save-Json([string]$path, $value) {
     [IO.File]::WriteAllText($path, (ConvertTo-Json -InputObject $value -Depth 64), [Text.UTF8Encoding]::new($false))
 }
 function Invoke-Aiw([string]$name, [string[]]$arguments) {
-    & $aiw @arguments 1> (Join-Path $evidenceRoot "$name.json") 2> (Join-Path $evidenceRoot "$name.stderr.log")
-    if ($LASTEXITCODE -ne 0) { throw "AIW failed at $name; inspect $evidenceRoot\$name.stderr.log and retained run status before retrying" }
+    $previousErrorActionPreference = $ErrorActionPreference
+    $previousConsoleEncoding = [Console]::OutputEncoding
+    try {
+        $ErrorActionPreference = 'Continue'
+        [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+        $outputLines = @(& $aiw @arguments 2> (Join-Path $evidenceRoot "$name.stderr.log"))
+        $exitCode = $LASTEXITCODE
+    } finally {
+        [Console]::OutputEncoding = $previousConsoleEncoding
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    [IO.File]::WriteAllText((Join-Path $evidenceRoot "$name.json"), ($outputLines -join [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
+    if ($exitCode -ne 0) { throw "AIW failed at $name (exit $exitCode); inspect $evidenceRoot\$name.stderr.log and retained run status before retrying" }
     Get-Content -LiteralPath (Join-Path $evidenceRoot "$name.json") -Raw | ConvertFrom-Json
 }
 $readiness = Invoke-Aiw 'host-readiness' @('host', 'assess')

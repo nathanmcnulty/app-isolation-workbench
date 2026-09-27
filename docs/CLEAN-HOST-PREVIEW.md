@@ -164,6 +164,70 @@ They are unsigned and have not been published.
 This earlier profile-bound candidate has not been replayed by the second
 operator. Its profile is bound to an earlier guest and scenario identity, so the
 successful v6 assessment does not validate that candidate on the clean host.
-Build and verify a new profile-bound candidate against the current guest and
-scenario, then complete the separate-host acceptance record. Do not substitute
-same-host evidence paths for a clean-host trial.
+Do not substitute same-host evidence paths for a clean-host trial.
+
+## Current bound development candidate
+
+A new unsigned candidate was assembled from clean revision
+`08ab4406efaeb5c3a674d70db724b106048682a8` using profile SHA-256
+`16da5a97a7cab5018b1712265aa4d82f25c885cf3cc47a8b827b46711493ca98`.
+The archive is retained at
+`E:\aiw-artifacts\AppIsolationWorkbench-profile-08ab440.zip`, with its
+companion distribution manifest at the same path plus `.json`:
+
+- archive SHA-256: `0ff27fe2d0a2f283a02bb2806b29b5e23000aca2e2bc6314b61baad8e4ae6f19`;
+- receipt file SHA-256: `fc99d0fb7d45ccf081773dab09bb051989cff3606dd94e79f9dd9c81be1d5272`;
+- canonical package receipt SHA-256: `d5d9687daad50f1f5ec72ffcb08bd25baca879ec2f73ae2443e4077b08d6454f`;
+- verifier SHA-256: `21d06626a01a063162704a0129a981c3815b3efa69881b7841c4631dc341b88b`.
+
+Fresh extractions on the build host and dedicated VM verified the exact nine-file
+inventory. The VM copies are `C:\AIW-Preview-08ab440.zip` and
+`C:\AIW-Preview-08ab440`; the short-lived Azure handoff blobs were removed.
+An agent-run packaged public-entry smoke test on that VM produced
+`admin-1790480009430263000` under `C:\AIW-Evidence-Profile-v1`. The retained
+report records the bound profile, fixed document save with matching hashes,
+standard-user file ACL denial and positive control, and verified cleanup.
+Operator-bound `run status` was terminal with `cleanupVerified`, and the
+provider session list was empty. The broader result remains
+`insufficientEvidence` for effective isolation. This is development evidence,
+not the independent second-operator acceptance record above; that gate remains
+open for the current package.
+
+The same packaged CLI rejected its own `README.txt` as an unsupported installer
+on the VM in run `admin-1790482235083588800` under
+`C:\AIW-Negative-Profile-v1`. It returned `AIW_ADMIN_UNSUPPORTED_INSTALLER`
+at `adminInstallerInspection`; the run directory contains only
+`host-readiness.json` and `installer-rejection.json`. No protected intake or
+Sandbox session was created, and a fresh `aiw host assess` reported no current
+sessions or blockers. This agent-run control does not replace the second
+operator's acceptance record.
+
+## Independent operator acceptance for this package
+
+On 2026-09-27, the second operator extracted the exact `08ab440` archive to a
+new `C:\AIW-Operator-Preview-08ab440` directory on the separate Windows VM.
+The transcript at `C:\AIW-Operator-Evidence-08ab440\operator-transcript.txt`
+records the archive, receipt, verifier, CLI, guest, profile, and installer
+hashes matching the separately retained distribution identities, package
+verification, host assessment, and interactive `admin assess` command. Native
+CLI output was checked in retained evidence and the operator terminal rather
+than inferred from the PowerShell transcript.
+
+Operator `nathanmcnulty` reviewed the recipe and approved fresh plan hash
+`39e79c84212cf70e90ed481912bde72bc1aeb59fb117e407482b746d6c27eaae`.
+Run `admin-1790485297308064300` under `C:\AIW-Operator-Evidence-08ab440`
+completed all nine fixed stages. The report binds profile
+`16da5a97a7cab5018b1712265aa4d82f25c885cf3cc47a8b827b46711493ca98`,
+records a saved document with matching expected and observed SHA-256, verifies
+the standard-user protected-file denial and positive control, and records
+cleanup. Operator-bound `run status` was terminal with `cleanupVerified`;
+subsequent host assessment listed no current sessions or blockers.
+
+The separate operator control `admin-1790486242125347900` under
+`C:\AIW-Operator-Negative-08ab440` rejected `README.txt` as an unsupported MSI
+input. Its only files are `host-readiness.json` and
+`installer-rejection.json`; the latter records `intakeCreated: false` and
+`providerAcquired: false`. The fixed workflow's broader isolation outcome is
+still `insufficientEvidence`. This closes the second-operator trial gate for
+the exact unsigned development preview, not publisher authentication,
+general application compatibility, or effective host containment.

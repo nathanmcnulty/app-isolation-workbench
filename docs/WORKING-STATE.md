@@ -1,12 +1,13 @@
 # Working state
 
-Updated 2026-09-26. This is a compact handoff, not a run receipt or authorization.
+Updated 2026-09-27. This is a compact handoff, not a run receipt or authorization.
 
 ## Where to resume
 
-- Active branch: `codex/clean-host-preview` at `14e77b2` before this handoff update. PR #68 merged the earlier preview package; later branch commits await integration. Verify with `scripts/work-status.ps1` before editing.
-- Current gate: the second operator completed the v6 assessment-only trial on the separate clean-host VM. Run `admin-1790455699199696400` passed the fixed install/open/edit/save/close workflow and ACL control; the retained run status and exact Sandbox cleanup verified. The broader isolation outcome remains `insufficientEvidence`. An unsupported-input control rejected before intake or Sandbox acquisition. The v4 120-second timeout and v6 300-second success are both retained; the cause of the timing difference is not isolated. See [CLEAN-HOST-PREVIEW.md](CLEAN-HOST-PREVIEW.md).
+- Active branch: `codex/profile-bound-clean-host`, with draft PR #71. Verify the current commit and clean state with `scripts/work-status.ps1` before editing.
+- The exact unsigned `08ab440` profile-bound package passed the separate-host second-operator trial. Run `admin-1790485297308064300` passed all nine fixed stages, document hash and ACL controls, and terminal cleanup; negative run `admin-1790486242125347900` rejected before intake or provider acquisition. The provider has no active session. The broader isolation outcome remains `insufficientEvidence`. See [CLEAN-HOST-PREVIEW.md](CLEAN-HOST-PREVIEW.md).
 - The earlier profile-bound approved replay passed its fixed document workflow, required guest file ACL controls, recorded environment comparison, and cleanup. That remains same-host evidence for its recorded source and provider identities. See [VALIDATED-SANDBOX-LAUNCH.md](VALIDATED-SANDBOX-LAUNCH.md).
+- The earlier development baseline/candidate/relocated-replay and agent-run packaged smoke remain separately recorded in [PACKAGING-RECIPES.md](PACKAGING-RECIPES.md) and [CLEAN-HOST-PREVIEW.md](CLEAN-HOST-PREVIEW.md). They are not substituted for the independent operator run.
 - Goal: report tested functions for exact application bytes and measured isolation configurations, then use the evidence for adaptation/repackaging. Free community project; feedback collection is not a development gate.
 
 ## Implemented versus exploratory
@@ -19,15 +20,12 @@ Updated 2026-09-26. This is a compact handoff, not a run receipt or authorizatio
 
 ## Next coherent slice
 
-Integrate the completed v6 evidence and branch commits through one reviewed PR
-with the required hosted checks. Then build a profile-bound candidate for the
-current guest and scenario identities, verify its fresh extraction, and repeat
-the public-entry replay with the second operator. The successful assessment-only
-run does not satisfy that release gate. [EXECUTION-PLAN.md](EXECUTION-PLAN.md)
-gives the packet order. Detailed older evidence remains in
-[VALIDATED-SANDBOX-LAUNCH.md](VALIDATED-SANDBOX-LAUNCH.md),
-[ADMINISTRATOR-WORKFLOW.md](ADMINISTRATOR-WORKFLOW.md), and
-[QUALITY-REVIEW-2026-09-20.md](QUALITY-REVIEW-2026-09-20.md).
+Integrate PR #71 after its exact-head required checks, preserving the unsigned
+preview and `insufficientEvidence` limits. Then select one next real application
+by an administrator need and define its bounded Assess -> Adapt -> Package ->
+Validate acceptance before implementation. See [ROADMAP.md](ROADMAP.md) and
+[RELEASE-GATES.md](RELEASE-GATES.md); do not infer general compatibility from
+the Notepad++ proof.
 
 ## Read only what the slice needs
 

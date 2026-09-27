@@ -5,6 +5,9 @@ fn verify_historical_scenario(
     project: &Project,
     recorded: &aiw_provider_wsb::CompiledMsiScenario,
 ) -> Result<(), RunnerError> {
+    recorded
+        .validate()
+        .map_err(|e| RunnerError::Preparation(e.to_string()))?;
     let compiled = if let Some(document) = recorded.interactive_document.as_ref() {
         aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario_with_document(
             project,
@@ -21,6 +24,7 @@ fn verify_historical_scenario(
     let mut historical = compiled;
     historical.schema_version = recorded.schema_version.clone();
     historical.profile = recorded.profile.clone();
+    historical.install_timeout_seconds = recorded.install_timeout_seconds;
     if !historical.requires_application_exercise() {
         historical.document_exercise = None;
     } else if !historical.requires_standard_user() {
@@ -1224,12 +1228,13 @@ mod tests {
             "install-launch-close",
         )
         .unwrap();
-        for version in 1..=4 {
+        for version in 1..=6 {
             let mut recorded = current.clone();
             recorded.schema_version =
                 format!("aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha{version}");
             recorded.profile =
                 format!("aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha{version}");
+            recorded.install_timeout_seconds = 120;
             if version < 3 {
                 recorded.document_exercise = None;
             } else if version == 3 {

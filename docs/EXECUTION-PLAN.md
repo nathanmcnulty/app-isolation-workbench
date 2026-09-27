@@ -6,11 +6,11 @@ are project recommendations, not measured cost or quality guarantees.
 
 ## Starting point
 
-Run `scripts/work-status.ps1`, then read WORKING-STATE.md. At writing, branch
-`codex/admin-assessment-summary` contains pushed commits `5766a55` and `340590e`;
-PR #66 is merged. Terminal approval review is implemented, validated, and its
-exact-commit Sol review found no actionable issue. Do not rebuild this work or
-assume it is on main.
+Run `scripts/work-status.ps1`, then read WORKING-STATE.md. The administrator
+preview packets below have been implemented; PR #71 holds the final
+profile-bound clean-host evidence. Check its exact head and merge state before
+starting another packet. Do not rebuild completed work from the historical
+commit references below.
 
 Use **Sol, medium** for the main task. It owns integration and the milestone.
 Use **Luna, medium** for a bounded implementation with an explicit contract,
@@ -113,13 +113,11 @@ Review the exact head and require successful `Verify and audit` and `Minimum
 supported Rust` before merging. Commit and push stable intermediate work without
 creating PRs or triggering CI just to preserve it.
 
-The actual packaged entry path completed on 2026-09-20 with retained evidence
-linked from ADMINISTRATOR-WORKFLOW.md. The exact package head also passed the
-workspace suite, formatting, warnings-as-errors clippy, Rust 1.85, governance,
-and independent exact-head review. The remaining integration work is one PR,
-hosted verification/audit, MSRV, and merge; after that Packet 5 is next.
+The packaged entry path completed on 2026-09-20 with retained evidence linked
+from ADMINISTRATOR-WORKFLOW.md. Its integration PR and required hosted checks
+passed. Packet 5 followed on the separate supported VM.
 
-### 5. Clean-host preview — Terra or Sol, medium, then a second operator
+### 5. Closed: clean-host preview
 
 Package exact CLI/guest builds and supported assets with identities, prerequisite
 detection, acquisition instructions, data contract, and limitations. Reuse pinned
@@ -129,13 +127,14 @@ assistant. Recreate validation on that host where required; copying same-host
 evidence paths does not validate deployment. This is the release gate, not a
 request to complete generic MSI/MSIX conversion or all isolation providers.
 
-Construction is prepared through `42d2b42`: archive mode requires a clean committed
-source, exact retained guest and validated profile, records build and support
-identity, verifies both the source and packaged profile identities, rejects source drift before
-publication, verifies the unpacked inventory, and emits an immutable ZIP plus
-companion distribution manifest. A fresh extraction of the current candidate
-passed. The separate-host second-operator run remains the gate; same-host replay
-and archive construction do not satisfy it.
+Archive mode requires clean committed source, exact retained guest and profile,
+verifies identities and inventory, and emits a ZIP plus companion distribution
+manifest. The second operator freshly extracted the exact `08ab440` candidate
+on the separate supported VM and completed the fixed workflow, negative control,
+and cleanup. See [CLEAN-HOST-PREVIEW.md](CLEAN-HOST-PREVIEW.md) for the retained
+acceptance record. PR #71 still needs integration. The package remains an
+unsigned development preview; this packet did not prove general MSI conversion
+or effective host containment.
 
 ## Escalation and quota discipline
 
@@ -156,11 +155,9 @@ and archive construction do not satisfy it.
 
 ## Ready-to-use continuation brief
 
-> Follow docs/EXECUTION-PLAN.md on the current checkout. Start with work-status
-> and WORKING-STATE. Close packet 1, then deliver packets 2–4 in order. Use Sol
-> medium for coordination, Luna medium for bounded implementation, and Sol high
-> only for consequential review. Use standalone worker briefs and one writer.
-> Preserve the trust boundaries and evidence; keep checks proportional. Commit
-> and push stable work, run CI at the integration milestone, and merge only a
-> reviewed final head with both checks green. Escalate concrete blockers rather
-> than redesigning the foundation. Report progress against acceptance cases.
+> Start with work-status and WORKING-STATE. Integrate the exact-head clean-host
+> PR only after its required checks. The five administrator preview packets are
+> complete; preserve their retained evidence and explicit unsigned/isolation
+> limits. Follow ROADMAP.md for the next bounded application benchmark. Use one
+> writer and proportional checks, and escalate a concrete blocker instead of
+> rebuilding the foundation.
