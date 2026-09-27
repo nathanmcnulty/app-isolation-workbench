@@ -54,6 +54,9 @@ provider session is active now.
    status identifies whether exact recovery is required. A console write error
    after a retained result cannot suggest repeating the trial; a cancelled
    approval points to its cancellation record rather than a nonexistent report.
+   An installer wait failure records the fixed process ID, elapsed wait, job
+   process count, and fixed entry-point metadata before contained cleanup;
+   those are diagnostics, not evidence that installation completed.
 6. **Independent proof.** Static and negative contract tests, package
    verification, and hosted checks precede a fresh separate-host operator run.
    That trial records the package and verifier hashes, approval, complete

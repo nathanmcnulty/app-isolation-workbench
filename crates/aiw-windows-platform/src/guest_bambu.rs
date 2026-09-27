@@ -8,7 +8,7 @@
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use aiw_provider_wsb::{
     BAMBU_MAX_ARTIFACT_BYTES, BAMBU_STUDIO_EXPORT_OUTPUT_PATH, BambuExecutionStage,
@@ -143,13 +143,34 @@ fn execute_install() -> Result<i32, String> {
             .collect::<Vec<_>>(),
     )
     .map_err(|error| error.to_string())?;
+    let started = Instant::now();
     let operation = installer.wait_for_exit(INSTALLER_TIMEOUT);
+    let wait_diagnostic = operation.is_err().then(|| {
+        let entrypoint = match fs::symlink_metadata(APPLICATION_PATH) {
+            Ok(metadata) if metadata.is_file() => format!("regular file, {} bytes", metadata.len()),
+            Ok(_) => "present but not a regular file".to_owned(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => "absent".to_owned(),
+            Err(error) => format!("metadata unavailable: {:?}", error.kind()),
+        };
+        format!(
+            "installer pid={}, elapsedMs={}, jobProcesses={:?}, fixed entrypoint={entrypoint}",
+            installer.process_id(),
+            started.elapsed().as_millis(),
+            installer.active_processes()
+        )
+    });
     let cleanup = if operation.is_ok() {
         installer.verify_empty_after_success()
     } else {
         installer.cleanup()
     };
-    let exit_code = complete_process(operation, cleanup)?;
+    let exit_code = complete_process(operation, cleanup).map_err(|error| {
+        if let Some(diagnostic) = wait_diagnostic {
+            format!("{error}; {diagnostic}")
+        } else {
+            error
+        }
+    })?;
     if exit_code != 0 {
         return Err(format!("fixed Bambu installer exited with {exit_code}"));
     }

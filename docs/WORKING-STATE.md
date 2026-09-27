@@ -23,8 +23,9 @@ Updated 2026-09-27. This is a compact handoff, not a run receipt or authorizatio
 The fixed Bambu package and `admin assess --product bambu-studio-export` route
 are implemented on the existing typed services. The first separate-host
 operator-approved run failed at the 300-second guest installer wait; its failure
-report and exact-session cleanup are retained. Diagnose installer progress
-before changing the bound or repeating the trial. [BAMBU-STUDIO-PROFILE.md](BAMBU-STUDIO-PROFILE.md)
+report and exact-session cleanup are retained. The next guest adds a bounded
+wait-failure diagnostic, but it has no live proof yet. Diagnose installer
+progress before changing the bound or repeating the trial. [BAMBU-STUDIO-PROFILE.md](BAMBU-STUDIO-PROFILE.md)
 records the exact evidence; [BAMBU-ADMIN-ENTRY.md](BAMBU-ADMIN-ENTRY.md)
 defines the remaining acceptance gates. Do not infer general compatibility
 from either fixed workflow. See [ROADMAP.md](ROADMAP.md) and [RELEASE-GATES.md](RELEASE-GATES.md).

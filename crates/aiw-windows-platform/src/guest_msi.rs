@@ -1371,6 +1371,10 @@ impl GuestProcess {
         self.process_id
     }
 
+    pub(crate) fn active_processes(&self) -> Result<u32, GuestMsiExecutionError> {
+        self.job.active_processes()
+    }
+
     pub(crate) fn collect_token(&self) -> Result<TokenEvidence, GuestMsiExecutionError> {
         collect_process_token(self.process.as_handle()).map_err(|error| {
             GuestMsiExecutionError::Process(format!(
