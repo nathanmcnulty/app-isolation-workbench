@@ -111,7 +111,7 @@ struct AdminArgs {
 
 #[derive(Debug, Subcommand)]
 enum AdminCommand {
-    /// Assess supported Notepad++ bytes through the packaged fixed workflow.
+    /// Assess supported application bytes through a packaged fixed workflow.
     Assess {
         /// Select one packaged fixed application workflow.
         #[arg(long, value_enum, default_value_t = AdminProduct::NotepadPlusPlus)]
