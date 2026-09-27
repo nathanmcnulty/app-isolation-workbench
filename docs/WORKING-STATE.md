@@ -1,10 +1,10 @@
 # Working state
 
-Updated 2026-09-27. This is a compact handoff, not a run receipt or authorization.
+Updated 2026-09-26. This is a compact handoff, not a run receipt or authorization.
 
 ## Where to resume
 
-- Active branch: `codex/profile-bound-clean-host`, with draft PR #71. Verify the current commit and clean state with `scripts/work-status.ps1` before editing.
+- PR #71 merged into `main` at `4b9054512213c64839a664997504a84d7c911cdb`. The current Bambu administrator-report slice is on `codex/bambu-admin-preview`; verify the checkout with `scripts/work-status.ps1` before editing.
 - The exact unsigned `08ab440` profile-bound package passed the separate-host second-operator trial. Run `admin-1790485297308064300` passed all nine fixed stages, document hash and ACL controls, and terminal cleanup; negative run `admin-1790486242125347900` rejected before intake or provider acquisition. The provider has no active session. The broader isolation outcome remains `insufficientEvidence`. See [CLEAN-HOST-PREVIEW.md](CLEAN-HOST-PREVIEW.md).
 - The earlier profile-bound approved replay passed its fixed document workflow, required guest file ACL controls, recorded environment comparison, and cleanup. That remains same-host evidence for its recorded source and provider identities. See [VALIDATED-SANDBOX-LAUNCH.md](VALIDATED-SANDBOX-LAUNCH.md).
 - The earlier development baseline/candidate/relocated-replay and agent-run packaged smoke remain separately recorded in [PACKAGING-RECIPES.md](PACKAGING-RECIPES.md) and [CLEAN-HOST-PREVIEW.md](CLEAN-HOST-PREVIEW.md). They are not substituted for the independent operator run.
@@ -20,12 +20,12 @@ Updated 2026-09-27. This is a compact handoff, not a run receipt or authorizatio
 
 ## Next coherent slice
 
-Integrate PR #71 after its exact-head required checks, preserving the unsigned
-preview and `insufficientEvidence` limits. Then select one next real application
-by an administrator need and define its bounded Assess -> Adapt -> Package ->
-Validate acceptance before implementation. See [ROADMAP.md](ROADMAP.md) and
-[RELEASE-GATES.md](RELEASE-GATES.md); do not infer general compatibility from
-the Notepad++ proof.
+Use Bambu Studio as the tentative next application, pending the user's choice.
+The first slice adds a guarded administrator overview to its retained Markdown
+report. Next define a bounded Assess -> Adapt -> Package -> Validate acceptance
+for the fixed local export before changing the admin package entry. See
+[ROADMAP.md](ROADMAP.md) and [RELEASE-GATES.md](RELEASE-GATES.md); do not infer
+general compatibility from either fixed workflow.
 
 ## Read only what the slice needs
 

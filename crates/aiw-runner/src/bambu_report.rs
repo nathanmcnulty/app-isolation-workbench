@@ -336,6 +336,7 @@ pub fn render_bambu_run_report_markdown(report: &WsbBambuRunReport) -> String {
         "# Bambu Studio Sandbox report\n\nRun: `{}`\n\nOutcome: `{:?}`. Recorded cleanup verified: {}. Evidence: `{:?}`.\n\n",
         report.run_id, report.outcome, report.recorded_cleanup_verified, report.evidence_status
     );
+    append_bambu_administrator_overview(&mut text, report);
     text.push_str(&format!(
         "Installer SHA-256: `{}`. Fixture SHA-256: `{}`.\n\n",
         report.compiled_scenario.application_sha256, report.compiled_scenario.fixture_sha256
@@ -354,4 +355,172 @@ pub fn render_bambu_run_report_markdown(report: &WsbBambuRunReport) -> String {
         text.push_str(&format!("- {gap}\n"));
     }
     text
+}
+
+fn append_bambu_administrator_overview(text: &mut String, report: &WsbBambuRunReport) {
+    use aiw_provider_wsb::BambuExecutionStage as Stage;
+
+    text.push_str("## Administrator overview\n\n");
+    text.push_str(&format!(
+        "Application bytes: Bambu Studio installer SHA-256 `{}`. Fixed workflow: privileged installation, then standard-user STL-to-3MF export of the bundled tetrahedron fixture. Other model, slicing, printer, cloud, and graphical workflows were not tested.\n\n",
+        report.compiled_scenario.application_sha256
+    ));
+    text.push_str("Function results:\n\n| Function | Result |\n|---|---|\n");
+    for (name, stage) in [
+        ("Install", Stage::Install),
+        ("Prepare fixed STL", Stage::PrepareFixture),
+        ("Export 3MF", Stage::Export),
+        ("Collect 3MF", Stage::CollectArtifact),
+    ] {
+        text.push_str(&format!(
+            "| {name} | {} |\n",
+            bambu_stage_result(report, stage)
+        ));
+    }
+    let verified_artifact = report.evidence_status == BambuReportEvidenceStatus::Verified
+        && report
+            .scenario
+            .as_ref()
+            .is_some_and(|scenario| scenario.successful())
+        && report.artifact.is_some();
+    text.push_str(&format!(
+        "| Verify fixed 3MF geometry | {} |\n",
+        if verified_artifact {
+            "passed"
+        } else {
+            "not verified"
+        }
+    ));
+    let runtime = if report.evidence_status == BambuReportEvidenceStatus::Verified
+        && report
+            .scenario
+            .as_ref()
+            .is_some_and(|scenario| scenario.standard_user_context.is_some())
+    {
+        "guest standard-user context recorded"
+    } else {
+        "not measured in accepted evidence"
+    };
+    text.push_str(&format!(
+        "\nRuntime observation: {runtime}. Requested settings and this guest observation do not establish effective application isolation or descendant boundaries.\n\nRecorded cleanup: **{}**. This describes the retained run, not a fresh provider query.\n\nBroader isolation: **insufficient evidence**; see the unresolved evidence list below.\n\nSafe next action: {}\n\n",
+        if report.recorded_cleanup_verified { "verified" } else { "not verified" },
+        bambu_next_action(report)
+    ));
+}
+
+fn bambu_stage_result(
+    report: &WsbBambuRunReport,
+    stage: aiw_provider_wsb::BambuExecutionStage,
+) -> &'static str {
+    if report.evidence_status != BambuReportEvidenceStatus::Verified {
+        return "not measured";
+    }
+    let Some(scenario) = report.scenario.as_ref() else {
+        return "not measured";
+    };
+    if scenario.completed_stages.contains(&stage) {
+        "passed"
+    } else if scenario.failed_stage == Some(stage) {
+        "failed"
+    } else {
+        "not reached"
+    }
+}
+
+fn bambu_next_action(report: &WsbBambuRunReport) -> &'static str {
+    if !report.recorded_cleanup_verified {
+        "Inspect the exact retained run status before another attempt; recover only if that status requires it."
+    } else if report.evidence_status != BambuReportEvidenceStatus::Verified
+        || report.scenario.is_none()
+    {
+        "Inspect retained status and output verification. Do not classify the application as incompatible from absent or rejected evidence."
+    } else if report
+        .scenario
+        .as_ref()
+        .is_some_and(|scenario| scenario.successful())
+        && report.artifact.is_some()
+    {
+        "Retain the exact output and recipe, then repeat the fixed workflow in a fresh approved worker before broadening packaging or isolation claims."
+    } else {
+        "Read the failed stage and diagnostic in the retained JSON report, correct the specific cause, and approve a new disposable trial."
+    }
+}
+
+#[cfg(test)]
+mod markdown_tests {
+    use super::*;
+    use aiw_provider_wsb::{
+        BambuExecutionStage as Stage, BambuScenarioStatus, ImportedBambuScenarioResult,
+    };
+
+    fn report() -> WsbBambuRunReport {
+        let project: Project =
+            serde_json::from_str(include_str!("../../../examples/bambu-studio-export.json"))
+                .unwrap();
+        WsbBambuRunReport {
+            schema_version: "aiw.dev/wsb-bambu-run-report/v0alpha1".into(),
+            run_id: "retained".into(),
+            project_revision_sha256: "a".repeat(64),
+            request_sha256: "b".repeat(64),
+            compiled_scenario: aiw_provider_wsb::compile_bambu_studio_export_scenario(
+                &project,
+                "local-file-export",
+            )
+            .unwrap(),
+            requested_assertions: project.assertions,
+            outcome: RunOutcome::Failed,
+            recorded_cleanup_verified: true,
+            evidence_status: BambuReportEvidenceStatus::Absent,
+            receipt_sha256: None,
+            evidence_root_hash: None,
+            scenario: None,
+            artifact: None,
+            missing_evidence: vec!["ordinary baseline".into()],
+        }
+    }
+
+    #[test]
+    fn missing_verified_scenario_does_not_promote_function_results() {
+        for evidence_status in [
+            BambuReportEvidenceStatus::Absent,
+            BambuReportEvidenceStatus::Rejected,
+            BambuReportEvidenceStatus::Verified,
+        ] {
+            let mut report = report();
+            report.evidence_status = evidence_status;
+            let markdown = render_bambu_run_report_markdown(&report);
+            assert!(markdown.contains("| Export 3MF | not measured |"));
+            assert!(markdown.contains("| Verify fixed 3MF geometry | not verified |"));
+            assert!(markdown.contains("Do not classify the application as incompatible"));
+        }
+    }
+
+    #[test]
+    fn verified_failure_marks_only_the_failed_stage_and_prefix() {
+        let mut report = report();
+        report.evidence_status = BambuReportEvidenceStatus::Verified;
+        report.scenario = Some(ImportedBambuScenarioResult {
+            schema_version: "aiw.dev/imported-bambu-scenario-result/v0alpha1".into(),
+            run_id: report.run_id.clone(),
+            sandbox_id: "sandbox".into(),
+            request_sha256: report.request_sha256.clone(),
+            scenario_sha256: "c".repeat(64),
+            status: BambuScenarioStatus::Failed,
+            completed_stages: vec![Stage::Install, Stage::PrepareFixture],
+            failed_stage: Some(Stage::Export),
+            diagnostic: Some("export failed".into()),
+            install_exit_code: Some(0),
+            launch_process_id: None,
+            launch_exit_code: None,
+            application_token: None,
+            standard_user_context: None,
+            artifact_sha256: None,
+            artifact_size_bytes: None,
+        });
+        let markdown = render_bambu_run_report_markdown(&report);
+        assert!(markdown.contains("| Prepare fixed STL | passed |"));
+        assert!(markdown.contains("| Export 3MF | failed |"));
+        assert!(markdown.contains("| Collect 3MF | not reached |"));
+        assert!(markdown.contains("Read the failed stage and diagnostic"));
+    }
 }
