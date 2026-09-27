@@ -153,7 +153,8 @@ if ($manifest.schemaVersion -ne 'aiw.dev/admin-product-assets/v0alpha1' -or
     $manifest.scenarioId -cne $scenarioId -or
     $manifest.projectPath -cne $projectFile -or
     $manifest.guestAgentPath -cne 'tools/aiw-guest-agent.exe' -or
-    ($isBambu -and ($manifest.launchProfilePath -or $manifest.launchProfileSha256))) {
+    ($isBambu -and ((@($manifest.PSObject.Properties.Name) -ccontains 'launchProfilePath') -or
+                    (@($manifest.PSObject.Properties.Name) -ccontains 'launchProfileSha256')))) {
     throw 'Selected product manifest does not match its fixed contract'
 }
 $projectPath = Join-Path $productPath $projectFile

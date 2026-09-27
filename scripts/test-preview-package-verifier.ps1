@@ -241,6 +241,27 @@ try {
         if ($bambuVerified.exactInventory -ne $true -or $bambuVerified.filesVerified -ne 4) {
             throw 'Bambu preview package fixture was not verified'
         }
+        $bambuManifest.launchProfilePath = ''
+        Write-Utf8NoBom (Join-Path $bambuProduct 'manifest.json') ($bambuManifest | ConvertTo-Json -Depth 20)
+        $bambuRecords = @(Get-ChildItem -LiteralPath $bambuRoot -Recurse -File |
+            Where-Object { $_.Name -ne 'receipt.json' } | ForEach-Object {
+                [ordered]@{
+                    path = [IO.Path]::GetRelativePath($bambuRoot, $_.FullName).Replace('\', '/')
+                    sizeBytes = $_.Length
+                    sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+                }
+            } | Sort-Object { $_.path })
+        $bambuCore.files = $bambuRecords
+        $bambuHash = Get-LowerSha256 (Get-CanonicalJsonBytes $bambuCore)
+        Write-Utf8NoBom (Join-Path $bambuRoot 'receipt.json') (([ordered]@{
+            schemaVersion = $bambuCore.schemaVersion
+            productId = $bambuCore.productId
+            files = $bambuCore.files
+            receiptLast = $true
+            receiptSha256 = $bambuHash
+        }) | ConvertTo-Json -Depth 20)
+        Assert-RejectedMessage { & $verifier -PackageRoot $bambuRoot -ReceiptSha256 $bambuHash } `
+            'a present but empty Bambu launch profile' 'fixed contract'
     }
     finally {
         Remove-Item -LiteralPath $bambuRoot -Recurse -Force -ErrorAction SilentlyContinue
