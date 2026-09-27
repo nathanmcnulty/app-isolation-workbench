@@ -31,6 +31,8 @@ cargo run -p aiw-cli -- schema bambu-run-report
 
 Reporting reopens retained authority and evidence without starting Sandbox or changing the workspace. A successful run requires reverified artifact evidence; changed output is rejected. Failed/cancelled runs distinguish verified failed evidence from absent or rejected evidence. `recordedCleanupVerified` describes the retained transaction, not a fresh provider query. Successful export still has outcome `insufficientEvidence`: baseline/candidate comparison, descendant isolation/canaries, filesystem/registry changes, and slicing/printer/cloud functions remain unmeasured.
 
+The Markdown report opens with an administrator overview for the exact installer and fixed export workflow. Its function table marks stages passed only when the retained scenario evidence is verified; absent or rejected evidence remains unmeasured, and geometry verification is shown separately. The overview records the standard-user observation and historical cleanup status, states the broader isolation gap, and gives a next action based on the retained result. The JSON report remains the detailed machine-readable record.
+
 ## Production validation, 2026-09-09
 
 The approved export passed in one fresh Sandbox: install and export exited 0, all four stages completed, and the exact session's cleanup was verified. The launched process token was medium integrity, not elevated, not AppContainer, with a matching standard-user profile and no enabled Administrators group. The 9,062-byte 3MF contains the expected referenced four-vertex/four-triangle tetrahedron. This demonstrates the fixed workflow inside an outer Sandbox, not an inner isolation candidate.
