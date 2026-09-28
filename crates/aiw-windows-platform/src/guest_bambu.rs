@@ -153,10 +153,11 @@ fn execute_install() -> Result<i32, String> {
             Err(error) => format!("metadata unavailable: {:?}", error.kind()),
         };
         format!(
-            "installer pid={}, elapsedMs={}, jobProcesses={:?}, fixed entrypoint={entrypoint}",
+            "installer pid={}, elapsedMs={}, jobProcesses={:?}, jobProcessImages={:?}, fixed entrypoint={entrypoint}",
             installer.process_id(),
             started.elapsed().as_millis(),
-            installer.active_processes()
+            installer.active_processes(),
+            installer.diagnostic_processes()
         )
     });
     let cleanup = if operation.is_ok() {
