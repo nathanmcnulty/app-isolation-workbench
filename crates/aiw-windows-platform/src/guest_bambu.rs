@@ -226,11 +226,24 @@ fn vc_setup_log_diagnostics(temp_dir: &Path) -> String {
             file.seek(SeekFrom::Start(size.saturating_sub(4096)))?;
             let mut tail = Vec::new();
             file.take(4096).read_to_end(&mut tail)?;
-            let text = String::from_utf8_lossy(&tail);
-            let mut lines = text.lines().map(str::trim).filter(|line| !line.is_empty());
-            let last = lines.clone().next_back().unwrap_or("");
+            let text = decode_setup_log_tail(&tail);
+            let lines = text
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .collect::<Vec<_>>();
+            let last = lines
+                .iter()
+                .rev()
+                .take(2)
+                .rev()
+                .copied()
+                .collect::<Vec<_>>();
             let error = lines
-                .rfind(|line| {
+                .iter()
+                .rev()
+                .copied()
+                .find(|line| {
                     let lower = line.to_ascii_lowercase();
                     lower.contains("error")
                         || lower.contains("fail")
@@ -239,7 +252,7 @@ fn vc_setup_log_diagnostics(temp_dir: &Path) -> String {
                 .unwrap_or("");
             Ok(format!(
                 "bytes={size}, last={:?}, error={:?}",
-                bounded_log_line(last),
+                last.into_iter().map(bounded_log_line).collect::<Vec<_>>(),
                 bounded_log_line(error)
             ))
         })();
@@ -257,6 +270,20 @@ fn vc_setup_log_diagnostics(temp_dir: &Path) -> String {
         // bytes. All characters above are ASCII after sanitization.
         joined.truncate(joined.len().min(900));
         joined
+    }
+}
+
+fn decode_setup_log_tail(tail: &[u8]) -> String {
+    let pairs = tail.len() / 2;
+    let odd_zeros = tail.iter().skip(1).step_by(2).filter(|&&b| b == 0).count();
+    if pairs >= 8 && odd_zeros * 2 >= pairs {
+        let units = tail
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect::<Vec<_>>();
+        String::from_utf16_lossy(&units)
+    } else {
+        String::from_utf8_lossy(tail).into_owned()
     }
 }
 
@@ -496,5 +523,30 @@ mod tests {
         assert!(!diagnostic.contains("unrelated marker"));
         assert!(diagnostic.len() <= 900);
         assert!(!diagnostic.chars().any(char::is_control));
+    }
+
+    #[test]
+    fn vc_log_diagnostic_decodes_utf16le_msi_tail() {
+        let directory = std::env::temp_dir().join(format!(
+            "aiw-bambu-unicode-log-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        fs::create_dir(&directory).expect("create isolated temp directory");
+        let content = "MSI action started\r\nError 0x80070422\r\nAction stalled\r\n";
+        let bytes = content
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+        fs::write(directory.join("dd_vcredist_amd64_20260928_000.log"), bytes)
+            .expect("write UTF-16LE setup log");
+        let diagnostic = vc_setup_log_diagnostics(&directory);
+        fs::remove_dir_all(&directory).expect("remove isolated temp directory");
+        assert!(diagnostic.contains("Action stalled"));
+        assert!(diagnostic.contains("Error 0x80070422"));
+        assert!(diagnostic.len() <= 900);
     }
 }
