@@ -90,6 +90,16 @@ try {
     if ($verified.exactInventory -ne $true -or $verified.filesVerified -ne 4) {
         throw 'Preview package verifier did not confirm the valid fixture'
     }
+    Push-Location -LiteralPath $root
+    try {
+        $relativeVerification = & $verifier -PackageRoot . -ReceiptSha256 $receiptSha256 | ConvertFrom-Json
+        if ($relativeVerification.exactInventory -ne $true -or $relativeVerification.filesVerified -ne 4) {
+            throw 'Preview package verifier did not resolve a relative package root from the PowerShell location'
+        }
+    }
+    finally {
+        Pop-Location
+    }
     $windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     if (-not (Test-Path -LiteralPath $windowsPowerShell -PathType Leaf)) {
         throw 'Windows PowerShell is required for the clean-host verifier compatibility check'
@@ -100,6 +110,15 @@ try {
     $windowsVerification = $windowsVerificationText | ConvertFrom-Json
     if ($windowsVerification.exactInventory -ne $true -or $windowsVerification.filesVerified -ne 4) {
         throw 'Windows PowerShell did not confirm the valid preview package fixture'
+    }
+    $windowsRelativeCommand = "Set-Location -LiteralPath '$($root.Replace("'", "''"))'; & '$($verifier.Replace("'", "''"))' -PackageRoot . -ReceiptSha256 '$receiptSha256'"
+    $windowsRelativeEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($windowsRelativeCommand))
+    $windowsRelativeText = & $windowsPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+        -EncodedCommand $windowsRelativeEncoded | Out-String
+    if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell relative-root preview package verification failed' }
+    $windowsRelativeVerification = $windowsRelativeText | ConvertFrom-Json
+    if ($windowsRelativeVerification.exactInventory -ne $true -or $windowsRelativeVerification.filesVerified -ne 4) {
+        throw 'Windows PowerShell did not resolve a relative package root from its PowerShell location'
     }
 
     $receiptPath = Join-Path $root 'receipt.json'
