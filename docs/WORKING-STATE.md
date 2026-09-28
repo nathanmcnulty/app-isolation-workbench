@@ -20,21 +20,18 @@ Updated 2026-09-28. This is a compact handoff, not a run receipt or authorizatio
 
 ## Next coherent slice
 
-The fixed Bambu package and `admin assess --product bambu-studio-export` route
-are implemented on the existing typed services. Separate-host runs still fail
-at the 300-second guest installer wait. The `449f615` development package
-verified on the VM, including the fixed relative-root verifier. Its bounded
-diagnostic identified the stalled job members: Bambu's installer, two bundled
-`vcredist2019_x64.exe` processes, and Microsoft's quiet `VC_redist.x64.exe`.
-A second agent-run guest inspection observed setup logs in the worker's temp
-directory, but did not retain them before cleanup. Both reports record failed
-install and verified cleanup; the provider list is empty. Source now has a
-bounded VC log excerpt diagnostic with a focused Windows test. Build and run
-that exact source on the VM before changing the wait
-contract or requesting another operator acceptance trial. [BAMBU-STUDIO-PROFILE.md](BAMBU-STUDIO-PROFILE.md)
-records the exact evidence; [BAMBU-ADMIN-ENTRY.md](BAMBU-ADMIN-ENTRY.md)
-defines the remaining acceptance gates. Do not infer general compatibility
-from either fixed workflow. See [ROADMAP.md](ROADMAP.md) and [RELEASE-GATES.md](RELEASE-GATES.md).
+The fixed Bambu package and administrator route are implemented. Separate-host
+development runs reached the bundled VC++ setup but exceeded the 300-second
+installer wait. Exact-source Unicode log diagnostics show the first VC runtime
+MSI completed successfully and the second was still progressing near the
+deadline; cleanup and an empty provider list were verified. Source now bounds
+the fixed export installation at 900 seconds and the worker receipt wait at
+1500 seconds. Run that exact source in a fresh disposable worker and review its
+retained stage/artifact report before requesting a separate human-approved
+acceptance run. [BAMBU-STUDIO-PROFILE.md](BAMBU-STUDIO-PROFILE.md) records the
+exact evidence; [BAMBU-ADMIN-ENTRY.md](BAMBU-ADMIN-ENTRY.md) defines the
+remaining acceptance gates. Do not infer general compatibility from either
+fixed workflow. See [ROADMAP.md](ROADMAP.md) and [RELEASE-GATES.md](RELEASE-GATES.md).
 
 ## Read only what the slice needs
 

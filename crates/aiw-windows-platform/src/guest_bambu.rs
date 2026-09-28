@@ -11,8 +11,9 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use aiw_provider_wsb::{
-    BAMBU_MAX_ARTIFACT_BYTES, BAMBU_STUDIO_EXPORT_OUTPUT_PATH, BambuExecutionStage,
-    CompiledBambuExportScenario, StandardUserRuntimeContext,
+    BAMBU_MAX_ARTIFACT_BYTES, BAMBU_STUDIO_EXPORT_INSTALL_TIMEOUT_SECONDS,
+    BAMBU_STUDIO_EXPORT_OUTPUT_PATH, BambuExecutionStage, CompiledBambuExportScenario,
+    StandardUserRuntimeContext,
 };
 use aiw_token::TokenEvidence;
 use sha2::{Digest, Sha256};
@@ -21,7 +22,8 @@ use crate::guest_msi::{GuestMsiExecutionError, GuestProcess};
 use crate::guest_standard_user::StandardUserSession;
 
 const INSTALLER_PATH: &str = r"C:\AIW\Tools\application.exe";
-const INSTALLER_TIMEOUT: Duration = Duration::from_secs(300);
+const INSTALLER_TIMEOUT: Duration =
+    Duration::from_secs(BAMBU_STUDIO_EXPORT_INSTALL_TIMEOUT_SECONDS as u64);
 const INSTALLER_ARGUMENTS: &[&str] = &["/S"];
 const APPLICATION_PATH: &str = r"C:\Program Files\Bambu Studio\bambu-studio.exe";
 const EXPORT_TIMEOUT: Duration = Duration::from_secs(60);
@@ -197,7 +199,8 @@ fn vc_setup_log_diagnostics(temp_dir: &Path) -> String {
                 .then_some((name, entry.path()))
         })
         .collect::<Vec<_>>();
-    logs.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    // Give the latest package log priority if the total excerpt is capped.
+    logs.sort_unstable_by(|a, b| b.0.cmp(&a.0));
     logs.truncate(3);
     let mut observations = Vec::new();
     for (name, path) in logs {
@@ -251,16 +254,20 @@ fn vc_setup_log_diagnostics(temp_dir: &Path) -> String {
                 })
                 .unwrap_or("");
             Ok(format!(
-                "bytes={size}, last={:?}, error={:?}",
-                last.into_iter().map(bounded_log_line).collect::<Vec<_>>(),
-                bounded_log_line(error)
+                "bytes={size}, error={:?}, last={:?}",
+                bounded_log_line(error),
+                last.into_iter().map(bounded_log_line).collect::<Vec<_>>()
             ))
         })();
-        observations.push(format!(
+        let mut rendered = format!(
             "{}:{}",
             bounded_log_line(&name),
             observation.unwrap_or_else(|error| format!("unavailable({:?})", error.kind()))
-        ));
+        );
+        // Reserve space for every selected package log, including the main
+        // Burn log, even if one MSI line is unusually long.
+        rendered.truncate(rendered.len().min(360));
+        observations.push(rendered);
     }
     if observations.is_empty() {
         "none".to_owned()
@@ -268,7 +275,7 @@ fn vc_setup_log_diagnostics(temp_dir: &Path) -> String {
         let mut joined = observations.join(" | ");
         // The imported failure contract caps the complete diagnostic at 2048
         // bytes. All characters above are ASCII after sanitization.
-        joined.truncate(joined.len().min(900));
+        joined.truncate(joined.len().min(1200));
         joined
     }
 }
@@ -521,7 +528,7 @@ mod tests {
         fs::remove_dir_all(&directory).expect("remove isolated temp directory");
         assert!(diagnostic.contains("Error 0x80070643"));
         assert!(!diagnostic.contains("unrelated marker"));
-        assert!(diagnostic.len() <= 900);
+        assert!(diagnostic.len() <= 1200);
         assert!(!diagnostic.chars().any(char::is_control));
     }
 
@@ -547,6 +554,6 @@ mod tests {
         fs::remove_dir_all(&directory).expect("remove isolated temp directory");
         assert!(diagnostic.contains("Action stalled"));
         assert!(diagnostic.contains("Error 0x80070422"));
-        assert!(diagnostic.len() <= 900);
+        assert!(diagnostic.len() <= 1200);
     }
 }

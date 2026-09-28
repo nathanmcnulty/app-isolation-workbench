@@ -822,7 +822,7 @@ pub fn assess_bambu(
         "runPlan": prepared.run_plan,
         "executionIdentity": "The Bambu Studio EXE installer runs with an elevated token inside Windows Sandbox. Bambu Studio, the fixed STL fixture, and local 3MF export run as AiwStandardUser.",
         "dataLifetime": "The fixed input and installed application are discarded with the worker. The receipt-bound 3MF and assessment evidence remain in the host run workspace; no automatic host export is performed.",
-        "limits": "This is one fixed offline STL-to-3MF export, not slicing, printing, cloud, graphical editing, general EXE support, or effective application-isolation proof."
+        "limits": "This is one fixed offline STL-to-3MF export. The installer wait is bounded at 900 seconds and the worker receipt wait at 1500 seconds. Slicing, printing, cloud, graphical editing, general EXE support, and effective application isolation are not tested."
     });
     save_stage(&evidence_root, "recipe", &recipe)?;
     {
@@ -879,7 +879,7 @@ pub fn assess_bambu(
         &assets.project,
         &project,
         &manifest.guest_agent_sha256,
-        900,
+        1500,
     ) {
         Ok(execution) => execution,
         Err(error) => {

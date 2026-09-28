@@ -6,7 +6,8 @@ pub use bambu_artifact::{BambuExportArtifact, verify_bambu_export};
 mod bambu_export;
 mod imported_bambu;
 pub use bambu_export::{
-    BAMBU_EXPORT_ARTIFACT_PATH, BAMBU_MAX_ARTIFACT_BYTES, BAMBU_STUDIO_EXPORT_OUTPUT_PATH,
+    BAMBU_EXPORT_ARTIFACT_PATH, BAMBU_MAX_ARTIFACT_BYTES,
+    BAMBU_STUDIO_EXPORT_INSTALL_TIMEOUT_SECONDS, BAMBU_STUDIO_EXPORT_OUTPUT_PATH,
     BambuExportCompileError, CompiledBambuExportScenario, compile_bambu_studio_export_scenario,
 };
 pub use imported_bambu::{

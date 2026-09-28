@@ -188,10 +188,37 @@ contents and the precise wait condition remain unknown. A subsequent targeted
 diagnostic must retain bounded setup-log evidence before changing the installer
 deadline or claiming the export works on this host.
 
-The next development source adds guest-only, bounded VC log excerpts to the
-existing failure diagnostic. Its focused Windows test passes; it needs a new
-static guest build and exact-source separate-host run before the log contents
-can inform any installer change.
+The `cd268ed` diagnostic package archive SHA-256
+`9947f48f003d868144cd16502ca3a6d7a282a465f25ab2181651f7e51d2072a1`
+verified on the VM. Run `admin-1790636527253726300` under
+`C:\AIW-Bambu-Agent-Evidence-cd268ed-b` again timed out with verified cleanup
+and an empty provider list. The bounded Burn log reached
+`vcRuntimeAdditional_x64` and recorded a system-restore-point warning
+`0x80070422`; its two MSI logs were encoded as UTF-16 and the first diagnostic
+decoded them incorrectly, leaving their meaningful tail unobserved.
+
+The `476108b` package fixed Unicode log decoding. Archive SHA-256
+`3cda7521658bfa35f07d1bd1f89a3a6b2fc985d68b390a9c5b9813e0d7315c19`
+and receipt SHA-256
+`bb03448e35940394f9946c95b6b4a53515aea05c0a210906780394403113b077`
+verified on the VM. Run `admin-1790637675180277500` at
+`C:\AIW-Bambu-Agent-Evidence-476108b` retained failed-report SHA-256
+`ed012136d61662d5ad31b568bb5ac84549b59e889ca39f4e53edefe6a440ae76`.
+Cleanup passed and the provider was empty. The `vcRuntimeMinimum_x64` MSI log
+ended with Windows Installer returning zero and stopping verbose logging;
+`vcRuntimeAdditional_x64` had begun its MSI actions at about 23:27:46, near
+the 300-second deadline. The system-restore-point message was a warning, not
+the observed failure. No export stage ran. This evidence supports a longer
+bounded installation wait, not skipping installer success or treating the
+partially installed Bambu entry point as sufficient.
+
+Current development source raises the fixed export-profile installer wait to
+900 seconds and the administrator worker receipt wait to 1500 seconds. The
+profile owns the timeout value shared by compilation and guest execution.
+Failed-run log excerpts prioritize the active MSI and reserve space for all
+three selected logs. This needs a new exact-source disposable-worker run before
+requesting an independent operator acceptance trial. The original metadata-only
+information-query profile retains its separate 300-second intent.
 
 ## Remaining integration
 

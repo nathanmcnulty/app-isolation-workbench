@@ -55,7 +55,8 @@ provider session is active now.
    after a retained result cannot suggest repeating the trial; a cancelled
    approval points to its cancellation record rather than a nonexistent report.
    An installer wait failure records the fixed process ID, elapsed wait, job
-   process count, and fixed entry-point metadata before contained cleanup;
+   process identities, fixed entry-point metadata, and bounded guest-local VC
+   setup-log excerpts before contained cleanup;
    those are diagnostics, not evidence that installation completed.
 6. **Independent proof.** Static and negative contract tests, package
    verification, and hosted checks precede a fresh separate-host operator run.

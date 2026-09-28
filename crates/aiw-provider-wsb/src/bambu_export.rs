@@ -32,7 +32,7 @@ pub const BAMBU_STUDIO_EXPORT_OUTPUT_PATH: &str =
     r"C:\Users\AiwStandardUser\AppData\Local\AIW\Scenario\aiw-tetrahedron.3mf";
 pub const BAMBU_EXPORT_ARTIFACT_PATH: &str = "aiw-tetrahedron.3mf";
 pub const BAMBU_MAX_ARTIFACT_BYTES: u64 = 1024 * 1024;
-const INSTALL_TIMEOUT_SECONDS: u32 = 300;
+pub const BAMBU_STUDIO_EXPORT_INSTALL_TIMEOUT_SECONDS: u32 = 900;
 const CLI_TIMEOUT_SECONDS: u32 = 60;
 
 /// Fully resolved Bambu Studio export scenario. Compilation does not execute it. `--export-3mf` uses
@@ -65,7 +65,7 @@ impl CompiledBambuExportScenario {
             || self.application_sha256 != BAMBU_STUDIO_APPLICATION_SHA256
             || self.installer_path != BAMBU_STUDIO_STAGED_INSTALLER_PATH
             || self.install_arguments != ["/S".to_owned()]
-            || self.install_timeout_seconds != INSTALL_TIMEOUT_SECONDS
+            || self.install_timeout_seconds != BAMBU_STUDIO_EXPORT_INSTALL_TIMEOUT_SECONDS
             || self.launch_path != BAMBU_STUDIO_INSTALLED_PATH
             || self.launch_arguments
                 != [
@@ -157,7 +157,7 @@ pub fn compile_bambu_studio_export_scenario(
         application_sha256: application.sha256.clone(),
         installer_path: BAMBU_STUDIO_STAGED_INSTALLER_PATH.to_owned(),
         install_arguments: vec!["/S".to_owned()],
-        install_timeout_seconds: INSTALL_TIMEOUT_SECONDS,
+        install_timeout_seconds: BAMBU_STUDIO_EXPORT_INSTALL_TIMEOUT_SECONDS,
         launch_path: BAMBU_STUDIO_INSTALLED_PATH.to_owned(),
         launch_arguments: vec![
             "--export-3mf".to_owned(),
