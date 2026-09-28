@@ -125,6 +125,35 @@ whether the installer was still progressing, blocked, or incompatible on this
 host. Do not count the export as tested or rerun blindly. The remaining gate is
 a bounded diagnosis of installer progress and a new operator-approved trial.
 
+## Agent-observed separate-host diagnostic, 2026-09-28
+
+An agent used the dedicated VM's open RDP session to run the staged unsigned
+`d7b92918887c6a5614f22e9dfd027eebb50b9fe2` package. The eight-file
+package verified against independently supplied receipt SHA-256
+`d692312e949142438cf2317425fa4eec53dfea520757a592b5e5d4c315e342d6`.
+Run `admin-1790624935080973000` is retained at
+`C:\AIW-Bambu-Agent-Evidence-d7b9291` on `aiw-clean-host-0921`.
+This is development diagnosis, not a successful independent operator trial.
+
+The visible Sandbox worker opened and later closed without an installer dialog.
+The receipt-bound failure report (`failed-report.json` SHA-256
+`e9b55fdb4775041efce49aee00e119bd2bdcc57b959953ba18cd2fc117512d9a`)
+records `failedStage: install`, no completed stages, and verified cleanup. Its
+new diagnostic records installer PID 6648, elapsed wait 300021 ms, four
+processes remaining in the job, and the fixed Bambu entrypoint present as a
+regular 159776-byte file. A fresh provider `list --raw` returned an empty
+session list. Installation made observable progress, but the installer job did
+not finish by the bound. No standard-user export or compatibility result was
+measured. Identify the remaining job processes and their completion behavior
+before revising the wait contract or repeating an acceptance trial.
+
+The packaged verifier's documented `-PackageRoot .` invocation failed because
+it resolved `.` against the process working directory rather than PowerShell's
+current location. Absolute-path verification succeeded, and source commit
+`fae693b` fixes relative resolution with a regression check in both PowerShell
+7 and Windows PowerShell 5.1. The staged `d7b9291` package retains its original
+verifier bytes; this source fix needs a new package before distribution.
+
 ## Remaining integration
 
 Mixed report sets now combine the two concrete reporting consumers. Keep Bambu export and Notepad++ editing as distinct function columns; missing functions stay unmeasured. Research scripts and raw exploratory output are not production evidence and cannot be imported as successful retained runs. Add clean repetitions and control-fixture coverage before declaring the broader repeatability benchmark complete.

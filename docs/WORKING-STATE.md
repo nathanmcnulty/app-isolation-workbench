@@ -1,6 +1,6 @@
 # Working state
 
-Updated 2026-09-27. This is a compact handoff, not a run receipt or authorization.
+Updated 2026-09-28. This is a compact handoff, not a run receipt or authorization.
 
 ## Where to resume
 
@@ -22,10 +22,13 @@ Updated 2026-09-27. This is a compact handoff, not a run receipt or authorizatio
 
 The fixed Bambu package and `admin assess --product bambu-studio-export` route
 are implemented on the existing typed services. The first separate-host
-operator-approved run failed at the 300-second guest installer wait; its failure
-report and exact-session cleanup are retained. The next guest adds a bounded
-wait-failure diagnostic, but it has no live proof yet. Diagnose installer
-progress before changing the bound or repeating the trial. [BAMBU-STUDIO-PROFILE.md](BAMBU-STUDIO-PROFILE.md)
+operator-approved run failed at the 300-second guest installer wait. A later
+agent-observed `d7b9291` run reached the same timeout: the installed entrypoint
+was present, but four job processes remained. Both failure reports and cleanup
+are retained; the provider is currently empty. Identify the remaining process
+tree and its completion behavior before changing the bound or repeating the
+acceptance trial. The packaged verifier's relative-root defect is fixed in
+source at `fae693b`; rebuild before distributing it. [BAMBU-STUDIO-PROFILE.md](BAMBU-STUDIO-PROFILE.md)
 records the exact evidence; [BAMBU-ADMIN-ENTRY.md](BAMBU-ADMIN-ENTRY.md)
 defines the remaining acceptance gates. Do not infer general compatibility
 from either fixed workflow. See [ROADMAP.md](ROADMAP.md) and [RELEASE-GATES.md](RELEASE-GATES.md).
