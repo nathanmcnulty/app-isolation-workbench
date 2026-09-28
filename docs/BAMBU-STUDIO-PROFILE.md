@@ -154,6 +154,45 @@ current location. Absolute-path verification succeeded, and source commit
 7 and Windows PowerShell 5.1. The staged `d7b9291` package retains its original
 verifier bytes; this source fix needs a new package before distribution.
 
+## Separate-host installer-process diagnosis, 2026-09-28
+
+The unsigned `449f615` package added bounded job-process image diagnostics and
+fixed the packaged verifier's relative-root behavior. Its archive SHA-256 is
+`5643941259037d1614a9395452e6e40b66b0a4b2d76e5b9f87c4402f73c37019`;
+the eight-file receipt is
+`383ea00a4e296102bbf79395dcc0ad01b9a585616b3c15145c4be9606c97a2e5`.
+The archive was independently verified on `aiw-clean-host-0921`, including
+`-PackageRoot .` under Windows PowerShell 5.1. These are agent-owned development
+runs, not independent operator acceptance.
+
+Run `admin-1790634384041089400` at
+`C:\AIW-Bambu-Agent-Evidence-449f615` again timed out after 300 seconds in the
+fixed install stage. Its receipt-bound failed report records verified cleanup,
+the 159,776-byte Bambu entrypoint, and four live job members:
+`application.exe`, two `vcredist2019_x64.exe` processes, and
+`VC_redist.x64.exe`. No export stage ran.
+
+Run `admin-1790634916825655000` at
+`C:\AIW-Bambu-Agent-Inspect-449f615` repeated the exact approved recipe only
+to inspect the stalled child processes in the disposable worker. Its verified
+failed report SHA-256 is
+`7e17132057ccc8015e1f38021153e155b6cb9adc640d3f73e2fa14403a39446e`;
+cleanup was verified and a fresh provider list was empty. The guest inspection
+showed installer PID 6676 and a child chain of bundled
+`vcredist2019_x64.exe` (including PID 3576, launched with `/s`) and Microsoft's
+`VC_redist.x64.exe` (PID 2216, launched in quiet mode). Those redistributable
+processes had accumulated under one second of CPU each late in the wait. The
+guest produced three `dd_vcredist_amd64_*.log` files under its local temp
+directory, but they were not retained before normal worker cleanup. Their
+contents and the precise wait condition remain unknown. A subsequent targeted
+diagnostic must retain bounded setup-log evidence before changing the installer
+deadline or claiming the export works on this host.
+
+The next development source adds guest-only, bounded VC log excerpts to the
+existing failure diagnostic. Its focused Windows test passes; it needs a new
+static guest build and exact-source separate-host run before the log contents
+can inform any installer change.
+
 ## Remaining integration
 
 Mixed report sets now combine the two concrete reporting consumers. Keep Bambu export and Notepad++ editing as distinct function columns; missing functions stay unmeasured. Research scripts and raw exploratory output are not production evidence and cannot be imported as successful retained runs. Add clean repetitions and control-fixture coverage before declaring the broader repeatability benchmark complete.

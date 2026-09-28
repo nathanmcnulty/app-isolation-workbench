@@ -6,7 +6,7 @@
 //! scenario; this module only executes its fixed native stages.
 
 use std::fs::{self, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -153,11 +153,12 @@ fn execute_install() -> Result<i32, String> {
             Err(error) => format!("metadata unavailable: {:?}", error.kind()),
         };
         format!(
-            "installer pid={}, elapsedMs={}, jobProcesses={:?}, jobProcessImages={:?}, fixed entrypoint={entrypoint}",
+            "installer pid={}, elapsedMs={}, jobProcesses={:?}, jobProcessImages={:?}, fixed entrypoint={entrypoint}, vcSetupLogs={}",
             installer.process_id(),
             started.elapsed().as_millis(),
             installer.active_processes(),
-            installer.diagnostic_processes()
+            installer.diagnostic_processes(),
+            vc_setup_log_diagnostics(&std::env::temp_dir())
         )
     });
     let cleanup = if operation.is_ok() {
@@ -176,6 +177,94 @@ fn execute_install() -> Result<i32, String> {
         return Err(format!("fixed Bambu installer exited with {exit_code}"));
     }
     Ok(exit_code)
+}
+
+// VC's setup logs are guest-local, untrusted input. Read only short tails from
+// its fixed log-name family while the installer is still alive; the worker is
+// destroyed after cleanup. The excerpt is diagnostic text, not installer proof.
+fn vc_setup_log_diagnostics(temp_dir: &Path) -> String {
+    let entries = match fs::read_dir(temp_dir) {
+        Ok(entries) => entries,
+        Err(error) => return format!("unavailable({:?})", error.kind()),
+    };
+    let mut logs = entries
+        .take(128)
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            let lower = name.to_ascii_lowercase();
+            (lower.starts_with("dd_vcredist_amd64_") && lower.ends_with(".log"))
+                .then_some((name, entry.path()))
+        })
+        .collect::<Vec<_>>();
+    logs.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    logs.truncate(3);
+    let mut observations = Vec::new();
+    for (name, path) in logs {
+        let observation = (|| -> Result<String, std::io::Error> {
+            let metadata = fs::symlink_metadata(&path)?;
+            #[cfg(windows)]
+            use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+            if !metadata.file_type().is_file() || metadata.len() > 1_048_576 || {
+                #[cfg(windows)]
+                {
+                    metadata.file_attributes() & 0x400 != 0
+                }
+                #[cfg(not(windows))]
+                {
+                    false
+                }
+            } {
+                return Ok("not a bounded regular file".to_owned());
+            }
+            let mut options = OpenOptions::new();
+            options.read(true);
+            #[cfg(windows)]
+            options.custom_flags(0x0020_0000); // FILE_FLAG_OPEN_REPARSE_POINT
+            let mut file = options.open(&path)?;
+            let size = file.metadata()?.len();
+            file.seek(SeekFrom::Start(size.saturating_sub(4096)))?;
+            let mut tail = Vec::new();
+            file.take(4096).read_to_end(&mut tail)?;
+            let text = String::from_utf8_lossy(&tail);
+            let mut lines = text.lines().map(str::trim).filter(|line| !line.is_empty());
+            let last = lines.clone().next_back().unwrap_or("");
+            let error = lines
+                .rfind(|line| {
+                    let lower = line.to_ascii_lowercase();
+                    lower.contains("error")
+                        || lower.contains("fail")
+                        || lower.contains("return value 3")
+                })
+                .unwrap_or("");
+            Ok(format!(
+                "bytes={size}, last={:?}, error={:?}",
+                bounded_log_line(last),
+                bounded_log_line(error)
+            ))
+        })();
+        observations.push(format!(
+            "{}:{}",
+            bounded_log_line(&name),
+            observation.unwrap_or_else(|error| format!("unavailable({:?})", error.kind()))
+        ));
+    }
+    if observations.is_empty() {
+        "none".to_owned()
+    } else {
+        let mut joined = observations.join(" | ");
+        // The imported failure contract caps the complete diagnostic at 2048
+        // bytes. All characters above are ASCII after sanitization.
+        joined.truncate(joined.len().min(900));
+        joined
+    }
+}
+
+fn bounded_log_line(text: &str) -> String {
+    text.chars()
+        .filter(|ch| ch.is_ascii_graphic() || *ch == ' ')
+        .take(96)
+        .collect()
 }
 
 fn prepare_fixture(user: &StandardUserSession) -> Result<(String, String), String> {
@@ -370,5 +459,42 @@ fn failed_stage(
         result: Err(error),
         completed_stages,
         failed_stage: Some(failed_stage),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vc_log_diagnostic_is_bounded_and_ignores_unrelated_files() {
+        let directory = std::env::temp_dir().join(format!(
+            "aiw-bambu-log-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        fs::create_dir(&directory).expect("create isolated temp directory");
+        fs::write(directory.join("other.log"), "unrelated marker").expect("write unrelated file");
+        fs::write(
+            directory.join("dd_vcredist_amd64_20260928.log"),
+            format!("{}\nError 0x80070643\n", "A".repeat(6000)),
+        )
+        .expect("write setup log");
+        for suffix in ["_001", "_002"] {
+            fs::write(
+                directory.join(format!("dd_vcredist_amd64_20260928{suffix}.log")),
+                format!("{}\nError {}\n", "\\\"".repeat(400), "\\\"".repeat(400)),
+            )
+            .expect("write oversized diagnostic log");
+        }
+        let diagnostic = vc_setup_log_diagnostics(&directory);
+        fs::remove_dir_all(&directory).expect("remove isolated temp directory");
+        assert!(diagnostic.contains("Error 0x80070643"));
+        assert!(!diagnostic.contains("unrelated marker"));
+        assert!(diagnostic.len() <= 900);
+        assert!(!diagnostic.chars().any(char::is_control));
     }
 }

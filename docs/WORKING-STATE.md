@@ -21,14 +21,17 @@ Updated 2026-09-28. This is a compact handoff, not a run receipt or authorizatio
 ## Next coherent slice
 
 The fixed Bambu package and `admin assess --product bambu-studio-export` route
-are implemented on the existing typed services. The first separate-host
-operator-approved run failed at the 300-second guest installer wait. A later
-agent-observed `d7b9291` run reached the same timeout: the installed entrypoint
-was present, but four job processes remained. Both failure reports and cleanup
-are retained; the provider is currently empty. Identify the remaining process
-tree and its completion behavior before changing the bound or repeating the
-acceptance trial. The packaged verifier's relative-root defect is fixed in
-source at `fae693b`; rebuild before distributing it. [BAMBU-STUDIO-PROFILE.md](BAMBU-STUDIO-PROFILE.md)
+are implemented on the existing typed services. Separate-host runs still fail
+at the 300-second guest installer wait. The `449f615` development package
+verified on the VM, including the fixed relative-root verifier. Its bounded
+diagnostic identified the stalled job members: Bambu's installer, two bundled
+`vcredist2019_x64.exe` processes, and Microsoft's quiet `VC_redist.x64.exe`.
+A second agent-run guest inspection observed setup logs in the worker's temp
+directory, but did not retain them before cleanup. Both reports record failed
+install and verified cleanup; the provider list is empty. Source now has a
+bounded VC log excerpt diagnostic with a focused Windows test. Build and run
+that exact source on the VM before changing the wait
+contract or requesting another operator acceptance trial. [BAMBU-STUDIO-PROFILE.md](BAMBU-STUDIO-PROFILE.md)
 records the exact evidence; [BAMBU-ADMIN-ENTRY.md](BAMBU-ADMIN-ENTRY.md)
 defines the remaining acceptance gates. Do not infer general compatibility
 from either fixed workflow. See [ROADMAP.md](ROADMAP.md) and [RELEASE-GATES.md](RELEASE-GATES.md).
