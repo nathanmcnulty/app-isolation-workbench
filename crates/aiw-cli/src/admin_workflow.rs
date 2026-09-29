@@ -501,15 +501,15 @@ fn assess_notepad(
     evidence_parent: &Path,
     identity: &str,
 ) -> Result<AdminAssessmentResult> {
+    let interactive = document_input.is_some();
     if identity.trim().is_empty() {
         bail!("operator identity is required");
     }
     if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
         bail!(
-            "admin assess requires terminal input and visible approval review; no intake or run was created"
+            "administrator workflow requires terminal input and visible approval review; no intake or run was created"
         );
     }
-    let interactive = document_input.is_some();
     let product_id = if interactive {
         INTERACTIVE_PRODUCT_ID
     } else {
@@ -535,7 +535,7 @@ fn assess_notepad(
     }
     let project: Project = serde_yaml::from_slice(&project_bytes)?;
     if !validate_project_for_planning(&project).is_empty() || project.metadata.name != product_id {
-        bail!("packaged project is not valid for the fixed assessment");
+        bail!("packaged project is not valid for the selected fixed workflow");
     }
     let expected_msi = match &project.application {
         ApplicationSource::Msi(source) => &source.sha256,
@@ -579,7 +579,7 @@ fn assess_notepad(
     {
         return Err(anyhow!(AiwError {
             code: "AIW_ADMIN_HOST_NOT_READY".into(),
-            summary: "Windows Sandbox readiness blocks this assessment".into(),
+            summary: "Windows Sandbox readiness blocks this workflow".into(),
             stage: "adminReadiness".into(),
             run_id: Some(run_id.clone().into()),
             retryable: false,
