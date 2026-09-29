@@ -212,13 +212,30 @@ the observed failure. No export stage ran. This evidence supports a longer
 bounded installation wait, not skipping installer success or treating the
 partially installed Bambu entry point as sufficient.
 
-Current development source raises the fixed export-profile installer wait to
-900 seconds and the administrator worker receipt wait to 1500 seconds. The
-profile owns the timeout value shared by compilation and guest execution.
-Failed-run log excerpts prioritize the active MSI and reserve space for all
-three selected logs. This needs a new exact-source disposable-worker run before
-requesting an independent operator acceptance trial. The original metadata-only
-information-query profile retains its separate 300-second intent.
+Commit `9a635c5` raises the fixed export-profile installer wait to 900 seconds
+and the administrator worker receipt wait to 1500 seconds. The profile owns the
+timeout value shared by compilation and guest execution. Failed-run log excerpts
+prioritize the active MSI and reserve space for all three selected logs. The
+original metadata-only information-query profile retains its separate
+300-second intent.
+
+The exact `9a635c5` preview package archive SHA-256
+`23fcfa10286299bf53e011a819b46c1f85960c696af95dc807e5bbe39025fa70`
+and receipt SHA-256
+`0e3e22d30dd6bbfe5909c4666827fe06dc27d316d5c2cf21b72309ac0f32c356`
+verified after extraction on the dedicated VM. The agent-approved development
+run `admin-1790639315194633000` at
+`C:\AIW-Bambu-Agent-Evidence-9a635c5` passed installation, fixed STL
+preparation, 3MF export, collection, and four-vertex/four-triangle geometry
+verification. The 9064-byte artifact SHA-256 was
+`963219dd4dceb346a2953b8d79bea0ce1e2e0102058710570bd51d04fdd14deb`.
+The retained report SHA-256 was
+`c376d6a2213e4963970229dbacb5432b321519398ac6be8153e8c18672812bc6`.
+Recorded cleanup verified, and a fresh provider query returned an empty session
+list. The report still says `insufficientEvidence` for broader isolation and
+untested Bambu workflows. This development run does not replace the independent
+human-approved trial and negative control required by
+[BAMBU-ADMIN-ENTRY.md](BAMBU-ADMIN-ENTRY.md).
 
 ## Remaining integration
 

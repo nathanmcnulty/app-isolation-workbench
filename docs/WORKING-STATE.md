@@ -20,18 +20,17 @@ Updated 2026-09-28. This is a compact handoff, not a run receipt or authorizatio
 
 ## Next coherent slice
 
-The fixed Bambu package and administrator route are implemented. Separate-host
-development runs reached the bundled VC++ setup but exceeded the 300-second
-installer wait. Exact-source Unicode log diagnostics show the first VC runtime
-MSI completed successfully and the second was still progressing near the
-deadline; cleanup and an empty provider list were verified. Source now bounds
-the fixed export installation at 900 seconds and the worker receipt wait at
-1500 seconds. Run that exact source in a fresh disposable worker and review its
-retained stage/artifact report before requesting a separate human-approved
-acceptance run. [BAMBU-STUDIO-PROFILE.md](BAMBU-STUDIO-PROFILE.md) records the
-exact evidence; [BAMBU-ADMIN-ENTRY.md](BAMBU-ADMIN-ENTRY.md) defines the
-remaining acceptance gates. Do not infer general compatibility from either
-fixed workflow. See [ROADMAP.md](ROADMAP.md) and [RELEASE-GATES.md](RELEASE-GATES.md).
+The fixed Bambu package and administrator route are implemented. Exact
+`9a635c5` source passed an agent-approved development replay on the separate
+VM: installation, fixed STL preparation, 3MF export, artifact collection and
+geometry verification all passed. Recorded cleanup and a fresh empty provider
+list were verified. The result remains `insufficientEvidence` for broader
+isolation. Hosted CI is pending. Next: complete checks, then obtain a separate
+human-approved operator run and negative control before promoting this entry.
+[BAMBU-STUDIO-PROFILE.md](BAMBU-STUDIO-PROFILE.md) records the exact evidence;
+[BAMBU-ADMIN-ENTRY.md](BAMBU-ADMIN-ENTRY.md) defines the acceptance gates.
+Do not infer general compatibility from either fixed workflow. See
+[ROADMAP.md](ROADMAP.md) and [RELEASE-GATES.md](RELEASE-GATES.md).
 
 ## Read only what the slice needs
 
