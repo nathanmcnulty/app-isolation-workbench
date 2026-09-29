@@ -44,7 +44,7 @@ if (($receiptItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
 
 $receipt = Get-Content -Raw -LiteralPath $receiptPath | ConvertFrom-Json
 if ($receipt.schemaVersion -ne 'aiw.dev/preview-package-receipt/v0alpha1' -or
-    $receipt.productId -notin @('notepad-plus-plus-local-settings', 'bambu-studio-export') -or
+    $receipt.productId -notin @('notepad-plus-plus-local-settings', 'notepad-plus-plus-interactive', 'bambu-studio-export') -or
     $receipt.receiptLast -ne $true) {
     throw 'Package receipt does not match the supported preview contract'
 }
@@ -139,7 +139,8 @@ if ((ConvertTo-Json $actualPaths -Compress) -cne (ConvertTo-Json $recordPaths -C
 }
 
 $isBambu = $receipt.productId -eq 'bambu-studio-export'
-$productDirectory = if ($isBambu) { 'bambu-studio' } else { 'notepad-plus-plus' }
+$isInteractive = $receipt.productId -eq 'notepad-plus-plus-interactive'
+$productDirectory = if ($isBambu) { 'bambu-studio' } elseif ($isInteractive) { 'notepad-plus-plus-interactive' } else { 'notepad-plus-plus' }
 $projectFile = if ($isBambu) { 'project.json' } else { 'project.yaml' }
 $scenarioId = if ($isBambu) { 'local-file-export' } else { 'install-launch-close' }
 $productPath = Join-Path $root "product\$productDirectory"
@@ -153,7 +154,7 @@ if ($manifest.schemaVersion -ne 'aiw.dev/admin-product-assets/v0alpha1' -or
     $manifest.scenarioId -cne $scenarioId -or
     $manifest.projectPath -cne $projectFile -or
     $manifest.guestAgentPath -cne 'tools/aiw-guest-agent.exe' -or
-    ($isBambu -and ((@($manifest.PSObject.Properties.Name) -ccontains 'launchProfilePath') -or
+    (($isBambu -or $isInteractive) -and ((@($manifest.PSObject.Properties.Name) -ccontains 'launchProfilePath') -or
                     (@($manifest.PSObject.Properties.Name) -ccontains 'launchProfileSha256')))) {
     throw 'Selected product manifest does not match its fixed contract'
 }

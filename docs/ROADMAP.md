@@ -38,8 +38,12 @@ consumer. Broader utility is a subsequent product outcome, not something inferre
 from repeated Notepad++ trials. Do not expand providers or collectors unless they
 answer a documented workflow failure or a claim the next release actually makes.
 The [Bambu administrator entry acceptance boundary](BAMBU-ADMIN-ENTRY.md)
-selects its existing fixed local export as the next explicit product path; it
-does not authorize general EXE assessment or a compatibility verdict.
+selected its existing fixed local export as the second product path. Its exact
+operator trial is recorded in [BAMBU-STUDIO-PROFILE.md](BAMBU-STUDIO-PROFILE.md);
+it does not establish general EXE compatibility. The next packaging slice
+exposes the already verified bounded Notepad++ interactive document transfer
+through an administrator entry, with a separate package identity and an
+explicit export step. A clean-host trial of that entry is still required.
 Public distribution also needs a publisher-authentication and signing decision;
 the present package is an unsigned development preview.
 

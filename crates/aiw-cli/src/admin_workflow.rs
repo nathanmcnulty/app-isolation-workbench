@@ -15,6 +15,7 @@ use crate::approval_review;
 pub const MANIFEST_SCHEMA: &str = "aiw.dev/admin-product-assets/v0alpha1";
 pub const PRODUCT_ID: &str = "notepad-plus-plus-local-settings";
 pub const SCENARIO_ID: &str = "install-launch-close";
+pub const INTERACTIVE_PRODUCT_ID: &str = "notepad-plus-plus-interactive";
 pub const BAMBU_PRODUCT_ID: &str = "bambu-studio-export";
 pub const BAMBU_SCENARIO_ID: &str = "local-file-export";
 
@@ -236,10 +237,33 @@ fn report_summary(report: &aiw_runner::WsbMsiRunReport) -> (String, &'static str
             ),
             "Read report.md and the exact run status before a new trial or any explicit recovery.",
         ),
-        aiw_runner::WsbMsiRunReport::InteractiveSession(_) => (
-            "No completed application assessment. This result needs detailed review.\n".into(),
-            "Read report.md and the exact run status before a new trial.",
-        ),
+        aiw_runner::WsbMsiRunReport::InteractiveSession(interactive) => {
+            let transfer = interactive.document_transfer.as_ref();
+            let cleanup = if interactive.recorded_cleanup_verified {
+                "verified"
+            } else {
+                "not verified"
+            };
+            (
+                match transfer {
+                    Some(value) => format!(
+                        "Fixed Notepad++ document session completed.\nVerified input: {} bytes (SHA-256 {}).\nVerified retained output: {} bytes (SHA-256 {}).\nRecorded cleanup: {cleanup}.\nBroader isolation: insufficient evidence.\n",
+                        value.input_size_bytes,
+                        value.input_sha256,
+                        value.output_size_bytes,
+                        value.output_sha256,
+                    ),
+                    None => format!(
+                        "Interactive session completed without a verified document transfer.\nRecorded cleanup: {cleanup}.\nBroader isolation: insufficient evidence.\n"
+                    ),
+                },
+                if transfer.is_some() && interactive.recorded_cleanup_verified {
+                    "Read report.md and explicitly export the verified output with run export-wsb-msi-document; no host output file was created automatically."
+                } else {
+                    "Read report.md and the exact retained run status before exporting or starting another trial."
+                },
+            )
+        }
     }
 }
 
@@ -276,6 +300,16 @@ fn bambu_report_summary(report: &aiw_runner::WsbBambuRunReport) -> (String, &'st
 impl ProductAssetManifest {
     fn resolve(&self, package_root: &Path) -> Result<ResolvedProductAssets> {
         self.resolve_fixed(package_root, PRODUCT_ID, SCENARIO_ID, ".yaml", true)
+    }
+
+    fn resolve_interactive(&self, package_root: &Path) -> Result<ResolvedProductAssets> {
+        self.resolve_fixed(
+            package_root,
+            INTERACTIVE_PRODUCT_ID,
+            SCENARIO_ID,
+            ".yaml",
+            false,
+        )
     }
 
     fn resolve_bambu(&self, package_root: &Path) -> Result<ResolvedProductAssets> {
@@ -447,6 +481,26 @@ pub fn assess(
     evidence_parent: &Path,
     identity: &str,
 ) -> Result<AdminAssessmentResult> {
+    assess_notepad(installer, None, evidence_parent, identity)
+}
+
+#[cfg(windows)]
+pub fn launch_document(
+    installer: &Path,
+    document_input: &Path,
+    evidence_parent: &Path,
+    identity: &str,
+) -> Result<AdminAssessmentResult> {
+    assess_notepad(installer, Some(document_input), evidence_parent, identity)
+}
+
+#[cfg(windows)]
+fn assess_notepad(
+    installer: &Path,
+    document_input: Option<&Path>,
+    evidence_parent: &Path,
+    identity: &str,
+) -> Result<AdminAssessmentResult> {
     if identity.trim().is_empty() {
         bail!("operator identity is required");
     }
@@ -455,18 +509,32 @@ pub fn assess(
             "admin assess requires terminal input and visible approval review; no intake or run was created"
         );
     }
-    let assets_root = packaged_asset_root("notepad-plus-plus")?;
+    let interactive = document_input.is_some();
+    let product_id = if interactive {
+        INTERACTIVE_PRODUCT_ID
+    } else {
+        PRODUCT_ID
+    };
+    let assets_root = packaged_asset_root(if interactive {
+        "notepad-plus-plus-interactive"
+    } else {
+        "notepad-plus-plus"
+    })?;
     let manifest: ProductAssetManifest = serde_json::from_slice(
         &std::fs::read(assets_root.join("manifest.json"))
             .map_err(|_| anyhow!("packaged product manifest is missing"))?,
     )?;
-    let assets = manifest.resolve(&assets_root)?;
+    let assets = if interactive {
+        manifest.resolve_interactive(&assets_root)?
+    } else {
+        manifest.resolve(&assets_root)?
+    };
     let project_bytes = std::fs::read(&assets.project)?;
     if lowercase_sha256(&project_bytes) != manifest.project_sha256 {
         bail!("packaged project bytes do not match the product manifest");
     }
     let project: Project = serde_yaml::from_slice(&project_bytes)?;
-    if !validate_project_for_planning(&project).is_empty() || project.metadata.name != PRODUCT_ID {
+    if !validate_project_for_planning(&project).is_empty() || project.metadata.name != product_id {
         bail!("packaged project is not valid for the fixed assessment");
     }
     let expected_msi = match &project.application {
@@ -493,7 +561,9 @@ pub fn assess(
             Ok(profile)
         })
         .transpose()?;
-    let execution_mode = if launch_profile.is_some() {
+    let execution_mode = if interactive {
+        "interactiveDocumentTransfer"
+    } else if launch_profile.is_some() {
         "approvedReplay"
     } else {
         "assessment"
@@ -548,7 +618,7 @@ pub fn assess(
     let receipt = aiw_windows_platform::import_application_file_with_metadata(&intake_parent, "notepad-plus-plus", ApplicationInspectionKind::Msi, &held, true)
         .map_err(|error| anyhow!("protected intake failed; preserve evidence and use a new evidence location to retry: {error}"))?;
     save_stage(&evidence_root, "intake-receipt", &receipt)?;
-    let prepared = aiw_runner::prepare_windows_sandbox_msi_bundle(&run_id, &project, &assets.guest_agent, &manifest.guest_agent_sha256, &evidence_root, &now_rfc3339(), aiw_runner::WsbMsiPreparationInput { import_receipt: &receipt, scenario_id: SCENARIO_ID, document_input: None, launch_profile: launch_profile.as_ref().zip(manifest.launch_profile_sha256.as_deref()) })
+    let prepared = aiw_runner::prepare_windows_sandbox_msi_bundle(&run_id, &project, &assets.guest_agent, &manifest.guest_agent_sha256, &evidence_root, &now_rfc3339(), aiw_runner::WsbMsiPreparationInput { import_receipt: &receipt, scenario_id: SCENARIO_ID, document_input, launch_profile: launch_profile.as_ref().zip(manifest.launch_profile_sha256.as_deref()) })
         .map_err(|error| anyhow!("preparation failed; inspect retained stage output and do not retry this workspace: {error}"))?;
     save_stage(&evidence_root, "preparation", &prepared.receipt)?;
     let workspace = PathBuf::from(&prepared.receipt.workspace.root.final_path);
@@ -597,7 +667,7 @@ pub fn assess(
         )?;
         return Ok(AdminAssessmentResult {
             schema_version: MANIFEST_SCHEMA,
-            product_id: PRODUCT_ID,
+            product_id,
             operator_identity: identity.trim().into(),
             evidence_root,
             run_id,
@@ -654,7 +724,7 @@ pub fn assess(
     let (summary, next) = report_summary(&report);
     Ok(AdminAssessmentResult {
         schema_version: MANIFEST_SCHEMA,
-        product_id: PRODUCT_ID,
+        product_id,
         operator_identity: identity.trim().into(),
         evidence_root,
         run_id,
@@ -669,6 +739,11 @@ pub fn assess(
 #[cfg(not(windows))]
 pub fn assess(_: &Path, _: &Path, _: &str) -> Result<AdminAssessmentResult> {
     bail!("admin assess requires Windows; no files or provider state were changed")
+}
+
+#[cfg(not(windows))]
+pub fn launch_document(_: &Path, _: &Path, _: &Path, _: &str) -> Result<AdminAssessmentResult> {
+    bail!("admin launch-document requires Windows; no files or provider state were changed")
 }
 
 #[cfg(windows)]
@@ -1216,6 +1291,32 @@ mod tests {
         manifest.scenario_id = BAMBU_SCENARIO_ID.into();
         manifest.project_path = "../project.json".into();
         assert!(manifest.resolve_bambu(Path::new(".")).is_err());
+    }
+    #[test]
+    fn interactive_manifest_rejects_assessment_identity_and_launch_profile() {
+        let root = std::env::temp_dir().join(format!("aiw-admin-interactive-{}", nonce()));
+        std::fs::create_dir(&root).unwrap();
+        std::fs::create_dir(root.join("tools")).unwrap();
+        std::fs::write(root.join("project.yaml"), b"project").unwrap();
+        std::fs::write(root.join("tools/agent.exe"), b"agent").unwrap();
+        let mut manifest = ProductAssetManifest {
+            schema_version: MANIFEST_SCHEMA.into(),
+            product_id: PRODUCT_ID.into(),
+            project_path: "project.yaml".into(),
+            project_sha256: "a".repeat(64),
+            guest_agent_path: "tools/agent.exe".into(),
+            scenario_id: SCENARIO_ID.into(),
+            guest_agent_sha256: "b".repeat(64),
+            launch_profile_path: None,
+            launch_profile_sha256: None,
+        };
+        assert!(manifest.resolve_interactive(&root).is_err());
+        manifest.product_id = INTERACTIVE_PRODUCT_ID.into();
+        assert!(manifest.resolve_interactive(&root).is_ok());
+        manifest.launch_profile_path = Some("launch-profile.json".into());
+        manifest.launch_profile_sha256 = Some("c".repeat(64));
+        assert!(manifest.resolve_interactive(&root).is_err());
+        std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn bambu_console_summary_does_not_promote_missing_evidence() {

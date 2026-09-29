@@ -4,7 +4,7 @@ Updated 2026-09-28. This is a compact handoff, not a run receipt or authorizatio
 
 ## Where to resume
 
-- PR #71 merged at `4b9054512213c64839a664997504a84d7c911cdb`; PR #72 merged at `13b12d1c1e34088f6da31ca107ae4b5bf3e15683`; PR #73 merged with concise administrator output. The fixed Bambu administrator entry is on `codex/bambu-admin-entry`; verify the checkout with `scripts/work-status.ps1` before editing.
+- PR #74 merged at `ad67784809704fa64f4b919b3e6289c63b2a7f3e`. The fixed Bambu administrator entry has an independently approved operator run; verify the current checkout with `scripts/work-status.ps1` before editing.
 - The exact unsigned `08ab440` profile-bound package passed the separate-host second-operator trial. Run `admin-1790485297308064300` passed all nine fixed stages, document hash and ACL controls, and terminal cleanup; negative run `admin-1790486242125347900` rejected before intake or provider acquisition. The provider has no active session. The broader isolation outcome remains `insufficientEvidence`. See [CLEAN-HOST-PREVIEW.md](CLEAN-HOST-PREVIEW.md).
 - The earlier profile-bound approved replay passed its fixed document workflow, required guest file ACL controls, recorded environment comparison, and cleanup. That remains same-host evidence for its recorded source and provider identities. See [VALIDATED-SANDBOX-LAUNCH.md](VALIDATED-SANDBOX-LAUNCH.md).
 - The earlier development baseline/candidate/relocated-replay and agent-run packaged smoke remain separately recorded in [PACKAGING-RECIPES.md](PACKAGING-RECIPES.md) and [CLEAN-HOST-PREVIEW.md](CLEAN-HOST-PREVIEW.md). They are not substituted for the independent operator run.
@@ -20,20 +20,23 @@ Updated 2026-09-28. This is a compact handoff, not a run receipt or authorizatio
 
 ## Next coherent slice
 
-The fixed Bambu package and administrator route are implemented. Exact
-`9a635c5` source passed an agent-approved development replay and a separate
-human-approved operator run on the dedicated VM. Both passed installation,
-fixed STL preparation, 3MF export, collection, and geometry verification.
-The operator run retained a terminal result with cleanup complete; a fresh
-provider query was empty. An agent-run unsupported-input control rejected
-before intake or provider acquisition. Both hosted PR checks passed. The
-result remains `insufficientEvidence` for broader isolation. Next: promote
-PR #74 after final checks, then advance to the next roadmap slice without
-broad compatibility claims.
-[BAMBU-STUDIO-PROFILE.md](BAMBU-STUDIO-PROFILE.md) records the exact evidence;
-[BAMBU-ADMIN-ENTRY.md](BAMBU-ADMIN-ENTRY.md) defines the acceptance gates.
-Do not infer general compatibility from either fixed workflow. See
-[ROADMAP.md](ROADMAP.md) and [RELEASE-GATES.md](RELEASE-GATES.md).
+The fixed Bambu administrator path is merged. Exact `9a635c5` source passed
+an agent-approved development replay and separate human-approved VM run
+`admin-1790641748201368500`; installation, STL preparation, 3MF export,
+collection, geometry verification, terminal cleanup, and a fresh empty
+provider list were recorded. An agent-run unsupported-input control rejected
+before intake. The outcome remains `insufficientEvidence` for broader
+isolation. See [BAMBU-STUDIO-PROFILE.md](BAMBU-STUDIO-PROFILE.md).
+
+Current branch `codex/admin-interactive-launch` adds a separate fixed
+Notepad++ document-transfer administrator entry and package identity. Local
+CLI tests, governance, verifier contract, and unarchived package assembly
+passed; a clean-host operator trial for this entry is still unrecorded.
+It reuses the existing interactive transfer/report/export primitives and
+requires visible exact-plan approval and explicit output export. Do not infer
+general compatibility from either fixed workflow. See
+[INTERACTIVE-SANDBOX.md](INTERACTIVE-SANDBOX.md), [ROADMAP.md](ROADMAP.md),
+and [RELEASE-GATES.md](RELEASE-GATES.md).
 
 ## Read only what the slice needs
 

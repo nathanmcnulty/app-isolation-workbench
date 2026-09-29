@@ -1,5 +1,19 @@
 # Scratch-only interactive Notepad++
 
+## Administrator preview entry
+
+The fixed `NotepadPlusPlusInteractive` preview package exposes
+`aiw admin launch-document --installer <exact MSI> --document-input <text file>
+--evidence <existing directory> --identity <operator>`. Its own manifest and
+receipt identify the interactive project; the automated local-settings
+assessment package remains a different product. This entry reuses protected
+intake, the complete recipe and exact-plan terminal approval, the owned Sandbox
+session, and retained interactive reporting. It does not export automatically.
+After a verified transfer and cleanup, use the explicit
+`run export-wsb-msi-document` command documented in the packaged README.
+Local package assembly and tests do not establish a separate-host operator
+trial for this new entry.
+
 The fixed interactive profile installs Notepad++ inside a disposable Windows Sandbox and opens a blank editor as `AiwStandardUser` with a verified medium-integrity token. Close the editor normally when finished. Its approved lifetime starts after the exact application window and token are observed; expiration terminates the process job, verifies cleanup, and records an unsuccessful attempt. An unsaved-document prompt does not extend the deadline.
 
 The example allows five minutes; `waitForUserClose.timeoutSeconds` accepts 30–600 seconds. The host's total `run start --timeout-seconds` can cancel earlier. Changing the project, lifetime, application, guest agent, or compiled scenario requires fresh preparation and approval.
