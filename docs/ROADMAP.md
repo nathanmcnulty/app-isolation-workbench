@@ -37,6 +37,9 @@ much profile-specific code it requires. Bambu already supplies a second reportin
 consumer. Broader utility is a subsequent product outcome, not something inferred
 from repeated Notepad++ trials. Do not expand providers or collectors unless they
 answer a documented workflow failure or a claim the next release actually makes.
+The [Bambu administrator entry acceptance boundary](BAMBU-ADMIN-ENTRY.md)
+selects its existing fixed local export as the next explicit product path; it
+does not authorize general EXE assessment or a compatibility verdict.
 Public distribution also needs a publisher-authentication and signing decision;
 the present package is an unsigned development preview.
 

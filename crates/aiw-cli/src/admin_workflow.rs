@@ -15,6 +15,8 @@ use crate::approval_review;
 pub const MANIFEST_SCHEMA: &str = "aiw.dev/admin-product-assets/v0alpha1";
 pub const PRODUCT_ID: &str = "notepad-plus-plus-local-settings";
 pub const SCENARIO_ID: &str = "install-launch-close";
+pub const BAMBU_PRODUCT_ID: &str = "bambu-studio-export";
+pub const BAMBU_SCENARIO_ID: &str = "local-file-export";
 
 pub fn public_error(error: anyhow::Error) -> anyhow::Error {
     if error.is::<AiwError>() {
@@ -241,11 +243,62 @@ fn report_summary(report: &aiw_runner::WsbMsiRunReport) -> (String, &'static str
     }
 }
 
+fn bambu_report_summary(report: &aiw_runner::WsbBambuRunReport) -> (String, &'static str) {
+    let mut summary = String::from("Fixed Bambu Studio export (retained report):\n");
+    for (name, result) in report.administrator_function_results() {
+        summary.push_str(&format!("  {name}: {result}\n"));
+    }
+    summary.push_str(&format!(
+        "Recorded cleanup: {}\nBroader isolation: insufficient evidence; slicing, printing, cloud, and graphical workflows were not tested.\n",
+        if report.recorded_cleanup_verified {
+            "verified"
+        } else {
+            "not verified"
+        }
+    ));
+    let next = if !report.recorded_cleanup_verified {
+        "Read the exact retained run status before another attempt; recover only if that status requires it."
+    } else if report.evidence_status != aiw_runner::BambuReportEvidenceStatus::Verified {
+        "Read report.md and status. Missing or rejected evidence does not establish application incompatibility."
+    } else if report
+        .scenario
+        .as_ref()
+        .is_some_and(|scenario| scenario.successful())
+        && report.artifact.is_some()
+    {
+        "Read report.md for the administrator overview; report.json and stage files retain the advanced evidence."
+    } else {
+        "Read the failed stage and diagnostics in report.md; correct that cause before approving a new disposable trial."
+    };
+    (summary, next)
+}
+
 impl ProductAssetManifest {
     fn resolve(&self, package_root: &Path) -> Result<ResolvedProductAssets> {
+        self.resolve_fixed(package_root, PRODUCT_ID, SCENARIO_ID, ".yaml", true)
+    }
+
+    fn resolve_bambu(&self, package_root: &Path) -> Result<ResolvedProductAssets> {
+        self.resolve_fixed(
+            package_root,
+            BAMBU_PRODUCT_ID,
+            BAMBU_SCENARIO_ID,
+            ".json",
+            false,
+        )
+    }
+
+    fn resolve_fixed(
+        &self,
+        package_root: &Path,
+        product_id: &str,
+        scenario_id: &str,
+        project_extension: &str,
+        allow_profile: bool,
+    ) -> Result<ResolvedProductAssets> {
         if self.schema_version != MANIFEST_SCHEMA
-            || self.product_id != PRODUCT_ID
-            || self.scenario_id != SCENARIO_ID
+            || self.product_id != product_id
+            || self.scenario_id != scenario_id
             || !valid_sha256(&self.project_sha256)
             || !valid_sha256(&self.guest_agent_sha256)
             || self
@@ -253,8 +306,9 @@ impl ProductAssetManifest {
                 .as_deref()
                 .is_some_and(|value| !valid_sha256(value))
             || self.launch_profile_path.is_some() != self.launch_profile_sha256.is_some()
+            || (!allow_profile && self.launch_profile_path.is_some())
         {
-            bail!("packaged product manifest is not the fixed Notepad++ assessment contract");
+            bail!("packaged product manifest is not the selected fixed assessment contract");
         }
         let root = package_root
             .canonicalize()
@@ -283,7 +337,7 @@ impl ProductAssetManifest {
             Ok(path)
         };
         Ok(ResolvedProductAssets {
-            project: resolve(&self.project_path, ".yaml")?,
+            project: resolve(&self.project_path, project_extension)?,
             guest_agent: resolve(&self.guest_agent_path, ".exe")?,
             launch_profile: self
                 .launch_profile_path
@@ -294,13 +348,13 @@ impl ProductAssetManifest {
     }
 }
 
-fn packaged_asset_root() -> Result<PathBuf> {
+fn packaged_asset_root(product_directory: &str) -> Result<PathBuf> {
     let executable = std::env::current_exe()
         .map_err(|_| anyhow!("cannot resolve the installed AIW executable"))?;
     let parent = executable
         .parent()
         .ok_or_else(|| anyhow!("installed AIW executable has no package directory"))?;
-    Ok(parent.join("product").join("notepad-plus-plus"))
+    Ok(parent.join("product").join(product_directory))
 }
 
 fn unsupported_installer_error(
@@ -308,12 +362,22 @@ fn unsupported_installer_error(
     run_id: &str,
     reason: impl Into<String>,
 ) -> anyhow::Error {
+    unsupported_application_error(evidence_root, run_id, reason, "msi", "Notepad++ MSI")
+}
+
+fn unsupported_application_error(
+    evidence_root: &Path,
+    run_id: &str,
+    reason: impl Into<String>,
+    supported_kind: &'static str,
+    profile: &'static str,
+) -> anyhow::Error {
     let reason = reason.into();
     let diagnostic_path = evidence_root.join("installer-rejection.json");
     let diagnostic = serde_json::json!({
         "schemaVersion": "aiw.dev/admin-installer-rejection/v0alpha1",
         "runId": run_id,
-        "supportedKind": "msi",
+        "supportedKind": supported_kind,
         "reason": reason,
         "intakeCreated": false,
         "providerAcquired": false
@@ -323,15 +387,57 @@ fn unsupported_installer_error(
         .unwrap_or_else(|error| format!("Diagnostic publication failed safely: {error}."));
     anyhow!(AiwError {
         code: "AIW_ADMIN_UNSUPPORTED_INSTALLER".into(),
-        summary: "installer is not supported by this Notepad++ MSI profile".into(),
+        summary: format!("installer is not supported by this {profile} profile").into(),
         stage: "adminInstallerInspection".into(),
         run_id: Some(run_id.into()),
         retryable: false,
         remediation: format!(
-            "{diagnostic_status} Select the exact supported MSI bytes; do not guess a recipe for another application type."
+            "{diagnostic_status} Select the exact supported {profile} bytes; do not guess a recipe for another application type."
         )
         .into(),
         detail: "No protected intake was created and no Sandbox session was acquired.".into(),
+    })
+}
+
+fn retained_result_error(
+    evidence_root: &Path,
+    run_id: &str,
+    stage: &'static str,
+    error: impl std::fmt::Display,
+) -> anyhow::Error {
+    anyhow!(AiwError {
+        code: "AIW_ADMIN_RESULT_PUBLICATION_FAILED".into(),
+        summary: "approved execution returned but its administrator result could not be published"
+            .into(),
+        stage: stage.into(),
+        run_id: Some(run_id.to_owned().into()),
+        retryable: false,
+        remediation: format!(
+            "Inspect the exact retained run status and stage files under {}. Do not repeat the trial because report publication failed; use explicit recovery only if that status requires it.",
+            evidence_root.display()
+        )
+        .into(),
+        detail: error.to_string().into(),
+    })
+}
+
+fn retained_execution_error(
+    evidence_root: &Path,
+    run_id: &str,
+    error: impl std::fmt::Display,
+) -> anyhow::Error {
+    anyhow!(AiwError {
+        code: "AIW_ADMIN_EXECUTION_FAILED".into(),
+        summary: "approved assessment did not complete".into(),
+        stage: "adminExecution".into(),
+        run_id: Some(run_id.to_owned().into()),
+        retryable: false,
+        remediation: format!(
+            "Inspect failed-status.json and failed-report.md, when present, under {}. Do not repeat the trial or recover a session until the exact retained status and cause are understood.",
+            evidence_root.display()
+        )
+        .into(),
+        detail: error.to_string().into(),
     })
 }
 
@@ -349,7 +455,7 @@ pub fn assess(
             "admin assess requires terminal input and visible approval review; no intake or run was created"
         );
     }
-    let assets_root = packaged_asset_root()?;
+    let assets_root = packaged_asset_root("notepad-plus-plus")?;
     let manifest: ProductAssetManifest = serde_json::from_slice(
         &std::fs::read(assets_root.join("manifest.json"))
             .map_err(|_| anyhow!("packaged product manifest is missing"))?,
@@ -526,23 +632,25 @@ pub fn assess(
                 let _ =
                     std::fs::write(evidence_root.join("failed-report.md"), report.to_markdown());
             }
-            bail!(
-                "execution failed; retained status/report diagnostics were attempted. Inspect this exact run and only run explicit recovery when status reports recovery required: {error}"
-            );
+            return Err(retained_execution_error(&evidence_root, &run_id, error));
         }
     };
-    save_stage(&evidence_root, "execution", &execution)?;
+    save_stage(&evidence_root, "execution", &execution).map_err(|error| {
+        retained_result_error(&evidence_root, &run_id, "adminExecutionRecord", error)
+    })?;
     let report = aiw_runner::report_windows_sandbox_msi_run(
         &workspace,
         &run_id,
         &project,
         &manifest.guest_agent_sha256,
     )
-    .map_err(|error| {
-        anyhow!("run ended without a report; retain evidence and inspect status: {error}")
+    .map_err(|error| retained_result_error(&evidence_root, &run_id, "adminReport", error))?;
+    save_stage(&evidence_root, "report", &report).map_err(|error| {
+        retained_result_error(&evidence_root, &run_id, "adminReportRecord", error)
     })?;
-    save_stage(&evidence_root, "report", &report)?;
-    std::fs::write(evidence_root.join("report.md"), report.to_markdown())?;
+    std::fs::write(evidence_root.join("report.md"), report.to_markdown()).map_err(|error| {
+        retained_result_error(&evidence_root, &run_id, "adminReportMarkdown", error)
+    })?;
     let (summary, next) = report_summary(&report);
     Ok(AdminAssessmentResult {
         schema_version: MANIFEST_SCHEMA,
@@ -563,10 +671,296 @@ pub fn assess(_: &Path, _: &Path, _: &str) -> Result<AdminAssessmentResult> {
     bail!("admin assess requires Windows; no files or provider state were changed")
 }
 
+#[cfg(windows)]
+pub fn assess_bambu(
+    installer: &Path,
+    evidence_parent: &Path,
+    identity: &str,
+) -> Result<AdminAssessmentResult> {
+    if identity.trim().is_empty() {
+        bail!("operator identity is required");
+    }
+    if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
+        bail!(
+            "admin assess requires terminal input and visible approval review; no intake or run was created"
+        );
+    }
+    let assets_root = packaged_asset_root("bambu-studio")?;
+    let manifest: ProductAssetManifest = serde_json::from_slice(
+        &std::fs::read(assets_root.join("manifest.json"))
+            .map_err(|_| anyhow!("packaged Bambu product manifest is missing"))?,
+    )?;
+    let assets = manifest.resolve_bambu(&assets_root)?;
+    let project_bytes = std::fs::read(&assets.project)?;
+    if lowercase_sha256(&project_bytes) != manifest.project_sha256 {
+        bail!("packaged Bambu project bytes do not match the product manifest");
+    }
+    let project: Project = serde_json::from_slice(&project_bytes)?;
+    if !validate_project_for_planning(&project).is_empty()
+        || project.metadata.name != BAMBU_PRODUCT_ID
+    {
+        bail!("packaged Bambu project is not valid for the fixed assessment");
+    }
+    let expected_exe = match &project.application {
+        ApplicationSource::Exe(source) => &source.sha256,
+        _ => bail!("packaged Bambu project is not an EXE assessment"),
+    };
+    aiw_provider_wsb::compile_bambu_studio_export_scenario(&project, BAMBU_SCENARIO_ID)
+        .map_err(|error| anyhow!("packaged Bambu export contract is invalid: {error}"))?;
+    let expected_agent = aiw_windows_platform::HeldApplicationFile::open(&assets.guest_agent)
+        .map_err(|error| anyhow!("packaged guest agent is unsupported: {error}"))?;
+    if expected_agent.observation().sha256 != manifest.guest_agent_sha256 {
+        bail!("packaged guest agent bytes do not match the product manifest");
+    }
+    expected_agent
+        .revalidate()
+        .map_err(|error| anyhow!("packaged guest agent drifted: {error}"))?;
+
+    let run_id = format!("admin-{}", nonce());
+    let evidence_root = create_evidence_root(evidence_parent, &run_id)?;
+    let readiness = aiw_windows_platform::assess_windows_sandbox();
+    save_stage(&evidence_root, "host-readiness", &readiness)?;
+    if !readiness.supported
+        || readiness.current_sessions != ReadinessState::Available
+        || !readiness.blockers.is_empty()
+        || !readiness.current_session_ids.is_empty()
+    {
+        return Err(anyhow!(AiwError {
+            code: "AIW_ADMIN_HOST_NOT_READY".into(),
+            summary: "Windows Sandbox readiness blocks this assessment".into(),
+            stage: "adminReadiness".into(),
+            run_id: Some(run_id.clone().into()),
+            retryable: false,
+            remediation: format!(
+                "Inspect {}. Resolve the listed prerequisite, or wait for the existing Sandbox session to finish. Do not stop an unrelated session.",
+                evidence_root.join("host-readiness.json").display()
+            ).into(),
+            detail: "No protected intake was created and AIW did not acquire, recover, or stop a Sandbox session.".into(),
+        }));
+    }
+    let held = aiw_windows_platform::HeldApplicationFile::open_with_download_metadata(installer)
+        .map_err(|error| {
+            unsupported_application_error(
+                &evidence_root,
+                &run_id,
+                error.to_string(),
+                "exe",
+                "Bambu Studio EXE",
+            )
+        })?;
+    let inspection = inspect_application_source(installer, ApplicationInspectionKind::Exe)
+        .map_err(|error| {
+            unsupported_application_error(
+                &evidence_root,
+                &run_id,
+                error.to_string(),
+                "exe",
+                "Bambu Studio EXE",
+            )
+        })?;
+    save_stage(&evidence_root, "installer-inspection", &inspection)?;
+    if inspection.sha256.as_deref() != Some(&held.observation().sha256)
+        || inspection.sha256.as_deref() != Some(expected_exe.as_str())
+    {
+        return Err(anyhow!(AiwError {
+            code: "AIW_ADMIN_UNSUPPORTED_INSTALLER".into(),
+            summary: "installer bytes are not supported by this Bambu Studio profile".into(),
+            stage: "adminInstallerInspection".into(),
+            run_id: Some(run_id.clone().into()),
+            retryable: false,
+            remediation: format!(
+                "Inspect {} and select the exact supported EXE bytes. Do not guess a recipe for changed bytes.",
+                evidence_root.join("installer-inspection.json").display()
+            ).into(),
+            detail: "No protected intake was created and no Sandbox session was acquired.".into(),
+        }));
+    }
+    held.revalidate()
+        .map_err(|error| anyhow!("installer drifted before protected intake: {error}"))?;
+    let intake_parent = evidence_root.join("intakes");
+    std::fs::create_dir(&intake_parent)?;
+    let receipt = aiw_windows_platform::import_application_file_with_metadata(
+        &intake_parent,
+        "bambu-studio",
+        ApplicationInspectionKind::Exe,
+        &held,
+        true,
+    )
+    .map_err(|error| {
+        anyhow!("protected intake failed; preserve evidence and use a new evidence location to retry: {error}")
+    })?;
+    save_stage(&evidence_root, "intake-receipt", &receipt)?;
+    let prepared = aiw_runner::prepare_windows_sandbox_bambu_bundle(
+        &run_id,
+        &project,
+        &assets.guest_agent,
+        &manifest.guest_agent_sha256,
+        &evidence_root,
+        &now_rfc3339(),
+        aiw_runner::WsbBambuPreparationInput {
+            import_receipt: &receipt,
+            scenario_id: BAMBU_SCENARIO_ID,
+        },
+    )
+    .map_err(|error| {
+        anyhow!("preparation failed; inspect retained stage output and do not retry this workspace: {error}")
+    })?;
+    save_stage(&evidence_root, "preparation", &prepared.receipt)?;
+    let workspace = PathBuf::from(&prepared.receipt.workspace.root.final_path);
+    let scenario = prepared
+        .receipt
+        .bambu
+        .as_ref()
+        .ok_or_else(|| anyhow!("prepared Bambu scenario is missing"))?;
+    let recipe = serde_json::json!({
+        "schemaVersion": "aiw.dev/admin-bambu-recipe/v0alpha1",
+        "productId": BAMBU_PRODUCT_ID,
+        "runId": run_id,
+        "scenario": scenario.scenario,
+        "preparationReceipt": prepared.receipt,
+        "sandboxPlan": prepared.wsb_plan,
+        "runPlan": prepared.run_plan,
+        "executionIdentity": "The Bambu Studio EXE installer runs with an elevated token inside Windows Sandbox. Bambu Studio, the fixed STL fixture, and local 3MF export run as AiwStandardUser.",
+        "dataLifetime": "The fixed input and installed application are discarded with the worker. The receipt-bound 3MF and assessment evidence remain in the host run workspace; no automatic host export is performed.",
+        "limits": "This is one fixed offline STL-to-3MF export. The installer wait is bounded at 900 seconds and the worker receipt wait at 1500 seconds. Slicing, printing, cloud, graphical editing, general EXE support, and effective application isolation are not tested."
+    });
+    save_stage(&evidence_root, "recipe", &recipe)?;
+    {
+        let mut terminal = std::io::stderr().lock();
+        writeln!(
+            terminal,
+            "Review the complete verified Bambu recipe before approval:\n"
+        )?;
+        approval_review::write_review_json(&mut terminal, &recipe)?;
+        writeln!(terminal, "\n")?;
+        terminal.flush()?;
+    }
+    let imported = aiw_runner::import_windows_sandbox_preparation(
+        &workspace,
+        &project,
+        &manifest.guest_agent_sha256,
+        &now_rfc3339(),
+    )
+    .map_err(|error| {
+        anyhow!("planning import failed; inspect retained preparation and status: {error}")
+    })?;
+    save_stage(&evidence_root, "planning-import", &imported)?;
+    let layout = RunLayout::new(&workspace, &run_id)?;
+    let plan = layout.read_plan()?;
+    let approval = ApprovalRecord::for_plan(&plan, identity.trim(), now_rfc3339())?;
+    if !approval_review::confirm(
+        &approval,
+        &plan,
+        std::io::stdin().lock(),
+        std::io::stderr().lock(),
+    )? {
+        save_stage(
+            &evidence_root,
+            "approval-cancelled",
+            &serde_json::json!({"runId": run_id, "approvalRecorded": false, "next": "Review the retained recipe, then rerun this command with a fresh evidence location when ready to approve."}),
+        )?;
+        return Ok(AdminAssessmentResult {
+            schema_version: MANIFEST_SCHEMA,
+            product_id: BAMBU_PRODUCT_ID,
+            operator_identity: identity.trim().into(),
+            evidence_root,
+            run_id,
+            workspace,
+            execution_mode: "assessment",
+            approval_recorded: false,
+            next: "Approval was cancelled. The run remains pending approval; no Sandbox was started.",
+            summary: None,
+        });
+    }
+    layout.write_approval(&approval)?;
+    save_stage(&evidence_root, "approval", &approval)?;
+    let execution = match aiw_runner::start_approved_windows_sandbox(
+        &workspace,
+        &assets.project,
+        &project,
+        &manifest.guest_agent_sha256,
+        1500,
+    ) {
+        Ok(execution) => execution,
+        Err(error) => {
+            if let Ok(status) = layout.status() {
+                let _ = save_stage(&evidence_root, "failed-status", &status);
+            }
+            if let Ok(report) = aiw_runner::report_windows_sandbox_bambu_run(
+                &workspace,
+                &run_id,
+                &project,
+                &manifest.guest_agent_sha256,
+            ) {
+                let _ = save_stage(&evidence_root, "failed-report", &report);
+                let _ = std::fs::write(
+                    evidence_root.join("failed-report.md"),
+                    aiw_runner::render_bambu_run_report_markdown(&report),
+                );
+            }
+            return Err(retained_execution_error(&evidence_root, &run_id, error));
+        }
+    };
+    save_stage(&evidence_root, "execution", &execution).map_err(|error| {
+        retained_result_error(&evidence_root, &run_id, "adminExecutionRecord", error)
+    })?;
+    let report = aiw_runner::report_windows_sandbox_bambu_run(
+        &workspace,
+        &run_id,
+        &project,
+        &manifest.guest_agent_sha256,
+    )
+    .map_err(|error| retained_result_error(&evidence_root, &run_id, "adminReport", error))?;
+    save_stage(&evidence_root, "report", &report).map_err(|error| {
+        retained_result_error(&evidence_root, &run_id, "adminReportRecord", error)
+    })?;
+    std::fs::write(
+        evidence_root.join("report.md"),
+        aiw_runner::render_bambu_run_report_markdown(&report),
+    )
+    .map_err(|error| {
+        retained_result_error(&evidence_root, &run_id, "adminReportMarkdown", error)
+    })?;
+    let (summary, next) = bambu_report_summary(&report);
+    Ok(AdminAssessmentResult {
+        schema_version: MANIFEST_SCHEMA,
+        product_id: BAMBU_PRODUCT_ID,
+        operator_identity: identity.trim().into(),
+        evidence_root,
+        run_id,
+        workspace,
+        execution_mode: "assessment",
+        approval_recorded: true,
+        next,
+        summary: Some(summary),
+    })
+}
+
+#[cfg(not(windows))]
+pub fn assess_bambu(_: &Path, _: &Path, _: &str) -> Result<AdminAssessmentResult> {
+    bail!("admin assess Bambu requires Windows; no files or provider state were changed")
+}
+
 fn create_evidence_root(parent: &Path, run_id: &str) -> Result<PathBuf> {
-    let parent = parent
-        .canonicalize()
-        .map_err(|_| anyhow!("evidence location must already exist"))?;
+    let parent = parent.canonicalize().map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            anyhow!(AiwError {
+                code: "AIW_ADMIN_EVIDENCE_NOT_READY".into(),
+                summary: "evidence directory does not exist".into(),
+                stage: "adminEvidenceRoot".into(),
+                run_id: None,
+                retryable: false,
+                remediation: format!(
+                    "Create {} as the current operator, then rerun this command. No intake or Sandbox session was created.",
+                    parent.display()
+                )
+                .into(),
+                detail: "The evidence parent must exist before assessment.".into(),
+            })
+        } else {
+            anyhow!("evidence location could not be opened: {error}")
+        }
+    })?;
     if !parent.is_dir() {
         bail!("evidence location must be a directory");
     }
@@ -633,6 +1027,42 @@ fn lowercase_sha256(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn missing_evidence_parent_gives_specific_safe_action() {
+        let missing = std::env::temp_dir().join(format!(
+            "aiw-admin-missing-evidence-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let error = public_error(create_evidence_root(&missing, "admin-test").unwrap_err());
+        let structured = error.downcast_ref::<AiwError>().unwrap();
+        assert_eq!(structured.code.as_ref(), "AIW_ADMIN_EVIDENCE_NOT_READY");
+        assert!(structured.remediation.contains("Create"));
+        assert!(
+            structured
+                .remediation
+                .contains("No intake or Sandbox session was created")
+        );
+        assert!(!missing.exists());
+    }
+
+    #[test]
+    fn approved_execution_error_preserves_run_and_retained_failure_paths() {
+        let error = retained_execution_error(
+            Path::new("evidence/admin-test"),
+            "admin-test",
+            "guest install timed out",
+        );
+        let structured = error.downcast_ref::<AiwError>().unwrap();
+        assert_eq!(structured.code.as_ref(), "AIW_ADMIN_EXECUTION_FAILED");
+        assert_eq!(structured.run_id.as_deref(), Some("admin-test"));
+        assert!(structured.remediation.contains("failed-report.md"));
+        assert!(structured.detail.contains("guest install timed out"));
+    }
+
     #[test]
     fn summary_keeps_cancellation_distinct_and_escapes_evidence_path() {
         let result = AdminAssessmentResult {
@@ -764,6 +1194,72 @@ mod tests {
             launch_profile_sha256: None,
         };
         assert!(manifest.resolve(Path::new(".")).is_err());
+    }
+    #[test]
+    fn bambu_manifest_rejects_profile_and_wrong_contract() {
+        let mut manifest = ProductAssetManifest {
+            schema_version: MANIFEST_SCHEMA.into(),
+            product_id: BAMBU_PRODUCT_ID.into(),
+            project_path: "project.json".into(),
+            project_sha256: "a".repeat(64),
+            guest_agent_path: "tools/agent.exe".into(),
+            scenario_id: BAMBU_SCENARIO_ID.into(),
+            guest_agent_sha256: "b".repeat(64),
+            launch_profile_path: Some("profile.json".into()),
+            launch_profile_sha256: Some("c".repeat(64)),
+        };
+        assert!(manifest.resolve_bambu(Path::new(".")).is_err());
+        manifest.launch_profile_path = None;
+        manifest.launch_profile_sha256 = None;
+        manifest.scenario_id = SCENARIO_ID.into();
+        assert!(manifest.resolve_bambu(Path::new(".")).is_err());
+        manifest.scenario_id = BAMBU_SCENARIO_ID.into();
+        manifest.project_path = "../project.json".into();
+        assert!(manifest.resolve_bambu(Path::new(".")).is_err());
+    }
+    #[test]
+    fn bambu_console_summary_does_not_promote_missing_evidence() {
+        let project: Project =
+            serde_json::from_str(include_str!("../../../examples/bambu-studio-export.json"))
+                .unwrap();
+        let report = aiw_runner::WsbBambuRunReport {
+            schema_version: "aiw.dev/wsb-bambu-run-report/v0alpha1".into(),
+            run_id: "admin-test".into(),
+            project_revision_sha256: "a".repeat(64),
+            request_sha256: "b".repeat(64),
+            compiled_scenario: aiw_provider_wsb::compile_bambu_studio_export_scenario(
+                &project,
+                BAMBU_SCENARIO_ID,
+            )
+            .unwrap(),
+            requested_assertions: project.assertions,
+            outcome: aiw_orchestrator::RunOutcome::Failed,
+            recorded_cleanup_verified: true,
+            evidence_status: aiw_runner::BambuReportEvidenceStatus::Absent,
+            receipt_sha256: None,
+            evidence_root_hash: None,
+            scenario: None,
+            artifact: None,
+            missing_evidence: vec!["ordinary baseline".into()],
+        };
+        let (summary, next) = bambu_report_summary(&report);
+        assert!(summary.contains("Export 3MF: not measured"));
+        assert!(summary.contains("Verify fixed 3MF geometry: not verified"));
+        assert!(next.contains("does not establish application incompatibility"));
+    }
+    #[test]
+    fn post_execution_publication_error_preserves_run_identity() {
+        let error = retained_result_error(
+            Path::new("retained-evidence"),
+            "admin-test",
+            "adminReport",
+            "report drift",
+        );
+        let public = error.downcast_ref::<AiwError>().unwrap();
+        assert_eq!(public.code.as_ref(), "AIW_ADMIN_RESULT_PUBLICATION_FAILED");
+        assert_eq!(public.run_id.as_deref(), Some("admin-test"));
+        assert!(public.remediation.contains("Do not repeat the trial"));
+        assert!(public.detail.contains("report drift"));
     }
     #[test]
     fn unsupported_type_retains_a_specific_rejection_stage() {

@@ -99,6 +99,182 @@ All three trials used Windows build 28000 and Sandbox CLI 0.8.107.0. Cleanup was
 
 **Roadmap consequence:** prefer a separate approved STL-to-3MF export profile for the first Bambu functional report. Verify bounded model geometry and package references, not an output hash or empty redirected console text. Keep the current information-query compiler available as metadata-only research intent; its fixed arguments do not silently become the export command. No slicing, cloud account, printer, or additional downloaded runtime was required for this exploratory export.
 
+## Separate-host administrator trial, 2026-09-27
+
+The independent operator approved the visible fixed recipe for unsigned package
+source `ee8eb34055d86bce6c68fee78f9e62423b4c65e2` on the dedicated
+`aiw-clean-host-0921` VM. Its archive SHA-256 was
+`4b76e12a6dfdfc184149fd3643c7b9be46f70b3848c9bbb2a1106c992c1a3f2e`;
+the extracted eight-file package verified against receipt
+`aaaaa53e479c61f41378b54c82777bd9e09196e0971c32e128a41c7db7eb1e88`.
+The separate installer on that VM matched the fixed
+`cd2f8f2c789a22efee1300e993827cfdb047f27cfb0b8f5dd7395fbafadef4c7`
+hash. Run `admin-1790501499861166000` is retained at
+`C:\AIW-Bambu-Evidence-ee8eb34` on the VM.
+
+The approved worker started and connected, but the fixed guest installer
+process reached its 300-second wait limit. The retained result has
+`failedStage: install`, no completed stages or installer exit code, and no
+application-token or export evidence. The zero-byte 3MF is the required
+failure placeholder, not a produced model. The verified failure report
+(`failed-report.json` SHA-256
+`ace27e64405f1cff7fc50c6bd1e8412d827712055df283abcb094a5e986a9f4a`)
+records `recordedCleanupVerified: true`; the provider diagnostic records the
+exact session stop, and a fresh provider list was empty. This does not establish
+whether the installer was still progressing, blocked, or incompatible on this
+host. Do not count the export as tested or rerun blindly. The remaining gate is
+a bounded diagnosis of installer progress and a new operator-approved trial.
+
+## Agent-observed separate-host diagnostic, 2026-09-28
+
+An agent used the dedicated VM's open RDP session to run the staged unsigned
+`d7b92918887c6a5614f22e9dfd027eebb50b9fe2` package. The eight-file
+package verified against independently supplied receipt SHA-256
+`d692312e949142438cf2317425fa4eec53dfea520757a592b5e5d4c315e342d6`.
+Run `admin-1790624935080973000` is retained at
+`C:\AIW-Bambu-Agent-Evidence-d7b9291` on `aiw-clean-host-0921`.
+This is development diagnosis, not a successful independent operator trial.
+
+The visible Sandbox worker opened and later closed without an installer dialog.
+The receipt-bound failure report (`failed-report.json` SHA-256
+`e9b55fdb4775041efce49aee00e119bd2bdcc57b959953ba18cd2fc117512d9a`)
+records `failedStage: install`, no completed stages, and verified cleanup. Its
+new diagnostic records installer PID 6648, elapsed wait 300021 ms, four
+processes remaining in the job, and the fixed Bambu entrypoint present as a
+regular 159776-byte file. A fresh provider `list --raw` returned an empty
+session list. Installation made observable progress, but the installer job did
+not finish by the bound. No standard-user export or compatibility result was
+measured. Identify the remaining job processes and their completion behavior
+before revising the wait contract or repeating an acceptance trial.
+
+The packaged verifier's documented `-PackageRoot .` invocation failed because
+it resolved `.` against the process working directory rather than PowerShell's
+current location. Absolute-path verification succeeded, and source commit
+`fae693b` fixes relative resolution with a regression check in both PowerShell
+7 and Windows PowerShell 5.1. The staged `d7b9291` package retains its original
+verifier bytes; this source fix needs a new package before distribution.
+
+## Separate-host installer-process diagnosis, 2026-09-28
+
+The unsigned `449f615` package added bounded job-process image diagnostics and
+fixed the packaged verifier's relative-root behavior. Its archive SHA-256 is
+`5643941259037d1614a9395452e6e40b66b0a4b2d76e5b9f87c4402f73c37019`;
+the eight-file receipt is
+`383ea00a4e296102bbf79395dcc0ad01b9a585616b3c15145c4be9606c97a2e5`.
+The archive was independently verified on `aiw-clean-host-0921`, including
+`-PackageRoot .` under Windows PowerShell 5.1. These are agent-owned development
+runs, not independent operator acceptance.
+
+Run `admin-1790634384041089400` at
+`C:\AIW-Bambu-Agent-Evidence-449f615` again timed out after 300 seconds in the
+fixed install stage. Its receipt-bound failed report records verified cleanup,
+the 159,776-byte Bambu entrypoint, and four live job members:
+`application.exe`, two `vcredist2019_x64.exe` processes, and
+`VC_redist.x64.exe`. No export stage ran.
+
+Run `admin-1790634916825655000` at
+`C:\AIW-Bambu-Agent-Inspect-449f615` repeated the exact approved recipe only
+to inspect the stalled child processes in the disposable worker. Its verified
+failed report SHA-256 is
+`7e17132057ccc8015e1f38021153e155b6cb9adc640d3f73e2fa14403a39446e`;
+cleanup was verified and a fresh provider list was empty. The guest inspection
+showed installer PID 6676 and a child chain of bundled
+`vcredist2019_x64.exe` (including PID 3576, launched with `/s`) and Microsoft's
+`VC_redist.x64.exe` (PID 2216, launched in quiet mode). Those redistributable
+processes had accumulated under one second of CPU each late in the wait. The
+guest produced three `dd_vcredist_amd64_*.log` files under its local temp
+directory, but they were not retained before normal worker cleanup. Their
+contents and the precise wait condition remain unknown. A subsequent targeted
+diagnostic must retain bounded setup-log evidence before changing the installer
+deadline or claiming the export works on this host.
+
+The `cd268ed` diagnostic package archive SHA-256
+`9947f48f003d868144cd16502ca3a6d7a282a465f25ab2181651f7e51d2072a1`
+verified on the VM. Run `admin-1790636527253726300` under
+`C:\AIW-Bambu-Agent-Evidence-cd268ed-b` again timed out with verified cleanup
+and an empty provider list. The bounded Burn log reached
+`vcRuntimeAdditional_x64` and recorded a system-restore-point warning
+`0x80070422`; its two MSI logs were encoded as UTF-16 and the first diagnostic
+decoded them incorrectly, leaving their meaningful tail unobserved.
+
+The `476108b` package fixed Unicode log decoding. Archive SHA-256
+`3cda7521658bfa35f07d1bd1f89a3a6b2fc985d68b390a9c5b9813e0d7315c19`
+and receipt SHA-256
+`bb03448e35940394f9946c95b6b4a53515aea05c0a210906780394403113b077`
+verified on the VM. Run `admin-1790637675180277500` at
+`C:\AIW-Bambu-Agent-Evidence-476108b` retained failed-report SHA-256
+`ed012136d61662d5ad31b568bb5ac84549b59e889ca39f4e53edefe6a440ae76`.
+Cleanup passed and the provider was empty. The `vcRuntimeMinimum_x64` MSI log
+ended with Windows Installer returning zero and stopping verbose logging;
+`vcRuntimeAdditional_x64` had begun its MSI actions at about 23:27:46, near
+the 300-second deadline. The system-restore-point message was a warning, not
+the observed failure. No export stage ran. This evidence supports a longer
+bounded installation wait, not skipping installer success or treating the
+partially installed Bambu entry point as sufficient.
+
+Commit `9a635c5` raises the fixed export-profile installer wait to 900 seconds
+and the administrator worker receipt wait to 1500 seconds. The profile owns the
+timeout value shared by compilation and guest execution. Failed-run log excerpts
+prioritize the active MSI and reserve space for all three selected logs. The
+original metadata-only information-query profile retains its separate
+300-second intent.
+
+The exact `9a635c5` preview package archive SHA-256
+`23fcfa10286299bf53e011a819b46c1f85960c696af95dc807e5bbe39025fa70`
+and receipt SHA-256
+`0e3e22d30dd6bbfe5909c4666827fe06dc27d316d5c2cf21b72309ac0f32c356`
+verified after extraction on the dedicated VM. The agent-approved development
+run `admin-1790639315194633000` at
+`C:\AIW-Bambu-Agent-Evidence-9a635c5` passed installation, fixed STL
+preparation, 3MF export, collection, and four-vertex/four-triangle geometry
+verification. The 9064-byte artifact SHA-256 was
+`963219dd4dceb346a2953b8d79bea0ce1e2e0102058710570bd51d04fdd14deb`.
+The retained report SHA-256 was
+`c376d6a2213e4963970229dbacb5432b321519398ac6be8153e8c18672812bc6`.
+Recorded cleanup verified, and a fresh provider query returned an empty session
+list. The report still says `insufficientEvidence` for broader isolation and
+untested Bambu workflows. This development run does not replace the independent
+human-approved trial and negative control required by
+[BAMBU-ADMIN-ENTRY.md](BAMBU-ADMIN-ENTRY.md).
+
+An agent-run visible-terminal negative control used the package's actual
+`README.txt` as the installer. Run `admin-1790640444416640100` under
+`C:\AIW-Bambu-Agent-Negative-9a635c5-b` rejected the `.txt` source before
+protected intake or provider acquisition; retained `installer-rejection.json`
+SHA-256 was
+`50fc39bd7368d15e948719784f184365593a86a8d101d1d2c3125f37a0a410b6`.
+A fresh provider query remained empty. This agent-run control verifies the
+rejection boundary for the acceptance cohort; it does not substitute for the
+human approval of the positive run.
+
+On the same dedicated VM, the second operator reviewed the recipe and entered
+the exact displayed plan hash for fresh run `admin-1790641748201368500` under
+`C:\AIW-Bambu-Operator-Evidence-9a635c5`. The retained approval records
+`nathanmcnulty` and plan hash
+`fce5a3908d613ee2e086b726d88862ebc9a4c0d75a2519659fcb6eb25dbf706e`.
+The same exact `9a635c5` archive SHA-256
+`23fcfa10286299bf53e011a819b46c1f85960c696af95dc807e5bbe39025fa70`,
+packaged verifier SHA-256
+`af11c06facc09346fd1648326709b3fc8e564c64807ad633027bb168fd4fb37e`,
+and installer SHA-256
+`cd2f8f2c789a22efee1300e993827cfdb047f27cfb0b8f5dd7395fbafadef4c7`
+were rechecked on that VM. The package receipt's embedded
+`receiptSha256` is
+`0e3e22d30dd6bbfe5909c4666827fe06dc27d316d5c2cf21b72309ac0f32c356`.
+
+The operator run passed the same five function checks. The standard-user
+application process exited zero, and the separately verified 9063-byte 3MF
+had four vertices and four triangles, SHA-256
+`841eee5eb5df5ce1914d55152874c7a86e357dc0326b7c71cc75c5414e940645`.
+Retained `report.json` SHA-256 was
+`8b10f44b0541bced340d00ea22b03119df04109f4b01a339ed08c717071a25cc`.
+The persisted run result and terminal journal record cleanup as complete; a
+fresh provider list was empty. A later status request from Azure's SYSTEM
+context failed the run coordination check, so it is not claimed as an
+operator-bound `run status` success. The report remains
+`insufficientEvidence` for broader isolation. The agent-run unsupported-input
+control above is recorded separately from the human-approved positive run.
+
 ## Remaining integration
 
 Mixed report sets now combine the two concrete reporting consumers. Keep Bambu export and Notepad++ editing as distinct function columns; missing functions stay unmeasured. Research scripts and raw exploratory output are not production evidence and cannot be imported as successful retained runs. Add clean repetitions and control-fixture coverage before declaring the broader repeatability benchmark complete.

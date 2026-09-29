@@ -91,8 +91,7 @@ fn msi_lifecycle(msi: Option<&WsbMsiApplication>) -> RunLifecycleKind {
         RunLifecycleKind::Assessment
     }
 }
-const TRUST_DELTA_BAMBU: &str =
-    "installs and exports the approved Bambu Studio local 3MF scenario in Windows Sandbox";
+const TRUST_DELTA_BAMBU: &str = "installs the approved Bambu Studio EXE with an elevated token inside Windows Sandbox, then runs Bambu Studio, the fixed STL fixture, and local 3MF export as AiwStandardUser; no host export is automatic";
 const GUEST_TOOLS: &str = r"C:\AIW\Tools";
 const GUEST_OUTPUT: &str = r"C:\AIW\Output";
 const GUEST_AGENT: &str = r"C:\AIW\Tools\aiw-guest-agent.exe";
@@ -3272,6 +3271,8 @@ mod tests {
         );
         assert!(artifacts.receipt.msi.is_none());
         assert!(artifacts.receipt.bambu.is_some());
+        assert!(artifacts.run_plan.trust_deltas[0].contains("elevated token"));
+        assert!(artifacts.run_plan.trust_deltas[0].contains("AiwStandardUser"));
         assert!(matches!(
             artifacts.run_plan.actions[2],
             PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { .. }

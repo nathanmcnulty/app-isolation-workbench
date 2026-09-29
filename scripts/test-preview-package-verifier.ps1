@@ -48,9 +48,21 @@ function Assert-RejectedMessage([scriptblock]$Operation, [string]$Case, [string]
 }
 
 try {
-    New-Item -ItemType Directory -Path (Join-Path $root 'product') | Out-Null
+    $productRoot = Join-Path $root 'product\notepad-plus-plus'
+    New-Item -ItemType Directory -Path (Join-Path $productRoot 'tools') -Force | Out-Null
     Write-Utf8NoBom (Join-Path $root 'aiw.exe') 'fixed-cli-bytes'
-    Write-Utf8NoBom (Join-Path $root 'product\manifest.json') '{"fixed":true}'
+    Write-Utf8NoBom (Join-Path $productRoot 'project.yaml') 'fixed-project-bytes'
+    Write-Utf8NoBom (Join-Path $productRoot 'tools\aiw-guest-agent.exe') 'fixed-guest-bytes'
+    $manifest = [ordered]@{
+        schemaVersion = 'aiw.dev/admin-product-assets/v0alpha1'
+        productId = 'notepad-plus-plus-local-settings'
+        projectPath = 'project.yaml'
+        projectSha256 = (Get-FileHash -LiteralPath (Join-Path $productRoot 'project.yaml') -Algorithm SHA256).Hash.ToLowerInvariant()
+        guestAgentPath = 'tools/aiw-guest-agent.exe'
+        guestAgentSha256 = (Get-FileHash -LiteralPath (Join-Path $productRoot 'tools\aiw-guest-agent.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+        scenarioId = 'install-launch-close'
+    }
+    Write-Utf8NoBom (Join-Path $productRoot 'manifest.json') ($manifest | ConvertTo-Json -Depth 20)
     $records = @(Get-ChildItem -LiteralPath $root -Recurse -File | ForEach-Object {
         [ordered]@{
             path = [IO.Path]::GetRelativePath($root, $_.FullName).Replace('\', '/')
@@ -75,8 +87,18 @@ try {
     Write-Utf8NoBom (Join-Path $root 'receipt.json') ($receipt | ConvertTo-Json -Depth 20)
 
     $verified = & $verifier -PackageRoot $root -ReceiptSha256 $receiptSha256 | ConvertFrom-Json
-    if ($verified.exactInventory -ne $true -or $verified.filesVerified -ne 2) {
+    if ($verified.exactInventory -ne $true -or $verified.filesVerified -ne 4) {
         throw 'Preview package verifier did not confirm the valid fixture'
+    }
+    Push-Location -LiteralPath $root
+    try {
+        $relativeVerification = & $verifier -PackageRoot . -ReceiptSha256 $receiptSha256 | ConvertFrom-Json
+        if ($relativeVerification.exactInventory -ne $true -or $relativeVerification.filesVerified -ne 4) {
+            throw 'Preview package verifier did not resolve a relative package root from the PowerShell location'
+        }
+    }
+    finally {
+        Pop-Location
     }
     $windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     if (-not (Test-Path -LiteralPath $windowsPowerShell -PathType Leaf)) {
@@ -86,8 +108,17 @@ try {
         -File $verifier -PackageRoot $root -ReceiptSha256 $receiptSha256 | Out-String
     if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell preview package verification failed' }
     $windowsVerification = $windowsVerificationText | ConvertFrom-Json
-    if ($windowsVerification.exactInventory -ne $true -or $windowsVerification.filesVerified -ne 2) {
+    if ($windowsVerification.exactInventory -ne $true -or $windowsVerification.filesVerified -ne 4) {
         throw 'Windows PowerShell did not confirm the valid preview package fixture'
+    }
+    $windowsRelativeCommand = "Set-Location -LiteralPath '$($root.Replace("'", "''"))'; & '$($verifier.Replace("'", "''"))' -PackageRoot . -ReceiptSha256 '$receiptSha256'"
+    $windowsRelativeEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($windowsRelativeCommand))
+    $windowsRelativeText = & $windowsPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+        -EncodedCommand $windowsRelativeEncoded | Out-String
+    if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell relative-root preview package verification failed' }
+    $windowsRelativeVerification = $windowsRelativeText | ConvertFrom-Json
+    if ($windowsRelativeVerification.exactInventory -ne $true -or $windowsRelativeVerification.filesVerified -ne 4) {
+        throw 'Windows PowerShell did not resolve a relative package root from its PowerShell location'
     }
 
     $receiptPath = Join-Path $root 'receipt.json'
@@ -182,6 +213,78 @@ try {
     Remove-Item -LiteralPath (Join-Path $root 'unexpected.txt')
 
     Assert-Rejected { & $verifier -PackageRoot $root -ReceiptSha256 ('0' * 64) } 'a wrong independent receipt identity'
+
+    $tempPrefix = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+    $bambuRoot = [IO.Path]::GetFullPath((Join-Path $tempPrefix "aiw-bambu-verifier-$([guid]::NewGuid().ToString('N'))"))
+    if (-not $bambuRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Bambu verifier fixture escaped the temporary root'
+    }
+    try {
+        $bambuProduct = Join-Path $bambuRoot 'product\bambu-studio'
+        New-Item -ItemType Directory -Path (Join-Path $bambuProduct 'tools') -Force | Out-Null
+        Write-Utf8NoBom (Join-Path $bambuRoot 'aiw.exe') 'fixed-cli-bytes'
+        Write-Utf8NoBom (Join-Path $bambuProduct 'project.json') '{"fixed":"bambu"}'
+        Write-Utf8NoBom (Join-Path $bambuProduct 'tools\aiw-guest-agent.exe') 'fixed-guest-bytes'
+        $bambuManifest = [ordered]@{
+            schemaVersion = 'aiw.dev/admin-product-assets/v0alpha1'
+            productId = 'bambu-studio-export'
+            projectPath = 'project.json'
+            projectSha256 = (Get-FileHash -LiteralPath (Join-Path $bambuProduct 'project.json') -Algorithm SHA256).Hash.ToLowerInvariant()
+            guestAgentPath = 'tools/aiw-guest-agent.exe'
+            guestAgentSha256 = (Get-FileHash -LiteralPath (Join-Path $bambuProduct 'tools\aiw-guest-agent.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+            scenarioId = 'local-file-export'
+        }
+        Write-Utf8NoBom (Join-Path $bambuProduct 'manifest.json') ($bambuManifest | ConvertTo-Json -Depth 20)
+        $bambuRecords = @(Get-ChildItem -LiteralPath $bambuRoot -Recurse -File | ForEach-Object {
+            [ordered]@{
+                path = [IO.Path]::GetRelativePath($bambuRoot, $_.FullName).Replace('\', '/')
+                sizeBytes = $_.Length
+                sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+        } | Sort-Object { $_.path })
+        $bambuCore = [ordered]@{
+            schemaVersion = 'aiw.dev/preview-package-receipt/v0alpha1'
+            productId = 'bambu-studio-export'
+            files = $bambuRecords
+            receiptLast = $true
+        }
+        $bambuHash = Get-LowerSha256 (Get-CanonicalJsonBytes $bambuCore)
+        Write-Utf8NoBom (Join-Path $bambuRoot 'receipt.json') (([ordered]@{
+            schemaVersion = $bambuCore.schemaVersion
+            productId = $bambuCore.productId
+            files = $bambuCore.files
+            receiptLast = $true
+            receiptSha256 = $bambuHash
+        }) | ConvertTo-Json -Depth 20)
+        $bambuVerified = & $verifier -PackageRoot $bambuRoot -ReceiptSha256 $bambuHash | ConvertFrom-Json
+        if ($bambuVerified.exactInventory -ne $true -or $bambuVerified.filesVerified -ne 4) {
+            throw 'Bambu preview package fixture was not verified'
+        }
+        $bambuManifest.launchProfilePath = ''
+        Write-Utf8NoBom (Join-Path $bambuProduct 'manifest.json') ($bambuManifest | ConvertTo-Json -Depth 20)
+        $bambuRecords = @(Get-ChildItem -LiteralPath $bambuRoot -Recurse -File |
+            Where-Object { $_.Name -ne 'receipt.json' } | ForEach-Object {
+                [ordered]@{
+                    path = [IO.Path]::GetRelativePath($bambuRoot, $_.FullName).Replace('\', '/')
+                    sizeBytes = $_.Length
+                    sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+                }
+            } | Sort-Object { $_.path })
+        $bambuCore.files = $bambuRecords
+        $bambuHash = Get-LowerSha256 (Get-CanonicalJsonBytes $bambuCore)
+        Write-Utf8NoBom (Join-Path $bambuRoot 'receipt.json') (([ordered]@{
+            schemaVersion = $bambuCore.schemaVersion
+            productId = $bambuCore.productId
+            files = $bambuCore.files
+            receiptLast = $true
+            receiptSha256 = $bambuHash
+        }) | ConvertTo-Json -Depth 20)
+        Assert-RejectedMessage { & $verifier -PackageRoot $bambuRoot -ReceiptSha256 $bambuHash } `
+            'a present but empty Bambu launch profile' 'fixed contract'
+    }
+    finally {
+        Remove-Item -LiteralPath $bambuRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
     Write-Host 'Preview package verifier contract passed.' -ForegroundColor Green
 }
 finally {

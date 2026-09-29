@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "aiw.dev/admin-product-assets/v0alpha1",
+  "productId": "bambu-studio-export",
+  "projectPath": "project.json",
+  "projectSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "guestAgentPath": "tools/aiw-guest-agent.exe",
+  "scenarioId": "local-file-export",
+  "guestAgentSha256": "0000000000000000000000000000000000000000000000000000000000000000"
+}

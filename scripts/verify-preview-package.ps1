@@ -9,7 +9,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$root = [IO.Path]::GetFullPath($PackageRoot)
+$root = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($PackageRoot)
 $receiptPath = Join-Path $root 'receipt.json'
 
 function Get-CanonicalJsonBytes([object]$Value) {
@@ -44,7 +44,7 @@ if (($receiptItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
 
 $receipt = Get-Content -Raw -LiteralPath $receiptPath | ConvertFrom-Json
 if ($receipt.schemaVersion -ne 'aiw.dev/preview-package-receipt/v0alpha1' -or
-    $receipt.productId -ne 'notepad-plus-plus-local-settings' -or
+    $receipt.productId -notin @('notepad-plus-plus-local-settings', 'bambu-studio-export') -or
     $receipt.receiptLast -ne $true) {
     throw 'Package receipt does not match the supported preview contract'
 }
@@ -136,6 +136,37 @@ $actualPaths = @(Get-ChildItem -LiteralPath $root -Recurse -File -Force |
     Sort-Object)
 if ((ConvertTo-Json $actualPaths -Compress) -cne (ConvertTo-Json $recordPaths -Compress)) {
     throw 'Package inventory contains missing or unexpected files'
+}
+
+$isBambu = $receipt.productId -eq 'bambu-studio-export'
+$productDirectory = if ($isBambu) { 'bambu-studio' } else { 'notepad-plus-plus' }
+$projectFile = if ($isBambu) { 'project.json' } else { 'project.yaml' }
+$scenarioId = if ($isBambu) { 'local-file-export' } else { 'install-launch-close' }
+$productPath = Join-Path $root "product\$productDirectory"
+$manifestPath = Join-Path $productPath 'manifest.json'
+if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+    throw 'Selected product manifest is missing'
+}
+$manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+if ($manifest.schemaVersion -ne 'aiw.dev/admin-product-assets/v0alpha1' -or
+    $manifest.productId -cne $receipt.productId -or
+    $manifest.scenarioId -cne $scenarioId -or
+    $manifest.projectPath -cne $projectFile -or
+    $manifest.guestAgentPath -cne 'tools/aiw-guest-agent.exe' -or
+    ($isBambu -and ((@($manifest.PSObject.Properties.Name) -ccontains 'launchProfilePath') -or
+                    (@($manifest.PSObject.Properties.Name) -ccontains 'launchProfileSha256')))) {
+    throw 'Selected product manifest does not match its fixed contract'
+}
+$projectPath = Join-Path $productPath $projectFile
+$guestPath = Join-Path $productPath 'tools\aiw-guest-agent.exe'
+foreach ($asset in @(
+    @{ path = $projectPath; expected = [string]$manifest.projectSha256 },
+    @{ path = $guestPath; expected = [string]$manifest.guestAgentSha256 }
+)) {
+    if ($asset.expected -notmatch '^[0-9a-f]{64}$' -or
+        (Get-FileHash -LiteralPath $asset.path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $asset.expected) {
+        throw 'Selected product asset identity differs from its manifest'
+    }
 }
 
 [ordered]@{

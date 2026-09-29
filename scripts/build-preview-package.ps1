@@ -3,6 +3,8 @@ param(
     [Parameter(Mandatory)]
     [ValidateNotNullOrEmpty()]
     [string]$OutputDirectory,
+    [ValidateSet('NotepadPlusPlus', 'BambuStudioExport')]
+    [string]$Product = 'NotepadPlusPlus',
     [string]$GuestAgent,
     [string]$GuestAgentSha256,
     [string]$LaunchProfile,
@@ -12,20 +14,26 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$productRoot = Join-Path $repoRoot 'crates\aiw-cli\product\notepad-plus-plus'
+$isBambu = $Product -eq 'BambuStudioExport'
+$productDirectory = if ($isBambu) { 'bambu-studio' } else { 'notepad-plus-plus' }
+$productId = if ($isBambu) { 'bambu-studio-export' } else { 'notepad-plus-plus-local-settings' }
+$scenarioIdExpected = if ($isBambu) { 'local-file-export' } else { 'install-launch-close' }
+$projectFile = if ($isBambu) { 'project.json' } else { 'project.yaml' }
+$productRoot = Join-Path $repoRoot "crates\aiw-cli\product\$productDirectory"
 $buildTarget = if ([string]::IsNullOrWhiteSpace($env:CARGO_TARGET_DIR)) {
     Join-Path $repoRoot 'target'
 } else {
     [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR)
 }
 $cliSource = Join-Path $buildTarget 'release\aiw.exe'
-$projectSource = Join-Path $productRoot 'project.yaml'
+$projectSource = Join-Path $productRoot $projectFile
 $manifestSource = Join-Path $productRoot 'manifest.json'
-$readmeTemplate = Join-Path $repoRoot 'packaging\preview\README.txt'
+$readmeFile = if ($isBambu) { 'packaging\preview\README-bambu.txt' } else { 'packaging\preview\README.txt' }
+$readmeTemplate = Join-Path $repoRoot $readmeFile
 $verifierSource = Join-Path $PSScriptRoot 'verify-preview-package.ps1'
 $licenseSource = Join-Path $repoRoot 'LICENSE'
 $output = [IO.Path]::GetFullPath($OutputDirectory)
-$packagedProductRoot = Join-Path $output 'product\notepad-plus-plus'
+$packagedProductRoot = Join-Path $output "product\$productDirectory"
 $targetTriple = 'x86_64-pc-windows-msvc'
 
 function Write-Utf8NoBom([string]$Path, [string]$Text) {
@@ -90,8 +98,8 @@ foreach ($path in @($projectSource, $manifestSource, $readmeTemplate, $verifierS
 }
 $archive = if ([string]::IsNullOrWhiteSpace($ArchivePath)) { $null } else { [IO.Path]::GetFullPath($ArchivePath) }
 if ($archive) {
-    if (-not $GuestAgent -or -not $LaunchProfile) {
-        throw 'Clean-host archive assembly requires an independently retained guest agent and validated launch profile'
+    if (-not $GuestAgent -or (-not $isBambu -and -not $LaunchProfile)) {
+        throw 'Clean-host archive assembly requires an independently retained guest agent and, for Notepad++, a validated launch profile'
     }
     if (Test-Path -LiteralPath $archive) { throw "Archive already exists; choose a new path: $archive" }
     if (Test-Path -LiteralPath "$archive.json") { throw "Distribution manifest already exists: $archive.json" }
@@ -164,10 +172,12 @@ try {
     Assert-StaticX64Pe $cliSource 'aiw CLI artifact'
 
     $manifest = Get-Content -Raw -LiteralPath $manifestSource | ConvertFrom-Json
-    if ($manifest.schemaVersion -ne 'aiw.dev/admin-product-assets/v0alpha1' -or $manifest.productId -notlike 'notepad-plus-plus-*') {
-        throw 'product manifest is not the supported Notepad++ contract'
+    if ($manifest.schemaVersion -ne 'aiw.dev/admin-product-assets/v0alpha1' -or $manifest.productId -cne $productId -or
+        $manifest.scenarioId -cne $scenarioIdExpected) {
+        throw 'product manifest is not the selected fixed contract'
     }
     if ($null -ne $LaunchProfile -xor $null -ne $LaunchProfileSha256) { throw 'LaunchProfile and LaunchProfileSha256 must be supplied together' }
+    if ($isBambu -and $LaunchProfile) { throw 'Bambu export assessment does not accept a launch profile' }
     $profileSource = $null
     if ($LaunchProfile) {
         $profileSource = [IO.Path]::GetFullPath($LaunchProfile)
@@ -184,7 +194,7 @@ try {
     New-Item -ItemType Directory -Path (Join-Path $packagedProductRoot 'tools') -Force:$false | Out-Null
     Copy-Item -LiteralPath $cliSource -Destination (Join-Path $output 'aiw.exe')
     Copy-Item -LiteralPath $guestSource -Destination (Join-Path $packagedProductRoot 'tools\aiw-guest-agent.exe')
-    Copy-Item -LiteralPath $projectSource -Destination (Join-Path $packagedProductRoot 'project.yaml')
+    Copy-Item -LiteralPath $projectSource -Destination (Join-Path $packagedProductRoot $projectFile)
     Copy-Item -LiteralPath $verifierSource -Destination (Join-Path $output 'verify-preview-package.ps1')
     Copy-Item -LiteralPath $licenseSource -Destination (Join-Path $output 'LICENSE')
     if ($profileSource) {
@@ -196,12 +206,13 @@ try {
         $profile = Get-Content -Raw -LiteralPath $packagedProfile | ConvertFrom-Json
     }
 
-    $manifest.projectPath = 'project.yaml'
+    $manifest.projectPath = $projectFile
     $manifest.guestAgentPath = 'tools/aiw-guest-agent.exe'
-    $manifest.projectSha256 = (Get-FileHash -LiteralPath (Join-Path $packagedProductRoot 'project.yaml') -Algorithm SHA256).Hash.ToLowerInvariant()
+    $manifest.projectSha256 = (Get-FileHash -LiteralPath (Join-Path $packagedProductRoot $projectFile) -Algorithm SHA256).Hash.ToLowerInvariant()
     $manifest.guestAgentSha256 = (Get-FileHash -LiteralPath (Join-Path $packagedProductRoot 'tools\aiw-guest-agent.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
-    $compiledText = & (Join-Path $output 'aiw.exe') provider compile-msi-scenario `
-        --project (Join-Path $packagedProductRoot 'project.yaml') --scenario ([string]$manifest.scenarioId) | Out-String
+    $compileCommand = if ($isBambu) { 'compile-bambu-export-scenario' } else { 'compile-msi-scenario' }
+    $compiledText = & (Join-Path $output 'aiw.exe') provider $compileCommand `
+        --project (Join-Path $packagedProductRoot $projectFile) --scenario ([string]$manifest.scenarioId) | Out-String
     if ($LASTEXITCODE -ne 0) { throw 'packaged fixed scenario compilation failed' }
     $compiled = $compiledText | ConvertFrom-Json
     if ($profileSource) {
@@ -219,13 +230,19 @@ try {
     }
     Write-Utf8NoBom (Join-Path $packagedProductRoot 'manifest.json') ($manifest | ConvertTo-Json -Depth 20)
 
-    $workflowDescription = if ($profileSource) {
+    $workflowDescription = if ($isBambu) {
+        'the recorded Bambu Studio 02.08.02.60 x64 EXE in Windows Sandbox, using the packaged fixed STL-to-3MF export project and guest agent.'
+    }
+    elseif ($profileSource) {
         'the recorded Notepad++ 8.9.8 x64 MSI in Windows Sandbox, using the packaged fixed project, guest agent, and validated local-settings replay profile.'
     }
     else {
         'the recorded Notepad++ 8.9.8 x64 MSI in Windows Sandbox, using the packaged fixed project and guest agent without a validated replay profile.'
     }
-    $profileBoundary = if ($profileSource) {
+    $profileBoundary = if ($isBambu) {
+        'This package supports the fixed export assessment only; it is not a profile-bound adaptation or reusable launch package.'
+    }
+    elseif ($profileSource) {
         'This package is bound to the included validated replay profile.'
     }
     else {

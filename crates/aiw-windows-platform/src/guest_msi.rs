@@ -26,15 +26,17 @@ use windows::Win32::Foundation::{
 };
 use windows::Win32::Security::{TOKEN_DUPLICATE, TOKEN_QUERY};
 use windows::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    AssignProcessToJobObject, CreateJobObjectW, IsProcessInJob, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-    JobObjectBasicAccountingInformation, JobObjectExtendedLimitInformation,
-    QueryInformationJobObject, SetInformationJobObject, TerminateJobObject,
+    JobObjectBasicAccountingInformation, JobObjectBasicProcessIdList,
+    JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
+    TerminateJobObject,
 };
 use windows::Win32::System::Threading::{
     CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, GetCurrentThreadId,
-    GetExitCodeProcess, GetExitCodeThread, OpenProcessToken, PROCESS_INFORMATION, ResumeThread,
-    STARTUPINFOW, TerminateProcess, WaitForSingleObject,
+    GetExitCodeProcess, GetExitCodeThread, OpenProcess, OpenProcessToken, PROCESS_INFORMATION,
+    PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
+    ResumeThread, STARTUPINFOW, TerminateProcess, WaitForSingleObject,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumChildWindows, EnumWindows, GetClassNameW, GetWindowThreadProcessId, IsWindowVisible,
@@ -1371,6 +1373,14 @@ impl GuestProcess {
         self.process_id
     }
 
+    pub(crate) fn active_processes(&self) -> Result<u32, GuestMsiExecutionError> {
+        self.job.active_processes()
+    }
+
+    pub(crate) fn diagnostic_processes(&self) -> Result<String, GuestMsiExecutionError> {
+        self.job.diagnostic_processes()
+    }
+
     pub(crate) fn collect_token(&self) -> Result<TokenEvidence, GuestMsiExecutionError> {
         collect_process_token(self.process.as_handle()).map_err(|error| {
             GuestMsiExecutionError::Process(format!(
@@ -1695,6 +1705,16 @@ struct ScenarioJob {
     handle: OwnedHandle,
 }
 
+const MAX_DIAGNOSTIC_JOB_PIDS: usize = 64;
+const MAX_REPORTED_JOB_PIDS: usize = 16;
+
+#[repr(C)]
+struct DiagnosticJobPidList {
+    assigned: u32,
+    returned: u32,
+    pids: [usize; MAX_DIAGNOSTIC_JOB_PIDS],
+}
+
 impl ScenarioJob {
     fn create() -> Result<Self, GuestMsiExecutionError> {
         let handle = unsafe { CreateJobObjectW(None, PCWSTR::null()) }.map_err(|error| {
@@ -1736,6 +1756,83 @@ impl ScenarioJob {
             GuestMsiExecutionError::Process(format!("QueryInformationJobObject failed: {error}"))
         })?;
         Ok(accounting.ActiveProcesses)
+    }
+
+    fn diagnostic_processes(&self) -> Result<String, GuestMsiExecutionError> {
+        let mut list = DiagnosticJobPidList {
+            assigned: 0,
+            returned: 0,
+            pids: [0; MAX_DIAGNOSTIC_JOB_PIDS],
+        };
+        unsafe {
+            QueryInformationJobObject(
+                Some(self.raw()),
+                JobObjectBasicProcessIdList,
+                (&mut list as *mut DiagnosticJobPidList).cast(),
+                std::mem::size_of::<DiagnosticJobPidList>() as u32,
+                None,
+            )
+        }
+        .map_err(|error| {
+            GuestMsiExecutionError::Process(format!(
+                "query bounded guest job process IDs failed: {error}"
+            ))
+        })?;
+        if list.returned as usize > MAX_DIAGNOSTIC_JOB_PIDS {
+            return Err(GuestMsiExecutionError::Process(
+                "guest job returned more process IDs than the supplied buffer".to_owned(),
+            ));
+        }
+        let mut entries = Vec::new();
+        for &pid in list.pids[..(list.returned as usize).min(MAX_REPORTED_JOB_PIDS)].iter() {
+            let Ok(pid) = u32::try_from(pid) else {
+                entries.push("invalid PID".to_owned());
+                continue;
+            };
+            let image = self.diagnostic_process_image(pid);
+            entries.push(format!("{pid}:{image}"));
+        }
+        Ok(format!(
+            "assigned={}, returned={}, images=[{}]",
+            list.assigned,
+            list.returned,
+            entries.join(", ")
+        ))
+    }
+
+    fn diagnostic_process_image(&self, pid: u32) -> String {
+        let process = match unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) } {
+            Ok(process) => unsafe { OwnedHandle::from_raw_handle(process.0) },
+            Err(_) => return "unavailable".to_owned(),
+        };
+        let mut belongs_to_job = windows::core::BOOL::default();
+        if unsafe { IsProcessInJob(raw_handle(&process), Some(self.raw()), &mut belongs_to_job) }
+            .is_err()
+            || !belongs_to_job.as_bool()
+        {
+            return "no longer in job".to_owned();
+        }
+        let mut path = [0u16; 1024];
+        let mut len = path.len() as u32;
+        if unsafe {
+            QueryFullProcessImageNameW(
+                raw_handle(&process),
+                PROCESS_NAME_WIN32,
+                PWSTR(path.as_mut_ptr()),
+                &mut len,
+            )
+        }
+        .is_err()
+        {
+            return "image unavailable".to_owned();
+        }
+        let path = String::from_utf16_lossy(&path[..len as usize]);
+        path.rsplit(['\\', '/'])
+            .next()
+            .unwrap_or("image unavailable")
+            .chars()
+            .take(96)
+            .collect()
     }
 
     fn terminate_and_verify_empty(&self) -> Result<(), GuestMsiExecutionError> {
@@ -1835,6 +1932,16 @@ fn wide_os(value: &OsStr) -> Result<Vec<u16>, GuestMsiExecutionError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bounded_job_diagnostic_reads_an_empty_job() {
+        let job = ScenarioJob::create().expect("create empty diagnostic job");
+        assert_eq!(
+            job.diagnostic_processes()
+                .expect("query empty job process IDs"),
+            "assigned=0, returned=0, images=[]"
+        );
+    }
 
     fn fixed_exercise() -> FixedDocumentExercise {
         FixedDocumentExercise {
