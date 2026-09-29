@@ -25,8 +25,10 @@ The fixed Bambu package and administrator route are implemented. Exact
 VM: installation, fixed STL preparation, 3MF export, artifact collection and
 geometry verification all passed. Recorded cleanup and a fresh empty provider
 list were verified. The result remains `insufficientEvidence` for broader
-isolation. Hosted CI is pending. Next: complete checks, then obtain a separate
-human-approved operator run and negative control before promoting this entry.
+isolation. An agent-run unsupported-input control rejected before intake or
+provider acquisition. Hosted CI is pending. Next: complete checks, then obtain
+a separate human-approved operator run and negative control before promoting
+this entry.
 [BAMBU-STUDIO-PROFILE.md](BAMBU-STUDIO-PROFILE.md) records the exact evidence;
 [BAMBU-ADMIN-ENTRY.md](BAMBU-ADMIN-ENTRY.md) defines the acceptance gates.
 Do not infer general compatibility from either fixed workflow. See

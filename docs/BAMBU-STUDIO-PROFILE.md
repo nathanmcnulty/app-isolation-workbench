@@ -237,6 +237,15 @@ untested Bambu workflows. This development run does not replace the independent
 human-approved trial and negative control required by
 [BAMBU-ADMIN-ENTRY.md](BAMBU-ADMIN-ENTRY.md).
 
+An agent-run visible-terminal negative control used the package's actual
+`README.txt` as the installer. Run `admin-1790640444416640100` under
+`C:\AIW-Bambu-Agent-Negative-9a635c5-b` rejected the `.txt` source before
+protected intake or provider acquisition; retained `installer-rejection.json`
+SHA-256 was
+`50fc39bd7368d15e948719784f184365593a86a8d101d1d2c3125f37a0a410b6`.
+A fresh provider query remained empty. This verifies the development preflight
+boundary, but is not the separate operator control required for promotion.
+
 ## Remaining integration
 
 Mixed report sets now combine the two concrete reporting consumers. Keep Bambu export and Notepad++ editing as distinct function columns; missing functions stay unmeasured. Research scripts and raw exploratory output are not production evidence and cannot be imported as successful retained runs. Add clean repetitions and control-fixture coverage before declaring the broader repeatability benchmark complete.
