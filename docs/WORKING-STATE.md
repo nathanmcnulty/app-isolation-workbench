@@ -21,14 +21,15 @@ Updated 2026-09-28. This is a compact handoff, not a run receipt or authorizatio
 ## Next coherent slice
 
 The fixed Bambu package and administrator route are implemented. Exact
-`9a635c5` source passed an agent-approved development replay on the separate
-VM: installation, fixed STL preparation, 3MF export, artifact collection and
-geometry verification all passed. Recorded cleanup and a fresh empty provider
-list were verified. The result remains `insufficientEvidence` for broader
-isolation. An agent-run unsupported-input control rejected before intake or
-provider acquisition. Hosted CI is pending. Next: complete checks, then obtain
-a separate human-approved operator run and negative control before promoting
-this entry.
+`9a635c5` source passed an agent-approved development replay and a separate
+human-approved operator run on the dedicated VM. Both passed installation,
+fixed STL preparation, 3MF export, collection, and geometry verification.
+The operator run retained a terminal result with cleanup complete; a fresh
+provider query was empty. An agent-run unsupported-input control rejected
+before intake or provider acquisition. Both hosted PR checks passed. The
+result remains `insufficientEvidence` for broader isolation. Next: promote
+PR #74 after final checks, then advance to the next roadmap slice without
+broad compatibility claims.
 [BAMBU-STUDIO-PROFILE.md](BAMBU-STUDIO-PROFILE.md) records the exact evidence;
 [BAMBU-ADMIN-ENTRY.md](BAMBU-ADMIN-ENTRY.md) defines the acceptance gates.
 Do not infer general compatibility from either fixed workflow. See

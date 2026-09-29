@@ -243,8 +243,37 @@ An agent-run visible-terminal negative control used the package's actual
 protected intake or provider acquisition; retained `installer-rejection.json`
 SHA-256 was
 `50fc39bd7368d15e948719784f184365593a86a8d101d1d2c3125f37a0a410b6`.
-A fresh provider query remained empty. This verifies the development preflight
-boundary, but is not the separate operator control required for promotion.
+A fresh provider query remained empty. This agent-run control verifies the
+rejection boundary for the acceptance cohort; it does not substitute for the
+human approval of the positive run.
+
+On the same dedicated VM, the second operator reviewed the recipe and entered
+the exact displayed plan hash for fresh run `admin-1790641748201368500` under
+`C:\AIW-Bambu-Operator-Evidence-9a635c5`. The retained approval records
+`nathanmcnulty` and plan hash
+`fce5a3908d613ee2e086b726d88862ebc9a4c0d75a2519659fcb6eb25dbf706e`.
+The same exact `9a635c5` archive SHA-256
+`23fcfa10286299bf53e011a819b46c1f85960c696af95dc807e5bbe39025fa70`,
+packaged verifier SHA-256
+`af11c06facc09346fd1648326709b3fc8e564c64807ad633027bb168fd4fb37e`,
+and installer SHA-256
+`cd2f8f2c789a22efee1300e993827cfdb047f27cfb0b8f5dd7395fbafadef4c7`
+were rechecked on that VM. The package receipt's embedded
+`receiptSha256` is
+`0e3e22d30dd6bbfe5909c4666827fe06dc27d316d5c2cf21b72309ac0f32c356`.
+
+The operator run passed the same five function checks. The standard-user
+application process exited zero, and the separately verified 9063-byte 3MF
+had four vertices and four triangles, SHA-256
+`841eee5eb5df5ce1914d55152874c7a86e357dc0326b7c71cc75c5414e940645`.
+Retained `report.json` SHA-256 was
+`8b10f44b0541bced340d00ea22b03119df04109f4b01a339ed08c717071a25cc`.
+The persisted run result and terminal journal record cleanup as complete; a
+fresh provider list was empty. A later status request from Azure's SYSTEM
+context failed the run coordination check, so it is not claimed as an
+operator-bound `run status` success. The report remains
+`insufficientEvidence` for broader isolation. The agent-run unsupported-input
+control above is recorded separately from the human-approved positive run.
 
 ## Remaining integration
 
