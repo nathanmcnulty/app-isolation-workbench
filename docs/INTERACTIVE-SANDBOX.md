@@ -29,8 +29,8 @@ retains at most the final 64 KiB as `output/guest-msi-install-unverified.log`.
 This raw diagnostic tail is untrusted, may be truncated, and is not a verified
 application result or export artifact. Installation failures identify the
 process and deadline and report whether log retention succeeded. Historical
-v0alpha8 transfer records keep their original 120-second contract. A new
-successful operator trial is still required.
+v0alpha8 transfer records keep their original 120-second contract. The corrected
+administrator entry's operator trial is recorded below.
 
 ### Administrator preview development proof, 2026-10-01
 
@@ -62,8 +62,39 @@ A second export refused overwrite and left the bytes unchanged; an operator
 provider query returned an empty list. Export evidence is retained at
 `C:\AIW-Export-Fix-Static-20261001` on the VM. The local runner suite passed
 108 tests (4 ignored), focused transfer tests passed, and formatting, Clippy,
-and governance passed. Original-source hosted CI passed; the final export fix
-still requires its own integration checks and independent operator trial.
+and governance passed. Hosted `Verify and audit` and `Minimum supported Rust`
+passed at corrected source `30231bb` before the independent operator trial.
+
+### Corrected administrator entry: operator acceptance, 2026-10-01
+
+Nathan approved the exact recipe as `nathanmcnulty` and reported completing the
+desktop trial on the dedicated VM. Preview `30231bb` completed public-entry run
+`admin-1790878302241975300`: successful MSI install, observed standard-user
+editor, normal close, verified document transfer, retained interactive report,
+and exact-session cleanup. The approval binds plan
+`f1c84aa4110cff2478929751bc08f86f04bf96d7cdaf02dc8844179a99134a21`.
+The guest token was medium integrity, non-elevated, with Administrators disabled.
+
+The unchanged original is 164 bytes, SHA-256
+`2260bf2ae8f247c75a30e058aace7a43cc4c030dbc050339919f86a6e5c64db8`.
+The saved output adds a separate final line `Edited and saved by Nathan`; its
+192 bytes hash to
+`8b3c443a776f5ddb1e646d5f2d2ab8f9691a81fc5e80319de6ac372beffe38a6`.
+The separately invoked explicit export reverified receipt
+`0f3baaacbd86045ace8c12f0db3e9f2695ba6397e5da4bd93747d7625535e69c`
+and copied those exact bytes. A second export refused overwrite and preserved
+the file. The original input hash stayed unchanged, and a fresh provider list
+under `aiwoperator` was empty.
+
+Retained VM evidence: `C:\AIW-Interactive-Evidence-30231bb` (approved execution
+and report) and `C:\AIW-Human-Export-30231bb` (explicit export, refusal control,
+original-input check, and provider query). The exported document is
+`C:\AIW-Human-Export-30231bb\edited-document.txt`. The exact archive SHA-256 is
+`787bfa27305a29117a83d454ba0aab140efbfcb579cd397fc0c82576924ed0ac`;
+its verifier checked all eight payload records and exact inventory before
+launch. This closes the corrected administrator document-transfer benchmark
+for this unsigned preview. It does not establish general MSI compatibility,
+publisher authenticity, or an inner application isolation boundary.
 
 The fixed interactive profile installs Notepad++ inside a disposable Windows Sandbox and opens a blank editor as `AiwStandardUser` with a verified medium-integrity token. Close the editor normally when finished. Its approved lifetime starts after the exact application window and token are observed; expiration terminates the process job, verifies cleanup, and records an unsuccessful attempt. An unsaved-document prompt does not extend the deadline.
 

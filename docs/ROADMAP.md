@@ -40,10 +40,15 @@ answer a documented workflow failure or a claim the next release actually makes.
 The [Bambu administrator entry acceptance boundary](BAMBU-ADMIN-ENTRY.md)
 selected its existing fixed local export as the second product path. Its exact
 operator trial is recorded in [BAMBU-STUDIO-PROFILE.md](BAMBU-STUDIO-PROFILE.md);
-it does not establish general EXE compatibility. The next packaging slice
-exposes the already verified bounded Notepad++ interactive document transfer
-through an administrator entry, with a separate package identity and an
-explicit export step. A clean-host trial of that entry is still required.
+it does not establish general EXE compatibility. The bounded Notepad++
+interactive document-transfer administrator entry now has its own package
+identity and a completed clean-host operator trial at exact preview `30231bb`.
+Approval, human edit/save/close, retained reporting, explicit export, refusal
+to overwrite, original-input preservation, and cleanup are recorded in
+[interactive operator acceptance](INTERACTIVE-SANDBOX.md#corrected-administrator-entry-operator-acceptance-2026-10-01).
+The next usability slice should make long installation waits and expected
+export refusals understandable, with concise default guidance and optional
+details. Preserve complete approval review and receipt-based conclusions.
 Public distribution also needs a publisher-authentication and signing decision;
 the present package is an unsigned development preview.
 

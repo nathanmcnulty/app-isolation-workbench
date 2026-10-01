@@ -20,35 +20,22 @@ Updated 2026-10-01. This is a compact handoff, not a run receipt or authorizatio
 
 ## Next coherent slice
 
-The fixed Bambu administrator path is merged. Exact `9a635c5` source passed
-an agent-approved development replay and separate human-approved VM run
-`admin-1790641748201368500`; installation, STL preparation, 3MF export,
-collection, geometry verification, terminal cleanup, and a fresh empty
-provider list were recorded. An agent-run unsupported-input control rejected
-before intake. The outcome remains `insufficientEvidence` for broader
-isolation. See [BAMBU-STUDIO-PROFILE.md](BAMBU-STUDIO-PROFILE.md).
+The corrected interactive administrator preview `30231bb` completed its
+independent operator trial, run `admin-1790878302241975300`. Exact approval,
+Notepad++ install/open/edit/save/close, standard-user token, retained transfer
+report, explicit export, original-input preservation, overwrite refusal, and
+cleanup passed. The exported 192-byte document contains Nathan's added final
+line. An operator-scoped provider query was empty. Exact executable-source
+hosted checks passed; verify PR #75's exact-head checks and merge state before
+resuming. See [INTERACTIVE-SANDBOX.md](INTERACTIVE-SANDBOX.md).
 
-Current branch `codex/admin-interactive-launch` adds a separate fixed
-Notepad++ document-transfer administrator entry and package identity. Local
-CLI tests, governance, verifier contract, and unarchived package assembly
-passed. Operator run `admin-1790840111071516800` on preview `88ec2d7`
-failed before the editor appeared, with a generic process timeout consistent
-with the old 120-second installation deadline. Cleanup passed; a fresh
-read-only provider query found no active sessions. Source `3175ad1` versions
-the transfer installation contract, retains bounded MSI diagnostics, and
-corrects failed-transfer reporting; its hosted CI passed. Agent development
-run `dev-interactive-3175ad1e` visibly opened Notepad++ on the VM and passed
-edit/save/close, receipt-bound transfer, and exact cleanup. Export exposed a
-guest-output ownership assumption; the held ordinary-artifact reader fix
-passed retained-output export and overwrite refusal on the VM. The operator's
-provider list was empty afterward. Focused transfer tests, all 108 runner
-tests, formatting, Clippy, and governance passed. Stage the corrected preview
-for the independent operator trial; agent development proof does not replace it.
-It reuses the existing interactive transfer/report/export primitives and
-requires visible exact-plan approval and explicit output export. Do not infer
-general compatibility from either fixed workflow. See
-[INTERACTIVE-SANDBOX.md](INTERACTIVE-SANDBOX.md), [ROADMAP.md](ROADMAP.md),
-and [RELEASE-GATES.md](RELEASE-GATES.md).
+Next: improve administrator usability around long installation waits and
+expected export refusals, using concise guidance with optional details while
+preserving complete approval review and receipt-bound results. Public release
+also needs a publisher-authentication/signing decision. Generic installer
+conversion and broader isolation claims remain outside this preview's proof.
+Follow [ROADMAP.md](ROADMAP.md) and [RELEASE-GATES.md](RELEASE-GATES.md); do not
+repeat successful installation merely to change reports or guidance.
 
 ## Read only what the slice needs
 
