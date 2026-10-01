@@ -31,7 +31,10 @@ hosted checks passed and PR #75 merged. See [INTERACTIVE-SANDBOX.md](INTERACTIVE
 The current usability slice adds post-approval elapsed waiting, shorter
 interactive summaries, optional export summaries, and distinct destination,
 evidence, and console-output failures. Full approval review and receipt-bound
-results remain intact. See INTERACTIVE-SANDBOX.md for behavior and validation.
+results remain intact. PR #77 carries this slice. The exact `2c264d1` static
+preview passed separate-host retained export checks in both formats; overwrite
+refusal and original-input preservation passed. No new installation was run.
+See INTERACTIVE-SANDBOX.md for behavior and validation.
 Next: assess remaining preview release gates, especially publisher identity
 and the simplest end-to-end administrator entry. Public release
 also needs a publisher-authentication/signing decision. Generic installer
