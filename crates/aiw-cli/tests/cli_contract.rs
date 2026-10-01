@@ -48,6 +48,67 @@ fn aiw() -> PathBuf {
 }
 
 #[test]
+#[cfg(windows)]
+fn admin_export_rejects_missing_package_and_guest_drift_before_destination_creation() {
+    let temp = TempDir::new();
+    let executable = temp.path().join("aiw.exe");
+    fs::copy(aiw(), &executable).unwrap();
+    let destination = temp.path().join("export.txt");
+    let invoke = |format: &str| {
+        Command::new(&executable)
+            .args(["admin", "export-document", "--workspace"])
+            .arg(temp.path().join("missing-workspace"))
+            .args(["--run-id", "run-one", "--destination"])
+            .arg(&destination)
+            .args(["--format", format])
+            .output()
+            .unwrap()
+    };
+    let output = invoke("summary");
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .starts_with("Export stopped:")
+    );
+    assert!(!destination.exists());
+
+    let assets = temp.path().join("product/notepad-plus-plus-interactive");
+    fs::create_dir_all(assets.join("tools")).unwrap();
+    let project = include_bytes!("../product/notepad-plus-plus-interactive/project.yaml");
+    fs::write(assets.join("project.yaml"), project).unwrap();
+    fs::copy(aiw(), assets.join("tools/agent.exe")).unwrap();
+    let manifest = serde_json::json!({
+        "schemaVersion": "aiw.dev/admin-product-assets/v0alpha1",
+        "productId": "notepad-plus-plus-interactive",
+        "scenarioId": "install-launch-close",
+        "projectPath": "project.yaml",
+        "projectSha256": hex::encode(Sha256::digest(project)),
+        "guestAgentPath": "tools/agent.exe",
+        "guestAgentSha256": "a".repeat(64)
+    });
+    fs::write(
+        assets.join("manifest.json"),
+        serde_json::to_vec(&manifest).unwrap(),
+    )
+    .unwrap();
+    let output = invoke("json");
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(error["code"], "AIW_WSB_EXPORT_FAILED");
+    assert_eq!(error["runId"], "run-one");
+    assert!(
+        error["detail"]
+            .as_str()
+            .unwrap()
+            .contains("guest agent bytes do not match")
+    );
+    assert!(!destination.exists());
+    assert!(!temp.path().join("missing-workspace").exists());
+}
+
+#[test]
 fn export_preflight_failure_identifies_export_and_creates_no_destination() {
     let temp = TempDir::new();
     let destination = temp.path().join("export.txt");

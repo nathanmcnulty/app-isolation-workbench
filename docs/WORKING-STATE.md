@@ -39,7 +39,11 @@ The exact `738ea6e` preview also completed Nathan's fresh approved run
 `admin-1790887375232888400`, with a 225-byte edited export and verified cleanup.
 The verifier succeeded; a handoff's stale `$LASTEXITCODE` check falsely reported
 failure. In-process PowerShell callers now use throws/structured results, and
-the verifier regression covers inherited nonzero native codes in both shells.
+the verifier regression covers unset and inherited nonzero native codes in both shells.
+The packaged `admin export-document` entry supplies checked project/guest
+identities and defaults to a short summary. It keeps the runner's receipt,
+cleanup, original-owner, and destination checks. Its retained-run validation
+will be recorded in INTERACTIVE-SANDBOX.md; no installer rerun is needed for export.
 Next: assess remaining preview release gates, especially publisher identity
 and the simplest end-to-end administrator entry. Public release
 also needs a publisher-authentication/signing decision. Generic installer

@@ -46,9 +46,14 @@ identity and a completed clean-host operator trial at exact preview `30231bb`.
 Approval, human edit/save/close, retained reporting, explicit export, refusal
 to overwrite, original-input preservation, and cleanup are recorded in
 [interactive operator acceptance](INTERACTIVE-SANDBOX.md#corrected-administrator-entry-operator-acceptance-2026-10-01).
-The next usability slice should make long installation waits and expected
-export refusals understandable, with concise default guidance and optional
-details. Preserve complete approval review and receipt-based conclusions.
+Installation waits, concise completion/export summaries, and actionable export
+refusals are implemented. The exact `738ea6e` preview completed a fresh approved
+human edit/save/export run with independently reverified retained output and
+cleanup. The packaged administrator export entry removes project/hash flags;
+its release validation uses that retained run rather than repeating installation.
+Keep the next preview work focused on a self-contained operator handoff and
+authenticated distribution. Preserve complete approval review and receipt-based
+conclusions; do not reopen completed execution gates to improve presentation.
 Public distribution also needs a publisher-authentication and signing decision;
 the present package is an unsigned development preview.
 

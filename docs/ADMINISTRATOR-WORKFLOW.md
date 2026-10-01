@@ -35,6 +35,20 @@ format does not shorten that trust-boundary review.
 
 ## Public-entry proof
 
+### Packaged interactive export contract
+
+`aiw admin export-document --workspace <retained-workspace> --run-id <exact-run-id>
+--destination <new-absolute-file>` uses the interactive product packaged beside
+the executable. The default output is a short summary; `--format json` preserves
+the detailed export result. The operator supplies no project path or guest hash.
+The package must contain the fixed interactive manifest, matching project and
+guest bytes, and no launch profile. The existing runner re-verifies the retained
+receipt, transfer artifact, original workspace ownership, and recorded cleanup
+before create-new export. Package drift, a wrong run, incomplete evidence,
+overwrite, and workspace/reparse destinations must fail closed. This command
+does not acquire or recover Sandbox, install anything, or repeat approval.
+The lower-level `run export-wsb-msi-document` remains available for advanced use.
+
 The profile-bound preview package completed this exact public route on
 2026-09-20. Operator approval was recorded for run
 `admin-1789947096248087800`; Windows Sandbox installed the exact supported MSI,

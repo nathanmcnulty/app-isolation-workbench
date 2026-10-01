@@ -142,6 +142,17 @@ enum AdminCommand {
         #[arg(long, value_enum, default_value_t = AdminOutputFormat::Summary)]
         format: AdminOutputFormat,
     },
+    /// Export a verified document using this package's fixed interactive assets.
+    ExportDocument {
+        #[arg(long)]
+        workspace: PathBuf,
+        #[arg(long)]
+        run_id: String,
+        #[arg(long)]
+        destination: PathBuf,
+        #[arg(long, value_enum, default_value_t = AdminOutputFormat::Summary)]
+        format: AdminOutputFormat,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -1249,6 +1260,9 @@ fn main() -> ExitCode {
             } | AdminCommand::LaunchDocument {
                 format: AdminOutputFormat::Summary,
                 ..
+            } | AdminCommand::ExportDocument {
+                format: AdminOutputFormat::Summary,
+                ..
             }
         }) | Command::Run(RunArgs {
             command: RunCommand::ExportWsbMsiDocument {
@@ -1273,6 +1287,21 @@ fn main() -> ExitCode {
 fn run(command: Command) -> Result<()> {
     match command {
         Command::Admin(args) => match args.command {
+            AdminCommand::ExportDocument {
+                workspace,
+                run_id,
+                destination,
+                format,
+            } => {
+                let export = admin_workflow::export_document(&workspace, &run_id, &destination)?;
+                let output = match format {
+                    AdminOutputFormat::Json => write_json(&export),
+                    AdminOutputFormat::Summary => {
+                        write_document_export_summary(&mut io::stdout(), &export)
+                    }
+                };
+                output.map_err(|error| document_export_output_error(&run_id, error))
+            }
             AdminCommand::Assess {
                 product,
                 installer,
@@ -2764,7 +2793,6 @@ fn document_export_error(run_id: &str, source: RunnerError) -> anyhow::Error {
     })
 }
 
-#[cfg(any(windows, test))]
 fn document_export_output_error(run_id: &str, error: anyhow::Error) -> anyhow::Error {
     anyhow!(AiwError {
         code: "AIW_WSB_EXPORT_OUTPUT_FAILED".into(),
@@ -2777,7 +2805,6 @@ fn document_export_output_error(run_id: &str, error: anyhow::Error) -> anyhow::E
     })
 }
 
-#[cfg(any(windows, test))]
 fn write_document_export_summary(
     output: &mut impl Write,
     export: &aiw_runner::WsbMsiDocumentExport,
@@ -3615,6 +3642,34 @@ mod tests {
             serde_json::to_value(&export).unwrap()["outputSha256"],
             export.output_sha256
         );
+    }
+
+    #[test]
+    fn admin_document_export_requires_exact_run_and_has_no_asset_overrides() {
+        let base = [
+            "aiw",
+            "admin",
+            "export-document",
+            "--workspace",
+            "workspace",
+            "--destination",
+            "output.txt",
+        ];
+        assert!(Cli::try_parse_from(base).is_err());
+        let mut arguments = base.to_vec();
+        arguments.extend(["--run-id", "retained-run"]);
+        let parsed = Cli::try_parse_from(&arguments).unwrap();
+        assert!(matches!(
+            parsed.command,
+            Command::Admin(AdminArgs {
+                command: AdminCommand::ExportDocument {
+                    format: AdminOutputFormat::Summary,
+                    ..
+                }
+            })
+        ));
+        arguments.extend(["--project", "substitute.yaml"]);
+        assert!(Cli::try_parse_from(arguments).is_err());
     }
 
     #[test]
