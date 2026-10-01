@@ -52,14 +52,16 @@ bytes prove the transfer result, not who typed or whether the text changed.
 If the report contains a verified document transfer and exact-session cleanup,
 explicitly export to a new host file with the values from that run:
 
-  .\aiw.exe run export-wsb-msi-document `
-    --root <workspace-path-from-result> --run-id <run-id-from-result> `
-    --project .\product\notepad-plus-plus-interactive\project.yaml `
-    --guest-agent-sha256 <guestAgentSha256-from-product-manifest> `
-    --destination <new-absolute-output-path> --format summary
+  .\aiw.exe admin export-document `
+    --workspace <workspace-path-from-result> --run-id <run-id-from-result> `
+    --destination <new-absolute-output-path>
+
+The package supplies its checked project and guest identities. Use the same
+verified interactive package as the launch; a different guest or project is
+rejected. The lower-level run export-wsb-msi-document remains an advanced route.
 
 Export refuses overwrite and workspace destinations, and verifies copied bytes.
-The default export format remains JSON; use --format summary for concise guidance.
+This administrator command defaults to a summary; use --format json for details.
 Destination refusals ask for a new path. Evidence failures require reviewing the
 retained run before retrying. If the file was exported but console output failed,
 preserve it and verify its bytes; do not repeat export just to obtain console text.

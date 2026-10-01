@@ -7,10 +7,10 @@ are project recommendations, not measured cost or quality guarantees.
 ## Starting point
 
 Run `scripts/work-status.ps1`, then read WORKING-STATE.md. The administrator
-preview packets below have been implemented; PR #71 holds the final
-profile-bound clean-host evidence. Check its exact head and merge state before
-starting another packet. Do not rebuild completed work from the historical
-commit references below.
+preview packets below have been implemented; PR #71 integrated the final
+profile-bound clean-host evidence at `4b9054512213c64839a664997504a84d7c911cdb`.
+Use WORKING-STATE and ROADMAP for the current bounded slice. Do not rebuild
+completed work from the historical commit references below.
 
 Use **Sol, medium** for the main task. It owns integration and the milestone.
 Use **Luna, medium** for a bounded implementation with an explicit contract,
@@ -132,7 +132,7 @@ verifies identities and inventory, and emits a ZIP plus companion distribution
 manifest. The second operator freshly extracted the exact `08ab440` candidate
 on the separate supported VM and completed the fixed workflow, negative control,
 and cleanup. See [CLEAN-HOST-PREVIEW.md](CLEAN-HOST-PREVIEW.md) for the retained
-acceptance record. PR #71 still needs integration. The package remains an
+acceptance record. PR #71 is merged. The package remains an
 unsigned development preview; this packet did not prove general MSI conversion
 or effective host containment.
 

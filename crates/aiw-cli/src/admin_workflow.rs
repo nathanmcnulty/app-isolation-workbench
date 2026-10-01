@@ -206,6 +206,10 @@ impl AdminAssessmentResult {
         }
         write!(output, "Evidence: ")?;
         approval_review::write_review_json(output, &self.evidence_root.display().to_string())?;
+        if self.approval_recorded && self.product_id == INTERACTIVE_PRODUCT_ID {
+            write!(output, "\nExport workspace: ")?;
+            approval_review::write_review_json(output, &self.workspace.display().to_string())?;
+        }
         writeln!(output, "\nNext: {}", self.next)?;
         Ok(())
     }
@@ -265,7 +269,7 @@ fn report_summary(report: &aiw_runner::WsbMsiRunReport) -> (String, &'static str
                     ),
                 },
                 if transfer.is_some() && interactive.recorded_cleanup_verified {
-                    "Explicitly export with run export-wsb-msi-document --format summary; no host output file was created automatically. Read report.md for the overview and report.json for advanced evidence."
+                    "Use admin export-document with the displayed export workspace, run ID, and a new destination. No host output file was created automatically. Read report.md for the overview and report.json for advanced evidence."
                 } else {
                     "Read report.md and the exact retained run status before exporting or starting another trial."
                 },
@@ -396,6 +400,87 @@ fn packaged_asset_root(product_directory: &str) -> Result<PathBuf> {
         .parent()
         .ok_or_else(|| anyhow!("installed AIW executable has no package directory"))?;
     Ok(parent.join("product").join(product_directory))
+}
+
+#[cfg(any(windows, test))]
+fn interactive_export_assets(
+    assets_root: &Path,
+) -> Result<(Project, ProductAssetManifest, ResolvedProductAssets)> {
+    let manifest: ProductAssetManifest =
+        crate::read_document(&assets_root.join("manifest.json"), 1024 * 1024)?;
+    let assets = manifest.resolve_interactive(assets_root)?;
+    let project_bytes = crate::read_bounded(
+        std::fs::File::open(&assets.project)?,
+        crate::MAX_CONFIG_BYTES,
+        &assets.project,
+    )?;
+    if lowercase_sha256(&project_bytes) != manifest.project_sha256 {
+        bail!("packaged project bytes do not match the product manifest");
+    }
+    let project: Project = serde_yaml::from_slice(&project_bytes)?;
+    if !validate_project_for_planning(&project).is_empty()
+        || project.metadata.name != INTERACTIVE_PRODUCT_ID
+    {
+        bail!("packaged project is not valid for the fixed interactive workflow");
+    }
+    Ok((project, manifest, assets))
+}
+
+#[cfg(windows)]
+pub fn export_document(
+    workspace: &Path,
+    run_id: &str,
+    destination: &Path,
+) -> Result<aiw_runner::WsbMsiDocumentExport> {
+    let result = (|| {
+        let assets_root = packaged_asset_root(INTERACTIVE_PRODUCT_ID)?;
+        let (project, manifest, assets) = interactive_export_assets(&assets_root)?;
+        let agent = aiw_windows_platform::HeldApplicationFile::open(&assets.guest_agent)
+            .map_err(|error| anyhow!("packaged guest agent is unsupported: {error}"))?;
+        if agent.observation().sha256 != manifest.guest_agent_sha256 {
+            bail!("packaged guest agent bytes do not match the product manifest");
+        }
+        agent
+            .revalidate()
+            .map_err(|error| anyhow!("packaged guest agent drifted: {error}"))?;
+        aiw_runner::export_windows_sandbox_msi_document(
+            workspace,
+            run_id,
+            &project,
+            &manifest.guest_agent_sha256,
+            destination,
+        )
+        .map_err(|source| crate::document_export_error(run_id, source))
+    })();
+    result.map_err(|error: anyhow::Error| {
+        if error.is::<AiwError>() {
+            error
+        } else {
+            crate::document_export_error(
+                run_id,
+                aiw_runner::RunnerError::Receipt(format!("export package rejected: {error}")),
+            )
+        }
+    })
+}
+
+#[cfg(not(windows))]
+pub fn export_document(
+    _: &Path,
+    run_id: &str,
+    _: &Path,
+) -> Result<aiw_runner::WsbMsiDocumentExport> {
+    Err(anyhow!(AiwError {
+        code: "AIW_WINDOWS_REQUIRED".into(),
+        summary: "interactive document export requires Windows".into(),
+        stage: "wsbDocumentExport".into(),
+        remediation:
+            "Export this exact retained interactive run on its original supported Windows host."
+                .into(),
+        detail: "No files or provider state were changed.".into(),
+        run_id: Some(run_id.into()),
+        retryable: false,
+    }))
 }
 
 fn unsupported_installer_error(
@@ -1369,6 +1454,40 @@ mod tests {
         manifest.launch_profile_path = Some("launch-profile.json".into());
         manifest.launch_profile_sha256 = Some("c".repeat(64));
         assert!(manifest.resolve_interactive(&root).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn export_package_rejects_project_drift_and_wrong_product() {
+        let root = std::env::temp_dir().join(format!("aiw-export-assets-{}", nonce()));
+        std::fs::create_dir(&root).unwrap();
+        std::fs::create_dir(root.join("tools")).unwrap();
+        let project = include_bytes!("../product/notepad-plus-plus-interactive/project.yaml");
+        std::fs::write(root.join("project.yaml"), project).unwrap();
+        std::fs::write(root.join("tools/agent.exe"), b"agent").unwrap();
+        let mut manifest = serde_json::json!({
+            "schemaVersion": MANIFEST_SCHEMA,
+            "productId": INTERACTIVE_PRODUCT_ID,
+            "scenarioId": SCENARIO_ID,
+            "projectPath": "project.yaml",
+            "projectSha256": lowercase_sha256(project),
+            "guestAgentPath": "tools/agent.exe",
+            "guestAgentSha256": "a".repeat(64)
+        });
+        let save = |manifest: &serde_json::Value| {
+            std::fs::write(
+                root.join("manifest.json"),
+                serde_json::to_vec(manifest).unwrap(),
+            )
+            .unwrap();
+        };
+        save(&manifest);
+        assert!(interactive_export_assets(&root).is_ok());
+        std::fs::write(root.join("project.yaml"), b"changed").unwrap();
+        assert!(interactive_export_assets(&root).is_err());
+        std::fs::write(root.join("project.yaml"), project).unwrap();
+        manifest["productId"] = PRODUCT_ID.into();
+        save(&manifest);
+        assert!(interactive_export_assets(&root).is_err());
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
