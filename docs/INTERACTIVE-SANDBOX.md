@@ -96,6 +96,13 @@ launch. This closes the corrected administrator document-transfer benchmark
 for this unsigned preview. It does not establish general MSI compatibility,
 publisher authenticity, or an inner application isolation boundary.
 
+A compact read-only backup of the textual run/export evidence is retained on
+the development host at
+`%LOCALAPPDATA%\Temp\AIW-Human-Trial-30231bb-evidence.zip` (43,061 bytes),
+SHA-256 `845c7484b7d213cdc840f80519d39e3e86f7eb32d56dc684608a7138d29acbb6`.
+Installers and binary tools are omitted. The archive is historical evidence,
+not a portable protected workspace or authority for a new execution.
+
 The fixed interactive profile installs Notepad++ inside a disposable Windows Sandbox and opens a blank editor as `AiwStandardUser` with a verified medium-integrity token. Close the editor normally when finished. Its approved lifetime starts after the exact application window and token are observed; expiration terminates the process job, verifies cleanup, and records an unsuccessful attempt. An unsaved-document prompt does not extend the deadline.
 
 The example allows five minutes; `waitForUserClose.timeoutSeconds` accepts 30–600 seconds. The host's total `run start --timeout-seconds` can cancel earlier. Changing the project, lifetime, application, guest agent, or compiled scenario requires fresh preparation and approval.
