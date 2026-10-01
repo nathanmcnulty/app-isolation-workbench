@@ -1132,6 +1132,28 @@ fn lowercase_sha256(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn export_failure_summary_preserves_completed_output_distinction() {
+        let cases = [
+            (
+                crate::document_export_error(
+                    "run-one",
+                    aiw_runner::RunnerError::Receipt("tampered".into()),
+                ),
+                "Export stopped:",
+            ),
+            (
+                crate::document_export_output_error("run-one", anyhow::anyhow!("broken pipe")),
+                "Export completed, but console output failed:",
+            ),
+        ];
+        for (error, prefix) in cases {
+            let mut output = Vec::new();
+            super::write_summary_error(&mut output, &error).unwrap();
+            assert!(String::from_utf8(output).unwrap().starts_with(prefix));
+        }
+    }
+
     use super::*;
     #[test]
     fn missing_evidence_parent_gives_specific_safe_action() {

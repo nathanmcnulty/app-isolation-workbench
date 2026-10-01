@@ -3578,25 +3578,11 @@ mod tests {
             assert_eq!(envelope.code.as_ref(), code);
             assert_eq!(envelope.stage.as_ref(), "wsbDocumentExport");
             assert!(!envelope.retryable);
-            let mut summary = Vec::new();
-            admin_workflow::write_summary_error(&mut summary, &error).unwrap();
-            assert!(
-                String::from_utf8(summary)
-                    .unwrap()
-                    .starts_with("Export stopped:")
-            );
         }
         let error = document_export_output_error("run-one", anyhow!("broken pipe"));
         let envelope = error.downcast_ref::<AiwError>().unwrap();
         assert_eq!(envelope.code.as_ref(), "AIW_WSB_EXPORT_OUTPUT_FAILED");
         assert!(envelope.remediation.contains("Do not repeat export"));
-        let mut summary = Vec::new();
-        admin_workflow::write_summary_error(&mut summary, &error).unwrap();
-        assert!(
-            String::from_utf8(summary)
-                .unwrap()
-                .starts_with("Export completed, but console output failed:")
-        );
     }
 
     #[test]
