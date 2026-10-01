@@ -241,6 +241,11 @@ This reused run `admin-1790878302241975300`; it did not start another Sandbox
 or repeat installation. It validates new export presentation against retained
 evidence, not a new application compatibility or human editing trial.
 
+An additional command-level regression covers an unreadable export project in
+summary and JSON formats: both identify the export operation and run, fail
+before creating any destination, and leave the fixture empty. The completed
+CLI suite has 42 unit tests and 28 contract tests.
+
 Successful transfer execution uses
 `aiw.dev/wsb-interactive-msi-execution/v0alpha2`; scratch-only execution keeps
 `v0alpha1`. Execution, retained reporting, and export share the same document

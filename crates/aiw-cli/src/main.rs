@@ -2339,7 +2339,12 @@ fn run(command: Command) -> Result<()> {
                 destination,
                 format,
             } => {
-                let loaded = read_project(&project)?;
+                let loaded = read_project(&project).map_err(|error| {
+                    document_export_error(
+                        &run_id,
+                        RunnerError::Receipt(format!("cannot read export project: {error}")),
+                    )
+                })?;
                 #[cfg(windows)]
                 {
                     let export = aiw_runner::export_windows_sandbox_msi_document(
@@ -2361,13 +2366,14 @@ fn run(command: Command) -> Result<()> {
                 #[cfg(not(windows))]
                 {
                     let _ = (root, loaded, guest_agent_sha256, destination, format);
-                    Err(anyhow!(RunOperationUnavailable {
-                        code: "AIW_WINDOWS_REQUIRED",
-                        summary: "interactive document export requires Windows",
-                        stage: "wsbDocumentExport",
-                        remediation: "Export this exact retained interactive run on its original supported Windows host.",
-                        detail: "No files or provider state were changed.",
-                        run_id,
+                    Err(anyhow!(AiwError {
+                        code: "AIW_WINDOWS_REQUIRED".into(),
+                        summary: "interactive document export requires Windows".into(),
+                        stage: "wsbDocumentExport".into(),
+                        remediation: "Export this exact retained interactive run on its original supported Windows host.".into(),
+                        detail: "No files or provider state were changed.".into(),
+                        run_id: Some(run_id.into()),
+                        retryable: false,
                     }))
                 }
             }
@@ -2741,7 +2747,6 @@ fn run(command: Command) -> Result<()> {
     }
 }
 
-#[cfg(any(windows, test))]
 fn document_export_error(run_id: &str, source: RunnerError) -> anyhow::Error {
     let destination = matches!(&source, RunnerError::DocumentExportDestination(_));
     anyhow!(AiwError {

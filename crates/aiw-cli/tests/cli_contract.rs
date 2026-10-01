@@ -48,6 +48,38 @@ fn aiw() -> PathBuf {
 }
 
 #[test]
+fn export_preflight_failure_identifies_export_and_creates_no_destination() {
+    let temp = TempDir::new();
+    let destination = temp.path().join("export.txt");
+    for format in ["summary", "json"] {
+        let output = Command::new(aiw())
+            .args(["run", "export-wsb-msi-document", "--root"])
+            .arg(temp.path())
+            .args(["--run-id", "run-one", "--project"])
+            .arg(temp.path().join("missing-project.yaml"))
+            .args(["--guest-agent-sha256", "abc", "--destination"])
+            .arg(&destination)
+            .args(["--format", format])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert!(!destination.exists());
+        let error = String::from_utf8(output.stderr).unwrap();
+        if format == "summary" {
+            assert!(error.starts_with("Export stopped:"));
+            assert!(error.contains("AIW_WSB_EXPORT_FAILED"));
+        } else {
+            let envelope: Value = serde_json::from_str(&error).unwrap();
+            assert_eq!(envelope["code"], "AIW_WSB_EXPORT_FAILED");
+            assert_eq!(envelope["stage"], "wsbDocumentExport");
+            assert_eq!(envelope["runId"], "run-one");
+        }
+    }
+    assert!(fs::read_dir(temp.path()).unwrap().next().is_none());
+}
+
+#[test]
 fn interactive_approval_rejects_redirected_input_without_mutation() {
     let temp = TempDir::new();
     let plan_path = temp.path().join("input-plan.json");
