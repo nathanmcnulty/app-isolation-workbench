@@ -26,7 +26,8 @@ $buildTarget = if ([string]::IsNullOrWhiteSpace($env:CARGO_TARGET_DIR)) {
 } else {
     [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR)
 }
-$cliSource = Join-Path $buildTarget 'release\aiw.exe'
+$targetTriple = 'x86_64-pc-windows-msvc'
+$cliSource = Join-Path $buildTarget "$targetTriple\release\aiw.exe"
 $projectSource = Join-Path $productRoot $projectFile
 $manifestSource = Join-Path $productRoot 'manifest.json'
 $readmeFile = if ($isBambu) { 'packaging\preview\README-bambu.txt' } elseif ($isInteractive) { 'packaging\preview\README-interactive.txt' } else { 'packaging\preview\README.txt' }
@@ -35,7 +36,6 @@ $verifierSource = Join-Path $PSScriptRoot 'verify-preview-package.ps1'
 $licenseSource = Join-Path $repoRoot 'LICENSE'
 $output = [IO.Path]::GetFullPath($OutputDirectory)
 $packagedProductRoot = Join-Path $output "product\$productDirectory"
-$targetTriple = 'x86_64-pc-windows-msvc'
 
 function Write-Utf8NoBom([string]$Path, [string]$Text) {
     [IO.File]::WriteAllText($Path, $Text + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
@@ -146,7 +146,9 @@ try {
         $targetRustFlags = (@($originalTargetRustFlags, '-C target-feature=+crt-static') |
             Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ' '
         Set-Item -Path $targetRustFlagsPath -Value $targetRustFlags
-        & cargo build --locked --release -p aiw-cli
+        # An explicit target keeps static CRT flags off host build scripts and
+        # procedural macros, even when the target equals the host triple.
+        & cargo build --locked --release -p aiw-cli --target $targetTriple
         if ($LASTEXITCODE -ne 0) { throw 'release aiw-cli build failed' }
     }
     finally {

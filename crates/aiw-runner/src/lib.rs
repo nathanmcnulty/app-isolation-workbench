@@ -283,6 +283,8 @@ pub enum RunnerError {
     Cancelled,
     #[error("completion receipt verification failed: {0}")]
     Receipt(String),
+    #[error("document export destination rejected: {0}")]
+    DocumentExportDestination(String),
     #[error("run journal update failed: {0}")]
     Journal(String),
     #[error("Windows Sandbox provider lease is currently held by another AIW run")]

@@ -305,28 +305,28 @@ fn protected_transfer_preparation_completion_report_and_export() {
     assert_eq!(fs::read(&destination).unwrap(), output);
     assert_eq!(exported.receipt_sha256, execution.receipt_sha256);
     assert_eq!(exported.output_sha256, hex::encode(Sha256::digest(output)));
-    assert!(
+    assert!(matches!(
         export_windows_sandbox_msi_document(
             &root,
             "w1-run",
             &project,
             &start.guest_agent.sha256,
             &destination
-        )
-        .is_err()
-    );
+        ),
+        Err(RunnerError::DocumentExportDestination(_))
+    ));
     assert_eq!(fs::read(&destination).unwrap(), output);
     let inside = root.join("output/forbidden.txt");
-    assert!(
+    assert!(matches!(
         export_windows_sandbox_msi_document(
             &root,
             "w1-run",
             &project,
             &start.guest_agent.sha256,
             &inside
-        )
-        .is_err()
-    );
+        ),
+        Err(RunnerError::DocumentExportDestination(_))
+    ));
     assert!(!inside.exists());
     let source = root.join("output/document-output.txt");
     let alias = fixture.0.join("output-alias.txt");
@@ -361,6 +361,18 @@ fn protected_transfer_preparation_completion_report_and_export() {
         .is_err()
     );
     assert!(!rejected.exists());
+    // A refused destination must not conceal altered retained evidence.
+    assert!(matches!(
+        export_windows_sandbox_msi_document(
+            &root,
+            "w1-run",
+            &project,
+            &start.guest_agent.sha256,
+            &destination
+        ),
+        Err(RunnerError::Receipt(_))
+    ));
+    assert_eq!(fs::read(&destination).unwrap(), output);
 }
 
 #[test]

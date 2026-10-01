@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+#[cfg(windows)]
+mod admin_progress;
 mod admin_workflow;
 mod approval_review;
 
@@ -142,7 +144,7 @@ enum AdminCommand {
     },
 }
 
-#[derive(Debug, Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum AdminOutputFormat {
     Summary,
     Json,
@@ -679,6 +681,9 @@ enum RunCommand {
         guest_agent_sha256: String,
         #[arg(long)]
         destination: PathBuf,
+        /// JSON preserves the structured export record; summary gives concise operator guidance.
+        #[arg(long, value_enum, default_value_t = AdminOutputFormat::Json)]
+        format: AdminOutputFormat,
     },
     /// Combine retained Notepad++ and Bambu results without executing or comparing applications.
     ReportWsbSet {
@@ -1245,6 +1250,11 @@ fn main() -> ExitCode {
                 format: AdminOutputFormat::Summary,
                 ..
             }
+        }) | Command::Run(RunArgs {
+            command: RunCommand::ExportWsbMsiDocument {
+                format: AdminOutputFormat::Summary,
+                ..
+            }
         })
     );
     match run(command) {
@@ -1271,12 +1281,18 @@ fn run(command: Command) -> Result<()> {
                 format,
             } => {
                 let result = match product {
-                    AdminProduct::NotepadPlusPlus => {
-                        admin_workflow::assess(&installer, &evidence, &identity)
-                    }
-                    AdminProduct::BambuStudioExport => {
-                        admin_workflow::assess_bambu(&installer, &evidence, &identity)
-                    }
+                    AdminProduct::NotepadPlusPlus => admin_workflow::assess(
+                        &installer,
+                        &evidence,
+                        &identity,
+                        matches!(format, AdminOutputFormat::Summary),
+                    ),
+                    AdminProduct::BambuStudioExport => admin_workflow::assess_bambu(
+                        &installer,
+                        &evidence,
+                        &identity,
+                        matches!(format, AdminOutputFormat::Summary),
+                    ),
                 }
                 .map_err(admin_workflow::public_error)?;
                 match format {
@@ -1302,6 +1318,7 @@ fn run(command: Command) -> Result<()> {
                     &document_input,
                     &evidence,
                     &identity,
+                    matches!(format, AdminOutputFormat::Summary),
                 )
                 .map_err(admin_workflow::public_error)?;
                 match format {
@@ -2320,8 +2337,14 @@ fn run(command: Command) -> Result<()> {
                 project,
                 guest_agent_sha256,
                 destination,
+                format,
             } => {
-                let loaded = read_project(&project)?;
+                let loaded = read_project(&project).map_err(|error| {
+                    document_export_error(
+                        &run_id,
+                        RunnerError::Receipt(format!("cannot read export project: {error}")),
+                    )
+                })?;
                 #[cfg(windows)]
                 {
                     let export = aiw_runner::export_windows_sandbox_msi_document(
@@ -2331,24 +2354,26 @@ fn run(command: Command) -> Result<()> {
                         &guest_agent_sha256,
                         &destination,
                     )
-                    .map_err(|source| {
-                        anyhow!(RunReportFailed {
-                            run_id: run_id.clone(),
-                            source,
-                        })
-                    })?;
-                    write_json(&export)
+                    .map_err(|source| document_export_error(&run_id, source))?;
+                    let output = match format {
+                        AdminOutputFormat::Json => write_json(&export),
+                        AdminOutputFormat::Summary => {
+                            write_document_export_summary(&mut io::stdout(), &export)
+                        }
+                    };
+                    output.map_err(|error| document_export_output_error(&run_id, error))
                 }
                 #[cfg(not(windows))]
                 {
-                    let _ = (root, loaded, guest_agent_sha256, destination);
-                    Err(anyhow!(RunOperationUnavailable {
-                        code: "AIW_WINDOWS_REQUIRED",
-                        summary: "interactive document export requires Windows",
-                        stage: "wsbDocumentExport",
-                        remediation: "Export this exact retained interactive run on its original supported Windows host.",
-                        detail: "No files or provider state were changed.",
-                        run_id,
+                    let _ = (root, loaded, guest_agent_sha256, destination, format);
+                    Err(anyhow!(AiwError {
+                        code: "AIW_WINDOWS_REQUIRED".into(),
+                        summary: "interactive document export requires Windows".into(),
+                        stage: "wsbDocumentExport".into(),
+                        remediation: "Export this exact retained interactive run on its original supported Windows host.".into(),
+                        detail: "No files or provider state were changed.".into(),
+                        run_id: Some(run_id.into()),
+                        retryable: false,
                     }))
                 }
             }
@@ -2720,6 +2745,56 @@ fn run(command: Command) -> Result<()> {
             write_json(&compare_runs(&left, &right))
         }
     }
+}
+
+fn document_export_error(run_id: &str, source: RunnerError) -> anyhow::Error {
+    let destination = matches!(&source, RunnerError::DocumentExportDestination(_));
+    anyhow!(AiwError {
+        code: if destination { "AIW_WSB_EXPORT_DESTINATION_REJECTED" } else { "AIW_WSB_EXPORT_FAILED" }.into(),
+        summary: if destination { "document export destination was refused" } else { "document export did not complete" }.into(),
+        stage: "wsbDocumentExport".into(),
+        run_id: Some(run_id.to_owned().into()),
+        retryable: false,
+        remediation: if destination {
+            "Choose a new absolute file path in an existing ordinary folder outside the retained workspace. No existing file was overwritten."
+        } else {
+            "Preserve the run and any destination file. Inspect the retained report and exact run status before retrying; do not overwrite an existing export."
+        }.into(),
+        detail: source.to_string().chars().take(512).collect::<String>().into(),
+    })
+}
+
+#[cfg(any(windows, test))]
+fn document_export_output_error(run_id: &str, error: anyhow::Error) -> anyhow::Error {
+    anyhow!(AiwError {
+        code: "AIW_WSB_EXPORT_OUTPUT_FAILED".into(),
+        summary: "document exported, but console output failed".into(),
+        stage: "wsbDocumentExport".into(),
+        run_id: Some(run_id.to_owned().into()),
+        retryable: false,
+        remediation: "Preserve the exported file and verify it against the retained report. Do not repeat export because console output failed.".into(),
+        detail: error.to_string().chars().take(512).collect::<String>().into(),
+    })
+}
+
+#[cfg(any(windows, test))]
+fn write_document_export_summary(
+    output: &mut impl Write,
+    export: &aiw_runner::WsbMsiDocumentExport,
+) -> Result<()> {
+    writeln!(
+        output,
+        "Document exported and verified ({} bytes).",
+        export.output_size_bytes
+    )?;
+    write!(output, "Saved file: ")?;
+    approval_review::write_review_json(output, &export.destination)?;
+    writeln!(
+        output,
+        "\nNo existing file was overwritten. Detailed hashes remain in the retained report.json."
+    )?;
+    output.flush()?;
+    Ok(())
 }
 
 fn emit_validation(issues: Vec<ValidationIssue>) -> Result<()> {
@@ -3459,6 +3534,89 @@ fn emit_error(envelope: &impl Serialize) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn document_export_keeps_json_default_and_accepts_summary() {
+        let arguments = [
+            "aiw",
+            "run",
+            "export-wsb-msi-document",
+            "--root",
+            ".",
+            "--run-id",
+            "run-one",
+            "--project",
+            "project.yaml",
+            "--guest-agent-sha256",
+            "abc",
+            "--destination",
+            "export.txt",
+        ];
+        for (extra, expected) in [
+            (vec![], AdminOutputFormat::Json),
+            (vec!["--format", "summary"], AdminOutputFormat::Summary),
+        ] {
+            let cli = Cli::try_parse_from(arguments.into_iter().chain(extra)).unwrap();
+            let Command::Run(RunArgs {
+                command: RunCommand::ExportWsbMsiDocument { format, .. },
+            }) = cli.command
+            else {
+                panic!("wrong command")
+            };
+            assert_eq!(format, expected);
+        }
+    }
+
+    #[test]
+    fn document_export_errors_distinguish_destination_from_evidence() {
+        for (source, code) in [
+            (
+                RunnerError::DocumentExportDestination("exists".into()),
+                "AIW_WSB_EXPORT_DESTINATION_REJECTED",
+            ),
+            (
+                RunnerError::Receipt("tampered".into()),
+                "AIW_WSB_EXPORT_FAILED",
+            ),
+        ] {
+            let error = document_export_error("run-one", source);
+            let envelope = error.downcast_ref::<AiwError>().unwrap();
+            assert_eq!(envelope.code.as_ref(), code);
+            assert_eq!(envelope.stage.as_ref(), "wsbDocumentExport");
+            assert!(!envelope.retryable);
+        }
+        let error = document_export_output_error("run-one", anyhow!("broken pipe"));
+        let envelope = error.downcast_ref::<AiwError>().unwrap();
+        assert_eq!(envelope.code.as_ref(), "AIW_WSB_EXPORT_OUTPUT_FAILED");
+        assert!(envelope.remediation.contains("Do not repeat export"));
+    }
+
+    #[test]
+    fn document_export_summary_escapes_paths_and_leaves_hashes_in_advanced_record() {
+        let export = aiw_runner::WsbMsiDocumentExport {
+            schema_version: "test".into(),
+            run_id: "run-one".into(),
+            receipt_sha256: "a".repeat(64),
+            scenario_sha256: "b".repeat(64),
+            source_artifact: "output/document-output.txt".into(),
+            destination: "C:\\export\u{1b}[2J.txt".into(),
+            input_sha256: "c".repeat(64),
+            input_size_bytes: 164,
+            output_sha256: "d".repeat(64),
+            output_size_bytes: 192,
+        };
+        let mut output = Vec::new();
+        write_document_export_summary(&mut output, &export).unwrap();
+        let summary = String::from_utf8(output).unwrap();
+        assert!(summary.contains("verified (192 bytes)"));
+        assert!(!summary.contains('\u{1b}'));
+        assert!(!summary.contains(&export.output_sha256));
+        assert!(summary.contains("report.json"));
+        assert_eq!(
+            serde_json::to_value(&export).unwrap()["outputSha256"],
+            export.output_sha256
+        );
+    }
+
     #[test]
     fn admin_document_launch_requires_explicit_input_and_routes_to_fixed_command() {
         use super::{AdminCommand, Cli, Command};

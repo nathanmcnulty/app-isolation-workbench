@@ -185,7 +185,7 @@ The old `report-wsb-msi` assessment-only command rejects interactive sessions. A
 $destination = Join-Path (Get-Location) 'notepad-plus-plus-output.txt'
 aiw run export-wsb-msi-document --root $workspace --run-id $runId `
   --project $project --guest-agent-sha256 $guestHash `
-  --destination $destination
+  --destination $destination --format summary
 ```
 
 Export requires a successful transfer report, creates one new ordinary host
@@ -193,6 +193,58 @@ file, refuses an existing destination, rejects destinations inside the retained
 worker, and reopens the destination to verify the exact receipt-bound bytes.
 The automated v6 document benchmark remains separate and retains its prior wire
 hashes and evidence semantics.
+
+Administrator commands default to a concise console summary. After exact-plan
+approval is recorded, they explain the wait and print elapsed time every 30
+seconds to a real terminal while execution is pending. These are waiting messages, not guest
+installer progress or compatibility observations. The editing limit starts
+after the editor is ready. Progress is stopped before the final result, with a
+100 ms shutdown bound so a stalled terminal cannot prevent report retention.
+An already blocked write may appear late if that terminal subsequently resumes.
+`--format json` suppresses these messages and retains the structured result (the full
+approval review remains interactive).
+
+Export defaults to JSON for existing callers. `--format summary` prints the
+verified byte count and escaped destination, with hashes retained in
+`report.json`. `AIW_WSB_EXPORT_DESTINATION_REJECTED` means to choose a new
+absolute destination outside the workspace in an existing ordinary folder.
+`AIW_WSB_EXPORT_FAILED` requires reviewing the retained evidence and preserving
+any destination file before retrying. Source verification precedes destination
+checks, so a refused path cannot conceal altered evidence. If export succeeds
+but console output fails, `AIW_WSB_EXPORT_OUTPUT_FAILED` warns against repeating
+the export merely because the console failed.
+
+### Progress and export guidance validation (2026-10-01)
+
+Exact executable source `2c264d11310fe22bd49d687bfb3bf7bbbc7543e7` passed
+42 CLI unit tests, 27 CLI contract tests, and the runner checks (108 unit tests,
+four explicitly ignored live checks, plus bundle/receipt regressions).
+Progress controls cover waiting-only wording, prompt shutdown, I/O failure,
+and an initial write that remains blocked until after guard shutdown.
+The protected transfer regression rejects tampered source evidence before an
+existing destination can be classified as a routine refusal. Independent review,
+formatting, governance, and Rust 1.99 workspace/all-targets Clippy passed.
+
+The explicit Windows target keeps static CRT flags off host compiler helpers;
+the preview builder passed x64/static PE checks, archive extraction verification,
+and eight-file exact inventory verification. The unsigned archive
+`AIW-Interactive-Preview-2c264d1.zip` is 4,999,710 bytes, SHA-256
+`6a50d5beac0a32b8acadf226c80922233c9a15d859aa52efd4b2c17d1c141c7a`.
+
+On `aiwcleanhost`, an operator-scoped export-only driver completed at
+`2026-10-01T19:46:09.7849975Z`; evidence is in
+`C:\AIW-Export-Guidance-2c264d1`. A schema control verified the new CLI before
+export. Summary and default JSON exports both matched the retained human trial's
+192-byte output and receipt; overwrite was refused in both formats and the
+original input hash remained unchanged. The driver task was disabled afterward.
+This reused run `admin-1790878302241975300`; it did not start another Sandbox
+or repeat installation. It validates new export presentation against retained
+evidence, not a new application compatibility or human editing trial.
+
+An additional command-level regression covers an unreadable export project in
+summary and JSON formats: both identify the export operation and run, fail
+before creating any destination, and leave the fixture empty. The completed
+CLI suite has 42 unit tests and 28 contract tests.
 
 Successful transfer execution uses
 `aiw.dev/wsb-interactive-msi-execution/v0alpha2`; scratch-only execution keeps

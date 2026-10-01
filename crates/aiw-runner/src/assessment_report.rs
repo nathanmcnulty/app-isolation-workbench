@@ -413,7 +413,7 @@ pub fn export_windows_sandbox_msi_document(
         .custom_flags(0x0020_0000)
         .open(&destination)
         .map_err(|error| {
-            RunnerError::Receipt(format!(
+            RunnerError::DocumentExportDestination(format!(
                 "cannot create new export destination {}: {error}",
                 destination.display()
             ))
@@ -458,12 +458,21 @@ pub fn export_windows_sandbox_msi_document(
 }
 
 #[cfg(windows)]
+fn export_destination_error(error: RunnerError) -> RunnerError {
+    let detail = match error {
+        RunnerError::Receipt(detail) => detail,
+        other => other.to_string(),
+    };
+    RunnerError::DocumentExportDestination(detail)
+}
+
+#[cfg(windows)]
 fn canonical_export_destination(
     path: &Path,
     workspace_root: &Path,
 ) -> Result<(PathBuf, Vec<File>), RunnerError> {
     if !path.is_absolute() {
-        return Err(RunnerError::Receipt(
+        return Err(RunnerError::DocumentExportDestination(
             "export destination must be an absolute path".to_owned(),
         ));
     }
@@ -471,7 +480,9 @@ fn canonical_export_destination(
         .file_name()
         .and_then(|value| value.to_str())
         .ok_or_else(|| {
-            RunnerError::Receipt("export destination must have a Unicode file name".to_owned())
+            RunnerError::DocumentExportDestination(
+                "export destination must have a Unicode file name".to_owned(),
+            )
         })?;
     if leaf.is_empty()
         || leaf.len() > 255
@@ -481,18 +492,20 @@ fn canonical_export_destination(
         || leaf.contains(':')
         || leaf.chars().any(char::is_control)
     {
-        return Err(RunnerError::Receipt(
+        return Err(RunnerError::DocumentExportDestination(
             "export destination file name is not a safe ordinary file leaf".to_owned(),
         ));
     }
-    let supplied_parent = path
-        .parent()
-        .ok_or_else(|| RunnerError::Receipt("export destination parent is missing".to_owned()))?;
-    ensure_ordinary_directory(supplied_parent)?;
-    let parent = supplied_parent
-        .canonicalize()
-        .map_err(|_| RunnerError::Receipt("export destination parent is unavailable".to_owned()))?;
-    ensure_ordinary_directory(&parent)?;
+    let supplied_parent = path.parent().ok_or_else(|| {
+        RunnerError::DocumentExportDestination("export destination parent is missing".to_owned())
+    })?;
+    ensure_ordinary_directory(supplied_parent).map_err(export_destination_error)?;
+    let parent = supplied_parent.canonicalize().map_err(|_| {
+        RunnerError::DocumentExportDestination(
+            "export destination parent is unavailable".to_owned(),
+        )
+    })?;
+    ensure_ordinary_directory(&parent).map_err(export_destination_error)?;
     // Hold every component before using this pathname for a host write. A
     // metadata-only check permits a parent to become a junction after checking.
     let ancestors = hold_export_directory_chain(&parent)?;
@@ -502,20 +515,20 @@ fn canonical_export_destination(
         ))
     })?;
     if windows_path_contains(&workspace, &parent) {
-        return Err(RunnerError::Receipt(
+        return Err(RunnerError::DocumentExportDestination(
             "export destination must be outside the retained Sandbox workspace".to_owned(),
         ));
     }
     let destination = parent.join(leaf);
     match fs::symlink_metadata(&destination) {
         Ok(_) => {
-            return Err(RunnerError::Receipt(
+            return Err(RunnerError::DocumentExportDestination(
                 "export destination already exists; refusing to overwrite it".to_owned(),
             ));
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => {
-            return Err(RunnerError::Receipt(format!(
+            return Err(RunnerError::DocumentExportDestination(format!(
                 "export destination metadata: {error}"
             )));
         }
@@ -540,7 +553,7 @@ fn hold_export_directory_chain(parent: &Path) -> Result<Vec<File>, RunnerError> 
             }
             Component::RootDir | Component::Normal(_) => path.push(component.as_os_str()),
             _ => {
-                return Err(RunnerError::Receipt(
+                return Err(RunnerError::DocumentExportDestination(
                     "export requires a canonical local drive path".into(),
                 ));
             }
@@ -551,13 +564,15 @@ fn hold_export_directory_chain(parent: &Path) -> Result<Vec<File>, RunnerError> 
             .custom_flags(0x0220_0000) // BACKUP_SEMANTICS | OPEN_REPARSE_POINT
             .open(&path)
             .map_err(|_| {
-                RunnerError::Receipt("cannot retain export destination ancestry".into())
+                RunnerError::DocumentExportDestination(
+                    "cannot retain export destination ancestry".into(),
+                )
             })?;
-        let metadata = directory
-            .metadata()
-            .map_err(|error| RunnerError::Receipt(format!("export ancestor metadata: {error}")))?;
+        let metadata = directory.metadata().map_err(|error| {
+            RunnerError::DocumentExportDestination(format!("export ancestor metadata: {error}"))
+        })?;
         if !metadata.is_dir() || metadata.file_attributes() & 0x0400 != 0 {
-            return Err(RunnerError::Receipt(
+            return Err(RunnerError::DocumentExportDestination(
                 "export destination ancestry contains a reparse point".into(),
             ));
         }
