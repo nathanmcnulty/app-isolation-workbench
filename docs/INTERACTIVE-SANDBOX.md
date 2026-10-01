@@ -302,6 +302,46 @@ PowerShell 5.1, while
 existing negative hash, payload, path, profile and inventory controls still
 reject invalid packages.
 
+### Packaged administrator export validation (2026-10-01)
+
+Exact source `7d45b3c18ec8ae7d9d5e699189f09fcf8dd7555b` adds
+`aiw admin export-document --workspace <retained-workspace> --run-id <exact-run>
+--destination <new-file>`. It resolves the fixed interactive project and held
+guest from the verified package beside the executable; those identities are
+not operator inputs. Summary is the default and `--format json` retains the
+structured export contract. The launch summary displays the export workspace.
+The existing receipt/ownership/cleanup and destination verifier performs the
+copy. The advanced `run export-wsb-msi-document` command remains available.
+
+The static x64 preview was assembled and extracted-inventory verified. ZIP
+`AIW-Interactive-Preview-7d45b3c.zip` is 5,007,839 bytes, SHA-256
+`82f2717991cc9e209ec2033b89272d110affa8f013062e8c3e28b0049ed7348a`;
+receipt core identity is
+`37bcb47119d00326e36121450b6c35be6cb99dda8f8b1646371bcbf0488c37f8`.
+The package keeps the exact retained guest `85cfe36...150a04`; its full identity
+is recorded with the operator trial above. It remains unsigned.
+
+On the dedicated VM, `aiwcleanhost\aiwoperator` completed project-owned driver
+controls and both administrator export formats at `2026-10-01T21:21:09.9507001Z`.
+Both reverified Nathan's retained run `admin-1790887375232888400` and exported
+225 bytes with SHA-256
+`bffa4d4d8d3f5098aa8984d16b237f8ebbf3115127c16a3a6d8fc370944f8e5c`.
+The JSON result binds the same completion receipt
+`225a6e205c3f290d58784aa5c3d5b4231baceb985a198038978b16760e6b6722`.
+New files are `C:\AIW-Edited-admin-export-7d45b3c.json.txt` and
+`C:\AIW-Edited-admin-export-7d45b3c.summary.txt`. Overwriting Nathan's original
+export, exporting a different run ID, and exporting into the retained workspace
+were refused; refused destinations were not created. Original input and export
+hashes remained unchanged. The operator's provider list contained zero sessions.
+No installer, approval, new Sandbox, or recovery was performed.
+
+Durable driver outputs and result are in `C:\AIW-Admin-Export-Proof-7d45b3c`;
+its scheduled task is disabled. Local validation passed 44 CLI unit tests,
+29 command-contract tests, workspace/all-target warnings-as-errors Clippy,
+formatting, and governance. New negative controls exercise missing assets,
+guest/project drift, wrong product, required run ID, and forbidden project
+override. An independent bounded review found no actionable findings.
+
 Successful transfer execution uses
 `aiw.dev/wsb-interactive-msi-execution/v0alpha2`; scratch-only execution keeps
 `v0alpha1`. Execution, retained reporting, and export share the same document
