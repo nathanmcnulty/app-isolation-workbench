@@ -32,6 +32,39 @@ process and deadline and report whether log retention succeeded. Historical
 v0alpha8 transfer records keep their original 120-second contract. A new
 successful operator trial is still required.
 
+### Administrator preview development proof, 2026-10-01
+
+The corrected guest from source `3175ad1` reached the editor on the dedicated
+VM in development run `dev-interactive-3175ad1e`. The agent observed Notepad++
+through RDP, inserted one ASCII character, saved, and closed the editor.
+The retained interactive report verified the medium, non-elevated standard-user
+token, normal application exit, exact-session cleanup, and document transfer.
+The 98-byte original remained unchanged; the saved 99-byte output SHA-256 is
+`d619d3dc0d2bbdae44fd6a1adf3267af0a07c6fe95295391429758a615abf214`.
+Evidence is retained at `C:\AIW-Dev-3175ad1e` on the VM. This was explicitly
+agent-approved development work, not an independent human operator trial.
+
+That run exposed an export defect: the guest-published output was owned by
+Administrators, while export incorrectly required the host operator's ownership
+and protected control-file ACL. Export now holds the bounded ordinary artifact
+against writes and deletion, rejects reparse points, hard links, extra streams,
+and path drift, and verifies its bytes against the receipt. Protected workspace
+directory validation remains unchanged. Regression coverage includes ordinary
+guest output, hard-link rejection, tampering, overwrite refusal, and refusal to
+export into the workspace.
+
+The corrected static-runtime CLI
+`a4313230afc156c4dbafcf05f4fb42b47cedcc2f1dda56cda4f3220f88cd66fd`
+exported that retained output under `aiwoperator` without rerunning installation.
+The export matched the 99-byte output and receipt
+`3ddc6d1c0ae3e1322150db79960956d9f4246a9a7597956364a0eba745f0373e`.
+A second export refused overwrite and left the bytes unchanged; an operator
+provider query returned an empty list. Export evidence is retained at
+`C:\AIW-Export-Fix-Static-20261001` on the VM. The local runner suite passed
+108 tests (4 ignored), focused transfer tests passed, and formatting, Clippy,
+and governance passed. Original-source hosted CI passed; the final export fix
+still requires its own integration checks and independent operator trial.
+
 The fixed interactive profile installs Notepad++ inside a disposable Windows Sandbox and opens a blank editor as `AiwStandardUser` with a verified medium-integrity token. Close the editor normally when finished. Its approved lifetime starts after the exact application window and token are observed; expiration terminates the process job, verifies cleanup, and records an unsuccessful attempt. An unsaved-document prompt does not extend the deadline.
 
 The example allows five minutes; `waitForUserClose.timeoutSeconds` accepts 30–600 seconds. The host's total `run start --timeout-seconds` can cancel earlier. Changing the project, lifetime, application, guest agent, or compiled scenario requires fresh preparation and approval.

@@ -34,10 +34,16 @@ CLI tests, governance, verifier contract, and unarchived package assembly
 passed. Operator run `admin-1790840111071516800` on preview `88ec2d7`
 failed before the editor appeared, with a generic process timeout consistent
 with the old 120-second installation deadline. Cleanup passed; a fresh
-read-only provider query found no active sessions. The pending fix versions
+read-only provider query found no active sessions. Source `3175ad1` versions
 the transfer installation contract, retains bounded MSI diagnostics, and
-corrects failed-transfer reporting. Validate and stage the corrected preview
-before requesting another operator trial; success is still unproved.
+corrects failed-transfer reporting; its hosted CI passed. Agent development
+run `dev-interactive-3175ad1e` visibly opened Notepad++ on the VM and passed
+edit/save/close, receipt-bound transfer, and exact cleanup. Export exposed a
+guest-output ownership assumption; the held ordinary-artifact reader fix
+passed retained-output export and overwrite refusal on the VM. The operator's
+provider list was empty afterward. Focused transfer tests, all 108 runner
+tests, formatting, Clippy, and governance passed. Stage the corrected preview
+for the independent operator trial; agent development proof does not replace it.
 It reuses the existing interactive transfer/report/export primitives and
 requires visible exact-plan approval and explicit output export. Do not infer
 general compatibility from either fixed workflow. See

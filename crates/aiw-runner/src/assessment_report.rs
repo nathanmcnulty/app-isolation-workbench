@@ -372,12 +372,24 @@ pub fn export_windows_sandbox_msi_document(
     held.revalidate()
         .map_err(|error| RunnerError::Receipt(format!("export workspace validation: {error}")))?;
 
-    let source = held
-        .reopen_output_file("document-output.txt")
-        .map_err(|error| RunnerError::Receipt(format!("export source open: {error}")))?;
-    let source_bytes =
-        read_bound_workspace_file(&source, aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES)
-            .map_err(|error| RunnerError::Receipt(format!("export source read: {error}")))?;
+    // Guest-published artifacts are untrusted data, not host-owned workspace
+    // control files. Hold the ordinary file against writes/deletion while the
+    // protected workspace directories remain held, then bind its bytes to the
+    // verified receipt. Do not require the guest file to have the host owner.
+    let source_path = held.output_path().join("document-output.txt");
+    let source = aiw_windows_platform::HeldApplicationFile::open_bounded(
+        &source_path,
+        aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES,
+    )
+    .map_err(|error| RunnerError::Receipt(format!("export source open: {error}")))?;
+    if !same_windows_path(&source.observation().canonical_path, &source_path) {
+        return Err(RunnerError::Receipt(
+            "export source identity changed".into(),
+        ));
+    }
+    let source_bytes = source
+        .read_bounded(aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES)
+        .map_err(|error| RunnerError::Receipt(format!("export source read: {error}")))?;
     msi_document::verify_bytes(&source_bytes, &transfer)?;
     source
         .revalidate()
@@ -443,34 +455,6 @@ pub fn export_windows_sandbox_msi_document(
         output_sha256: transfer.output_sha256,
         output_size_bytes: transfer.output_size_bytes,
     })
-}
-
-#[cfg(windows)]
-fn read_bound_workspace_file(
-    file: &aiw_windows_platform::BoundWorkspaceFile,
-    maximum_bytes: u64,
-) -> Result<Vec<u8>, RunnerError> {
-    use std::io::Seek as _;
-
-    file.revalidate().map_err(|_| RunnerError::Drift)?;
-    let mut reader = file.as_file().try_clone().map_err(|_| RunnerError::Drift)?;
-    let metadata = reader.metadata().map_err(|_| RunnerError::Drift)?;
-    if !metadata.is_file() || metadata.len() > maximum_bytes {
-        return Err(RunnerError::Drift);
-    }
-    reader
-        .seek(std::io::SeekFrom::Start(0))
-        .map_err(|_| RunnerError::Drift)?;
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    reader
-        .take(maximum_bytes + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|_| RunnerError::Drift)?;
-    if bytes.len() as u64 > maximum_bytes {
-        return Err(RunnerError::Drift);
-    }
-    file.revalidate().map_err(|_| RunnerError::Drift)?;
-    Ok(bytes)
 }
 
 #[cfg(windows)]
