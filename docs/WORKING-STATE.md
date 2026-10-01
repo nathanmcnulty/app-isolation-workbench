@@ -1,6 +1,6 @@
 # Working state
 
-Updated 2026-09-28. This is a compact handoff, not a run receipt or authorization.
+Updated 2026-10-01. This is a compact handoff, not a run receipt or authorization.
 
 ## Where to resume
 
@@ -31,7 +31,13 @@ isolation. See [BAMBU-STUDIO-PROFILE.md](BAMBU-STUDIO-PROFILE.md).
 Current branch `codex/admin-interactive-launch` adds a separate fixed
 Notepad++ document-transfer administrator entry and package identity. Local
 CLI tests, governance, verifier contract, and unarchived package assembly
-passed; a clean-host operator trial for this entry is still unrecorded.
+passed. Operator run `admin-1790840111071516800` on preview `88ec2d7`
+failed before the editor appeared, with a generic process timeout consistent
+with the old 120-second installation deadline. Cleanup passed; a fresh
+read-only provider query found no active sessions. The pending fix versions
+the transfer installation contract, retains bounded MSI diagnostics, and
+corrects failed-transfer reporting. Validate and stage the corrected preview
+before requesting another operator trial; success is still unproved.
 It reuses the existing interactive transfer/report/export primitives and
 requires visible exact-plan approval and explicit output export. Do not infer
 general compatibility from either fixed workflow. See

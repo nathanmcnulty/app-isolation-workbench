@@ -14,6 +14,24 @@ After a verified transfer and cleanup, use the explicit
 Local package assembly and tests do not establish a separate-host operator
 trial for this new entry.
 
+Operator run `admin-1790840111071516800` from preview `88ec2d7` failed before
+the editor was visible. The generic guest process timeout and approximately
+133 seconds from provider start to cleanup are consistent with the old
+120-second MSI installation deadline; they do not establish why MSI stalled.
+Recorded exact-session cleanup passed, and a subsequent read-only provider
+query found no active sessions. The original evidence remains under
+`C:\AIW-Interactive-Evidence-88ec2d7` on the dedicated VM.
+
+New document-transfer preparations use compiled scenario v0alpha12 / transfer
+profile v0alpha2, a fixed 300-second installation deadline, and fixed MSI
+verbose logging inside the disposable guest. On installation failure, after process cleanup the agent
+retains at most the final 64 KiB as `output/guest-msi-install-unverified.log`.
+This raw diagnostic tail is untrusted, may be truncated, and is not a verified
+application result or export artifact. Installation failures identify the
+process and deadline and report whether log retention succeeded. Historical
+v0alpha8 transfer records keep their original 120-second contract. A new
+successful operator trial is still required.
+
 The fixed interactive profile installs Notepad++ inside a disposable Windows Sandbox and opens a blank editor as `AiwStandardUser` with a verified medium-integrity token. Close the editor normally when finished. Its approved lifetime starts after the exact application window and token are observed; expiration terminates the process job, verifies cleanup, and records an unsuccessful attempt. An unsaved-document prompt does not extend the deadline.
 
 The example allows five minutes; `waitForUserClose.timeoutSeconds` accepts 30–600 seconds. The host's total `run start --timeout-seconds` can cancel earlier. Changing the project, lifetime, application, guest agent, or compiled scenario requires fresh preparation and approval.

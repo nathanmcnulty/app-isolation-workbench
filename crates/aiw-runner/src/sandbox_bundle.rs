@@ -148,7 +148,7 @@ pub(crate) fn verify_prepared_scenario(
 ) -> Result<(), crate::RunnerError> {
     // Only the fixed scratch recipe may acquire a document at preparation time.
     // Recompile both sides rather than removing fields before comparing them.
-    let expected = if let Some(document) = &prepared.interactive_document {
+    let mut expected = if let Some(document) = &prepared.interactive_document {
         if bundled.interactive_session_seconds.is_none()
             || bundled.requires_document_transfer()
             || compile_notepad_plus_plus_msi_scenario(project, &bundled.scenario_id).as_ref()
@@ -166,6 +166,22 @@ pub(crate) fn verify_prepared_scenario(
     } else {
         bundled.clone()
     };
+    // Historical transfer runs retain their originally approved installation
+    // deadline and argument contract when associated with their scratch bundle.
+    if prepared.schema_version == "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha8"
+        && prepared.requires_document_transfer()
+    {
+        prepared
+            .validate()
+            .map_err(|_| crate::RunnerError::ApprovalBinding)?;
+        expected.schema_version = prepared.schema_version.clone();
+        expected.profile = prepared.profile.clone();
+        expected.install_timeout_seconds = 120;
+        expected.install_arguments.truncate(4);
+        expected
+            .validate()
+            .map_err(|_| crate::RunnerError::ApprovalBinding)?;
+    }
     if &expected != prepared {
         return Err(crate::RunnerError::ApprovalBinding);
     }

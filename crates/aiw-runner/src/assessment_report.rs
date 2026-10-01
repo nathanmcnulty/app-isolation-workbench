@@ -25,6 +25,8 @@ fn verify_historical_scenario(
     historical.schema_version = recorded.schema_version.clone();
     historical.profile = recorded.profile.clone();
     historical.install_timeout_seconds = recorded.install_timeout_seconds;
+    // validate() above restricts both old and current fixed installer arguments.
+    historical.install_arguments = recorded.install_arguments.clone();
     if !historical.requires_application_exercise() {
         historical.document_exercise = None;
     } else if !historical.requires_standard_user() {
@@ -601,6 +603,9 @@ fn windows_path_contains(parent: &Path, child: &Path) -> bool {
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WsbMsiUnsuccessfulReport {
+    /// Approved input binding; never a claim of a successfully retained output.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approved_document_transfer: Option<aiw_provider_wsb::InteractiveDocumentTransfer>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interactive_session_seconds: Option<u32>,
     pub schema_version: String,
@@ -892,8 +897,11 @@ pub(crate) fn report_windows_sandbox_msi_run_bound(
         revalidate()?;
         return Ok(WsbMsiRunReport::UnsuccessfulAttempt(Box::new(
             WsbMsiUnsuccessfulReport {
+                approved_document_transfer: msi.scenario.interactive_document.clone(),
                 interactive_session_seconds: msi.scenario.interactive_session_seconds,
-                schema_version: if failure_progress_has_snapshots(&failure_progress) {
+                schema_version: if msi.scenario.requires_document_transfer() {
+                    "aiw.dev/wsb-msi-unsuccessful-report/v0alpha5"
+                } else if failure_progress_has_snapshots(&failure_progress) {
                     "aiw.dev/wsb-msi-unsuccessful-report/v0alpha4"
                 } else if msi.import_receipt.download_metadata_archive.is_some() {
                     "aiw.dev/wsb-msi-unsuccessful-report/v0alpha3"

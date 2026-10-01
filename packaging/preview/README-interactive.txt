@@ -57,5 +57,10 @@ explicitly export to a new host file with the values from that run:
 Export refuses overwrite and workspace destinations, and verifies copied bytes.
 Keep the evidence directory. On failure, inspect the exact retained run status;
 recover only if it says recovery is required. Never guess a Sandbox session ID.
+Installation has a separate five-minute deadline before the editor's five-minute
+editing period begins. Installation failures identify the process and deadline.
+If present, output\guest-msi-install-unverified.log inside the retained workspace
+contains at most the final 64 KiB of raw MSI diagnostics. This may be truncated
+and is untrusted diagnostic text, not a verified result or export artifact.
 AIW performs no telemetry or upload. The separate-host operator trial is still
 required for this package; this package is not a signed public release.

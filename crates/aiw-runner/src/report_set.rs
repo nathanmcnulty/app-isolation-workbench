@@ -484,7 +484,8 @@ mod tests {
             FailureProgressEvidence::Absent,
             FailureProgressEvidence::Rejected,
         ] {
-            let report = crate::WsbMsiUnsuccessfulReport {
+            let mut report = crate::WsbMsiUnsuccessfulReport {
+                approved_document_transfer: None,
                 interactive_session_seconds: None,
                 schema_version: "legacy".into(),
                 run_id: "run-1".into(),
@@ -503,6 +504,25 @@ mod tests {
                 },
                 failure_progress: progress,
             };
+            report.interactive_session_seconds = Some(300);
+            assert!(
+                report
+                    .to_markdown()
+                    .contains("Scratch-only interactive profile")
+            );
+            report.approved_document_transfer =
+                Some(aiw_provider_wsb::InteractiveDocumentTransfer {
+                    input_sha256: "f".repeat(64),
+                    input_size_bytes: 98,
+                });
+            let markdown = report.to_markdown();
+            assert!(markdown.contains("Approved input: 98 bytes"));
+            assert!(markdown.contains(&"f".repeat(64)));
+            assert!(markdown.contains("No verified output"));
+            assert!(!markdown.contains("Scratch-only"));
+            assert!(!markdown.contains("No host document transfer"));
+            report.interactive_session_seconds = None;
+            report.approved_document_transfer = None;
             let result = summarize(
                 "application".into(),
                 WsbMsiRunReport::UnsuccessfulAttempt(Box::new(report)),

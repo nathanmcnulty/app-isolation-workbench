@@ -392,6 +392,16 @@ fn bundle_allows_only_the_approved_document_specialization() {
     };
     verify(&bundled).unwrap();
     verify(&prepared).unwrap();
+    let mut historical = prepared.clone();
+    historical.schema_version = "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha8".into();
+    historical.profile =
+        "aiw.dev/windows-sandbox/notepad-plus-plus-interactive-document/v0alpha1".into();
+    historical.install_timeout_seconds = 120;
+    historical.install_arguments.truncate(4);
+    historical.validate().unwrap();
+    verify(&historical).unwrap();
+    historical.install_timeout_seconds = 300;
+    assert!(verify(&historical).is_err());
     for field in [
         "lifetime",
         "application",

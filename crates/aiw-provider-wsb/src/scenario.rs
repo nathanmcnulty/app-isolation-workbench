@@ -27,9 +27,12 @@ pub(crate) const LEGACY_NOTEPAD_PLUS_PLUS_MSI_PROFILE: &str =
 pub const NOTEPAD_PLUS_PLUS_INTERACTIVE_PROFILE: &str =
     "aiw.dev/windows-sandbox/notepad-plus-plus-interactive/v0alpha1";
 pub const NOTEPAD_PLUS_PLUS_INTERACTIVE_DOCUMENT_PROFILE: &str =
+    "aiw.dev/windows-sandbox/notepad-plus-plus-interactive-document/v0alpha2";
+pub(crate) const LEGACY_INTERACTIVE_DOCUMENT_PROFILE: &str =
     "aiw.dev/windows-sandbox/notepad-plus-plus-interactive-document/v0alpha1";
 pub const COMPILED_MSI_INTERACTIVE_DOCUMENT_SCENARIO_SCHEMA_VERSION: &str =
-    "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha8";
+    "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha12";
+pub const INTERACTIVE_MSI_INSTALL_LOG_PATH: &str = r"C:\AIW\interactive-msi-install.log";
 pub const COMPILED_MSI_LOCAL_SETTINGS_SCENARIO_SCHEMA_VERSION: &str =
     "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha10";
 pub const NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_PROFILE: &str =
@@ -144,9 +147,25 @@ impl CompiledMsiScenario {
         let interactive = self.schema_version
             == "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha7"
             && self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_PROFILE;
-        let interactive_document = self.schema_version
+        let current_interactive_document = self.schema_version
             == COMPILED_MSI_INTERACTIVE_DOCUMENT_SCENARIO_SCHEMA_VERSION
             && self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_DOCUMENT_PROFILE;
+        let legacy_interactive_document = self.schema_version
+            == "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha8"
+            && self.profile == LEGACY_INTERACTIVE_DOCUMENT_PROFILE;
+        let interactive_document = current_interactive_document || legacy_interactive_document;
+        let mut install_arguments = vec![
+            "/i".to_owned(),
+            STAGED_INSTALLER_PATH.to_owned(),
+            "/qn".to_owned(),
+            "/norestart".to_owned(),
+        ];
+        if current_interactive_document {
+            install_arguments.extend([
+                "/L*V".to_owned(),
+                INTERACTIVE_MSI_INSTALL_LOG_PATH.to_owned(),
+            ]);
+        }
         let registry_profile = self.schema_version
             == "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha5"
             && self.profile == "aiw.dev/windows-sandbox/notepad-plus-plus-msi/v0alpha5";
@@ -205,15 +224,9 @@ impl CompiledMsiScenario {
             || (!interactive_document && self.interactive_document.is_some())
             || !lower_hex_sha256(&self.application_sha256)
             || self.installer_path != STAGED_INSTALLER_PATH
-            || self.install_arguments
-                != [
-                    "/i".to_owned(),
-                    STAGED_INSTALLER_PATH.to_owned(),
-                    "/qn".to_owned(),
-                    "/norestart".to_owned(),
-                ]
+            || self.install_arguments != install_arguments
             || self.install_timeout_seconds
-                != if current || local_settings {
+                != if current || local_settings || current_interactive_document {
                     CURRENT_INSTALL_TIMEOUT_SECONDS
                 } else {
                     INSTALL_TIMEOUT_SECONDS
@@ -238,7 +251,7 @@ impl CompiledMsiScenario {
     /// The versioned profile is part of the approved scenario hash.
     pub fn requires_application_token(&self) -> bool {
         self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_PROFILE
-            || self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_DOCUMENT_PROFILE
+            || self.requires_document_transfer()
             || self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
             || self.profile == LEGACY_NOTEPAD_PLUS_PLUS_MSI_PROFILE
             || self.is_local_settings_profile()
@@ -259,7 +272,7 @@ impl CompiledMsiScenario {
 
     pub fn requires_standard_user(&self) -> bool {
         self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_PROFILE
-            || self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_DOCUMENT_PROFILE
+            || self.requires_document_transfer()
             || self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
             || self.profile == LEGACY_NOTEPAD_PLUS_PLUS_MSI_PROFILE
             || self.is_local_settings_profile()
@@ -282,6 +295,7 @@ impl CompiledMsiScenario {
 
     pub fn requires_document_transfer(&self) -> bool {
         self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_DOCUMENT_PROFILE
+            || self.profile == LEGACY_INTERACTIVE_DOCUMENT_PROFILE
     }
 
     pub fn requires_local_settings(&self) -> bool {
@@ -472,6 +486,11 @@ pub fn compile_notepad_plus_plus_msi_scenario_with_document(
     }
     compiled.schema_version = COMPILED_MSI_INTERACTIVE_DOCUMENT_SCENARIO_SCHEMA_VERSION.to_owned();
     compiled.profile = NOTEPAD_PLUS_PLUS_INTERACTIVE_DOCUMENT_PROFILE.to_owned();
+    compiled.install_timeout_seconds = CURRENT_INSTALL_TIMEOUT_SECONDS;
+    compiled.install_arguments.extend([
+        "/L*V".to_owned(),
+        INTERACTIVE_MSI_INSTALL_LOG_PATH.to_owned(),
+    ]);
     compiled.interactive_document = Some(InteractiveDocumentTransfer {
         input_sha256: input_sha256.to_owned(),
         input_size_bytes,
@@ -787,6 +806,31 @@ mod tests {
             hash
         );
         assert_eq!(compiled.canonical_sha256().unwrap().len(), 64);
+        assert_eq!(compiled.install_timeout_seconds, 300);
+        assert_eq!(compiled.install_arguments[4], "/L*V");
+        assert_eq!(
+            compiled.install_arguments[5],
+            INTERACTIVE_MSI_INSTALL_LOG_PATH
+        );
+
+        let mut changed = compiled.clone();
+        changed.install_timeout_seconds = 120;
+        assert!(changed.validate().is_err());
+        changed = compiled.clone();
+        changed.install_arguments[5] = r"C:\other.log".into();
+        assert!(changed.validate().is_err());
+
+        let mut historical = compiled;
+        historical.schema_version = "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha8".into();
+        historical.profile = LEGACY_INTERACTIVE_DOCUMENT_PROFILE.into();
+        historical.install_timeout_seconds = 120;
+        historical.install_arguments.truncate(4);
+        historical.validate().unwrap();
+        assert!(historical.requires_document_transfer());
+        assert!(historical.requires_standard_user());
+        assert!(historical.requires_application_token());
+        historical.install_timeout_seconds = 300;
+        assert!(historical.validate().is_err());
     }
 
     #[test]
