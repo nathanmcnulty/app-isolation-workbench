@@ -4,7 +4,7 @@ Updated 2026-10-01. This is a compact handoff, not a run receipt or authorizatio
 
 ## Where to resume
 
-- PR #75 merged at `1abbcf309de1cea50c6e9d1af41eb7507c67f0c9`. The interactive document transfer and explicit export have an independently approved operator run; verify the current checkout with `scripts/work-status.ps1` before editing.
+- PR #77 merged at `fda9935c5da59c7652b0028be7f3b12270c6ce64`. The interactive document transfer and explicit export have an independently approved operator run; verify the current checkout with `scripts/work-status.ps1` before editing.
 - The exact unsigned `08ab440` profile-bound package passed the separate-host second-operator trial. Run `admin-1790485297308064300` passed all nine fixed stages, document hash and ACL controls, and terminal cleanup; negative run `admin-1790486242125347900` rejected before intake or provider acquisition. The provider has no active session. The broader isolation outcome remains `insufficientEvidence`. See [CLEAN-HOST-PREVIEW.md](CLEAN-HOST-PREVIEW.md).
 - The earlier profile-bound approved replay passed its fixed document workflow, required guest file ACL controls, recorded environment comparison, and cleanup. That remains same-host evidence for its recorded source and provider identities. See [VALIDATED-SANDBOX-LAUNCH.md](VALIDATED-SANDBOX-LAUNCH.md).
 - The earlier development baseline/candidate/relocated-replay and agent-run packaged smoke remain separately recorded in [PACKAGING-RECIPES.md](PACKAGING-RECIPES.md) and [CLEAN-HOST-PREVIEW.md](CLEAN-HOST-PREVIEW.md). They are not substituted for the independent operator run.
@@ -31,10 +31,15 @@ hosted checks passed and PR #75 merged. See [INTERACTIVE-SANDBOX.md](INTERACTIVE
 The current usability slice adds post-approval elapsed waiting, shorter
 interactive summaries, optional export summaries, and distinct destination,
 evidence, and console-output failures. Full approval review and receipt-bound
-results remain intact. PR #77 carries this slice. The exact `2c264d1` static
+results remain intact. PR #77 merged this slice. The exact `2c264d1` static
 preview passed separate-host retained export checks in both formats; overwrite
 refusal and original-input preservation passed. No new installation was run.
 See INTERACTIVE-SANDBOX.md for behavior and validation.
+The exact `738ea6e` preview also completed Nathan's fresh approved run
+`admin-1790887375232888400`, with a 225-byte edited export and verified cleanup.
+The verifier succeeded; a handoff's stale `$LASTEXITCODE` check falsely reported
+failure. In-process PowerShell callers now use throws/structured results, and
+the verifier regression covers inherited nonzero native codes in both shells.
 Next: assess remaining preview release gates, especially publisher identity
 and the simplest end-to-end administrator entry. Public release
 also needs a publisher-authentication/signing decision. Generic installer

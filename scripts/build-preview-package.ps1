@@ -165,7 +165,6 @@ try {
         if ($actualGuestHash -ne $GuestAgentSha256) { throw 'guest-agent bytes do not match the independently retained hash' }
     } else {
         $guestBuildText = & (Join-Path $PSScriptRoot 'build-guest-agent.ps1') -Profile release | Out-String
-        if ($LASTEXITCODE -ne 0) { throw 'release guest-agent build failed' }
         $guestBuild = $guestBuildText | ConvertFrom-Json
         $guestSource = [IO.Path]::GetFullPath([string]$guestBuild.artifact)
     }
@@ -314,7 +313,6 @@ try {
     $receiptPath = Join-Path $output 'receipt.json'
     Write-Utf8NoBom $receiptPath ($receipt | ConvertTo-Json -Depth 20)
     $verificationText = & $verifierSource -PackageRoot $output -ReceiptSha256 $receiptHash | Out-String
-    if ($LASTEXITCODE -ne 0) { throw 'assembled preview package verification failed' }
     $verification = $verificationText | ConvertFrom-Json
     if ($verification.exactInventory -ne $true) { throw 'assembled preview package inventory was not verified' }
 
@@ -334,7 +332,7 @@ try {
                 throw 'Archive receipt bytes differ from the assembled package'
             }
             $archiveVerificationText = & $verifierSource -PackageRoot $archiveVerificationRoot -ReceiptSha256 $receiptHash | Out-String
-            if ($LASTEXITCODE -ne 0 -or ($archiveVerificationText | ConvertFrom-Json).exactInventory -ne $true) {
+            if (($archiveVerificationText | ConvertFrom-Json).exactInventory -ne $true) {
                 throw 'Extracted preview archive verification failed'
             }
         }
