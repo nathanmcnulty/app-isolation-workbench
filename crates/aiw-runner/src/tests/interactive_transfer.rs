@@ -201,7 +201,9 @@ fn protected_transfer_preparation_completion_report_and_export() {
                 == b"{\"event\":\"test-observation\"}\n")
     );
     let result = transfer_result(&start, output);
-    let fake = transfer_process(&start, result, Some(output.to_vec()), true);
+    // Guest output need not carry the protected ACL of host control files.
+    // Export must verify ordinary artifact bytes while retaining workspace holds.
+    let fake = transfer_process(&start, result, Some(output.to_vec()), false);
     let execution = crate::execute_wsb_golden_probe(
         &start,
         &readiness,
@@ -326,6 +328,22 @@ fn protected_transfer_preparation_completion_report_and_export() {
         .is_err()
     );
     assert!(!inside.exists());
+    let source = root.join("output/document-output.txt");
+    let alias = fixture.0.join("output-alias.txt");
+    fs::hard_link(&source, &alias).unwrap();
+    let rejected_link = fixture.0.join("rejected-link.txt");
+    assert!(
+        export_windows_sandbox_msi_document(
+            &root,
+            "w1-run",
+            &project,
+            &start.guest_agent.sha256,
+            &rejected_link,
+        )
+        .is_err()
+    );
+    assert!(!rejected_link.exists());
+    fs::remove_file(alias).unwrap();
     fs::write(root.join("output/document-output.txt"), b"tampered output").unwrap();
     assert!(
         report_windows_sandbox_msi_run(&root, "w1-run", &project, &start.guest_agent.sha256)
@@ -392,6 +410,16 @@ fn bundle_allows_only_the_approved_document_specialization() {
     };
     verify(&bundled).unwrap();
     verify(&prepared).unwrap();
+    let mut historical = prepared.clone();
+    historical.schema_version = "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha8".into();
+    historical.profile =
+        "aiw.dev/windows-sandbox/notepad-plus-plus-interactive-document/v0alpha1".into();
+    historical.install_timeout_seconds = 120;
+    historical.install_arguments.truncate(4);
+    historical.validate().unwrap();
+    verify(&historical).unwrap();
+    historical.install_timeout_seconds = 300;
+    assert!(verify(&historical).is_err());
     for field in [
         "lifetime",
         "application",

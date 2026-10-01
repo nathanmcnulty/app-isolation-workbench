@@ -1,5 +1,108 @@
 # Scratch-only interactive Notepad++
 
+## Administrator preview entry
+
+The fixed `NotepadPlusPlusInteractive` preview package exposes
+`aiw admin launch-document --installer <exact MSI> --document-input <text file>
+--evidence <existing directory> --identity <operator>`. Its own manifest and
+receipt identify the interactive project; the automated local-settings
+assessment package remains a different product. This entry reuses protected
+intake, the complete recipe and exact-plan terminal approval, the owned Sandbox
+session, and retained interactive reporting. It does not export automatically.
+After a verified transfer and cleanup, use the explicit
+`run export-wsb-msi-document` command documented in the packaged README.
+Local package assembly and tests do not establish a separate-host operator
+trial for this new entry.
+
+Operator run `admin-1790840111071516800` from preview `88ec2d7` failed before
+the editor was visible. The generic guest process timeout and approximately
+133 seconds from provider start to cleanup are consistent with the old
+120-second MSI installation deadline; they do not establish why MSI stalled.
+Recorded exact-session cleanup passed, and a subsequent read-only provider
+query found no active sessions. The original evidence remains under
+`C:\AIW-Interactive-Evidence-88ec2d7` on the dedicated VM.
+
+New document-transfer preparations use compiled scenario v0alpha12 / transfer
+profile v0alpha2, a fixed 300-second installation deadline, and fixed MSI
+verbose logging inside the disposable guest. On installation failure, after process cleanup the agent
+retains at most the final 64 KiB as `output/guest-msi-install-unverified.log`.
+This raw diagnostic tail is untrusted, may be truncated, and is not a verified
+application result or export artifact. Installation failures identify the
+process and deadline and report whether log retention succeeded. Historical
+v0alpha8 transfer records keep their original 120-second contract. The corrected
+administrator entry's operator trial is recorded below.
+
+### Administrator preview development proof, 2026-10-01
+
+The corrected guest from source `3175ad1` reached the editor on the dedicated
+VM in development run `dev-interactive-3175ad1e`. The agent observed Notepad++
+through RDP, inserted one ASCII character, saved, and closed the editor.
+The retained interactive report verified the medium, non-elevated standard-user
+token, normal application exit, exact-session cleanup, and document transfer.
+The 98-byte original remained unchanged; the saved 99-byte output SHA-256 is
+`d619d3dc0d2bbdae44fd6a1adf3267af0a07c6fe95295391429758a615abf214`.
+Evidence is retained at `C:\AIW-Dev-3175ad1e` on the VM. This was explicitly
+agent-approved development work, not an independent human operator trial.
+
+That run exposed an export defect: the guest-published output was owned by
+Administrators, while export incorrectly required the host operator's ownership
+and protected control-file ACL. Export now holds the bounded ordinary artifact
+against writes and deletion, rejects reparse points, hard links, extra streams,
+and path drift, and verifies its bytes against the receipt. Protected workspace
+directory validation remains unchanged. Regression coverage includes ordinary
+guest output, hard-link rejection, tampering, overwrite refusal, and refusal to
+export into the workspace.
+
+The corrected static-runtime CLI
+`a4313230afc156c4dbafcf05f4fb42b47cedcc2f1dda56cda4f3220f88cd66fd`
+exported that retained output under `aiwoperator` without rerunning installation.
+The export matched the 99-byte output and receipt
+`3ddc6d1c0ae3e1322150db79960956d9f4246a9a7597956364a0eba745f0373e`.
+A second export refused overwrite and left the bytes unchanged; an operator
+provider query returned an empty list. Export evidence is retained at
+`C:\AIW-Export-Fix-Static-20261001` on the VM. The local runner suite passed
+108 tests (4 ignored), focused transfer tests passed, and formatting, Clippy,
+and governance passed. Hosted `Verify and audit` and `Minimum supported Rust`
+passed at corrected source `30231bb` before the independent operator trial.
+
+### Corrected administrator entry: operator acceptance, 2026-10-01
+
+Nathan approved the exact recipe as `nathanmcnulty` and reported completing the
+desktop trial on the dedicated VM. Preview `30231bb` completed public-entry run
+`admin-1790878302241975300`: successful MSI install, observed standard-user
+editor, normal close, verified document transfer, retained interactive report,
+and exact-session cleanup. The approval binds plan
+`f1c84aa4110cff2478929751bc08f86f04bf96d7cdaf02dc8844179a99134a21`.
+The guest token was medium integrity, non-elevated, with Administrators disabled.
+
+The unchanged original is 164 bytes, SHA-256
+`2260bf2ae8f247c75a30e058aace7a43cc4c030dbc050339919f86a6e5c64db8`.
+The saved output adds a separate final line `Edited and saved by Nathan`; its
+192 bytes hash to
+`8b3c443a776f5ddb1e646d5f2d2ab8f9691a81fc5e80319de6ac372beffe38a6`.
+The separately invoked explicit export reverified receipt
+`0f3baaacbd86045ace8c12f0db3e9f2695ba6397e5da4bd93747d7625535e69c`
+and copied those exact bytes. A second export refused overwrite and preserved
+the file. The original input hash stayed unchanged, and a fresh provider list
+under `aiwoperator` was empty.
+
+Retained VM evidence: `C:\AIW-Interactive-Evidence-30231bb` (approved execution
+and report) and `C:\AIW-Human-Export-30231bb` (explicit export, refusal control,
+original-input check, and provider query). The exported document is
+`C:\AIW-Human-Export-30231bb\edited-document.txt`. The exact archive SHA-256 is
+`787bfa27305a29117a83d454ba0aab140efbfcb579cd397fc0c82576924ed0ac`;
+its verifier checked all eight payload records and exact inventory before
+launch. This closes the corrected administrator document-transfer benchmark
+for this unsigned preview. It does not establish general MSI compatibility,
+publisher authenticity, or an inner application isolation boundary.
+
+A compact read-only backup of the textual run/export evidence is retained on
+the development host at
+`%LOCALAPPDATA%\Temp\AIW-Human-Trial-30231bb-evidence.zip` (43,061 bytes),
+SHA-256 `845c7484b7d213cdc840f80519d39e3e86f7eb32d56dc684608a7138d29acbb6`.
+Installers and binary tools are omitted. The archive is historical evidence,
+not a portable protected workspace or authority for a new execution.
+
 The fixed interactive profile installs Notepad++ inside a disposable Windows Sandbox and opens a blank editor as `AiwStandardUser` with a verified medium-integrity token. Close the editor normally when finished. Its approved lifetime starts after the exact application window and token are observed; expiration terminates the process job, verifies cleanup, and records an unsuccessful attempt. An unsaved-document prompt does not extend the deadline.
 
 The example allows five minutes; `waitForUserClose.timeoutSeconds` accepts 30–600 seconds. The host's total `run start --timeout-seconds` can cancel earlier. Changing the project, lifetime, application, guest agent, or compiled scenario requires fresh preparation and approval.

@@ -3,7 +3,7 @@ param(
     [Parameter(Mandatory)]
     [ValidateNotNullOrEmpty()]
     [string]$OutputDirectory,
-    [ValidateSet('NotepadPlusPlus', 'BambuStudioExport')]
+    [ValidateSet('NotepadPlusPlus', 'NotepadPlusPlusInteractive', 'BambuStudioExport')]
     [string]$Product = 'NotepadPlusPlus',
     [string]$GuestAgent,
     [string]$GuestAgentSha256,
@@ -15,8 +15,9 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $isBambu = $Product -eq 'BambuStudioExport'
-$productDirectory = if ($isBambu) { 'bambu-studio' } else { 'notepad-plus-plus' }
-$productId = if ($isBambu) { 'bambu-studio-export' } else { 'notepad-plus-plus-local-settings' }
+$isInteractive = $Product -eq 'NotepadPlusPlusInteractive'
+$productDirectory = if ($isBambu) { 'bambu-studio' } elseif ($isInteractive) { 'notepad-plus-plus-interactive' } else { 'notepad-plus-plus' }
+$productId = if ($isBambu) { 'bambu-studio-export' } elseif ($isInteractive) { 'notepad-plus-plus-interactive' } else { 'notepad-plus-plus-local-settings' }
 $scenarioIdExpected = if ($isBambu) { 'local-file-export' } else { 'install-launch-close' }
 $projectFile = if ($isBambu) { 'project.json' } else { 'project.yaml' }
 $productRoot = Join-Path $repoRoot "crates\aiw-cli\product\$productDirectory"
@@ -28,7 +29,7 @@ $buildTarget = if ([string]::IsNullOrWhiteSpace($env:CARGO_TARGET_DIR)) {
 $cliSource = Join-Path $buildTarget 'release\aiw.exe'
 $projectSource = Join-Path $productRoot $projectFile
 $manifestSource = Join-Path $productRoot 'manifest.json'
-$readmeFile = if ($isBambu) { 'packaging\preview\README-bambu.txt' } else { 'packaging\preview\README.txt' }
+$readmeFile = if ($isBambu) { 'packaging\preview\README-bambu.txt' } elseif ($isInteractive) { 'packaging\preview\README-interactive.txt' } else { 'packaging\preview\README.txt' }
 $readmeTemplate = Join-Path $repoRoot $readmeFile
 $verifierSource = Join-Path $PSScriptRoot 'verify-preview-package.ps1'
 $licenseSource = Join-Path $repoRoot 'LICENSE'
@@ -98,8 +99,8 @@ foreach ($path in @($projectSource, $manifestSource, $readmeTemplate, $verifierS
 }
 $archive = if ([string]::IsNullOrWhiteSpace($ArchivePath)) { $null } else { [IO.Path]::GetFullPath($ArchivePath) }
 if ($archive) {
-    if (-not $GuestAgent -or (-not $isBambu -and -not $LaunchProfile)) {
-        throw 'Clean-host archive assembly requires an independently retained guest agent and, for Notepad++, a validated launch profile'
+    if (-not $GuestAgent -or (-not $isBambu -and -not $isInteractive -and -not $LaunchProfile)) {
+        throw 'Clean-host archive assembly requires an independently retained guest agent; the Notepad++ assessment also requires a validated launch profile'
     }
     if (Test-Path -LiteralPath $archive) { throw "Archive already exists; choose a new path: $archive" }
     if (Test-Path -LiteralPath "$archive.json") { throw "Distribution manifest already exists: $archive.json" }
@@ -177,7 +178,7 @@ try {
         throw 'product manifest is not the selected fixed contract'
     }
     if ($null -ne $LaunchProfile -xor $null -ne $LaunchProfileSha256) { throw 'LaunchProfile and LaunchProfileSha256 must be supplied together' }
-    if ($isBambu -and $LaunchProfile) { throw 'Bambu export assessment does not accept a launch profile' }
+    if (($isBambu -or $isInteractive) -and $LaunchProfile) { throw 'The selected workflow does not accept a launch profile' }
     $profileSource = $null
     if ($LaunchProfile) {
         $profileSource = [IO.Path]::GetFullPath($LaunchProfile)
@@ -233,6 +234,9 @@ try {
     $workflowDescription = if ($isBambu) {
         'the recorded Bambu Studio 02.08.02.60 x64 EXE in Windows Sandbox, using the packaged fixed STL-to-3MF export project and guest agent.'
     }
+    elseif ($isInteractive) {
+        'the recorded Notepad++ 8.9.8 x64 MSI in Windows Sandbox, with one bounded UTF-8 document input, an editor open for human use, and a verified retained output after successful completion.'
+    }
     elseif ($profileSource) {
         'the recorded Notepad++ 8.9.8 x64 MSI in Windows Sandbox, using the packaged fixed project, guest agent, and validated local-settings replay profile.'
     }
@@ -241,6 +245,9 @@ try {
     }
     $profileBoundary = if ($isBambu) {
         'This package supports the fixed export assessment only; it is not a profile-bound adaptation or reusable launch package.'
+    }
+    elseif ($isInteractive) {
+        'This package is a scratch-only interactive transfer profile. It does not preserve application state or establish a reusable isolation boundary.'
     }
     elseif ($profileSource) {
         'This package is bound to the included validated replay profile.'

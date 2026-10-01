@@ -1226,6 +1226,11 @@ mod tests {
         request.scenario.profile =
             aiw_provider_wsb::NOTEPAD_PLUS_PLUS_INTERACTIVE_DOCUMENT_PROFILE.into();
         request.scenario.interactive_session_seconds = Some(60);
+        request.scenario.install_timeout_seconds = 300;
+        request.scenario.install_arguments.extend([
+            "/L*V".into(),
+            aiw_provider_wsb::INTERACTIVE_MSI_INSTALL_LOG_PATH.into(),
+        ]);
         request.scenario.interactive_document =
             Some(aiw_provider_wsb::InteractiveDocumentTransfer {
                 input_sha256: "e".repeat(64),

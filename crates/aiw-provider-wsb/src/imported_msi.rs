@@ -519,6 +519,11 @@ mod tests {
             crate::COMPILED_MSI_INTERACTIVE_DOCUMENT_SCENARIO_SCHEMA_VERSION.to_owned();
         request.scenario.profile = crate::NOTEPAD_PLUS_PLUS_INTERACTIVE_DOCUMENT_PROFILE.to_owned();
         request.scenario.interactive_session_seconds = Some(60);
+        request.scenario.install_timeout_seconds = 300;
+        request.scenario.install_arguments.extend([
+            "/L*V".into(),
+            crate::INTERACTIVE_MSI_INSTALL_LOG_PATH.into(),
+        ]);
         request.scenario.interactive_document = Some(crate::InteractiveDocumentTransfer {
             input_sha256: "e".repeat(64),
             input_size_bytes: 7,

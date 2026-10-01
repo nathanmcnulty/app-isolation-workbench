@@ -25,6 +25,9 @@ use windows::Win32::Foundation::{
     WAIT_TIMEOUT, WPARAM,
 };
 use windows::Win32::Security::{TOKEN_DUPLICATE, TOKEN_QUERY};
+use windows::Win32::Storage::FileSystem::{
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT,
+};
 use windows::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, IsProcessInJob, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
@@ -433,9 +436,8 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
                 Ok((Some(standard_user), Some(snapshot), product))
             })?
         } else if scenario.requires_standard_user() {
-            // The scratch-only interactive profile uses the same verified fresh
-            // medium-integrity account, but takes no filesystem or registry
-            // observations and creates no guest document.
+            // Interactive profiles use the same verified fresh medium-integrity
+            // account without automated filesystem or registry observations.
             (Some(StandardUserSession::establish()?), None, None)
         } else {
             (
@@ -466,7 +468,25 @@ fn execute_validated_fixed_notepad_plus_plus_msi(
         } else {
             installer.cleanup()
         };
-        let install_exit_code = complete_process_operation(install_exit_code, install_cleanup)?;
+        // Preserve only a bounded tail of the fixed MSI log. It is untrusted
+        // diagnostic text, never receipt-bound application evidence.
+        let installation_failed = !matches!(install_exit_code, Ok(code) if code == scenario.expected_exit_code)
+            || install_cleanup.is_err();
+        let diagnostic = if installation_failed && scenario.schema_version
+            == aiw_provider_wsb::COMPILED_MSI_INTERACTIVE_DOCUMENT_SCENARIO_SCHEMA_VERSION
+        {
+            retain_interactive_install_log()
+        } else {
+            Ok(())
+        };
+        let install_exit_code = complete_process_operation(install_exit_code, install_cleanup)
+            .map_err(|error| GuestMsiExecutionError::Process(format!(
+                "MSI installation failed (deadline {} seconds, process {}): {error}; diagnostic retention: {diagnostic:?}",
+                scenario.install_timeout_seconds, installer.process_id
+            )))?;
+        diagnostic.map_err(|error| GuestMsiExecutionError::Process(format!(
+            "MSI installation exited with {install_exit_code}, but diagnostic retention failed: {error}"
+        )))?;
         if install_exit_code != scenario.expected_exit_code {
             return Err(GuestMsiExecutionError::Process(format!(
                 "fixed msiexec exited with {install_exit_code}"
@@ -1341,6 +1361,38 @@ pub(crate) struct GuestProcess {
     initial_thread: OwnedHandle,
 }
 
+/// The installer writes locally inside the disposable worker. Publish a bounded
+/// raw tail only after process/job cleanup, with no compatibility claims.
+fn retain_interactive_install_log() -> Result<(), String> {
+    const MAX_TAIL_BYTES: u64 = 64 * 1024;
+    let mut source = OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
+        .open(aiw_provider_wsb::INTERACTIVE_MSI_INSTALL_LOG_PATH)
+        .map_err(|error| format!("MSI log unavailable: {error}"))?;
+    let metadata = source.metadata().map_err(|error| error.to_string())?;
+    if !metadata.is_file() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
+        return Err("MSI log is not a regular non-reparse file".into());
+    }
+    source
+        .seek(SeekFrom::Start(
+            metadata.len().saturating_sub(MAX_TAIL_BYTES),
+        ))
+        .map_err(|error| error.to_string())?;
+    let mut tail = Vec::new();
+    source
+        .take(MAX_TAIL_BYTES)
+        .read_to_end(&mut tail)
+        .map_err(|error| error.to_string())?;
+    let mut output = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(r"C:\AIW\Output\guest-msi-install-unverified.log")
+        .map_err(|error| error.to_string())?;
+    std::io::Write::write_all(&mut output, &tail).map_err(|error| error.to_string())?;
+    output.sync_all().map_err(|error| error.to_string())
+}
+
 impl GuestProcess {
     fn impersonate_token<T>(
         &self,
@@ -1562,9 +1614,11 @@ impl GuestProcess {
         loop {
             let now = Instant::now();
             if now >= deadline {
-                return Err(GuestMsiExecutionError::Process(
-                    "fixed guest process timed out".to_owned(),
-                ));
+                return Err(GuestMsiExecutionError::Process(format!(
+                    "fixed guest process {} timed out after {} seconds",
+                    self.process_id,
+                    timeout.as_secs()
+                )));
             }
             let milliseconds = deadline
                 .saturating_duration_since(now)

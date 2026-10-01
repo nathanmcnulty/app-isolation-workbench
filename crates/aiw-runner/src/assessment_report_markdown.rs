@@ -223,7 +223,7 @@ impl WsbMsiRunReport {
 impl WsbMsiUnsuccessfulReport {
     pub fn to_markdown(&self) -> String {
         let mut out = format!(
-            "# Notepad++ Windows Sandbox unsuccessful attempt\n\nRun: {}\n\n## Administrator overview\n\nInstaller SHA-256: `{}`. Recorded outcome: **{:?}**. Fixed workflow: privileged guest installation followed by launch, fixed-document open/edit/save, and graceful close. No completed application assessment is available; application functions are **not verified**. The failure may be in setup, the worker, the installer, the application, or the test driver, and does not establish application incompatibility.\n\nRecorded exact-session cleanup verified: **{}**. This historical record is not a current-session query.\n\nSafe next action: {}\n\n## Recorded provider lifecycle\n\n| Sequence | State | Reason code |\n|---|---|---|\n",
+            "# Notepad++ Windows Sandbox unsuccessful attempt\n\nRun: {}\n\n## Administrator overview\n\nInstaller SHA-256: `{}`. Recorded outcome: **{:?}**. Approved workflow: privileged guest installation followed by the fixed application scenario. No completed application assessment is available; application functions are **not verified**. The failure may be in setup, the worker, the installer, the application, or the test driver, and does not establish application incompatibility.\n\nRecorded exact-session cleanup verified: **{}**. This historical record is not a current-session query.\n\nSafe next action: {}\n\n## Recorded provider lifecycle\n\n| Sequence | State | Reason code |\n|---|---|---|\n",
             cell(&self.run_id),
             cell(&self.installer_sha256),
             self.outcome,
@@ -239,7 +239,11 @@ impl WsbMsiUnsuccessfulReport {
             ));
         }
         if let Some(seconds) = self.interactive_session_seconds {
-            out.push_str(&format!("\nScratch-only interactive profile; approved lifetime: {seconds} seconds after window readiness. No host document transfer or saved-data preservation was approved. The terminal failure alone does not identify its cause.\n"));
+            if let Some(input) = &self.approved_document_transfer {
+                out.push_str(&format!("\nInteractive document-transfer profile; approved lifetime: {seconds} seconds after window readiness. Approved input: {} bytes, SHA-256 `{}`. No verified output is available from this failed attempt; do not export partial files. The terminal failure alone does not identify its cause.\n", input.input_size_bytes, cell(&input.input_sha256)));
+            } else {
+                out.push_str(&format!("\nScratch-only interactive profile; approved lifetime: {seconds} seconds after window readiness. No host document transfer or saved-data preservation was approved. The terminal failure alone does not identify its cause.\n"));
+            }
         }
         match &self.failure_progress {
             FailureProgressEvidence::Absent => out.push_str("\nNo receipt-bound stage progress was retained.\n"),

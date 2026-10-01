@@ -126,6 +126,20 @@ enum AdminCommand {
         #[arg(long, value_enum, default_value_t = AdminOutputFormat::Summary)]
         format: AdminOutputFormat,
     },
+    /// Open the fixed Notepad++ document-transfer workflow in a disposable Sandbox.
+    LaunchDocument {
+        #[arg(long)]
+        installer: PathBuf,
+        /// One existing bounded UTF-8 text file to copy into the worker.
+        #[arg(long)]
+        document_input: PathBuf,
+        #[arg(long)]
+        evidence: PathBuf,
+        #[arg(long)]
+        identity: String,
+        #[arg(long, value_enum, default_value_t = AdminOutputFormat::Summary)]
+        format: AdminOutputFormat,
+    },
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -1227,6 +1241,9 @@ fn main() -> ExitCode {
             command: AdminCommand::Assess {
                 format: AdminOutputFormat::Summary,
                 ..
+            } | AdminCommand::LaunchDocument {
+                format: AdminOutputFormat::Summary,
+                ..
             }
         })
     );
@@ -1261,6 +1278,31 @@ fn run(command: Command) -> Result<()> {
                         admin_workflow::assess_bambu(&installer, &evidence, &identity)
                     }
                 }
+                .map_err(admin_workflow::public_error)?;
+                match format {
+                    AdminOutputFormat::Summary => result
+                        .write_summary(&mut std::io::stdout())
+                        .map_err(|error| {
+                            admin_workflow::AdminOutputFailed::from_result(&result, error)
+                        }),
+                    AdminOutputFormat::Json => write_json(&result).map_err(|error| {
+                        admin_workflow::AdminOutputFailed::from_result(&result, error)
+                    }),
+                }
+            }
+            AdminCommand::LaunchDocument {
+                installer,
+                document_input,
+                evidence,
+                identity,
+                format,
+            } => {
+                let result = admin_workflow::launch_document(
+                    &installer,
+                    &document_input,
+                    &evidence,
+                    &identity,
+                )
                 .map_err(admin_workflow::public_error)?;
                 match format {
                     AdminOutputFormat::Summary => result
@@ -3417,6 +3459,44 @@ fn emit_error(envelope: &impl Serialize) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn admin_document_launch_requires_explicit_input_and_routes_to_fixed_command() {
+        use super::{AdminCommand, Cli, Command};
+
+        let arguments = [
+            "aiw",
+            "admin",
+            "launch-document",
+            "--installer",
+            "installer.msi",
+            "--evidence",
+            "evidence",
+            "--identity",
+            "operator",
+        ];
+        assert!(Cli::try_parse_from(arguments).is_err());
+        let parsed = Cli::try_parse_from([
+            "aiw",
+            "admin",
+            "launch-document",
+            "--installer",
+            "installer.msi",
+            "--document-input",
+            "document.txt",
+            "--evidence",
+            "evidence",
+            "--identity",
+            "operator",
+        ])
+        .unwrap();
+        assert!(matches!(
+            parsed.command,
+            Command::Admin(super::AdminArgs {
+                command: AdminCommand::LaunchDocument { .. },
+            })
+        ));
+    }
+
     #[test]
     fn package_import_requires_an_independent_manifest_hash() {
         assert!(

@@ -1647,20 +1647,20 @@ fn invoke_job_bound(
         "finalCleanupError": final_cleanup.as_ref().err(),
     });
     let with_diagnostic = |error: String| format!("{error}; diagnostic={diagnostic}");
-    early_cleanup.map_err(&with_diagnostic)?;
-    deadline_cleanup.map_err(&with_diagnostic)?;
-    final_cleanup.map_err(&with_diagnostic)?;
+    early_cleanup.map_err(with_diagnostic)?;
+    deadline_cleanup.map_err(with_diagnostic)?;
+    final_cleanup.map_err(with_diagnostic)?;
     if root_succeeded && !streams_completed {
         return Err(with_diagnostic(
             "AIW_WSB_CLI_PIPE_TIMEOUT: output remained open past the provider deadline.".to_owned(),
         ));
     }
-    wait_result.map_err(&with_diagnostic)?;
+    wait_result.map_err(with_diagnostic)?;
     let exit_code = exit_code
-        .map_err(&with_diagnostic)?
+        .map_err(with_diagnostic)?
         .expect("a successful wait has an exit code");
-    let stdout = stdout.map_err(&with_diagnostic)?;
-    let stderr = stderr.map_err(&with_diagnostic)?;
+    let stdout = stdout.map_err(with_diagnostic)?;
+    let stderr = stderr.map_err(with_diagnostic)?;
     Ok(ProcessOutput {
         exit_code,
         stdout,
