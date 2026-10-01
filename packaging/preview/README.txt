@@ -29,6 +29,10 @@ After extracting the archive to a new local directory:
    .\verify-preview-package.ps1 -PackageRoot . `
      -ReceiptSha256 <independently-retained-package-receipt-sha256>
 
+Success prints exactInventory: true and the verified file count. This PowerShell
+script throws on failure. Do not check $LASTEXITCODE afterward: it can contain
+an unrelated earlier program's exit code. AIW executable commands do use it.
+
 Host requirements
 -----------------
 - Windows 11 24H2 x64, build 26100 or later.

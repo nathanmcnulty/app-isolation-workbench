@@ -15,6 +15,9 @@
 
 ## Validate proportionally
 
+- Operator handoffs must include copy-and-paste commands with verified target paths, installer/input identities, fresh evidence and export destinations, and independently supplied package hashes. Do not send an operator back to generic README placeholders. Provide the expected editing tasks and completion behavior, and derive new run values from retained typed records rather than guessing IDs.
+- Use terminating errors and structured output for in-process PowerShell scripts. Check `$LASTEXITCODE` only for native programs or scripts explicitly documented to set it; a successful PowerShell script can leave an unrelated native exit code unchanged.
+
 - `scripts/check-local.ps1 -Check Format,Provider` runs selected checks and emits a compact JSON result with full log paths. Choose checks for the changed code; it is not a replacement for required repository checks.
 - Documentation-only edits need link/content review and governance checks, not the Rust suite. Report-only edits should use retained evidence before considering live reruns. Execution or trust-boundary changes need appropriate negative tests and disposable-worker proof.
 - Run each required check once on the completed code. Repeat only when relevant code changes, a failure, or an unresolved concern justifies it. No automatic pass cache: prior logs are evidence for their recorded state, not today's checkout.

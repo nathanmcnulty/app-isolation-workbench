@@ -246,6 +246,60 @@ summary and JSON formats: both identify the export operation and run, fail
 before creating any destination, and leave the fixture empty. The completed
 CLI suite has 42 unit tests and 28 contract tests.
 
+### Fresh operator trial of the usability preview (2026-10-01)
+
+Nathan approved exact preview `738ea6ebd603fae247c5b628a05bde6f0cff5e42`
+for run `admin-1790887375232888400`, plan SHA-256
+`c2b4880b96aee2f991163c2cd225827156e9878d344da447d805288200334549`,
+at `2026-10-01T20:43:07Z`. The recorded Sandbox session is
+`4f15d2df-637b-966d-444d-4ad2cb18fd62`. Installation and editor exit codes
+were zero; the editor was observed and closed without a requested graceful
+close. The application token was medium-integrity and non-elevated; the
+standard-user context had Administrators disabled. Cleanup was verified.
+
+Approved input: 180 bytes, SHA-256
+`3e266d6a75e56727e3ab1703230fc0a6566e6410c57aa13f871fcc0bfb4aaa4c`.
+Retained and user-exported output: 225 bytes, SHA-256
+`bffa4d4d8d3f5098aa8984d16b237f8ebbf3115127c16a3a6d8fc370944f8e5c`.
+Receipt SHA-256:
+`225a6e205c3f290d58784aa5c3d5b4231baceb985a198038978b16760e6b6722`.
+The exported `C:\AIW-Edited-738ea6e.txt` ends with the added line
+`Edited and saved by Nathan on preview 738ea6e`. Evidence is retained under
+`C:\AIW-Interactive-Evidence-738ea6e\admin-1790887375232888400`.
+These are exact-workflow results, not broader effective-isolation proof.
+
+An operator-scoped read-only receipt recheck passed at
+`2026-10-01T20:55:42.7261551Z`. The user export matched the verified report,
+overwrite was refused, the original input hash was unchanged, and the
+operator's provider list was empty. The proof task is disabled. Its retained
+control/results are in `C:\AIW-Human-Proof-738ea6e`.
+A compact historical text backup, `AIW-Human-Trial-738ea6e-evidence.zip`, is
+46,019 bytes, SHA-256
+`3ad4c6c93a1f9d33f52f77396e38e5a2525292374c7578a14b6a349adab913e9`.
+It is retained on the VM, in the private handoff blob
+`evidence/admin-1790887375232888400.zip`, and in the local temporary folder.
+It excludes binaries and does not preserve protected workspace identity; the
+original retained workspace remains authoritative and was not removed.
+
+The package verifier printed `filesVerified: 8` and `exactInventory: true`.
+The handoff's subsequent `$LASTEXITCODE` check falsely reported failure because
+an in-process PowerShell script can leave a prior native exit code unchanged.
+No installer repeat was required. Use its terminating errors and structured
+result instead:
+
+```powershell
+$verification = .\verify-preview-package.ps1 -PackageRoot . -ReceiptSha256 37ad8be43709bd974abbccce48401d57eb85769554058ab4923949fa112e866f | ConvertFrom-Json
+if ($verification.exactInventory -ne $true) { throw 'Package inventory was not verified' }
+Write-Host "Package verified ($($verification.filesVerified) files)."
+```
+
+Keep `$LASTEXITCODE` checks after native `aiw.exe` or a separately launched
+`powershell.exe`, where that exit code belongs to the process just invoked.
+The verifier regression seeds native exit code 17 and then validates the
+package successfully in both PowerShell 7 and Windows PowerShell 5.1, while
+existing negative hash, payload, path, profile and inventory controls still
+reject invalid packages.
+
 Successful transfer execution uses
 `aiw.dev/wsb-interactive-msi-execution/v0alpha2`; scratch-only execution keeps
 `v0alpha1`. Execution, retained reporting, and export share the same document

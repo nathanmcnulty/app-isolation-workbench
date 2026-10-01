@@ -19,6 +19,10 @@ retained hashes, then run:
   .\verify-preview-package.ps1 -PackageRoot . `
     -ReceiptSha256 <independently-retained-package-receipt-sha256>
 
+Success prints exactInventory: true and the verified file count. This PowerShell
+script throws on failure. Do not check $LASTEXITCODE afterward: it can contain
+an unrelated earlier program's exit code. AIW executable commands do use it.
+
 Use Windows 11 24H2 x64 build 26100 or later, with Windows Sandbox installed
 and available to the signed-in operator. Only the exact Notepad++ 8.9.8 x64 MSI
 with SHA-256 c29cbe1a9aaef322cc3f316ceeabe8a8071b18441a5e3c3ec348069739e59e80
