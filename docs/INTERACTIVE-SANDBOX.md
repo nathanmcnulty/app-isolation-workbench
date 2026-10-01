@@ -283,7 +283,8 @@ original retained workspace remains authoritative and was not removed.
 
 The package verifier printed `filesVerified: 8` and `exactInventory: true`.
 The handoff's subsequent `$LASTEXITCODE` check falsely reported failure because
-an in-process PowerShell script can leave a prior native exit code unchanged.
+an in-process PowerShell script can leave a prior native exit code unchanged
+or leave `$LASTEXITCODE` unset. Neither establishes script failure.
 No installer repeat was required. Use its terminating errors and structured
 result instead:
 
@@ -295,8 +296,9 @@ Write-Host "Package verified ($($verification.filesVerified) files)."
 
 Keep `$LASTEXITCODE` checks after native `aiw.exe` or a separately launched
 `powershell.exe`, where that exit code belongs to the process just invoked.
-The verifier regression seeds native exit code 17 and then validates the
-package successfully in both PowerShell 7 and Windows PowerShell 5.1, while
+The verifier regression validates the package with an inherited native exit
+code of 17 and with no native exit code in both PowerShell 7 and Windows
+PowerShell 5.1, while
 existing negative hash, payload, path, profile and inventory controls still
 reject invalid packages.
 

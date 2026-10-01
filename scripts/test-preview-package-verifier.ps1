@@ -97,6 +97,11 @@ try {
     if ($staleExitVerification.exactInventory -ne $true -or $LASTEXITCODE -ne 17) {
         throw 'Preview verification incorrectly depends on a previous native exit code'
     }
+    Remove-Variable LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
+    $unsetExitVerification = & $verifier -PackageRoot $root -ReceiptSha256 $receiptSha256 | ConvertFrom-Json
+    if ($unsetExitVerification.exactInventory -ne $true -or $null -ne $LASTEXITCODE) {
+        throw 'Preview verification incorrectly depends on an initialized native exit code'
+    }
     Push-Location -LiteralPath $root
     try {
         $relativeVerification = & $verifier -PackageRoot . -ReceiptSha256 $receiptSha256 | ConvertFrom-Json
@@ -118,7 +123,7 @@ try {
     if ($windowsVerification.exactInventory -ne $true -or $windowsVerification.filesVerified -ne 4) {
         throw 'Windows PowerShell did not confirm the valid preview package fixture'
     }
-    $staleExitCommand = "& `$env:ComSpec /d /c 'exit 17'; `$verified = & '$($verifier.Replace("'", "''"))' -PackageRoot '$($root.Replace("'", "''"))' -ReceiptSha256 '$receiptSha256' | ConvertFrom-Json; if (`$verified.exactInventory -ne `$true -or `$LASTEXITCODE -ne 17) { throw 'Stale native exit code affected verification' }; `$verified | ConvertTo-Json -Compress; exit 0"
+    $staleExitCommand = "& `$env:ComSpec /d /c 'exit 17'; `$verified = & '$($verifier.Replace("'", "''"))' -PackageRoot '$($root.Replace("'", "''"))' -ReceiptSha256 '$receiptSha256' | ConvertFrom-Json; if (`$verified.exactInventory -ne `$true -or `$LASTEXITCODE -ne 17) { throw 'Stale native exit code affected verification' }; Remove-Variable LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue; `$verified = & '$($verifier.Replace("'", "''"))' -PackageRoot '$($root.Replace("'", "''"))' -ReceiptSha256 '$receiptSha256' | ConvertFrom-Json; if (`$verified.exactInventory -ne `$true -or `$null -ne `$LASTEXITCODE) { throw 'Unset native exit code affected verification' }; `$verified | ConvertTo-Json -Compress; exit 0"
     $staleExitEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($staleExitCommand))
     $staleExitText = & $windowsPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $staleExitEncoded | Out-String
     if ($LASTEXITCODE -ne 0 -or ($staleExitText | ConvertFrom-Json).exactInventory -ne $true) {
