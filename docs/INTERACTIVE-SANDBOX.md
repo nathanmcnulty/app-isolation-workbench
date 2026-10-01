@@ -196,10 +196,11 @@ hashes and evidence semantics.
 
 Administrator commands default to a concise console summary. After exact-plan
 approval is recorded, they explain the wait and print elapsed time every 30
-seconds while execution is pending. These are waiting messages, not guest
+seconds to a real terminal while execution is pending. These are waiting messages, not guest
 installer progress or compatibility observations. The editing limit starts
-after the editor is ready. Progress stops before the final result; `--format
-json` suppresses these messages and retains the structured result (the full
+after the editor is ready. Progress is stopped before the final result, with a
+100 ms shutdown bound so a stalled terminal cannot prevent report retention.
+`--format json` suppresses these messages and retains the structured result (the full
 approval review remains interactive).
 
 Export defaults to JSON for existing callers. `--format summary` prints the
