@@ -185,7 +185,7 @@ The old `report-wsb-msi` assessment-only command rejects interactive sessions. A
 $destination = Join-Path (Get-Location) 'notepad-plus-plus-output.txt'
 aiw run export-wsb-msi-document --root $workspace --run-id $runId `
   --project $project --guest-agent-sha256 $guestHash `
-  --destination $destination
+  --destination $destination --format summary
 ```
 
 Export requires a successful transfer report, creates one new ordinary host
@@ -193,6 +193,24 @@ file, refuses an existing destination, rejects destinations inside the retained
 worker, and reopens the destination to verify the exact receipt-bound bytes.
 The automated v6 document benchmark remains separate and retains its prior wire
 hashes and evidence semantics.
+
+Administrator commands default to a concise console summary. After exact-plan
+approval is recorded, they explain the wait and print elapsed time every 30
+seconds while execution is pending. These are waiting messages, not guest
+installer progress or compatibility observations. The editing limit starts
+after the editor is ready. Progress stops before the final result; `--format
+json` suppresses these messages and retains the structured result (the full
+approval review remains interactive).
+
+Export defaults to JSON for existing callers. `--format summary` prints the
+verified byte count and escaped destination, with hashes retained in
+`report.json`. `AIW_WSB_EXPORT_DESTINATION_REJECTED` means to choose a new
+absolute destination outside the workspace in an existing ordinary folder.
+`AIW_WSB_EXPORT_FAILED` requires reviewing the retained evidence and preserving
+any destination file before retrying. Source verification precedes destination
+checks, so a refused path cannot conceal altered evidence. If export succeeds
+but console output fails, `AIW_WSB_EXPORT_OUTPUT_FAILED` warns against repeating
+the export merely because the console failed.
 
 Successful transfer execution uses
 `aiw.dev/wsb-interactive-msi-execution/v0alpha2`; scratch-only execution keeps

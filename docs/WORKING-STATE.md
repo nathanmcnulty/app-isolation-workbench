@@ -4,7 +4,7 @@ Updated 2026-10-01. This is a compact handoff, not a run receipt or authorizatio
 
 ## Where to resume
 
-- PR #74 merged at `ad67784809704fa64f4b919b3e6289c63b2a7f3e`. The fixed Bambu administrator entry has an independently approved operator run; verify the current checkout with `scripts/work-status.ps1` before editing.
+- PR #75 merged at `1abbcf309de1cea50c6e9d1af41eb7507c67f0c9`. The interactive document transfer and explicit export have an independently approved operator run; verify the current checkout with `scripts/work-status.ps1` before editing.
 - The exact unsigned `08ab440` profile-bound package passed the separate-host second-operator trial. Run `admin-1790485297308064300` passed all nine fixed stages, document hash and ACL controls, and terminal cleanup; negative run `admin-1790486242125347900` rejected before intake or provider acquisition. The provider has no active session. The broader isolation outcome remains `insufficientEvidence`. See [CLEAN-HOST-PREVIEW.md](CLEAN-HOST-PREVIEW.md).
 - The earlier profile-bound approved replay passed its fixed document workflow, required guest file ACL controls, recorded environment comparison, and cleanup. That remains same-host evidence for its recorded source and provider identities. See [VALIDATED-SANDBOX-LAUNCH.md](VALIDATED-SANDBOX-LAUNCH.md).
 - The earlier development baseline/candidate/relocated-replay and agent-run packaged smoke remain separately recorded in [PACKAGING-RECIPES.md](PACKAGING-RECIPES.md) and [CLEAN-HOST-PREVIEW.md](CLEAN-HOST-PREVIEW.md). They are not substituted for the independent operator run.
@@ -26,12 +26,14 @@ Notepad++ install/open/edit/save/close, standard-user token, retained transfer
 report, explicit export, original-input preservation, overwrite refusal, and
 cleanup passed. The exported 192-byte document contains Nathan's added final
 line. An operator-scoped provider query was empty. Exact executable-source
-hosted checks passed; verify PR #75's exact-head checks and merge state before
-resuming. See [INTERACTIVE-SANDBOX.md](INTERACTIVE-SANDBOX.md).
+hosted checks passed and PR #75 merged. See [INTERACTIVE-SANDBOX.md](INTERACTIVE-SANDBOX.md).
 
-Next: improve administrator usability around long installation waits and
-expected export refusals, using concise guidance with optional details while
-preserving complete approval review and receipt-bound results. Public release
+The current usability slice adds post-approval elapsed waiting, shorter
+interactive summaries, optional export summaries, and distinct destination,
+evidence, and console-output failures. Full approval review and receipt-bound
+results remain intact. See INTERACTIVE-SANDBOX.md for behavior and validation.
+Next: assess remaining preview release gates, especially publisher identity
+and the simplest end-to-end administrator entry. Public release
 also needs a publisher-authentication/signing decision. Generic installer
 conversion and broader isolation claims remain outside this preview's proof.
 Follow [ROADMAP.md](ROADMAP.md) and [RELEASE-GATES.md](RELEASE-GATES.md); do not

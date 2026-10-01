@@ -128,7 +128,17 @@ fn write_summary_error(output: &mut impl Write, error: &anyhow::Error) -> Result
     let Some(error) = error.downcast_ref::<AiwError>() else {
         return writeln!(output, "Assessment stopped. Inspect the retained evidence and retry only after resolving the cause.").map_err(Into::into);
     };
-    write!(output, "Assessment stopped: ")?;
+    write!(
+        output,
+        "{}",
+        if error.code.as_ref() == "AIW_WSB_EXPORT_OUTPUT_FAILED" {
+            "Export completed, but console output failed: "
+        } else if error.stage.as_ref() == "wsbDocumentExport" {
+            "Export stopped: "
+        } else {
+            "Assessment stopped: "
+        }
+    )?;
     approval_review::write_review_json(output, &error.summary)?;
     write!(output, "\nCode: {}", error.code)?;
     if let Some(run_id) = &error.run_id {
@@ -247,18 +257,15 @@ fn report_summary(report: &aiw_runner::WsbMsiRunReport) -> (String, &'static str
             (
                 match transfer {
                     Some(value) => format!(
-                        "Fixed Notepad++ document session completed.\nVerified input: {} bytes (SHA-256 {}).\nVerified retained output: {} bytes (SHA-256 {}).\nRecorded cleanup: {cleanup}.\nBroader isolation: insufficient evidence.\n",
-                        value.input_size_bytes,
-                        value.input_sha256,
-                        value.output_size_bytes,
-                        value.output_sha256,
+                        "Fixed Notepad++ document session completed.\nVerified input: {} bytes.\nVerified retained output: {} bytes.\nRecorded cleanup: {cleanup}.\nBroader isolation: insufficient evidence.\n",
+                        value.input_size_bytes, value.output_size_bytes,
                     ),
                     None => format!(
                         "Interactive session completed without a verified document transfer.\nRecorded cleanup: {cleanup}.\nBroader isolation: insufficient evidence.\n"
                     ),
                 },
                 if transfer.is_some() && interactive.recorded_cleanup_verified {
-                    "Read report.md and explicitly export the verified output with run export-wsb-msi-document; no host output file was created automatically."
+                    "Explicitly export with run export-wsb-msi-document --format summary; no host output file was created automatically. Read report.md for the overview and report.json for advanced evidence."
                 } else {
                     "Read report.md and the exact retained run status before exporting or starting another trial."
                 },
@@ -480,8 +487,9 @@ pub fn assess(
     installer: &Path,
     evidence_parent: &Path,
     identity: &str,
+    show_progress: bool,
 ) -> Result<AdminAssessmentResult> {
-    assess_notepad(installer, None, evidence_parent, identity)
+    assess_notepad(installer, None, evidence_parent, identity, show_progress)
 }
 
 #[cfg(windows)]
@@ -490,8 +498,15 @@ pub fn launch_document(
     document_input: &Path,
     evidence_parent: &Path,
     identity: &str,
+    show_progress: bool,
 ) -> Result<AdminAssessmentResult> {
-    assess_notepad(installer, Some(document_input), evidence_parent, identity)
+    assess_notepad(
+        installer,
+        Some(document_input),
+        evidence_parent,
+        identity,
+        show_progress,
+    )
 }
 
 #[cfg(windows)]
@@ -500,6 +515,7 @@ fn assess_notepad(
     document_input: Option<&Path>,
     evidence_parent: &Path,
     identity: &str,
+    show_progress: bool,
 ) -> Result<AdminAssessmentResult> {
     let interactive = document_input.is_some();
     if identity.trim().is_empty() {
@@ -680,13 +696,17 @@ fn assess_notepad(
     }
     layout.write_approval(&approval)?;
     save_stage(&evidence_root, "approval", &approval)?;
-    let execution = match aiw_runner::start_approved_windows_sandbox(
-        &workspace,
-        &assets.project,
-        &project,
-        &manifest.guest_agent_sha256,
-        900,
-    ) {
+    let execution_result = {
+        let _progress = crate::admin_progress::RunProgress::start(show_progress, interactive);
+        aiw_runner::start_approved_windows_sandbox(
+            &workspace,
+            &assets.project,
+            &project,
+            &manifest.guest_agent_sha256,
+            900,
+        )
+    };
+    let execution = match execution_result {
         Ok(execution) => execution,
         Err(error) => {
             if let Ok(status) = layout.status() {
@@ -737,12 +757,18 @@ fn assess_notepad(
 }
 
 #[cfg(not(windows))]
-pub fn assess(_: &Path, _: &Path, _: &str) -> Result<AdminAssessmentResult> {
+pub fn assess(_: &Path, _: &Path, _: &str, _: bool) -> Result<AdminAssessmentResult> {
     bail!("admin assess requires Windows; no files or provider state were changed")
 }
 
 #[cfg(not(windows))]
-pub fn launch_document(_: &Path, _: &Path, _: &Path, _: &str) -> Result<AdminAssessmentResult> {
+pub fn launch_document(
+    _: &Path,
+    _: &Path,
+    _: &Path,
+    _: &str,
+    _: bool,
+) -> Result<AdminAssessmentResult> {
     bail!("admin launch-document requires Windows; no files or provider state were changed")
 }
 
@@ -751,6 +777,7 @@ pub fn assess_bambu(
     installer: &Path,
     evidence_parent: &Path,
     identity: &str,
+    show_progress: bool,
 ) -> Result<AdminAssessmentResult> {
     if identity.trim().is_empty() {
         bail!("operator identity is required");
@@ -949,13 +976,17 @@ pub fn assess_bambu(
     }
     layout.write_approval(&approval)?;
     save_stage(&evidence_root, "approval", &approval)?;
-    let execution = match aiw_runner::start_approved_windows_sandbox(
-        &workspace,
-        &assets.project,
-        &project,
-        &manifest.guest_agent_sha256,
-        1500,
-    ) {
+    let execution_result = {
+        let _progress = crate::admin_progress::RunProgress::start(show_progress, false);
+        aiw_runner::start_approved_windows_sandbox(
+            &workspace,
+            &assets.project,
+            &project,
+            &manifest.guest_agent_sha256,
+            1500,
+        )
+    };
+    let execution = match execution_result {
         Ok(execution) => execution,
         Err(error) => {
             if let Ok(status) = layout.status() {
@@ -1012,7 +1043,7 @@ pub fn assess_bambu(
 }
 
 #[cfg(not(windows))]
-pub fn assess_bambu(_: &Path, _: &Path, _: &str) -> Result<AdminAssessmentResult> {
+pub fn assess_bambu(_: &Path, _: &Path, _: &str, _: bool) -> Result<AdminAssessmentResult> {
     bail!("admin assess Bambu requires Windows; no files or provider state were changed")
 }
 
@@ -1381,6 +1412,14 @@ mod tests {
     #[test]
     fn non_windows_route_cannot_start_provider() {
         #[cfg(not(windows))]
-        assert!(assess(Path::new("installer.msi"), Path::new("."), "operator").is_err());
+        assert!(
+            assess(
+                Path::new("installer.msi"),
+                Path::new("."),
+                "operator",
+                false
+            )
+            .is_err()
+        );
     }
 }

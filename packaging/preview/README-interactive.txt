@@ -52,13 +52,21 @@ explicitly export to a new host file with the values from that run:
     --root <workspace-path-from-result> --run-id <run-id-from-result> `
     --project .\product\notepad-plus-plus-interactive\project.yaml `
     --guest-agent-sha256 <guestAgentSha256-from-product-manifest> `
-    --destination <new-absolute-output-path>
+    --destination <new-absolute-output-path> --format summary
 
 Export refuses overwrite and workspace destinations, and verifies copied bytes.
+The default export format remains JSON; use --format summary for concise guidance.
+Destination refusals ask for a new path. Evidence failures require reviewing the
+retained run before retrying. If the file was exported but console output failed,
+preserve it and verify its bytes; do not repeat export just to obtain console text.
 Keep the evidence directory. On failure, inspect the exact retained run status;
 recover only if it says recovery is required. Never guess a Sandbox session ID.
 Installation has a separate five-minute deadline before the editor's five-minute
 editing period begins. Installation failures identify the process and deadline.
+After approval, the default console view prints elapsed waiting every 30 seconds.
+These messages do not indicate verified installer progress or editor readiness.
+Use --format json on the administrator command for the structured result without
+waiting messages; full approval review is still required.
 If present, output\guest-msi-install-unverified.log inside the retained workspace
 contains at most the final 64 KiB of raw MSI diagnostics. This may be truncated
 and is untrusted diagnostic text, not a verified result or export artifact.
