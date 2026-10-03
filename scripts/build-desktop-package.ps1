@@ -46,7 +46,17 @@ function Assert-LowerHash([string]$Value, [string]$Label) { if ($Value -notmatch
 function Invoke-Preview([string]$Destination, [string]$Product, [string]$GuestPath, [string]$GuestHash) {
     $previewParameters = @{ OutputDirectory = $Destination; Product = $Product }
     if ($GuestPath) { $previewParameters.GuestAgent = $GuestPath; $previewParameters.GuestAgentSha256 = $GuestHash }
-    & $previewBuilder @previewParameters | Out-Null
+    $targetDirectoryPath = 'Env:CARGO_TARGET_DIR'
+    $hadTargetDirectory = Test-Path $targetDirectoryPath
+    $originalTargetDirectory = if ($hadTargetDirectory) { (Get-Item $targetDirectoryPath).Value } else { $null }
+    try {
+        Set-Item -Path $targetDirectoryPath -Value $buildTarget
+        & $previewBuilder @previewParameters | Out-Null
+    }
+    finally {
+        if ($hadTargetDirectory) { Set-Item -Path $targetDirectoryPath -Value $originalTargetDirectory }
+        else { Remove-Item $targetDirectoryPath -ErrorAction SilentlyContinue }
+    }
 }
 
 Assert-LowerHash $DesktopExecutableSha256 'DesktopExecutableSha256'
@@ -62,7 +72,19 @@ try {
     $targetRustFlagsPath = "Env:$targetRustFlagsName"
     $hadTargetRustFlags = Test-Path $targetRustFlagsPath
     $originalTargetRustFlags = if ($hadTargetRustFlags) { (Get-Item $targetRustFlagsPath).Value } else { $null }
+    $targetDirectoryPath = 'Env:CARGO_TARGET_DIR'
+    $hadTargetDirectory = Test-Path $targetDirectoryPath
+    $originalTargetDirectory = if ($hadTargetDirectory) { (Get-Item $targetDirectoryPath).Value } else { $null }
     try {
+        # Make Cargo's workspace resolution explicit. The GUI has its own
+        # manifest, while preview packaging defaults to the repository target;
+        # one absolute target keeps both artifact paths consistent.
+        Set-Item -Path $targetDirectoryPath -Value $buildTarget
+        $metadataText = & cargo metadata --manifest-path $guiManifest --format-version 1 --no-deps --locked | Out-String
+        if ($LASTEXITCODE -ne 0) { throw 'GUI Cargo metadata resolution failed' }
+        $metadata = $metadataText | ConvertFrom-Json
+        $metadataTarget = [IO.Path]::GetFullPath([string]$metadata.target_directory)
+        if (-not $metadataTarget.TrimEnd('\').Equals($buildTarget.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) { throw "GUI Cargo target directory differs from the selected target: $metadataTarget" }
         $targetRustFlags = (@($originalTargetRustFlags, '-C target-feature=+crt-static') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ' '
         Set-Item -Path $targetRustFlagsPath -Value $targetRustFlags
         & cargo +stable build --manifest-path $guiManifest --locked --release --target $targetTriple | Out-Null
@@ -71,6 +93,8 @@ try {
     finally {
         if ($hadTargetRustFlags) { Set-Item -Path $targetRustFlagsPath -Value $originalTargetRustFlags }
         else { Remove-Item $targetRustFlagsPath -ErrorAction SilentlyContinue }
+        if ($hadTargetDirectory) { Set-Item -Path $targetDirectoryPath -Value $originalTargetDirectory }
+        else { Remove-Item $targetDirectoryPath -ErrorAction SilentlyContinue }
     }
 }
 finally { Pop-Location }
