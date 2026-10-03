@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory)] [ValidateNotNullOrEmpty()] [string]$OutputDirectory,
     [Parameter(Mandatory)] [Alias('SourceHead')] [ValidatePattern('^[0-9a-f]{40}$')] [string]$SourceRevision,
     [Parameter(Mandatory)] [ValidateNotNullOrEmpty()] [string]$GuestAgent,
-    [Parameter(Mandatory)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$GuestAgentSha256
+    [Parameter(Mandatory)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$GuestAgentSha256,
+    [switch]$KeepFailedBuild
 )
 
 $ErrorActionPreference = 'Stop'
@@ -91,6 +92,7 @@ $buildTarget = Join-Path $tempRoot 'build'
 $builtDesktopSource = Join-Path $buildTarget "$targetTriple\release\aiw-desktop.exe"
 $assessmentPreview = Join-Path $tempRoot 'assessment'
 $interactivePreview = Join-Path $tempRoot 'interactive'
+$buildSucceeded = $false
 try {
     New-Item -ItemType Directory -Path $tempRoot -Force:$false | Out-Null
     Assert-OrdinaryDirectory $tempRoot 'Temporary staging root'
@@ -188,8 +190,13 @@ Guest agent SHA-256 (retained independently): $GuestAgentSha256
     $verification = (& $verifier -PackageRoot $output -ReceiptSha256 $receiptHash -SourceRevision $SourceRevision | ConvertFrom-Json)
     if ($verification.exactInventory -ne $true) { throw 'Desktop package inventory did not verify' }
     Assert-Source $SourceRevision
+    $buildSucceeded = $true
     [ordered]@{ schemaVersion = 'aiw.dev/desktop-package/v0alpha1'; sourceRevision = $SourceRevision; packageRoot = $output; receiptSha256 = $receiptHash; cliSha256 = $cliHash; desktopSha256 = $desktopHash; guestAgentSha256 = $GuestAgentSha256; products = @('notepad-plus-plus', 'notepad-plus-plus-interactive'); unsigned = $true; exactInventory = $true } | ConvertTo-Json -Depth 10 -Compress
 }
 finally {
-    Remove-OwnedTemporaryRoot $tempRoot $tempParent $tempLeaf
+    if ($KeepFailedBuild -and -not $buildSucceeded -and (Test-Path -LiteralPath $tempRoot)) {
+        Write-Warning "Failed build retained for diagnostics: $tempRoot. This staging tree is not a verified package."
+    } else {
+        Remove-OwnedTemporaryRoot $tempRoot $tempParent $tempLeaf
+    }
 }

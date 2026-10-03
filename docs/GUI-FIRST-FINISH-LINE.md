@@ -176,3 +176,11 @@ after the earlier busy action, blocking explicit export. Its fix restores the
 chooser only when the backend supplies an export-eligible result and the GUI is
 not busy. A regression test exercises preparation followed by an eligible result
 and revocation of eligibility. This retry is transfer proof, not export proof.
+
+Fresh package assembly for `9e88181` failed with Rust E0463 while loading
+`tauri_macros`. The full log is retained as `aiw-desktop-package-9e88181.log`
+under host TEMP. This is an unresolved build failure, not application evidence.
+The builder supports opt-in `-KeepFailedBuild` for diagnostic retention of failed
+temporary staging trees; default cleanup and all package identity gates remain.
+Successful builds clean staging even with that switch. Retained failed staging
+is never a verified package and requires deliberate cleanup after investigation.
