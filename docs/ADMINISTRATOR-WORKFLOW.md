@@ -1,6 +1,12 @@
 # Administrator workflow contract
 
-The supported administrator entry point is `aiw admin assess`. It accepts
+The packaged Windows desktop now provides the supported Notepad++ assessment and
+interactive document workflows through selection, full review, exact approval,
+separate Start, verified results, and explicit export. See
+[GUI acceptance and package identities](GUI-FIRST-FINISH-LINE.md#completed-packaged-gui-acceptance-2026-10-03).
+The desktop shares the administrator service below; it does not drive the CLI.
+
+The CLI administrator entry point is `aiw admin assess`. It accepts
 exactly three operator values: `--installer`, `--evidence`, and `--identity`.
 The packaged Notepad++ local-settings asset manifest supplies the fixed project,
 scenario, guest-agent identity, and optional approved replay profile; operators

@@ -9,7 +9,14 @@ The delivery loop is `Assess -> Adapt -> Package -> Validate`. We will complete 
 
 ## Current status
 
-AIW is an experimental CLI with verified fixed Notepad++ and Bambu workflows, retained reports, reusable MSI Sandbox bundles, an evidence-bound local-settings replay path, and a demonstrated packaged administrator workflow. General application coverage, clean-host distribution validation, the desktop UI, and Studio authoring remain future work. The [first administrator preview gates](docs/RELEASE-GATES.md) separate demonstrated capabilities from the remaining release work, and the [clean-host handoff](docs/CLEAN-HOST-PREVIEW.md) defines the final preview trial. Projects use `aiw.dev/v0alpha2`; legacy `v0alpha1` projects remain readable and migrate non-destructively with an explicit review gate.
+AIW has an experimental CLI and an unsigned Windows desktop preview. Fixed Notepad++ assessment and interactive document edit/save/export have completed packaged GUI acceptance on a separate supported VM. The CLI also provides a fixed Bambu workflow, retained reports, reusable MSI Sandbox bundles, and evidence-bound local-settings replay. General application coverage, authenticated public distribution, broader isolation measurements, and Studio authoring remain future work. The [first administrator preview gates](docs/RELEASE-GATES.md) separate demonstrated capabilities from remaining release work. Projects use `aiw.dev/v0alpha2`; legacy `v0alpha1` projects remain readable and migrate non-destructively with an explicit review gate.
+
+For the desktop preview, verify the identified package and open `aiw-desktop.exe`.
+Choose the supported Notepad++ MSI and, for an interactive session, a text input;
+prepare the review, confirm its exact plan, and separately click Start. The GUI
+shows a concise result with optional retained details and explicitly exports a
+verified document to a new file. A passing function workflow does not establish
+broader isolation. See [the tested GUI package and exact VM launch/input paths](docs/GUI-FIRST-FINISH-LINE.md#completed-packaged-gui-acceptance-2026-10-03).
 
 | Capability | Current boundary |
 |---|---|
@@ -89,7 +96,7 @@ For focused development, start with `scripts/work-status.ps1` and the [short han
 
 ## Architecture and roadmap
 
-The shared `aiw-orchestrator` service boundary is called directly by the CLI and will also be called by the future Tauri backend; the desktop application will not automate the CLI as a subprocess. The implemented lifecycles are `AssessmentRun`, `LaunchRun`, and `AuthoringRun`. Authoritative state remains inspectable on disk: immutable plans, per-run journals and evidence JSONL, content-addressed artifacts, approvals, and terminal receipts.
+The CLI and Tauri desktop call the shared `aiw-admin-workflow` service directly; the desktop does not automate the CLI as a subprocess. The existing `aiw-orchestrator` boundary provides the `AssessmentRun`, `LaunchRun`, and `AuthoringRun` lifecycles. Authoritative state remains inspectable on disk: immutable plans, per-run journals and evidence JSONL, content-addressed artifacts, approvals, and terminal receipts.
 
 See [Architecture](docs/ARCHITECTURE.md), [Roadmap](docs/ROADMAP.md), and [Threat model](docs/THREAT-MODEL.md) for the detailed contracts and release gates. Supporting contracts are documented in [Assessment bundles](docs/ASSESSMENT-BUNDLES.md), [Boundary denial canaries](docs/DENIAL-CANARIES.md), [Local analyst report contract](docs/LOCAL-ANALYST-CONTRACT.md), [Retained MSI report sets](docs/REPORT-SETS.md), [Windows Sandbox automation](docs/WINDOWS-SANDBOX-AUTOMATION.md), and [Windows Sandbox completion receipts](docs/WINDOWS-SANDBOX-COMPLETION.md).
 

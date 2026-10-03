@@ -6,8 +6,9 @@ This handoff is a pointer, not execution authority or a run receipt.
 ## Current slice
 
 The unsigned administrator GUI acceptance slice is complete at packaged source
-`343d380a3fef4e8734ea25c693ac99d4ac6f2a6a`; integrate PR #80 after the final
-acceptance documentation and exact-head required CI. See
+`343d380a3fef4e8734ea25c693ac99d4ac6f2a6a`; PR #80 merged at
+`11786078d8f2c0d047a326ed7e1ade71e87e8751`. Final entry-point documentation
+corrects the stale README and records this integrated milestone. See
 [GUI-FIRST-FINISH-LINE.md](GUI-FIRST-FINISH-LINE.md#completed-packaged-gui-acceptance-2026-10-03)
 for package identities, detailed observations, negative controls, and archives.
 
