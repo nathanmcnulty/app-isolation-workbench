@@ -1,6 +1,6 @@
 # Working state
 
-Updated 2026-10-02. Verify this checkout with `scripts/work-status.ps1`.
+Updated 2026-10-03. Verify this checkout with `scripts/work-status.ps1`.
 This handoff is a pointer, not execution authority or a run receipt.
 
 ## Current slice
@@ -21,12 +21,17 @@ An independently hash-checked startup probe visibly opened the GUI over RDP and
 refused missing inputs. Windows PowerShell 5.1 exposed receipt sort differences;
 explicit ordinal ordering and a same-package cross-shell fixture now address it.
 Exact package `7667acd` verified under Windows PowerShell 5.1 and opened on the
-VM; all CI jobs passed at that code head. Fresh GUI assessment/edit/save/export
-acceptance is pending: an unrelated GitHub passkey prompt currently blocks RDP
-input. Leave authentication to its owner. The GUI is idle, Sandbox was empty,
-and no assessment intake exists. Desktop targets also passed release checking
+VM; all CI jobs passed at that code head and at `1b36f505`. The owner dismissed
+the passkey prompt and RDP is usable. GUI assessment `admin-1791016406004205400`
+passed, including malformed approval rejection, no Sandbox before Start, refusal
+to close during execution, and independent empty-provider checks. Interactive
+run `admin-1791017360314238000` visibly opened Notepad++ but automated text input
+did not arrive before its editing deadline; terminal failure and exact cleanup
+are recorded. No transfer/export proof is claimed. A focused console/warning/timer
+polish slice is being validated before fresh packaged acceptance. See the GUI
+plan for detailed evidence and remaining checks. Desktop targets passed checking
 with their declared Rust 1.90 compiler; CI now covers that floor alongside the
-unchanged core Rust 1.85 check. See the GUI plan for package/proof identities.
+unchanged core Rust 1.85 check.
 
 ## Preserved stable evidence
 

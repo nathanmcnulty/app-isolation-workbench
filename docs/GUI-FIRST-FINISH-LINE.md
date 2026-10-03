@@ -136,3 +136,32 @@ startup probes as `C:\AIW-GUI-Startup-Proof-7667acd.zip`, 17,375 bytes, SHA-256
 It is also retained in the private handoff container as
 `evidence/gui-startup-7667acd.zip`; it is not a portable execution authority or
 application-compatibility proof. PR #80 remains draft until live acceptance.
+
+## GUI acceptance in progress (2026-10-03)
+
+The unrelated passkey prompt was dismissed by its owner. RDP input resumed and
+the packaged GUI `7667acd` completed assessment run
+`admin-1791016406004205400` through actual selection, review, approval, and Start.
+The malformed confirmation `approve wrong-plan` was rejected. An independent
+operator-session provider query after approval and before Start reported zero
+sessions; approval alone did not launch a worker. Closing the GUI during execution
+was refused and execution continued. The GUI displayed all five fixed function
+checks and cleanup as verified, while broader isolation remained insufficient
+evidence. A separate operator-session provider query after completion also
+reported zero sessions. Control records are retained under
+`C:\AIW-GUI-PreStart-admin-1791016406004205400` and
+`C:\AIW-GUI-PostAssessment-admin-1791016406004205400`.
+
+Interactive run `admin-1791017360314238000` opened Notepad++ with the approved
+180-byte document visibly inside Sandbox. Automated text input over the nested
+RDP connection did not appear in the editor; it was not saved or closed before
+the 300-second deadline. The retained failed status records terminal failure and
+verified exact-session cleanup. No verified transfer or export is claimed. The
+original failure evidence is preserved under the operator's default evidence
+root; this driver failure must be addressed before a new interactive trial.
+
+These live observations also exposed provider console flashes, an offscreen
+close-refusal warning, and an elapsed counter carried into a new workflow. A
+focused correction hides provider consoles without changing captured handles or
+job containment, scrolls to a newly raised close warning once, and resets the
+timer on workflow identity changes. Fresh package acceptance remains required.

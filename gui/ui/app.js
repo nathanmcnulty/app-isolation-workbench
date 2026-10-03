@@ -124,12 +124,18 @@
   function render(snapshot) {
     if (!snapshot) return;
     const previousPhase = state.current && state.current.phase;
+    const previousCloseRefused = state.current && state.current.closeRefused;
+    if (!state.current || state.current.workflowId !== snapshot.workflowId) {
+      state.startedAt = null;
+      text("elapsed", "Elapsed 00:00");
+    }
     state.current = snapshot; text("phaseBadge", phaseLabel(snapshot.phase)); renderProgress(snapshot); renderResult(snapshot.result); renderError(snapshot.error);
     applyControls(snapshot, state.busy);
     if (previousPhase !== snapshot.phase) {
       const target = snapshot.error ? "errorCard" : snapshot.phase === "review" ? "reviewCard" : snapshot.phase === "approved" ? "startBox" : ["running", "exporting"].includes(snapshot.phase) ? "progressCard" : snapshot.result ? "resultCard" : null;
       if (target) $(target).scrollIntoView({ block: "start" });
     }
+    if (snapshot.closeRefused && !previousCloseRefused) $("closeWarning").scrollIntoView({ block: "start" });
   }
 
   async function poll() {
