@@ -1,11 +1,9 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [ValidateNotNullOrEmpty()] [string]$OutputDirectory,
-    [Parameter(Mandatory)] [Alias('DesktopExe')] [ValidateNotNullOrEmpty()] [string]$DesktopExecutable,
-    [Parameter(Mandatory)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$DesktopExecutableSha256,
     [Parameter(Mandatory)] [Alias('SourceHead')] [ValidatePattern('^[0-9a-f]{40}$')] [string]$SourceRevision,
-    [string]$GuestAgent,
-    [ValidatePattern('^[0-9a-f]{64}$')] [string]$GuestAgentSha256
+    [Parameter(Mandatory)] [ValidateNotNullOrEmpty()] [string]$GuestAgent,
+    [Parameter(Mandatory)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$GuestAgentSha256
 )
 
 $ErrorActionPreference = 'Stop'
@@ -13,19 +11,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $previewBuilder = Join-Path $PSScriptRoot 'build-preview-package.ps1'
 $verifier = Join-Path $PSScriptRoot 'verify-desktop-package.ps1'
 $output = [IO.Path]::GetFullPath($OutputDirectory)
-if (-not [IO.Path]::IsPathRooted($DesktopExecutable)) { throw 'DesktopExecutable must be an absolute path' }
-$desktopSource = [IO.Path]::GetFullPath($DesktopExecutable)
 $targetTriple = 'x86_64-pc-windows-msvc'
-$buildTarget = if ([string]::IsNullOrWhiteSpace($env:CARGO_TARGET_DIR)) {
-    Join-Path $repoRoot 'target'
-}
-elseif ([IO.Path]::IsPathRooted($env:CARGO_TARGET_DIR)) {
-    [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR)
-}
-else {
-    [IO.Path]::GetFullPath((Join-Path $repoRoot $env:CARGO_TARGET_DIR))
-}
-$builtDesktopSource = Join-Path $buildTarget "$targetTriple\release\aiw-desktop.exe"
 
 function Write-Utf8NoBom([string]$Path, [string]$Text) { [IO.File]::WriteAllText($Path, $Text + [Environment]::NewLine, [Text.UTF8Encoding]::new($false)) }
 function Get-CanonicalJsonBytes([object]$Value) { return ,([Text.UTF8Encoding]::new($false).GetBytes(($Value | ConvertTo-Json -Depth 30 -Compress))) }
@@ -58,58 +44,33 @@ function Invoke-Preview([string]$Destination, [string]$Product, [string]$GuestPa
         else { Remove-Item $targetDirectoryPath -ErrorAction SilentlyContinue }
     }
 }
+function Remove-OwnedTemporaryRoot([string]$Root, [string]$Parent, [string]$Leaf) {
+    if (-not (Test-Path -LiteralPath $Root)) { return }
+    $resolvedRoot = [IO.Path]::GetFullPath($Root)
+    if ([IO.Path]::GetDirectoryName($resolvedRoot).TrimEnd('\') -cne $Parent.TrimEnd('\') -or
+        [IO.Path]::GetFileName($resolvedRoot) -cne $Leaf -or
+        $Leaf -notmatch '^aiw-desktop-package-[0-9a-f]{32}$') {
+        throw 'Refusing to remove an unexpected temporary staging root'
+    }
+    Assert-OrdinaryDirectory $Parent 'Temporary staging parent'
+    Assert-OrdinaryDirectory $resolvedRoot 'Temporary staging root'
+    $reparse = Get-ChildItem -LiteralPath $resolvedRoot -Recurse -Force | Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 }
+    if ($reparse) { throw 'Refusing to remove a staging tree containing a reparse point' }
+    Remove-Item -LiteralPath $resolvedRoot -Recurse -Force
+}
 
-Assert-LowerHash $DesktopExecutableSha256 'DesktopExecutableSha256'
 Assert-Source $SourceRevision
 Assert-OrdinaryDirectory (Split-Path -Parent $output) 'Output parent'
 if (Test-Path -LiteralPath $output) { throw "Output directory already exists; choose a fresh path: $output" }
 if ($output.Equals($repoRoot, [StringComparison]::OrdinalIgnoreCase) -or $output.StartsWith($repoRoot.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Output directory must be outside the source checkout' }
 $guiManifest = Join-Path $repoRoot 'gui\Cargo.toml'
 if (-not (Test-Path -LiteralPath $guiManifest -PathType Leaf)) { throw "Desktop GUI manifest is missing: $guiManifest" }
-Push-Location -LiteralPath $repoRoot
-try {
-    $targetRustFlagsName = 'CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS'
-    $targetRustFlagsPath = "Env:$targetRustFlagsName"
-    $hadTargetRustFlags = Test-Path $targetRustFlagsPath
-    $originalTargetRustFlags = if ($hadTargetRustFlags) { (Get-Item $targetRustFlagsPath).Value } else { $null }
-    $targetDirectoryPath = 'Env:CARGO_TARGET_DIR'
-    $hadTargetDirectory = Test-Path $targetDirectoryPath
-    $originalTargetDirectory = if ($hadTargetDirectory) { (Get-Item $targetDirectoryPath).Value } else { $null }
-    try {
-        # Make Cargo's workspace resolution explicit. The GUI has its own
-        # manifest, while preview packaging defaults to the repository target;
-        # one absolute target keeps both artifact paths consistent.
-        Set-Item -Path $targetDirectoryPath -Value $buildTarget
-        $metadataText = & cargo metadata --manifest-path $guiManifest --format-version 1 --no-deps --locked | Out-String
-        if ($LASTEXITCODE -ne 0) { throw 'GUI Cargo metadata resolution failed' }
-        $metadata = $metadataText | ConvertFrom-Json
-        $metadataTarget = [IO.Path]::GetFullPath([string]$metadata.target_directory)
-        if (-not $metadataTarget.TrimEnd('\').Equals($buildTarget.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) { throw "GUI Cargo target directory differs from the selected target: $metadataTarget" }
-        $targetRustFlags = (@($originalTargetRustFlags, '-C target-feature=+crt-static') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ' '
-        Set-Item -Path $targetRustFlagsPath -Value $targetRustFlags
-        & cargo +stable build --manifest-path $guiManifest --locked --release --target $targetTriple | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw 'release aiw-desktop build failed' }
-    }
-    finally {
-        if ($hadTargetRustFlags) { Set-Item -Path $targetRustFlagsPath -Value $originalTargetRustFlags }
-        else { Remove-Item $targetRustFlagsPath -ErrorAction SilentlyContinue }
-        if ($hadTargetDirectory) { Set-Item -Path $targetDirectoryPath -Value $originalTargetDirectory }
-        else { Remove-Item $targetDirectoryPath -ErrorAction SilentlyContinue }
-    }
-}
-finally { Pop-Location }
-Assert-Source $SourceRevision
-if ([IO.Path]::GetFullPath($desktopSource) -cne [IO.Path]::GetFullPath($builtDesktopSource)) { throw "DesktopExecutable must identify the newly built artifact: $builtDesktopSource" }
-if (-not (Test-Path -LiteralPath $builtDesktopSource -PathType Leaf)) { throw "Built desktop executable is missing: $builtDesktopSource" }
-$desktopItem = Get-Item -LiteralPath $builtDesktopSource -Force
-if (($desktopItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Built desktop executable is a reparse point' }
-if ((Get-FileHash -LiteralPath $builtDesktopSource -Algorithm SHA256).Hash.ToLowerInvariant() -cne $DesktopExecutableSha256) { throw 'Desktop executable bytes differ from the newly built artifact hash' }
-if (($null -eq $GuestAgent) -xor ($null -eq $GuestAgentSha256)) { throw 'GuestAgent and GuestAgentSha256 must be supplied together' }
-if ($GuestAgent) {
-    $GuestAgent = [IO.Path]::GetFullPath($GuestAgent); Assert-LowerHash $GuestAgentSha256 'GuestAgentSha256'
-    if (-not (Test-Path -LiteralPath $GuestAgent -PathType Leaf)) { throw "Guest agent is missing: $GuestAgent" }
-    if ((Get-FileHash -LiteralPath $GuestAgent -Algorithm SHA256).Hash.ToLowerInvariant() -cne $GuestAgentSha256) { throw 'Guest agent bytes differ from the independently supplied hash' }
-}
+Assert-LowerHash $GuestAgentSha256 'GuestAgentSha256'
+$GuestAgent = [IO.Path]::GetFullPath($GuestAgent)
+if (-not (Test-Path -LiteralPath $GuestAgent -PathType Leaf)) { throw "Guest agent is missing: $GuestAgent" }
+$guestItem = Get-Item -LiteralPath $GuestAgent -Force
+if (($guestItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Guest agent is a reparse point' }
+if ((Get-FileHash -LiteralPath $GuestAgent -Algorithm SHA256).Hash.ToLowerInvariant() -cne $GuestAgentSha256) { throw 'Guest agent bytes differ from the independently retained hash' }
 
 $tempParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
 Assert-OrdinaryDirectory $tempParent 'Temporary staging parent'
@@ -117,10 +78,47 @@ $tempLeaf = "aiw-desktop-package-$([guid]::NewGuid().ToString('N'))"
 if ($tempLeaf -notmatch '^aiw-desktop-package-[0-9a-f]{32}$') { throw 'Temporary staging leaf is not a generated GUID name' }
 $tempRoot = Join-Path $tempParent $tempLeaf
 if ([IO.Path]::GetDirectoryName($tempRoot).TrimEnd('\') -cne $tempParent.TrimEnd('\')) { throw 'Temporary staging root escaped its intended parent' }
+$buildTarget = Join-Path $tempRoot 'build'
+$builtDesktopSource = Join-Path $buildTarget "$targetTriple\release\aiw-desktop.exe"
 $assessmentPreview = Join-Path $tempRoot 'assessment'
 $interactivePreview = Join-Path $tempRoot 'interactive'
 try {
     New-Item -ItemType Directory -Path $tempRoot -Force:$false | Out-Null
+    Assert-OrdinaryDirectory $tempRoot 'Temporary staging root'
+    New-Item -ItemType Directory -Path $buildTarget -Force:$false | Out-Null
+    Assert-OrdinaryDirectory $buildTarget 'Fresh Cargo target directory'
+    Push-Location -LiteralPath $repoRoot
+    try {
+        $targetRustFlagsName = 'CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS'
+        $targetRustFlagsPath = "Env:$targetRustFlagsName"
+        $hadTargetRustFlags = Test-Path $targetRustFlagsPath
+        $originalTargetRustFlags = if ($hadTargetRustFlags) { (Get-Item $targetRustFlagsPath).Value } else { $null }
+        $targetDirectoryPath = 'Env:CARGO_TARGET_DIR'
+        $hadTargetDirectory = Test-Path $targetDirectoryPath
+        $originalTargetDirectory = if ($hadTargetDirectory) { (Get-Item $targetDirectoryPath).Value } else { $null }
+        try {
+            Set-Item -Path $targetDirectoryPath -Value ([IO.Path]::GetFullPath($buildTarget))
+            $metadataText = & cargo metadata --manifest-path ([IO.Path]::GetFullPath($guiManifest)) --format-version 1 --no-deps --locked | Out-String
+            if ($LASTEXITCODE -ne 0) { throw 'GUI Cargo metadata resolution failed' }
+            $metadata = $metadataText | ConvertFrom-Json
+            $metadataTarget = [IO.Path]::GetFullPath([string]$metadata.target_directory)
+            if (-not $metadataTarget.TrimEnd('\').Equals($buildTarget.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) { throw "GUI Cargo target directory differs from the fresh target: $metadataTarget" }
+            $targetRustFlags = (@($originalTargetRustFlags, '-C target-feature=+crt-static') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ' '
+            Set-Item -Path $targetRustFlagsPath -Value $targetRustFlags
+            & cargo +stable build --manifest-path ([IO.Path]::GetFullPath($guiManifest)) --locked --release --target $targetTriple | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'release aiw-desktop build failed' }
+        }
+        finally {
+            if ($hadTargetRustFlags) { Set-Item -Path $targetRustFlagsPath -Value $originalTargetRustFlags } else { Remove-Item $targetRustFlagsPath -ErrorAction SilentlyContinue }
+            if ($hadTargetDirectory) { Set-Item -Path $targetDirectoryPath -Value $originalTargetDirectory } else { Remove-Item $targetDirectoryPath -ErrorAction SilentlyContinue }
+        }
+    }
+    finally { Pop-Location }
+    Assert-Source $SourceRevision
+    if (-not (Test-Path -LiteralPath $builtDesktopSource -PathType Leaf)) { throw "Fresh desktop executable is missing: $builtDesktopSource" }
+    $desktopItem = Get-Item -LiteralPath $builtDesktopSource -Force
+    if (($desktopItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Fresh desktop executable is a reparse point' }
+    $desktopHash = (Get-FileHash -LiteralPath $builtDesktopSource -Algorithm SHA256).Hash.ToLowerInvariant()
     Invoke-Preview $assessmentPreview 'NotepadPlusPlus' $GuestAgent $GuestAgentSha256
     Assert-Source $SourceRevision
     $firstGuest = Join-Path $assessmentPreview 'product\notepad-plus-plus\tools\aiw-guest-agent.exe'
@@ -137,7 +135,7 @@ try {
     if ($firstGuestHash -cne $secondGuestHash) { throw 'Preview builds produced different guest-agent bytes' }
     New-Item -ItemType Directory -Path $output -Force:$false | Out-Null
     foreach ($name in @('aiw.exe', 'LICENSE')) { Copy-Item -LiteralPath (Join-Path $assessmentPreview $name) -Destination (Join-Path $output $name) }
-    Copy-Item -LiteralPath $desktopSource -Destination (Join-Path $output 'aiw-desktop.exe')
+    Copy-Item -LiteralPath $builtDesktopSource -Destination (Join-Path $output 'aiw-desktop.exe')
     Copy-Item -LiteralPath $verifier -Destination (Join-Path $output 'verify-desktop-package.ps1')
     New-Item -ItemType Directory -Path (Join-Path $output 'product') -Force:$false | Out-Null
     foreach ($product in @(@{ source = Join-Path $assessmentPreview 'product\notepad-plus-plus'; name = 'notepad-plus-plus' }, @{ source = Join-Path $interactivePreview 'product\notepad-plus-plus-interactive'; name = 'notepad-plus-plus-interactive' })) {
@@ -145,15 +143,15 @@ try {
     }
 
     $cliHash = (Get-FileHash -LiteralPath (Join-Path $output 'aiw.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
-    $desktopHash = (Get-FileHash -LiteralPath (Join-Path $output 'aiw-desktop.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($desktopHash -cne $DesktopExecutableSha256) { throw 'Copied desktop executable changed during assembly' }
+    if ((Get-FileHash -LiteralPath (Join-Path $output 'aiw-desktop.exe') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $desktopHash) { throw 'Copied desktop executable changed during assembly' }
     $readme = @"
 Application Isolation Workbench — unsigned development GUI
 
 Launch directly from this folder with:
   .\aiw-desktop.exe
 
-This package is an unsigned development build. The GUI supports the fixed
+This package is an unsigned development build assembled from a fresh GUI and
+CLI release build under the declared source revision. The GUI supports the fixed
 Notepad++ assessment and interactive document workflows. Select the exact
 supported Notepad++ MSI in the GUI, choose a bounded text input for the
 interactive workflow, review the complete recipe and plan, type the displayed
@@ -165,6 +163,7 @@ only where the retained report says it is measured.
 Source revision: $SourceRevision
 CLI SHA-256: $cliHash
 Desktop SHA-256: $desktopHash
+Guest agent SHA-256 (retained independently): $GuestAgentSha256
 "@
     Write-Utf8NoBom (Join-Path $output 'README.txt') $readme.TrimEnd()
 
