@@ -107,12 +107,11 @@ operator session. Independent identities:
 - Archive: `815f31caab0abac13ece1a8e833e8b0c313b9bbfe49416d74139796112e82347`.
 - Verifier: `9899d3b75d9ba3458cd8bafb69bbae8fbec98ae62ea56a0b63db1f448594a540`.
 
-The GUI is already running from `C:\AIW-Desktop-Preview-7667acd\aiw-desktop.exe`.
-Its launch controls passed, provider session count was zero, and the evidence
-folder had no run directories. All CI jobs passed at this exact code head in
-run `37103146981`. An unrelated Windows Security GitHub passkey prompt blocks
-RDP input; no authentication action was automated and no Sandbox trial started.
-Finish or dismiss that unrelated prompt before resuming GUI acceptance.
+At this historical startup checkpoint, the GUI opened from
+`C:\AIW-Desktop-Preview-7667acd\aiw-desktop.exe`. Its launch controls passed,
+provider session count was zero, and the evidence folder had no run directories.
+All CI jobs passed at that code head in run `37103146981`. An unrelated passkey
+prompt temporarily blocked input; its owner subsequently dismissed it.
 
 If the GUI has closed, the exact VM launch command is:
 
@@ -184,3 +183,60 @@ The builder supports opt-in `-KeepFailedBuild` for diagnostic retention of faile
 temporary staging trees; default cleanup and all package identity gates remain.
 Successful builds clean staging even with that switch. Retained failed staging
 is never a verified package and requires deliberate cleanup after investigation.
+
+## Completed packaged GUI acceptance (2026-10-03)
+
+Clean-source package `343d380a3fef4e8734ea25c693ac99d4ac6f2a6a` built successfully
+with two build jobs and verified its exact 11-file inventory on Windows PowerShell
+5.1 in the dedicated VM. No compiler/configuration defect was established for
+the earlier `tauri_macros` build failure; its underlying transient cause remains
+unproven. Current independent identities:
+
+- Canonical package receipt: `1c9e8fb63e2d2d795d7b0c36adacd9929aaa6cfda5071ab98d029a8995ba4a67`.
+- Desktop: `bdd93ae0d57ec08837cd6670ddac49a6a137b86871892f4c9394866b98d1e642`.
+- CLI: `7df17ceb7b384c3849b654eb1bdcae1553867a77b25f65d48d99826d538a472f`.
+- Guest: `85cfe36b3f3926553601227eadd748e4c2404e30ee89ca8c8e999469dd150a04`.
+- Archive: `7cf8ffeb8c2623d5761ae6d0d54af4857f7425f3e29ecf3667ae947219b31cfb`.
+
+Launch `C:\AIW-Desktop-Preview-343d380\aiw-desktop.exe` on the VM. The supported
+MSI/input and their independent hashes are the unchanged paths recorded above.
+Review each fresh displayed plan and separately Start; historical plan hashes
+and run IDs are evidence, not approval for another run.
+
+| Acceptance | Observed result |
+|---|---|
+| Fresh assessment | `admin-1791022076187823100`: all five supported function checks passed, exact cleanup verified, broader isolation retained as `insufficientEvidence`. Completion receipt: `540a9a70e22b1d247f4497906f9720c46d8f1de1b40d70ab65abfabad0b06b84`. |
+| Fresh interactive transfer and GUI export | `admin-1791022515798013900`: visibly appended `gui`, saved, and closed Notepad++; GUI verified the 183-byte output and cleanup, then explicitly exported to new `C:\AIW-GUI-Fresh-343d380.txt`. |
+| Independent transfer binding | Export exactly equals original 180-byte input plus UTF-8 `gui`; original SHA-256 remains `3e266d6a75e56727e3ab1703230fc0a6566e6410c57aa13f871fcc0bfb4aaa4c`. Output/export SHA-256 is `dbb9ed84d47483b5c75246bc666315a0b643b9d4df396d442ef68f25ff16f63c`. Independently canonicalized receipt `9f7ec2866623bafd0fb6b6c7a3aac1cca79b385e4aa701da4c2da3cff44f56c4` matches the report and binds the same output size/hash. |
+| Approval and worker lifetime | Independent operator-session queries returned zero sessions after approval and before each Start, and after each completed run. Closing during assessment visibly raised the warning and preserved execution through cleanup. A new workflow reset elapsed time to zero. |
+| Retained report after restart | Loaded historical successful transfer `admin-1791018718356210200` read-only, inspected advanced evidence, and explicitly exported its independently matching 183-byte output to `C:\AIW-GUI-Edited-343d380.txt`. Provider remained empty. |
+| Export refusals | Missing destination refused; repeated export to the existing file refused with its hash and modification time unchanged; a new file inside the retained workspace refused and remained absent. |
+| Cancel and close before Start | `admin-1791023221399651500` cancelled before approval: GUI showed Not run and disabled export, retained `approval-cancelled.json` has `approvalRecorded=false`. `admin-1791023275400573100` closed after approval without Start: retained `execution-not-started.json` has `approvalRecorded=true`, `providerAcquired=false`; no execution/completion receipt exists for either run. GUI exited, then restarted Ready with an independently empty provider. |
+
+These are agent-driven Computer Use observations as `aiw-automated-acceptance`,
+not Nathan's human proof. The live observations complement the controller tests
+for malformed/stale/duplicate challenges, concurrent mutation, pending closure,
+and cancelled preparation, and existing service/runner tests for input/package
+drift, unsupported or occupied hosts, receipt rejection, and unsafe exports.
+Historical timeout evidence remains a failed driver attempt with verified cleanup;
+it is not promoted into an application incompatibility verdict.
+
+All three hosted CI jobs passed at exact source `343d380` in run `37113254300`.
+Consequential shared-service/IPC and focused platform/control changes received
+independent review. This closes the unsigned development GUI acceptance slice;
+publisher-authenticated distribution, generic conversion, additional application
+coverage, and measured broader isolation remain separate release work.
+
+VM records are preserved in `C:\AIW-GUI-Acceptance-343d380.zip`: 164 files,
+63,004,779 bytes, SHA-256
+`373641a90056146a9c0949083d5c7c9b478b0a3a792c9227e70d4baf015a363a`.
+The archive contains the four fresh run roots, operator controls, deployment and
+independent verification records, and both exported files. Host screenshots and
+canonical binding observations are under `%TEMP%\aiw-gui-acceptance-343d380`.
+Both are backed up in the private handoff container as
+`evidence/gui-acceptance-343d380.zip` and
+`evidence/gui-acceptance-screens-343d380.zip`. The screenshot/observation archive
+is 1,341,577 bytes, SHA-256
+`531ee0675d7024cd8c2cdba4ae8615dc8859a9fd90228a80802a42c291d39d4b`.
+Diagnostic copies preserve evidence for review; they are not portable execution
+authority and must never be substituted for the original retained workspace.

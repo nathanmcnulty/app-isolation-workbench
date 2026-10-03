@@ -5,37 +5,33 @@ This handoff is a pointer, not execution authority or a run receipt.
 
 ## Current slice
 
-Build and independently validate the Windows administrator GUI following
-[GUI-FIRST-FINISH-LINE.md](GUI-FIRST-FINISH-LINE.md). The user authorized full
-dedicated-VM control and agent-driven approvals/editing; record these as automated
-acceptance, never as Nathan's human proof. The goal remains active until the
-packaged GUI assessment and edit/save/export loop and negative controls pass.
+The unsigned administrator GUI acceptance slice is complete at packaged source
+`343d380a3fef4e8734ea25c693ac99d4ac6f2a6a`; integrate PR #80 after the final
+acceptance documentation and exact-head required CI. See
+[GUI-FIRST-FINISH-LINE.md](GUI-FIRST-FINISH-LINE.md#completed-packaged-gui-acceptance-2026-10-03)
+for package identities, detailed observations, negative controls, and archives.
 
-The shared `aiw-admin-workflow` crate retains the CLI workflow and adds separate
-review/approval and Start gates. `gui/` is a separate Tauri workspace with local
-embedded assets, narrow IPC, backend-owned one-shot challenges, explicit export,
-verified retained reports, and truthful not-run/incomplete outcomes. Core MSRV
-remains 1.85; the desktop workspace declares 1.90. Desktop assembly rebuilds from
-clean source and combines both fixed Notepad++ product assets in one inventory.
-An independently hash-checked startup probe visibly opened the GUI over RDP and
-refused missing inputs. Windows PowerShell 5.1 exposed receipt sort differences;
-explicit ordinal ordering and a same-package cross-shell fixture now address it.
-Exact package `7667acd` verified under Windows PowerShell 5.1 and opened on the
-VM; all CI jobs passed at that code head and at `1b36f505`. The owner dismissed
-the passkey prompt and RDP is usable. GUI assessment `admin-1791016406004205400`
-passed, including malformed approval rejection, no Sandbox before Start, refusal
-to close during execution, and independent empty-provider checks. Interactive
-run `admin-1791017360314238000` visibly opened Notepad++ but automated text input
-did not arrive before its editing deadline; terminal failure and exact cleanup
-are recorded. No transfer/export proof is claimed. A focused console/warning/timer
-polish slice passed native platform checks and independent review at `381398d`.
-Retry `admin-1791018718356210200` visibly edited/saved/closed the document using
-physical keys and verified 183-byte output plus cleanup. Export exposed a disabled
-destination chooser; its focused fix and regression test passed review. Fresh
-packaging and actual GUI export/current-source acceptance remain required. See the
-GUI plan for detailed evidence and remaining checks. Desktop targets passed checking
-with their declared Rust 1.90 compiler; CI now covers that floor alongside the
-unchanged core Rust 1.85 check.
+Fresh GUI assessment `admin-1791022076187823100` passed all five supported
+functions and verified cleanup. Fresh interactive run `admin-1791022515798013900`
+visibly edited/saved/closed Notepad++, verified the 183-byte output, and explicitly
+exported through the GUI. Independent checks matched the receipt/output/export,
+preserved the original input, and found zero provider sessions before Start and
+after completion. Broader isolation remains insufficient evidence.
+
+Restart/read-only viewing, explicit retained export, missing/existing/workspace
+export refusals, cancellation before approval, and closure after approval before
+Start passed. Controls and screenshots record automated acceptance, never Nathan's
+human proof. Destination selection, close-warning visibility, timer reset, and
+provider console fixes are included. The fresh package verified on Windows
+PowerShell 5.1; all three hosted CI jobs passed at exact code `343d380`. Earlier
+failed driver/build evidence remains historical and is not compatibility proof.
+
+The shared workflow preserves separate approval and Start, protected intake,
+one-shot challenges, fixed package identities, receipt verification, and exact
+cleanup. The desktop is a separate Tauri workspace with embedded local assets
+and narrow IPC. Core MSRV is 1.85; desktop MSRV is 1.90. Follow ROADMAP and
+RELEASE-GATES for the next bounded deliverable; public publisher signing,
+additional profiles, and generic application conversion remain separate work.
 
 ## Preserved stable evidence
 
