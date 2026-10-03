@@ -17,8 +17,12 @@ embedded assets, narrow IPC, backend-owned one-shot challenges, explicit export,
 verified retained reports, and truthful not-run/incomplete outcomes. Core MSRV
 remains 1.85; the desktop workspace declares 1.90. Desktop assembly rebuilds from
 clean source and combines both fixed Notepad++ product assets in one inventory.
-Live GUI acceptance and integration CI are still pending; compilation/unit tests
-do not establish application compatibility or a working operator experience.
+An independently hash-checked startup probe visibly opened the GUI over RDP and
+refused missing inputs. Windows PowerShell 5.1 exposed receipt sort differences;
+explicit ordinal ordering and a same-package cross-shell fixture now address it.
+Fresh GUI assessment/edit/save/export acceptance and integration CI are pending;
+startup/unit tests do not establish application compatibility. See the focused
+GUI plan for the preserved probe identities and diagnostic paths.
 
 ## Preserved stable evidence
 

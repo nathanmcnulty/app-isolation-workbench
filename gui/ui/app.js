@@ -26,17 +26,21 @@
   async function choose(target, inputId) {
     try {
       const selected = await call("choose_input", { kind: target });
+      state.localError = null;
+      renderError(state.current && state.current.error);
       if (selected != null) text(inputId, selected), $(inputId).value = clean(selected);
     } catch (error) { displayLocalError(error); }
   }
 
   function displayLocalError(error) {
+    const newlyVisible = state.localError !== error;
     state.localError = error;
     text("errorSummary", "The desktop action could not be completed");
     text("errorRemediation", errorText(error));
     text("errorDetail", "");
     text("errorLocation", "Check the current workflow state and retained evidence before retrying.");
     show("errorCard", true);
+    if (newlyVisible) $("errorCard").scrollIntoView({ block: "nearest" });
   }
 
   function setBusy(busy) {
@@ -119,8 +123,13 @@
 
   function render(snapshot) {
     if (!snapshot) return;
+    const previousPhase = state.current && state.current.phase;
     state.current = snapshot; text("phaseBadge", phaseLabel(snapshot.phase)); renderProgress(snapshot); renderResult(snapshot.result); renderError(snapshot.error);
     applyControls(snapshot, state.busy);
+    if (previousPhase !== snapshot.phase) {
+      const target = snapshot.error ? "errorCard" : snapshot.phase === "review" ? "reviewCard" : snapshot.phase === "approved" ? "startBox" : ["running", "exporting"].includes(snapshot.phase) ? "progressCard" : snapshot.result ? "resultCard" : null;
+      if (target) $(target).scrollIntoView({ block: "start" });
+    }
   }
 
   async function poll() {

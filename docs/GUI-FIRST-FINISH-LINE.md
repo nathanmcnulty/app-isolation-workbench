@@ -76,3 +76,24 @@ generic installer converter or a new isolation-provider implementation.
 
 Detailed proof belongs here or in focused fixtures. WORKING-STATE stays a short
 resume pointer. Missing live/rendered evidence means the goal remains active.
+
+## Development startup proof (2026-10-02)
+
+Unsigned package `f00b2b2c61540c6dacecdca52139a761bd65464c` built from
+clean source and verified its 11-file payload inventory on PowerShell 7.
+Desktop SHA-256: `538d47668559586231e75b978dfe50dff6b773e686dce9309083d0338af1ca11`.
+Archive SHA-256: `132d6c40b997ad33be1c32024eaaeb37efd52c7d5a8e12c3fba38d252a9542b0`.
+The dedicated VM retained the package at `C:\AIW-Desktop-Preview-f00b2b2`.
+PowerShell 5.1 rejected its culture-sorted receipt; this prompted explicit
+ordinal ordering and a same-package cross-shell verifier fixture. That old
+package is preserved, not rewritten as evidence for the corrected contract.
+
+A startup-only diagnostic independently checked every deployed file against
+host-supplied identities, then launched as `aiwoperator`. Through RDP Computer
+Use, the desktop visibly rendered Ready, maximized, and refused preparation
+without installer/operator inputs. The missing-input error appeared below the
+fold; UI fixes bring new errors and workflow steps into view and correct radio
+button sizing. Launch-control records are under `C:\AIW-GUI-Proof-f00b2b2`.
+No Sandbox assessment, approval, document edit, or export was performed by this
+startup probe. Fresh assessment and interactive acceptance remain pending on
+the corrected package.

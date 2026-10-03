@@ -23,6 +23,7 @@ h3 { margin: 4px 0 8px; font-size: 1rem; }
 .mode-option { display: flex; gap: 11px; padding: 15px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
 .mode-option:has(input:checked) { border-color: #94b7f5; background: var(--soft-blue); }
 .mode-option input { accent-color: var(--blue); margin-top: 4px; }
+.mode-option input[type="radio"] { width: 18px; height: 18px; min-height: 18px; flex-shrink: 0; }
 .mode-option span { display: grid; gap: 3px; }.mode-option small { color: var(--muted); }
 .field-grid, .review-grid, .result-grid, .retained-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 17px; }
 .field { display: grid; gap: 7px; color: var(--muted); font-size: .86rem; font-weight: 650; }.field em { color: #778593; font-size: .75rem; font-style: normal; font-weight: 500; }
