@@ -643,6 +643,46 @@ pub fn report_assessment(workspace: &Path, run_id: &str) -> Result<aiw_runner::W
     .map_err(|source| retained_result_error(workspace, run_id, "adminRetainedReport", source))
 }
 
+/// Reverify a retained fixed Bambu export using package-bound project and guest identities.
+#[cfg(windows)]
+pub fn report_bambu(workspace: &Path, run_id: &str) -> Result<aiw_runner::WsbBambuRunReport> {
+    let assets_root = packaged_asset_root("bambu-studio")?;
+    let manifest: ProductAssetManifest = serde_json::from_slice(&read_file_bounded(
+        &assets_root.join("manifest.json"),
+        1024 * 1024,
+    )?)?;
+    let assets = manifest.resolve_bambu(&assets_root)?;
+    let project_bytes = read_file_bounded(&assets.project, MAX_CONFIG_BYTES)?;
+    if lowercase_sha256(&project_bytes) != manifest.project_sha256 {
+        bail!("packaged Bambu project bytes do not match the product manifest");
+    }
+    let project: Project = serde_json::from_slice(&project_bytes)?;
+    if !validate_project_for_planning(&project).is_empty()
+        || project.metadata.name != BAMBU_PRODUCT_ID
+        || manifest.product_id != BAMBU_PRODUCT_ID
+        || manifest.scenario_id != BAMBU_SCENARIO_ID
+    {
+        bail!("packaged Bambu project is not valid for the fixed assessment");
+    }
+    aiw_provider_wsb::compile_bambu_studio_export_scenario(&project, BAMBU_SCENARIO_ID)
+        .map_err(|error| anyhow!("packaged Bambu export contract is invalid: {error}"))?;
+    let agent = aiw_windows_platform::HeldApplicationFile::open(&assets.guest_agent)
+        .map_err(|error| anyhow!("packaged guest agent is unsupported: {error}"))?;
+    if agent.observation().sha256 != manifest.guest_agent_sha256 {
+        bail!("packaged guest agent bytes do not match the product manifest");
+    }
+    agent
+        .revalidate()
+        .map_err(|error| anyhow!("packaged guest agent drifted: {error}"))?;
+    aiw_runner::report_windows_sandbox_bambu_run(
+        workspace,
+        run_id,
+        &project,
+        &manifest.guest_agent_sha256,
+    )
+    .map_err(anyhow::Error::from)
+}
+
 #[cfg(not(windows))]
 pub fn export_document(
     _: &Path,

@@ -70,3 +70,19 @@ intake, approval, runner, report, and cleanup services. Keep product selection
 explicit; do not infer a trusted profile from a filename or turn the Bambu
 command into a caller-supplied execution interface. A profile-bound adaptation
 and reusable launch package are later steps after this assessment works.
+
+## Desktop implementation boundary
+
+The development desktop now exposes Bambu Studio export as an explicit third
+mode with an EXE-only chooser. It reuses the fixed administrator service,
+package-bound retained reporting, and the existing separate approval and Start
+gates. A Bambu result is shown as Verified only when its typed report has
+verified evidence and cleanup, a successful fixed scenario, and a verified 3MF
+artifact. The desktop never enables document export for this mode.
+
+Desktop package schema `aiw.dev/desktop-package/v0alpha2` closes the inventory
+over the two historical Notepad++ products plus `bambu-studio`, whose project is
+the fixed `project.json` used by the preview builder. The verifier continues to
+recognize `v0alpha1` only as its exact historical two-product contract. Fresh
+package and disposable-worker GUI acceptance remain required before this entry
+can be treated as live desktop proof.

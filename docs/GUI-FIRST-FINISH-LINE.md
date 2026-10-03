@@ -22,6 +22,13 @@ The supported assessment and interactive document workflows both use the same
 existing Rust services as the CLI. This is the first GUI finish line, not a
 generic installer converter or a new isolation-provider implementation.
 
+The next bounded desktop slice adds the existing fixed Bambu Studio export
+assessment as an explicit EXE mode. It preserves the same approval and Start
+controller, uses package-bound retained report verification, and cannot export
+a document. Package contract `v0alpha2` binds all three products; historical
+`v0alpha1` remains the exact two-product contract. This source implementation
+still requires fresh package and disposable-worker GUI evidence.
+
 ## Architecture and delivery
 
 1. Extract the existing administrator workflow into a shared Rust crate. Keep

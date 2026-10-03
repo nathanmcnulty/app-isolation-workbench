@@ -13,7 +13,7 @@
       <div>
         <p class="eyebrow">Application Isolation Workbench</p>
         <h1>Administrator assessment</h1>
-        <p class="lede">Run the supported Notepad++ workflow with a clear review and approval boundary.</p>
+        <p class="lede">Run a fixed supported application workflow with a clear review and approval boundary.</p>
       </div>
       <div id="phaseBadge" class="phase-badge" aria-live="polite">Loading state</div>
     </header>
@@ -29,9 +29,10 @@
       <div class="mode-switch" role="group" aria-label="Workflow type">
         <label class="mode-option"><input type="radio" name="workflowKind" value="assessment" checked> <span><strong>Assessment</strong><small>Test install, open, edit, save, and close.</small></span></label>
         <label class="mode-option"><input type="radio" name="workflowKind" value="interactive"> <span><strong>Interactive document</strong><small>Edit a bounded text input and export the verified result.</small></span></label>
+        <label class="mode-option"><input type="radio" name="workflowKind" value="bambu"> <span><strong>Bambu Studio export</strong><small>Run the fixed offline STL-to-3MF export assessment.</small></span></label>
       </div>
       <div class="field-grid">
-        <label class="field"><span>Supported Notepad++ installer</span><div class="input-action"><input id="installer" type="text" readonly placeholder="Choose the exact supported MSI"><button id="chooseInstaller" class="secondary" type="button">Choose MSI</button></div></label>
+        <label class="field"><span id="installerLabel">Supported Notepad++ installer</span><div class="input-action"><input id="installer" type="text" readonly placeholder="Choose the exact supported MSI"><button id="chooseInstaller" class="secondary" type="button">Choose MSI</button></div></label>
         <label id="documentField" class="field hidden"><span>Bounded text input <em>interactive only</em></span><div class="input-action"><input id="documentInput" type="text" readonly placeholder="Choose a UTF-8 text file"><button id="chooseDocument" class="secondary" type="button">Choose text</button></div></label>
         <label class="field"><span>Evidence folder</span><div class="input-action"><input id="evidence" type="text" readonly placeholder="Backend default will appear here"><button id="chooseEvidence" class="secondary" type="button">Choose folder</button></div></label>
         <label class="field"><span>Operator identity</span><input id="operatorIdentity" type="text" autocomplete="off" placeholder="Name or administrator ID"></label>
@@ -79,7 +80,7 @@
     </section>
 
     <section class="card advanced-card" aria-labelledby="retained-title">
-      <details><summary id="retained-title">Open a retained report (read-only)</summary><div class="retained-grid"><label class="field"><span>Report kind</span><select id="retainedKind"><option value="assessment">Assessment</option><option value="interactive">Interactive</option></select></label><label class="field"><span>Workspace</span><div class="input-action"><input id="retainedWorkspace" type="text" placeholder="Retained workspace path"><button id="chooseWorkspace" class="secondary" type="button">Choose folder</button></div></label><label class="field"><span>Run ID</span><input id="retainedRunId" type="text" placeholder="Run identifier"></label><button id="loadRetained" class="secondary" type="button">Load report</button></div><p class="helper">Loading is read-only. It does not start, repair, recover, or approve a run.</p></details>
+      <details><summary id="retained-title">Open a retained report (read-only)</summary><div class="retained-grid"><label class="field"><span>Report kind</span><select id="retainedKind"><option value="assessment">Assessment</option><option value="interactive">Interactive</option><option value="bambu">Bambu Studio export</option></select></label><label class="field"><span>Workspace</span><div class="input-action"><input id="retainedWorkspace" type="text" placeholder="Retained workspace path"><button id="chooseWorkspace" class="secondary" type="button">Choose folder</button></div></label><label class="field"><span>Run ID</span><input id="retainedRunId" type="text" placeholder="Run identifier"></label><button id="loadRetained" class="secondary" type="button">Load report</button></div><p class="helper">Loading is read-only. It does not start, repair, recover, or approve a run.</p></details>
     </section>
 
     <section id="errorCard" class="error-card hidden" aria-live="assertive"><div><p class="eyebrow">Action needed</p><h2 id="errorSummary">The workflow needs attention</h2><p id="errorRemediation"></p></div><details><summary>Technical details</summary><pre id="errorDetail"></pre></details><p id="errorLocation" class="helper"></p></section>

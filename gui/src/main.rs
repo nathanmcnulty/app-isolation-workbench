@@ -127,6 +127,9 @@ mod desktop {
                 "installer" => builder
                     .add_filter("Supported MSI", &["msi"])
                     .blocking_pick_file(),
+                "bambu-installer" => builder
+                    .add_filter("Supported Bambu Studio EXE", &["exe"])
+                    .blocking_pick_file(),
                 "document" => builder
                     .add_filter("UTF-8 text", &["txt"])
                     .blocking_pick_file(),
@@ -157,7 +160,7 @@ mod desktop {
         evidence: String,
         operator_identity: String,
     ) -> std::result::Result<(), String> {
-        if !matches!(kind.as_str(), "assessment" | "interactive") {
+        if !matches!(kind.as_str(), "assessment" | "interactive" | "bambu") {
             return Err("Unsupported workflow.".into());
         }
         if installer.is_empty() || evidence.is_empty() || operator_identity.trim().is_empty() {
@@ -175,6 +178,8 @@ mod desktop {
             id: id.clone(),
             workflow_name: if kind == "interactive" {
                 "Interactive Notepad++ document transfer"
+            } else if kind == "bambu" {
+                "Fixed Bambu Studio STL-to-3MF export"
             } else {
                 "Fixed Notepad++ assessment"
             }
@@ -194,6 +199,14 @@ mod desktop {
                     &gate,
                     false,
                 )?
+            } else if kind == "bambu" {
+                service::assess_bambu_with_gate(
+                    Path::new(&installer),
+                    Path::new(&evidence),
+                    &operator_identity,
+                    &gate,
+                    false,
+                )?
             } else {
                 service::assess_with_gate(
                     Path::new(&installer),
@@ -208,6 +221,24 @@ mod desktop {
             } else {
                 Phase::Cancelled
             };
+            if result.execution_started && kind == "bambu" {
+                let report = service::report_bambu(&result.workspace, &result.run_id)?;
+                return Ok((
+                    phase,
+                    ResultView {
+                        outcome: bambu_report_outcome(&report),
+                        run_id: result.run_id.clone(),
+                        workspace: path_text(&result.workspace)?,
+                        evidence_root: path_text(&result.evidence_root)?,
+                        summary: result
+                            .summary_text()
+                            .unwrap_or("No verified summary is available.")
+                            .into(),
+                        can_export_document: false,
+                        report_markdown: aiw_runner::render_bambu_run_report_markdown(&report),
+                    },
+                ));
+            }
             let report = if result.execution_started {
                 if kind == "interactive" {
                     service::report_document(&result.workspace, &result.run_id)?
@@ -266,6 +297,32 @@ mod desktop {
                 ResultOutcome::Verified
             }
             _ => ResultOutcome::Incomplete,
+        }
+    }
+    fn bambu_report_outcome(report: &aiw_runner::WsbBambuRunReport) -> ResultOutcome {
+        if aiw_desktop::bambu_report_verified(
+            report.outcome == aiw_orchestrator::RunOutcome::Succeeded,
+            report.recorded_cleanup_verified,
+            match report.evidence_status {
+                aiw_runner::BambuReportEvidenceStatus::Verified => {
+                    aiw_desktop::BambuEvidenceState::Verified
+                }
+                aiw_runner::BambuReportEvidenceStatus::Absent => {
+                    aiw_desktop::BambuEvidenceState::Absent
+                }
+                aiw_runner::BambuReportEvidenceStatus::Rejected => {
+                    aiw_desktop::BambuEvidenceState::Rejected
+                }
+            },
+            report
+                .scenario
+                .as_ref()
+                .is_some_and(|scenario| scenario.successful()),
+            report.artifact.is_some(),
+        ) {
+            ResultOutcome::Verified
+        } else {
+            ResultOutcome::Incomplete
         }
     }
     #[tauri::command]
@@ -350,7 +407,7 @@ mod desktop {
         workspace: String,
         run_id: String,
     ) -> std::result::Result<(), String> {
-        if !matches!(kind.as_str(), "assessment" | "interactive")
+        if !matches!(kind.as_str(), "assessment" | "interactive" | "bambu")
             || workspace.is_empty()
             || run_id.is_empty()
         {
@@ -359,6 +416,18 @@ mod desktop {
         let c = c.inner().clone();
         let id = c.begin()?;
         spawn_work(app, c, id, move || {
+            if kind == "bambu" {
+                let report = service::report_bambu(Path::new(&workspace), &run_id)?;
+                return Ok((Phase::Completed, ResultView {
+                    outcome: bambu_report_outcome(&report),
+                    run_id,
+                    evidence_root: "Not recorded by this retained-report selection".into(),
+                    workspace,
+                    summary: "Retained Bambu report reverified. Loading did not start or recover Sandbox. Read the verified function, artifact, and cleanup results below.".into(),
+                    can_export_document: false,
+                    report_markdown: aiw_runner::render_bambu_run_report_markdown(&report),
+                }));
+            }
             let report = if kind == "interactive" {
                 service::report_document(Path::new(&workspace), &run_id)?
             } else {

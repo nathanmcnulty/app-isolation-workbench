@@ -38,12 +38,13 @@ if ((Get-Item -LiteralPath $receiptPath).Length -gt 1048576) { throw 'Package re
 $rootPrefix = $root.TrimEnd('\') + '\'
 
 $receipt = Get-Content -Raw -LiteralPath $receiptPath | ConvertFrom-Json
-if ($receipt.schemaVersion -cne 'aiw.dev/desktop-package/v0alpha1' -or
+$historicalProducts = @('notepad-plus-plus', 'notepad-plus-plus-interactive')
+$currentProducts = @('notepad-plus-plus', 'notepad-plus-plus-interactive', 'bambu-studio')
+$expectedProducts = if ($receipt.schemaVersion -ceq 'aiw.dev/desktop-package/v0alpha1') { $historicalProducts } elseif ($receipt.schemaVersion -ceq 'aiw.dev/desktop-package/v0alpha2') { $currentProducts } else { @() }
+if ($expectedProducts.Count -eq 0 -or
     $receipt.receiptLast -ne $true -or
     $receipt.sourceRevision -cne $SourceRevision -or
-    $receipt.productIds.Count -ne 2 -or
-    @($receipt.productIds) -cnotcontains 'notepad-plus-plus' -or
-    @($receipt.productIds) -cnotcontains 'notepad-plus-plus-interactive') {
+    (ConvertTo-Json @($receipt.productIds) -Compress) -cne (ConvertTo-Json @($expectedProducts) -Compress)) {
     throw 'Package receipt does not match the closed desktop package contract'
 }
 
@@ -100,6 +101,7 @@ $actualPaths = Sort-OrdinalStrings $actualPaths
 if ((ConvertTo-Json $actualPaths -Compress) -cne (ConvertTo-Json $recordPaths -Compress)) { throw 'Package inventory contains missing or unexpected files' }
 
 $required = @('aiw.exe', 'aiw-desktop.exe', 'README.txt', 'LICENSE', 'verify-desktop-package.ps1', 'product/notepad-plus-plus/manifest.json', 'product/notepad-plus-plus/project.yaml', 'product/notepad-plus-plus/tools/aiw-guest-agent.exe', 'product/notepad-plus-plus-interactive/manifest.json', 'product/notepad-plus-plus-interactive/project.yaml', 'product/notepad-plus-plus-interactive/tools/aiw-guest-agent.exe')
+if ($receipt.schemaVersion -ceq 'aiw.dev/desktop-package/v0alpha2') { $required += @('product/bambu-studio/manifest.json', 'product/bambu-studio/project.json', 'product/bambu-studio/tools/aiw-guest-agent.exe') }
 foreach ($path in $required) { if (-not $seen.Contains($path)) { throw "Closed package file is missing: $path" } }
 if ($seen.Count -ne $required.Count) { throw 'Package receipt contains files outside the closed desktop contract' }
 
@@ -110,15 +112,17 @@ foreach ($exe in @(@{ path = 'aiw.exe'; expected = [string]$receipt.cliSha256 },
 }
 
 foreach ($product in @(
-    @{ directory = 'notepad-plus-plus'; id = 'notepad-plus-plus-local-settings'; scenario = 'install-launch-close' },
-    @{ directory = 'notepad-plus-plus-interactive'; id = 'notepad-plus-plus-interactive'; scenario = 'install-launch-close' }
+    @{ directory = 'notepad-plus-plus'; id = 'notepad-plus-plus-local-settings'; scenario = 'install-launch-close'; project = 'project.yaml'; noLaunchProfile = $false },
+    @{ directory = 'notepad-plus-plus-interactive'; id = 'notepad-plus-plus-interactive'; scenario = 'install-launch-close'; project = 'project.yaml'; noLaunchProfile = $true },
+    $(if ($receipt.schemaVersion -ceq 'aiw.dev/desktop-package/v0alpha2') { @{ directory = 'bambu-studio'; id = 'bambu-studio-export'; scenario = 'local-file-export'; project = 'project.json'; noLaunchProfile = $true } })
 )) {
+    if ($null -eq $product) { continue }
     $productRoot = Join-Path $root "product\$($product.directory)"
     $manifestPath = Join-Path $productRoot 'manifest.json'
-    $projectPath = Join-Path $productRoot 'project.yaml'
+    $projectPath = Join-Path $productRoot $product.project
     $guestPath = Join-Path $productRoot 'tools\aiw-guest-agent.exe'
     $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
-    if ($manifest.schemaVersion -cne 'aiw.dev/admin-product-assets/v0alpha1' -or $manifest.productId -cne $product.id -or $manifest.projectPath -cne 'project.yaml' -or $manifest.guestAgentPath -cne 'tools/aiw-guest-agent.exe' -or $manifest.scenarioId -cne $product.scenario) { throw "Product manifest does not match its fixed contract: $($product.directory)" }
+    if ($manifest.schemaVersion -cne 'aiw.dev/admin-product-assets/v0alpha1' -or $manifest.productId -cne $product.id -or $manifest.projectPath -cne $product.project -or $manifest.guestAgentPath -cne 'tools/aiw-guest-agent.exe' -or $manifest.scenarioId -cne $product.scenario -or ($product.noLaunchProfile -and (@($manifest.PSObject.Properties.Name) -ccontains 'launchProfilePath' -or @($manifest.PSObject.Properties.Name) -ccontains 'launchProfileSha256'))) { throw "Product manifest does not match its fixed contract: $($product.directory)" }
     if ((Get-FileHash -LiteralPath $projectPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne [string]$manifest.projectSha256 -or (Get-FileHash -LiteralPath $guestPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne [string]$manifest.guestAgentSha256 -or [string]$manifest.guestAgentSha256 -cne [string]$receipt.guestAgentSha256) { throw "Product asset identity differs from its manifest or receipt: $($product.directory)" }
 }
 
