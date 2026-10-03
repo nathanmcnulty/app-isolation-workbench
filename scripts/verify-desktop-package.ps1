@@ -20,6 +20,12 @@ function Get-LowerSha256([byte[]]$Bytes) {
     finally { $sha256.Dispose() }
 }
 
+function Sort-OrdinalStrings([string[]]$Values) {
+    $sorted = [string[]]@($Values)
+    [Array]::Sort($sorted, [StringComparer]::Ordinal)
+    return $sorted
+}
+
 function Assert-Ordinary([string]$Path, [string]$Label, [switch]$Directory) {
     if (-not (Test-Path -LiteralPath $Path -PathType $(if ($Directory) { 'Container' } else { 'Leaf' }))) { throw "$Label is missing" }
     $item = Get-Item -LiteralPath $Path -Force
@@ -44,7 +50,8 @@ if ($receipt.schemaVersion -cne 'aiw.dev/desktop-package/v0alpha1' -or
 $records = @($receipt.files)
 if ($records.Count -eq 0) { throw 'Package receipt has no payload records' }
 $recordPaths = @($records | ForEach-Object { [string]$_.path })
-if ((ConvertTo-Json $recordPaths -Compress) -cne (ConvertTo-Json (@($recordPaths | Sort-Object)) -Compress)) { throw 'Package receipt paths are not sorted' }
+$sortedRecordPaths = Sort-OrdinalStrings $recordPaths
+if ((ConvertTo-Json $recordPaths -Compress) -cne (ConvertTo-Json $sortedRecordPaths -Compress)) { throw 'Package receipt paths are not sorted' }
 $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 $safeRecords = foreach ($record in $records) {
     $relative = [string]$record.path
@@ -88,7 +95,8 @@ foreach ($record in $safeRecords) {
 
 $reparse = Get-ChildItem -LiteralPath $root -Recurse -Force | Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 }
 if ($reparse) { throw 'Package tree contains a reparse point' }
-$actualPaths = @(Get-ChildItem -LiteralPath $root -Recurse -File -Force | Where-Object { $_.FullName -cne $receiptPath } | ForEach-Object { $_.FullName.Substring($rootPrefix.Length).Replace('\', '/') } | Sort-Object)
+$actualPaths = @(Get-ChildItem -LiteralPath $root -Recurse -File -Force | Where-Object { $_.FullName -cne $receiptPath } | ForEach-Object { $_.FullName.Substring($rootPrefix.Length).Replace('\', '/') })
+$actualPaths = Sort-OrdinalStrings $actualPaths
 if ((ConvertTo-Json $actualPaths -Compress) -cne (ConvertTo-Json $recordPaths -Compress)) { throw 'Package inventory contains missing or unexpected files' }
 
 $required = @('aiw.exe', 'aiw-desktop.exe', 'README.txt', 'LICENSE', 'verify-desktop-package.ps1', 'product/notepad-plus-plus/manifest.json', 'product/notepad-plus-plus/project.yaml', 'product/notepad-plus-plus/tools/aiw-guest-agent.exe', 'product/notepad-plus-plus-interactive/manifest.json', 'product/notepad-plus-plus-interactive/project.yaml', 'product/notepad-plus-plus-interactive/tools/aiw-guest-agent.exe')

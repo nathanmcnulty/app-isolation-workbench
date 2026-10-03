@@ -11,6 +11,15 @@ $inheritedLastExitCode = if ($hadInheritedLastExitCode) { $global:LASTEXITCODE }
 function Write-Utf8NoBom([string]$Path, [string]$Text) { [IO.File]::WriteAllText($Path, $Text + [Environment]::NewLine, [Text.UTF8Encoding]::new($false)) }
 function Get-CanonicalJsonBytes([object]$Value) { return ,([Text.UTF8Encoding]::new($false).GetBytes(($Value | ConvertTo-Json -Depth 30 -Compress))) }
 function Get-LowerSha256([byte[]]$Bytes) { $sha = [Security.Cryptography.SHA256]::Create(); try { ([BitConverter]::ToString($sha.ComputeHash($Bytes))).Replace('-', '').ToLowerInvariant() } finally { $sha.Dispose() } }
+function Sort-OrdinalRecords([object[]]$Items) {
+    $sorted = [Collections.Generic.List[object]]::new()
+    foreach ($item in $Items) {
+        $index = 0
+        while ($index -lt $sorted.Count -and [StringComparer]::Ordinal.Compare([string]$sorted[$index].path, [string]$item.path) -lt 0) { $index++ }
+        $sorted.Insert($index, $item)
+    }
+    return $sorted.ToArray()
+}
 function Assert-Rejected([scriptblock]$Operation, [string]$Case) { try { & $Operation | Out-Null } catch { return }; throw "Desktop package verifier accepted $Case" }
 
 try {
@@ -28,7 +37,9 @@ try {
         $manifest = [ordered]@{ schemaVersion = 'aiw.dev/admin-product-assets/v0alpha1'; productId = $product.id; projectPath = 'project.yaml'; projectSha256 = (Get-FileHash -LiteralPath $project -Algorithm SHA256).Hash.ToLowerInvariant(); guestAgentPath = 'tools/aiw-guest-agent.exe'; scenarioId = 'install-launch-close'; guestAgentSha256 = (Get-FileHash -LiteralPath $guest -Algorithm SHA256).Hash.ToLowerInvariant() }
         Write-Utf8NoBom (Join-Path $productRoot 'manifest.json') ($manifest | ConvertTo-Json -Depth 10)
     }
-    $records = @(Get-ChildItem -LiteralPath $root -Recurse -File | ForEach-Object { [ordered]@{ path = [IO.Path]::GetRelativePath($root, $_.FullName).Replace('\', '/'); sizeBytes = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() } } | Sort-Object { $_.path })
+    $rootPrefix = $root.TrimEnd('\') + '\'
+    $records = @(Get-ChildItem -LiteralPath $root -Recurse -File | ForEach-Object { [ordered]@{ path = $_.FullName.Substring($rootPrefix.Length).Replace('\', '/'); sizeBytes = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() } })
+    $records = @(Sort-OrdinalRecords $records)
     $cliHash = (Get-FileHash -LiteralPath (Join-Path $root 'aiw.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
     $desktopHash = (Get-FileHash -LiteralPath (Join-Path $root 'aiw-desktop.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
     $guestHash = (Get-FileHash -LiteralPath (Join-Path $root 'product\notepad-plus-plus\tools\aiw-guest-agent.exe') -Algorithm SHA256).Hash.ToLowerInvariant()

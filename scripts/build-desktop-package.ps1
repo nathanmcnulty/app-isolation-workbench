@@ -16,6 +16,15 @@ $targetTriple = 'x86_64-pc-windows-msvc'
 function Write-Utf8NoBom([string]$Path, [string]$Text) { [IO.File]::WriteAllText($Path, $Text + [Environment]::NewLine, [Text.UTF8Encoding]::new($false)) }
 function Get-CanonicalJsonBytes([object]$Value) { return ,([Text.UTF8Encoding]::new($false).GetBytes(($Value | ConvertTo-Json -Depth 30 -Compress))) }
 function Get-LowerSha256([byte[]]$Bytes) { $sha = [Security.Cryptography.SHA256]::Create(); try { ([BitConverter]::ToString($sha.ComputeHash($Bytes))).Replace('-', '').ToLowerInvariant() } finally { $sha.Dispose() } }
+function Sort-OrdinalRecords([object[]]$Items) {
+    $sorted = [Collections.Generic.List[object]]::new()
+    foreach ($item in $Items) {
+        $index = 0
+        while ($index -lt $sorted.Count -and [StringComparer]::Ordinal.Compare([string]$sorted[$index].path, [string]$item.path) -lt 0) { $index++ }
+        $sorted.Insert($index, $item)
+    }
+    return $sorted.ToArray()
+}
 function Assert-OrdinaryDirectory([string]$Path, [string]$Label) {
     if (-not (Test-Path -LiteralPath $Path -PathType Container)) { throw "$Label is missing: $Path" }
     $item = Get-Item -LiteralPath $Path -Force
@@ -171,7 +180,8 @@ Guest agent SHA-256 (retained independently): $GuestAgentSha256
 
     $payload = @(Get-ChildItem -LiteralPath $output -Recurse -File -Force | Where-Object { $_.FullName -cne (Join-Path $output 'receipt.json') } | ForEach-Object {
         [ordered]@{ path = [IO.Path]::GetRelativePath($output, $_.FullName).Replace('\', '/'); sizeBytes = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
-    } | Sort-Object { $_.path })
+    })
+    $payload = @(Sort-OrdinalRecords $payload)
     $core = [ordered]@{ schemaVersion = 'aiw.dev/desktop-package/v0alpha1'; sourceRevision = $SourceRevision; productIds = @('notepad-plus-plus', 'notepad-plus-plus-interactive'); cliSha256 = $cliHash; desktopSha256 = $desktopHash; guestAgentSha256 = $GuestAgentSha256; files = $payload; receiptLast = $true }
     $receiptHash = Get-LowerSha256 (Get-CanonicalJsonBytes $core)
     Write-Utf8NoBom (Join-Path $output 'receipt.json') (([ordered]@{ schemaVersion = $core.schemaVersion; sourceRevision = $core.sourceRevision; productIds = $core.productIds; cliSha256 = $core.cliSha256; desktopSha256 = $core.desktopSha256; guestAgentSha256 = $core.guestAgentSha256; files = $core.files; receiptLast = $true; receiptSha256 = $receiptHash }) | ConvertTo-Json -Depth 30)
