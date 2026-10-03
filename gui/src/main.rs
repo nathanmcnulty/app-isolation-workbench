@@ -300,26 +300,7 @@ mod desktop {
         }
     }
     fn bambu_report_outcome(report: &aiw_runner::WsbBambuRunReport) -> ResultOutcome {
-        if aiw_desktop::bambu_report_verified(
-            report.outcome == aiw_orchestrator::RunOutcome::Succeeded,
-            report.recorded_cleanup_verified,
-            match report.evidence_status {
-                aiw_runner::BambuReportEvidenceStatus::Verified => {
-                    aiw_desktop::BambuEvidenceState::Verified
-                }
-                aiw_runner::BambuReportEvidenceStatus::Absent => {
-                    aiw_desktop::BambuEvidenceState::Absent
-                }
-                aiw_runner::BambuReportEvidenceStatus::Rejected => {
-                    aiw_desktop::BambuEvidenceState::Rejected
-                }
-            },
-            report
-                .scenario
-                .as_ref()
-                .is_some_and(|scenario| scenario.successful()),
-            report.artifact.is_some(),
-        ) {
+        if report.verified_workflow_completed() {
             ResultOutcome::Verified
         } else {
             ResultOutcome::Incomplete

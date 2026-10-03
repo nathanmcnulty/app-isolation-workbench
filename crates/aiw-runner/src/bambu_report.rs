@@ -385,6 +385,24 @@ fn append_bambu_administrator_overview(text: &mut String, report: &WsbBambuRunRe
 }
 
 impl WsbBambuRunReport {
+    /// A verified fixed export and cleanup do not establish broader isolation.
+    /// Successful Bambu runs intentionally retain `InsufficientEvidence` for
+    /// that separate verdict; callers must not require `Succeeded` here.
+    pub fn verified_workflow_completed(&self) -> bool {
+        self.outcome == RunOutcome::InsufficientEvidence
+            && self.recorded_cleanup_verified
+            && self.evidence_status == BambuReportEvidenceStatus::Verified
+            && self.receipt_sha256.is_some()
+            && self.evidence_root_hash.is_some()
+            && self.scenario.as_ref().is_some_and(|scenario| {
+                scenario.successful()
+                    && self.artifact.as_ref().is_some_and(|artifact| {
+                        scenario.artifact_sha256.as_ref() == Some(&artifact.sha256)
+                            && scenario.artifact_size_bytes == Some(artifact.size_bytes)
+                    })
+            })
+    }
+
     /// Function labels from retained report evidence; missing evidence cannot
     /// be promoted into a successful application observation.
     pub fn administrator_function_results(&self) -> [(&'static str, &'static str); 5] {
@@ -487,6 +505,94 @@ mod markdown_tests {
             artifact: None,
             missing_evidence: vec!["ordinary baseline".into()],
         }
+    }
+
+    #[test]
+    fn completed_export_keeps_isolation_gap_separate_from_workflow_verification() {
+        let mut report = report();
+        report.outcome = RunOutcome::InsufficientEvidence;
+        report.evidence_status = BambuReportEvidenceStatus::Verified;
+        report.receipt_sha256 = Some("e".repeat(64));
+        report.evidence_root_hash = Some("f".repeat(64));
+        report.scenario = Some(ImportedBambuScenarioResult {
+            schema_version: "aiw.dev/imported-bambu-scenario-result/v0alpha1".into(),
+            run_id: report.run_id.clone(),
+            sandbox_id: "sandbox".into(),
+            request_sha256: report.request_sha256.clone(),
+            scenario_sha256: "c".repeat(64),
+            status: BambuScenarioStatus::Succeeded,
+            completed_stages: vec![
+                Stage::Install,
+                Stage::PrepareFixture,
+                Stage::Export,
+                Stage::CollectArtifact,
+            ],
+            failed_stage: None,
+            diagnostic: None,
+            install_exit_code: Some(0),
+            launch_process_id: Some(42),
+            launch_exit_code: Some(0),
+            application_token: None,
+            standard_user_context: None,
+            artifact_sha256: Some("d".repeat(64)),
+            artifact_size_bytes: Some(9063),
+        });
+        report.artifact = Some(aiw_provider_wsb::BambuExportArtifact {
+            sha256: "d".repeat(64),
+            size_bytes: 9063,
+            vertex_count: 4,
+            triangle_count: 4,
+        });
+        assert!(report.verified_workflow_completed());
+        assert_eq!(report.outcome, RunOutcome::InsufficientEvidence);
+        assert!(!report.missing_evidence.is_empty());
+        assert!(
+            report
+                .administrator_function_results()
+                .iter()
+                .all(|(_, result)| *result == "passed")
+        );
+
+        for outcome in [
+            RunOutcome::Succeeded,
+            RunOutcome::Failed,
+            RunOutcome::Cancelled,
+        ] {
+            let mut incomplete = report.clone();
+            incomplete.outcome = outcome;
+            assert!(!incomplete.verified_workflow_completed());
+        }
+        let mut incomplete = report.clone();
+        incomplete.recorded_cleanup_verified = false;
+        assert!(!incomplete.verified_workflow_completed());
+        for evidence in [
+            BambuReportEvidenceStatus::Absent,
+            BambuReportEvidenceStatus::Rejected,
+        ] {
+            incomplete = report.clone();
+            incomplete.evidence_status = evidence;
+            assert!(!incomplete.verified_workflow_completed());
+        }
+        incomplete = report.clone();
+        incomplete.scenario.as_mut().unwrap().status = BambuScenarioStatus::Failed;
+        assert!(!incomplete.verified_workflow_completed());
+        incomplete = report.clone();
+        incomplete.scenario = None;
+        assert!(!incomplete.verified_workflow_completed());
+        incomplete = report.clone();
+        incomplete.receipt_sha256 = None;
+        assert!(!incomplete.verified_workflow_completed());
+        incomplete = report.clone();
+        incomplete.evidence_root_hash = None;
+        assert!(!incomplete.verified_workflow_completed());
+        incomplete = report.clone();
+        incomplete.artifact.as_mut().unwrap().sha256 = "0".repeat(64);
+        assert!(!incomplete.verified_workflow_completed());
+        incomplete = report.clone();
+        incomplete.artifact.as_mut().unwrap().size_bytes += 1;
+        assert!(!incomplete.verified_workflow_completed());
+        report.artifact = None;
+        assert!(!report.verified_workflow_completed());
     }
 
     #[test]

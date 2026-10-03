@@ -61,27 +61,6 @@ pub enum ResultOutcome {
     Incomplete,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BambuEvidenceState {
-    Verified,
-    Absent,
-    Rejected,
-}
-
-pub fn bambu_report_verified(
-    outcome_succeeded: bool,
-    cleanup_verified: bool,
-    evidence: BambuEvidenceState,
-    scenario_successful: bool,
-    artifact_verified: bool,
-) -> bool {
-    outcome_succeeded
-        && cleanup_verified
-        && evidence == BambuEvidenceState::Verified
-        && scenario_successful
-        && artifact_verified
-}
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ErrorView {
@@ -366,58 +345,6 @@ mod tests {
             evidence_root: "test".into(),
             workspace: "test".into(),
         }
-    }
-    #[test]
-    fn bambu_verified_outcome_requires_every_typed_report_gate() {
-        assert!(bambu_report_verified(
-            true,
-            true,
-            BambuEvidenceState::Verified,
-            true,
-            true
-        ));
-        assert!(!bambu_report_verified(
-            false,
-            true,
-            BambuEvidenceState::Verified,
-            true,
-            true
-        ));
-        assert!(!bambu_report_verified(
-            true,
-            false,
-            BambuEvidenceState::Verified,
-            true,
-            true
-        ));
-        assert!(!bambu_report_verified(
-            true,
-            true,
-            BambuEvidenceState::Absent,
-            true,
-            true
-        ));
-        assert!(!bambu_report_verified(
-            true,
-            true,
-            BambuEvidenceState::Rejected,
-            true,
-            true
-        ));
-        assert!(!bambu_report_verified(
-            true,
-            true,
-            BambuEvidenceState::Verified,
-            false,
-            true
-        ));
-        assert!(!bambu_report_verified(
-            true,
-            true,
-            BambuEvidenceState::Verified,
-            true,
-            false
-        ));
     }
     #[test]
     fn gates_are_distinct_exact_and_single_use() {
