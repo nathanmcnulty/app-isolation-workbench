@@ -24,7 +24,9 @@ Exact package `7667acd` verified under Windows PowerShell 5.1 and opened on the
 VM; all CI jobs passed at that code head. Fresh GUI assessment/edit/save/export
 acceptance is pending: an unrelated GitHub passkey prompt currently blocks RDP
 input. Leave authentication to its owner. The GUI is idle, Sandbox was empty,
-and no assessment intake exists. See the GUI plan for package/proof identities.
+and no assessment intake exists. Desktop targets also passed release checking
+with their declared Rust 1.90 compiler; CI now covers that floor alongside the
+unchanged core Rust 1.85 check. See the GUI plan for package/proof identities.
 
 ## Preserved stable evidence
 
