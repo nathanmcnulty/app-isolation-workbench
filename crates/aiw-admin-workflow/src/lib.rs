@@ -606,7 +606,7 @@ pub fn report_document(workspace: &Path, run_id: &str) -> Result<aiw_runner::Wsb
 
 /// Reverify a retained fixed Notepad++ assessment using package-bound assets.
 #[cfg(windows)]
-pub fn report_assessment(workspace: &Path, run_id: &str) -> Result<AdminAssessmentResult> {
+pub fn report_assessment(workspace: &Path, run_id: &str) -> Result<aiw_runner::WsbMsiRunReport> {
     let assets_root = packaged_asset_root("notepad-plus-plus")?;
     let manifest: ProductAssetManifest = serde_json::from_slice(&read_file_bounded(
         &assets_root.join("manifest.json"),
@@ -633,27 +633,13 @@ pub fn report_assessment(workspace: &Path, run_id: &str) -> Result<AdminAssessme
     agent
         .revalidate()
         .map_err(|error| anyhow!("packaged guest agent drifted: {error}"))?;
-    let report = aiw_runner::report_windows_sandbox_msi_run(
+    aiw_runner::report_windows_sandbox_msi_run(
         workspace,
         run_id,
         &project,
         &manifest.guest_agent_sha256,
     )
-    .map_err(|source| retained_result_error(workspace, run_id, "adminRetainedReport", source))?;
-    let (summary, next) = report_summary(&report);
-    Ok(AdminAssessmentResult {
-        schema_version: MANIFEST_SCHEMA,
-        product_id: PRODUCT_ID,
-        operator_identity: "retained-report".into(),
-        evidence_root: workspace.parent().unwrap_or(workspace).to_owned(),
-        run_id: run_id.to_owned(),
-        workspace: workspace.to_owned(),
-        execution_mode: "retainedReport",
-        approval_recorded: true,
-        execution_started: false,
-        next,
-        summary: Some(summary),
-    })
+    .map_err(|source| retained_result_error(workspace, run_id, "adminRetainedReport", source))
 }
 
 #[cfg(not(windows))]
