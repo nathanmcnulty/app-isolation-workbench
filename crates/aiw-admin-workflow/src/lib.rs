@@ -646,41 +646,46 @@ pub fn report_assessment(workspace: &Path, run_id: &str) -> Result<aiw_runner::W
 /// Reverify a retained fixed Bambu export using package-bound project and guest identities.
 #[cfg(windows)]
 pub fn report_bambu(workspace: &Path, run_id: &str) -> Result<aiw_runner::WsbBambuRunReport> {
-    let assets_root = packaged_asset_root("bambu-studio")?;
-    let manifest: ProductAssetManifest = serde_json::from_slice(&read_file_bounded(
-        &assets_root.join("manifest.json"),
-        1024 * 1024,
-    )?)?;
-    let assets = manifest.resolve_bambu(&assets_root)?;
-    let project_bytes = read_file_bounded(&assets.project, MAX_CONFIG_BYTES)?;
-    if lowercase_sha256(&project_bytes) != manifest.project_sha256 {
-        bail!("packaged Bambu project bytes do not match the product manifest");
-    }
-    let project: Project = serde_json::from_slice(&project_bytes)?;
-    if !validate_project_for_planning(&project).is_empty()
-        || project.metadata.name != BAMBU_PRODUCT_ID
-        || manifest.product_id != BAMBU_PRODUCT_ID
-        || manifest.scenario_id != BAMBU_SCENARIO_ID
-    {
-        bail!("packaged Bambu project is not valid for the fixed assessment");
-    }
-    aiw_provider_wsb::compile_bambu_studio_export_scenario(&project, BAMBU_SCENARIO_ID)
-        .map_err(|error| anyhow!("packaged Bambu export contract is invalid: {error}"))?;
-    let agent = aiw_windows_platform::HeldApplicationFile::open(&assets.guest_agent)
-        .map_err(|error| anyhow!("packaged guest agent is unsupported: {error}"))?;
-    if agent.observation().sha256 != manifest.guest_agent_sha256 {
-        bail!("packaged guest agent bytes do not match the product manifest");
-    }
-    agent
-        .revalidate()
-        .map_err(|error| anyhow!("packaged guest agent drifted: {error}"))?;
-    aiw_runner::report_windows_sandbox_bambu_run(
-        workspace,
-        run_id,
-        &project,
-        &manifest.guest_agent_sha256,
-    )
-    .map_err(anyhow::Error::from)
+    let result = (|| -> Result<aiw_runner::WsbBambuRunReport> {
+        let assets_root = packaged_asset_root("bambu-studio")?;
+        let manifest: ProductAssetManifest = serde_json::from_slice(&read_file_bounded(
+            &assets_root.join("manifest.json"),
+            1024 * 1024,
+        )?)?;
+        let assets = manifest.resolve_bambu(&assets_root)?;
+        let project_bytes = read_file_bounded(&assets.project, MAX_CONFIG_BYTES)?;
+        if lowercase_sha256(&project_bytes) != manifest.project_sha256 {
+            bail!("packaged Bambu project bytes do not match the product manifest");
+        }
+        let project: Project = serde_json::from_slice(&project_bytes)?;
+        if !validate_project_for_planning(&project).is_empty()
+            || project.metadata.name != BAMBU_PRODUCT_ID
+            || manifest.product_id != BAMBU_PRODUCT_ID
+            || manifest.scenario_id != BAMBU_SCENARIO_ID
+        {
+            bail!("packaged Bambu project is not valid for the fixed assessment");
+        }
+        aiw_provider_wsb::compile_bambu_studio_export_scenario(&project, BAMBU_SCENARIO_ID)
+            .map_err(|error| anyhow!("packaged Bambu export contract is invalid: {error}"))?;
+        let agent = aiw_windows_platform::HeldApplicationFile::open(&assets.guest_agent)
+            .map_err(|error| anyhow!("packaged guest agent is unsupported: {error}"))?;
+        if agent.observation().sha256 != manifest.guest_agent_sha256 {
+            bail!("packaged guest agent bytes do not match the product manifest");
+        }
+        agent
+            .revalidate()
+            .map_err(|error| anyhow!("packaged guest agent drifted: {error}"))?;
+        aiw_runner::report_windows_sandbox_bambu_run(
+            workspace,
+            run_id,
+            &project,
+            &manifest.guest_agent_sha256,
+        )
+        .map_err(anyhow::Error::from)
+    })();
+    result.map_err(|source| {
+        retained_result_error(workspace, run_id, "adminRetainedBambuReport", source)
+    })
 }
 
 #[cfg(not(windows))]
@@ -1963,6 +1968,22 @@ mod tests {
         assert_eq!(public.run_id.as_deref(), Some("admin-test"));
         assert!(public.remediation.contains("Do not repeat the trial"));
         assert!(public.detail.contains("report drift"));
+    }
+    #[cfg(windows)]
+    #[test]
+    fn missing_bambu_package_preserves_retained_run_error_context() {
+        let error = report_bambu(
+            Path::new("retained-bambu-workspace"),
+            "admin-retained-bambu",
+        )
+        .expect_err("test executable has no packaged Bambu assets");
+        let public = error.downcast_ref::<AiwError>().unwrap();
+        assert_eq!(public.code.as_ref(), "AIW_ADMIN_RESULT_PUBLICATION_FAILED");
+        assert_eq!(public.run_id.as_deref(), Some("admin-retained-bambu"));
+        assert_eq!(public.stage.as_ref(), "adminRetainedBambuReport");
+        assert!(public.remediation.contains("retained-bambu-workspace"));
+        assert!(public.remediation.contains("Do not repeat the trial"));
+        assert!(!public.retryable);
     }
     #[test]
     fn unsupported_type_retains_a_specific_rejection_stage() {
