@@ -100,6 +100,7 @@
   function renderProgress(snapshot) {
     const active = ["preparing", "review", "approved", "running", "exporting"].includes(snapshot.phase);
     show("progressCard", active || ["completed", "cancelled", "failed"].includes(snapshot.phase));
+    show("progressTrack", ["preparing", "running", "exporting"].includes(snapshot.phase));
     const messages = { preparing: "Preparing or recording the reviewed plan. No Sandbox has started.", review: "Review the exact plan and type the literal confirmation.", approved: "Approval recorded. Sandbox has not started; press Start when ready.", running: "Start accepted. The backend is validating and executing the workflow. Wait for the retained result and cleanup.", exporting: "Exporting the last verified document to the selected new file.", completed: "The workflow finished; inspect its retained result below.", cancelled: "The workflow was cancelled; inspect the retained state before retrying.", failed: "The workflow failed; inspect the retained diagnostic and remediation." };
     text("progressSummary", messages[snapshot.phase] || "Ready.");
     const editing = snapshot.phase === "running" && snapshot.review && snapshot.review.workflowName === "Interactive Notepad++ document transfer";
