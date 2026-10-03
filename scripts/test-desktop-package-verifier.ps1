@@ -49,6 +49,13 @@ try {
 
     $valid = & $verifier -PackageRoot $root -ReceiptSha256 $receiptHash -SourceRevision $sourceRevision | ConvertFrom-Json
     if ($valid.exactInventory -ne $true -or $valid.filesVerified -ne $records.Count) { throw 'Valid desktop package fixture did not verify' }
+    if (($env:OS -eq 'Windows_NT' -or $IsWindows) -and $PSVersionTable.PSVersion.Major -ge 7) {
+        $powershell51Output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $verifier -PackageRoot $root -ReceiptSha256 $receiptHash -SourceRevision $sourceRevision | Out-String
+        $powershell51Exit = $LASTEXITCODE
+        if ($powershell51Exit -ne 0) { throw "Windows PowerShell 5.1 verifier failed with native exit code $powershell51Exit" }
+        $powershell51Result = $powershell51Output | ConvertFrom-Json
+        if ($powershell51Result.exactInventory -ne $true -or [string]$powershell51Result.receiptSha256 -cne $receiptHash) { throw 'Windows PowerShell 5.1 verifier result differed from the PowerShell 7 result' }
+    }
     & $env:ComSpec /d /c 'exit 19' | Out-Null
     $stale = & $verifier -PackageRoot $root -ReceiptSha256 $receiptHash -SourceRevision $sourceRevision | ConvertFrom-Json
     if ($stale.exactInventory -ne $true) { throw 'Verifier output depended on stale native exit state' }
