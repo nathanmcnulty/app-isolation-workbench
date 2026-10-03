@@ -3,6 +3,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $verifier = Join-Path $PSScriptRoot 'verify-desktop-package.ps1'
+$builder = Join-Path $PSScriptRoot 'build-desktop-package.ps1'
 $root = Join-Path ([IO.Path]::GetTempPath()) "aiw-desktop-verifier-$([guid]::NewGuid().ToString('N'))"
 $sourceRevision = '0123456789abcdef0123456789abcdef01234567'
 
@@ -12,6 +13,9 @@ function Get-LowerSha256([byte[]]$Bytes) { $sha = [Security.Cryptography.SHA256]
 function Assert-Rejected([scriptblock]$Operation, [string]$Case) { try { & $Operation | Out-Null } catch { return }; throw "Desktop package verifier accepted $Case" }
 
 try {
+    $builderText = Get-Content -Raw -LiteralPath $builder
+    if ($builderText -notmatch '\$previewParameters\s*=\s*@\{' -or $builderText -notmatch '&\s*\$previewBuilder\s+@previewParameters') { throw 'Builder preview invocation is not named-parameter splatted' }
+    if ($builderText -match '\$arguments\s*=\s*@\(') { throw 'Builder still uses positional preview arguments' }
     $paths = @(
         'aiw.exe', 'aiw-desktop.exe', 'README.txt', 'LICENSE', 'verify-desktop-package.ps1',
         'product/notepad-plus-plus/manifest.json', 'product/notepad-plus-plus/project.yaml', 'product/notepad-plus-plus/tools/aiw-guest-agent.exe',

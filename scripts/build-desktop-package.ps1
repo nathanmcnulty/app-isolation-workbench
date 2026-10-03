@@ -13,6 +13,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $previewBuilder = Join-Path $PSScriptRoot 'build-preview-package.ps1'
 $verifier = Join-Path $PSScriptRoot 'verify-desktop-package.ps1'
 $output = [IO.Path]::GetFullPath($OutputDirectory)
+if (-not [IO.Path]::IsPathRooted($DesktopExecutable)) { throw 'DesktopExecutable must be an absolute path' }
 $desktopSource = [IO.Path]::GetFullPath($DesktopExecutable)
 
 function Write-Utf8NoBom([string]$Path, [string]$Text) { [IO.File]::WriteAllText($Path, $Text + [Environment]::NewLine, [Text.UTF8Encoding]::new($false)) }
@@ -32,9 +33,9 @@ function Assert-Source([string]$Expected) {
 }
 function Assert-LowerHash([string]$Value, [string]$Label) { if ($Value -notmatch '^[0-9a-f]{64}$') { throw "$Label must be a lowercase SHA-256" } }
 function Invoke-Preview([string]$Destination, [string]$Product, [string]$GuestPath, [string]$GuestHash) {
-    $arguments = @('-OutputDirectory', $Destination, '-Product', $Product)
-    if ($GuestPath) { $arguments += @('-GuestAgent', $GuestPath, '-GuestAgentSha256', $GuestHash) }
-    & $previewBuilder @arguments | Out-Null
+    $previewParameters = @{ OutputDirectory = $Destination; Product = $Product }
+    if ($GuestPath) { $previewParameters.GuestAgent = $GuestPath; $previewParameters.GuestAgentSha256 = $GuestHash }
+    & $previewBuilder @previewParameters | Out-Null
 }
 
 Assert-LowerHash $DesktopExecutableSha256 'DesktopExecutableSha256'
@@ -53,8 +54,12 @@ if ($GuestAgent) {
     if ((Get-FileHash -LiteralPath $GuestAgent -Algorithm SHA256).Hash.ToLowerInvariant() -cne $GuestAgentSha256) { throw 'Guest agent bytes differ from the independently supplied hash' }
 }
 
-$tempRoot = Join-Path ([IO.Path]::GetTempPath()) "aiw-desktop-package-$([guid]::NewGuid().ToString('N'))"
-Assert-OrdinaryDirectory (Split-Path -Parent $tempRoot) 'Temporary staging parent'
+$tempParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+Assert-OrdinaryDirectory $tempParent 'Temporary staging parent'
+$tempLeaf = "aiw-desktop-package-$([guid]::NewGuid().ToString('N'))"
+if ($tempLeaf -notmatch '^aiw-desktop-package-[0-9a-f]{32}$') { throw 'Temporary staging leaf is not a generated GUID name' }
+$tempRoot = Join-Path $tempParent $tempLeaf
+if ([IO.Path]::GetDirectoryName($tempRoot).TrimEnd('\') -cne $tempParent.TrimEnd('\')) { throw 'Temporary staging root escaped its intended parent' }
 $assessmentPreview = Join-Path $tempRoot 'assessment'
 $interactivePreview = Join-Path $tempRoot 'interactive'
 try {
@@ -118,5 +123,15 @@ Desktop SHA-256: $desktopHash
     [ordered]@{ schemaVersion = 'aiw.dev/desktop-package/v0alpha1'; sourceRevision = $SourceRevision; packageRoot = $output; receiptSha256 = $receiptHash; cliSha256 = $cliHash; desktopSha256 = $desktopHash; products = @('notepad-plus-plus', 'notepad-plus-plus-interactive'); unsigned = $true; exactInventory = $true } | ConvertTo-Json -Depth 10 -Compress
 }
 finally {
-    if (Test-Path -LiteralPath $tempRoot) { Remove-Item -LiteralPath $tempRoot -Recurse -Force }
+    if (Test-Path -LiteralPath $tempRoot) {
+        $resolvedTempRoot = [IO.Path]::GetFullPath($tempRoot)
+        if ([IO.Path]::GetDirectoryName($resolvedTempRoot).TrimEnd('\') -cne $tempParent.TrimEnd('\') -or
+            [IO.Path]::GetFileName($resolvedTempRoot) -cne $tempLeaf -or
+            $tempLeaf -notmatch '^aiw-desktop-package-[0-9a-f]{32}$') {
+            throw 'Refusing to remove an unexpected temporary staging root'
+        }
+        Assert-OrdinaryDirectory $tempParent 'Temporary staging parent'
+        Assert-OrdinaryDirectory $resolvedTempRoot 'Temporary staging root'
+        Remove-Item -LiteralPath $resolvedTempRoot -Recurse -Force
+    }
 }
