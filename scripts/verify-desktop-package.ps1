@@ -28,6 +28,7 @@ function Assert-Ordinary([string]$Path, [string]$Label, [switch]$Directory) {
 
 Assert-Ordinary $root 'Package root' -Directory
 Assert-Ordinary $receiptPath 'Package receipt'
+if ((Get-Item -LiteralPath $receiptPath).Length -gt 1048576) { throw 'Package receipt exceeds the bounded contract' }
 $rootPrefix = $root.TrimEnd('\') + '\'
 
 $receipt = Get-Content -Raw -LiteralPath $receiptPath | ConvertFrom-Json
@@ -91,6 +92,7 @@ if ((ConvertTo-Json $actualPaths -Compress) -cne (ConvertTo-Json $recordPaths -C
 
 $required = @('aiw.exe', 'aiw-desktop.exe', 'README.txt', 'LICENSE', 'verify-desktop-package.ps1', 'product/notepad-plus-plus/manifest.json', 'product/notepad-plus-plus/project.yaml', 'product/notepad-plus-plus/tools/aiw-guest-agent.exe', 'product/notepad-plus-plus-interactive/manifest.json', 'product/notepad-plus-plus-interactive/project.yaml', 'product/notepad-plus-plus-interactive/tools/aiw-guest-agent.exe')
 foreach ($path in $required) { if (-not $seen.Contains($path)) { throw "Closed package file is missing: $path" } }
+if ($seen.Count -ne $required.Count) { throw 'Package receipt contains files outside the closed desktop contract' }
 
 foreach ($exe in @(@{ path = 'aiw.exe'; expected = [string]$receipt.cliSha256 }, @{ path = 'aiw-desktop.exe'; expected = [string]$receipt.desktopSha256 })) {
     $record = $null

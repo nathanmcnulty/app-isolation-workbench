@@ -9,6 +9,10 @@ description = "Local administrator surface for verified Windows Sandbox workflow
 # Keep desktop dependencies separate from the core workspace's Rust 1.85 contract.
 [workspace]
 
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
 [dependencies]
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
