@@ -1,4 +1,4 @@
-use std::io::{IsTerminal, Write};
+use std::io::{IsTerminal, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -20,7 +20,15 @@ fn read_file_bounded(path: &Path, max_bytes: u64) -> Result<Vec<u8>> {
     if !metadata.is_file() || metadata.len() > max_bytes {
         bail!("{} is not a bounded regular file", path.display());
     }
-    let bytes = std::fs::read(path)?;
+    let mut bytes =
+        Vec::with_capacity(usize::try_from(max_bytes.min(1024 * 1024)).unwrap_or(1024 * 1024));
+    let mut file = std::fs::File::open(path)?;
+    file.take(
+        max_bytes
+            .checked_add(1)
+            .ok_or_else(|| anyhow!("maximum input size is too large"))?,
+    )
+    .read_to_end(&mut bytes)?;
     if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > max_bytes {
         bail!("{} exceeds the maximum accepted size", path.display());
     }
@@ -71,6 +79,9 @@ pub trait ApprovalGate {
     fn review(&self, review: &ApprovalReview) -> Result<Option<String>>;
     /// A distinct gate after durable approval and before provider acquisition.
     fn wait_for_start(&self, review: &ApprovalReview) -> Result<bool>;
+    fn uses_terminal_progress(&self) -> bool {
+        false
+    }
 }
 
 pub struct TerminalApprovalGate;
@@ -92,6 +103,9 @@ impl ApprovalGate for TerminalApprovalGate {
     }
     fn wait_for_start(&self, _: &ApprovalReview) -> Result<bool> {
         Ok(true)
+    }
+    fn uses_terminal_progress(&self) -> bool {
+        true
     }
 }
 
@@ -578,6 +592,9 @@ pub fn report_document(workspace: &Path, run_id: &str) -> Result<aiw_runner::Wsb
     if agent.observation().sha256 != manifest.guest_agent_sha256 {
         bail!("packaged guest agent bytes do not match the product manifest");
     }
+    agent
+        .revalidate()
+        .map_err(|error| anyhow!("packaged guest agent drifted: {error}"))?;
     aiw_runner::report_windows_sandbox_msi_run(
         workspace,
         run_id,
@@ -585,6 +602,58 @@ pub fn report_document(workspace: &Path, run_id: &str) -> Result<aiw_runner::Wsb
         &manifest.guest_agent_sha256,
     )
     .map_err(|source| document_export_error(run_id, source))
+}
+
+/// Reverify a retained fixed Notepad++ assessment using package-bound assets.
+#[cfg(windows)]
+pub fn report_assessment(workspace: &Path, run_id: &str) -> Result<AdminAssessmentResult> {
+    let assets_root = packaged_asset_root("notepad-plus-plus")?;
+    let manifest: ProductAssetManifest = serde_json::from_slice(&read_file_bounded(
+        &assets_root.join("manifest.json"),
+        1024 * 1024,
+    )?)?;
+    let assets = manifest.resolve(&assets_root)?;
+    let project_bytes = read_file_bounded(&assets.project, MAX_CONFIG_BYTES)?;
+    if lowercase_sha256(&project_bytes) != manifest.project_sha256 {
+        bail!("packaged project bytes do not match the product manifest");
+    }
+    let project: Project = serde_yaml::from_slice(&project_bytes)?;
+    if !validate_project_for_planning(&project).is_empty()
+        || project.metadata.name != PRODUCT_ID
+        || manifest.product_id != PRODUCT_ID
+        || manifest.scenario_id != SCENARIO_ID
+    {
+        bail!("packaged project is not valid for the fixed assessment");
+    }
+    let agent = aiw_windows_platform::HeldApplicationFile::open(&assets.guest_agent)
+        .map_err(|error| anyhow!("packaged guest agent is unsupported: {error}"))?;
+    if agent.observation().sha256 != manifest.guest_agent_sha256 {
+        bail!("packaged guest agent bytes do not match the product manifest");
+    }
+    agent
+        .revalidate()
+        .map_err(|error| anyhow!("packaged guest agent drifted: {error}"))?;
+    let report = aiw_runner::report_windows_sandbox_msi_run(
+        workspace,
+        run_id,
+        &project,
+        &manifest.guest_agent_sha256,
+    )
+    .map_err(|source| retained_result_error(workspace, run_id, "adminRetainedReport", source))?;
+    let (summary, next) = report_summary(&report);
+    Ok(AdminAssessmentResult {
+        schema_version: MANIFEST_SCHEMA,
+        product_id: PRODUCT_ID,
+        operator_identity: "retained-report".into(),
+        evidence_root: workspace.parent().unwrap_or(workspace).to_owned(),
+        run_id: run_id.to_owned(),
+        workspace: workspace.to_owned(),
+        execution_mode: "retainedReport",
+        approval_recorded: true,
+        execution_started: false,
+        next,
+        summary: Some(summary),
+    })
 }
 
 #[cfg(not(windows))]
@@ -960,7 +1029,10 @@ fn assess_notepad(
         });
     }
     let execution_result = {
-        let _progress = admin_progress::RunProgress::start(show_progress, interactive);
+        let _progress = admin_progress::RunProgress::start(
+            show_progress && gate.uses_terminal_progress(),
+            interactive,
+        );
         aiw_runner::start_approved_windows_sandbox(
             &workspace,
             &assets.project,
@@ -1276,7 +1348,10 @@ pub fn assess_bambu_with_gate(
         });
     }
     let execution_result = {
-        let _progress = admin_progress::RunProgress::start(show_progress, false);
+        let _progress = admin_progress::RunProgress::start(
+            show_progress && gate.uses_terminal_progress(),
+            false,
+        );
         aiw_runner::start_approved_windows_sandbox(
             &workspace,
             &assets.project,
@@ -1432,6 +1507,115 @@ fn lowercase_sha256(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    struct FixedGate {
+        review_response: Option<String>,
+        start: bool,
+    }
+
+    impl ApprovalGate for FixedGate {
+        fn review(&self, _: &ApprovalReview) -> Result<Option<String>> {
+            Ok(self.review_response.clone())
+        }
+
+        fn wait_for_start(&self, _: &ApprovalReview) -> Result<bool> {
+            Ok(self.start)
+        }
+    }
+
+    fn review_fixture() -> (PathBuf, ApprovalReview) {
+        let root = std::env::temp_dir().join(format!(
+            "aiw-admin-gate-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let plan = aiw_orchestrator::RunPlan::new(
+            "gate-test",
+            "project",
+            "a".repeat(64),
+            aiw_orchestrator::RunLifecycleKind::Assessment,
+            "now",
+            vec![aiw_orchestrator::PlannedAction::AssessHost],
+            vec![],
+        )
+        .unwrap();
+        let layout = RunLayout::new(&root, &plan.run_id).unwrap();
+        layout.create(&plan).unwrap();
+        let approval = ApprovalRecord::for_plan(&plan, "operator", "now").unwrap();
+        (
+            root.clone(),
+            ApprovalReview {
+                run_id: plan.run_id.clone(),
+                workspace: root,
+                evidence_root: PathBuf::from("evidence"),
+                recipe: serde_json::json!({"fixed": true}),
+                plan,
+                proposed_approval: approval,
+            },
+        )
+    }
+
+    #[test]
+    fn approval_gate_requires_the_exact_literal_and_cancellation_writes_nothing() {
+        for response in [None, Some("approve wrong-hash".into())] {
+            let (root, review) = review_fixture();
+            let gate = FixedGate {
+                review_response: response,
+                start: true,
+            };
+            assert!(!approve_review(&gate, &review).unwrap());
+            let layout = RunLayout::new(&root, &review.run_id).unwrap();
+            assert!(layout.read_approval().is_err());
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn approval_gate_rejects_a_changed_persisted_plan() {
+        let (root, review) = review_fixture();
+        let gate = FixedGate {
+            review_response: Some(format!("approve {}", review.proposed_approval.plan_hash)),
+            start: true,
+        };
+        let changed = aiw_orchestrator::RunPlan::new(
+            "gate-test",
+            "changed-project",
+            "b".repeat(64),
+            aiw_orchestrator::RunLifecycleKind::Assessment,
+            "now",
+            vec![aiw_orchestrator::PlannedAction::AssessHost],
+            vec![],
+        )
+        .unwrap();
+        let layout = RunLayout::new(&root, &review.run_id).unwrap();
+        std::fs::write(layout.plan_path(), serde_json::to_vec(&changed).unwrap()).unwrap();
+        assert!(approve_review(&gate, &review).is_err());
+        assert!(layout.read_approval().is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn approved_start_decline_leaves_a_durable_ready_run_without_acquisition() {
+        let (root, review) = review_fixture();
+        let gate = FixedGate {
+            review_response: Some(format!("approve {}", review.proposed_approval.plan_hash)),
+            start: false,
+        };
+        assert!(approve_review(&gate, &review).unwrap());
+        assert!(!wait_for_start(&gate, &review).unwrap());
+        let layout = RunLayout::new(&root, &review.run_id).unwrap();
+        assert!(layout.read_approval().is_ok());
+        assert!(matches!(
+            layout.status().unwrap(),
+            aiw_orchestrator::RecoveryStatus::Ready { .. }
+        ));
+        assert!(!layout.run_dir().join("receipt.json").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn export_failure_summary_preserves_completed_output_distinction() {
         let cases = [
