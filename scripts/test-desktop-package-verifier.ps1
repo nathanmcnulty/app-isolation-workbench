@@ -21,34 +21,76 @@ function Sort-OrdinalRecords([object[]]$Items) {
     return $sorted.ToArray()
 }
 function Assert-Rejected([scriptblock]$Operation, [string]$Case) { try { & $Operation | Out-Null } catch { return }; throw "Desktop package verifier accepted $Case" }
+function Write-Receipt([string]$Schema, [string[]]$Products, [string]$GuestHash) {
+    $rootPrefix = $root.TrimEnd('\') + '\'
+    $records = @(Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object { $_.Name -cne 'receipt.json' } | ForEach-Object { [ordered]@{ path = $_.FullName.Substring($rootPrefix.Length).Replace('\', '/'); sizeBytes = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() } })
+    $records = @(Sort-OrdinalRecords $records)
+    $core = [ordered]@{ schemaVersion = $Schema; sourceRevision = $sourceRevision; productIds = $Products; cliSha256 = (Get-FileHash -LiteralPath (Join-Path $root 'aiw.exe') -Algorithm SHA256).Hash.ToLowerInvariant(); desktopSha256 = (Get-FileHash -LiteralPath (Join-Path $root 'aiw-desktop.exe') -Algorithm SHA256).Hash.ToLowerInvariant(); guestAgentSha256 = $GuestHash; files = $records; receiptLast = $true }
+    $hash = Get-LowerSha256 (Get-CanonicalJsonBytes $core)
+    Write-Utf8NoBom (Join-Path $root 'receipt.json') (([ordered]@{ schemaVersion = $core.schemaVersion; sourceRevision = $core.sourceRevision; productIds = $core.productIds; cliSha256 = $core.cliSha256; desktopSha256 = $core.desktopSha256; guestAgentSha256 = $core.guestAgentSha256; files = $core.files; receiptLast = $true; receiptSha256 = $hash }) | ConvertTo-Json -Depth 30)
+    return [pscustomobject]@{ hash = $hash; records = $records; core = $core }
+}
 
 try {
     $paths = @(
         'aiw.exe', 'aiw-desktop.exe', 'README.txt', 'LICENSE', 'verify-desktop-package.ps1',
         'product/notepad-plus-plus/manifest.json', 'product/notepad-plus-plus/project.yaml', 'product/notepad-plus-plus/tools/aiw-guest-agent.exe',
-        'product/notepad-plus-plus-interactive/manifest.json', 'product/notepad-plus-plus-interactive/project.yaml', 'product/notepad-plus-plus-interactive/tools/aiw-guest-agent.exe'
+        'product/notepad-plus-plus-interactive/manifest.json', 'product/notepad-plus-plus-interactive/project.yaml', 'product/notepad-plus-plus-interactive/tools/aiw-guest-agent.exe',
+        'product/bambu-studio/manifest.json', 'product/bambu-studio/project.json', 'product/bambu-studio/tools/aiw-guest-agent.exe'
     )
     foreach ($path in $paths) { New-Item -ItemType Directory -Path (Split-Path -Parent (Join-Path $root $path)) -Force | Out-Null; Write-Utf8NoBom (Join-Path $root $path) "fixture:$path" }
     $guestBytes = [Text.UTF8Encoding]::new($false).GetBytes('fixture:shared-guest')
-    foreach ($guestPath in @('product\notepad-plus-plus\tools\aiw-guest-agent.exe', 'product\notepad-plus-plus-interactive\tools\aiw-guest-agent.exe')) { [IO.File]::WriteAllBytes((Join-Path $root $guestPath), $guestBytes) }
-    foreach ($product in @(@{ dir = 'notepad-plus-plus'; id = 'notepad-plus-plus-local-settings' }, @{ dir = 'notepad-plus-plus-interactive'; id = 'notepad-plus-plus-interactive' })) {
+    foreach ($guestPath in @('product\notepad-plus-plus\tools\aiw-guest-agent.exe', 'product\notepad-plus-plus-interactive\tools\aiw-guest-agent.exe', 'product\bambu-studio\tools\aiw-guest-agent.exe')) { [IO.File]::WriteAllBytes((Join-Path $root $guestPath), $guestBytes) }
+    foreach ($product in @(@{ dir = 'notepad-plus-plus'; id = 'notepad-plus-plus-local-settings'; project = 'project.yaml'; scenario = 'install-launch-close' }, @{ dir = 'notepad-plus-plus-interactive'; id = 'notepad-plus-plus-interactive'; project = 'project.yaml'; scenario = 'install-launch-close' }, @{ dir = 'bambu-studio'; id = 'bambu-studio-export'; project = 'project.json'; scenario = 'local-file-export' })) {
         $productRoot = Join-Path $root "product\$($product.dir)"
-        $project = Join-Path $productRoot 'project.yaml'; $guest = Join-Path $productRoot 'tools\aiw-guest-agent.exe'
-        $manifest = [ordered]@{ schemaVersion = 'aiw.dev/admin-product-assets/v0alpha1'; productId = $product.id; projectPath = 'project.yaml'; projectSha256 = (Get-FileHash -LiteralPath $project -Algorithm SHA256).Hash.ToLowerInvariant(); guestAgentPath = 'tools/aiw-guest-agent.exe'; scenarioId = 'install-launch-close'; guestAgentSha256 = (Get-FileHash -LiteralPath $guest -Algorithm SHA256).Hash.ToLowerInvariant() }
+        $project = Join-Path $productRoot $product.project; $guest = Join-Path $productRoot 'tools\aiw-guest-agent.exe'
+        $manifest = [ordered]@{ schemaVersion = 'aiw.dev/admin-product-assets/v0alpha1'; productId = $product.id; projectPath = $product.project; projectSha256 = (Get-FileHash -LiteralPath $project -Algorithm SHA256).Hash.ToLowerInvariant(); guestAgentPath = 'tools/aiw-guest-agent.exe'; scenarioId = $product.scenario; guestAgentSha256 = (Get-FileHash -LiteralPath $guest -Algorithm SHA256).Hash.ToLowerInvariant() }
         Write-Utf8NoBom (Join-Path $productRoot 'manifest.json') ($manifest | ConvertTo-Json -Depth 10)
     }
-    $rootPrefix = $root.TrimEnd('\') + '\'
-    $records = @(Get-ChildItem -LiteralPath $root -Recurse -File | ForEach-Object { [ordered]@{ path = $_.FullName.Substring($rootPrefix.Length).Replace('\', '/'); sizeBytes = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() } })
-    $records = @(Sort-OrdinalRecords $records)
-    $cliHash = (Get-FileHash -LiteralPath (Join-Path $root 'aiw.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
-    $desktopHash = (Get-FileHash -LiteralPath (Join-Path $root 'aiw-desktop.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
     $guestHash = (Get-FileHash -LiteralPath (Join-Path $root 'product\notepad-plus-plus\tools\aiw-guest-agent.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
-    $core = [ordered]@{ schemaVersion = 'aiw.dev/desktop-package/v0alpha1'; sourceRevision = $sourceRevision; productIds = @('notepad-plus-plus', 'notepad-plus-plus-interactive'); cliSha256 = $cliHash; desktopSha256 = $desktopHash; guestAgentSha256 = $guestHash; files = $records; receiptLast = $true }
-    $receiptHash = Get-LowerSha256 (Get-CanonicalJsonBytes $core)
-    Write-Utf8NoBom (Join-Path $root 'receipt.json') (([ordered]@{ schemaVersion = $core.schemaVersion; sourceRevision = $core.sourceRevision; productIds = $core.productIds; cliSha256 = $core.cliSha256; desktopSha256 = $core.desktopSha256; guestAgentSha256 = $core.guestAgentSha256; files = $core.files; receiptLast = $true; receiptSha256 = $receiptHash }) | ConvertTo-Json -Depth 30)
+    $written = Write-Receipt 'aiw.dev/desktop-package/v0alpha2' @('notepad-plus-plus', 'notepad-plus-plus-interactive', 'bambu-studio') $guestHash
+    $receiptHash = $written.hash
+    $records = $written.records
+    $core = $written.core
 
     $valid = & $verifier -PackageRoot $root -ReceiptSha256 $receiptHash -SourceRevision $sourceRevision | ConvertFrom-Json
     if ($valid.exactInventory -ne $true -or $valid.filesVerified -ne $records.Count) { throw 'Valid desktop package fixture did not verify' }
+
+    $bambuRoot = Join-Path $root 'product\bambu-studio'
+    $bambuFiles = @{}
+    foreach ($relative in @('manifest.json', 'project.json', 'tools\aiw-guest-agent.exe')) { $bambuFiles[$relative] = [IO.File]::ReadAllBytes((Join-Path $bambuRoot $relative)) }
+    Remove-Item -LiteralPath $bambuRoot -Recurse -Force
+    $historical = Write-Receipt 'aiw.dev/desktop-package/v0alpha1' @('notepad-plus-plus', 'notepad-plus-plus-interactive') $guestHash
+    $validHistorical = & $verifier -PackageRoot $root -ReceiptSha256 $historical.hash -SourceRevision $sourceRevision | ConvertFrom-Json
+    if ($validHistorical.exactInventory -ne $true -or $validHistorical.filesVerified -ne $historical.records.Count) { throw 'Historical v0alpha1 desktop package fixture did not verify' }
+    foreach ($relative in $bambuFiles.Keys) { New-Item -ItemType Directory -Path (Split-Path -Parent (Join-Path $bambuRoot $relative)) -Force | Out-Null; [IO.File]::WriteAllBytes((Join-Path $bambuRoot $relative), $bambuFiles[$relative]) }
+    $written = Write-Receipt 'aiw.dev/desktop-package/v0alpha2' @('notepad-plus-plus', 'notepad-plus-plus-interactive', 'bambu-studio') $guestHash
+    $receiptHash = $written.hash; $records = $written.records; $core = $written.core
+
+    $wrongProducts = Write-Receipt 'aiw.dev/desktop-package/v0alpha2' @('notepad-plus-plus', 'notepad-plus-plus-interactive', 'wrong-product') $guestHash
+    Assert-Rejected { & $verifier -PackageRoot $root -ReceiptSha256 $wrongProducts.hash -SourceRevision $sourceRevision } 'wrong product set'
+    $unknownSchema = Write-Receipt 'aiw.dev/desktop-package/v0alpha3' @() $guestHash
+    Assert-Rejected { & $verifier -PackageRoot $root -ReceiptSha256 $unknownSchema.hash -SourceRevision $sourceRevision } 'an unknown desktop package schema'
+    $written = Write-Receipt 'aiw.dev/desktop-package/v0alpha2' @('notepad-plus-plus', 'notepad-plus-plus-interactive', 'bambu-studio') $guestHash
+    $receiptHash = $written.hash; $records = $written.records; $core = $written.core
+
+    $bambuManifestPath = Join-Path $bambuRoot 'manifest.json'
+    $bambuManifestBytes = [IO.File]::ReadAllBytes($bambuManifestPath)
+    $bambuManifest = Get-Content -Raw -LiteralPath $bambuManifestPath | ConvertFrom-Json
+    $bambuManifest.productId = 'wrong-product'
+    Write-Utf8NoBom $bambuManifestPath ($bambuManifest | ConvertTo-Json -Depth 10)
+    $wrongIdentity = Write-Receipt 'aiw.dev/desktop-package/v0alpha2' @('notepad-plus-plus', 'notepad-plus-plus-interactive', 'bambu-studio') $guestHash
+    Assert-Rejected { & $verifier -PackageRoot $root -ReceiptSha256 $wrongIdentity.hash -SourceRevision $sourceRevision } 'mismatched Bambu product identity'
+    [IO.File]::WriteAllBytes($bambuManifestPath, $bambuManifestBytes)
+
+    $bambuManifest = Get-Content -Raw -LiteralPath $bambuManifestPath | ConvertFrom-Json
+    $bambuManifest.guestAgentSha256 = ('1' * 64)
+    Write-Utf8NoBom $bambuManifestPath ($bambuManifest | ConvertTo-Json -Depth 10)
+    $wrongGuest = Write-Receipt 'aiw.dev/desktop-package/v0alpha2' @('notepad-plus-plus', 'notepad-plus-plus-interactive', 'bambu-studio') $guestHash
+    Assert-Rejected { & $verifier -PackageRoot $root -ReceiptSha256 $wrongGuest.hash -SourceRevision $sourceRevision } 'mismatched Bambu guest identity'
+    [IO.File]::WriteAllBytes($bambuManifestPath, $bambuManifestBytes)
+    $written = Write-Receipt 'aiw.dev/desktop-package/v0alpha2' @('notepad-plus-plus', 'notepad-plus-plus-interactive', 'bambu-studio') $guestHash
+    $receiptHash = $written.hash; $records = $written.records; $core = $written.core
     if (($env:OS -eq 'Windows_NT' -or $IsWindows) -and $PSVersionTable.PSVersion.Major -ge 7) {
         $powershell51Output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $verifier -PackageRoot $root -ReceiptSha256 $receiptHash -SourceRevision $sourceRevision | Out-String
         $powershell51Exit = $LASTEXITCODE
@@ -70,6 +112,12 @@ try {
     Write-Utf8NoBom (Join-Path $root 'unexpected.txt') 'extra'
     Assert-Rejected { & $verifier -PackageRoot $root -ReceiptSha256 $receiptHash -SourceRevision $sourceRevision } 'an extra file'
     Remove-Item -LiteralPath (Join-Path $root 'unexpected.txt') -Force
+    Remove-Item -LiteralPath $bambuRoot -Recurse -Force
+    $missingProduct = Write-Receipt 'aiw.dev/desktop-package/v0alpha2' @('notepad-plus-plus', 'notepad-plus-plus-interactive', 'bambu-studio') $guestHash
+    Assert-Rejected { & $verifier -PackageRoot $root -ReceiptSha256 $missingProduct.hash -SourceRevision $sourceRevision } 'a missing Bambu product'
+    foreach ($relative in $bambuFiles.Keys) { New-Item -ItemType Directory -Path (Split-Path -Parent (Join-Path $bambuRoot $relative)) -Force | Out-Null; [IO.File]::WriteAllBytes((Join-Path $bambuRoot $relative), $bambuFiles[$relative]) }
+    $written = Write-Receipt 'aiw.dev/desktop-package/v0alpha2' @('notepad-plus-plus', 'notepad-plus-plus-interactive', 'bambu-studio') $guestHash
+    $receiptHash = $written.hash
     Write-Utf8NoBom (Join-Path $root 'aiw.exe') 'drifted'
     Assert-Rejected { & $verifier -PackageRoot $root -ReceiptSha256 $receiptHash -SourceRevision $sourceRevision } 'drifted executable bytes'
     Write-Utf8NoBom (Join-Path $root 'aiw.exe') 'fixture:aiw.exe'

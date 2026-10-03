@@ -9,14 +9,14 @@ The delivery loop is `Assess -> Adapt -> Package -> Validate`. We will complete 
 
 ## Current status
 
-AIW has an experimental CLI and an unsigned Windows desktop preview. Fixed Notepad++ assessment and interactive document edit/save/export have completed packaged GUI acceptance on a separate supported VM. The CLI also provides a fixed Bambu workflow, retained reports, reusable MSI Sandbox bundles, and evidence-bound local-settings replay. General application coverage, authenticated public distribution, broader isolation measurements, and Studio authoring remain future work. The [first administrator preview gates](docs/RELEASE-GATES.md) separate demonstrated capabilities from remaining release work. Projects use `aiw.dev/v0alpha2`; legacy `v0alpha1` projects remain readable and migrate non-destructively with an explicit review gate.
+AIW has an experimental CLI and an unsigned Windows desktop preview. Fixed Notepad++ assessment and interactive document edit/save/export, plus Bambu Studio's fixed STL-to-3MF export, have completed GUI acceptance on a separate supported VM. The CLI also provides retained reports, reusable MSI Sandbox bundles, and evidence-bound local-settings replay. General application coverage, authenticated public distribution, broader isolation measurements, and Studio authoring remain future work. The [first administrator preview gates](docs/RELEASE-GATES.md) separate demonstrated capabilities from remaining release work. Projects use `aiw.dev/v0alpha2`; legacy `v0alpha1` projects remain readable and migrate non-destructively with an explicit review gate.
 
 For the desktop preview, verify the identified package and open `aiw-desktop.exe`.
-Choose the supported Notepad++ MSI and, for an interactive session, a text input;
+Choose the supported Notepad++ MSI or fixed Bambu Studio EXE and, for a Notepad++ interactive session, a text input;
 prepare the review, confirm its exact plan, and separately click Start. The GUI
 shows a concise result with optional retained details and explicitly exports a
 verified document to a new file. A passing function workflow does not establish
-broader isolation. See [the tested GUI package and exact VM launch/input paths](docs/GUI-FIRST-FINISH-LINE.md#completed-packaged-gui-acceptance-2026-10-03).
+broader isolation. See [Notepad++ GUI acceptance](docs/GUI-FIRST-FINISH-LINE.md#completed-packaged-gui-acceptance-2026-10-03) and [the current three-product package and exact VM paths](docs/BAMBU-ADMIN-ENTRY.md#completed-desktop-acceptance-2026-10-03).
 
 | Capability | Current boundary |
 |---|---|

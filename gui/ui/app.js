@@ -32,6 +32,18 @@
     } catch (error) { displayLocalError(error); }
   }
 
+  function renderMode() {
+    const bambu = kind() === "bambu";
+    show("documentField", kind() === "interactive");
+    text("installerLabel", bambu ? "Supported Bambu Studio installer" : "Supported Notepad++ installer");
+    text("chooseInstaller", bambu ? "Choose EXE" : "Choose MSI");
+    $("installer").placeholder = bambu ? "Choose the exact supported EXE" : "Choose the exact supported MSI";
+    text("setupHint", bambu
+      ? "Select the exact supported Bambu Studio EXE and identify the operator before preparing. The fixed STL input is package supplied."
+      : "Select the exact supported MSI and identify the operator before preparing.");
+    $("installer").value = "";
+  }
+
   function displayLocalError(error) {
     const newlyVisible = state.localError == null;
     state.localError = error;
@@ -148,7 +160,7 @@
 
   function elapsed() { if (state.startedAt) { const seconds = Math.floor((Date.now() - state.startedAt) / 1000); text("elapsed", "Elapsed " + String(Math.floor(seconds / 60)).padStart(2, "0") + ":" + String(seconds % 60).padStart(2, "0")); } }
 
-  $("chooseInstaller").addEventListener("click", () => choose("installer", "installer"));
+  $("chooseInstaller").addEventListener("click", () => choose(kind() === "bambu" ? "bambu-installer" : "installer", "installer"));
   $("chooseDocument").addEventListener("click", () => choose("document", "documentInput"));
   $("chooseEvidence").addEventListener("click", () => choose("evidence", "evidence"));
   $("chooseDestination").addEventListener("click", () => choose("destination", "destination"));
@@ -159,6 +171,6 @@
   $("cancel").addEventListener("click", () => { const snapshot = state.current; if (snapshot && ["preparing", "review", "approved"].includes(snapshot.phase)) action("cancel_pending", { workflowId: snapshot.workflowId }); });
   $("export").addEventListener("click", () => action("export_document", { destination: value("destination") }));
   $("loadRetained").addEventListener("click", () => action("load_retained_report", { kind: value("retainedKind"), workspace: value("retainedWorkspace"), runId: value("retainedRunId") }));
-  document.querySelectorAll("input[name=workflowKind]").forEach((radio) => radio.addEventListener("change", () => { show("documentField", kind() === "interactive"); }));
+  document.querySelectorAll("input[name=workflowKind]").forEach((radio) => radio.addEventListener("change", renderMode));
   setInterval(poll, 1000); setInterval(elapsed, 1000); poll();
 }());

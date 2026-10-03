@@ -92,6 +92,7 @@ $buildTarget = Join-Path $tempRoot 'build'
 $builtDesktopSource = Join-Path $buildTarget "$targetTriple\release\aiw-desktop.exe"
 $assessmentPreview = Join-Path $tempRoot 'assessment'
 $interactivePreview = Join-Path $tempRoot 'interactive'
+$bambuPreview = Join-Path $tempRoot 'bambu'
 $buildSucceeded = $false
 try {
     New-Item -ItemType Directory -Path $tempRoot -Force:$false | Out-Null
@@ -137,21 +138,26 @@ try {
     if ($firstGuestHash -cne $GuestAgentSha256) { throw 'Assessment preview guest-agent bytes differ from the independently retained hash' }
     Invoke-Preview $interactivePreview 'NotepadPlusPlusInteractive' $firstGuest $firstGuestHash
     Assert-Source $SourceRevision
+    Invoke-Preview $bambuPreview 'BambuStudioExport' $firstGuest $firstGuestHash
+    Assert-Source $SourceRevision
 
     Assert-OrdinaryDirectory $assessmentPreview 'Assessment preview'
     Assert-OrdinaryDirectory $interactivePreview 'Interactive preview'
+    Assert-OrdinaryDirectory $bambuPreview 'Bambu preview'
     $firstCliHash = (Get-FileHash -LiteralPath (Join-Path $assessmentPreview 'aiw.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
     $secondCliHash = (Get-FileHash -LiteralPath (Join-Path $interactivePreview 'aiw.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($firstCliHash -cne $secondCliHash) { throw 'Preview builds produced different CLI bytes' }
+    $thirdCliHash = (Get-FileHash -LiteralPath (Join-Path $bambuPreview 'aiw.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($firstCliHash -cne $secondCliHash -or $firstCliHash -cne $thirdCliHash) { throw 'Preview builds produced different CLI bytes' }
     $secondGuestHash = (Get-FileHash -LiteralPath (Join-Path $interactivePreview 'product\notepad-plus-plus-interactive\tools\aiw-guest-agent.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($secondGuestHash -cne $GuestAgentSha256) { throw 'Interactive preview guest-agent bytes differ from the independently retained hash' }
-    if ($firstGuestHash -cne $secondGuestHash) { throw 'Preview builds produced different guest-agent bytes' }
+    $thirdGuestHash = (Get-FileHash -LiteralPath (Join-Path $bambuPreview 'product\bambu-studio\tools\aiw-guest-agent.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($thirdGuestHash -cne $GuestAgentSha256 -or $firstGuestHash -cne $secondGuestHash -or $firstGuestHash -cne $thirdGuestHash) { throw 'Preview builds produced different guest-agent bytes' }
     New-Item -ItemType Directory -Path $output -Force:$false | Out-Null
     foreach ($name in @('aiw.exe', 'LICENSE')) { Copy-Item -LiteralPath (Join-Path $assessmentPreview $name) -Destination (Join-Path $output $name) }
     Copy-Item -LiteralPath $builtDesktopSource -Destination (Join-Path $output 'aiw-desktop.exe')
     Copy-Item -LiteralPath $verifier -Destination (Join-Path $output 'verify-desktop-package.ps1')
     New-Item -ItemType Directory -Path (Join-Path $output 'product') -Force:$false | Out-Null
-    foreach ($product in @(@{ source = Join-Path $assessmentPreview 'product\notepad-plus-plus'; name = 'notepad-plus-plus' }, @{ source = Join-Path $interactivePreview 'product\notepad-plus-plus-interactive'; name = 'notepad-plus-plus-interactive' })) {
+    foreach ($product in @(@{ source = Join-Path $assessmentPreview 'product\notepad-plus-plus'; name = 'notepad-plus-plus' }, @{ source = Join-Path $interactivePreview 'product\notepad-plus-plus-interactive'; name = 'notepad-plus-plus-interactive' }, @{ source = Join-Path $bambuPreview 'product\bambu-studio'; name = 'bambu-studio' })) {
         Copy-Item -LiteralPath $product.source -Destination (Join-Path $output "product\$($product.name)") -Recurse
     }
 
@@ -165,9 +171,9 @@ Launch directly from this folder with:
 
 This package is an unsigned development build assembled from a fresh GUI and
 CLI release build under the declared source revision. The GUI supports the fixed
-Notepad++ assessment and interactive document workflows. Select the exact
-supported Notepad++ MSI in the GUI, choose a bounded text input for the
-interactive workflow, review the complete recipe and plan, type the displayed
+Notepad++ assessment and interactive document workflows plus the fixed Bambu
+Studio STL-to-3MF export assessment. Select the exact supported MSI or EXE in
+the GUI, choose a bounded text input only for the interactive workflow, review the complete recipe and plan, type the displayed
 approval literal, and press Start separately. The Sandbox is not started by
 preparation or approval alone. Results distinguish verified application
 functions and cleanup from broader isolation evidence, which remains measured
@@ -184,14 +190,14 @@ Guest agent SHA-256 (retained independently): $GuestAgentSha256
         [ordered]@{ path = [IO.Path]::GetRelativePath($output, $_.FullName).Replace('\', '/'); sizeBytes = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
     })
     $payload = @(Sort-OrdinalRecords $payload)
-    $core = [ordered]@{ schemaVersion = 'aiw.dev/desktop-package/v0alpha1'; sourceRevision = $SourceRevision; productIds = @('notepad-plus-plus', 'notepad-plus-plus-interactive'); cliSha256 = $cliHash; desktopSha256 = $desktopHash; guestAgentSha256 = $GuestAgentSha256; files = $payload; receiptLast = $true }
+    $core = [ordered]@{ schemaVersion = 'aiw.dev/desktop-package/v0alpha2'; sourceRevision = $SourceRevision; productIds = @('notepad-plus-plus', 'notepad-plus-plus-interactive', 'bambu-studio'); cliSha256 = $cliHash; desktopSha256 = $desktopHash; guestAgentSha256 = $GuestAgentSha256; files = $payload; receiptLast = $true }
     $receiptHash = Get-LowerSha256 (Get-CanonicalJsonBytes $core)
     Write-Utf8NoBom (Join-Path $output 'receipt.json') (([ordered]@{ schemaVersion = $core.schemaVersion; sourceRevision = $core.sourceRevision; productIds = $core.productIds; cliSha256 = $core.cliSha256; desktopSha256 = $core.desktopSha256; guestAgentSha256 = $core.guestAgentSha256; files = $core.files; receiptLast = $true; receiptSha256 = $receiptHash }) | ConvertTo-Json -Depth 30)
     $verification = (& $verifier -PackageRoot $output -ReceiptSha256 $receiptHash -SourceRevision $SourceRevision | ConvertFrom-Json)
     if ($verification.exactInventory -ne $true) { throw 'Desktop package inventory did not verify' }
     Assert-Source $SourceRevision
     $buildSucceeded = $true
-    [ordered]@{ schemaVersion = 'aiw.dev/desktop-package/v0alpha1'; sourceRevision = $SourceRevision; packageRoot = $output; receiptSha256 = $receiptHash; cliSha256 = $cliHash; desktopSha256 = $desktopHash; guestAgentSha256 = $GuestAgentSha256; products = @('notepad-plus-plus', 'notepad-plus-plus-interactive'); unsigned = $true; exactInventory = $true } | ConvertTo-Json -Depth 10 -Compress
+    [ordered]@{ schemaVersion = 'aiw.dev/desktop-package/v0alpha2'; sourceRevision = $SourceRevision; packageRoot = $output; receiptSha256 = $receiptHash; cliSha256 = $cliHash; desktopSha256 = $desktopHash; guestAgentSha256 = $GuestAgentSha256; products = @('notepad-plus-plus', 'notepad-plus-plus-interactive', 'bambu-studio'); unsigned = $true; exactInventory = $true } | ConvertTo-Json -Depth 10 -Compress
 }
 finally {
     if ($KeepFailedBuild -and -not $buildSucceeded -and (Test-Path -LiteralPath $tempRoot)) {
