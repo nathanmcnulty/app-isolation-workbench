@@ -123,6 +123,7 @@ try {
     Assert-Source $SourceRevision
     $firstGuest = Join-Path $assessmentPreview 'product\notepad-plus-plus\tools\aiw-guest-agent.exe'
     $firstGuestHash = (Get-FileHash -LiteralPath $firstGuest -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($firstGuestHash -cne $GuestAgentSha256) { throw 'Assessment preview guest-agent bytes differ from the independently retained hash' }
     Invoke-Preview $interactivePreview 'NotepadPlusPlusInteractive' $firstGuest $firstGuestHash
     Assert-Source $SourceRevision
 
@@ -132,6 +133,7 @@ try {
     $secondCliHash = (Get-FileHash -LiteralPath (Join-Path $interactivePreview 'aiw.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($firstCliHash -cne $secondCliHash) { throw 'Preview builds produced different CLI bytes' }
     $secondGuestHash = (Get-FileHash -LiteralPath (Join-Path $interactivePreview 'product\notepad-plus-plus-interactive\tools\aiw-guest-agent.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($secondGuestHash -cne $GuestAgentSha256) { throw 'Interactive preview guest-agent bytes differ from the independently retained hash' }
     if ($firstGuestHash -cne $secondGuestHash) { throw 'Preview builds produced different guest-agent bytes' }
     New-Item -ItemType Directory -Path $output -Force:$false | Out-Null
     foreach ($name in @('aiw.exe', 'LICENSE')) { Copy-Item -LiteralPath (Join-Path $assessmentPreview $name) -Destination (Join-Path $output $name) }
@@ -170,24 +172,14 @@ Guest agent SHA-256 (retained independently): $GuestAgentSha256
     $payload = @(Get-ChildItem -LiteralPath $output -Recurse -File -Force | Where-Object { $_.FullName -cne (Join-Path $output 'receipt.json') } | ForEach-Object {
         [ordered]@{ path = [IO.Path]::GetRelativePath($output, $_.FullName).Replace('\', '/'); sizeBytes = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
     } | Sort-Object { $_.path })
-    $core = [ordered]@{ schemaVersion = 'aiw.dev/desktop-package/v0alpha1'; sourceRevision = $SourceRevision; productIds = @('notepad-plus-plus', 'notepad-plus-plus-interactive'); cliSha256 = $cliHash; desktopSha256 = $desktopHash; files = $payload; receiptLast = $true }
+    $core = [ordered]@{ schemaVersion = 'aiw.dev/desktop-package/v0alpha1'; sourceRevision = $SourceRevision; productIds = @('notepad-plus-plus', 'notepad-plus-plus-interactive'); cliSha256 = $cliHash; desktopSha256 = $desktopHash; guestAgentSha256 = $GuestAgentSha256; files = $payload; receiptLast = $true }
     $receiptHash = Get-LowerSha256 (Get-CanonicalJsonBytes $core)
-    Write-Utf8NoBom (Join-Path $output 'receipt.json') (([ordered]@{ schemaVersion = $core.schemaVersion; sourceRevision = $core.sourceRevision; productIds = $core.productIds; cliSha256 = $core.cliSha256; desktopSha256 = $core.desktopSha256; files = $core.files; receiptLast = $true; receiptSha256 = $receiptHash }) | ConvertTo-Json -Depth 30)
+    Write-Utf8NoBom (Join-Path $output 'receipt.json') (([ordered]@{ schemaVersion = $core.schemaVersion; sourceRevision = $core.sourceRevision; productIds = $core.productIds; cliSha256 = $core.cliSha256; desktopSha256 = $core.desktopSha256; guestAgentSha256 = $core.guestAgentSha256; files = $core.files; receiptLast = $true; receiptSha256 = $receiptHash }) | ConvertTo-Json -Depth 30)
     $verification = (& $verifier -PackageRoot $output -ReceiptSha256 $receiptHash -SourceRevision $SourceRevision | ConvertFrom-Json)
     if ($verification.exactInventory -ne $true) { throw 'Desktop package inventory did not verify' }
     Assert-Source $SourceRevision
-    [ordered]@{ schemaVersion = 'aiw.dev/desktop-package/v0alpha1'; sourceRevision = $SourceRevision; packageRoot = $output; receiptSha256 = $receiptHash; cliSha256 = $cliHash; desktopSha256 = $desktopHash; products = @('notepad-plus-plus', 'notepad-plus-plus-interactive'); unsigned = $true; exactInventory = $true } | ConvertTo-Json -Depth 10 -Compress
+    [ordered]@{ schemaVersion = 'aiw.dev/desktop-package/v0alpha1'; sourceRevision = $SourceRevision; packageRoot = $output; receiptSha256 = $receiptHash; cliSha256 = $cliHash; desktopSha256 = $desktopHash; guestAgentSha256 = $GuestAgentSha256; products = @('notepad-plus-plus', 'notepad-plus-plus-interactive'); unsigned = $true; exactInventory = $true } | ConvertTo-Json -Depth 10 -Compress
 }
 finally {
-    if (Test-Path -LiteralPath $tempRoot) {
-        $resolvedTempRoot = [IO.Path]::GetFullPath($tempRoot)
-        if ([IO.Path]::GetDirectoryName($resolvedTempRoot).TrimEnd('\') -cne $tempParent.TrimEnd('\') -or
-            [IO.Path]::GetFileName($resolvedTempRoot) -cne $tempLeaf -or
-            $tempLeaf -notmatch '^aiw-desktop-package-[0-9a-f]{32}$') {
-            throw 'Refusing to remove an unexpected temporary staging root'
-        }
-        Assert-OrdinaryDirectory $tempParent 'Temporary staging parent'
-        Assert-OrdinaryDirectory $resolvedTempRoot 'Temporary staging root'
-        Remove-Item -LiteralPath $resolvedTempRoot -Recurse -Force
-    }
+    Remove-OwnedTemporaryRoot $tempRoot $tempParent $tempLeaf
 }

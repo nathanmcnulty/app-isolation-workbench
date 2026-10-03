@@ -60,12 +60,13 @@ $receiptCore = [ordered]@{
     productIds = @($receipt.productIds)
     cliSha256 = [string]$receipt.cliSha256
     desktopSha256 = [string]$receipt.desktopSha256
+    guestAgentSha256 = [string]$receipt.guestAgentSha256
     files = @($safeRecords)
     receiptLast = $true
 }
 $calculatedReceiptSha256 = Get-LowerSha256 (Get-CanonicalJsonBytes $receiptCore)
 if ($calculatedReceiptSha256 -cne $ReceiptSha256 -or [string]$receipt.receiptSha256 -cne $ReceiptSha256) { throw 'Package receipt identity differs from the independently supplied hash' }
-if ([string]$receipt.cliSha256 -notmatch '^[0-9a-f]{64}$' -or [string]$receipt.desktopSha256 -notmatch '^[0-9a-f]{64}$') { throw 'Package executable identities are invalid' }
+if ([string]$receipt.cliSha256 -notmatch '^[0-9a-f]{64}$' -or [string]$receipt.desktopSha256 -notmatch '^[0-9a-f]{64}$' -or [string]$receipt.guestAgentSha256 -notmatch '^[0-9a-f]{64}$') { throw 'Package executable or guest-agent identities are invalid' }
 
 foreach ($record in $safeRecords) {
     $relative = [string]$record.path
@@ -110,7 +111,7 @@ foreach ($product in @(
     $guestPath = Join-Path $productRoot 'tools\aiw-guest-agent.exe'
     $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
     if ($manifest.schemaVersion -cne 'aiw.dev/admin-product-assets/v0alpha1' -or $manifest.productId -cne $product.id -or $manifest.projectPath -cne 'project.yaml' -or $manifest.guestAgentPath -cne 'tools/aiw-guest-agent.exe' -or $manifest.scenarioId -cne $product.scenario) { throw "Product manifest does not match its fixed contract: $($product.directory)" }
-    if ((Get-FileHash -LiteralPath $projectPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne [string]$manifest.projectSha256 -or (Get-FileHash -LiteralPath $guestPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne [string]$manifest.guestAgentSha256) { throw "Product asset identity differs from its manifest: $($product.directory)" }
+    if ((Get-FileHash -LiteralPath $projectPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne [string]$manifest.projectSha256 -or (Get-FileHash -LiteralPath $guestPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne [string]$manifest.guestAgentSha256 -or [string]$manifest.guestAgentSha256 -cne [string]$receipt.guestAgentSha256) { throw "Product asset identity differs from its manifest or receipt: $($product.directory)" }
 }
 
 [ordered]@{ schemaVersion = 'aiw.dev/desktop-package-verification/v0alpha1'; sourceRevision = $SourceRevision; receiptSha256 = $calculatedReceiptSha256; filesVerified = $records.Count; exactInventory = $true } | ConvertTo-Json -Compress
