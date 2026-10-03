@@ -33,7 +33,7 @@
   }
 
   function displayLocalError(error) {
-    const newlyVisible = state.localError !== error;
+    const newlyVisible = state.localError == null;
     state.localError = error;
     text("errorSummary", "The desktop action could not be completed");
     text("errorRemediation", errorText(error));
