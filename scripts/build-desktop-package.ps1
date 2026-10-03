@@ -15,6 +15,17 @@ $verifier = Join-Path $PSScriptRoot 'verify-desktop-package.ps1'
 $output = [IO.Path]::GetFullPath($OutputDirectory)
 if (-not [IO.Path]::IsPathRooted($DesktopExecutable)) { throw 'DesktopExecutable must be an absolute path' }
 $desktopSource = [IO.Path]::GetFullPath($DesktopExecutable)
+$targetTriple = 'x86_64-pc-windows-msvc'
+$buildTarget = if ([string]::IsNullOrWhiteSpace($env:CARGO_TARGET_DIR)) {
+    Join-Path $repoRoot 'target'
+}
+elseif ([IO.Path]::IsPathRooted($env:CARGO_TARGET_DIR)) {
+    [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR)
+}
+else {
+    [IO.Path]::GetFullPath((Join-Path $repoRoot $env:CARGO_TARGET_DIR))
+}
+$builtDesktopSource = Join-Path $buildTarget "$targetTriple\release\aiw-desktop.exe"
 
 function Write-Utf8NoBom([string]$Path, [string]$Text) { [IO.File]::WriteAllText($Path, $Text + [Environment]::NewLine, [Text.UTF8Encoding]::new($false)) }
 function Get-CanonicalJsonBytes([object]$Value) { return ,([Text.UTF8Encoding]::new($false).GetBytes(($Value | ConvertTo-Json -Depth 30 -Compress))) }
@@ -43,10 +54,32 @@ Assert-Source $SourceRevision
 Assert-OrdinaryDirectory (Split-Path -Parent $output) 'Output parent'
 if (Test-Path -LiteralPath $output) { throw "Output directory already exists; choose a fresh path: $output" }
 if ($output.Equals($repoRoot, [StringComparison]::OrdinalIgnoreCase) -or $output.StartsWith($repoRoot.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Output directory must be outside the source checkout' }
-if (-not (Test-Path -LiteralPath $desktopSource -PathType Leaf)) { throw "Desktop executable is missing: $desktopSource" }
-$desktopItem = Get-Item -LiteralPath $desktopSource -Force
-if (($desktopItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Desktop executable is a reparse point' }
-if ((Get-FileHash -LiteralPath $desktopSource -Algorithm SHA256).Hash.ToLowerInvariant() -cne $DesktopExecutableSha256) { throw 'Desktop executable bytes differ from the independently supplied hash' }
+$guiManifest = Join-Path $repoRoot 'gui\Cargo.toml'
+if (-not (Test-Path -LiteralPath $guiManifest -PathType Leaf)) { throw "Desktop GUI manifest is missing: $guiManifest" }
+Push-Location -LiteralPath $repoRoot
+try {
+    $targetRustFlagsName = 'CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS'
+    $targetRustFlagsPath = "Env:$targetRustFlagsName"
+    $hadTargetRustFlags = Test-Path $targetRustFlagsPath
+    $originalTargetRustFlags = if ($hadTargetRustFlags) { (Get-Item $targetRustFlagsPath).Value } else { $null }
+    try {
+        $targetRustFlags = (@($originalTargetRustFlags, '-C target-feature=+crt-static') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ' '
+        Set-Item -Path $targetRustFlagsPath -Value $targetRustFlags
+        & cargo +stable build --manifest-path $guiManifest --locked --release --target $targetTriple | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'release aiw-desktop build failed' }
+    }
+    finally {
+        if ($hadTargetRustFlags) { Set-Item -Path $targetRustFlagsPath -Value $originalTargetRustFlags }
+        else { Remove-Item $targetRustFlagsPath -ErrorAction SilentlyContinue }
+    }
+}
+finally { Pop-Location }
+Assert-Source $SourceRevision
+if ([IO.Path]::GetFullPath($desktopSource) -cne [IO.Path]::GetFullPath($builtDesktopSource)) { throw "DesktopExecutable must identify the newly built artifact: $builtDesktopSource" }
+if (-not (Test-Path -LiteralPath $builtDesktopSource -PathType Leaf)) { throw "Built desktop executable is missing: $builtDesktopSource" }
+$desktopItem = Get-Item -LiteralPath $builtDesktopSource -Force
+if (($desktopItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Built desktop executable is a reparse point' }
+if ((Get-FileHash -LiteralPath $builtDesktopSource -Algorithm SHA256).Hash.ToLowerInvariant() -cne $DesktopExecutableSha256) { throw 'Desktop executable bytes differ from the newly built artifact hash' }
 if (($null -eq $GuestAgent) -xor ($null -eq $GuestAgentSha256)) { throw 'GuestAgent and GuestAgentSha256 must be supplied together' }
 if ($GuestAgent) {
     $GuestAgent = [IO.Path]::GetFullPath($GuestAgent); Assert-LowerHash $GuestAgentSha256 'GuestAgentSha256'
