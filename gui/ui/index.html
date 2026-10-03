@@ -63,13 +63,14 @@
     <section id="progressCard" class="card hidden" aria-labelledby="progress-title">
       <div class="card-heading"><div><p class="eyebrow">Current run</p><h2 id="progress-title">Workflow status</h2></div><span id="elapsed" class="timer">Elapsed 00:00</span></div>
       <p id="progressSummary" class="progress-summary">Waiting for the backend.</p>
+      <p id="editingInstructions" class="notice hidden">When Notepad++ opens inside Sandbox, edit the document, save it, and close Notepad++. Leave Sandbox open so the backend can verify the saved output and complete cleanup.</p>
       <div class="progress-track" aria-hidden="true"><span id="progressBar"></span></div>
-      <p class="helper">The UI does not invent stage progress. While running, you may minimize the window; the backend owns installation, editing, cleanup, and the retained receipt.</p>
+      <p class="helper">While the workflow is active, you may minimize this window. The backend owns installation, verification, cleanup, and the retained receipt.</p>
       <button id="cancel" class="cancel-button hidden" type="button">Cancel pending workflow</button>
     </section>
 
     <section id="resultCard" class="card hidden" aria-labelledby="result-title">
-      <div class="card-heading"><div><p class="eyebrow">Verified result</p><h2 id="result-title">Run complete</h2></div><span class="step-mark success">Complete</span></div>
+      <div class="card-heading"><div><p id="resultEyebrow" class="eyebrow">Retained result</p><h2 id="result-title">Workflow result</h2></div><span id="resultBadge" class="step-mark">Result</span></div>
       <div class="result-grid"><div class="result-fact"><span>Run</span><strong id="resultRun" class="mono">—</strong></div><div class="result-fact"><span>Workspace</span><strong id="resultWorkspace">—</strong></div><div class="result-fact"><span>Evidence root</span><strong id="resultEvidence">—</strong></div></div>
       <p id="resultSummary" class="result-summary"></p>
       <div class="boundary-callout"><strong>Function results and isolation evidence are separate.</strong><span>The completed workflow may verify install, document editing, save, close, and cleanup while broader isolation remains unmeasured.</span></div>
@@ -84,6 +85,7 @@
     <section id="errorCard" class="error-card hidden" aria-live="assertive"><div><p class="eyebrow">Action needed</p><h2 id="errorSummary">The workflow needs attention</h2><p id="errorRemediation"></p></div><details><summary>Technical details</summary><pre id="errorDetail"></pre></details><p id="errorLocation" class="helper"></p></section>
     <footer>Local administrator surface · Backend-owned evidence and cleanup</footer>
   </main>
+  <script src="display.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

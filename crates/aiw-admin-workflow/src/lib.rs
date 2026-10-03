@@ -22,7 +22,7 @@ fn read_file_bounded(path: &Path, max_bytes: u64) -> Result<Vec<u8>> {
     }
     let mut bytes =
         Vec::with_capacity(usize::try_from(max_bytes.min(1024 * 1024)).unwrap_or(1024 * 1024));
-    let mut file = std::fs::File::open(path)?;
+    let file = std::fs::File::open(path)?;
     file.take(
         max_bytes
             .checked_add(1)
@@ -49,6 +49,7 @@ fn document_export_error(run_id: &str, source: aiw_runner::RunnerError) -> anyho
     })
 }
 
+#[cfg(test)]
 fn document_export_output_error(run_id: &str, error: anyhow::Error) -> anyhow::Error {
     anyhow!(AiwError { code: "AIW_WSB_EXPORT_OUTPUT_FAILED".into(), summary: "document exported, but console output failed".into(), stage: "wsbDocumentExport".into(), run_id: Some(run_id.to_owned().into()), retryable: false, remediation: "Preserve the exported file and verify it against the retained report. Do not repeat export because console output failed.".into(), detail: error.to_string().chars().take(512).collect::<String>().into() })
 }
@@ -1849,7 +1850,8 @@ mod tests {
         let root = std::env::temp_dir().join(format!("aiw-export-assets-{}", nonce()));
         std::fs::create_dir(&root).unwrap();
         std::fs::create_dir(root.join("tools")).unwrap();
-        let project = include_bytes!("../product/notepad-plus-plus-interactive/project.yaml");
+        let project =
+            include_bytes!("../../aiw-cli/product/notepad-plus-plus-interactive/project.yaml");
         std::fs::write(root.join("project.yaml"), project).unwrap();
         std::fs::write(root.join("tools/agent.exe"), b"agent").unwrap();
         let mut manifest = serde_json::json!({

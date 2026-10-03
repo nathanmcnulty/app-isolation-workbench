@@ -4,8 +4,7 @@
   const $ = (id) => document.getElementById(id);
   const invoke = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
   const state = { current: null, polling: false, timer: null, startedAt: null, reviewChallenge: null, busy: false };
-  const forbidden = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g;
-  const clean = (value) => String(value == null ? "" : value).replace(forbidden, "�");
+  const clean = window.AiwDisplay.clean;
   const text = (id, value) => { $(id).textContent = clean(value); };
   const show = (id, visible) => $(id).classList.toggle("hidden", !visible);
   const value = (id) => $(id).value.trim();
@@ -35,7 +34,7 @@
     text("errorSummary", "The desktop action could not be completed");
     text("errorRemediation", errorText(error));
     text("errorDetail", "");
-    text("errorLocation", "No workflow state was changed.");
+    text("errorLocation", "Check the current workflow state and retained evidence before retrying.");
     show("errorCard", true);
   }
 
@@ -64,7 +63,7 @@
     show("reviewCard", !!review);
     if (!review) { state.reviewChallenge = null; return; }
     if (state.reviewChallenge !== review.challengeId) { $("confirmation").value = ""; state.reviewChallenge = review.challengeId; }
-    text("reviewWorkflow", kind() === "interactive" ? "Interactive document" : "Assessment");
+    text("reviewWorkflow", review.workflowName);
     text("reviewOperator", review.operatorIdentity);
     text("reviewEvidence", review.evidenceRoot);
     text("reviewWorkspace", review.workspace);
@@ -83,6 +82,11 @@
   function renderResult(result) {
     show("resultCard", !!result);
     if (!result) return;
+    const verified = result.outcome === "verified";
+    text("resultEyebrow", verified ? "Verified workflow result" : "Retained workflow state");
+    text("result-title", verified ? "Supported workflow verified" : result.outcome === "notRun" ? "Sandbox was not started" : "Workflow not fully verified");
+    text("resultBadge", verified ? "Verified" : result.outcome === "notRun" ? "Not run" : "Needs review");
+    $("resultBadge").classList.toggle("success", verified);
     text("resultRun", result.runId); text("resultWorkspace", result.workspace); text("resultEvidence", result.evidenceRoot); text("resultSummary", result.summary); text("reportMarkdown", result.reportMarkdown || "(report not included in this state)");
     $("export").disabled = !result.canExportDocument;
   }
@@ -96,8 +100,10 @@
   function renderProgress(snapshot) {
     const active = ["preparing", "review", "approved", "running", "exporting"].includes(snapshot.phase);
     show("progressCard", active || ["completed", "cancelled", "failed"].includes(snapshot.phase));
-    const messages = { preparing: "Preparing a reviewable plan. No Sandbox has started.", review: "Review the exact plan and type the literal confirmation.", approved: "Approval recorded. Sandbox has not started; press Start when ready.", running: "Sandbox is running. Wait for the backend to finish and record cleanup.", exporting: "Exporting the last verified document to the selected new file.", completed: "The workflow completed and the retained result is available.", cancelled: "The workflow was cancelled; inspect the retained state before retrying.", failed: "The workflow failed; inspect the retained diagnostic and remediation." };
+    const messages = { preparing: "Preparing or recording the reviewed plan. No Sandbox has started.", review: "Review the exact plan and type the literal confirmation.", approved: "Approval recorded. Sandbox has not started; press Start when ready.", running: "Start accepted. The backend is validating and executing the workflow. Wait for the retained result and cleanup.", exporting: "Exporting the last verified document to the selected new file.", completed: "The workflow finished; inspect its retained result below.", cancelled: "The workflow was cancelled; inspect the retained state before retrying.", failed: "The workflow failed; inspect the retained diagnostic and remediation." };
     text("progressSummary", messages[snapshot.phase] || "Ready.");
+    const editing = snapshot.phase === "running" && snapshot.review && snapshot.review.workflowName === "Interactive Notepad++ document transfer";
+    show("editingInstructions", editing);
     const running = snapshot.phase === "running";
     if (running && !state.startedAt) state.startedAt = Date.now();
     if (!running) state.startedAt = null;
