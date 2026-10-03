@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Application Isolation Workbench</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Application Isolation Workbench</p>
+        <h1>Administrator assessment</h1>
+        <p class="lede">Run the supported Notepad++ workflow with a clear review and approval boundary.</p>
+      </div>
+      <div id="phaseBadge" class="phase-badge" aria-live="polite">Loading state</div>
+    </header>
+
+    <section class="notice" aria-label="Workflow boundary">
+      <strong>Two deliberate gates</strong>
+      <span>Prepare creates a reviewable plan. Approval records your exact confirmation. Start is a separate action that begins the Sandbox run.</span>
+    </section>
+
+    <section class="card" aria-labelledby="setup-title">
+      <div class="card-heading"><div><p class="eyebrow">Step 1</p><h2 id="setup-title">Choose the supported workflow</h2></div><span class="step-mark">Setup</span></div>
+      <div class="mode-switch" role="group" aria-label="Workflow type">
+        <label class="mode-option"><input type="radio" name="workflowKind" value="assessment" checked> <span><strong>Assessment</strong><small>Test install, open, edit, save, and close.</small></span></label>
+        <label class="mode-option"><input type="radio" name="workflowKind" value="interactive"> <span><strong>Interactive document</strong><small>Edit a bounded text input and export the verified result.</small></span></label>
+      </div>
+      <div class="field-grid">
+        <label class="field"><span>Supported Notepad++ installer</span><div class="input-action"><input id="installer" type="text" readonly placeholder="Choose the exact supported MSI"><button id="chooseInstaller" class="secondary" type="button">Choose MSI</button></div></label>
+        <label id="documentField" class="field hidden"><span>Bounded text input <em>interactive only</em></span><div class="input-action"><input id="documentInput" type="text" readonly placeholder="Choose a UTF-8 text file"><button id="chooseDocument" class="secondary" type="button">Choose text</button></div></label>
+        <label class="field"><span>Evidence folder</span><div class="input-action"><input id="evidence" type="text" readonly placeholder="Backend default will appear here"><button id="chooseEvidence" class="secondary" type="button">Choose folder</button></div></label>
+        <label class="field"><span>Operator identity</span><input id="operatorIdentity" type="text" autocomplete="off" placeholder="Name or administrator ID"></label>
+      </div>
+      <p id="setupHint" class="helper">Select the exact supported MSI and identify the operator before preparing.</p>
+      <button id="prepare" class="primary" type="button">Prepare review</button>
+    </section>
+
+    <section id="reviewCard" class="card hidden" aria-labelledby="review-title">
+      <div class="card-heading"><div><p class="eyebrow">Step 2</p><h2 id="review-title">Review the exact plan</h2></div><span class="step-mark">Review</span></div>
+      <p class="section-intro">Read the complete recipe, plan, and approval identity. These fields are display-only. The Sandbox has not started.</p>
+      <div class="review-grid">
+        <div class="review-fact"><span>Workflow</span><strong id="reviewWorkflow">—</strong></div>
+        <div class="review-fact"><span>Operator</span><strong id="reviewOperator">—</strong></div>
+        <div class="review-fact"><span>Evidence root</span><strong id="reviewEvidence">—</strong></div>
+        <div class="review-fact"><span>Workspace</span><strong id="reviewWorkspace">—</strong></div>
+        <div class="review-fact"><span>Plan hash</span><strong id="reviewPlanHash" class="mono">—</strong></div>
+        <div class="review-fact"><span>Approval challenge</span><strong id="reviewChallenge" class="mono">—</strong></div>
+      </div>
+      <details class="advanced"><summary>Advanced plan details</summary><div class="detail-grid"><div><h3>Recipe</h3><pre id="recipeJson"></pre></div><div><h3>Plan</h3><pre id="planJson"></pre></div><div><h3>Approval identity</h3><pre id="approvalJson"></pre></div></div></details>
+      <div class="approval-box">
+        <div><span class="eyebrow">Approval gate</span><h3>Confirm the displayed plan</h3><p>Type the exact confirmation shown below, including <code>approve</code> and the full plan hash.</p><code id="exactConfirmation" class="confirmation">—</code></div>
+        <label class="field"><span>Typed confirmation</span><input id="confirmation" type="text" spellcheck="false" autocomplete="off" placeholder="approve &lt;plan hash&gt;"></label>
+        <button id="approve" class="primary" type="button">Approve plan</button>
+      </div>
+      <div id="startBox" class="start-box hidden"><div><span class="eyebrow">Start gate</span><h3>Approval recorded</h3><p>The backend accepted the approval. Start remains a separate explicit action.</p></div><button id="start" class="primary" type="button">Start Sandbox workflow</button></div>
+    </section>
+
+    <section id="progressCard" class="card hidden" aria-labelledby="progress-title">
+      <div class="card-heading"><div><p class="eyebrow">Current run</p><h2 id="progress-title">Workflow status</h2></div><span id="elapsed" class="timer">Elapsed 00:00</span></div>
+      <p id="progressSummary" class="progress-summary">Waiting for the backend.</p>
+      <div class="progress-track" aria-hidden="true"><span id="progressBar"></span></div>
+      <p class="helper">The UI does not invent stage progress. While running, you may minimize the window; the backend owns installation, editing, cleanup, and the retained receipt.</p>
+    </section>
+
+    <section id="resultCard" class="card hidden" aria-labelledby="result-title">
+      <div class="card-heading"><div><p class="eyebrow">Verified result</p><h2 id="result-title">Run complete</h2></div><span class="step-mark success">Complete</span></div>
+      <div class="result-grid"><div class="result-fact"><span>Run</span><strong id="resultRun" class="mono">—</strong></div><div class="result-fact"><span>Workspace</span><strong id="resultWorkspace">—</strong></div><div class="result-fact"><span>Evidence root</span><strong id="resultEvidence">—</strong></div></div>
+      <p id="resultSummary" class="result-summary"></p>
+      <div class="boundary-callout"><strong>Function results and isolation evidence are separate.</strong><span>The completed workflow may verify install, document editing, save, close, and cleanup while broader isolation remains unmeasured.</span></div>
+      <div class="export-row"><label class="field"><span>Export verified document to a new file</span><div class="input-action"><input id="destination" type="text" readonly placeholder="Choose a new destination"><button id="chooseDestination" class="secondary" type="button">Choose destination</button></div></label><button id="export" class="primary" type="button" disabled>Export document</button></div>
+      <details class="advanced"><summary>Retained report</summary><pre id="reportMarkdown"></pre></details>
+    </section>
+
+    <section class="card advanced-card" aria-labelledby="retained-title">
+      <details><summary id="retained-title">Open a retained report (read-only)</summary><div class="retained-grid"><label class="field"><span>Report kind</span><select id="retainedKind"><option value="assessment">Assessment</option><option value="interactive">Interactive</option></select></label><label class="field"><span>Workspace</span><div class="input-action"><input id="retainedWorkspace" type="text" placeholder="Retained workspace path"><button id="chooseWorkspace" class="secondary" type="button">Choose folder</button></div></label><label class="field"><span>Run ID</span><input id="retainedRunId" type="text" placeholder="Run identifier"></label><button id="loadRetained" class="secondary" type="button">Load report</button></div><p class="helper">Loading is read-only. It does not start, repair, recover, or approve a run.</p></details>
+    </section>
+
+    <section id="errorCard" class="error-card hidden" aria-live="assertive"><div><p class="eyebrow">Action needed</p><h2 id="errorSummary">The workflow needs attention</h2><p id="errorRemediation"></p></div><details><summary>Technical details</summary><pre id="errorDetail"></pre></details><p id="errorLocation" class="helper"></p></section>
+    <footer>Local administrator surface · Backend-owned evidence and cleanup</footer>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
