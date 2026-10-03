@@ -33,6 +33,12 @@ evidence that an arbitrary MSI is compatible or a claim of broad market coverage
    This reduces operator command burden without broadening compatibility or
    isolation claims.
 
+   The fixed Bambu Studio local export now also completes through the GUI.
+   Its five function checks, artifact binding, cleanup, and retained viewing are
+   validated separately from broader isolation; the current three-product
+   package also reverified and exported a retained Notepad++ document without
+   reinstalling. See [Bambu desktop acceptance](BAMBU-ADMIN-ENTRY.md#completed-desktop-acceptance-2026-10-03).
+
 The exact acceptance cases are in [RELEASE-GATES.md](RELEASE-GATES.md). A release
 requires successful supported use and understandable failure handling, not only
 a successful developer script. Preserve explicit data-loss/export warnings for

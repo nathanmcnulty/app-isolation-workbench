@@ -5,34 +5,31 @@ This handoff is a pointer, not execution authority or a run receipt.
 
 ## Current slice
 
-The unsigned administrator GUI acceptance slice is complete at packaged source
-`343d380a3fef4e8734ea25c693ac99d4ac6f2a6a`; PR #80 merged at
-`11786078d8f2c0d047a326ed7e1ade71e87e8751`. Final entry-point documentation
-corrects the stale README and records this integrated milestone. See
-[GUI-FIRST-FINISH-LINE.md](GUI-FIRST-FINISH-LINE.md#completed-packaged-gui-acceptance-2026-10-03)
-for package identities, detailed observations, negative controls, and archives.
+The fixed Bambu Studio export now has a validated GUI path beside the two
+Notepad++ modes. Current unsigned package source is
+`e08115b50fb0ee37fba1f923b377985dc3f1bc94`. Use work-status for the current
+integration head; merge milestones only after exact-head hosted CI.
+See [Bambu desktop acceptance](BAMBU-ADMIN-ENTRY.md#completed-desktop-acceptance-2026-10-03)
+for exact package/input/launch paths, identities, observations, and evidence.
 
-Fresh GUI assessment `admin-1791022076187823100` passed all five supported
-functions and verified cleanup. Fresh interactive run `admin-1791022515798013900`
-visibly edited/saved/closed Notepad++, verified the 183-byte output, and explicitly
-exported through the GUI. Independent checks matched the receipt/output/export,
-preserved the original input, and found zero provider sessions before Start and
-after completion. Broader isolation remains insufficient evidence.
+Fresh GUI run `admin-1791052004563329100` at package `170caab` passed all five
+fixed export functions, verified the 9,061-byte tetrahedron 3MF, preserved input,
+and verified cleanup with zero remaining sessions. It exposed a GUI label bug:
+Bambu's deliberate broader-isolation `insufficientEvidence` was mistaken for an
+incomplete workflow. The runner-owned typed predicate fixes that distinction;
+its negative regression and independent review passed. New package `e08115b`
+reopened that same run as Verified with document export disabled.
 
-Restart/read-only viewing, explicit retained export, missing/existing/workspace
-export refusals, cancellation before approval, and closure after approval before
-Start passed. Controls and screenshots record automated acceptance, never Nathan's
-human proof. Destination selection, close-warning visibility, timer reset, and
-provider console fixes are included. The fresh package verified on Windows
-PowerShell 5.1; all three hosted CI jobs passed at exact code `343d380`. Earlier
-failed driver/build evidence remains historical and is not compatibility proof.
+The new package also reverified retained Notepad++ transfer
+`admin-1791022515798013900` and explicitly exported its matching 183-byte output.
+These are automated dedicated-VM controls, not another human trial. Reporting
+corrections used retained evidence; no repeat installation was needed.
 
-The shared workflow preserves separate approval and Start, protected intake,
-one-shot challenges, fixed package identities, receipt verification, and exact
-cleanup. The desktop is a separate Tauri workspace with embedded local assets
-and narrow IPC. Core MSRV is 1.85; desktop MSRV is 1.90. Follow ROADMAP and
-RELEASE-GATES for the next bounded deliverable; public publisher signing,
-additional profiles, and generic application conversion remain separate work.
+PR #80 integrated the initial Notepad++ GUI at `11786078`; PR #81 corrected its
+entry documentation at `8c8201f`. See [initial GUI acceptance](GUI-FIRST-FINISH-LINE.md#completed-packaged-gui-acceptance-2026-10-03)
+for its fresh edit/save/export and negative lifecycle/export controls.
+Follow ROADMAP and RELEASE-GATES for the next bounded deliverable. Publisher
+signing, generic application conversion, and broader isolation remain separate.
 
 ## Preserved stable evidence
 
