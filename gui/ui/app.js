@@ -3,7 +3,7 @@
 
   const $ = (id) => document.getElementById(id);
   const invoke = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
-  const state = { current: null, polling: false, timer: null, startedAt: null };
+  const state = { current: null, polling: false, timer: null, startedAt: null, reviewChallenge: null, busy: false };
   const forbidden = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g;
   const clean = (value) => String(value == null ? "" : value).replace(forbidden, "�");
   const text = (id, value) => { $(id).textContent = clean(value); };
@@ -40,12 +40,30 @@
   }
 
   function setBusy(busy) {
-    ["prepare", "approve", "start", "chooseInstaller", "chooseDocument", "chooseEvidence", "chooseDestination", "export", "loadRetained"].forEach((id) => { if ($(id)) $(id).disabled = busy; });
+    ["prepare", "approve", "start", "cancel", "chooseInstaller", "chooseDocument", "chooseEvidence", "chooseDestination", "chooseWorkspace", "operatorIdentity", "export", "loadRetained"].forEach((id) => { if ($(id)) $(id).disabled = busy; });
+    document.querySelectorAll("input[name=workflowKind]").forEach((radio) => { radio.disabled = busy; });
+  }
+
+  function applyControls(snapshot, busy) {
+    const phase = snapshot ? snapshot.phase : "idle";
+    const editable = ["idle", "cancelled", "failed", "completed"].includes(phase);
+    const pending = ["preparing", "review", "approved"].includes(phase);
+    const locked = busy || ["preparing", "running", "exporting"].includes(phase);
+    ["chooseInstaller", "chooseDocument", "chooseEvidence", "operatorIdentity", "prepare"].forEach((id) => { $(id).disabled = locked || !editable; });
+    $("chooseWorkspace").disabled = !!busy;
+    $("loadRetained").disabled = !!busy;
+    document.querySelectorAll("input[name=workflowKind]").forEach((radio) => { radio.disabled = locked || !editable; });
+    $("approve").disabled = busy || phase !== "review";
+    $("start").disabled = busy || phase !== "approved";
+    $("cancel").disabled = busy || !pending;
+    show("cancel", pending);
+    $("export").disabled = busy || !(snapshot && snapshot.result && snapshot.result.canExportDocument);
   }
 
   function renderReview(review) {
     show("reviewCard", !!review);
-    if (!review) return;
+    if (!review) { state.reviewChallenge = null; return; }
+    if (state.reviewChallenge !== review.challengeId) { $("confirmation").value = ""; state.reviewChallenge = review.challengeId; }
     text("reviewWorkflow", kind() === "interactive" ? "Interactive document" : "Assessment");
     text("reviewOperator", review.operatorIdentity);
     text("reviewEvidence", review.evidenceRoot);
@@ -85,8 +103,7 @@
     if (!running) state.startedAt = null;
     show("reviewCard", !!snapshot.review || ["approved"].includes(snapshot.phase));
     show("startBox", snapshot.phase === "approved");
-    $("start").disabled = snapshot.phase !== "approved";
-    $("approve").disabled = snapshot.phase !== "review";
+    show("closeWarning", !!snapshot.closeRefused);
     if (snapshot.defaults && snapshot.defaults.evidence && !value("evidence")) $("evidence").value = clean(snapshot.defaults.evidence);
     if (snapshot.review) renderReview(snapshot.review);
   }
@@ -94,8 +111,7 @@
   function render(snapshot) {
     if (!snapshot) return;
     state.current = snapshot; text("phaseBadge", phaseLabel(snapshot.phase)); renderProgress(snapshot); renderResult(snapshot.result); renderError(snapshot.error);
-    const locked = ["preparing", "running", "exporting"].includes(snapshot.phase); setBusy(locked);
-    if (snapshot.phase === "idle" || snapshot.phase === "cancelled" || snapshot.phase === "failed") $("prepare").disabled = false;
+    applyControls(snapshot, state.busy);
   }
 
   async function poll() {
@@ -103,7 +119,7 @@
     try { render(await call("get_state")); } catch (error) { displayLocalError(error); } finally { state.polling = false; }
   }
 
-  async function action(name, args) { setBusy(true); try { await call(name, args); await poll(); } catch (error) { displayLocalError(error); } finally { setBusy(false); if (state.current) setBusy(["preparing", "running", "exporting"].includes(state.current.phase)); } }
+  async function action(name, args) { state.busy = true; setBusy(true); try { await call(name, args); await poll(); } catch (error) { displayLocalError(error); } finally { state.busy = false; applyControls(state.current, false); } }
 
   function elapsed() { if (state.startedAt) { const seconds = Math.floor((Date.now() - state.startedAt) / 1000); text("elapsed", "Elapsed " + String(Math.floor(seconds / 60)).padStart(2, "0") + ":" + String(seconds % 60).padStart(2, "0")); } }
 
@@ -115,6 +131,7 @@
   $("prepare").addEventListener("click", () => action("prepare_workflow", { kind: kind(), installer: value("installer"), documentInput: value("documentInput") || null, evidence: value("evidence"), operatorIdentity: value("operatorIdentity") }));
   $("approve").addEventListener("click", () => { const review = state.current && state.current.review; if (review) action("submit_approval", { workflowId: state.current.workflowId, challengeId: review.challengeId, confirmation: value("confirmation") }); });
   $("start").addEventListener("click", () => { const snapshot = state.current; if (snapshot) action("start_approved_workflow", { workflowId: snapshot.workflowId, challengeId: snapshot.startChallengeId }); });
+  $("cancel").addEventListener("click", () => { const snapshot = state.current; if (snapshot && ["preparing", "review", "approved"].includes(snapshot.phase)) action("cancel_pending", { workflowId: snapshot.workflowId }); });
   $("export").addEventListener("click", () => action("export_document", { destination: value("destination") }));
   $("loadRetained").addEventListener("click", () => action("load_retained_report", { kind: value("retainedKind"), workspace: value("retainedWorkspace"), runId: value("retainedRunId") }));
   document.querySelectorAll("input[name=workflowKind]").forEach((radio) => radio.addEventListener("change", () => { show("documentField", kind() === "interactive"); }));
