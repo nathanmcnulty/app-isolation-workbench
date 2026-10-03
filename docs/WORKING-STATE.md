@@ -28,8 +28,12 @@ to close during execution, and independent empty-provider checks. Interactive
 run `admin-1791017360314238000` visibly opened Notepad++ but automated text input
 did not arrive before its editing deadline; terminal failure and exact cleanup
 are recorded. No transfer/export proof is claimed. A focused console/warning/timer
-polish slice is being validated before fresh packaged acceptance. See the GUI
-plan for detailed evidence and remaining checks. Desktop targets passed checking
+polish slice passed native platform checks and independent review at `381398d`.
+Retry `admin-1791018718356210200` visibly edited/saved/closed the document using
+physical keys and verified 183-byte output plus cleanup. Export exposed a disabled
+destination chooser; its focused fix and regression test passed review. Fresh
+packaging and actual GUI export/current-source acceptance remain required. See the
+GUI plan for detailed evidence and remaining checks. Desktop targets passed checking
 with their declared Rust 1.90 compiler; CI now covers that floor alongside the
 unchanged core Rust 1.85 check.
 

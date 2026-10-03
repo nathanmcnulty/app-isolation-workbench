@@ -165,3 +165,14 @@ close-refusal warning, and an elapsed counter carried into a new workflow. A
 focused correction hides provider consoles without changing captured handles or
 job containment, scrolls to a newly raised close warning once, and resets the
 timer on workflow identity changes. Fresh package acceptance remains required.
+
+The retry `admin-1791018718356210200` used physical keys to append `aiw`, saved
+the visibly edited document, and closed Notepad++. The GUI verified the 183-byte
+retained output and cleanup, preserving the 180-byte input identity and the
+insufficient broader-isolation verdict. Automated Unicode text injection was
+the failed input path; physical keys and explicit RDP clipboard paste work.
+The result exposed a separate GUI defect: destination selection stayed disabled
+after the earlier busy action, blocking explicit export. Its fix restores the
+chooser only when the backend supplies an export-eligible result and the GUI is
+not busy. A regression test exercises preparation followed by an eligible result
+and revocation of eligibility. This retry is transfer proof, not export proof.

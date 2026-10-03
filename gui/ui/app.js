@@ -62,6 +62,7 @@
     $("cancel").disabled = busy || !pending;
     show("cancel", pending);
     $("export").disabled = busy || !(snapshot && snapshot.result && snapshot.result.canExportDocument);
+    $("chooseDestination").disabled = busy || !(snapshot && snapshot.result && snapshot.result.canExportDocument);
   }
 
   function renderReview(review) {
