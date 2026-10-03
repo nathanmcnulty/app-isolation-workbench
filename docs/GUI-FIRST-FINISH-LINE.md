@@ -227,6 +227,15 @@ independent review. This closes the unsigned development GUI acceptance slice;
 publisher-authenticated distribution, generic conversion, additional application
 coverage, and measured broader isolation remain separate release work.
 
+The desktop lockfile audit passes with two allowed warnings: unmaintained
+`proc-macro-error` and `glib` 0.18.5 unsoundness
+([RUSTSEC-2024-0429](https://rustsec.org/advisories/RUSTSEC-2024-0429.html)).
+GitHub raised the corresponding `glib` alert after merge. A locked
+`cargo tree --manifest-path gui/Cargo.toml --target x86_64-pc-windows-msvc -i glib`
+found no Windows dependency on that crate. This is a Windows-only preview;
+the warning remains visible and Linux support would require separate dependency
+remediation and validation. An audit exit of zero is not a claim of no warnings.
+
 VM records are preserved in `C:\AIW-GUI-Acceptance-343d380.zip`: 164 files,
 63,004,779 bytes, SHA-256
 `373641a90056146a9c0949083d5c7c9b478b0a3a792c9227e70d4baf015a363a`.
