@@ -43,8 +43,9 @@ validation at exact preview `7d45b3c`, without reinstalling. See
   Disable incremental/debug information for core validation. Use explicit
   `x86_64-pc-windows-msvc` and target-scoped static CRT flags for packages.
 - Two parallel workspace checks encountered access-denied errors in existing
-  raw-file recovery tests; the isolated orchestrator rerun passed. A serialized
-  full check is in progress; preserve logs and investigate any further failure.
+  raw-file recovery tests. The serialized workspace, clippy, MSRV, and governance
+  checks passed. Desktop release configuration now has its own CI check after a
+  release-only API error was found and corrected during package assembly.
 
 ## Boundaries
 

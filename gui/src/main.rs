@@ -319,7 +319,15 @@ mod desktop {
                     ));
                     None
                 }
-                Ok(Err(e)) => Some(public_error(e)),
+                Ok(Err(e)) => {
+                    let error = public_error(e);
+                    if error.code != "AIW_WSB_EXPORT_DESTINATION_REJECTED" {
+                        result.can_export_document = false;
+                        result.outcome = ResultOutcome::Incomplete;
+                        result.summary.push_str("\nExport re-verification failed. Preserve the evidence and any destination file; no current export is available.");
+                    }
+                    Some(error)
+                }
                 Err(_) => {
                     result.can_export_document = false;
                     Some(public_error(anyhow::anyhow!(
@@ -382,7 +390,7 @@ mod desktop {
                 load_retained_report
             ])
             .setup(|app| {
-                let _window = tauri::WebviewWindowBuilder::new(
+                tauri::WebviewWindowBuilder::new(
                     app,
                     "main",
                     tauri::WebviewUrl::App("index.html".into()),
@@ -390,6 +398,7 @@ mod desktop {
                 .title("Application Isolation Workbench — Development preview")
                 .inner_size(1080.0, 820.0)
                 .min_inner_size(760.0, 600.0)
+                .devtools(false)
                 .on_navigation(|url| {
                     url.port().is_none()
                         && ((url.scheme() == "tauri" && url.host_str() == Some("localhost"))
@@ -398,8 +407,6 @@ mod desktop {
                 })
                 .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
                 .build()?;
-                #[cfg(not(debug_assertions))]
-                _window.close_devtools();
                 Ok(())
             })
             .on_window_event(|window, event| {

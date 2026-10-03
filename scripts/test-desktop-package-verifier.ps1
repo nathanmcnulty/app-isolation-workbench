@@ -61,6 +61,15 @@ try {
     Write-Host 'Desktop package verifier contract passed.' -ForegroundColor Green
 }
 finally {
-    if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
+    if (Test-Path -LiteralPath $root) {
+        $resolvedRoot = (Get-Item -LiteralPath $root -Force).FullName
+        $expectedParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
+        if ((Split-Path -Parent $resolvedRoot) -ine $expectedParent -or
+            (Split-Path -Leaf $resolvedRoot) -notmatch '^aiw-desktop-verifier-[0-9a-f]{32}$' -or
+            ((Get-Item -LiteralPath $resolvedRoot -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw 'Refusing cleanup outside the owned desktop verifier fixture'
+        }
+        Remove-Item -LiteralPath $resolvedRoot -Recurse -Force
+    }
     if ($hadInheritedLastExitCode) { $global:LASTEXITCODE = $inheritedLastExitCode } else { Remove-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue }
 }

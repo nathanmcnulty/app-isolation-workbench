@@ -3,7 +3,7 @@
 
   const $ = (id) => document.getElementById(id);
   const invoke = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
-  const state = { current: null, polling: false, timer: null, startedAt: null, reviewChallenge: null, busy: false };
+  const state = { current: null, polling: false, timer: null, startedAt: null, reviewChallenge: null, busy: false, localError: null };
   const clean = window.AiwDisplay.clean;
   const text = (id, value) => { $(id).textContent = clean(value); };
   const show = (id, visible) => $(id).classList.toggle("hidden", !visible);
@@ -31,6 +31,7 @@
   }
 
   function displayLocalError(error) {
+    state.localError = error;
     text("errorSummary", "The desktop action could not be completed");
     text("errorRemediation", errorText(error));
     text("errorDetail", "");
@@ -92,6 +93,7 @@
   }
 
   function renderError(error) {
+    if (!error && state.localError) { displayLocalError(state.localError); return; }
     show("errorCard", !!error);
     if (!error) return;
     text("errorSummary", error.summary || "The workflow needs attention"); text("errorRemediation", error.remediation || "Inspect the retained evidence before taking another action."); text("errorDetail", error.detail || "No technical details were retained."); text("errorLocation", error.runId ? "Retained run: " + error.runId : "");
@@ -126,7 +128,7 @@
     try { render(await call("get_state")); } catch (error) { displayLocalError(error); } finally { state.polling = false; }
   }
 
-  async function action(name, args) { state.busy = true; setBusy(true); try { await call(name, args); await poll(); } catch (error) { displayLocalError(error); } finally { state.busy = false; applyControls(state.current, false); } }
+  async function action(name, args) { state.localError = null; state.busy = true; setBusy(true); try { await call(name, args); await poll(); } catch (error) { displayLocalError(error); } finally { state.busy = false; applyControls(state.current, false); } }
 
   function elapsed() { if (state.startedAt) { const seconds = Math.floor((Date.now() - state.startedAt) / 1000); text("elapsed", "Elapsed " + String(Math.floor(seconds / 60)).padStart(2, "0") + ":" + String(seconds % 60).padStart(2, "0")); } }
 

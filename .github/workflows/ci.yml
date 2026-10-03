@@ -89,6 +89,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Desktop clippy failed' }
           cargo +stable test --manifest-path gui/Cargo.toml --locked
           if ($LASTEXITCODE -ne 0) { throw 'Desktop gate tests failed' }
+          cargo +stable check --manifest-path gui/Cargo.toml --release --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop release configuration failed' }
           node --test gui/tests/display.cjs
           if ($LASTEXITCODE -ne 0) { throw 'Desktop display controls failed' }
           .\scripts\test-desktop-package-verifier.ps1
