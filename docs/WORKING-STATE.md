@@ -20,9 +20,11 @@ clean source and combines both fixed Notepad++ product assets in one inventory.
 An independently hash-checked startup probe visibly opened the GUI over RDP and
 refused missing inputs. Windows PowerShell 5.1 exposed receipt sort differences;
 explicit ordinal ordering and a same-package cross-shell fixture now address it.
-Fresh GUI assessment/edit/save/export acceptance and integration CI are pending;
-startup/unit tests do not establish application compatibility. See the focused
-GUI plan for the preserved probe identities and diagnostic paths.
+Exact package `7667acd` verified under Windows PowerShell 5.1 and opened on the
+VM; all CI jobs passed at that code head. Fresh GUI assessment/edit/save/export
+acceptance is pending: an unrelated GitHub passkey prompt currently blocks RDP
+input. Leave authentication to its owner. The GUI is idle, Sandbox was empty,
+and no assessment intake exists. See the GUI plan for package/proof identities.
 
 ## Preserved stable evidence
 

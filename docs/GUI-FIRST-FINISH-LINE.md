@@ -97,3 +97,42 @@ button sizing. Launch-control records are under `C:\AIW-GUI-Proof-f00b2b2`.
 No Sandbox assessment, approval, document edit, or export was performed by this
 startup probe. Fresh assessment and interactive acceptance remain pending on
 the corrected package.
+
+The corrected clean-source package is `7667acda1fd319032090d9d6eb87ce857bbfcf91`.
+It verified on the VM under Windows PowerShell 5.1 and opened visibly in the
+operator session. Independent identities:
+
+- Canonical receipt: `eb4da4f6ef13cd2122a77db84441aa1de489da56b5324be744de0b78dbd7e300`.
+- Desktop: `bf5f5c73b164d6401b6a5657264a47f582bd3f833945ee86474af6a09b1495d3`.
+- Archive: `815f31caab0abac13ece1a8e833e8b0c313b9bbfe49416d74139796112e82347`.
+- Verifier: `9899d3b75d9ba3458cd8bafb69bbae8fbec98ae62ea56a0b63db1f448594a540`.
+
+The GUI is already running from `C:\AIW-Desktop-Preview-7667acd\aiw-desktop.exe`.
+Its launch controls passed, provider session count was zero, and the evidence
+folder had no run directories. All CI jobs passed at this exact code head in
+run `37103146981`. An unrelated Windows Security GitHub passkey prompt blocks
+RDP input; no authentication action was automated and no Sandbox trial started.
+Finish or dismiss that unrelated prompt before resuming GUI acceptance.
+
+If the GUI has closed, the exact VM launch command is:
+
+```powershell
+& 'C:\AIW-Desktop-Preview-7667acd\aiw-desktop.exe'
+```
+
+Choose `C:\AIW-Interactive-Input-738ea6e\npp.8.9.8.Installer.x64.msi` and, for the
+interactive workflow, `C:\AIW-Interactive-Input-738ea6e\document.txt`. Reverify
+installer SHA-256 `c29cbe1a9aaef322cc3f316ceeabe8a8071b18441a5e3c3ec348069739e59e80`
+and input SHA-256 `3e266d6a75e56727e3ab1703230fc0a6566e6410c57aa13f871fcc0bfb4aaa4c`
+before starting. Use operator identity
+`aiw-automated-acceptance`, the existing GUI evidence default (fresh run children),
+and new export destination `C:\AIW-GUI-Edited-7667acd.txt`. Derive the approval
+literal and run ID from the displayed review/retained typed records.
+
+Launch diagnostics are at `C:\AIW-GUI-Proof-7667acd`, with deployment status at
+`C:\AIW-GUI-Deployment-7667acd.json`. A text-only diagnostic backup preserves both
+startup probes as `C:\AIW-GUI-Startup-Proof-7667acd.zip`, 17,375 bytes, SHA-256
+`f0f8ef1b9c68c8f7900a61dfbd347db0b02e96c96986c95f855456f9e3baa577`.
+It is also retained in the private handoff container as
+`evidence/gui-startup-7667acd.zip`; it is not a portable execution authority or
+application-compatibility proof. PR #80 remains draft until live acceptance.
