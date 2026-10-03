@@ -3,7 +3,7 @@ use std::io::{BufRead, Read, Write};
 use aiw_orchestrator::{ApprovalRecord, RunPlan};
 use anyhow::Result;
 
-pub(super) fn confirm(
+pub fn confirm(
     approval: &ApprovalRecord,
     plan: &RunPlan,
     input: impl Read,
@@ -29,10 +29,7 @@ pub(super) fn confirm(
     Ok(response.trim_end_matches(['\r', '\n']) == expected)
 }
 
-pub(super) fn write_review_json(
-    output: &mut impl Write,
-    value: &impl serde::Serialize,
-) -> Result<()> {
+pub fn write_review_json(output: &mut impl Write, value: &impl serde::Serialize) -> Result<()> {
     let mut escaped = Vec::new();
     for ch in serde_json::to_string_pretty(value)?.chars() {
         if ch.is_ascii() && ch != '\u{7f}' {
