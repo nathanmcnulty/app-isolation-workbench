@@ -1,32 +1,21 @@
 [package]
-name = "aiw-cli"
-description = "Command-line interface for App Isolation Workbench"
+name = "aiw-admin-workflow"
+description = "Framework-independent administrator workflow services"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
-[[bin]]
-name = "aiw"
-path = "src/main.rs"
-
 [dependencies]
-aiw-admin-workflow.workspace = true
-aiw-core.workspace = true
-aiw-evidence.workspace = true
 aiw-orchestrator.workspace = true
 aiw-probe.workspace = true
-aiw-provider-mxc.workspace = true
 aiw-provider-wsb.workspace = true
 aiw-runner.workspace = true
 aiw-schema.workspace = true
-aiw-token.workspace = true
 aiw-windows-platform.workspace = true
 anyhow.workspace = true
-clap.workspace = true
 hex.workspace = true
-schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true

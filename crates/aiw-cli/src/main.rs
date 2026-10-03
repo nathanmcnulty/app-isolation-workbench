@@ -6,10 +6,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-#[cfg(windows)]
-mod admin_progress;
-mod admin_workflow;
-mod approval_review;
+use aiw_admin_workflow as admin_workflow;
+use aiw_admin_workflow::approval_review;
 
 use aiw_core::{
     AnalystReport, AnalystReportValidation, CanaryObservationSet, CanaryPlan, CanaryReport,

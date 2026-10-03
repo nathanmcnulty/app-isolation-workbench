@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/aiw-admin-workflow",
     "crates/aiw-cli",
     "crates/aiw-control-fixture",
     "crates/aiw-control-appcontainer",
@@ -27,6 +28,7 @@ repository = "https://github.com/nathanmcnulty/app-isolation-workbench"
 rust-version = "1.85"
 
 [workspace.dependencies]
+aiw-admin-workflow = { path = "crates/aiw-admin-workflow" }
 aiw-core = { path = "crates/aiw-core" }
 aiw-evidence = { path = "crates/aiw-evidence" }
 aiw-orchestrator = { path = "crates/aiw-orchestrator" }

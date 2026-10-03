@@ -9,9 +9,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
+name = "aiw-admin-workflow"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "aiw-orchestrator",
+ "aiw-probe",
+ "aiw-provider-wsb",
+ "aiw-runner",
+ "aiw-schema",
+ "aiw-windows-platform",
+ "anyhow",
+ "hex",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "sha2",
+]
+
+[[package]]
 name = "aiw-cli"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "aiw-admin-workflow",
  "aiw-core",
  "aiw-evidence",
  "aiw-orchestrator",

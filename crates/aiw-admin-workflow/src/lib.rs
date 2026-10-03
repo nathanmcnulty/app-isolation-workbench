@@ -1,4 +1,4 @@
-use std::io::{IsTerminal, Write};
+use std::io::{IsTerminal, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -10,7 +10,49 @@ use aiw_orchestrator::{AiwError, ApprovalRecord, RunLayout};
 use aiw_probe::{ApplicationInspectionKind, ReadinessState, inspect_application_source};
 use aiw_schema::{ApplicationSource, Project, validate_project_for_planning};
 
-use crate::approval_review;
+mod admin_progress;
+pub mod approval_review;
+
+const MAX_CONFIG_BYTES: u64 = 16 * 1024 * 1024;
+
+fn read_file_bounded(path: &Path, max_bytes: u64) -> Result<Vec<u8>> {
+    let metadata = std::fs::metadata(path)?;
+    if !metadata.is_file() || metadata.len() > max_bytes {
+        bail!("{} is not a bounded regular file", path.display());
+    }
+    let mut bytes =
+        Vec::with_capacity(usize::try_from(max_bytes.min(1024 * 1024)).unwrap_or(1024 * 1024));
+    let file = std::fs::File::open(path)?;
+    file.take(
+        max_bytes
+            .checked_add(1)
+            .ok_or_else(|| anyhow!("maximum input size is too large"))?,
+    )
+    .read_to_end(&mut bytes)?;
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > max_bytes {
+        bail!("{} exceeds the maximum accepted size", path.display());
+    }
+    Ok(bytes)
+}
+
+fn document_export_error(run_id: &str, source: aiw_runner::RunnerError) -> anyhow::Error {
+    let destination = matches!(
+        &source,
+        aiw_runner::RunnerError::DocumentExportDestination(_)
+    );
+    anyhow!(AiwError {
+        code: if destination { "AIW_WSB_EXPORT_DESTINATION_REJECTED" } else { "AIW_WSB_EXPORT_FAILED" }.into(),
+        summary: if destination { "document export destination was refused" } else { "document export did not complete" }.into(),
+        stage: "wsbDocumentExport".into(), run_id: Some(run_id.to_owned().into()), retryable: false,
+        remediation: if destination { "Choose a new absolute file path in an existing ordinary folder outside the retained workspace. No existing file was overwritten." } else { "Preserve the run and any destination file. Inspect the retained report and exact run status before retrying; do not overwrite an existing export." }.into(),
+        detail: source.to_string().chars().take(512).collect::<String>().into(),
+    })
+}
+
+#[cfg(test)]
+fn document_export_output_error(run_id: &str, error: anyhow::Error) -> anyhow::Error {
+    anyhow!(AiwError { code: "AIW_WSB_EXPORT_OUTPUT_FAILED".into(), summary: "document exported, but console output failed".into(), stage: "wsbDocumentExport".into(), run_id: Some(run_id.to_owned().into()), retryable: false, remediation: "Preserve the exported file and verify it against the retained report. Do not repeat export because console output failed.".into(), detail: error.to_string().chars().take(512).collect::<String>().into() })
+}
 
 pub const MANIFEST_SCHEMA: &str = "aiw.dev/admin-product-assets/v0alpha1";
 pub const PRODUCT_ID: &str = "notepad-plus-plus-local-settings";
@@ -18,6 +60,76 @@ pub const SCENARIO_ID: &str = "install-launch-close";
 pub const INTERACTIVE_PRODUCT_ID: &str = "notepad-plus-plus-interactive";
 pub const BAMBU_PRODUCT_ID: &str = "bambu-studio-export";
 pub const BAMBU_SCENARIO_ID: &str = "local-file-export";
+
+/// Complete, typed authority disclosure presented before approval or Start.
+/// Presentation is advisory; `approve_review` re-reads the persisted plan under
+/// the existing `RunLayout` lock before it records approval.
+#[derive(Debug, Clone)]
+pub struct ApprovalReview {
+    pub run_id: String,
+    pub workspace: PathBuf,
+    pub evidence_root: PathBuf,
+    pub recipe: serde_json::Value,
+    pub plan: aiw_orchestrator::RunPlan,
+    pub proposed_approval: ApprovalRecord,
+}
+
+pub trait ApprovalGate {
+    /// Return the literal operator response. The service requires exactly
+    /// `approve <displayed plan hash>`; `None` is cancellation.
+    fn review(&self, review: &ApprovalReview) -> Result<Option<String>>;
+    /// A distinct gate after durable approval and before provider acquisition.
+    fn wait_for_start(&self, review: &ApprovalReview) -> Result<bool>;
+    fn uses_terminal_progress(&self) -> bool {
+        false
+    }
+}
+
+pub struct TerminalApprovalGate;
+
+impl ApprovalGate for TerminalApprovalGate {
+    fn review(&self, review: &ApprovalReview) -> Result<Option<String>> {
+        if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
+            bail!(
+                "administrator workflow requires terminal input and visible approval review; no intake or run was created"
+            );
+        }
+        let accepted = approval_review::confirm(
+            &review.proposed_approval,
+            &review.plan,
+            std::io::stdin().lock(),
+            std::io::stderr().lock(),
+        )?;
+        Ok(accepted.then(|| format!("approve {}", review.proposed_approval.plan_hash)))
+    }
+    fn wait_for_start(&self, _: &ApprovalReview) -> Result<bool> {
+        Ok(true)
+    }
+    fn uses_terminal_progress(&self) -> bool {
+        true
+    }
+}
+
+pub fn approve_review(gate: &dyn ApprovalGate, review: &ApprovalReview) -> Result<bool> {
+    let expected = format!("approve {}", review.proposed_approval.plan_hash);
+    let Some(response) = gate.review(review)? else {
+        return Ok(false);
+    };
+    if response != expected {
+        return Ok(false);
+    }
+    let layout = RunLayout::new(&review.workspace, &review.run_id)?;
+    let current = layout.read_plan()?;
+    if current != review.plan {
+        bail!("persisted plan changed after review")
+    }
+    layout.write_approval(&review.proposed_approval)?;
+    Ok(true)
+}
+
+pub fn wait_for_start(gate: &dyn ApprovalGate, review: &ApprovalReview) -> Result<bool> {
+    gate.wait_for_start(review)
+}
 
 pub fn public_error(error: anyhow::Error) -> anyhow::Error {
     if error.is::<AiwError>() {
@@ -186,12 +298,21 @@ pub struct AdminAssessmentResult {
     pub workspace: PathBuf,
     pub execution_mode: &'static str,
     pub approval_recorded: bool,
+    pub execution_started: bool,
     pub next: &'static str,
     #[serde(skip)]
     summary: Option<String>,
 }
 
 impl AdminAssessmentResult {
+    pub fn summary_text(&self) -> Option<&str> {
+        self.summary.as_deref()
+    }
+    pub fn can_export_document(&self) -> bool {
+        self.approval_recorded
+            && self.execution_started
+            && self.product_id == INTERACTIVE_PRODUCT_ID
+    }
     pub fn write_summary(&self, output: &mut impl Write) -> Result<()> {
         if self.approval_recorded {
             writeln!(output, "Run: {}", self.run_id)?;
@@ -406,14 +527,12 @@ fn packaged_asset_root(product_directory: &str) -> Result<PathBuf> {
 fn interactive_export_assets(
     assets_root: &Path,
 ) -> Result<(Project, ProductAssetManifest, ResolvedProductAssets)> {
-    let manifest: ProductAssetManifest =
-        crate::read_document(&assets_root.join("manifest.json"), 1024 * 1024)?;
+    let manifest: ProductAssetManifest = serde_json::from_slice(&read_file_bounded(
+        &assets_root.join("manifest.json"),
+        1024 * 1024,
+    )?)?;
     let assets = manifest.resolve_interactive(assets_root)?;
-    let project_bytes = crate::read_bounded(
-        std::fs::File::open(&assets.project)?,
-        crate::MAX_CONFIG_BYTES,
-        &assets.project,
-    )?;
+    let project_bytes = read_file_bounded(&assets.project, MAX_CONFIG_BYTES)?;
     if lowercase_sha256(&project_bytes) != manifest.project_sha256 {
         bail!("packaged project bytes do not match the product manifest");
     }
@@ -450,18 +569,78 @@ pub fn export_document(
             &manifest.guest_agent_sha256,
             destination,
         )
-        .map_err(|source| crate::document_export_error(run_id, source))
+        .map_err(|source| document_export_error(run_id, source))
     })();
     result.map_err(|error: anyhow::Error| {
         if error.is::<AiwError>() {
             error
         } else {
-            crate::document_export_error(
+            document_export_error(
                 run_id,
                 aiw_runner::RunnerError::Receipt(format!("export package rejected: {error}")),
             )
         }
     })
+}
+
+/// Reverify the retained interactive report using the package-bound project and guest identity.
+#[cfg(windows)]
+pub fn report_document(workspace: &Path, run_id: &str) -> Result<aiw_runner::WsbMsiRunReport> {
+    let assets_root = packaged_asset_root(INTERACTIVE_PRODUCT_ID)?;
+    let (project, manifest, assets) = interactive_export_assets(&assets_root)?;
+    let agent = aiw_windows_platform::HeldApplicationFile::open(&assets.guest_agent)
+        .map_err(|error| anyhow!("packaged guest agent is unsupported: {error}"))?;
+    if agent.observation().sha256 != manifest.guest_agent_sha256 {
+        bail!("packaged guest agent bytes do not match the product manifest");
+    }
+    agent
+        .revalidate()
+        .map_err(|error| anyhow!("packaged guest agent drifted: {error}"))?;
+    aiw_runner::report_windows_sandbox_msi_run(
+        workspace,
+        run_id,
+        &project,
+        &manifest.guest_agent_sha256,
+    )
+    .map_err(|source| document_export_error(run_id, source))
+}
+
+/// Reverify a retained fixed Notepad++ assessment using package-bound assets.
+#[cfg(windows)]
+pub fn report_assessment(workspace: &Path, run_id: &str) -> Result<aiw_runner::WsbMsiRunReport> {
+    let assets_root = packaged_asset_root("notepad-plus-plus")?;
+    let manifest: ProductAssetManifest = serde_json::from_slice(&read_file_bounded(
+        &assets_root.join("manifest.json"),
+        1024 * 1024,
+    )?)?;
+    let assets = manifest.resolve(&assets_root)?;
+    let project_bytes = read_file_bounded(&assets.project, MAX_CONFIG_BYTES)?;
+    if lowercase_sha256(&project_bytes) != manifest.project_sha256 {
+        bail!("packaged project bytes do not match the product manifest");
+    }
+    let project: Project = serde_yaml::from_slice(&project_bytes)?;
+    if !validate_project_for_planning(&project).is_empty()
+        || project.metadata.name != PRODUCT_ID
+        || manifest.product_id != PRODUCT_ID
+        || manifest.scenario_id != SCENARIO_ID
+    {
+        bail!("packaged project is not valid for the fixed assessment");
+    }
+    let agent = aiw_windows_platform::HeldApplicationFile::open(&assets.guest_agent)
+        .map_err(|error| anyhow!("packaged guest agent is unsupported: {error}"))?;
+    if agent.observation().sha256 != manifest.guest_agent_sha256 {
+        bail!("packaged guest agent bytes do not match the product manifest");
+    }
+    agent
+        .revalidate()
+        .map_err(|error| anyhow!("packaged guest agent drifted: {error}"))?;
+    aiw_runner::report_windows_sandbox_msi_run(
+        workspace,
+        run_id,
+        &project,
+        &manifest.guest_agent_sha256,
+    )
+    .map_err(|source| retained_result_error(workspace, run_id, "adminRetainedReport", source))
 }
 
 #[cfg(not(windows))]
@@ -574,7 +753,32 @@ pub fn assess(
     identity: &str,
     show_progress: bool,
 ) -> Result<AdminAssessmentResult> {
-    assess_notepad(installer, None, evidence_parent, identity, show_progress)
+    require_terminal()?;
+    assess_with_gate(
+        installer,
+        evidence_parent,
+        identity,
+        &TerminalApprovalGate,
+        show_progress,
+    )
+}
+
+#[cfg(windows)]
+pub fn assess_with_gate(
+    installer: &Path,
+    evidence_parent: &Path,
+    identity: &str,
+    gate: &dyn ApprovalGate,
+    show_progress: bool,
+) -> Result<AdminAssessmentResult> {
+    assess_notepad(
+        installer,
+        None,
+        evidence_parent,
+        identity,
+        gate,
+        show_progress,
+    )
 }
 
 #[cfg(windows)]
@@ -585,11 +789,32 @@ pub fn launch_document(
     identity: &str,
     show_progress: bool,
 ) -> Result<AdminAssessmentResult> {
+    require_terminal()?;
+    launch_document_with_gate(
+        installer,
+        document_input,
+        evidence_parent,
+        identity,
+        &TerminalApprovalGate,
+        show_progress,
+    )
+}
+
+#[cfg(windows)]
+pub fn launch_document_with_gate(
+    installer: &Path,
+    document_input: &Path,
+    evidence_parent: &Path,
+    identity: &str,
+    gate: &dyn ApprovalGate,
+    show_progress: bool,
+) -> Result<AdminAssessmentResult> {
     assess_notepad(
         installer,
         Some(document_input),
         evidence_parent,
         identity,
+        gate,
         show_progress,
     )
 }
@@ -600,16 +825,12 @@ fn assess_notepad(
     document_input: Option<&Path>,
     evidence_parent: &Path,
     identity: &str,
+    gate: &dyn ApprovalGate,
     show_progress: bool,
 ) -> Result<AdminAssessmentResult> {
     let interactive = document_input.is_some();
     if identity.trim().is_empty() {
         bail!("operator identity is required");
-    }
-    if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
-        bail!(
-            "administrator workflow requires terminal input and visible approval review; no intake or run was created"
-        );
     }
     let product_id = if interactive {
         INTERACTIVE_PRODUCT_ID
@@ -732,16 +953,6 @@ fn assess_notepad(
         anyhow!("recipe inspection failed; inspect retained preparation before retrying: {error}")
     })?;
     save_stage(&evidence_root, "recipe", &recipe)?;
-    {
-        let mut terminal = std::io::stderr().lock();
-        writeln!(
-            terminal,
-            "Review the complete verified recipe before approval (mode: {execution_mode}):\n"
-        )?;
-        approval_review::write_review_json(&mut terminal, &recipe)?;
-        writeln!(terminal, "\n")?;
-        terminal.flush()?;
-    }
     let imported = aiw_runner::import_windows_sandbox_preparation(
         &workspace,
         &project,
@@ -755,12 +966,15 @@ fn assess_notepad(
     let layout = RunLayout::new(&workspace, &run_id)?;
     let plan = layout.read_plan()?;
     let approval = ApprovalRecord::for_plan(&plan, identity.trim(), now_rfc3339())?;
-    if !approval_review::confirm(
-        &approval,
-        &plan,
-        std::io::stdin().lock(),
-        std::io::stderr().lock(),
-    )? {
+    let review = ApprovalReview {
+        run_id: run_id.clone(),
+        workspace: workspace.clone(),
+        evidence_root: evidence_root.clone(),
+        recipe: serde_json::to_value(&recipe)?,
+        plan: plan.clone(),
+        proposed_approval: approval.clone(),
+    };
+    if !approve_review(gate, &review)? {
         save_stage(
             &evidence_root,
             "approval-cancelled",
@@ -775,14 +989,37 @@ fn assess_notepad(
             workspace,
             execution_mode,
             approval_recorded: false,
+            execution_started: false,
             next: "Approval was cancelled. The run remains pending approval; no Sandbox was started.",
             summary: None,
         });
     }
-    layout.write_approval(&approval)?;
     save_stage(&evidence_root, "approval", &approval)?;
+    if !wait_for_start(gate, &review)? {
+        save_stage(
+            &evidence_root,
+            "execution-not-started",
+            &serde_json::json!({"runId": run_id, "approvalRecorded": true, "providerAcquired": false, "next": "Approval is recorded. Explicitly request Start when ready; no Sandbox was started."}),
+        )?;
+        return Ok(AdminAssessmentResult {
+            schema_version: MANIFEST_SCHEMA,
+            product_id,
+            operator_identity: identity.trim().into(),
+            evidence_root,
+            run_id,
+            workspace,
+            execution_mode,
+            approval_recorded: true,
+            execution_started: false,
+            next: "Approval recorded; execution was not started. No Sandbox was started.",
+            summary: None,
+        });
+    }
     let execution_result = {
-        let _progress = crate::admin_progress::RunProgress::start(show_progress, interactive);
+        let _progress = admin_progress::RunProgress::start(
+            show_progress && gate.uses_terminal_progress(),
+            interactive,
+        );
         aiw_runner::start_approved_windows_sandbox(
             &workspace,
             &assets.project,
@@ -836,6 +1073,7 @@ fn assess_notepad(
         workspace,
         execution_mode,
         approval_recorded: true,
+        execution_started: true,
         next,
         summary: Some(summary),
     })
@@ -864,13 +1102,35 @@ pub fn assess_bambu(
     identity: &str,
     show_progress: bool,
 ) -> Result<AdminAssessmentResult> {
-    if identity.trim().is_empty() {
-        bail!("operator identity is required");
-    }
+    require_terminal()?;
+    assess_bambu_with_gate(
+        installer,
+        evidence_parent,
+        identity,
+        &TerminalApprovalGate,
+        show_progress,
+    )
+}
+
+fn require_terminal() -> Result<()> {
     if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
         bail!(
-            "admin assess requires terminal input and visible approval review; no intake or run was created"
+            "administrator workflow requires terminal input and visible approval review; no intake or run was created"
         );
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+pub fn assess_bambu_with_gate(
+    installer: &Path,
+    evidence_parent: &Path,
+    identity: &str,
+    gate: &dyn ApprovalGate,
+    show_progress: bool,
+) -> Result<AdminAssessmentResult> {
+    if identity.trim().is_empty() {
+        bail!("operator identity is required");
     }
     let assets_root = packaged_asset_root("bambu-studio")?;
     let manifest: ProductAssetManifest = serde_json::from_slice(
@@ -1012,16 +1272,6 @@ pub fn assess_bambu(
         "limits": "This is one fixed offline STL-to-3MF export. The installer wait is bounded at 900 seconds and the worker receipt wait at 1500 seconds. Slicing, printing, cloud, graphical editing, general EXE support, and effective application isolation are not tested."
     });
     save_stage(&evidence_root, "recipe", &recipe)?;
-    {
-        let mut terminal = std::io::stderr().lock();
-        writeln!(
-            terminal,
-            "Review the complete verified Bambu recipe before approval:\n"
-        )?;
-        approval_review::write_review_json(&mut terminal, &recipe)?;
-        writeln!(terminal, "\n")?;
-        terminal.flush()?;
-    }
     let imported = aiw_runner::import_windows_sandbox_preparation(
         &workspace,
         &project,
@@ -1035,12 +1285,15 @@ pub fn assess_bambu(
     let layout = RunLayout::new(&workspace, &run_id)?;
     let plan = layout.read_plan()?;
     let approval = ApprovalRecord::for_plan(&plan, identity.trim(), now_rfc3339())?;
-    if !approval_review::confirm(
-        &approval,
-        &plan,
-        std::io::stdin().lock(),
-        std::io::stderr().lock(),
-    )? {
+    let review = ApprovalReview {
+        run_id: run_id.clone(),
+        workspace: workspace.clone(),
+        evidence_root: evidence_root.clone(),
+        recipe: recipe.clone(),
+        plan: plan.clone(),
+        proposed_approval: approval.clone(),
+    };
+    if !approve_review(gate, &review)? {
         save_stage(
             &evidence_root,
             "approval-cancelled",
@@ -1055,14 +1308,37 @@ pub fn assess_bambu(
             workspace,
             execution_mode: "assessment",
             approval_recorded: false,
+            execution_started: false,
             next: "Approval was cancelled. The run remains pending approval; no Sandbox was started.",
             summary: None,
         });
     }
-    layout.write_approval(&approval)?;
     save_stage(&evidence_root, "approval", &approval)?;
+    if !wait_for_start(gate, &review)? {
+        save_stage(
+            &evidence_root,
+            "execution-not-started",
+            &serde_json::json!({"runId": run_id, "approvalRecorded": true, "providerAcquired": false}),
+        )?;
+        return Ok(AdminAssessmentResult {
+            schema_version: MANIFEST_SCHEMA,
+            product_id: BAMBU_PRODUCT_ID,
+            operator_identity: identity.trim().into(),
+            evidence_root,
+            run_id,
+            workspace,
+            execution_mode: "assessment",
+            approval_recorded: true,
+            execution_started: false,
+            next: "Approval recorded; execution was not started. No Sandbox was started.",
+            summary: None,
+        });
+    }
     let execution_result = {
-        let _progress = crate::admin_progress::RunProgress::start(show_progress, false);
+        let _progress = admin_progress::RunProgress::start(
+            show_progress && gate.uses_terminal_progress(),
+            false,
+        );
         aiw_runner::start_approved_windows_sandbox(
             &workspace,
             &assets.project,
@@ -1122,6 +1398,7 @@ pub fn assess_bambu(
         workspace,
         execution_mode: "assessment",
         approval_recorded: true,
+        execution_started: true,
         next,
         summary: Some(summary),
     })
@@ -1217,18 +1494,127 @@ fn lowercase_sha256(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    struct FixedGate {
+        review_response: Option<String>,
+        start: bool,
+    }
+
+    impl ApprovalGate for FixedGate {
+        fn review(&self, _: &ApprovalReview) -> Result<Option<String>> {
+            Ok(self.review_response.clone())
+        }
+
+        fn wait_for_start(&self, _: &ApprovalReview) -> Result<bool> {
+            Ok(self.start)
+        }
+    }
+
+    fn review_fixture() -> (PathBuf, ApprovalReview) {
+        let root = std::env::temp_dir().join(format!(
+            "aiw-admin-gate-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let plan = aiw_orchestrator::RunPlan::new(
+            "gate-test",
+            "project",
+            "a".repeat(64),
+            aiw_orchestrator::RunLifecycleKind::Assessment,
+            "now",
+            vec![aiw_orchestrator::PlannedAction::AssessHost],
+            vec![],
+        )
+        .unwrap();
+        let layout = RunLayout::new(&root, &plan.run_id).unwrap();
+        layout.create(&plan).unwrap();
+        let approval = ApprovalRecord::for_plan(&plan, "operator", "now").unwrap();
+        (
+            root.clone(),
+            ApprovalReview {
+                run_id: plan.run_id.clone(),
+                workspace: root,
+                evidence_root: PathBuf::from("evidence"),
+                recipe: serde_json::json!({"fixed": true}),
+                plan,
+                proposed_approval: approval,
+            },
+        )
+    }
+
+    #[test]
+    fn approval_gate_requires_the_exact_literal_and_cancellation_writes_nothing() {
+        for response in [None, Some("approve wrong-hash".into())] {
+            let (root, review) = review_fixture();
+            let gate = FixedGate {
+                review_response: response,
+                start: true,
+            };
+            assert!(!approve_review(&gate, &review).unwrap());
+            let layout = RunLayout::new(&root, &review.run_id).unwrap();
+            assert!(layout.read_approval().is_err());
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn approval_gate_rejects_a_changed_persisted_plan() {
+        let (root, review) = review_fixture();
+        let gate = FixedGate {
+            review_response: Some(format!("approve {}", review.proposed_approval.plan_hash)),
+            start: true,
+        };
+        let changed = aiw_orchestrator::RunPlan::new(
+            "gate-test",
+            "changed-project",
+            "b".repeat(64),
+            aiw_orchestrator::RunLifecycleKind::Assessment,
+            "now",
+            vec![aiw_orchestrator::PlannedAction::AssessHost],
+            vec![],
+        )
+        .unwrap();
+        let layout = RunLayout::new(&root, &review.run_id).unwrap();
+        std::fs::write(layout.plan_path(), serde_json::to_vec(&changed).unwrap()).unwrap();
+        assert!(approve_review(&gate, &review).is_err());
+        assert!(layout.read_approval().is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn approved_start_decline_leaves_a_durable_ready_run_without_acquisition() {
+        let (root, review) = review_fixture();
+        let gate = FixedGate {
+            review_response: Some(format!("approve {}", review.proposed_approval.plan_hash)),
+            start: false,
+        };
+        assert!(approve_review(&gate, &review).unwrap());
+        assert!(!wait_for_start(&gate, &review).unwrap());
+        let layout = RunLayout::new(&root, &review.run_id).unwrap();
+        assert!(layout.read_approval().is_ok());
+        assert!(matches!(
+            layout.status().unwrap(),
+            aiw_orchestrator::RecoveryStatus::Ready { .. }
+        ));
+        assert!(!layout.run_dir().join("receipt.json").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn export_failure_summary_preserves_completed_output_distinction() {
         let cases = [
             (
-                crate::document_export_error(
+                document_export_error(
                     "run-one",
                     aiw_runner::RunnerError::Receipt("tampered".into()),
                 ),
                 "Export stopped:",
             ),
             (
-                crate::document_export_output_error("run-one", anyhow::anyhow!("broken pipe")),
+                document_export_output_error("run-one", anyhow::anyhow!("broken pipe")),
                 "Export completed, but console output failed:",
             ),
         ];
@@ -1287,6 +1673,7 @@ mod tests {
             workspace: PathBuf::from("workspace"),
             execution_mode: "assessment",
             approval_recorded: false,
+            execution_started: false,
             next: "Review the retained recipe.",
             summary: None,
         };
@@ -1330,6 +1717,7 @@ mod tests {
             workspace: PathBuf::from("workspace"),
             execution_mode: "assessment",
             approval_recorded: true,
+            execution_started: true,
             next: "Read the report.",
             summary: Some("Fixed workflow results retained.\n".into()),
         };
@@ -1360,6 +1748,7 @@ mod tests {
             workspace: PathBuf::from("workspace"),
             execution_mode: "assessment",
             approval_recorded: false,
+            execution_started: false,
             next: "Use fresh evidence if later approved.",
             summary: None,
         };
@@ -1461,7 +1850,8 @@ mod tests {
         let root = std::env::temp_dir().join(format!("aiw-export-assets-{}", nonce()));
         std::fs::create_dir(&root).unwrap();
         std::fs::create_dir(root.join("tools")).unwrap();
-        let project = include_bytes!("../product/notepad-plus-plus-interactive/project.yaml");
+        let project =
+            include_bytes!("../../aiw-cli/product/notepad-plus-plus-interactive/project.yaml");
         std::fs::write(root.join("project.yaml"), project).unwrap();
         std::fs::write(root.join("tools/agent.exe"), b"agent").unwrap();
         let mut manifest = serde_json::json!({

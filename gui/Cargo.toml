@@ -1,0 +1,37 @@
+[package]
+name = "aiw-desktop"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+license = "Apache-2.0"
+description = "Local administrator surface for verified Windows Sandbox workflows"
+
+# Keep desktop dependencies separate from the core workspace's Rust 1.85 contract.
+[workspace]
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(windows)'.dependencies]
+aiw-admin-workflow = { path = "../crates/aiw-admin-workflow" }
+aiw-orchestrator = { path = "../crates/aiw-orchestrator" }
+aiw-runner = { path = "../crates/aiw-runner" }
+tauri = { version = "=2.12.0", features = [] }
+tauri-plugin-dialog = "=2.7.3"
+windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging"] }
+
+[target.'cfg(windows)'.build-dependencies]
+tauri-build = "=2.7.0"
+
+[profile.dev]
+debug = 0
+
+[profile.release]
+strip = true

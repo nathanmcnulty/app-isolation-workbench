@@ -67,3 +67,45 @@ jobs:
           rustup toolchain install 1.85.0 --profile minimal --no-self-update
           if ($LASTEXITCODE -ne 0) { throw 'Rust 1.85 installation failed' }
           cargo +1.85.0 check --workspace --all-targets --locked
+
+      - name: Check desktop targets with Rust 1.90
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal --no-self-update
+          if ($LASTEXITCODE -ne 0) { throw 'Rust 1.90 installation failed' }
+          cargo +1.90.0 check --manifest-path gui/Cargo.toml --locked --all-targets --release
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop minimum Rust check failed' }
+
+  desktop:
+    name: Windows desktop
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Select stable Rust
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy --no-self-update
+          if ($LASTEXITCODE -ne 0) { throw 'Stable Rust installation failed' }
+      - name: Verify desktop source and gates
+        shell: pwsh
+        run: |
+          cargo +stable fmt --manifest-path gui/Cargo.toml --check
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop formatting failed' }
+          cargo +stable clippy --manifest-path gui/Cargo.toml --all-targets --locked -- -D warnings
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop clippy failed' }
+          cargo +stable test --manifest-path gui/Cargo.toml --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop gate tests failed' }
+          cargo +stable check --manifest-path gui/Cargo.toml --release --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop release configuration failed' }
+          node --test gui/tests/*.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop display controls failed' }
+          .\scripts\test-desktop-package-verifier.ps1
+      - name: Audit desktop dependencies
+        shell: pwsh
+        run: |
+          cargo +stable install cargo-audit --version 0.22.2 --locked
+          if ($LASTEXITCODE -ne 0) { throw 'cargo-audit installation failed' }
+          cargo +stable audit --file gui/Cargo.lock
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop dependency audit failed' }

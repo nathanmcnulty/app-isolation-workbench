@@ -1,6 +1,6 @@
 # Roadmap
 
-Reviewed 2026-09-27 against the implemented runner and retained live evidence. The release sequence below is authoritative; numbered capability benchmarks retain research acceptance criteria, not a serial release backlog. External platform research below is dated context and must be reverified before implementation.
+Reviewed 2026-10-03 against the implemented runner and retained live evidence. The release sequence below is authoritative; numbered capability benchmarks retain research acceptance criteria, not a serial release backlog. External platform research below is dated context and must be reverified before implementation.
 
 The goal is a free community tool that answers **which tested application functions work under which measured isolation configuration**, helps an administrator adapt the application, and produces a launch profile or package that passes the same tests. Workbench evolves into Studio when authoring is useful; this is one product.
 
@@ -25,6 +25,13 @@ evidence that an arbitrary MSI is compatible or a claim of broad market coverage
    and profile were packaged and verified on a separate supported VM. A second
    operator completed the documented loop with fresh approval, report, negative
    control, and cleanup. See [clean-host acceptance](CLEAN-HOST-PREVIEW.md#independent-operator-acceptance-for-this-package).
+4. **Demonstrated for the exact unsigned GUI preview:** packaged Notepad++
+   assessment and interactive edit/save/export completed through the Windows
+   desktop on the dedicated VM. Explicit approval/Start, retained viewing,
+   cancellation, export refusals, and cleanup have automated acceptance evidence.
+   See [GUI acceptance](GUI-FIRST-FINISH-LINE.md#completed-packaged-gui-acceptance-2026-10-03).
+   This reduces operator command burden without broadening compatibility or
+   isolation claims.
 
 The exact acceptance cases are in [RELEASE-GATES.md](RELEASE-GATES.md). A release
 requires successful supported use and understandable failure handling, not only

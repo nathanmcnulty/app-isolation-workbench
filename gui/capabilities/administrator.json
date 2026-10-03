@@ -1,0 +1,9 @@
+{
+  "identifier": "administrator",
+  "description": "Only the local administrator window may request fixed workflow operations.",
+  "windows": ["main"],
+  "permissions": [
+    "allow-get-state", "allow-choose-input", "allow-prepare-workflow", "allow-submit-approval",
+    "allow-start-approved-workflow", "allow-cancel-pending", "allow-export-document", "allow-load-retained-report"
+  ]
+}
