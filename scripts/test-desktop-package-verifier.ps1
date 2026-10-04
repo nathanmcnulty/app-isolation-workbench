@@ -55,6 +55,9 @@ try {
 
     $valid = & $verifier -PackageRoot $root -ReceiptSha256 $receiptHash -SourceRevision $sourceRevision | ConvertFrom-Json
     if ($valid.exactInventory -ne $true -or $valid.filesVerified -ne $records.Count) { throw 'Valid desktop package fixture did not verify' }
+    $normalizedRoot = & $verifier -PackageRoot ($root + '\') -ReceiptSha256 $receiptHash -SourceRevision $sourceRevision | ConvertFrom-Json
+    if ($normalizedRoot.exactInventory -ne $true) { throw 'Trailing-separator package root did not verify' }
+    & (Join-Path $PSScriptRoot 'test-desktop-package-archive.ps1') -PackageRoot $root -ReceiptSha256 $receiptHash -SourceRevision $sourceRevision
 
     $bambuRoot = Join-Path $root 'product\bambu-studio'
     $bambuFiles = @{}
@@ -63,6 +66,7 @@ try {
     $historical = Write-Receipt 'aiw.dev/desktop-package/v0alpha1' @('notepad-plus-plus', 'notepad-plus-plus-interactive') $guestHash
     $validHistorical = & $verifier -PackageRoot $root -ReceiptSha256 $historical.hash -SourceRevision $sourceRevision | ConvertFrom-Json
     if ($validHistorical.exactInventory -ne $true -or $validHistorical.filesVerified -ne $historical.records.Count) { throw 'Historical v0alpha1 desktop package fixture did not verify' }
+    & (Join-Path $PSScriptRoot 'test-desktop-package-archive.ps1') -PackageRoot $root -ReceiptSha256 $historical.hash -SourceRevision $sourceRevision
     foreach ($relative in $bambuFiles.Keys) { New-Item -ItemType Directory -Path (Split-Path -Parent (Join-Path $bambuRoot $relative)) -Force | Out-Null; [IO.File]::WriteAllBytes((Join-Path $bambuRoot $relative), $bambuFiles[$relative]) }
     $written = Write-Receipt 'aiw.dev/desktop-package/v0alpha2' @('notepad-plus-plus', 'notepad-plus-plus-interactive', 'bambu-studio') $guestHash
     $receiptHash = $written.hash; $records = $written.records; $core = $written.core
