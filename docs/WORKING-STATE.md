@@ -5,6 +5,14 @@ This handoff is a pointer, not execution authority or a run receipt.
 
 ## Current slice
 
+PR #82 merged the Bambu GUI at `1db892d` after all three exact-head CI jobs passed;
+merged main has the tested tree. The verified desktop archive handoff now has
+native PowerShell 5.1 export and extraction proof on the dedicated VM; both
+passed for the existing `e08115b` package; its receipt and application bytes did
+not change. Both schema fixtures/negative controls and independent exact-commit
+review passed. See [distribution proof and exact commands](DESKTOP-DISTRIBUTION.md).
+This avoids manual ZIP/extraction work; publisher identity/signing remain open.
+
 The fixed Bambu Studio export now has a validated GUI path beside the two
 Notepad++ modes. Current unsigned package source is
 `e08115b50fb0ee37fba1f923b377985dc3f1bc94`. Use work-status for the current

@@ -46,6 +46,12 @@ foundation work before the administrator milestone.
 
 ## Administrator milestone acceptance cases
 
+The [desktop archive handoff](DESKTOP-DISTRIBUTION.md) now has native PowerShell
+5.1 export/extraction proof for the accepted unsigned package, with unchanged
+receipt bytes, trusted sidecar verifier selection, and negative path/hash controls.
+No application trial was repeated. This is a distribution-integrity control;
+publisher authentication and signing remain open.
+
 - Starting with the distributed build and an operator-selected installer, show
   whether an exact supported profile exists. Unsupported bytes or application
   types produce an honest unsupported result and next step, never a guessed command.
