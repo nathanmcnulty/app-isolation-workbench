@@ -16,7 +16,7 @@ Choose the supported Notepad++ MSI or fixed Bambu Studio EXE and, for a Notepad+
 prepare the review, confirm its exact plan, and separately click Start. The GUI
 shows a concise result with optional retained details and explicitly exports a
 verified document to a new file. A passing function workflow does not establish
-broader isolation. See [Notepad++ GUI acceptance](docs/GUI-FIRST-FINISH-LINE.md#completed-packaged-gui-acceptance-2026-10-03) and [the current three-product package and exact VM paths](docs/BAMBU-ADMIN-ENTRY.md#completed-desktop-acceptance-2026-10-03).
+broader isolation. See [Notepad++ GUI acceptance](docs/GUI-FIRST-FINISH-LINE.md#completed-packaged-gui-acceptance-2026-10-03), [the current three-product package and exact VM paths](docs/BAMBU-ADMIN-ENTRY.md#completed-desktop-acceptance-2026-10-03), and [verified ZIP extraction with exact operator commands](docs/DESKTOP-DISTRIBUTION.md).
 
 | Capability | Current boundary |
 |---|---|

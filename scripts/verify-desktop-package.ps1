@@ -6,7 +6,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$root = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($PackageRoot)
+$root = [IO.Path]::GetFullPath($ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($PackageRoot)).TrimEnd('\')
 $receiptPath = Join-Path $root 'receipt.json'
 
 function Get-CanonicalJsonBytes([object]$Value) {

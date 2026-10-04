@@ -69,6 +69,12 @@ authenticated distribution. Preserve complete approval review and receipt-based
 conclusions; do not reopen completed execution gates to improve presentation.
 Public distribution also needs a publisher-authentication and signing decision;
 the present package is an unsigned development preview.
+The [verified desktop archive handoff](DESKTOP-DISTRIBUTION.md) now exports and
+extracts that accepted package with independent identities and bounded inventory
+checks, including native PowerShell 5.1 proof on the dedicated VM. This removes
+manual ZIP work without changing the application evidence or closing publisher
+authentication. Finish the publication/signing decision before public release;
+do not add application classes as a substitute for this remaining gate.
 
 ## What is already working
 
