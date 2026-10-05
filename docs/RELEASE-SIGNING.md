@@ -35,7 +35,7 @@ Its federated credential is restricted to:
 
 ```text
 issuer: https://token.actions.githubusercontent.com
-subject: repo:nathanmcnulty/app-isolation-workbench:environment:artifact-signing
+subject: repo:nathanmcnulty@6653432/app-isolation-workbench@1340122842:environment:artifact-signing
 audience: api://AzureADTokenExchange
 ```
 
@@ -65,8 +65,38 @@ repository cache.
 The signature verifier holds the built file against concurrent write/delete,
 records its hash and publisher/timestamp status, and writes a fresh result even
 when the signature is rejected. An unsigned file was locally rejected with a
-retained `NotSigned` record. Live signing remains unproven until the exact
-merged workflow completes and its retained artifact is independently verified.
+retained `NotSigned` record. The completed live control is recorded below.
+
+## Completed live control
+
+PR #84 merged at `210bbc995307e7a57455c10cbc557fed1633f727` after all three
+CI checks passed at `5576576004bc71985cd4a7b44f46361650788040`; the merged tree
+matched the tested tree. [Signing run 37247667778, attempt 2](https://github.com/nathanmcnulty/app-isolation-workbench/actions/runs/37247667778/attempts/2)
+completed compilation, signing, and isolated verification successfully.
+
+Attempt 1 retained an Azure federation rejection: this repository uses GitHub's
+immutable owner/repository-ID subject, while the initial federation used the
+older name-only subject. Read-only GitHub OIDC configuration confirmed the exact
+prefix. The single existing Entra federation was corrected to the subject above,
+read back, and only failed jobs were retried, reusing the successful build.
+No permission expansion or client secret was needed. See [GitHub's subject
+contract](https://docs.github.com/en/actions/reference/security/oidc).
+
+The downloaded `aiw-signing-control-210bbc995307e7a57455c10cbc557fed1633f727`
+artifact contains the 13,423,888-byte signed `aiw.exe`. Independent host verification
+agreed with the runner record:
+
+- Signed SHA-256: `8c7e9e73fd6fea2747ae3fccdadda70e46ce7e8d9d0b9f8b27d2c0f0af2ef616`.
+- Authenticode status: `Valid`; publisher: `Nathan McNulty`; timestamp present.
+- A separate copy changed at byte offset 4096 was rejected with `HashMismatch`;
+  the original retained binary was preserved.
+- Local evidence: `%TEMP%\AIW-Signing-Control-210bbc9`, including runner,
+  independent, and tamper verification records. Failed-attempt logs and the
+  corrected federation readback are retained separately under `%TEMP%`.
+
+Actions artifacts expire after 14 days; the downloaded host evidence is the
+retained local copy. This proves the personal signing path for this CLI control,
+not signed desktop assembly, runtime acceptance, or public distribution.
 
 ## Moving from control to release
 

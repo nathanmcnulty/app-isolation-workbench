@@ -7,7 +7,11 @@ This handoff is a pointer, not execution authority or a run receipt.
 
 Nathan authorized his existing personal Artifact Signing account and CI setup;
 see [signing identity and control](RELEASE-SIGNING.md). The manual main-only CLI
-signing control is the current slice, not a signed desktop/public release.
+signing control passed at merged `210bbc9` (PR #84, all three CI checks passed).
+Downloaded signed bytes independently verified as timestamped Authenticode from
+Nathan McNulty; a modified copy was rejected with `HashMismatch`. Initial Azure
+federation rejection was corrected using GitHub's exact immutable subject.
+The next slice is signed desktop assembly, not public release.
 Its dedicated passwordless identity, profile-only signer role, and main-only
 environment are configured and independently read back. The build/sign/verify
 jobs are isolated; none of the built executable runs with signing authority.
