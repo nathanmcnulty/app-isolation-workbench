@@ -35,7 +35,7 @@ Its federated credential is restricted to:
 
 ```text
 issuer: https://token.actions.githubusercontent.com
-subject: repo:nathanmcnulty/app-isolation-workbench:environment:artifact-signing
+subject: repo:nathanmcnulty@6653432/app-isolation-workbench@1340122842:environment:artifact-signing
 audience: api://AzureADTokenExchange
 ```
 
@@ -65,10 +65,86 @@ repository cache.
 The signature verifier holds the built file against concurrent write/delete,
 records its hash and publisher/timestamp status, and writes a fresh result even
 when the signature is rejected. An unsigned file was locally rejected with a
-retained `NotSigned` record. Live signing remains unproven until the exact
-merged workflow completes and its retained artifact is independently verified.
+retained `NotSigned` record. The completed live control is recorded below.
+
+## Completed live control
+
+PR #84 merged at `210bbc995307e7a57455c10cbc557fed1633f727` after all three
+CI checks passed at `5576576004bc71985cd4a7b44f46361650788040`; the merged tree
+matched the tested tree. [Signing run 37247667778, attempt 2](https://github.com/nathanmcnulty/app-isolation-workbench/actions/runs/37247667778/attempts/2)
+completed compilation, signing, and isolated verification successfully.
+
+Attempt 1 retained an Azure federation rejection: this repository uses GitHub's
+immutable owner/repository-ID subject, while the initial federation used the
+older name-only subject. Read-only GitHub OIDC configuration confirmed the exact
+prefix. The single existing Entra federation was corrected to the subject above,
+read back, and only failed jobs were retried, reusing the successful build.
+No permission expansion or client secret was needed. See [GitHub's subject
+contract](https://docs.github.com/en/actions/reference/security/oidc).
+
+The downloaded `aiw-signing-control-210bbc995307e7a57455c10cbc557fed1633f727`
+artifact contains the 13,423,888-byte signed `aiw.exe`. Independent host verification
+agreed with the runner record:
+
+- Signed SHA-256: `8c7e9e73fd6fea2747ae3fccdadda70e46ce7e8d9d0b9f8b27d2c0f0af2ef616`.
+- Authenticode status: `Valid`; publisher: `Nathan McNulty`; timestamp present.
+- A separate copy changed at byte offset 4096 was rejected with `HashMismatch`;
+  the original retained binary was preserved.
+- Local evidence: `%TEMP%\AIW-Signing-Control-210bbc9`, including runner,
+  independent, and tamper verification records. Failed-attempt logs and the
+  corrected federation readback are retained separately under `%TEMP%`.
+
+Actions artifacts expire after 14 days; the downloaded host evidence is the
+retained local copy. This proves the personal signing path for this CLI control,
+not signed desktop assembly, runtime acceptance, or public distribution.
 
 ## Moving from control to release
+
+The manual `desktop-candidate.yml` workflow extends the proven control to the
+three unique executables and the two distribution scripts. It retains a private
+Actions candidate; it does not yet publish a GitHub release. Compilation creates
+an unsigned closed package and a fixed signing-input record. The signer consumes
+only five named files, checks their source/receipt/hash inventory before login,
+and has no checkout or build step. A third job verifies the publisher signatures,
+assembles into a fresh directory, binds all three manifests to the final signed
+guest hash, writes a new receipt last, and exports/expands the signed ZIP.
+The original unsigned package remains intact; neither assembly nor verification
+runs an application or starts Sandbox. Historical guest-bound launch profiles
+are refused rather than reclassified after signing.
+
+`desktop-package-archive.ps1 -RequirePublisherSignature` makes signature checking
+an explicit requirement for export and extraction; it authenticates and holds the
+handoff scripts before executing the verifier, then checks the fixed packaged
+executables/verifier and exported handoff scripts. Its distribution record lists
+only the signed files; complete-package authenticity remains `notEstablished`
+because project assets, receipt, and archive are not publisher-signed. Independently
+supplied archive/receipt hashes bind their exact contents. Default unsigned/historical
+handoffs retain their existing claim boundary. CI runs unsigned-signature and
+build-record-drift refusal controls alongside the existing receipt/archive tests.
+Full signed candidate execution remains unproven until this workflow is merged,
+run, downloaded, and tested on the supported disposable VM.
+
+Nathan authorized the following order on 2026-10-04, once a good public candidate
+is ready:
+
+1. Finish the signed desktop assembly path and resolve candidate-blocking findings.
+2. Review the exact release CI for build/signing separation, token permissions,
+   pinned actions, source/artifact binding, and public PR/fork behavior. Check
+   repository contents and history for material that must remain private before
+   changing visibility.
+3. Make the repository public, then use reviewed CI to build, sign, assemble,
+   and publish the candidate from the exact approved source revision.
+4. Download those published artifacts, independently verify their identities and
+   publisher signatures, and test the exact download on the dedicated supported
+   VM. Supply copy-and-paste operator commands and fresh evidence destinations
+   whenever human participation is needed.
+5. Publish the first candidate as an alpha/prerelease; promote a stable release
+   only after its downloaded-artifact acceptance is recorded.
+
+This is conditional authorization for that sequence, not a declaration that the
+current unsigned draft is ready or that its historical trials validate newly
+signed bytes. CI-built downloadable candidates precede final distribution
+acceptance; stable-release claims follow that acceptance.
 
 Sign final executables/scripts **before** calculating manifests, guest identity,
 receipts, and archive hashes. Signature bytes change SHA-256; signing an existing

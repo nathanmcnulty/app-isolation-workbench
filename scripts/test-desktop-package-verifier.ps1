@@ -1,10 +1,10 @@
 [CmdletBinding()]
-param()
+param([switch]$CheckSignedAssembly)
 
 $ErrorActionPreference = 'Stop'
 $verifier = Join-Path $PSScriptRoot 'verify-desktop-package.ps1'
 $root = Join-Path ([IO.Path]::GetTempPath()) "aiw-desktop-verifier-$([guid]::NewGuid().ToString('N'))"
-$sourceRevision = '0123456789abcdef0123456789abcdef01234567'
+$sourceRevision = if ($CheckSignedAssembly) { (git -C (Split-Path -Parent $PSScriptRoot) rev-parse HEAD).Trim() } else { '0123456789abcdef0123456789abcdef01234567' }
 $hadInheritedLastExitCode = Test-Path -LiteralPath Variable:LASTEXITCODE
 $inheritedLastExitCode = if ($hadInheritedLastExitCode) { $global:LASTEXITCODE } else { $null }
 
@@ -58,6 +58,73 @@ try {
     $normalizedRoot = & $verifier -PackageRoot ($root + '\') -ReceiptSha256 $receiptHash -SourceRevision $sourceRevision | ConvertFrom-Json
     if ($normalizedRoot.exactInventory -ne $true) { throw 'Trailing-separator package root did not verify' }
     & (Join-Path $PSScriptRoot 'test-desktop-package-archive.ps1') -PackageRoot $root -ReceiptSha256 $receiptHash -SourceRevision $sourceRevision
+
+    $signedExport = Join-Path ([IO.Path]::GetTempPath()) "aiw-signed-refusal-$([guid]::NewGuid().ToString('N'))"
+    Assert-Rejected { & (Join-Path $PSScriptRoot 'desktop-package-archive.ps1') -PackageRoot $root -ReceiptSha256 $receiptHash -SourceRevision $sourceRevision -OutputDirectory $signedExport -RequirePublisherSignature } 'unsigned payload requested as an authenticated handoff'
+    if (Test-Path -LiteralPath $signedExport) { throw 'Unsigned handoff was published despite signature refusal' }
+    # Isolate the verifier ordering regression: the tool is accepted by the
+    # signature probe, while its sibling verifier is explicitly rejected.
+    # The real unsigned-signature controls above/below do not use this probe.
+    $sidecarRoot = $root + '-sidecar'
+    New-Item -ItemType Directory -Path $sidecarRoot | Out-Null
+    try {
+        $testTool = Join-Path $sidecarRoot 'desktop-package-archive.ps1'
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'desktop-package-archive.ps1') -Destination $testTool
+        $marker = Join-Path $sidecarRoot 'verifier-executed.txt'
+        "[IO.File]::WriteAllText('$marker', 'executed')" | Set-Content (Join-Path $sidecarRoot 'verify-desktop-package.ps1')
+        function Get-AuthenticodeSignature {
+            param([string]$LiteralPath)
+            $certificate = [pscustomobject]@{}
+            $certificate | Add-Member -MemberType ScriptMethod -Name GetNameInfo -Value { param($type, $issuer) 'Nathan McNulty' }
+            [pscustomobject]@{ Status = $(if ([IO.Path]::GetFileName($LiteralPath) -ceq 'desktop-package-archive.ps1') { 'Valid' } else { 'HashMismatch' }); SignatureType = 'Authenticode'; SignerCertificate = $certificate; TimeStamperCertificate = $certificate }
+        }
+        foreach ($operation in @('Export', 'Expand')) {
+            $parameters = @{ OutputDirectory = (Join-Path $sidecarRoot $operation); ReceiptSha256 = $receiptHash; SourceRevision = $sourceRevision; RequirePublisherSignature = $true }
+            if ($operation -ceq 'Export') { $parameters.PackageRoot = $root } else { $parameters.ArchivePath = Join-Path $sidecarRoot 'unused.zip'; $parameters.ArchiveSha256 = '0' * 64 }
+            $rejection = $null
+            try { & $testTool @parameters | Out-Null } catch { $rejection = $_.Exception.Message }
+            if ($rejection -notlike '*requires valid timestamped Authenticode*' -or (Test-Path -LiteralPath $marker) -or (Test-Path -LiteralPath $parameters.OutputDirectory)) { throw 'Signed handoff executed a rejected verifier sidecar' }
+        }
+    } finally {
+        Remove-Item -LiteralPath Function:Get-AuthenticodeSignature -ErrorAction SilentlyContinue
+        if ((Split-Path -Parent $sidecarRoot) -ine ([IO.Path]::GetTempPath()).TrimEnd('\') -or -not $sidecarRoot.StartsWith($root + '-', [StringComparison]::OrdinalIgnoreCase) -or (Get-ChildItem -LiteralPath $sidecarRoot -Recurse -Force | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint })) { throw 'Unexpected sidecar fixture cleanup target' }
+        Remove-Item -LiteralPath $sidecarRoot -Recurse -Force
+    }
+    if ($CheckSignedAssembly) {
+        # Kept outside the unsigned package's closed inventory.
+        $signedInputs = $root + '-signed-inputs'
+        New-Item -ItemType Directory -Path $signedInputs | Out-Null
+        try {
+            foreach ($name in @('aiw.exe', 'aiw-desktop.exe', 'verify-desktop-package.ps1')) { Copy-Item -LiteralPath (Join-Path $root $name) -Destination (Join-Path $signedInputs $name) }
+            Copy-Item -LiteralPath (Join-Path $root 'product\notepad-plus-plus\tools\aiw-guest-agent.exe') -Destination (Join-Path $signedInputs 'aiw-guest-agent.exe')
+            Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'desktop-package-archive.ps1') -Destination (Join-Path $signedInputs 'desktop-package-archive.ps1')
+            $buildFiles = @(Get-ChildItem -LiteralPath $signedInputs -File | ForEach-Object { @{ name = $_.Name; sizeBytes = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() } })
+            $buildPath = $root + '-build.json'
+            @{ sourceRevision = $sourceRevision; receiptSha256 = $receiptHash; files = $buildFiles } | ConvertTo-Json -Depth 5 | Set-Content $buildPath
+            $parameters = @{ UnsignedPackageRoot = $root; UnsignedReceiptSha256 = $receiptHash; SourceRevision = $sourceRevision; SignedArtifactsDirectory = $signedInputs; BuildRecord = $buildPath; OutputDirectory = $root + '-assembled'; EvidenceDirectory = $root + '-evidence' }
+            $rejection = $null
+            try { & (Join-Path $PSScriptRoot 'assemble-signed-desktop-package.ps1') @parameters | Out-Null } catch { $rejection = $_.Exception.Message }
+            if ($rejection -notlike '*requires valid timestamped Authenticode*') { throw "Expected real unsigned-signature refusal, got: $rejection" }
+            if (Test-Path -LiteralPath $parameters.OutputDirectory) { throw 'Unsigned assembly published a package' }
+            $negative = Get-Content (Join-Path $parameters.EvidenceDirectory 'aiw.exe.signature.json') -Raw | ConvertFrom-Json
+            if ($negative.verified -or $negative.signatureStatus -eq 'Valid') { throw 'Unsigned fixture assembly did not retain a truthful signature refusal' }
+            $parameters.EvidenceDirectory = $root + '-bad-record-evidence'
+            $badBuild = Get-Content $buildPath -Raw | ConvertFrom-Json
+            $badBuild.files[0].sha256 = '0' * 64
+            $badBuild | ConvertTo-Json -Depth 5 | Set-Content $buildPath
+            $rejection = $null
+            try { & (Join-Path $PSScriptRoot 'assemble-signed-desktop-package.ps1') @parameters | Out-Null } catch { $rejection = $_.Exception.Message }
+            if ($rejection -notlike '*Unsigned signing input differs*' -or (Test-Path -LiteralPath $parameters.EvidenceDirectory)) { throw 'Assembly failed to reject build input drift before signature processing' }
+        } finally {
+            foreach ($owned in @($signedInputs, ($root + '-evidence'))) {
+                if (Test-Path -LiteralPath $owned) {
+                    if ((Split-Path -Parent $owned) -ine ([IO.Path]::GetTempPath()).TrimEnd('\') -or -not $owned.StartsWith($root + '-', [StringComparison]::OrdinalIgnoreCase) -or (Get-ChildItem -LiteralPath $owned -Recurse -Force | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint })) { throw 'Unexpected signed fixture cleanup target' }
+                    Remove-Item -LiteralPath $owned -Recurse -Force
+                }
+            }
+            if (Test-Path -LiteralPath ($root + '-build.json')) { Remove-Item -LiteralPath ($root + '-build.json') -Force }
+        }
+    }
 
     $bambuRoot = Join-Path $root 'product\bambu-studio'
     $bambuFiles = @{}

@@ -1,0 +1,215 @@
+name: Signed desktop candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aiw-signed-desktop-candidate
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'nathanmcnulty/app-isolation-workbench' && github.ref == 'refs/heads/main' && github.actor == 'nathanmcnulty'
+    runs-on: windows-2025
+    timeout-minutes: 40
+    outputs:
+      receipt: ${{ steps.build.outputs.receipt }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Build unsigned desktop inputs without signing authority
+        id: build
+        shell: pwsh
+        env:
+          SOURCE_REVISION: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:ACTIONS_ID_TOKEN_REQUEST_URL -or $env:ACTIONS_ID_TOKEN_REQUEST_TOKEN) { throw 'Build unexpectedly has OIDC authority' }
+          rustup toolchain install stable --profile minimal --no-self-update
+          if ($LASTEXITCODE -ne 0) { throw 'Rust installation failed' }
+          rustup default stable
+          if ($LASTEXITCODE -ne 0) { throw 'Rust selection failed' }
+          $guest = .\scripts\build-guest-agent.ps1 -Profile release | ConvertFrom-Json
+          $root = Join-Path $env:RUNNER_TEMP 'aiw-unsigned-desktop'
+          $package = .\scripts\build-desktop-package.ps1 -OutputDirectory $root -SourceRevision $env:SOURCE_REVISION -GuestAgent $guest.artifact -GuestAgentSha256 $guest.sha256 -KeepFailedBuild | ConvertFrom-Json
+          $signing = Join-Path $env:RUNNER_TEMP 'aiw-signing-inputs'
+          $binaries = Join-Path $signing 'binaries'
+          New-Item -ItemType Directory -Path $binaries | Out-Null
+          foreach ($name in @('aiw.exe', 'aiw-desktop.exe', 'verify-desktop-package.ps1')) { Copy-Item -LiteralPath (Join-Path $root $name) -Destination (Join-Path $binaries $name) }
+          Copy-Item -LiteralPath (Join-Path $root 'product\notepad-plus-plus\tools\aiw-guest-agent.exe') -Destination (Join-Path $binaries 'aiw-guest-agent.exe')
+          Copy-Item -LiteralPath scripts\desktop-package-archive.ps1 -Destination (Join-Path $binaries 'desktop-package-archive.ps1')
+          $files = @(Get-ChildItem -LiteralPath $binaries -File | ForEach-Object { @{ name = $_.Name; sizeBytes = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() } })
+          @{ sourceRevision = $env:SOURCE_REVISION; receiptSha256 = $package.receiptSha256; files = $files } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $signing 'unsigned-build.json')
+          "receipt=$($package.receiptSha256)" >> $env:GITHUB_OUTPUT
+      - name: Preserve unsigned assembly input
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: aiw-desktop-unsigned-${{ github.sha }}
+          path: ${{ runner.temp }}\aiw-unsigned-desktop/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Transfer only fixed signing inputs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: aiw-desktop-signing-inputs-${{ github.sha }}
+          path: ${{ runner.temp }}\aiw-signing-inputs/
+          if-no-files-found: error
+          retention-days: 7
+
+  sign:
+    needs: build
+    runs-on: windows-2025
+    timeout-minutes: 15
+    environment: artifact-signing
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: aiw-desktop-signing-inputs-${{ github.sha }}
+          path: inputs
+      - name: Check exact transferred inventory before Azure login
+        shell: pwsh
+        env:
+          SOURCE_REVISION: ${{ github.sha }}
+          RECEIPT: ${{ needs.build.outputs.receipt }}
+          CLIENT_ID: ${{ vars.AIW_SIGNING_CLIENT_ID }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:CLIENT_ID -notmatch '^[0-9a-f-]{36}$' -or $env:RECEIPT -notmatch '^[0-9a-f]{64}$') { throw 'Missing signing identity or receipt' }
+          $expected = @('aiw.exe', 'aiw-desktop.exe', 'aiw-guest-agent.exe', 'verify-desktop-package.ps1', 'desktop-package-archive.ps1')
+          $items = @(Get-ChildItem inputs -Recurse -Force)
+          if ($items.Count -ne 7 -or @($items | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count) { throw 'Unexpected signing input tree' }
+          if ((Get-Item inputs\unsigned-build.json).Length -gt 16384) { throw 'Build record exceeds bound' }
+          $build = Get-Content inputs\unsigned-build.json -Raw | ConvertFrom-Json
+          if ($build.sourceRevision -cne $env:SOURCE_REVISION -or $build.receiptSha256 -cne $env:RECEIPT -or @($build.files).Count -ne 5) { throw 'Signing source or receipt mismatch' }
+          foreach ($name in $expected) {
+            $file = Get-Item -LiteralPath (Join-Path inputs\binaries $name)
+            $records = @($build.files | Where-Object name -CEQ $name)
+            if ($file.PSIsContainer -or $file.Length -gt 128MB -or $records.Count -ne 1 -or $records[0].sizeBytes -ne $file.Length -or $records[0].sha256 -cne (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()) { throw 'Unsigned signing input differs' }
+          }
+      - name: Authenticate only the dedicated profile signer
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AIW_SIGNING_CLIENT_ID }}
+          tenant-id: 847b5907-ca15-40f4-b171-eb18619dbfab
+          subscription-id: a80941e8-c2b9-4bc9-83ad-117cc40d0bea
+      - name: Sign the three executables and two handoff scripts
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2
+        with:
+          endpoint: https://wus2.codesigning.azure.net/
+          signing-account-name: asa-nathanmcnulty
+          certificate-profile-name: kvpp-public-trust
+          files-folder: ${{ github.workspace }}\inputs\binaries
+          files-folder-filter: exe,ps1
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          cache-dependencies: false
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: aiw-desktop-signed-inputs-${{ github.sha }}
+          path: inputs/
+          if-no-files-found: error
+          retention-days: 7
+
+  assemble:
+    needs: [build, sign]
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: aiw-desktop-unsigned-${{ github.sha }}
+          path: ${{ runner.temp }}\unsigned-package
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: aiw-desktop-signed-inputs-${{ github.sha }}
+          path: ${{ runner.temp }}\signed-inputs
+      - name: Assemble and round-trip exact signed bytes without executing applications
+        shell: pwsh
+        env:
+          SOURCE_REVISION: ${{ github.sha }}
+          RECEIPT: ${{ needs.build.outputs.receipt }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:ACTIONS_ID_TOKEN_REQUEST_URL -or $env:ACTIONS_ID_TOKEN_REQUEST_TOKEN) { throw 'Assembly unexpectedly has OIDC authority' }
+          $inputs = Join-Path $env:RUNNER_TEMP 'signed-inputs'
+          $package = Join-Path $env:RUNNER_TEMP 'signed-package'
+          $evidence = Join-Path $env:RUNNER_TEMP 'signed-evidence'
+          $assembled = .\scripts\assemble-signed-desktop-package.ps1 -UnsignedPackageRoot (Join-Path $env:RUNNER_TEMP 'unsigned-package') -UnsignedReceiptSha256 $env:RECEIPT -SourceRevision $env:SOURCE_REVISION -SignedArtifactsDirectory (Join-Path $inputs 'binaries') -BuildRecord (Join-Path $inputs 'unsigned-build.json') -OutputDirectory $package -EvidenceDirectory $evidence | ConvertFrom-Json
+          $handoff = Join-Path $env:RUNNER_TEMP 'desktop-handoff'
+          & (Join-Path $inputs 'binaries\desktop-package-archive.ps1') -PackageRoot $package -OutputDirectory $handoff -ReceiptSha256 $assembled.receiptSha256 -SourceRevision $env:SOURCE_REVISION -RequirePublisherSignature | Out-Null
+          $distribution = Get-Content (Join-Path $handoff 'distribution.json') -Raw | ConvertFrom-Json
+          & (Join-Path $handoff 'desktop-package-archive.ps1') -ArchivePath (Join-Path $handoff 'aiw-desktop.zip') -ArchiveSha256 $distribution.archive.sha256 -OutputDirectory (Join-Path $env:RUNNER_TEMP 'download-round-trip') -ReceiptSha256 $assembled.receiptSha256 -SourceRevision $env:SOURCE_REVISION -RequirePublisherSignature | Out-Null
+          $guide = @'
+          # App Isolation Workbench signed alpha candidate
+
+          This candidate still needs runtime acceptance of these exact signed bytes.
+          Run the following in PowerShell from this downloaded handoff folder.
+          Compare the hashes below with the independently supplied CI/release record.
+          Use a supported Windows 11 host with Windows Sandbox enabled; the GUI
+          checks readiness before preparation.
+
+          ```powershell
+          $ErrorActionPreference = 'Stop'
+          $expected = @{
+              'desktop-package-archive.ps1' = '{HELPER_SHA}'
+              'verify-desktop-package.ps1' = '{VERIFIER_SHA}'
+          }
+          foreach ($name in $expected.Keys) {
+              if ((Get-FileHash -LiteralPath $name -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expected[$name]) { throw "Handoff hash mismatch: $name" }
+              $signature = Get-AuthenticodeSignature -LiteralPath $name
+              if ($signature.Status -ne 'Valid' -or $null -eq $signature.SignerCertificate -or $null -eq $signature.TimeStamperCertificate -or $signature.SignerCertificate.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) -cne 'Nathan McNulty') { throw "Publisher verification failed: $name" }
+          }
+          .\desktop-package-archive.ps1 -ArchivePath .\aiw-desktop.zip -ArchiveSha256 '{ARCHIVE_SHA}' -ReceiptSha256 '{RECEIPT_SHA}' -SourceRevision '{SOURCE}' -OutputDirectory 'C:\AIW-Desktop-Alpha-{SHORT_SOURCE}' -RequirePublisherSignature
+          & 'C:\AIW-Desktop-Alpha-{SHORT_SOURCE}\aiw-desktop.exe'
+          ```
+
+          Do not check `$LASTEXITCODE` after the archive PowerShell script: it throws
+          on failure. The destination must be fresh; do not overwrite prior evidence.
+          Choose the fixed Notepad++ 8.9.8 x64 MSI assessment or interactive transfer,
+          or Bambu Studio 02.08.02.60 x64 EXE export workflow in the GUI. Select the
+          exact supported installer, review the recipe, approve its displayed literal,
+          then press Start separately. Interactive transfer requires you to edit,
+          save, and close the editor. Sandbox data is temporary; export required
+          results explicitly. A passing function workflow does not prove broader
+          isolation. Retain the result and cleanup record before closing the host GUI.
+          '@
+          $helperHash = (Get-FileHash (Join-Path $handoff 'desktop-package-archive.ps1') -Algorithm SHA256).Hash.ToLowerInvariant()
+          $guide.Replace('{HELPER_SHA}', $helperHash).Replace('{VERIFIER_SHA}', $distribution.verifierSha256).Replace('{ARCHIVE_SHA}', $distribution.archive.sha256).Replace('{RECEIPT_SHA}', $assembled.receiptSha256).Replace('{SOURCE}', $env:SOURCE_REVISION).Replace('{SHORT_SOURCE}', $env:SOURCE_REVISION.Substring(0, 7)) | Set-Content (Join-Path $handoff 'START-HERE.md')
+      - name: Retain candidate for independent download testing
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: aiw-desktop-candidate-${{ github.sha }}
+          path: ${{ runner.temp }}\desktop-handoff/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Retain signature and assembly records even on failure
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: aiw-desktop-candidate-evidence-${{ github.sha }}
+          path: ${{ runner.temp }}\signed-evidence/
+          if-no-files-found: warn
+          retention-days: 30
