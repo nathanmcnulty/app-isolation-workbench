@@ -47,6 +47,12 @@ the canonical repository and owner actor. It never runs on PRs, forks, pushes,
 or caller-supplied code/files. The public client ID belongs in environment
 variable `AIW_SIGNING_CLIENT_ID`; no client secret/private key is generated.
 
+Configuration was applied and read back on 2026-10-04: client ID
+`2cf5967b-ebc6-431f-8ebd-3e221ef7e95e`, service principal
+`085c0231-28b0-4437-81e4-cf71a847ebd2`, one exact-environment federated credential,
+and one profile-scoped signer role. The environment's only deployment branch is
+`main`. The retained host record is `%TEMP%\aiw-signing-configured-identity.json`.
+
 Azure login uses OIDC and the explicit signing subscription. Artifact Signing
 uses only that Azure CLI credential; environment, managed-identity, developer,
 shared-cache, and interactive-browser alternatives are excluded. Never use
