@@ -62,6 +62,34 @@ try {
     $signedExport = Join-Path ([IO.Path]::GetTempPath()) "aiw-signed-refusal-$([guid]::NewGuid().ToString('N'))"
     Assert-Rejected { & (Join-Path $PSScriptRoot 'desktop-package-archive.ps1') -PackageRoot $root -ReceiptSha256 $receiptHash -SourceRevision $sourceRevision -OutputDirectory $signedExport -RequirePublisherSignature } 'unsigned payload requested as an authenticated handoff'
     if (Test-Path -LiteralPath $signedExport) { throw 'Unsigned handoff was published despite signature refusal' }
+    # Isolate the verifier ordering regression: the tool is accepted by the
+    # signature probe, while its sibling verifier is explicitly rejected.
+    # The real unsigned-signature controls above/below do not use this probe.
+    $sidecarRoot = $root + '-sidecar'
+    New-Item -ItemType Directory -Path $sidecarRoot | Out-Null
+    try {
+        $testTool = Join-Path $sidecarRoot 'desktop-package-archive.ps1'
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'desktop-package-archive.ps1') -Destination $testTool
+        $marker = Join-Path $sidecarRoot 'verifier-executed.txt'
+        "[IO.File]::WriteAllText('$marker', 'executed')" | Set-Content (Join-Path $sidecarRoot 'verify-desktop-package.ps1')
+        function Get-AuthenticodeSignature {
+            param([string]$LiteralPath)
+            $certificate = [pscustomobject]@{}
+            $certificate | Add-Member -MemberType ScriptMethod -Name GetNameInfo -Value { param($type, $issuer) 'Nathan McNulty' }
+            [pscustomobject]@{ Status = $(if ([IO.Path]::GetFileName($LiteralPath) -ceq 'desktop-package-archive.ps1') { 'Valid' } else { 'HashMismatch' }); SignatureType = 'Authenticode'; SignerCertificate = $certificate; TimeStamperCertificate = $certificate }
+        }
+        foreach ($operation in @('Export', 'Expand')) {
+            $parameters = @{ OutputDirectory = (Join-Path $sidecarRoot $operation); ReceiptSha256 = $receiptHash; SourceRevision = $sourceRevision; RequirePublisherSignature = $true }
+            if ($operation -ceq 'Export') { $parameters.PackageRoot = $root } else { $parameters.ArchivePath = Join-Path $sidecarRoot 'unused.zip'; $parameters.ArchiveSha256 = '0' * 64 }
+            $rejection = $null
+            try { & $testTool @parameters | Out-Null } catch { $rejection = $_.Exception.Message }
+            if ($rejection -notlike '*requires valid timestamped Authenticode*' -or (Test-Path -LiteralPath $marker) -or (Test-Path -LiteralPath $parameters.OutputDirectory)) { throw 'Signed handoff executed a rejected verifier sidecar' }
+        }
+    } finally {
+        Remove-Item -LiteralPath Function:Get-AuthenticodeSignature -ErrorAction SilentlyContinue
+        if ((Split-Path -Parent $sidecarRoot) -ine ([IO.Path]::GetTempPath()).TrimEnd('\') -or -not $sidecarRoot.StartsWith($root + '-', [StringComparison]::OrdinalIgnoreCase) -or (Get-ChildItem -LiteralPath $sidecarRoot -Recurse -Force | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint })) { throw 'Unexpected sidecar fixture cleanup target' }
+        Remove-Item -LiteralPath $sidecarRoot -Recurse -Force
+    }
     if ($CheckSignedAssembly) {
         # Kept outside the unsigned package's closed inventory.
         $signedInputs = $root + '-signed-inputs'

@@ -18,6 +18,11 @@ $allowedPaths = @('receipt.json', 'aiw.exe', 'aiw-desktop.exe', 'README.txt', 'L
     'product/bambu-studio/manifest.json', 'product/bambu-studio/project.json', 'product/bambu-studio/tools/aiw-guest-agent.exe')
 $maximumFileBytes = 128MB
 $maximumArchiveBytes = 512MB
+$handoffLocks = [Collections.Generic.List[IO.FileStream]]::new()
+$signedPackagePaths = @('aiw.exe', 'aiw-desktop.exe', 'verify-desktop-package.ps1',
+    'product/notepad-plus-plus/tools/aiw-guest-agent.exe',
+    'product/notepad-plus-plus-interactive/tools/aiw-guest-agent.exe',
+    'product/bambu-studio/tools/aiw-guest-agent.exe')
 
 function Resolve-LocalPath([string]$Path) {
     $resolved = [IO.Path]::GetFullPath($ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path))
@@ -79,10 +84,7 @@ function Verify-Package([string]$Root) {
     $result = & $verifier -PackageRoot $Root -ReceiptSha256 $ReceiptSha256 -SourceRevision $SourceRevision | ConvertFrom-Json
     if ($result.exactInventory -ne $true) { throw 'Desktop package inventory did not verify' }
     if ($RequirePublisherSignature) {
-        foreach ($relative in @('aiw.exe', 'aiw-desktop.exe', 'verify-desktop-package.ps1',
-            'product/notepad-plus-plus/tools/aiw-guest-agent.exe',
-            'product/notepad-plus-plus-interactive/tools/aiw-guest-agent.exe',
-            'product/bambu-studio/tools/aiw-guest-agent.exe')) { Assert-Publisher (Join-Path $Root $relative) }
+        foreach ($relative in $signedPackagePaths) { Assert-Publisher (Join-Path $Root $relative) }
     }
 }
 function Expand-HeldArchive([IO.FileStream]$Stream, [string]$Destination) {
@@ -125,6 +127,15 @@ $stageLeaf = "aiw-desktop-handoff-$([guid]::NewGuid().ToString('N'))"
 $stage = Join-Path $parent $stageLeaf
 New-Item -ItemType Directory -Path $stage -ErrorAction Stop | Out-Null
 try {
+    if ($RequirePublisherSignature) {
+        # Hold the authenticated tools against replacement through invocation and
+        # copying. Authenticating only after verifier execution is too late.
+        foreach ($tool in @($PSCommandPath, $verifier)) {
+            Assert-OrdinaryAncestors $tool
+            $handoffLocks.Add([IO.File]::Open($tool, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read))
+            Assert-Publisher $tool
+        }
+    }
     if ($PSCmdlet.ParameterSetName -ceq 'Export') {
         $root = Resolve-LocalPath $PackageRoot
         Assert-OrdinaryAncestors $root
@@ -168,7 +179,12 @@ try {
         if ($RequirePublisherSignature) {
             foreach ($name in @('desktop-package-archive.ps1', 'verify-desktop-package.ps1')) { Assert-Publisher (Join-Path $stage $name) }
             $manifest.signingStatus = 'publisherSignatureVerified'
-            $manifest.authenticity = 'timestampedAuthenticode:Nathan McNulty'
+            # Authenticode covers these files, not the unsigned receipt, project
+            # assets, ZIP, or distribution record. Independent hashes still bind
+            # the exact handoff; they are not a publisher signature over it.
+            $manifest.publisherSignaturesVerified = $true
+            $manifest.publisher = 'Nathan McNulty'
+            $manifest.signedPackagePaths = $signedPackagePaths
         }
         $manifest.handoffTools = @('desktop-package-archive.ps1', 'verify-desktop-package.ps1') | ForEach-Object {
             [ordered]@{ fileName = $_; sha256 = (Get-FileHash -LiteralPath (Join-Path $stage $_) -Algorithm SHA256).Hash.ToLowerInvariant() }
@@ -183,9 +199,10 @@ try {
         finally { $stream.Dispose() }
     }
     [IO.Directory]::Move($stage, $output)
-    [ordered]@{ schemaVersion = 'aiw.dev/desktop-archive-result/v0alpha1'; operation = $PSCmdlet.ParameterSetName; outputDirectory = $output; archiveSha256 = $ArchiveSha256; receiptSha256 = $ReceiptSha256; sourceRevision = $SourceRevision; exactInventory = $true; authenticity = $(if ($RequirePublisherSignature) { 'timestampedAuthenticode:Nathan McNulty' } else { 'notEstablished' }) } | ConvertTo-Json -Compress
+    [ordered]@{ schemaVersion = 'aiw.dev/desktop-archive-result/v0alpha1'; operation = $PSCmdlet.ParameterSetName; outputDirectory = $output; archiveSha256 = $ArchiveSha256; receiptSha256 = $ReceiptSha256; sourceRevision = $SourceRevision; exactInventory = $true; authenticity = 'notEstablished'; publisherSignaturesVerified = [bool]$RequirePublisherSignature; signedPackagePaths = $(if ($RequirePublisherSignature) { $signedPackagePaths } else { @() }) } | ConvertTo-Json -Compress
 }
 finally {
+    foreach ($heldTool in $handoffLocks) { $heldTool.Dispose() }
     if (Test-Path -LiteralPath $stage) {
         if ((Split-Path -Parent $stage) -cne $parent -or (Split-Path -Leaf $stage) -cne $stageLeaf) { throw 'Refusing cleanup outside the owned handoff stage' }
         Assert-OrdinaryAncestors $stage

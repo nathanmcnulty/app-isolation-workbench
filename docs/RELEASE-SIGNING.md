@@ -113,9 +113,12 @@ runs an application or starts Sandbox. Historical guest-bound launch profiles
 are refused rather than reclassified after signing.
 
 `desktop-package-archive.ps1 -RequirePublisherSignature` makes signature checking
-an explicit requirement for export and extraction; it checks the fixed packaged
-executables/verifier, plus exported handoff scripts. Its distribution record only
-claims publisher authentication after these checks. Default unsigned/historical
+an explicit requirement for export and extraction; it authenticates and holds the
+handoff scripts before executing the verifier, then checks the fixed packaged
+executables/verifier and exported handoff scripts. Its distribution record lists
+only the signed files; complete-package authenticity remains `notEstablished`
+because project assets, receipt, and archive are not publisher-signed. Independently
+supplied archive/receipt hashes bind their exact contents. Default unsigned/historical
 handoffs retain their existing claim boundary. CI runs unsigned-signature and
 build-record-drift refusal controls alongside the existing receipt/archive tests.
 Full signed candidate execution remains unproven until this workflow is merged,
