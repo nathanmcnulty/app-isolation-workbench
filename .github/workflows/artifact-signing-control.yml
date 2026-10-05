@@ -1,0 +1,98 @@
+name: Artifact Signing control
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aiw-artifact-signing-control
+  cancel-in-progress: false
+
+jobs:
+  sign-control:
+    if: github.repository == 'nathanmcnulty/app-isolation-workbench' && github.ref == 'refs/heads/main' && github.actor == 'nathanmcnulty'
+    runs-on: windows-2025
+    timeout-minutes: 30
+    environment: artifact-signing
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}\build-signing-control
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: '-C target-feature=+crt-static'
+      CARGO_INCREMENTAL: '0'
+      SOURCE_REVISION: ${{ github.sha }}
+    steps:
+      - name: Check out exact authorized source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Check source and signing identity
+        shell: pwsh
+        env:
+          CLIENT_ID: ${{ vars.AIW_SIGNING_CLIENT_ID }}
+        run: |
+          if ((git rev-parse HEAD).Trim() -cne $env:SOURCE_REVISION) { throw 'Signing source differs from the dispatched commit' }
+          if ($env:CLIENT_ID -notmatch '^[0-9a-f-]{36}$') { throw 'Missing dedicated Artifact Signing OIDC client ID' }
+          New-Item -ItemType Directory -Path out | Out-Null
+      - name: Build project-owned CLI control
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          if ($LASTEXITCODE -ne 0) { throw 'Rust installation failed' }
+          cargo +stable build -p aiw-cli --locked --release --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { throw 'CLI control build failed' }
+          Copy-Item -LiteralPath build-signing-control\x86_64-pc-windows-msvc\release\aiw.exe -Destination out\aiw.exe
+      - name: Azure OIDC login for the dedicated signer
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AIW_SIGNING_CLIENT_ID }}
+          tenant-id: 847b5907-ca15-40f4-b171-eb18619dbfab
+          subscription-id: a80941e8-c2b9-4bc9-83ad-117cc40d0bea
+      - name: Sign only the built control
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2
+        with:
+          endpoint: https://wus2.codesigning.azure.net/
+          signing-account-name: asa-nathanmcnulty
+          certificate-profile-name: kvpp-public-trust
+          files: ${{ github.workspace }}\out\aiw.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+      - name: Verify publisher, timestamp, and signed bytes
+        shell: pwsh
+        run: |
+          .\scripts\verify-signing-control.ps1 -Path out\aiw.exe -SourceRevision $env:SOURCE_REVISION -OutputFile out\signing-verification.json
+      - name: Run bounded project-owned version control
+        shell: pwsh
+        run: |
+          $control = Start-Process -FilePath (Join-Path $PWD 'out\aiw.exe') -ArgumentList '--version' -PassThru -WindowStyle Hidden -RedirectStandardOutput out\version.stdout.txt -RedirectStandardError out\version.stderr.txt
+          if (-not $control.WaitForExit(30000)) {
+            $control.Kill()
+            @{ stage = 'version'; outcome = 'timedOut' } | ConvertTo-Json | Set-Content out\control-result.json
+            throw 'Signed CLI control exceeded its deadline'
+          }
+          $control.WaitForExit()
+          @{ stage = 'version'; outcome = $(if ($control.ExitCode -eq 0) { 'completed' } else { 'failed' }); exitCode = $control.ExitCode } | ConvertTo-Json | Set-Content out\control-result.json
+          if ($control.ExitCode -ne 0) { throw 'Signed CLI control failed' }
+      - name: Retain signing control evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: aiw-signing-control-${{ github.sha }}
+          path: out/
+          if-no-files-found: warn
+          retention-days: 14
