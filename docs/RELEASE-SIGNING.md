@@ -58,6 +58,9 @@ uses only that Azure CLI credential; environment, managed-identity, developer,
 shared-cache, and interactive-browser alternatives are excluded. Never use
 device-code authentication. Action dependencies have fixed versions in the
 reviewed pinned action; its internal actions are also SHA-pinned.
+Its dependency cache is disabled in the credentialed signing job so code run
+during compilation cannot seed executable signing dependencies through a shared
+repository cache.
 
 The signature verifier holds the built file against concurrent write/delete,
 records its hash and publisher/timestamp status, and writes a fresh result even
