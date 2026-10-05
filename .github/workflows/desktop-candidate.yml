@@ -162,7 +162,42 @@ jobs:
           & (Join-Path $inputs 'binaries\desktop-package-archive.ps1') -PackageRoot $package -OutputDirectory $handoff -ReceiptSha256 $assembled.receiptSha256 -SourceRevision $env:SOURCE_REVISION -RequirePublisherSignature | Out-Null
           $distribution = Get-Content (Join-Path $handoff 'distribution.json') -Raw | ConvertFrom-Json
           & (Join-Path $handoff 'desktop-package-archive.ps1') -ArchivePath (Join-Path $handoff 'aiw-desktop.zip') -ArchiveSha256 $distribution.archive.sha256 -OutputDirectory (Join-Path $env:RUNNER_TEMP 'download-round-trip') -ReceiptSha256 $assembled.receiptSha256 -SourceRevision $env:SOURCE_REVISION -RequirePublisherSignature | Out-Null
-          "Signed alpha candidate. Source: $env:SOURCE_REVISION. Runtime acceptance is pending; no application was executed in this job." | Set-Content (Join-Path $handoff 'START-HERE.txt')
+          $guide = @'
+          # App Isolation Workbench signed alpha candidate
+
+          This candidate still needs runtime acceptance of these exact signed bytes.
+          Run the following in PowerShell from this downloaded handoff folder.
+          Compare the hashes below with the independently supplied CI/release record.
+          Use a supported Windows 11 host with Windows Sandbox enabled; the GUI
+          checks readiness before preparation.
+
+          ```powershell
+          $ErrorActionPreference = 'Stop'
+          $expected = @{
+              'desktop-package-archive.ps1' = '{HELPER_SHA}'
+              'verify-desktop-package.ps1' = '{VERIFIER_SHA}'
+          }
+          foreach ($name in $expected.Keys) {
+              if ((Get-FileHash -LiteralPath $name -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expected[$name]) { throw "Handoff hash mismatch: $name" }
+              $signature = Get-AuthenticodeSignature -LiteralPath $name
+              if ($signature.Status -ne 'Valid' -or $null -eq $signature.SignerCertificate -or $null -eq $signature.TimeStamperCertificate -or $signature.SignerCertificate.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) -cne 'Nathan McNulty') { throw "Publisher verification failed: $name" }
+          }
+          .\desktop-package-archive.ps1 -ArchivePath .\aiw-desktop.zip -ArchiveSha256 '{ARCHIVE_SHA}' -ReceiptSha256 '{RECEIPT_SHA}' -SourceRevision '{SOURCE}' -OutputDirectory 'C:\AIW-Desktop-Alpha-{SHORT_SOURCE}' -RequirePublisherSignature
+          & 'C:\AIW-Desktop-Alpha-{SHORT_SOURCE}\aiw-desktop.exe'
+          ```
+
+          Do not check `$LASTEXITCODE` after the archive PowerShell script: it throws
+          on failure. The destination must be fresh; do not overwrite prior evidence.
+          Choose the fixed Notepad++ 8.9.8 x64 MSI assessment or interactive transfer,
+          or Bambu Studio 02.08.02.60 x64 EXE export workflow in the GUI. Select the
+          exact supported installer, review the recipe, approve its displayed literal,
+          then press Start separately. Interactive transfer requires you to edit,
+          save, and close the editor. Sandbox data is temporary; export required
+          results explicitly. A passing function workflow does not prove broader
+          isolation. Retain the result and cleanup record before closing the host GUI.
+          '@
+          $helperHash = (Get-FileHash (Join-Path $handoff 'desktop-package-archive.ps1') -Algorithm SHA256).Hash.ToLowerInvariant()
+          $guide.Replace('{HELPER_SHA}', $helperHash).Replace('{VERIFIER_SHA}', $distribution.verifierSha256).Replace('{ARCHIVE_SHA}', $distribution.archive.sha256).Replace('{RECEIPT_SHA}', $assembled.receiptSha256).Replace('{SOURCE}', $env:SOURCE_REVISION).Replace('{SHORT_SOURCE}', $env:SOURCE_REVISION.Substring(0, 7)) | Set-Content (Join-Path $handoff 'START-HERE.md')
       - name: Retain candidate for independent download testing
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
