@@ -101,8 +101,8 @@ not signed desktop assembly, runtime acceptance, or public distribution.
 ## Moving from control to release
 
 The manual `desktop-candidate.yml` workflow extends the proven control to the
-three unique executables and the two distribution scripts. It retains a private
-Actions candidate; it does not yet publish a GitHub release. Compilation creates
+three unique executables and the two distribution scripts. By default it retains
+an Actions candidate without publishing a GitHub release. Compilation creates
 an unsigned closed package and a fixed signing-input record. The signer consumes
 only five named files, checks their source/receipt/hash inventory before login,
 and has no checkout or build step. A third job verifies the publisher signatures,
@@ -123,6 +123,27 @@ handoffs retain their existing claim boundary. CI runs unsigned-signature and
 build-record-drift refusal controls alongside the existing receipt/archive tests.
 Full signed candidate execution remains unproven until this workflow is merged,
 run, downloaded, and tested on the supported disposable VM.
+
+The optional `publish` input is false by default. Publication requires the public
+canonical repository, owner actor, exact `main` dispatch, successful assembly,
+and the main-only `public-release` environment. Its separate runner has no
+checkout, build, application execution, or Azure login. It checks the five
+downloaded handoff files against assembly's exact hash/size inventory, attests
+each file with SHA-pinned `actions/attest` v4.2.2, uploads a fresh prerelease in
+draft, and independently compares GitHub's uploaded asset digests before exposing
+it. Existing tags/releases are not overwritten. The public release and resolved
+tag source are read back. Only this job receives contents-write and provenance
+attestation authority; it cannot use the signing environment's Azure federation.
+
+These [GitHub build provenance attestations](https://github.com/actions/attest/tree/1e69f48acb82d1966a394da916b4c1698aa569d6)
+bind downloadable asset digests to repository/workflow/source identity. They are
+separate from the personal Authenticode signatures and runtime/isolation evidence.
+The unsigned distribution record keeps complete-package publisher authenticity
+unestablished; provenance and independently supplied hashes verify its exact
+contents. A public download must verify both provenance and the signed handoff
+scripts before extraction. Release notes supply all five asset hashes and an
+exact `gh attestation verify` command scoped to the workflow, main ref, source
+digest, and hosted runners.
 
 Nathan authorized the following order on 2026-10-04, once a good public candidate
 is ready:

@@ -40,15 +40,20 @@ try {
         }
     }
 
-    $workflowText = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.github\workflows\ci.yml')
-    $workflowUses = [regex]::Matches($workflowText, '(?m)^\s*uses:\s*([^\s#]+)')
-    foreach ($match in $workflowUses) {
-        if ($match.Groups[1].Value -notmatch '@[0-9a-fA-F]{40}$') {
-            throw "GitHub Actions must be pinned to a full commit SHA: $($match.Groups[1].Value)"
+    $workflows = @(Get-ChildItem -LiteralPath (Join-Path $repoRoot '.github\workflows') -File | Where-Object Extension -In @('.yml', '.yaml'))
+    $actionCount = 0
+    foreach ($workflow in $workflows) {
+        $workflowText = Get-Content -Raw -LiteralPath $workflow.FullName
+        $workflowUses = [regex]::Matches($workflowText, '(?m)^\s*(?:-\s*)?uses:\s*([^\s#]+)')
+        foreach ($match in $workflowUses) {
+            if ($match.Groups[1].Value -notmatch '@[0-9a-fA-F]{40}$') {
+                throw "GitHub Actions must be pinned to a full commit SHA in $($workflow.Name): $($match.Groups[1].Value)"
+            }
+            $actionCount++
         }
     }
-    if ($workflowUses.Count -eq 0) {
-        throw 'CI workflow does not declare an action'
+    if ($actionCount -eq 0) {
+        throw 'Repository workflows do not declare a pinned action'
     }
 
     if ($GovernanceOnly) {
