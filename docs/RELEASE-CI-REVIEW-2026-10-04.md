@@ -87,3 +87,25 @@ this review does not change repository-required checks or imply their enforcemen
 6. Download the public assets into a fresh folder and verify/test those exact bytes
    on the dedicated supported VM. Do not substitute private build or historical
    unsigned acceptance. Keep stable promotion gated on that evidence.
+
+## Public transition and draft API correction
+
+PR #86 merged at `90d06e7fe223bfe1166bd996f0e1db8c3a068be4` after all three
+CI jobs passed at `40c9df8` (run `37252512658`). Its merged tree matches the tested
+PR tree. Final scan covered 463 commits with no findings. The authorized public
+transition was read back anonymously; the immutable OIDC subject was unchanged.
+
+Before publication, a read-only API control against the existing unsigned draft
+found a release lookup defect missed by the initial review: authenticated
+`GET /releases/tags/desktop-preview-e08115b` returns 404 for the draft, whereas
+paginated `GET /releases` resolves numeric ID `403260000` and `GET /releases/403260000`
+returns its exact tag, source, draft state and five assets. Public workflow run
+`37253486994` was canceled during compilation, before signing or publication.
+No public alpha or new draft was created.
+
+Publication now resolves exactly one numeric ID for the fixed tag from the
+paginated release list, then reads that ID and applies the existing draft/source/
+asset digest checks. Missing or ambiguous identity refuses publication and
+preserves the draft. The published-release readback still uses its published tag.
+The existing unsigned draft was only read and remains unchanged. This correction
+requires independent review and exact-head hosted CI before the next dispatch.
