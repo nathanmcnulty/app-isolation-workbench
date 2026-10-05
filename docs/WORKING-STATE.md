@@ -5,37 +5,34 @@ This handoff is a pointer, not execution authority or a run receipt.
 
 ## Current slice
 
-Nathan authorized his existing personal Artifact Signing account and CI setup;
-see [signing identity and control](RELEASE-SIGNING.md). The manual main-only CLI
-signing control passed at merged `210bbc9` (PR #84, all three CI checks passed).
-Downloaded signed bytes independently verified as timestamped Authenticode from
-Nathan McNulty; a modified copy was rejected with `HashMismatch`. Initial Azure
-federation rejection was corrected using GitHub's exact immutable subject.
-PR #85 merged the signed-desktop candidate workflow at `0cb8cad` after all three
-CI checks passed at `7d9f9d6` in run `37249517740`; merged main has the tested tree.
-Independent review resolved verifier execution before authentication and overly
-broad authenticity claims. Local and hosted receipt/archive tests include real
-unsigned refusal, changed build-record refusal, and rejected verifier non-execution.
-Full signed candidate run `37250759217` passed all three stages at merged
-`0cb8cad6605b857170a199e28f9f9a3577defd05`. Independent downloaded-package
-extraction verified source, receipt, exact inventory, timestamped personal
-publisher signatures on both handoff tools and six fixed package paths.
-See RELEASE-CI-REVIEW-2026-10-04 for hashes and retained evidence pointers.
-The publication/governance diff at `5f85a7f`, with README at `9d7bd47`, passed
-independent review with no actionable findings. Final exact-head hosted CI,
-merged-tree proof, public transition, public CI, and public-byte VM acceptance
-remain open. This checkout adds a false-by-default publication job with separate
-main-only authority, per-file provenance, and draft asset checks before exposure.
-Nathan authorized the subsequent sequence: candidate readiness, focused release
-CI review, public repository, CI-built public prerelease, then download/verify/test
-those exact artifacts before stable promotion. See RELEASE-SIGNING for the order.
-Its dedicated passwordless identity, profile-only signer role, and main-only
-environment are configured and independently read back. The build/sign/verify
-jobs are isolated; none of the built executable runs with signing authority.
-The unsigned `desktop-preview-e08115b` GitHub draft was created with all five
-verified assets. Approved cleanup of two temporary host handoffs remains blocked
-by automatic policy review; the final handoff and all evidence are preserved.
+PR #86 merged the independently reviewed public alpha publication workflow at
+`90d06e7fe223bfe1166bd996f0e1db8c3a068be4`. All three hosted CI checks passed
+at `40c9df8` in run `37252512658`; merged main has its exact tested tree
+`cd2363c8deecc5482cd1255a6c58e3cfc00fac3b`. The repository is now public under
+Nathan's authorization, with anonymous API readback. The final full-history
+exposure scan covered 463 commits with no findings. Main-only environment
+policies, profile-only Azure signer role, and immutable OIDC subject were checked;
+visibility did not change the subject. See RELEASE-CI-REVIEW-2026-10-04.
 
+First public alpha workflow run `37253486994` is building exact merged `90d06e7`.
+Observe this run before any retry. Host watcher log:
+`%TEMP%\aiw-public-alpha-37253486994.log`. Expected new tag is
+`desktop-alpha-90d06e7fe223`. Public publication, all-five-file provenance and
+asset verification, fresh public download, and exact-byte dedicated-VM acceptance
+remain open. This acceptance branch starts at the public build source; do not
+substitute its later documentation commits for the source being tested.
+
+Private full signed control `37250759217` passed at `0cb8cad`. Independent
+signature-checked download/extraction passed with exact source, inventory, receipt,
+and timestamped Nathan McNulty signatures on both handoff tools and six package
+paths. This is not public-byte runtime acceptance. The earlier CLI signing
+control, tamper rejection, and corrected immutable federation are recorded in
+RELEASE-SIGNING. Build, Azure signing, assembly, and publication have separate
+runners/permissions; built executables never run with signing authority.
+
+The old unsigned `desktop-preview-e08115b` draft remains unpublished. Automatic
+policy review blocked approved cleanup of two temporary host handoffs; do not
+bypass that rejection. The final handoff and retained evidence remain preserved.
 PR #82 merged the Bambu GUI at `1db892d` after all three exact-head CI jobs passed;
 merged main has the tested tree. The verified desktop archive handoff now has
 native PowerShell 5.1 export and extraction proof on the dedicated VM; both
