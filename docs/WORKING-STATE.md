@@ -11,12 +11,16 @@ signing control passed at merged `210bbc9` (PR #84, all three CI checks passed).
 Downloaded signed bytes independently verified as timestamped Authenticode from
 Nathan McNulty; a modified copy was rejected with `HashMismatch`. Initial Azure
 federation rejection was corrected using GitHub's exact immutable subject.
-Current slice: the private signed-desktop candidate workflow builds, signs, and
-assembles on separate runners, preserving unsigned inputs and regenerating
-manifests/receipt from final signed bytes. It requires exact publisher signatures
-for ZIP export/extraction. Local negative tests, exact-commit review, hosted CI,
-and a full live candidate build are the pending checks; runtime acceptance and
-public release remain open. See RELEASE-SIGNING for the contract.
+PR #85 merged the signed-desktop candidate workflow at `0cb8cad` after all three
+CI checks passed at `7d9f9d6` in run `37249517740`; merged main has the tested tree.
+Independent review resolved verifier execution before authentication and overly
+broad authenticity claims. Local and hosted receipt/archive tests include real
+unsigned refusal, changed build-record refusal, and rejected verifier non-execution.
+Full signed candidate run `37250759217` is actively building exact merged
+`0cb8cad6605b857170a199e28f9f9a3577defd05`. Observe that run before any retry;
+the host watcher logs to `%TEMP%\aiw-full-signed-desktop-37250759217.log`.
+Download/signature/receipt verification, release CI review, public publication,
+and exact downloaded-candidate runtime acceptance remain open. See RELEASE-SIGNING.
 Nathan authorized the subsequent sequence: candidate readiness, focused release
 CI review, public repository, CI-built public prerelease, then download/verify/test
 those exact artifacts before stable promotion. See RELEASE-SIGNING for the order.
