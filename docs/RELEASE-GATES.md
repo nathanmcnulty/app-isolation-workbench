@@ -20,9 +20,10 @@ separate supported-profile candidate, not a reason to promise general EXE suppor
   document workflow and required guest standard-user file ACL controls.
 - A reusable profile can bind that retained comparison to fresh preparation.
 
-This is substantial execution and evidence infrastructure. It is not yet a
-complete administrator-facing release. Counts of commits, tests, or reports do
-not measure that final product outcome.
+The signed public alpha now distributes this fixed-workflow foundation through
+reviewed CI. [Public acceptance](PUBLIC-ALPHA-ACCEPTANCE.md) records exact download
+identities and fresh runtime results; historical unsigned trials are not substituted
+for those checks. Counts of commits, tests, or reports do not measure product utility.
 
 ## Release-critical gates
 
@@ -32,6 +33,7 @@ not measure that final product outcome.
 | Administrator workflow — demonstrated | The packaged `aiw admin assess` route completed protected intake, complete recipe display, operator exact-hash approval, profile-bound replay, retained JSON/Markdown reporting, and verified cleanup for run `admin-1789947096248087800`. The report records every fixed function as passed while retaining `insufficientEvidence` for broader isolation. Occupied-session, unsupported-input, cancellation, and profile/package drift controls are retained or covered by the exact package checks and tests. See [administrator workflow proof](ADMINISTRATOR-WORKFLOW.md#public-entry-proof). |
 | Clean-host distribution trial — demonstrated for the exact unsigned preview | A second operator freshly extracted and verified the `08ab440` package on the separate supported VM, approved the profile-bound recipe, and completed run `admin-1790485297308064300` with nine passed stages, saved-document and ACL controls, terminal cleanup, and no remaining Sandbox session. Unsupported input was rejected before intake or provider acquisition in `admin-1790486242125347900`. See [clean-host acceptance](CLEAN-HOST-PREVIEW.md#independent-operator-acceptance-for-this-package). Signing, publisher authentication, and broader isolation claims remain outside this proof. |
 | Windows GUI operator loop — demonstrated for the exact unsigned development preview | Package `343d380` completed fresh assessment and interactive edit/save/export through actual GUI selection, review, approval, and separate Start. Independent receipt/output/input and empty-provider checks passed, as did retained viewing, cancellation/closure before Start, and export refusals. The third fixed Bambu export mode also passed a fresh GUI trial and corrected retained-result verification; see [Bambu acceptance](BAMBU-ADMIN-ENTRY.md#completed-desktop-acceptance-2026-10-03). This is automated dedicated-VM acceptance, not another human trial or a signed public release. See [GUI acceptance](GUI-FIRST-FINISH-LINE.md#completed-packaged-gui-acceptance-2026-10-03). |
+| Signed public distribution — demonstrated for exact alpha | Reviewed CI run `37254512259` built, signed, assembled, attested and published `desktop-alpha-6c7873c4e80c` from exact main `6c7873c4e80c889394ec43b27138cc52fc7df1c2`. Independent public downloads passed exact-source GitHub provenance, timestamped personal signatures, inventory and receipt checks before fresh extraction and GUI execution on the dedicated VM. See [public acceptance](PUBLIC-ALPHA-ACCEPTANCE.md) for each runtime result and its separate limits. This is a prerelease, not general application or effective-isolation certification. |
 
 After approved profile replay, pause feature expansion for a focused quality
 review of approval/evidence bindings, historical reporting, recovery, and test
@@ -49,8 +51,9 @@ foundation work before the administrator milestone.
 The [desktop archive handoff](DESKTOP-DISTRIBUTION.md) now has native PowerShell
 5.1 export/extraction proof for the accepted unsigned package, with unchanged
 receipt bytes, trusted sidecar verifier selection, and negative path/hash controls.
-No application trial was repeated. This is a distribution-integrity control;
-publisher authentication and signing remain open.
+No application trial was repeated for that historical unsigned integrity control.
+Publisher signing and authenticated public distribution subsequently passed for
+the separate signed alpha identified in the table above.
 
 - Starting with the distributed build and an operator-selected installer, show
   whether an exact supported profile exists. Unsupported bytes or application
@@ -122,9 +125,9 @@ provider reported no sessions afterward. The report's broader outcome remains
 IPC, persistence, and effective-backend measurements listed explicitly.
 
 These are outcome gates, not a calendar or quota estimate. The narrow
-clean-host preview loop is demonstrated for the exact unsigned package; public
-distribution still needs an authenticated publication channel and signing
-decision. New application classes and isolation mechanisms are not evidence
+clean-host preview loop is demonstrated for the exact unsigned package; the
+subsequent signed public alpha has its own authenticated distribution and fresh
+runtime evidence. New application classes and isolation mechanisms are not evidence
 for this preview and require their own bounded validation.
 Update this table when evidence closes a gate rather than repeatedly labelling
 implementation slices as a release milestone.

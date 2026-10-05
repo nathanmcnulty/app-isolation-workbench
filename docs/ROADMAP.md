@@ -1,6 +1,6 @@
 # Roadmap
 
-Reviewed 2026-10-03 against the implemented runner and retained live evidence. The release sequence below is authoritative; numbered capability benchmarks retain research acceptance criteria, not a serial release backlog. External platform research below is dated context and must be reverified before implementation.
+Reviewed 2026-10-04 against the implemented runner, publication controls, and retained live evidence. The release sequence below is authoritative; numbered capability benchmarks retain research acceptance criteria, not a serial release backlog. External platform research below is dated context and must be reverified before implementation.
 
 The goal is a free community tool that answers **which tested application functions work under which measured isolation configuration**, helps an administrator adapt the application, and produces a launch profile or package that passes the same tests. Workbench evolves into Studio when authoring is useful; this is one product.
 
@@ -64,20 +64,20 @@ refusals are implemented. The exact `738ea6e` preview completed a fresh approved
 human edit/save/export run with independently reverified retained output and
 cleanup. The packaged administrator export entry removes project/hash flags;
 its release validation uses that retained run rather than repeating installation.
-Keep the next preview work focused on a self-contained operator handoff and
-authenticated distribution. Preserve complete approval review and receipt-based
-conclusions; do not reopen completed execution gates to improve presentation.
-Public distribution also needs a publisher-authentication and signing decision;
-the present package is an unsigned development preview.
+Preserve the self-contained operator handoff, complete approval review and
+receipt-based conclusions; do not reopen completed execution gates to improve
+presentation.
 Nathan selected his existing personal Artifact Signing account on 2026-10-04.
-The [isolated signing control](RELEASE-SIGNING.md) prepares the CI path; its
-completion does not replace signed-candidate assembly and fresh acceptance.
-The [verified desktop archive handoff](DESKTOP-DISTRIBUTION.md) now exports and
-extracts that accepted package with independent identities and bounded inventory
-checks, including native PowerShell 5.1 proof on the dedicated VM. This removes
-manual ZIP work without changing the application evidence or closing publisher
-authentication. Finish the publication/signing decision before public release;
-do not add application classes as a substitute for this remaining gate.
+The reviewed CI separates compilation, signing, assembly and publication. After
+the authorized public transition, it published signed alpha
+`desktop-alpha-6c7873c4e80c`. Independent public downloads passed exact-source
+attestation, timestamped signature, closed-inventory and receipt checks before
+fresh dedicated-VM testing. See [signed public acceptance](PUBLIC-ALPHA-ACCEPTANCE.md)
+for completed workflows and limits; earlier unsigned trials remain separate.
+The alpha provides a usable fixed-workflow assessment loop, not general installer
+conversion or a measured host-containment verdict. Keep the complete recipe
+available while improving its default approval presentation. Moving raw JSON
+into an advanced view is a bounded usability follow-up.
 
 ## What is already working
 

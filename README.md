@@ -9,11 +9,11 @@ The delivery loop is `Assess -> Adapt -> Package -> Validate`. We will complete 
 
 ## Current status
 
-AIW has an experimental CLI and Windows desktop preview. Fixed Notepad++ assessment and interactive document edit/save/export, plus Bambu Studio's fixed STL-to-3MF export, have completed GUI acceptance for the identified unsigned packages on a separate supported VM. Isolated publisher signing is proven for the CLI; complete signed desktop and public-download acceptance remain release gates. The CLI also provides retained reports, reusable MSI Sandbox bundles, and evidence-bound local-settings replay. General application coverage, broader isolation measurements, and Studio authoring remain future work. The [first administrator preview gates](docs/RELEASE-GATES.md) separate demonstrated capabilities from remaining release work. Projects use `aiw.dev/v0alpha2`; legacy `v0alpha1` projects remain readable and migrate non-destructively with an explicit review gate.
+AIW has a [signed public Windows desktop alpha](https://github.com/nathanmcnulty/app-isolation-workbench/releases/tag/desktop-alpha-6c7873c4e80c) and an experimental CLI. CI built and published the exact candidate; independent public-download checks verified provenance, publisher signatures, inventory, and receipt before dedicated-VM testing. Fixed Notepad++ assessment, interactive edit/save/export, and Bambu Studio STL-to-3MF export all passed using that download. The [public acceptance record](docs/PUBLIC-ALPHA-ACCEPTANCE.md) identifies the exact runs and their limits. The CLI also provides retained reports, reusable MSI Sandbox bundles, and evidence-bound local-settings replay. General application coverage, broader isolation measurements, and Studio authoring remain future work. The [first administrator preview gates](docs/RELEASE-GATES.md) separate demonstrated capabilities from remaining release work. Projects use `aiw.dev/v0alpha2`; legacy `v0alpha1` projects remain readable and migrate non-destructively with an explicit review gate.
 
 ## Administrator quick start
 
-When the signed alpha is published, use the [release downloads](https://github.com/nathanmcnulty/app-isolation-workbench/releases). Each release provides `START-HERE.md` with exact hashes, a fresh extraction path, and copy-and-paste verification and launch commands for that build. A compiler is not required.
+Download [signed alpha `desktop-alpha-6c7873c4e80c`](https://github.com/nathanmcnulty/app-isolation-workbench/releases/tag/desktop-alpha-6c7873c4e80c). Its `START-HERE.md` provides exact hashes, a fresh extraction path, and copy-and-paste verification and launch commands for this build. A compiler is not required.
 
 1. Download the five release assets into one folder and follow its `START-HERE.md`.
 2. Open the verified desktop on a supported Windows 11 24H2+ host with Windows Sandbox enabled. The app checks readiness before preparation.
@@ -23,12 +23,10 @@ When the signed alpha is published, use the [release downloads](https://github.c
 
 For interactive transfer, edit the document, save it, and close the editor when finished. The fixed assessment/export workflows complete automatically. A passing function workflow does not establish broader isolation or compatibility for another installer version. The alpha tests these fixed workflows; it does not yet convert arbitrary applications into deployable sandbox packages.
 
-For the desktop preview, verify the identified package and open `aiw-desktop.exe`.
-Choose the supported Notepad++ MSI or fixed Bambu Studio EXE and, for a Notepad++ interactive session, a text input;
-prepare the review, confirm its exact plan, and separately click Start. The GUI
-shows a concise result with optional retained details and explicitly exports a
-verified document to a new file. A passing function workflow does not establish
-broader isolation. See [Notepad++ GUI acceptance](docs/GUI-FIRST-FINISH-LINE.md#completed-packaged-gui-acceptance-2026-10-03), [the current three-product package and exact VM paths](docs/BAMBU-ADMIN-ENTRY.md#completed-desktop-acceptance-2026-10-03), and [verified ZIP extraction with exact operator commands](docs/DESKTOP-DISTRIBUTION.md).
+The [public acceptance record](docs/PUBLIC-ALPHA-ACCEPTANCE.md) binds testing to
+the downloaded signed package. Earlier unsigned proofs remain separately recorded
+in [Notepad++ GUI acceptance](docs/GUI-FIRST-FINISH-LINE.md#completed-packaged-gui-acceptance-2026-10-03)
+and [Bambu acceptance](docs/BAMBU-ADMIN-ENTRY.md#completed-desktop-acceptance-2026-10-03).
 
 | Capability | Current boundary |
 |---|---|
