@@ -11,7 +11,12 @@ signing control passed at merged `210bbc9` (PR #84, all three CI checks passed).
 Downloaded signed bytes independently verified as timestamped Authenticode from
 Nathan McNulty; a modified copy was rejected with `HashMismatch`. Initial Azure
 federation rejection was corrected using GitHub's exact immutable subject.
-The next slice is signed desktop assembly, not public release.
+Current slice: the private signed-desktop candidate workflow builds, signs, and
+assembles on separate runners, preserving unsigned inputs and regenerating
+manifests/receipt from final signed bytes. It requires exact publisher signatures
+for ZIP export/extraction. Local negative tests, exact-commit review, hosted CI,
+and a full live candidate build are the pending checks; runtime acceptance and
+public release remain open. See RELEASE-SIGNING for the contract.
 Nathan authorized the subsequent sequence: candidate readiness, focused release
 CI review, public repository, CI-built public prerelease, then download/verify/test
 those exact artifacts before stable promotion. See RELEASE-SIGNING for the order.

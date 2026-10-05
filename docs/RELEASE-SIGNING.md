@@ -100,6 +100,27 @@ not signed desktop assembly, runtime acceptance, or public distribution.
 
 ## Moving from control to release
 
+The manual `desktop-candidate.yml` workflow extends the proven control to the
+three unique executables and the two distribution scripts. It retains a private
+Actions candidate; it does not yet publish a GitHub release. Compilation creates
+an unsigned closed package and a fixed signing-input record. The signer consumes
+only five named files, checks their source/receipt/hash inventory before login,
+and has no checkout or build step. A third job verifies the publisher signatures,
+assembles into a fresh directory, binds all three manifests to the final signed
+guest hash, writes a new receipt last, and exports/expands the signed ZIP.
+The original unsigned package remains intact; neither assembly nor verification
+runs an application or starts Sandbox. Historical guest-bound launch profiles
+are refused rather than reclassified after signing.
+
+`desktop-package-archive.ps1 -RequirePublisherSignature` makes signature checking
+an explicit requirement for export and extraction; it checks the fixed packaged
+executables/verifier, plus exported handoff scripts. Its distribution record only
+claims publisher authentication after these checks. Default unsigned/historical
+handoffs retain their existing claim boundary. CI runs unsigned-signature and
+build-record-drift refusal controls alongside the existing receipt/archive tests.
+Full signed candidate execution remains unproven until this workflow is merged,
+run, downloaded, and tested on the supported disposable VM.
+
 Nathan authorized the following order on 2026-10-04, once a good public candidate
 is ready:
 

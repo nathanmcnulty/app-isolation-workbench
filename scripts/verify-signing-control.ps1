@@ -32,7 +32,7 @@ $record = [ordered]@{
     certificateThumbprint = if ($signature.SignerCertificate) { $signature.SignerCertificate.Thumbprint.ToLowerInvariant() } else { $null }
     timestampPresent = $null -ne $signature.TimeStamperCertificate
     verified = $verified
-    scope = 'Project-built CLI signing control only; not a desktop package or application compatibility trial'
+    scope = 'Project-owned file signature verification only; not application compatibility or desktop runtime acceptance'
 }
 $json = $record | ConvertTo-Json -Depth 5
 $output = [IO.File]::Open([IO.Path]::GetFullPath($OutputFile), [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)

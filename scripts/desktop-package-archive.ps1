@@ -5,7 +5,8 @@ param(
     [Parameter(Mandatory, ParameterSetName = 'Expand')] [ValidatePattern('^[0-9a-f]{64}$')] [string]$ArchiveSha256,
     [Parameter(Mandatory)] [string]$OutputDirectory,
     [Parameter(Mandatory)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$ReceiptSha256,
-    [Parameter(Mandatory)] [ValidatePattern('^[0-9a-f]{40}$')] [string]$SourceRevision
+    [Parameter(Mandatory)] [ValidatePattern('^[0-9a-f]{40}$')] [string]$SourceRevision,
+    [switch]$RequirePublisherSignature
 )
 
 $ErrorActionPreference = 'Stop'
@@ -61,10 +62,28 @@ function Copy-PackageFile([string]$Root, [string]$Relative, [string]$Destination
     }
     finally { $inputFile.Dispose() }
 }
+function Assert-Publisher([string]$Path) {
+    Assert-OrdinaryAncestors $Path
+    $held = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    try {
+        $signature = Get-AuthenticodeSignature -LiteralPath $Path
+        if ($signature.Status -ne 'Valid' -or $signature.SignatureType -ne 'Authenticode' -or
+            $null -eq $signature.SignerCertificate -or $null -eq $signature.TimeStamperCertificate -or
+            $signature.SignerCertificate.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) -cne 'Nathan McNulty') {
+            throw 'Signed desktop handoff requires valid timestamped Authenticode from Nathan McNulty'
+        }
+    } finally { $held.Dispose() }
+}
 function Verify-Package([string]$Root) {
     # Always execute the repository-owned verifier, never code extracted from the ZIP.
     $result = & $verifier -PackageRoot $Root -ReceiptSha256 $ReceiptSha256 -SourceRevision $SourceRevision | ConvertFrom-Json
     if ($result.exactInventory -ne $true) { throw 'Desktop package inventory did not verify' }
+    if ($RequirePublisherSignature) {
+        foreach ($relative in @('aiw.exe', 'aiw-desktop.exe', 'verify-desktop-package.ps1',
+            'product/notepad-plus-plus/tools/aiw-guest-agent.exe',
+            'product/notepad-plus-plus-interactive/tools/aiw-guest-agent.exe',
+            'product/bambu-studio/tools/aiw-guest-agent.exe')) { Assert-Publisher (Join-Path $Root $relative) }
+    }
 }
 function Expand-HeldArchive([IO.FileStream]$Stream, [string]$Destination) {
     if ($Stream.Length -gt $maximumArchiveBytes) { throw 'Archive exceeds the bounded handoff contract' }
@@ -146,6 +165,11 @@ try {
         # These are handoff tools, outside the unchanged closed application ZIP.
         Copy-Item -LiteralPath $PSCommandPath -Destination (Join-Path $stage 'desktop-package-archive.ps1')
         Copy-Item -LiteralPath $verifier -Destination (Join-Path $stage 'verify-desktop-package.ps1')
+        if ($RequirePublisherSignature) {
+            foreach ($name in @('desktop-package-archive.ps1', 'verify-desktop-package.ps1')) { Assert-Publisher (Join-Path $stage $name) }
+            $manifest.signingStatus = 'publisherSignatureVerified'
+            $manifest.authenticity = 'timestampedAuthenticode:Nathan McNulty'
+        }
         $manifest.handoffTools = @('desktop-package-archive.ps1', 'verify-desktop-package.ps1') | ForEach-Object {
             [ordered]@{ fileName = $_; sha256 = (Get-FileHash -LiteralPath (Join-Path $stage $_) -Algorithm SHA256).Hash.ToLowerInvariant() }
         }
@@ -159,7 +183,7 @@ try {
         finally { $stream.Dispose() }
     }
     [IO.Directory]::Move($stage, $output)
-    [ordered]@{ schemaVersion = 'aiw.dev/desktop-archive-result/v0alpha1'; operation = $PSCmdlet.ParameterSetName; outputDirectory = $output; archiveSha256 = $ArchiveSha256; receiptSha256 = $ReceiptSha256; sourceRevision = $SourceRevision; exactInventory = $true; authenticity = 'notEstablished' } | ConvertTo-Json -Compress
+    [ordered]@{ schemaVersion = 'aiw.dev/desktop-archive-result/v0alpha1'; operation = $PSCmdlet.ParameterSetName; outputDirectory = $output; archiveSha256 = $ArchiveSha256; receiptSha256 = $ReceiptSha256; sourceRevision = $SourceRevision; exactInventory = $true; authenticity = $(if ($RequirePublisherSignature) { 'timestampedAuthenticode:Nathan McNulty' } else { 'notEstablished' }) } | ConvertTo-Json -Compress
 }
 finally {
     if (Test-Path -LiteralPath $stage) {
