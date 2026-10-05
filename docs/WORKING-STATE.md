@@ -12,6 +12,9 @@ Downloaded signed bytes independently verified as timestamped Authenticode from
 Nathan McNulty; a modified copy was rejected with `HashMismatch`. Initial Azure
 federation rejection was corrected using GitHub's exact immutable subject.
 The next slice is signed desktop assembly, not public release.
+Nathan authorized the subsequent sequence: candidate readiness, focused release
+CI review, public repository, CI-built public prerelease, then download/verify/test
+those exact artifacts before stable promotion. See RELEASE-SIGNING for the order.
 Its dedicated passwordless identity, profile-only signer role, and main-only
 environment are configured and independently read back. The build/sign/verify
 jobs are isolated; none of the built executable runs with signing authority.

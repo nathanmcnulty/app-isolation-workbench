@@ -100,6 +100,28 @@ not signed desktop assembly, runtime acceptance, or public distribution.
 
 ## Moving from control to release
 
+Nathan authorized the following order on 2026-10-04, once a good public candidate
+is ready:
+
+1. Finish the signed desktop assembly path and resolve candidate-blocking findings.
+2. Review the exact release CI for build/signing separation, token permissions,
+   pinned actions, source/artifact binding, and public PR/fork behavior. Check
+   repository contents and history for material that must remain private before
+   changing visibility.
+3. Make the repository public, then use reviewed CI to build, sign, assemble,
+   and publish the candidate from the exact approved source revision.
+4. Download those published artifacts, independently verify their identities and
+   publisher signatures, and test the exact download on the dedicated supported
+   VM. Supply copy-and-paste operator commands and fresh evidence destinations
+   whenever human participation is needed.
+5. Publish the first candidate as an alpha/prerelease; promote a stable release
+   only after its downloaded-artifact acceptance is recorded.
+
+This is conditional authorization for that sequence, not a declaration that the
+current unsigned draft is ready or that its historical trials validate newly
+signed bytes. CI-built downloadable candidates precede final distribution
+acceptance; stable-release claims follow that acceptance.
+
 Sign final executables/scripts **before** calculating manifests, guest identity,
 receipts, and archive hashes. Signature bytes change SHA-256; signing an existing
 receipt-bound package in place invalidates its evidence bindings. Signed guest
