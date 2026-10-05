@@ -291,7 +291,11 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or @($existingTags | Where-Object ref -CEQ "refs/tags/$tag").Count) { throw 'Candidate tag already exists or its absence could not be verified; refuse tag reuse' }
           gh release create $tag @files --repo $repo --target $env:SOURCE_REVISION --title ('App Isolation Workbench signed alpha ' + $env:SOURCE_REVISION.Substring(0, 7)) --draft --prerelease --notes-file $notes
           if ($LASTEXITCODE -ne 0) { throw 'Draft release creation/upload failed; preserve and inspect it rather than overwrite or recreate it' }
-          $release = gh api "repos/$repo/releases/tags/$tag" | ConvertFrom-Json
+          # Drafts have no published tag lookup; resolve their numeric release ID.
+          $releaseQuery = '.[] | select(.tag_name == "' + $tag + '") | .id'
+          $releaseIds = @(gh api "repos/$repo/releases?per_page=100" --paginate --jq $releaseQuery)
+          if ($LASTEXITCODE -ne 0 -or $releaseIds.Count -ne 1 -or $releaseIds[0] -notmatch '^\d+$') { throw 'Draft release identity is not unique; publication refused' }
+          $release = gh api "repos/$repo/releases/$($releaseIds[0])" | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0 -or -not $release.draft -or -not $release.prerelease -or $release.target_commitish -cne $env:SOURCE_REVISION -or @($release.assets).Count -ne 5) { throw 'Draft release identity differs; publication refused' }
           foreach ($record in $records) {
             $asset = @($release.assets | Where-Object name -CEQ $record.name)

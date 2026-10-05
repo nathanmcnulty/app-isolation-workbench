@@ -14,14 +14,20 @@ exposure scan covered 463 commits with no findings. Main-only environment
 policies, profile-only Azure signer role, and immutable OIDC subject were checked;
 visibility did not change the subject. See RELEASE-CI-REVIEW-2026-10-04.
 
-First public alpha workflow run `37253486994` is building exact merged `90d06e7`.
-Observe this run before any retry. Host watcher log:
-`%TEMP%\aiw-public-alpha-37253486994.log`. Expected new tag is
-`desktop-alpha-90d06e7fe223`. Public publication, all-five-file provenance and
-asset verification, fresh public download, and exact-byte dedicated-VM acceptance
-remain open. This acceptance branch starts at the public build source; do not
-substitute its later documentation commits for the source being tested.
+First public alpha attempt `37253486994` at `90d06e7` was canceled during build
+before signing, assembly, or publication. A read-only check against the existing
+unsigned draft exposed GitHub's draft lookup behavior: the by-tag API returns
+404, while release listing resolves numeric ID `403260000` and by-ID readback
+returns the correct five-asset draft. This branch fixes the publication readback
+to require one exact-tag numeric ID before existing draft/source/digest checks.
+The original draft remains unchanged; no alpha assets were published.
 
+Next: independently review this narrow correction, require final-head CI,
+merge/tree-check, then dispatch a new public build at that merged source.
+The canceled-run log is `%TEMP%\aiw-public-alpha-37253486994.log`; do not retry
+its old workflow. All-five-file provenance/asset verification, fresh public
+download, and exact-byte dedicated-VM acceptance remain open. RDP computer use
+was verified live, and the completed historical GUI view was closed.
 Private full signed control `37250759217` passed at `0cb8cad`. Independent
 signature-checked download/extraction passed with exact source, inventory, receipt,
 and timestamped Nathan McNulty signatures on both handoff tools and six package
