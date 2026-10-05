@@ -30,6 +30,18 @@ a document. Package contract `v0alpha2` binds all three products; historical
 GUI trial and corrected retained-result verification are recorded in
 [Bambu desktop acceptance](BAMBU-ADMIN-ENTRY.md#completed-desktop-acceptance-2026-10-03).
 
+## Approval presentation
+
+The default review shows backend-authored execution/access, requested changes
+and scope, and data/export lifetime prose. Complete recipe, plan, workspace and
+approval identity remain available in **Full technical details**. Unknown or
+incomplete recipe summaries open those details automatically rather than guessing.
+Polling preserves the operator's expanded view; a new challenge resets the
+confirmation and returns a recognized recipe to the concise view. All text remains
+inert and visibly escapes control characters. Exact-plan confirmation and separate
+Start still use the existing backend gates; the overview grants no authority.
+This presentation change does not alter the already published alpha's bytes.
+
 ## Architecture and delivery
 
 1. Extract the existing administrator workflow into a shared Rust crate. Keep

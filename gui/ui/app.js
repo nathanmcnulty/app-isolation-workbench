@@ -80,7 +80,15 @@
   function renderReview(review) {
     show("reviewCard", !!review);
     if (!review) { state.reviewChallenge = null; return; }
-    if (state.reviewChallenge !== review.challengeId) { $("confirmation").value = ""; state.reviewChallenge = review.challengeId; }
+    const newReview = state.reviewChallenge !== review.challengeId;
+    if (newReview) { $("confirmation").value = ""; state.reviewChallenge = review.challengeId; }
+    const summary = window.AiwDisplay.reviewSummary(review.recipeJson);
+    show("reviewSummary", !!summary);
+    show("reviewSummaryUnavailable", !summary);
+    text("reviewExecution", summary ? summary.execution : "");
+    text("reviewChanges", summary ? summary.changes : "");
+    text("reviewLifetime", summary ? summary.lifetime : "");
+    if (newReview || !summary) $("reviewDetails").open = !summary;
     text("reviewWorkflow", review.workflowName);
     text("reviewOperator", review.operatorIdentity);
     text("reviewEvidence", review.evidenceRoot);

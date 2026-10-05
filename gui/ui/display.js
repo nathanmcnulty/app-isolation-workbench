@@ -6,7 +6,25 @@
     return String(value == null ? "" : value).replace(controls, (character) =>
       "\\u" + character.charCodeAt(0).toString(16).padStart(4, "0"));
   }
-  const api = Object.freeze({ clean });
+  // Project existing backend prose only; this view grants no execution authority.
+  function reviewSummary(input) {
+    let source;
+    try { source = typeof input === "string" ? JSON.parse(input) : input; } catch (_) { return null; }
+    const prose = (value) => typeof value === "string" && value.trim().length > 0;
+    if (source && source.schemaVersion === "aiw.dev/wsb-msi-recipe-inspection/v0alpha1") {
+      const recipe = source.recipe;
+      if (!recipe || !recipe.data || !prose(recipe.data.lifetime) ||
+          !Array.isArray(recipe.trustDeltas) || !recipe.trustDeltas.length || !recipe.trustDeltas.every(prose) ||
+          !Array.isArray(recipe.limitations) || !prose(recipe.limitations[1])) return null;
+      return { execution: recipe.limitations[1], changes: recipe.trustDeltas.join("\n\n"), lifetime: recipe.data.lifetime };
+    }
+    if (source && source.schemaVersion === "aiw.dev/admin-bambu-recipe/v0alpha1" &&
+        prose(source.executionIdentity) && prose(source.dataLifetime) && prose(source.limits)) {
+      return { execution: source.executionIdentity, changes: source.limits, lifetime: source.dataLifetime };
+    }
+    return null;
+  }
+  const api = Object.freeze({ clean, reviewSummary });
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.AiwDisplay = api;
 }(globalThis));
