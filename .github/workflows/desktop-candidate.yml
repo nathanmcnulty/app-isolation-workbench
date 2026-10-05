@@ -296,7 +296,7 @@ jobs:
           $releaseIds = @(gh api "repos/$repo/releases?per_page=100" --paginate --jq $releaseQuery)
           if ($LASTEXITCODE -ne 0 -or $releaseIds.Count -ne 1 -or $releaseIds[0] -notmatch '^\d+$') { throw 'Draft release identity is not unique; publication refused' }
           $release = gh api "repos/$repo/releases/$($releaseIds[0])" | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0 -or -not $release.draft -or -not $release.prerelease -or $release.target_commitish -cne $env:SOURCE_REVISION -or @($release.assets).Count -ne 5) { throw 'Draft release identity differs; publication refused' }
+          if ($LASTEXITCODE -ne 0 -or $release.tag_name -cne $tag -or -not $release.draft -or -not $release.prerelease -or $release.target_commitish -cne $env:SOURCE_REVISION -or @($release.assets).Count -ne 5) { throw 'Draft release identity differs; publication refused' }
           foreach ($record in $records) {
             $asset = @($release.assets | Where-Object name -CEQ $record.name)
             if ($asset.Count -ne 1 -or $asset[0].digest -cne ('sha256:' + $record.sha256) -or $asset[0].size -ne $record.sizeBytes) { throw 'Uploaded asset digest differs; leave release in draft' }
