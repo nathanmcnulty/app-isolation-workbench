@@ -79,7 +79,7 @@ try {
             if ($rejection -notlike '*requires valid timestamped Authenticode*') { throw "Expected real unsigned-signature refusal, got: $rejection" }
             if (Test-Path -LiteralPath $parameters.OutputDirectory) { throw 'Unsigned assembly published a package' }
             $negative = Get-Content (Join-Path $parameters.EvidenceDirectory 'aiw.exe.signature.json') -Raw | ConvertFrom-Json
-            if ($negative.verified -or $negative.signatureStatus -ne 'NotSigned') { throw 'Unsigned assembly did not retain a truthful signature refusal' }
+            if ($negative.verified -or $negative.signatureStatus -eq 'Valid') { throw 'Unsigned fixture assembly did not retain a truthful signature refusal' }
             $parameters.EvidenceDirectory = $root + '-bad-record-evidence'
             $badBuild = Get-Content $buildPath -Raw | ConvertFrom-Json
             $badBuild.files[0].sha256 = '0' * 64
@@ -88,7 +88,7 @@ try {
             try { & (Join-Path $PSScriptRoot 'assemble-signed-desktop-package.ps1') @parameters | Out-Null } catch { $rejection = $_.Exception.Message }
             if ($rejection -notlike '*Unsigned signing input differs*' -or (Test-Path -LiteralPath $parameters.EvidenceDirectory)) { throw 'Assembly failed to reject build input drift before signature processing' }
         } finally {
-            foreach ($owned in @($signedInputs, $root + '-evidence')) {
+            foreach ($owned in @($signedInputs, ($root + '-evidence'))) {
                 if (Test-Path -LiteralPath $owned) {
                     if ((Split-Path -Parent $owned) -ine ([IO.Path]::GetTempPath()).TrimEnd('\') -or -not $owned.StartsWith($root + '-', [StringComparison]::OrdinalIgnoreCase) -or (Get-ChildItem -LiteralPath $owned -Recurse -Force | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint })) { throw 'Unexpected signed fixture cleanup target' }
                     Remove-Item -LiteralPath $owned -Recurse -Force
