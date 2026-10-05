@@ -2,6 +2,11 @@ name: Signed desktop candidate
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish a public alpha after the candidate and CI review
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -27,8 +32,11 @@ jobs:
         shell: pwsh
         env:
           SOURCE_REVISION: ${{ github.sha }}
+          PUBLISH_REQUESTED: ${{ inputs.publish }}
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
         run: |
           $ErrorActionPreference = 'Stop'
+          if ($env:PUBLISH_REQUESTED -ceq 'true' -and $env:REPOSITORY_PRIVATE -cne 'false') { throw 'Public publication requires the reviewed repository to be public first' }
           if ($env:ACTIONS_ID_TOKEN_REQUEST_URL -or $env:ACTIONS_ID_TOKEN_REQUEST_TOKEN) { throw 'Build unexpectedly has OIDC authority' }
           rustup toolchain install stable --profile minimal --no-self-update
           if ($LASTEXITCODE -ne 0) { throw 'Rust installation failed' }
@@ -133,6 +141,8 @@ jobs:
     needs: [build, sign]
     runs-on: windows-2025
     timeout-minutes: 15
+    outputs:
+      handoff-inventory: ${{ steps.assemble.outputs.inventory }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -147,6 +157,7 @@ jobs:
           name: aiw-desktop-signed-inputs-${{ github.sha }}
           path: ${{ runner.temp }}\signed-inputs
       - name: Assemble and round-trip exact signed bytes without executing applications
+        id: assemble
         shell: pwsh
         env:
           SOURCE_REVISION: ${{ github.sha }}
@@ -198,6 +209,8 @@ jobs:
           '@
           $helperHash = (Get-FileHash (Join-Path $handoff 'desktop-package-archive.ps1') -Algorithm SHA256).Hash.ToLowerInvariant()
           $guide.Replace('{HELPER_SHA}', $helperHash).Replace('{VERIFIER_SHA}', $distribution.verifierSha256).Replace('{ARCHIVE_SHA}', $distribution.archive.sha256).Replace('{RECEIPT_SHA}', $assembled.receiptSha256).Replace('{SOURCE}', $env:SOURCE_REVISION).Replace('{SHORT_SOURCE}', $env:SOURCE_REVISION.Substring(0, 7)) | Set-Content (Join-Path $handoff 'START-HERE.md')
+          $inventory = @(Get-ChildItem -LiteralPath $handoff -File | ForEach-Object { @{ name = $_.Name; sizeBytes = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() } }) | ConvertTo-Json -Compress
+          "inventory=$inventory" >> $env:GITHUB_OUTPUT
       - name: Retain candidate for independent download testing
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -205,6 +218,7 @@ jobs:
           path: ${{ runner.temp }}\desktop-handoff/
           if-no-files-found: error
           retention-days: 30
+
       - name: Retain signature and assembly records even on failure
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -213,3 +227,84 @@ jobs:
           path: ${{ runner.temp }}\signed-evidence/
           if-no-files-found: warn
           retention-days: 30
+
+  publish:
+    needs: assemble
+    if: inputs.publish && github.event.repository.private == false && github.repository == 'nathanmcnulty/app-isolation-workbench' && github.ref == 'refs/heads/main' && github.actor == 'nathanmcnulty'
+    runs-on: windows-2025
+    timeout-minutes: 15
+    environment: public-release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Fetch only this run's assembled candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: aiw-desktop-candidate-${{ github.sha }}
+          path: release
+      - name: Verify transferred handoff without executing payload or scripts
+        shell: pwsh
+        env:
+          SOURCE_REVISION: ${{ github.sha }}
+          INVENTORY: ${{ needs.assemble.outputs.handoff-inventory }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expected = @('aiw-desktop.zip', 'desktop-package-archive.ps1', 'verify-desktop-package.ps1', 'distribution.json', 'START-HERE.md')
+          $records = @($env:INVENTORY | ConvertFrom-Json)
+          $actual = @(Get-ChildItem -LiteralPath release -Recurse -Force)
+          if ($records.Count -ne 5 -or $actual.Count -ne 5 -or @($actual | Where-Object { $_.PSIsContainer -or ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) }).Count) { throw 'Unexpected public handoff inventory' }
+          foreach ($name in $expected) {
+            $record = @($records | Where-Object name -CEQ $name)
+            $file = Get-Item -LiteralPath (Join-Path release $name)
+            if ($record.Count -ne 1 -or $record[0].sha256 -notmatch '^[0-9a-f]{64}$' -or $file.Length -gt 512MB -or $record[0].sizeBytes -ne $file.Length -or $record[0].sha256 -cne (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()) { throw 'Transferred public handoff bytes differ from assembly' }
+          }
+          $distribution = Get-Content release\distribution.json -Raw | ConvertFrom-Json
+          if ($distribution.sourceRevision -cne $env:SOURCE_REVISION -or $distribution.archive.sha256 -cne ($records | Where-Object name -CEQ 'aiw-desktop.zip').sha256 -or $distribution.publisherSignaturesVerified -ne $true -or $distribution.authenticity -cne 'notEstablished') { throw 'Distribution record differs from the scoped candidate contract' }
+      - name: Attest all five handoff files from this exact workflow revision
+        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ github.workspace }}\release\*
+      - name: Publish only the verified alpha assets and independent hashes
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_REVISION: ${{ github.sha }}
+          INVENTORY: ${{ needs.assemble.outputs.handoff-inventory }}
+          ATTESTATION_URL: ${{ steps.attest.outputs.attestation-url }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $repo = 'nathanmcnulty/app-isolation-workbench'
+          $tag = 'desktop-alpha-' + $env:SOURCE_REVISION.Substring(0, 12)
+          $records = @($env:INVENTORY | ConvertFrom-Json)
+          $distribution = Get-Content release\distribution.json -Raw | ConvertFrom-Json
+          $lines = @('# Signed desktop alpha', '', 'Windows Sandbox assessment for three fixed workflows: Notepad++ assessment, interactive document transfer, and Bambu Studio STL-to-3MF export.', '', 'This is an alpha candidate. Exact downloaded-artifact runtime acceptance is pending. Supported function results remain separate from broader isolation, which is not established by signing or a passing workflow.', '', 'Download all five assets into one fresh folder and follow START-HERE.md. Windows Sandbox is required; application inputs are selected separately. Export needed results before discarding temporary Sandbox data.', '', "Source: $env:SOURCE_REVISION", "Build/sign/assembly run: $env:RUN_URL", "Build provenance attestation: $env:ATTESTATION_URL", "Package receipt SHA-256: $($distribution.receiptSha256)", '', '| File | SHA-256 |', '|---|---|')
+          foreach ($record in $records) { $lines += "| $($record.name) | $($record.sha256) |" }
+          $lines += @('', 'Authenticode verifies Nathan McNulty on the packaged executables and handoff scripts. GitHub build provenance binds each exact downloadable asset to this repository, workflow, and source revision; it is separate from application/isolation acceptance.', '', 'Advanced provenance verification:', '', '```powershell', "gh attestation verify .\aiw-desktop.zip --repo $repo --signer-workflow $repo/.github/workflows/desktop-candidate.yml --source-ref refs/heads/main --source-digest $env:SOURCE_REVISION --deny-self-hosted-runners", '```')
+          $notes = Join-Path $env:RUNNER_TEMP 'alpha-release-notes.md'
+          $lines -join "`n" | Set-Content -LiteralPath $notes
+          $files = @($records | ForEach-Object { Join-Path release $_.name })
+          $existingTags = gh api "repos/$repo/git/matching-refs/tags/$tag" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or @($existingTags | Where-Object ref -CEQ "refs/tags/$tag").Count) { throw 'Candidate tag already exists or its absence could not be verified; refuse tag reuse' }
+          gh release create $tag @files --repo $repo --target $env:SOURCE_REVISION --title ('App Isolation Workbench signed alpha ' + $env:SOURCE_REVISION.Substring(0, 7)) --draft --prerelease --notes-file $notes
+          if ($LASTEXITCODE -ne 0) { throw 'Draft release creation/upload failed; preserve and inspect it rather than overwrite or recreate it' }
+          $release = gh api "repos/$repo/releases/tags/$tag" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $release.draft -or -not $release.prerelease -or $release.target_commitish -cne $env:SOURCE_REVISION -or @($release.assets).Count -ne 5) { throw 'Draft release identity differs; publication refused' }
+          foreach ($record in $records) {
+            $asset = @($release.assets | Where-Object name -CEQ $record.name)
+            if ($asset.Count -ne 1 -or $asset[0].digest -cne ('sha256:' + $record.sha256) -or $asset[0].size -ne $record.sizeBytes) { throw 'Uploaded asset digest differs; leave release in draft' }
+          }
+          gh release edit $tag --repo $repo --draft=false
+          if ($LASTEXITCODE -ne 0) { throw 'Alpha publication failed; inspect exact draft status before any retry' }
+          $published = gh api "repos/$repo/releases/tags/$tag" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $published.draft -or -not $published.prerelease -or @($published.assets).Count -ne 5) { throw 'Public alpha readback failed' }
+          $tagCommit = gh api "repos/$repo/commits/$tag" --jq '.sha'
+          if ($LASTEXITCODE -ne 0 -or $tagCommit -cne $env:SOURCE_REVISION) { throw 'Published tag source identity differs' }
+          foreach ($record in $records) {
+            $asset = @($published.assets | Where-Object name -CEQ $record.name)
+            if ($asset.Count -ne 1 -or $asset[0].digest -cne ('sha256:' + $record.sha256) -or $asset[0].size -ne $record.sizeBytes) { throw 'Published asset readback differs from assembly' }
+          }
+          $published.html_url >> $env:GITHUB_STEP_SUMMARY

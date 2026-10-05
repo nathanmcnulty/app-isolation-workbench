@@ -1,6 +1,6 @@
 # App Isolation Workbench
 
-App Isolation Workbench (AIW) is free, open-source research software for assessing existing Windows applications under stronger isolation boundaries. The product evolves through two capability stages:
+App Isolation Workbench (AIW) helps Windows administrators test supported application workflows inside Windows Sandbox and retain understandable, inspectable results. It is free research software in alpha development. The product is working toward two capability stages:
 
 1. **Workbench v1** assesses MSI, EXE, and portable-directory applications, compares ordinary and isolated execution, records inspectable evidence, makes deterministic recommendations, and replays validated profiles on demand.
 2. **Studio v1** retains Workbench and adds first-party MSIX/AppContainer authoring, narrowly scoped remediation, signing, and final-package validation.
@@ -9,7 +9,19 @@ The delivery loop is `Assess -> Adapt -> Package -> Validate`. We will complete 
 
 ## Current status
 
-AIW has an experimental CLI and an unsigned Windows desktop preview. Fixed Notepad++ assessment and interactive document edit/save/export, plus Bambu Studio's fixed STL-to-3MF export, have completed GUI acceptance on a separate supported VM. The CLI also provides retained reports, reusable MSI Sandbox bundles, and evidence-bound local-settings replay. General application coverage, authenticated public distribution, broader isolation measurements, and Studio authoring remain future work. The [first administrator preview gates](docs/RELEASE-GATES.md) separate demonstrated capabilities from remaining release work. Projects use `aiw.dev/v0alpha2`; legacy `v0alpha1` projects remain readable and migrate non-destructively with an explicit review gate.
+AIW has an experimental CLI and Windows desktop preview. Fixed Notepad++ assessment and interactive document edit/save/export, plus Bambu Studio's fixed STL-to-3MF export, have completed GUI acceptance for the identified unsigned packages on a separate supported VM. Isolated publisher signing is proven for the CLI; complete signed desktop and public-download acceptance remain release gates. The CLI also provides retained reports, reusable MSI Sandbox bundles, and evidence-bound local-settings replay. General application coverage, broader isolation measurements, and Studio authoring remain future work. The [first administrator preview gates](docs/RELEASE-GATES.md) separate demonstrated capabilities from remaining release work. Projects use `aiw.dev/v0alpha2`; legacy `v0alpha1` projects remain readable and migrate non-destructively with an explicit review gate.
+
+## Administrator quick start
+
+When the signed alpha is published, use the [release downloads](https://github.com/nathanmcnulty/app-isolation-workbench/releases). Each release provides `START-HERE.md` with exact hashes, a fresh extraction path, and copy-and-paste verification and launch commands for that build. A compiler is not required.
+
+1. Download the five release assets into one folder and follow its `START-HERE.md`.
+2. Open the verified desktop on a supported Windows 11 24H2+ host with Windows Sandbox enabled. The app checks readiness before preparation.
+3. Choose a workflow and its exact supported installer: Notepad++ 8.9.8 x64 MSI, or Bambu Studio 02.08.02.60 x64 EXE. Interactive Notepad++ also takes a bounded text input.
+4. Review the recipe and temporary-data behavior, confirm the displayed approval literal, then press **Start** separately.
+5. Read the concise result; open details when needed. Export required output explicitly before discarding temporary Sandbox data, and retain the evidence and cleanup result.
+
+For interactive transfer, edit the document, save it, and close the editor when finished. The fixed assessment/export workflows complete automatically. A passing function workflow does not establish broader isolation or compatibility for another installer version. The alpha tests these fixed workflows; it does not yet convert arbitrary applications into deployable sandbox packages.
 
 For the desktop preview, verify the identified package and open `aiw-desktop.exe`.
 Choose the supported Notepad++ MSI or fixed Bambu Studio EXE and, for a Notepad++ interactive session, a text input;
@@ -47,9 +59,9 @@ The initial live target is Windows 11 24H2 (build 26100+) x64. Provider support 
 - Studio keeps delivery (`containedMsix`) separate from runtime boundary (`mediumIlFullTrust`, `appContainer`, or preview `appSiloPreview`). A converted full-trust MSIX is not an isolation claim.
 - Master Packager is a manual export/import handoff. AIW will not call, embed, or automate it without a separate vendor authorization.
 
-## Current CLI
+## Advanced CLI and developer examples
 
-These commands exercise the current contracts and fixed Windows Sandbox proof. `run start` starts the approved prepared profile; `run recover` can stop its persisted session:
+These Rust-based examples exercise the internal contracts and fixed Windows Sandbox proof. The desktop quick start above is the administrator entry path. `run start` starts the approved prepared profile; `run recover` can stop its persisted session:
 
 ```powershell
 cargo run -p aiw-cli -- project validate --path .\examples\minimal.aiw.yaml
