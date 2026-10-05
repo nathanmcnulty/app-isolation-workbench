@@ -14,20 +14,31 @@ exposure scan covered 463 commits with no findings. Main-only environment
 policies, profile-only Azure signer role, and immutable OIDC subject were checked;
 visibility did not change the subject. See RELEASE-CI-REVIEW-2026-10-04.
 
-First public alpha attempt `37253486994` at `90d06e7` was canceled during build
-before signing, assembly, or publication. A read-only check against the existing
-unsigned draft exposed GitHub's draft lookup behavior: the by-tag API returns
-404, while release listing resolves numeric ID `403260000` and by-ID readback
-returns the correct five-asset draft. This branch fixes the publication readback
-to require one exact-tag numeric ID before existing draft/source/digest checks.
-The original draft remains unchanged; no alpha assets were published.
+PR #87 fixed draft lookup and merged at
+`6c7873c4e80c889394ec43b27138cc52fc7df1c2`. Independent final-head review found
+no issues; all three checks passed at `6b693c4` in run `37253841234`. Merged main
+matches the tested tree `bb0d72391360da3592542a232db7e2f1fbe84cc7`. The old
+by-tag draft lookup returned 404; read-only listing/by-ID control verified the
+existing five-asset draft without mutation. Missing/ambiguous IDs or tag drift
+now refuse publication before exposure. See RELEASE-CI-REVIEW-2026-10-04.
 
-Next: independently review this narrow correction, require final-head CI,
-merge/tree-check, then dispatch a new public build at that merged source.
-The canceled-run log is `%TEMP%\aiw-public-alpha-37253486994.log`; do not retry
-its old workflow. All-five-file provenance/asset verification, fresh public
-download, and exact-byte dedicated-VM acceptance remain open. RDP computer use
-was verified live, and the completed historical GUI view was closed.
+Corrected public alpha run `37254512259` is building exact merged `6c7873c`.
+Observe this run before any retry. Host watcher:
+`%TEMP%\aiw-public-alpha-37254512259.log`. Expected new tag is
+`desktop-alpha-6c7873c4e80c`. The prior run `37253486994` was canceled during
+build, before signing or publication, and created no alpha or new draft.
+Public asset/provenance verification, fresh public download, and exact-byte VM
+acceptance remain open. This validation branch starts at the public build source;
+its later documentation commits are not the build source being tested.
+
+RDP computer use is verified live; the completed historical GUI view was closed.
+VM input preflight reverified the exact supported Notepad++ MSI, 180-byte original
+document, and Bambu EXE, with no AIW process running and aiwoperator session 2
+active. Records: `%TEMP%\aiw-public-acceptance-input-records.json`. A first inline
+Run Command returned no usable output; its log is preserved. A marker-bearing
+file-based command proved transport before the successful input probe. Use
+`--scripts @<saved-file>` and inspect remote result/error records; native Azure
+success alone does not prove script or application success.
 Private full signed control `37250759217` passed at `0cb8cad`. Independent
 signature-checked download/extraction passed with exact source, inventory, receipt,
 and timestamped Nathan McNulty signatures on both handoff tools and six package
