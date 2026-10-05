@@ -16,11 +16,16 @@ CI checks passed at `7d9f9d6` in run `37249517740`; merged main has the tested t
 Independent review resolved verifier execution before authentication and overly
 broad authenticity claims. Local and hosted receipt/archive tests include real
 unsigned refusal, changed build-record refusal, and rejected verifier non-execution.
-Full signed candidate run `37250759217` is actively building exact merged
-`0cb8cad6605b857170a199e28f9f9a3577defd05`. Observe that run before any retry;
-the host watcher logs to `%TEMP%\aiw-full-signed-desktop-37250759217.log`.
-Download/signature/receipt verification, release CI review, public publication,
-and exact downloaded-candidate runtime acceptance remain open. See RELEASE-SIGNING.
+Full signed candidate run `37250759217` passed all three stages at merged
+`0cb8cad6605b857170a199e28f9f9a3577defd05`. Independent downloaded-package
+extraction verified source, receipt, exact inventory, timestamped personal
+publisher signatures on both handoff tools and six fixed package paths.
+See RELEASE-CI-REVIEW-2026-10-04 for hashes and retained evidence pointers.
+The publication/governance diff at `5f85a7f`, with README at `9d7bd47`, passed
+independent review with no actionable findings. Final exact-head hosted CI,
+merged-tree proof, public transition, public CI, and public-byte VM acceptance
+remain open. This checkout adds a false-by-default publication job with separate
+main-only authority, per-file provenance, and draft asset checks before exposure.
 Nathan authorized the subsequent sequence: candidate readiness, focused release
 CI review, public repository, CI-built public prerelease, then download/verify/test
 those exact artifacts before stable promotion. See RELEASE-SIGNING for the order.

@@ -1,11 +1,26 @@
 # First public alpha: CI and visibility review
 
-Review in progress for the optional publication job on top of merged candidate
+Independent review completed for the optional publication job on top of merged candidate
 assembly `0cb8cad6605b857170a199e28f9f9a3577defd05`. Repository visibility remains
 private. Independent exact-commit review, hosted CI, and the full private signed
 candidate result are gates before the authorized public transition.
 
 ## Checks completed
+
+- Independent review of `5f85a7f8a53dedbf068162533f5efffce6eda322`, with the
+  README follow-up at `9d7bd47`, found no actionable findings. It covered job
+  authority, same-run asset binding, draft publication, provenance, action pins,
+  Windows glob handling, and public fork permissions.
+- Full private signed control run `37250759217` passed build, signing, and
+  assembly at `0cb8cad6605b857170a199e28f9f9a3577defd05`. Independent download
+  and extraction verified the timestamped personal publisher on both handoff
+  scripts and all six fixed package paths, closed inventory, exact source and
+  receipt. ZIP SHA-256 is
+  `4a4726183401b0b65b7f6d4f3adcf6ef3fe2f5aede90e7043ef6c2ed5fd1a0c8`;
+  receipt SHA-256 is
+  `04cb4d4777e8aaa5c9c2f3437dbdf9ada836797bf1e12864ce61eb58bc6357f9`.
+  Local evidence root is recorded in `%TEMP%\aiw-signed-desktop-proof-root.txt`.
+  No candidate application ran on the host; runtime acceptance remains open.
 
 - `actionlint` 1.7.12 accepted all three repository workflows. Its Windows release
   ZIP was verified against upstream GitHub asset SHA-256
@@ -61,8 +76,8 @@ this review does not change repository-required checks or imply their enforcemen
 
 ## Remaining acceptance
 
-1. Independently review the exact publication/governance diff and resolve findings.
-2. Require all three CI jobs on the final PR head and verify the merged main tree.
+1. Review is complete; require all three CI jobs on the final PR head.
+2. Verify the merged main tree matches the tested PR tree.
 3. Retain/download the full signed private control and check source, signatures,
    receipt, ZIP identities, and extraction. Its runtime acceptance remains separate.
 4. Recheck final public-exposure scan and environment/federation identities; then
