@@ -14,11 +14,14 @@ do not substitute another publisher or create another signing account.
 ## First bounded control
 
 `artifact-signing-control.yml` is manual, owner-dispatched, main-only, and uses
-the `artifact-signing` GitHub environment. It builds a fresh project-owned CLI,
-signs only that fixed output, requires valid timestamped Authenticode with the
-expected publisher, and runs only `--version` with a 30-second deadline. It
-retains the signed file, identity/hash verification, exit status, and output as
-an Actions artifact. It does not install applications or run Sandbox.
+the `artifact-signing` GitHub environment only for its signing job. Compilation,
+signing, and signature verification run on separate disposable runners. The build
+job has no signing identity or OIDC permission. The signing job checks the
+transferred source/hash, signs only the fixed CLI output, and never runs build
+code or the executable. Verification has no environment or OIDC authority;
+it requires valid timestamped Authenticode with the expected publisher and retains
+the exact signed bytes and verification record as an Actions artifact. This
+control does not execute the CLI, install applications, or run Sandbox.
 
 This is signing-path proof, not a signed desktop preview or a public-release
 workflow. It does not edit or replace the accepted unsigned package, infer

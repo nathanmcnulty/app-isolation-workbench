@@ -11,14 +11,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  sign-control:
+  build-control:
     if: github.repository == 'nathanmcnulty/app-isolation-workbench' && github.ref == 'refs/heads/main' && github.actor == 'nathanmcnulty'
     runs-on: windows-2025
     timeout-minutes: 30
-    environment: artifact-signing
-    permissions:
-      contents: read
-      id-token: write
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}\build-signing-control
       CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: '-C target-feature=+crt-static'
@@ -30,13 +26,10 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Check source and signing identity
+      - name: Check source
         shell: pwsh
-        env:
-          CLIENT_ID: ${{ vars.AIW_SIGNING_CLIENT_ID }}
         run: |
           if ((git rev-parse HEAD).Trim() -cne $env:SOURCE_REVISION) { throw 'Signing source differs from the dispatched commit' }
-          if ($env:CLIENT_ID -notmatch '^[0-9a-f-]{36}$') { throw 'Missing dedicated Artifact Signing OIDC client ID' }
           New-Item -ItemType Directory -Path out | Out-Null
       - name: Build project-owned CLI control
         shell: pwsh
@@ -46,6 +39,41 @@ jobs:
           cargo +stable build -p aiw-cli --locked --release --target x86_64-pc-windows-msvc
           if ($LASTEXITCODE -ne 0) { throw 'CLI control build failed' }
           Copy-Item -LiteralPath build-signing-control\x86_64-pc-windows-msvc\release\aiw.exe -Destination out\aiw.exe
+          @{ sourceRevision = $env:SOURCE_REVISION; unsignedSha256 = (Get-FileHash out\aiw.exe -Algorithm SHA256).Hash.ToLowerInvariant() } | ConvertTo-Json | Set-Content out\unsigned-build.json
+      - name: Transfer the unsigned control
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: aiw-unsigned-control-${{ github.sha }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 7
+
+  sign-control:
+    needs: build-control
+    runs-on: windows-2025
+    timeout-minutes: 15
+    environment: artifact-signing
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Fetch only this run's unsigned control
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: aiw-unsigned-control-${{ github.sha }}
+          path: out
+      - name: Check transferred source and bytes before acquiring authority
+        shell: pwsh
+        env:
+          SOURCE_REVISION: ${{ github.sha }}
+          CLIENT_ID: ${{ vars.AIW_SIGNING_CLIENT_ID }}
+        run: |
+          if ($env:CLIENT_ID -notmatch '^[0-9a-f-]{36}$') { throw 'Missing dedicated signing OIDC client ID' }
+          if ((Get-Item out\unsigned-build.json).Length -gt 4096) { throw 'Build record exceeds its contract' }
+          if ((Get-Item out\aiw.exe).Length -gt 128MB) { throw 'Built control exceeds its contract' }
+          if (@(Get-ChildItem out -Recurse -File).Count -ne 2) { throw 'Unexpected build artifact inventory' }
+          $build = Get-Content out\unsigned-build.json -Raw | ConvertFrom-Json
+          if ($build.sourceRevision -cne $env:SOURCE_REVISION -or $build.unsignedSha256 -cne (Get-FileHash out\aiw.exe -Algorithm SHA256).Hash.ToLowerInvariant()) { throw 'Transferred build source or hash differs' }
       - name: Azure OIDC login for the dedicated signer
         uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
@@ -72,22 +100,38 @@ jobs:
           exclude-azure-powershell-credential: true
           exclude-azure-developer-cli-credential: true
           exclude-interactive-browser-credential: true
+      - name: Transfer signed bytes without executing them
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: aiw-signed-control-${{ github.sha }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 7
+
+  verify-control:
+    needs: sign-control
+    runs-on: windows-2025
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Fetch exact verification source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Fetch this run's signed control
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: aiw-signed-control-${{ github.sha }}
+          path: out
       - name: Verify publisher, timestamp, and signed bytes
         shell: pwsh
+        env:
+          SOURCE_REVISION: ${{ github.sha }}
         run: |
+          if ($env:ACTIONS_ID_TOKEN_REQUEST_URL -or $env:ACTIONS_ID_TOKEN_REQUEST_TOKEN) { throw 'Verification job unexpectedly has OIDC authority' }
           .\scripts\verify-signing-control.ps1 -Path out\aiw.exe -SourceRevision $env:SOURCE_REVISION -OutputFile out\signing-verification.json
-      - name: Run bounded project-owned version control
-        shell: pwsh
-        run: |
-          $control = Start-Process -FilePath (Join-Path $PWD 'out\aiw.exe') -ArgumentList '--version' -PassThru -WindowStyle Hidden -RedirectStandardOutput out\version.stdout.txt -RedirectStandardError out\version.stderr.txt
-          if (-not $control.WaitForExit(30000)) {
-            $control.Kill()
-            @{ stage = 'version'; outcome = 'timedOut' } | ConvertTo-Json | Set-Content out\control-result.json
-            throw 'Signed CLI control exceeded its deadline'
-          }
-          $control.WaitForExit()
-          @{ stage = 'version'; outcome = $(if ($control.ExitCode -eq 0) { 'completed' } else { 'failed' }); exitCode = $control.ExitCode } | ConvertTo-Json | Set-Content out\control-result.json
-          if ($control.ExitCode -ne 0) { throw 'Signed CLI control failed' }
       - name: Retain signing control evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
