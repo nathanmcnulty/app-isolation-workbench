@@ -5,106 +5,89 @@ This handoff is a pointer, not execution authority or a run receipt.
 
 ## Current slice
 
-PR #86 merged the independently reviewed public alpha publication workflow at
-`90d06e7fe223bfe1166bd996f0e1db8c3a068be4`. All three hosted CI checks passed
-at `40c9df8` in run `37252512658`; merged main has its exact tested tree
-`cd2363c8deecc5482cd1255a6c58e3cfc00fac3b`. The repository is now public under
-Nathan's authorization, with anonymous API readback. The final full-history
-exposure scan covered 463 commits with no findings. Main-only environment
-policies, profile-only Azure signer role, and immutable OIDC subject were checked;
-visibility did not change the subject. See RELEASE-CI-REVIEW-2026-10-04.
+The repository is public under Nathan's authorization. Public signed alpha
+`desktop-alpha-6c7873c4e80c` is published as a prerelease from exact source
+`6c7873c4e80c889394ec43b27138cc52fc7df1c2`; all four jobs in release run
+`37254512259` succeeded. This validation branch's later documentation commits
+are not its build source. See [public acceptance](PUBLIC-ALPHA-ACCEPTANCE.md).
 
-First public alpha attempt `37253486994` at `90d06e7` was canceled during build
-before signing, assembly, or publication. A read-only check against the existing
-unsigned draft exposed GitHub's draft lookup behavior: the by-tag API returns
-404, while release listing resolves numeric ID `403260000` and by-ID readback
-returns the correct five-asset draft. This branch fixes the publication readback
-to require one exact-tag numeric ID before existing draft/source/digest checks.
-The original draft remains unchanged; no alpha assets were published.
+PR #86 integrated the reviewed publication workflow; PR #87 fixed draft API
+lookup. All three exact-head CI checks passed for each; merged main trees match
+tested PR trees. The final public-exposure scan covered 463 commits with no
+findings. Main-only environments, profile-only signer authority and immutable
+OIDC subject were read back; public visibility did not change the subject.
+See [CI review](RELEASE-CI-REVIEW-2026-10-04.md) and RELEASE-SIGNING.md.
 
-Next: independently review this narrow correction, require final-head CI,
-merge/tree-check, then dispatch a new public build at that merged source.
-The canceled-run log is `%TEMP%\aiw-public-alpha-37253486994.log`; do not retry
-its old workflow. All-five-file provenance/asset verification, fresh public
-download, and exact-byte dedicated-VM acceptance remain open. RDP computer use
-was verified live, and the completed historical GUI view was closed.
-Private full signed control `37250759217` passed at `0cb8cad`. Independent
-signature-checked download/extraction passed with exact source, inventory, receipt,
-and timestamped Nathan McNulty signatures on both handoff tools and six package
-paths. This is not public-byte runtime acceptance. The earlier CLI signing
-control, tamper rejection, and corrected immutable federation are recorded in
-RELEASE-SIGNING. Build, Azure signing, assembly, and publication have separate
-runners/permissions; built executables never run with signing authority.
+Independent public downloads verified all five asset attestations against exact
+source, workflow, invocation and public visibility. Timestamped Nathan McNulty
+signatures, closed inventory, receipt and extraction passed on host and dedicated
+VM. No candidate executable ran on the host. VM public package is
+`C:\AIW-Desktop-Alpha-6c7873c`; distribution and operator GUI launch proof are
+under `C:\AIW-Public-Distribution-Proof-6c7873c` and
+`C:\AIW-Public-GUI-Proof-6c7873c`. Host evidence pointer:
+`%TEMP%\aiw-public-alpha-proof-root.txt`.
 
-The old unsigned `desktop-preview-e08115b` draft remains unpublished. Automatic
-policy review blocked approved cleanup of two temporary host handoffs; do not
-bypass that rejection. The final handoff and retained evidence remain preserved.
-PR #82 merged the Bambu GUI at `1db892d` after all three exact-head CI jobs passed;
-merged main has the tested tree. The verified desktop archive handoff now has
-native PowerShell 5.1 export and extraction proof on the dedicated VM; both
-passed for the existing `e08115b` package; its receipt and application bytes did
-not change. Both schema fixtures/negative controls and independent exact-commit
-review passed. See [distribution proof and exact commands](DESKTOP-DISTRIBUTION.md).
-This avoids manual ZIP work. Publisher selection is settled; signed-candidate
-assembly and public acceptance remain open.
+Public interactive GUI run `admin-1791167847046734900` completed actual guest
+edit/save/close, verified 183-byte retained output, cleanup and explicit export.
+Wrong plan confirmation and repeat export to an existing file were refused.
+Original input is unchanged; retained/exported bytes match the observed `aiw`
+append exactly. Broader isolation remains insufficient evidence. This is an
+automated RDP control, not a new human trial. Full typed records are retained.
+A SYSTEM-context provider query failed to locate WindowsSandboxServer.exe; its
+failure is preserved and is not an empty-session observation. The final operator-
+context read-only check succeeded with zero sessions at `2026-10-05T03:34:42Z`;
+VM `07-post-trial-provider.json` and host `post-trial-provider-proof.json` retain it.
 
-The fixed Bambu Studio export now has a validated GUI path beside the two
-Notepad++ modes. Current unsigned package source is
-`e08115b50fb0ee37fba1f923b377985dc3f1bc94`. Use work-status for the current
-integration head; merge milestones only after exact-head hosted CI.
-See [Bambu desktop acceptance](BAMBU-ADMIN-ENTRY.md#completed-desktop-acceptance-2026-10-03)
-for exact package/input/launch paths, identities, observations, and evidence.
+Public fixed assessment GUI run `admin-1791169556266470800` completed all five
+functions and guest ACL controls after full recipe review, exact approval and
+separate Start. Typed records confirm cleanup and unchanged installer. Evidence parent:
+`C:\Users\aiwoperator\AppData\Local\AppIsolationWorkbench\Evidence`.
+Host `assessment-review.json` and `assessment-terminal-proof.json` bind its plan
+and terminal report. Bambu public run `admin-1791170118731201300` also completed
+all five checks after full review, exact approval and separate Start. The 9,063-byte
+3MF, four-vertex/four-triangle geometry, unchanged installer and recorded cleanup
+were independently checked against terminal records. All three public-byte modes
+passed; broader isolation remains insufficient evidence. The package remains
+an alpha; stable promotion is a separate decision.
 
-Fresh GUI run `admin-1791052004563329100` at package `170caab` passed all five
-fixed export functions, verified the 9,061-byte tetrahedron 3MF, preserved input,
-and verified cleanup with zero remaining sessions. It exposed a GUI label bug:
-Bambu's deliberate broader-isolation `insufficientEvidence` was mistaken for an
-incomplete workflow. The runner-owned typed predicate fixes that distinction;
-its negative regression and independent review passed. New package `e08115b`
-reopened that same run as Verified with document export disabled.
+## Preserved milestones
 
-The new package also reverified retained Notepad++ transfer
-`admin-1791022515798013900` and explicitly exported its matching 183-byte output.
-These are automated dedicated-VM controls, not another human trial. Reporting
-corrections used retained evidence; no repeat installation was needed.
+- PR #85 established full isolated signed desktop CI. Private signed control
+  `37250759217` passed; signing authority never executes built payloads.
+- PR #82 integrated Bambu GUI after exact-head CI and matched-tree merge.
+  Historical unsigned acceptance: BAMBU-ADMIN-ENTRY.md and DESKTOP-DISTRIBUTION.md.
+- PR #80/#81 integrated/documented the two Notepad++ GUI modes; historical
+  acceptance and negative controls: GUI-FIRST-FINISH-LINE.md.
+- PR #78/#79 corrected PowerShell success handling and packaged explicit export.
+  Nathan's retained interactive run `admin-1790887375232888400` is preserved;
+  INTERACTIVE-SANDBOX.md records the separate human proof.
+- Old unsigned `desktop-preview-e08115b` draft remains unpublished. Automatic
+  policy review rejected approved cleanup of two host handoffs. Do not bypass
+  or retry that deletion; retained evidence and handoffs remain preserved.
 
-PR #80 integrated the initial Notepad++ GUI at `11786078`; PR #81 corrected its
-entry documentation at `8c8201f`. See [initial GUI acceptance](GUI-FIRST-FINISH-LINE.md#completed-packaged-gui-acceptance-2026-10-03)
-for its fresh edit/save/export and negative lifecycle/export controls.
-Follow ROADMAP and RELEASE-GATES for the next bounded deliverable. Publisher
-signing, generic application conversion, and broader isolation remain separate.
+## Environment and next step
 
-## Preserved stable evidence
+Dedicated VM: `aiw-clean-host-0921`, resource group `RG-AIW-CLEAN-HOST-20260921`,
+subscription `43babb60-9e73-4dc8-b769-4401c01aad73`; aiwoperator session 2.
+RDP computer use is working and authorized. Verified input identities are in
+`%TEMP%\aiw-public-acceptance-input-records.json`. File-based Azure Run Command
+(`--scripts @<saved-file>`) with marker/error/typed-record checks is proven;
+inline transport success with empty output is not execution proof.
 
-PR #78 merged at `688e923`: verification throws/structured results are authoritative;
-do not check stale `$LASTEXITCODE` after an in-process PowerShell script. Nathan's
-exact `738ea6e` run `admin-1790887375232888400` retained a 225-byte edited document,
-verified cleanup, and unchanged input. PR #79 merged at `103f1ed`: packaged
-`admin export-document` supplies fixed project/guest identities and defaults to a
-short summary. Both formats and negative destinations passed retained-run VM
-validation at exact preview `7d45b3c`, without reinstalling. See
-[INTERACTIVE-SANDBOX.md](INTERACTIVE-SANDBOX.md).
+Public downloaded-artifact acceptance is complete. No trial is active and no
+application rerun is needed for these docs.
+Follow ROADMAP and EXECUTION-PLAN for the next slice: simplify approval presentation
+with complete advanced details, then select a concrete administrator workflow.
+Keep generic application conversion, Studio authoring and broader isolation
+measurements separate from the narrow alpha acceptance.
 
-## Acceptance environment and build ownership
-
-- Dedicated VM: `aiw-clean-host-0921`, resource group `RG-AIW-CLEAN-HOST-20260921`,
-  subscription `43babb60-9e73-4dc8-b769-4401c01aad73`; operator `aiwoperator`.
-- RDP is usable. The supported installer and original document remain in
-  `C:\AIW-Interactive-Input-738ea6e`; reverify their hashes before use. Retained
-  evidence is read-only unless the exact lifecycle explicitly requires recovery.
-- One target owner. Core cache: `%LOCALAPPDATA%\Temp\aiw-os-validation-20260919`.
-  Desktop cache: `%LOCALAPPDATA%\Temp\aiw-desktop-validation-20261002`.
-  Disable incremental/debug information for core validation. Use explicit
-  `x86_64-pc-windows-msvc` and target-scoped static CRT flags for packages.
-- Two parallel workspace checks encountered access-denied errors in existing
-  raw-file recovery tests. The serialized workspace, clippy, MSRV, and governance
-  checks passed. Desktop release configuration now has its own CI check after a
-  release-only API error was found and corrected during package assembly.
+One build owner per target. Core cache: `%LOCALAPPDATA%\Temp\aiw-os-validation-20260919`;
+desktop cache: `%LOCALAPPDATA%\Temp\aiw-desktop-validation-20261002`.
+Use explicit Windows target and target-scoped static CRT for packages.
 
 ## Boundaries
 
-No host installer execution, generic command interface, implicit approval,
-automatic export/overwrite, or unrelated Sandbox recovery. Never use device-code
-authentication. Commit/push milestones and merge only after review and required
-exact-head CI. Public signing/publisher identity, generic repackaging, and broader
-isolation verdicts remain separate from this unsigned development GUI goal.
+No host installer execution, generic execution interface, implicit approval,
+automatic export/overwrite or unrelated Sandbox recovery. Never device-code auth.
+Use a fresh evidence directory after diagnosed failures. Commit/push milestones;
+merge only after required exact-head CI and review, then verify merged main tree.

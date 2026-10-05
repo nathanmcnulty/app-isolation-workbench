@@ -173,6 +173,9 @@ receipt-bound package in place invalidates its evidence bindings. Signed guest
 bytes require fresh preparation/approval and appropriate disposable-worker proof;
 do not relabel historical unsigned runs as signed-candidate acceptance.
 
-Public distribution needs a complete signed candidate and fresh identity-bound
-acceptance. Keep the exact original package and evidence readable. This account
-selection and the signing control do not alone close those release gates.
+CI subsequently published complete signed alpha `desktop-alpha-6c7873c4e80c`
+from exact source `6c7873c4e80c889394ec43b27138cc52fc7df1c2` in successful run
+`37254512259`. [Public acceptance](PUBLIC-ALPHA-ACCEPTANCE.md) records independent
+asset provenance/signature checks and fresh identity-bound runtime results.
+Keep the original package and evidence readable. Account selection or CI success
+alone does not replace that acceptance or establish broader isolation.

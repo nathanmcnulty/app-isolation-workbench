@@ -1,9 +1,9 @@
 # First public alpha: CI and visibility review
 
-Independent review completed for the optional publication job on top of merged candidate
-assembly `0cb8cad6605b857170a199e28f9f9a3577defd05`. Repository visibility remains
-private. Independent exact-commit review, hosted CI, and the full private signed
-candidate result are gates before the authorized public transition.
+Independent review covered the publication job on top of merged candidate
+assembly `0cb8cad6605b857170a199e28f9f9a3577defd05`. The checkpoints below
+preceded the authorized public transition. The final sections record matched-tree
+integration, the live draft API correction, and the published signed public alpha.
 
 ## Checks completed
 
@@ -108,4 +108,24 @@ paginated release list, then reads that ID and applies the existing draft/source
 asset digest checks. Missing or ambiguous identity refuses publication and
 preserves the draft. The published-release readback still uses its published tag.
 The existing unsigned draft was only read and remains unchanged. This correction
-requires independent review and exact-head hosted CI before the next dispatch.
+required independent review and exact-head hosted CI before the next dispatch;
+the completed integration and publication are recorded below.
+
+## Published public alpha
+
+PR #87 received independent final-head review and all three successful CI checks
+at `6b693c4` (run `37253841234`). Its squash merge
+`6c7873c4e80c889394ec43b27138cc52fc7df1c2` has the exact tested tree
+`bb0d72391360da3592542a232db7e2f1fbe84cc7`.
+Corrected public run `37254512259` succeeded in all four jobs and published
+`desktop-alpha-6c7873c4e80c` as a prerelease with the five expected assets.
+The numeric draft lookup and digest-before-exposure checks are now exercised
+live. The older unsigned draft remains unpublished.
+
+Independent per-file attestation verification and fresh dedicated-VM download,
+signature, receipt and extraction checks passed. All three actual public-byte
+GUI workflows passed on the dedicated VM, including interactive edit/save/export,
+fixed Notepad++ assessment and Bambu STL-to-3MF export. Negative approval/overwrite
+controls passed as well. See [public acceptance and exact identities](PUBLIC-ALPHA-ACCEPTANCE.md).
+This closes narrow-alpha downloaded-artifact acceptance; stable promotion and
+broader isolation remain separate decisions. CI success alone proves neither.
