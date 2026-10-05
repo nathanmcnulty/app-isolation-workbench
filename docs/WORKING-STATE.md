@@ -1,9 +1,19 @@
 # Working state
 
-Updated 2026-10-03. Verify this checkout with `scripts/work-status.ps1`.
+Updated 2026-10-04. Verify this checkout with `scripts/work-status.ps1`.
 This handoff is a pointer, not execution authority or a run receipt.
 
 ## Current slice
+
+Nathan authorized his existing personal Artifact Signing account and CI setup;
+see [signing identity and control](RELEASE-SIGNING.md). The manual main-only CLI
+signing control is the current slice, not a signed desktop/public release.
+Its dedicated passwordless identity, profile-only signer role, and main-only
+environment are configured and independently read back. The build/sign/verify
+jobs are isolated; none of the built executable runs with signing authority.
+The unsigned `desktop-preview-e08115b` GitHub draft was created with all five
+verified assets. Approved cleanup of two temporary host handoffs remains blocked
+by automatic policy review; the final handoff and all evidence are preserved.
 
 PR #82 merged the Bambu GUI at `1db892d` after all three exact-head CI jobs passed;
 merged main has the tested tree. The verified desktop archive handoff now has
@@ -11,7 +21,8 @@ native PowerShell 5.1 export and extraction proof on the dedicated VM; both
 passed for the existing `e08115b` package; its receipt and application bytes did
 not change. Both schema fixtures/negative controls and independent exact-commit
 review passed. See [distribution proof and exact commands](DESKTOP-DISTRIBUTION.md).
-This avoids manual ZIP/extraction work; publisher identity/signing remain open.
+This avoids manual ZIP work. Publisher selection is settled; signed-candidate
+assembly and public acceptance remain open.
 
 The fixed Bambu Studio export now has a validated GUI path beside the two
 Notepad++ modes. Current unsigned package source is
