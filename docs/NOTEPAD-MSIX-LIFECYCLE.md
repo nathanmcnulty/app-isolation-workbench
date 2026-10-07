@@ -74,6 +74,11 @@ No Notepad++ executable or application installer ran on the host.
 Signing and the final worker lifecycle are **not yet verified**.
 `notepad-msix-research.yml` is a manual owner/main-only assembly/signing workflow;
 it has no public-release permission and never installs or executes the application.
+Owner gates require both the original `github.actor` and the current
+`github.triggering_actor` on assembly and signing, including reruns. The existing
+personal signing control and desktop candidate use the same direct signing gate;
+desktop publication also checks the triggering actor. See [GitHub's actor context
+semantics](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts).
 
 ## Feedback into assessment
 

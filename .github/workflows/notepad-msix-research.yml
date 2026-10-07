@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   assemble:
-    if: github.repository == 'nathanmcnulty/app-isolation-workbench' && github.ref == 'refs/heads/main' && github.actor == 'nathanmcnulty'
+    if: github.repository == 'nathanmcnulty/app-isolation-workbench' && github.ref == 'refs/heads/main' && github.actor == 'nathanmcnulty' && github.triggering_actor == 'nathanmcnulty'
     runs-on: windows-2025
     timeout-minutes: 10
     steps:
@@ -51,6 +51,7 @@ jobs:
           retention-days: 14
 
   sign:
+    if: github.repository == 'nathanmcnulty/app-isolation-workbench' && github.ref == 'refs/heads/main' && github.actor == 'nathanmcnulty' && github.triggering_actor == 'nathanmcnulty'
     needs: assemble
     runs-on: windows-2025
     timeout-minutes: 15
