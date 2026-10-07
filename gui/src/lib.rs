@@ -319,10 +319,9 @@ impl Controller {
             return false;
         }
         Self::cancel_gate(&mut i);
-        if let Some(mut previous) = i.package_snapshot.take() {
-            if error.is_some() {
-                previous.error = error;
-            }
+        // Packaging errors are returned by their IPC call. Keep retained trial
+        // errors with the trial rather than replacing them with an auxiliary error.
+        if let Some(previous) = i.package_snapshot.take() {
             i.snapshot = previous;
             i.worker_active = false;
             i.snapshot.close_refused = false;
@@ -395,14 +394,36 @@ mod tests {
             can_export_document: true,
             report_markdown: "retained report".into(),
         };
-        c.finish(&id, Phase::Completed, Some(result), None);
+        let trial_error = ErrorView {
+            code: "retained-export-error".into(),
+            summary: "trial error".into(),
+            remediation: "preserve trial evidence".into(),
+            detail: "original error".into(),
+            run_id: Some("retained-run".into()),
+        };
+        c.finish(&id, Phase::Completed, Some(result), Some(trial_error));
         let auxiliary = c.begin_analysis().unwrap();
         assert!(c.begin_export().is_err());
         c.finish(&auxiliary, Phase::Idle, None, None);
         assert_eq!(c.snapshot().phase, Phase::Completed);
         assert_eq!(c.snapshot().result.unwrap().run_id, "retained-run");
         let auxiliary = c.begin_packaging().unwrap();
-        c.finish(&auxiliary, Phase::Failed, None, None);
+        c.finish(
+            &auxiliary,
+            Phase::Failed,
+            None,
+            Some(ErrorView {
+                code: "package-error".into(),
+                summary: "package failed".into(),
+                remediation: "preserve package evidence".into(),
+                detail: "auxiliary error".into(),
+                run_id: None,
+            }),
+        );
+        assert_eq!(c.snapshot().error.unwrap().code, "retained-export-error");
+        let auxiliary = c.begin_packaging().unwrap();
+        c.finish(&auxiliary, Phase::Idle, None, None);
+        assert_eq!(c.snapshot().error.unwrap().code, "retained-export-error");
         let (_, result) = c.begin_export().unwrap();
         assert!(result.can_export_document);
         assert_eq!(result.run_id, "retained-run");
