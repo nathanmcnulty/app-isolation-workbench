@@ -7,11 +7,13 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use aiw_orchestrator::{AiwError, ApprovalRecord, RunLayout};
-use aiw_probe::{ApplicationInspectionKind, ReadinessState, inspect_application_source};
+use aiw_probe::{ApplicationInspectionKind, ReadinessState};
 use aiw_schema::{ApplicationSource, Project, validate_project_for_planning};
 
 mod admin_progress;
 pub mod approval_review;
+#[cfg(windows)]
+mod installer_inspection;
 pub mod packaging;
 
 const MAX_CONFIG_BYTES: u64 = 16 * 1024 * 1024;
@@ -1001,11 +1003,12 @@ fn assess_notepad(
             )
         })
         .transpose()?;
-    if let (Some(installer), Some(held)) = (installer, held.as_ref()) {
-        let inspection = inspect_application_source(installer, ApplicationInspectionKind::Msi)
-            .map_err(|error| {
-                unsupported_installer_error(&evidence_root, &run_id, error.to_string())
-            })?;
+    if let Some(held) = held.as_ref() {
+        let inspection =
+            installer_inspection::inspect_held_installer(held, ApplicationInspectionKind::Msi)
+                .map_err(|error| {
+                    unsupported_installer_error(&evidence_root, &run_id, error.to_string())
+                })?;
         save_stage(&evidence_root, "installer-inspection", &inspection)?;
         if inspection.sha256.as_deref() != Some(&held.observation().sha256)
             || inspection.sha256.as_deref() != Some(expected_msi.as_str())
@@ -1293,16 +1296,17 @@ pub fn assess_bambu_with_gate(
                 "Bambu Studio EXE",
             )
         })?;
-    let inspection = inspect_application_source(installer, ApplicationInspectionKind::Exe)
-        .map_err(|error| {
-            unsupported_application_error(
-                &evidence_root,
-                &run_id,
-                error.to_string(),
-                "exe",
-                "Bambu Studio EXE",
-            )
-        })?;
+    let inspection =
+        installer_inspection::inspect_held_installer(&held, ApplicationInspectionKind::Exe)
+            .map_err(|error| {
+                unsupported_application_error(
+                    &evidence_root,
+                    &run_id,
+                    error.to_string(),
+                    "exe",
+                    "Bambu Studio EXE",
+                )
+            })?;
     save_stage(&evidence_root, "installer-inspection", &inspection)?;
     if inspection.sha256.as_deref() != Some(&held.observation().sha256)
         || inspection.sha256.as_deref() != Some(expected_exe.as_str())

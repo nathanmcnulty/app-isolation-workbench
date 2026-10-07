@@ -114,36 +114,8 @@ fn supported_hash(project: &Project) -> Result<&str> {
 #[cfg(windows)]
 pub fn analyze_notepad_installer(installer: &Path) -> Result<PackageAnalysis> {
     let held = aiw_windows_platform::HeldApplicationFile::open_with_download_metadata(installer)?;
-    let observed = held.observation();
-    let mut inspection = inspect_application_source(installer, ApplicationInspectionKind::Msi)?;
-    if inspection.sha256.as_deref() != Some(&observed.sha256)
-        || inspection.size_bytes != Some(observed.size_bytes)
-    {
-        bail!("installer drifted during analysis");
-    }
-    inspection.signature_status = held.embedded_signature_status()?;
-    inspection
-        .canonical_path
-        .clone_from(&observed.canonical_path);
-    inspection.file_authority = Some(aiw_probe::ApplicationFileAuthority {
-        schema_version: if observed.download_metadata.is_empty() {
-            aiw_probe::APPLICATION_FILE_AUTHORITY_SCHEMA
-        } else {
-            aiw_probe::APPLICATION_DOWNLOAD_AUTHORITY_SCHEMA
-        }
-        .into(),
-        identity: observed.identity.clone(),
-        size_bytes: observed.size_bytes,
-        sha256: observed.sha256.clone(),
-        link_count: observed.link_count,
-        only_unnamed_data_stream: observed.only_unnamed_data_stream,
-        download_metadata: observed.download_metadata.clone(),
-    });
-    inspection.limitations = vec![
-        "Held file identity, streams and embedded signature were observed during analysis. Signature status is not publisher identity or application compatibility.".into(),
-        "Analysis grants no import or execution authority; packaging reopens and verifies the selected bytes.".into(),
-    ];
-    held.revalidate()?;
+    let inspection =
+        installer_inspection::inspect_held_installer(&held, ApplicationInspectionKind::Msi)?;
     let mut options = Vec::new();
     for profile in [
         NotepadPackageProfile::LocalSettingsAssessment,
