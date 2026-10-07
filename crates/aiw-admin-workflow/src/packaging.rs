@@ -8,8 +8,6 @@ pub enum SandboxPackageProfile {
     InteractiveDocument,
     BambuStudioExport,
 }
-// Preserve source compatibility for the first packaging API.
-pub type NotepadPackageProfile = SandboxPackageProfile;
 
 /// Only the existing fixed offline Sandbox policy can be selected. Device,
 /// resource and exact mapping disclosures are resolved in the replay recipe.
@@ -59,6 +57,54 @@ impl SandboxPackageProfile {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SandboxPackageOption {
+    pub profile: SandboxPackageProfile,
+    pub project_sha256: String,
+    pub isolation_preset: PackageIsolationPreset,
+    pub description: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SandboxPackageAnalysis {
+    pub schema_version: String,
+    pub installer: aiw_probe::ApplicationInspection,
+    pub options: Vec<SandboxPackageOption>,
+    pub limitations: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SandboxPackageRequest {
+    pub installer: PathBuf,
+    pub profile: SandboxPackageProfile,
+    pub isolation_preset: PackageIsolationPreset,
+    pub analyzed_installer_sha256: String,
+    pub analyzed_project_sha256: String,
+    pub evidence_parent: PathBuf,
+    pub output_parent: PathBuf,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SandboxPackageResult {
+    pub schema_version: String,
+    pub profile: SandboxPackageProfile,
+    pub isolation_preset: PackageIsolationPreset,
+    pub evidence_root: PathBuf,
+    pub bundle: aiw_runner::SandboxBundleExport,
+    pub next: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum NotepadPackageProfile {
+    LocalSettingsAssessment,
+    InteractiveDocument,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PackageOption {
     pub profile: NotepadPackageProfile,
     pub project_sha256: String,
@@ -77,7 +123,7 @@ pub struct PackageAnalysis {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct SandboxPackageRequest {
+pub struct NotepadPackageRequest {
     pub installer: PathBuf,
     pub profile: NotepadPackageProfile,
     pub isolation_preset: PackageIsolationPreset,
@@ -86,7 +132,6 @@ pub struct SandboxPackageRequest {
     pub evidence_parent: PathBuf,
     pub output_parent: PathBuf,
 }
-pub type NotepadPackageRequest = SandboxPackageRequest;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -99,19 +144,87 @@ pub struct PackageResult {
     pub next: String,
 }
 
+impl From<NotepadPackageProfile> for SandboxPackageProfile {
+    fn from(profile: NotepadPackageProfile) -> Self {
+        match profile {
+            NotepadPackageProfile::LocalSettingsAssessment => Self::LocalSettingsAssessment,
+            NotepadPackageProfile::InteractiveDocument => Self::InteractiveDocument,
+        }
+    }
+}
+
+#[cfg(windows)]
+fn notepad_profile(profile: SandboxPackageProfile) -> Result<NotepadPackageProfile> {
+    match profile {
+        SandboxPackageProfile::LocalSettingsAssessment => {
+            Ok(NotepadPackageProfile::LocalSettingsAssessment)
+        }
+        SandboxPackageProfile::InteractiveDocument => {
+            Ok(NotepadPackageProfile::InteractiveDocument)
+        }
+        SandboxPackageProfile::BambuStudioExport => bail!("Bambu is not a Notepad package profile"),
+    }
+}
+
+/// Preserve the two-profile v0alpha1 Notepad analysis contract.
+#[cfg(windows)]
+pub fn analyze_notepad_installer(installer: &Path) -> Result<PackageAnalysis> {
+    let analysis = analyze_notepad_sandbox_installer(installer)?;
+    let options = analysis
+        .options
+        .into_iter()
+        .map(|option| {
+            Ok(PackageOption {
+                profile: notepad_profile(option.profile)?,
+                project_sha256: option.project_sha256,
+                isolation_preset: option.isolation_preset,
+                description: option.description,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(PackageAnalysis {
+        schema_version: "aiw.dev/admin-package-analysis/v0alpha1".into(),
+        installer: analysis.installer,
+        options,
+        limitations: analysis.limitations,
+    })
+}
+
+/// Preserve the two-profile v0alpha1 Notepad assembly contract.
+#[cfg(windows)]
+pub fn create_notepad_package(request: &NotepadPackageRequest) -> Result<PackageResult> {
+    let result = create_sandbox_package(&SandboxPackageRequest {
+        installer: request.installer.clone(),
+        profile: request.profile.into(),
+        isolation_preset: request.isolation_preset,
+        analyzed_installer_sha256: request.analyzed_installer_sha256.clone(),
+        analyzed_project_sha256: request.analyzed_project_sha256.clone(),
+        evidence_parent: request.evidence_parent.clone(),
+        output_parent: request.output_parent.clone(),
+    })?;
+    Ok(PackageResult {
+        schema_version: "aiw.dev/admin-package-result/v0alpha1".into(),
+        profile: notepad_profile(result.profile)?,
+        isolation_preset: result.isolation_preset,
+        evidence_root: result.evidence_root,
+        bundle: result.bundle,
+        next: result.next,
+    })
+}
+
 #[cfg(any(windows, test))]
 fn fixed_assets(
     root: &Path,
-    profile: NotepadPackageProfile,
+    profile: SandboxPackageProfile,
 ) -> Result<(Project, ProductAssetManifest)> {
     let manifest: ProductAssetManifest = serde_json::from_slice(&read_file_bounded(
         &root.join("manifest.json"),
         1024 * 1024,
     )?)?;
     let assets = match profile {
-        NotepadPackageProfile::LocalSettingsAssessment => manifest.resolve(root)?,
-        NotepadPackageProfile::InteractiveDocument => manifest.resolve_interactive(root)?,
-        NotepadPackageProfile::BambuStudioExport => manifest.resolve_bambu(root)?,
+        SandboxPackageProfile::LocalSettingsAssessment => manifest.resolve(root)?,
+        SandboxPackageProfile::InteractiveDocument => manifest.resolve_interactive(root)?,
+        SandboxPackageProfile::BambuStudioExport => manifest.resolve_bambu(root)?,
     };
     let bytes = read_file_bounded(&assets.project, MAX_CONFIG_BYTES)?;
     if lowercase_sha256(&bytes) != manifest.project_sha256 {
@@ -146,7 +259,7 @@ fn supported_hash(project: &Project) -> Result<&str> {
 /// Read-only identity observation. No intake, provider lease or worker is created.
 /// The result is advisory; assembly reopens and revalidates installer and assets.
 #[cfg(windows)]
-pub fn analyze_notepad_installer(installer: &Path) -> Result<PackageAnalysis> {
+pub fn analyze_notepad_sandbox_installer(installer: &Path) -> Result<SandboxPackageAnalysis> {
     analyze_installer(
         installer,
         &[
@@ -158,7 +271,7 @@ pub fn analyze_notepad_installer(installer: &Path) -> Result<PackageAnalysis> {
 }
 
 #[cfg(windows)]
-pub fn analyze_bambu_installer(installer: &Path) -> Result<PackageAnalysis> {
+pub fn analyze_bambu_installer(installer: &Path) -> Result<SandboxPackageAnalysis> {
     analyze_installer(
         installer,
         &[SandboxPackageProfile::BambuStudioExport],
@@ -171,7 +284,7 @@ fn analyze_installer(
     installer: &Path,
     profiles: &[SandboxPackageProfile],
     kind: ApplicationInspectionKind,
-) -> Result<PackageAnalysis> {
+) -> Result<SandboxPackageAnalysis> {
     let held = aiw_windows_platform::HeldApplicationFile::open_with_download_metadata(installer)?;
     let inspection = installer_inspection::inspect_held_installer(&held, kind)?;
     let mut options = Vec::new();
@@ -179,21 +292,21 @@ fn analyze_installer(
         let (project, manifest) =
             fixed_assets(&packaged_asset_root(profile.directory())?, profile)?;
         if inspection.sha256.as_deref() == Some(supported_hash(&project)?) {
-            options.push(PackageOption {
+            options.push(SandboxPackageOption {
                 profile,
                 project_sha256: manifest.project_sha256,
                 isolation_preset: PackageIsolationPreset::OfflineWindowsSandbox,
                 description: match profile {
-                    NotepadPackageProfile::LocalSettingsAssessment => "Fixed assessment with ephemeral local settings; no user document is included.",
-                    NotepadPackageProfile::InteractiveDocument => "Interactive document workflow; a bounded text input is selected and approved separately at launch, with explicit verified export.",
-                    NotepadPackageProfile::BambuStudioExport => "Fixed standard-user STL-to-3MF export using the reviewed fixture; no slicing, printing or cloud access is tested.",
+                    SandboxPackageProfile::LocalSettingsAssessment => "Fixed assessment with ephemeral local settings; no user document is included.",
+                    SandboxPackageProfile::InteractiveDocument => "Interactive document workflow; a bounded text input is selected and approved separately at launch, with explicit verified export.",
+                    SandboxPackageProfile::BambuStudioExport => "Fixed standard-user STL-to-3MF export using the reviewed fixture; no slicing, printing or cloud access is tested.",
                 }.into(),
             });
         }
     }
     held.revalidate()?;
-    Ok(PackageAnalysis {
-        schema_version: "aiw.dev/admin-package-analysis/v0alpha1".into(),
+    Ok(SandboxPackageAnalysis {
+        schema_version: "aiw.dev/admin-package-analysis/v0alpha2".into(),
         installer: inspection,
         options,
         limitations: vec![
@@ -208,15 +321,7 @@ fn analyze_installer(
 /// Assemble and verify a reusable bundle through protected intake. Never executes
 /// an installer, approves a plan, starts Sandbox, or overwrites an existing bundle.
 #[cfg(windows)]
-pub fn create_notepad_package(request: &NotepadPackageRequest) -> Result<PackageResult> {
-    if request.profile == SandboxPackageProfile::BambuStudioExport {
-        bail!("the Notepad++ packaging entry does not accept a Bambu recipe");
-    }
-    create_sandbox_package(request)
-}
-
-#[cfg(windows)]
-pub fn create_sandbox_package(request: &SandboxPackageRequest) -> Result<PackageResult> {
+pub fn create_sandbox_package(request: &SandboxPackageRequest) -> Result<SandboxPackageResult> {
     create_with_assets(request, &packaged_asset_root(request.profile.directory())?)
 }
 
@@ -282,9 +387,9 @@ pub(crate) fn import_bambu_for_replay(
 
 #[cfg(windows)]
 fn create_with_assets(
-    request: &NotepadPackageRequest,
+    request: &SandboxPackageRequest,
     assets_root: &Path,
-) -> Result<PackageResult> {
+) -> Result<SandboxPackageResult> {
     let (project, manifest) = fixed_assets(assets_root, request.profile)?;
     if !valid_sha256(&request.analyzed_installer_sha256)
         || !valid_sha256(&request.analyzed_project_sha256)
@@ -301,7 +406,7 @@ fn create_with_assets(
     held.revalidate()?;
     let id = format!("package-{}", nonce());
     let evidence_root = create_evidence_root(&request.evidence_parent, &id)?;
-    let assembled = (|| -> Result<PackageResult> {
+    let assembled = (|| -> Result<SandboxPackageResult> {
         save_stage(
             &evidence_root,
             "selection",
@@ -344,8 +449,8 @@ fn create_with_assets(
                 &bundle.manifest_sha256,
             )?;
         }
-        let result = PackageResult {
-        schema_version: "aiw.dev/admin-package-result/v0alpha1".into(),
+        let result = SandboxPackageResult {
+        schema_version: "aiw.dev/admin-package-result/v0alpha2".into(),
         profile: request.profile,
         isolation_preset: request.isolation_preset,
         evidence_root: evidence_root.clone(),
@@ -369,8 +474,36 @@ mod tests {
     use super::*;
 
     #[test]
+    fn legacy_notepad_profile_remains_closed_to_two_variants() {
+        for (wire, expected) in [
+            (
+                "localSettingsAssessment",
+                NotepadPackageProfile::LocalSettingsAssessment,
+            ),
+            (
+                "interactiveDocument",
+                NotepadPackageProfile::InteractiveDocument,
+            ),
+        ] {
+            assert_eq!(
+                serde_json::from_value::<NotepadPackageProfile>(serde_json::json!(wire)).unwrap(),
+                expected
+            );
+        }
+        assert!(
+            serde_json::from_value::<NotepadPackageProfile>(serde_json::json!("bambuStudioExport"))
+                .is_err()
+        );
+        let value = serde_json::json!({"installer":"inert.exe", "profile":"bambuStudioExport",
+            "isolationPreset":"offlineWindowsSandbox", "analyzedInstallerSha256":"0".repeat(64),
+            "analyzedProjectSha256":"0".repeat(64), "evidenceParent":"evidence", "outputParent":"output"});
+        assert!(serde_json::from_value::<NotepadPackageRequest>(value.clone()).is_err());
+        assert!(serde_json::from_value::<SandboxPackageRequest>(value).is_ok());
+    }
+
+    #[test]
     fn bambu_installer_and_recipe_drift_reject_before_intake() {
-        let (root, assets, mut request) = fixture(NotepadPackageProfile::LocalSettingsAssessment);
+        let (root, assets, mut request) = fixture(SandboxPackageProfile::LocalSettingsAssessment);
         let mut project: Project = serde_json::from_slice(include_bytes!(
             "../../aiw-cli/product/bambu-studio/project.json"
         ))
@@ -430,7 +563,7 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
-    fn fixture(profile: NotepadPackageProfile) -> (PathBuf, PathBuf, NotepadPackageRequest) {
+    fn fixture(profile: SandboxPackageProfile) -> (PathBuf, PathBuf, SandboxPackageRequest) {
         static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let sequence = SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let root = std::env::temp_dir().join(format!(
@@ -447,13 +580,13 @@ mod tests {
         std::fs::write(&installer, b"inert MSI contract fixture").unwrap();
         let installer_hash = lowercase_sha256(b"inert MSI contract fixture");
         let bytes: &[u8] = match profile {
-            NotepadPackageProfile::LocalSettingsAssessment => {
+            SandboxPackageProfile::LocalSettingsAssessment => {
                 include_bytes!("../../aiw-cli/product/notepad-plus-plus/project.yaml")
             }
-            NotepadPackageProfile::InteractiveDocument => {
+            SandboxPackageProfile::InteractiveDocument => {
                 include_bytes!("../../aiw-cli/product/notepad-plus-plus-interactive/project.yaml")
             }
-            NotepadPackageProfile::BambuStudioExport => panic!("Notepad fixture only"),
+            SandboxPackageProfile::BambuStudioExport => panic!("Notepad fixture only"),
         };
         let mut project: Project = serde_yaml::from_slice(bytes).unwrap();
         let ApplicationSource::Msi(source) = &mut project.application else {
@@ -469,7 +602,7 @@ mod tests {
             "projectPath": "project.yaml", "projectSha256": project_hash,
             "guestAgentPath": "tools/agent.exe", "guestAgentSha256": lowercase_sha256(b"inert agent"),
         })).unwrap()).unwrap();
-        let request = NotepadPackageRequest {
+        let request = SandboxPackageRequest {
             installer,
             profile,
             isolation_preset: PackageIsolationPreset::OfflineWindowsSandbox,
@@ -484,8 +617,8 @@ mod tests {
     #[test]
     fn assembly_preserves_selected_recipe_and_retains_verified_result() {
         for profile in [
-            NotepadPackageProfile::LocalSettingsAssessment,
-            NotepadPackageProfile::InteractiveDocument,
+            SandboxPackageProfile::LocalSettingsAssessment,
+            SandboxPackageProfile::InteractiveDocument,
         ] {
             let (root, assets, request) = fixture(profile);
             let result = create_with_assets(&request, &assets).unwrap();
@@ -512,7 +645,7 @@ mod tests {
 
     #[test]
     fn drift_is_rejected_before_creating_any_package_or_evidence() {
-        let (root, assets, mut request) = fixture(NotepadPackageProfile::LocalSettingsAssessment);
+        let (root, assets, mut request) = fixture(SandboxPackageProfile::LocalSettingsAssessment);
         request.analyzed_project_sha256 = "0".repeat(64);
         assert!(create_with_assets(&request, &assets).is_err());
         request.analyzed_project_sha256 = fixed_assets(&assets, request.profile)
@@ -524,13 +657,13 @@ mod tests {
         for parent in [&request.evidence_parent, &request.output_parent] {
             assert_eq!(std::fs::read_dir(parent).unwrap().count(), 0);
         }
-        assert!(serde_json::from_str::<NotepadPackageProfile>("\"appContainer\"").is_err());
+        assert!(serde_json::from_str::<SandboxPackageProfile>("\"appContainer\"").is_err());
         std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn failed_destination_retains_intake_and_never_publishes_success() {
-        let (root, assets, mut request) = fixture(NotepadPackageProfile::LocalSettingsAssessment);
+        let (root, assets, mut request) = fixture(SandboxPackageProfile::LocalSettingsAssessment);
         request.output_parent = root.join("missing-output-parent");
         assert!(create_with_assets(&request, &assets).is_err());
         let evidence = std::fs::read_dir(&request.evidence_parent)
@@ -548,7 +681,7 @@ mod tests {
 
     #[test]
     fn repackaged_metadata_cannot_enable_network() {
-        let (root, assets, request) = fixture(NotepadPackageProfile::LocalSettingsAssessment);
+        let (root, assets, request) = fixture(SandboxPackageProfile::LocalSettingsAssessment);
         let mut project: Project =
             serde_yaml::from_slice(&std::fs::read(assets.join("project.yaml")).unwrap()).unwrap();
         project.isolation_intent.network = aiw_schema::NetworkIntent::Allowed;
@@ -568,7 +701,7 @@ mod tests {
 
     #[test]
     fn shared_evidence_and_output_parent_uses_distinct_fresh_children() {
-        let (root, assets, mut request) = fixture(NotepadPackageProfile::LocalSettingsAssessment);
+        let (root, assets, mut request) = fixture(SandboxPackageProfile::LocalSettingsAssessment);
         request.output_parent.clone_from(&request.evidence_parent);
         let result = create_with_assets(&request, &assets).unwrap();
         assert_ne!(
@@ -585,7 +718,7 @@ mod tests {
 
     #[test]
     fn replay_import_requires_the_matching_installed_recipe_and_manifest() {
-        let (root, assets, request) = fixture(NotepadPackageProfile::LocalSettingsAssessment);
+        let (root, assets, request) = fixture(SandboxPackageProfile::LocalSettingsAssessment);
         let result = create_with_assets(&request, &assets).unwrap();
         let (mut project, _) = fixed_assets(&assets, request.profile).unwrap();
         let intake = root.join("replay-intakes");

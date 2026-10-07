@@ -188,13 +188,13 @@ mod desktop {
         c: State<'_, Controller>,
         installer: String,
         product: Option<PackageApplication>,
-    ) -> std::result::Result<service::packaging::PackageAnalysis, String> {
+    ) -> std::result::Result<service::packaging::SandboxPackageAnalysis, String> {
         let c = c.inner().clone();
         let id = c.begin_analysis()?;
         package_action(app, c, id, move || {
             match product.unwrap_or(PackageApplication::Notepad) {
                 PackageApplication::Notepad => {
-                    service::packaging::analyze_notepad_installer(Path::new(&installer))
+                    service::packaging::analyze_notepad_sandbox_installer(Path::new(&installer))
                 }
                 PackageApplication::Bambu => {
                     service::packaging::analyze_bambu_installer(Path::new(&installer))
@@ -208,7 +208,7 @@ mod desktop {
         app: tauri::AppHandle,
         c: State<'_, Controller>,
         request: service::packaging::SandboxPackageRequest,
-    ) -> std::result::Result<service::packaging::PackageResult, String> {
+    ) -> std::result::Result<service::packaging::SandboxPackageResult, String> {
         let c = c.inner().clone();
         let id = c.begin_packaging()?;
         package_action(app, c, id, move || {

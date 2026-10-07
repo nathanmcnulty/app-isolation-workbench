@@ -372,6 +372,35 @@ fn bundle_failure_preserves_actionable_diagnostic() {
     );
 }
 
+#[cfg(windows)]
+#[test]
+fn bambu_bundle_rejection_is_structured_and_creates_no_intake() {
+    let temp = TempDir::new();
+    for command in ["verify-bambu", "import-bambu"] {
+        let mut cli = Command::new(aiw());
+        cli.args(["package", command, "--bundle"])
+            .arg(temp.path())
+            .args(["--manifest-sha256", "bad-hash"]);
+        if command == "import-bambu" {
+            cli.arg("--intake-parent")
+                .arg(temp.path())
+                .args(["--intake-id", "never-created"]);
+        }
+        let result = cli.output().unwrap();
+        assert!(!result.status.success());
+        assert!(result.stdout.is_empty());
+        let error = parse_one_json(&result.stderr);
+        assert_eq!(error["code"], "AIW_SANDBOX_BUNDLE_REJECTED");
+        assert!(
+            error["detail"]
+                .as_str()
+                .unwrap()
+                .contains("expected manifest hash")
+        );
+        assert!(!temp.path().join("never-created").exists());
+    }
+}
+
 #[test]
 fn typed_msi_compilation_emits_bound_review_and_rejects_unknown_scenario() {
     let project_path = repo_path("examples/notepad-plus-plus-msi.aiw.yaml");

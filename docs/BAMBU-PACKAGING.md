@@ -13,6 +13,9 @@ the 512 MiB bound matches existing Bambu preparation. A manifest binds payload,
 project, compiled scenario, runtime, ephemeral data contract and source intake.
 The manifest hash must be preserved separately. Existing Notepad++ bundles and
 their typed records remain unchanged and cannot be interpreted as Bambu input.
+The original two-profile Notepad administrator API and v0alpha1 records remain
+closed to Notepad values. The expanded administrator analysis/result records use
+separate `SandboxPackage*` types and v0alpha2 identifiers.
 
 Reuse held closed-inventory file transport and protected receipt-last publication.
 Keep profile-specific compilation, import and report types separate. Replay must
