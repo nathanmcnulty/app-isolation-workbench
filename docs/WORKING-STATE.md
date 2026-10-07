@@ -5,7 +5,7 @@ This handoff is a pointer, not execution authority or a run receipt.
 
 ## Current slice
 
-The active goal is initial packaging validated using Notepad++ with a simple
+Initial packaging is complete using Notepad++ with a simple
 installer -> analysis -> isolation/recipe selection experience. On
 `codex/notepad-package-workflow`, the new `aiw-admin-workflow::packaging` service
 reuses fixed recipe compilation, protected intake and bundle export/verification.
@@ -22,8 +22,11 @@ run `admin-1791360654757886700` completed native editing, saving, graceful close
 verified 217-byte retention, cleanup and explicit export. Existing-destination
 export was refused; source bytes remained unchanged. Both package/run associations
 were independently reverified under the operator account. Broader isolation
-remains insufficient evidence. Draft PR #90 has all three checks passed at
-`46cdab5`; final acceptance documentation needs exact-head CI before merge.
+remains insufficient evidence. PR #90 merged at
+`08dcc310aa30ea9c0bc4b68deb46ac09337ea012` after all three checks passed at
+`a7714f1` (CI `37594030722`); main matches the tested PR tree. Signed public-alpha
+CI `37595331022` is building that exact merged source. Its downloaded-byte
+verification and runtime acceptance remain pending.
 Package replay imports a verified bundle
 only when its recipe matches the installed profile, then uses the existing review,
 exact approval and separate Start. Packaging preserves completed trial/export state.
@@ -80,7 +83,7 @@ One build owner per target. Core cache: `%LOCALAPPDATA%\Temp\aiw-os-validation-2
 desktop cache: `%LOCALAPPDATA%\Temp\aiw-desktop-validation-20261002`.
 Use explicit Windows target and target-scoped static CRT for packages.
 
-Finish the active Notepad++ packaging goal before selecting another application.
+Verify the new signed distribution and its package workflows before selecting another application.
 Keep generic conversion and new providers outside this initial packaging slice.
 
 ## Boundaries

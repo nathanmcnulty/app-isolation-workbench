@@ -186,8 +186,10 @@ The local workspace suite and full warnings-as-errors Clippy passed in diagnosti
 run `aiw-local-checks-b6831e1e-218d-40f0-a568-aa9ba67d8f5b`. Earlier local
 test-storage AccessDenied failures remain retained; no publication or ACL checks
 were weakened. All three hosted checks passed at `46cdab5` in CI `37591119932`,
-including the normal parallel workspace suite. Final documentation integration
-still requires its exact-head hosted checks and merged-tree verification.
+including the normal parallel workspace suite. All three final checks passed at
+`a7714f1` in CI `37594030722`. PR #90 merged at
+`08dcc310aa30ea9c0bc4b68deb46ac09337ea012`; main's tree matches the tested
+PR tree `421227ad1ea6472e8570a03a6d2c399d6fb6e26e`.
 
 The desktop now has installer selection, Analyze, the closed isolation preset and
 workflow choices, and Create package. Output defaults to the existing Workbench
