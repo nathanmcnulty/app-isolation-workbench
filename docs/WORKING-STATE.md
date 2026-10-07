@@ -17,7 +17,13 @@ and created a verified package. Native inspection caught result-card overflow,
 fixed at `f6746b8`; the rebuilt candidate created another package with readable
 controls. Package-bound run `admin-1791358675396046500` completed the fixed
 workflow and verified cleanup after full recipe review, exact approval and Start.
-Broader isolation remains insufficient evidence. Hosted integration remains.
+The rebuilt `b61e0a7` passed native scroll/result preservation. Interactive package
+run `admin-1791360654757886700` completed native editing, saving, graceful close,
+verified 217-byte retention, cleanup and explicit export. Existing-destination
+export was refused; source bytes remained unchanged. Both package/run associations
+were independently reverified under the operator account. Broader isolation
+remains insufficient evidence. Draft PR #90 has all three checks passed at
+`46cdab5`; final acceptance documentation needs exact-head CI before merge.
 Package replay imports a verified bundle
 only when its recipe matches the installed profile, then uses the existing review,
 exact approval and separate Start. Packaging preserves completed trial/export state.
