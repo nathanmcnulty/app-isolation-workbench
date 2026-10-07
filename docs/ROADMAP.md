@@ -76,8 +76,13 @@ fresh dedicated-VM testing. See [signed public acceptance](PUBLIC-ALPHA-ACCEPTAN
 for completed workflows and limits; earlier unsigned trials remain separate.
 The alpha provides a usable fixed-workflow assessment loop, not general installer
 conversion or a measured host-containment verdict. Keep the complete recipe
-available while improving its default approval presentation. Moving raw JSON
-into an advanced view is a bounded usability follow-up.
+available. PR #89 completed concise backend-authored approval presentation with
+optional full technical details. PR #90 completed the initial Notepad++ installer
+analysis, closed offline recipe selection, package assembly and verified replay
+experience. Signed alpha `desktop-alpha-08dcc310aa30` now includes both slices;
+its [downloaded-package acceptance](PUBLIC-PACKAGING-ACCEPTANCE.md) is separate
+from unsigned development proof. This closes the first packaging component,
+not the broader isolation or Studio benchmarks.
 
 ## What is already working
 

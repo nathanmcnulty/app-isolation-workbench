@@ -21,7 +21,8 @@ separate supported-profile candidate, not a reason to promise general EXE suppor
 - A reusable profile can bind that retained comparison to fresh preparation.
 
 The signed public alpha now distributes this fixed-workflow foundation through
-reviewed CI. [Public acceptance](PUBLIC-ALPHA-ACCEPTANCE.md) records exact download
+reviewed CI. [Original public acceptance](PUBLIC-ALPHA-ACCEPTANCE.md) and
+[packaging alpha acceptance](PUBLIC-PACKAGING-ACCEPTANCE.md) record exact download
 identities and fresh runtime results; historical unsigned trials are not substituted
 for those checks. Counts of commits, tests, or reports do not measure product utility.
 
