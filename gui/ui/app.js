@@ -135,6 +135,7 @@
         text("packageStatus", analysis.options.length ? "Supported installer identity. Choose an isolation preset and workflow." : "These installer bytes have no supported package recipe. Analysis is not a compatibility verdict.");
       }
       renderPackage(); await poll();
+      $(create ? "packageResult" : "packageSelection").scrollIntoView({ block: "nearest" });
     } catch (error) { text("packageStatus", "Packaging action stopped. Read the error and preserve retained evidence before retrying."); displayLocalError(error); }
     finally { state.busy = false; applyControls(state.current, false); }
   }
@@ -217,7 +218,7 @@
     }
     state.current = snapshot; text("phaseBadge", phaseLabel(snapshot.phase)); renderProgress(snapshot); renderResult(snapshot.result); renderError(snapshot.error);
     applyControls(snapshot, state.busy);
-    if (previousPhase !== snapshot.phase) {
+    if (previousPhase !== snapshot.phase && ![previousPhase, snapshot.phase].some((phase) => ["analyzing", "packaging"].includes(phase))) {
       const target = snapshot.error ? "errorCard" : snapshot.phase === "review" ? "reviewCard" : snapshot.phase === "approved" ? "startBox" : ["running", "exporting"].includes(snapshot.phase) ? "progressCard" : snapshot.result ? "resultCard" : null;
       if (target) $(target).scrollIntoView({ block: "start" });
     }

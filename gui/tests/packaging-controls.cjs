@@ -5,12 +5,12 @@ const vm = require("node:vm");
 const display = require("../ui/display.js");
 
 for (const profile of ["localSettingsAssessment", "interactiveDocument"]) test(`package ${profile} binds analysis and changing installer invalidates it without execution`, async () => {
-  const elements = new Map();
+  const elements = new Map(), scrolled = [];
   const element = (id) => {
     if (!elements.has(id)) elements.set(id, {
       value: "", textContent: "", innerHTML: "untouched", disabled: false, hidden: false, handlers: {},
       classList: { toggle(name, on) { if (name === "hidden") element(id).hidden = on; } },
-      scrollIntoView() {}, addEventListener(event, handler) { this.handlers[event] = handler; },
+      scrollIntoView() { scrolled.push(id); }, addEventListener(event, handler) { this.handlers[event] = handler; },
     });
     return elements.get(id);
   };
@@ -19,6 +19,7 @@ for (const profile of ["localSettingsAssessment", "interactiveDocument"]) test(`
   const analysisGate = new Promise((resolve) => { finishAnalysis = resolve; });
   let selected = "C:\\input\\notepad.msi";
   let failCreation = false;
+  let phase = "completed";
   const analysis = {
     installer: { sha256: "installer-hash" },
     options: [{ profile, isolationPreset: "offlineWindowsSandbox", projectSha256: "project-hash", description: "<script>inert recipe</script>" }],
@@ -32,9 +33,12 @@ for (const profile of ["localSettingsAssessment", "interactiveDocument"]) test(`
       if (name === "analyze_package") return analysisGate;
       if (name === "create_package") {
         if (failCreation) throw new Error("Retain partial output");
+        phase = "packaging";
+        await intervals.find((callback) => callback.name === "poll")();
+        phase = "completed";
         return { profile, next: "Not compatibility-certified", bundle: { bundlePath: "C:\\out\\bundle", manifestSha256: "manifest-hash" } };
       }
-      return { phase: "idle", defaults: { evidence: "C:\\evidence" } };
+      return { phase, result: { outcome: "verified", runId: "previous-trial" }, defaults: { evidence: "C:\\evidence" } };
     } } } },
     setInterval: (callback) => intervals.push(callback),
   };
@@ -55,7 +59,10 @@ for (const profile of ["localSettingsAssessment", "interactiveDocument"]) test(`
   assert.equal(element("packageDescription").innerHTML, "untouched");
   selected = "C:\\out";
   await element("choosePackageOutput").handlers.click();
+  scrolled.length = 0;
   await element("createPackage").handlers.click();
+  assert.deepEqual(scrolled, ["packageResult"]);
+  assert.equal(element("resultRun").textContent, "previous-trial");
   const request = calls.find((call) => call.name === "create_package").args.request;
   assert.equal(request.installer, "C:\\input\\notepad.msi");
   assert.equal(request.analyzedInstallerSha256, "installer-hash");
