@@ -19,8 +19,9 @@
       return { execution: recipe.limitations[1], changes: recipe.trustDeltas.join("\n\n"), lifetime: recipe.data.lifetime };
     }
     if (source && source.schemaVersion === "aiw.dev/admin-bambu-recipe/v0alpha1" &&
-        prose(source.executionIdentity) && prose(source.dataLifetime) && prose(source.limits)) {
-      return { execution: source.executionIdentity, changes: source.limits, lifetime: source.dataLifetime };
+        prose(source.executionIdentity) && prose(source.dataLifetime) && prose(source.limits) &&
+        source.runPlan && Array.isArray(source.runPlan.trustDeltas) && source.runPlan.trustDeltas.length && source.runPlan.trustDeltas.every(prose)) {
+      return { execution: source.executionIdentity, changes: source.runPlan.trustDeltas.join("\n\n") + "\n\n" + source.limits, lifetime: source.dataLifetime };
     }
     return null;
   }

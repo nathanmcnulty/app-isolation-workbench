@@ -53,7 +53,7 @@ test("review overview stays inert, preserves expanded details, and resets on a n
     });
     return elements.get(id);
   };
-  const recipe = { schemaVersion: "aiw.dev/admin-bambu-recipe/v0alpha1", executionIdentity: "<img src=x>\u202eexecution", dataLifetime: "Export is explicit", limits: "No printing" };
+  const recipe = { schemaVersion: "aiw.dev/admin-bambu-recipe/v0alpha1", executionIdentity: "<img src=x>\u202eexecution", dataLifetime: "Export is explicit", limits: "No printing", runPlan: { trustDeltas: ["Tools read-only; output untrusted"] } };
   let snapshot = { phase: "review", workflowId: "fixed", review: { challengeId: "one", recipeJson: JSON.stringify(recipe), planJson: '{"fixed":true}', approvalJson: "{}", exactConfirmation: "approve exact-hash", planHash: "exact-hash" } };
   const intervals = [], calls = [];
   const context = {

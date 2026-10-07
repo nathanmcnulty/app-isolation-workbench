@@ -24,8 +24,10 @@ test("recipe overviews preserve backend access, data and scope prose", () => {
   assert.deepEqual(reviewSummary(JSON.stringify(recipe)), {
     execution: recipe.recipe.limitations[1], changes: recipe.recipe.trustDeltas.join("\n\n"), lifetime: recipe.recipe.data.lifetime,
   });
-  const bambu = { schemaVersion: "aiw.dev/admin-bambu-recipe/v0alpha1", executionIdentity: "Standard-user export", dataLifetime: "No automatic host export", limits: "No slicing or printing" };
-  assert.deepEqual(reviewSummary(bambu), { execution: bambu.executionIdentity, changes: bambu.limits, lifetime: bambu.dataLifetime });
+  const bambu = { schemaVersion: "aiw.dev/admin-bambu-recipe/v0alpha1", executionIdentity: "Standard-user export", dataLifetime: "No automatic host export", limits: "No slicing or printing", runPlan: { trustDeltas: ["Tools read-only; output untrusted"] } };
+  assert.deepEqual(reviewSummary(bambu), { execution: bambu.executionIdentity, changes: "Tools read-only; output untrusted\n\nNo slicing or printing", lifetime: bambu.dataLifetime });
+  delete bambu.runPlan;
+  assert.equal(reviewSummary(bambu), null);
 });
 
 test("unknown or incomplete recipes do not get a guessed overview", () => {
