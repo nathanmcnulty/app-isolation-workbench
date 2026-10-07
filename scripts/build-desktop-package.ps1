@@ -179,15 +179,20 @@ preparation or approval alone. Results distinguish verified application
 functions and cleanup from broader isolation evidence, which remains measured
 only where the retained report says it is measured.
 
-To assemble a reusable Notepad++ package, use Build a Notepad++ Sandbox package:
-Choose MSI, Analyze installer, select the offline preset and application workflow,
-then Create package. Assembly does not execute the installer. Keep the package
+To assemble a reusable package, use Build a Sandbox package. Select Supported
+application: Notepad++ 8.9.8 x64 MSI or Bambu Studio 2.8.2.60 x64 EXE. Choose the
+exact installer and Analyze installer. Select Windows Sandbox · offline and
+ephemeral, then a Notepad++ assessment/interactive workflow or Fixed STL-to-3MF
+export for Bambu. Press Create package. Assembly does not execute the installer.
+Keep the package
 folder and displayed manifest hash together. Identify the operator below; an
 interactive package also needs its own text input. Press Prepare package validation,
 review the recipe, approve its exact literal, then Start separately. Interactive
 validation requires editing, saving and closing the editor; export its verified
-document explicitly to a new file. This supports only the fixed Notepad++ recipes
-in this desktop, not arbitrary installer conversion or AppContainer packaging.
+document explicitly to a new file. Fixed assessment and Bambu export complete
+automatically; inspect their function and cleanup results. Only the three fixed
+recipes in this desktop are supported, not arbitrary installer conversion or
+AppContainer packaging.
 
 Source revision: $SourceRevision
 CLI SHA-256: $cliHash

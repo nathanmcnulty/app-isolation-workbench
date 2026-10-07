@@ -207,16 +207,21 @@ jobs:
           results explicitly. A passing function workflow does not prove broader
           isolation. Retain the result and cleanup record before closing the host GUI.
 
-          To build a supported Notepad++ Sandbox package, use **Build a Notepad++
-          Sandbox package**: **Choose MSI**, **Analyze installer**, select the offline
-          preset and application workflow, then **Create package**. Assembly does
+          To build a supported package, use **Build a Sandbox package**. Select
+          **Supported application**: Notepad++ 8.9.8 x64 MSI or Bambu Studio
+          2.8.2.60 x64 EXE. Choose the exact installer, **Analyze installer**, select
+          **Windows Sandbox · offline and ephemeral** and a Notepad++ assessment/
+          interactive workflow or **Fixed STL-to-3MF export** for Bambu, then
+          **Create package**. Assembly does
           not run the installer. Retain the package folder and displayed manifest
           hash. Enter the operator identity below; interactive packages also need
           their own text input. Use **Prepare package validation**, review its recipe,
           approve the exact displayed literal, then **Start** separately. Interactive
           validation requires editing, saving and closing Notepad++; export the
           verified document explicitly to a new file. Only the installed fixed
-          Notepad++ recipes are supported. Package assembly alone does not establish
+          Notepad++ and Bambu recipes are supported. Fixed assessment and Bambu
+          export complete automatically; inspect their function and cleanup results.
+          Package assembly alone does not establish
           compatibility or broader isolation, and does not create an MSIX/AppContainer.
           '@
           $helperHash = (Get-FileHash (Join-Path $handoff 'desktop-package-archive.ps1') -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -293,7 +298,7 @@ jobs:
           $tag = 'desktop-alpha-' + $env:SOURCE_REVISION.Substring(0, 12)
           $records = @($env:INVENTORY | ConvertFrom-Json)
           $distribution = Get-Content release\distribution.json -Raw | ConvertFrom-Json
-          $lines = @('# Signed desktop alpha', '', 'Windows Sandbox assessment for three fixed workflows: Notepad++ assessment, interactive document transfer, and Bambu Studio STL-to-3MF export. Includes installer analysis and reusable package assembly for the two fixed Notepad++ recipes, with separate review, approval and validation.', '', 'This is an alpha candidate. Exact downloaded-artifact runtime acceptance is pending. Supported function results remain separate from broader isolation, which is not established by signing or a passing workflow.', '', 'Download all five assets into one fresh folder and follow START-HERE.md. Windows Sandbox is required; application inputs are selected separately. Export needed results before discarding temporary Sandbox data.', '', "Source: $env:SOURCE_REVISION", "Build/sign/assembly run: $env:RUN_URL", "Build provenance attestation: $env:ATTESTATION_URL", "Package receipt SHA-256: $($distribution.receiptSha256)", '', '| File | SHA-256 |', '|---|---|')
+          $lines = @('# Signed desktop alpha', '', 'Windows Sandbox assessment for three fixed workflows: Notepad++ assessment, interactive document transfer, and Bambu Studio STL-to-3MF export. Includes installer analysis and reusable package assembly for all three fixed recipes, with separate review, approval and validation.', '', 'This is an alpha candidate. Exact downloaded-artifact runtime acceptance is pending. Supported function results remain separate from broader isolation, which is not established by signing or a passing workflow.', '', 'Download all five assets into one fresh folder and follow START-HERE.md. Windows Sandbox is required; application inputs are selected separately. Export needed results before discarding temporary Sandbox data.', '', "Source: $env:SOURCE_REVISION", "Build/sign/assembly run: $env:RUN_URL", "Build provenance attestation: $env:ATTESTATION_URL", "Package receipt SHA-256: $($distribution.receiptSha256)", '', '| File | SHA-256 |', '|---|---|')
           foreach ($record in $records) { $lines += "| $($record.name) | $($record.sha256) |" }
           $lines += @('', 'Authenticode verifies Nathan McNulty on the packaged executables and handoff scripts. GitHub build provenance binds each exact downloadable asset to this repository, workflow, and source revision; it is separate from application/isolation acceptance.', '', 'Advanced provenance verification:', '', '```powershell', "gh attestation verify .\aiw-desktop.zip --repo $repo --signer-workflow $repo/.github/workflows/desktop-candidate.yml --source-ref refs/heads/main --source-digest $env:SOURCE_REVISION --deny-self-hosted-runners", '```')
           $notes = Join-Path $env:RUNNER_TEMP 'alpha-release-notes.md'
