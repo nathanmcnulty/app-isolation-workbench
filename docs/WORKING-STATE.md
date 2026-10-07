@@ -5,6 +5,33 @@ This handoff is a pointer, not execution authority or a run receipt.
 
 ## Current slice
 
+The active goal is initial packaging validated using Notepad++ with a simple
+installer -> analysis -> isolation/recipe selection experience. On
+`codex/notepad-package-workflow`, the new `aiw-admin-workflow::packaging` service
+reuses fixed recipe compilation, protected intake and bundle export/verification.
+The desktop now wires installer analysis, typed preset/workflow selection and
+package creation with optional technical details and operation locking. Service
+tests use inert fixtures; 31 service, 7 controller and 10 UI tests pass. Exact
+`e881c59` passed independent review; the native VM flow analyzed the real MSI
+and created a verified package. Native inspection caught result-card overflow,
+fixed at `f6746b8`; the rebuilt candidate created another package with readable
+controls. Package-bound run `admin-1791358675396046500` completed the fixed
+workflow and verified cleanup after full recipe review, exact approval and Start.
+The rebuilt `b61e0a7` passed native scroll/result preservation. Interactive package
+run `admin-1791360654757886700` completed native editing, saving, graceful close,
+verified 217-byte retention, cleanup and explicit export. Existing-destination
+export was refused; source bytes remained unchanged. Both package/run associations
+were independently reverified under the operator account. Broader isolation
+remains insufficient evidence. Draft PR #90 has all three checks passed at
+`46cdab5`; final acceptance documentation needs exact-head CI before merge.
+Package replay imports a verified bundle
+only when its recipe matches the installed profile, then uses the existing review,
+exact approval and separate Start. Packaging preserves completed trial/export state.
+See [administrator packaging](ADMIN-PACKAGING.md). Do not treat assembly tests or
+older public-alpha trials as acceptance of this new end-to-end experience.
+
+## Previous completed slice
+
 `codex/admin-approval-summary` adds backend-authored approval prose by default
 and expandable complete recipe, plan, workspace and approval identity. Unknown
 or incomplete summaries open full details. Exact approval and separate Start
@@ -17,8 +44,8 @@ with explicit Windows target and static CRT. Retained recipes for all three
 products project successfully. Automated RDP preparation/expand/cancel acceptance
 on the dedicated VM passed without approving or starting a Sandbox workflow.
 Detailed source/binary/run identities are in [GUI acceptance](GUI-FIRST-FINISH-LINE.md#approval-presentation).
-Local acceptance is complete. Integration requires all three hosted checks for
-the final PR head and verification of the merged tree against that tested head.
+PR #89 integrated this slice at `612cd2926b5678f817f83869e04ae22f15d39a18`.
+All three hosted checks passed; the merged tree matches the tested PR head.
 
 ## Preserved public milestone
 
@@ -53,8 +80,8 @@ One build owner per target. Core cache: `%LOCALAPPDATA%\Temp\aiw-os-validation-2
 desktop cache: `%LOCALAPPDATA%\Temp\aiw-desktop-validation-20261002`.
 Use explicit Windows target and target-scoped static CRT for packages.
 
-Follow ROADMAP and EXECUTION-PLAN: select the next concrete administrator application workflow;
-keep generic conversion and new providers outside that bounded slice.
+Finish the active Notepad++ packaging goal before selecting another application.
+Keep generic conversion and new providers outside this initial packaging slice.
 
 ## Boundaries
 

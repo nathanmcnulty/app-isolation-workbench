@@ -12,6 +12,7 @@ use aiw_schema::{ApplicationSource, Project, validate_project_for_planning};
 
 mod admin_progress;
 pub mod approval_review;
+pub mod packaging;
 
 const MAX_CONFIG_BYTES: u64 = 16 * 1024 * 1024;
 
@@ -817,7 +818,7 @@ pub fn assess_with_gate(
     show_progress: bool,
 ) -> Result<AdminAssessmentResult> {
     assess_notepad(
-        installer,
+        NotepadSource::Installer(installer),
         None,
         evidence_parent,
         identity,
@@ -855,7 +856,7 @@ pub fn launch_document_with_gate(
     show_progress: bool,
 ) -> Result<AdminAssessmentResult> {
     assess_notepad(
-        installer,
+        NotepadSource::Installer(installer),
         Some(document_input),
         evidence_parent,
         identity,
@@ -865,8 +866,40 @@ pub fn launch_document_with_gate(
 }
 
 #[cfg(windows)]
+#[derive(Clone, Copy)]
+enum NotepadSource<'a> {
+    Installer(&'a Path),
+    Bundle {
+        root: &'a Path,
+        manifest_sha256: &'a str,
+    },
+}
+
+#[cfg(windows)]
+pub fn assess_package_with_gate(
+    bundle_root: &Path,
+    manifest_sha256: &str,
+    document_input: Option<&Path>,
+    evidence_parent: &Path,
+    identity: &str,
+    gate: &dyn ApprovalGate,
+) -> Result<AdminAssessmentResult> {
+    assess_notepad(
+        NotepadSource::Bundle {
+            root: bundle_root,
+            manifest_sha256,
+        },
+        document_input,
+        evidence_parent,
+        identity,
+        gate,
+        false,
+    )
+}
+
+#[cfg(windows)]
 fn assess_notepad(
-    installer: &Path,
+    source: NotepadSource<'_>,
     document_input: Option<&Path>,
     evidence_parent: &Path,
     identity: &str,
@@ -957,15 +990,27 @@ fn assess_notepad(
             detail: "No protected intake was created and AIW did not acquire, recover, or stop a Sandbox session.".into(),
         }));
     }
-    let held = aiw_windows_platform::HeldApplicationFile::open_with_download_metadata(installer)
-        .map_err(|error| unsupported_installer_error(&evidence_root, &run_id, error.to_string()))?;
-    let inspection = inspect_application_source(installer, ApplicationInspectionKind::Msi)
-        .map_err(|error| unsupported_installer_error(&evidence_root, &run_id, error.to_string()))?;
-    save_stage(&evidence_root, "installer-inspection", &inspection)?;
-    if inspection.sha256.as_deref() != Some(&held.observation().sha256)
-        || inspection.sha256.as_deref() != Some(expected_msi.as_str())
-    {
-        return Err(anyhow!(AiwError {
+    let installer = match source {
+        NotepadSource::Installer(path) => Some(path),
+        NotepadSource::Bundle { .. } => None,
+    };
+    let held = installer
+        .map(|path| {
+            aiw_windows_platform::HeldApplicationFile::open_with_download_metadata(path).map_err(
+                |error| unsupported_installer_error(&evidence_root, &run_id, error.to_string()),
+            )
+        })
+        .transpose()?;
+    if let (Some(installer), Some(held)) = (installer, held.as_ref()) {
+        let inspection = inspect_application_source(installer, ApplicationInspectionKind::Msi)
+            .map_err(|error| {
+                unsupported_installer_error(&evidence_root, &run_id, error.to_string())
+            })?;
+        save_stage(&evidence_root, "installer-inspection", &inspection)?;
+        if inspection.sha256.as_deref() != Some(&held.observation().sha256)
+            || inspection.sha256.as_deref() != Some(expected_msi.as_str())
+        {
+            return Err(anyhow!(AiwError {
             code: "AIW_ADMIN_UNSUPPORTED_INSTALLER".into(),
             summary: "installer bytes are not supported by this Notepad++ profile".into(),
             stage: "adminInstallerInspection".into(),
@@ -977,13 +1022,21 @@ fn assess_notepad(
             ).into(),
             detail: "No protected intake was created and no Sandbox session was acquired.".into(),
         }));
+        }
+        held.revalidate()
+            .map_err(|error| anyhow!("installer drifted before protected intake: {error}"))?;
     }
-    held.revalidate()
-        .map_err(|error| anyhow!("installer drifted before protected intake: {error}"))?;
     let intake_parent = evidence_root.join("intakes");
     std::fs::create_dir(&intake_parent)?;
-    let receipt = aiw_windows_platform::import_application_file_with_metadata(&intake_parent, "notepad-plus-plus", ApplicationInspectionKind::Msi, &held, true)
-        .map_err(|error| anyhow!("protected intake failed; preserve evidence and use a new evidence location to retry: {error}"))?;
+    let receipt = match source {
+            NotepadSource::Installer(_) => aiw_windows_platform::import_application_file_with_metadata(&intake_parent, "notepad-plus-plus", ApplicationInspectionKind::Msi, held.as_ref().ok_or_else(|| anyhow!("held installer missing"))?, true)
+            .map_err(|error| anyhow!("protected intake failed; preserve evidence and use a new evidence location to retry: {error}"))?,
+        NotepadSource::Bundle { root, manifest_sha256 } => {
+            let imported = packaging::import_for_replay(root, manifest_sha256, &intake_parent, &project)?;
+            save_stage(&evidence_root, "bundle-import", &imported)?;
+            imported.import_receipt
+        }
+    };
     save_stage(&evidence_root, "intake-receipt", &receipt)?;
     let prepared = aiw_runner::prepare_windows_sandbox_msi_bundle(&run_id, &project, &assets.guest_agent, &manifest.guest_agent_sha256, &evidence_root, &now_rfc3339(), aiw_runner::WsbMsiPreparationInput { import_receipt: &receipt, scenario_id: SCENARIO_ID, document_input, launch_profile: launch_profile.as_ref().zip(manifest.launch_profile_sha256.as_deref()) })
         .map_err(|error| anyhow!("preparation failed; inspect retained stage output and do not retry this workspace: {error}"))?;

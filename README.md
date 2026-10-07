@@ -13,6 +13,8 @@ AIW has a [signed public Windows desktop alpha](https://github.com/nathanmcnulty
 
 ## Administrator quick start
 
+Current source also includes the [Notepad++ packaging component](docs/ADMIN-PACKAGING.md#administrator-path): select MSI, analyze, choose a fixed offline recipe, create a reusable bundle, then prepare and explicitly approve its validation. Both recipes have fresh dedicated-VM acceptance, including interactive save/export. The signed alpha linked below predates this component; assembly alone is not a compatibility or isolation result.
+
 Download [signed alpha `desktop-alpha-6c7873c4e80c`](https://github.com/nathanmcnulty/app-isolation-workbench/releases/tag/desktop-alpha-6c7873c4e80c). Its `START-HERE.md` provides exact hashes, a fresh extraction path, and copy-and-paste verification and launch commands for this build. A compiler is not required.
 
 1. Download the five release assets into one folder and follow its `START-HERE.md`.

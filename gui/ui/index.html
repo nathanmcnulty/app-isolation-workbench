@@ -24,6 +24,23 @@
     </section>
     <div id="closeWarning" class="close-warning hidden" role="status"><strong>Run in progress</strong><span>The window cannot safely close while the backend owns an active workflow. Keep it open until the retained result or recovery instruction appears.</span></div>
 
+    <section class="card" aria-labelledby="package-title">
+      <div class="card-heading"><div><p class="eyebrow">Package</p><h2 id="package-title">Build a Notepad++ Sandbox package</h2></div><span class="step-mark">No execution</span></div>
+      <p class="section-intro">Select the supported installer, analyze its identity, then choose a supported isolation recipe. Creating a package does not install the application or prove compatibility.</p>
+      <label class="field"><span>Notepad++ MSI installer</span><div class="input-action"><input id="packageInstaller" type="text" readonly placeholder="Choose the supported MSI"><button id="choosePackageInstaller" class="secondary" type="button">Choose MSI</button></div></label>
+      <button id="analyzePackage" class="secondary" type="button">Analyze installer</button>
+      <p id="packageStatus" class="helper" aria-live="polite">No installer analyzed.</p>
+      <div id="packageSelection" class="hidden">
+        <div class="field-grid"><label class="field"><span>Isolation preset</span><select id="packageIsolation"><option value="offlineWindowsSandbox">Windows Sandbox · offline and ephemeral</option></select></label><label class="field"><span>Application workflow</span><select id="packageProfile"><option id="packageAssessmentOption" value="localSettingsAssessment">Fixed assessment with local settings</option><option id="packageInteractiveOption" value="interactiveDocument">Interactive document · input selected at launch</option></select></label></div>
+        <p id="packageDescription" class="helper"></p><p id="packageLimits" class="notice"></p>
+        <label class="field"><span>Package output folder</span><div class="input-action"><input id="packageOutput" type="text" readonly placeholder="Select an existing folder; a fresh child is created"><button id="choosePackageOutput" class="secondary" type="button">Choose folder</button></div></label>
+        <p class="helper">Output defaults to the Workbench evidence folder. Each package and its evidence use separate fresh child folders. Exact runtime settings are disclosed again before approval and Start.</p>
+        <button id="createPackage" class="primary" type="button">Create package</button>
+      </div>
+      <div id="packageResult" class="notice hidden"><strong>Package assembled and verified</strong><p id="packageResultSummary"></p><p id="packageResultPath" class="mono"></p><p id="packageResultHash" class="mono"></p><p>Identify the operator below. Interactive packages also require a text input. Validation prepares a fresh review; approve and Start separately.</p><label id="packageDocumentField" class="field hidden"><span>Text input for this validation</span><div class="input-action"><input id="packageDocumentInput" type="text" readonly placeholder="Choose a UTF-8 text file"><button id="choosePackageDocument" class="secondary" type="button">Choose text</button></div></label><button id="validatePackage" class="secondary" type="button">Prepare package validation</button></div>
+      <details id="packageAdvanced" class="advanced hidden"><summary>Analysis and package identity details</summary><pre id="packageAnalysisJson"></pre><pre id="packageResultJson"></pre></details>
+    </section>
+
     <section class="card" aria-labelledby="setup-title">
       <div class="card-heading"><div><p class="eyebrow">Step 1</p><h2 id="setup-title">Choose the supported workflow</h2></div><span class="step-mark">Setup</span></div>
       <div class="mode-switch" role="group" aria-label="Workflow type">

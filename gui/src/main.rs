@@ -133,7 +133,7 @@ mod desktop {
                 "document" => builder
                     .add_filter("UTF-8 text", &["txt"])
                     .blocking_pick_file(),
-                "evidence" | "workspace" => builder.blocking_pick_folder(),
+                "evidence" | "workspace" | "package-output" => builder.blocking_pick_folder(),
                 "destination" => builder
                     .add_filter("Text document", &["txt"])
                     .set_file_name("edited-document.txt")
@@ -150,7 +150,73 @@ mod desktop {
         .await
         .map_err(|e| e.to_string())?
     }
+    async fn package_action<T: Send + 'static>(
+        app: tauri::AppHandle,
+        c: Controller,
+        id: String,
+        work: impl FnOnce() -> Result<T> + Send + 'static,
+    ) -> std::result::Result<T, String> {
+        let outcome = tauri::async_runtime::spawn_blocking(move || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(work))
+                .unwrap_or_else(|_| Err(anyhow::anyhow!("Packaging worker panicked. Preserve evidence and partial output before retrying.")))
+        }).await.map_err(|error| anyhow::anyhow!(error)).and_then(|result| result);
+        let (returned, error) = match outcome {
+            Ok(value) => (Ok(value), None),
+            Err(error) => {
+                let view = public_error(error);
+                (
+                    Err(format!("{}: {}", view.summary, view.detail)),
+                    Some(view),
+                )
+            }
+        };
+        let phase = if returned.is_ok() {
+            Phase::Idle
+        } else {
+            Phase::Failed
+        };
+        if c.finish(&id, phase, None, error)
+            && let Some(window) = app.get_webview_window("main")
+        {
+            let _ = window.destroy();
+        }
+        returned
+    }
     #[tauri::command]
+    async fn analyze_package(
+        app: tauri::AppHandle,
+        c: State<'_, Controller>,
+        installer: String,
+    ) -> std::result::Result<service::packaging::PackageAnalysis, String> {
+        let c = c.inner().clone();
+        let id = c.begin_analysis()?;
+        package_action(app, c, id, move || {
+            service::packaging::analyze_notepad_installer(Path::new(&installer))
+        })
+        .await
+    }
+    #[tauri::command]
+    async fn create_package(
+        app: tauri::AppHandle,
+        c: State<'_, Controller>,
+        request: service::packaging::NotepadPackageRequest,
+    ) -> std::result::Result<service::packaging::PackageResult, String> {
+        let c = c.inner().clone();
+        let id = c.begin_packaging()?;
+        package_action(app, c, id, move || {
+            service::packaging::create_notepad_package(&request)
+        })
+        .await
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct PackageValidationInput {
+        bundle_root: String,
+        manifest_sha256: String,
+    }
+    #[tauri::command]
+    // Keep the existing named IPC arguments compatible; package is an optional source.
+    #[allow(clippy::too_many_arguments)]
     fn prepare_workflow(
         app: tauri::AppHandle,
         c: State<'_, Controller>,
@@ -159,11 +225,18 @@ mod desktop {
         document_input: Option<String>,
         evidence: String,
         operator_identity: String,
+        package: Option<PackageValidationInput>,
     ) -> std::result::Result<(), String> {
         if !matches!(kind.as_str(), "assessment" | "interactive" | "bambu") {
             return Err("Unsupported workflow.".into());
         }
-        if installer.is_empty() || evidence.is_empty() || operator_identity.trim().is_empty() {
+        if package.is_some() && kind == "bambu" {
+            return Err("Notepad++ packages cannot select the Bambu workflow.".into());
+        }
+        if (package.is_none() && installer.is_empty())
+            || evidence.is_empty()
+            || operator_identity.trim().is_empty()
+        {
             return Err(
                 "Choose the supported installer, evidence folder, and operator identity.".into(),
             );
@@ -186,7 +259,20 @@ mod desktop {
             .into(),
         };
         spawn_work(app, c, id, move || {
-            let result = if kind == "interactive" {
+            let result = if let Some(package) = package {
+                service::assess_package_with_gate(
+                    Path::new(&package.bundle_root),
+                    &package.manifest_sha256,
+                    if kind == "interactive" {
+                        document_input.as_deref().map(Path::new)
+                    } else {
+                        None
+                    },
+                    Path::new(&evidence),
+                    &operator_identity,
+                    &gate,
+                )?
+            } else if kind == "interactive" {
                 service::launch_document_with_gate(
                     Path::new(&installer),
                     Path::new(
@@ -432,6 +518,8 @@ mod desktop {
             .invoke_handler(tauri::generate_handler![
                 get_state,
                 choose_input,
+                analyze_package,
+                create_package,
                 prepare_workflow,
                 submit_approval,
                 start_approved_workflow,
