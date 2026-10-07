@@ -133,7 +133,7 @@ mod desktop {
                 "document" => builder
                     .add_filter("UTF-8 text", &["txt"])
                     .blocking_pick_file(),
-                "evidence" | "workspace" => builder.blocking_pick_folder(),
+                "evidence" | "workspace" | "package-output" => builder.blocking_pick_folder(),
                 "destination" => builder
                     .add_filter("Text document", &["txt"])
                     .set_file_name("edited-document.txt")
@@ -149,6 +149,64 @@ mod desktop {
         })
         .await
         .map_err(|e| e.to_string())?
+    }
+    async fn package_action<T: Send + 'static>(
+        app: tauri::AppHandle,
+        c: Controller,
+        id: String,
+        work: impl FnOnce() -> Result<T> + Send + 'static,
+    ) -> std::result::Result<T, String> {
+        let outcome = tauri::async_runtime::spawn_blocking(move || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(work))
+                .unwrap_or_else(|_| Err(anyhow::anyhow!("Packaging worker panicked. Preserve evidence and partial output before retrying.")))
+        }).await.map_err(|error| anyhow::anyhow!(error)).and_then(|result| result);
+        let (returned, error) = match outcome {
+            Ok(value) => (Ok(value), None),
+            Err(error) => {
+                let view = public_error(error);
+                (
+                    Err(format!("{}: {}", view.summary, view.detail)),
+                    Some(view),
+                )
+            }
+        };
+        let phase = if returned.is_ok() {
+            Phase::Idle
+        } else {
+            Phase::Failed
+        };
+        if c.finish(&id, phase, None, error)
+            && let Some(window) = app.get_webview_window("main")
+        {
+            let _ = window.destroy();
+        }
+        returned
+    }
+    #[tauri::command]
+    async fn analyze_package(
+        app: tauri::AppHandle,
+        c: State<'_, Controller>,
+        installer: String,
+    ) -> std::result::Result<service::packaging::PackageAnalysis, String> {
+        let c = c.inner().clone();
+        let id = c.begin_analysis()?;
+        package_action(app, c, id, move || {
+            service::packaging::analyze_notepad_installer(Path::new(&installer))
+        })
+        .await
+    }
+    #[tauri::command]
+    async fn create_package(
+        app: tauri::AppHandle,
+        c: State<'_, Controller>,
+        request: service::packaging::NotepadPackageRequest,
+    ) -> std::result::Result<service::packaging::PackageResult, String> {
+        let c = c.inner().clone();
+        let id = c.begin_packaging()?;
+        package_action(app, c, id, move || {
+            service::packaging::create_notepad_package(&request)
+        })
+        .await
     }
     #[tauri::command]
     fn prepare_workflow(
@@ -432,6 +490,8 @@ mod desktop {
             .invoke_handler(tauri::generate_handler![
                 get_state,
                 choose_input,
+                analyze_package,
+                create_package,
                 prepare_workflow,
                 submit_approval,
                 start_approved_workflow,

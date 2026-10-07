@@ -49,6 +49,8 @@ pub struct PackageAnalysis {
     pub limitations: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NotepadPackageRequest {
     pub installer: PathBuf,
     pub profile: NotepadPackageProfile,
@@ -63,6 +65,8 @@ pub struct NotepadPackageRequest {
 #[serde(rename_all = "camelCase")]
 pub struct PackageResult {
     pub schema_version: String,
+    pub profile: NotepadPackageProfile,
+    pub isolation_preset: PackageIsolationPreset,
     pub evidence_root: PathBuf,
     pub bundle: aiw_runner::SandboxBundleExport,
     pub next: String,
@@ -234,6 +238,8 @@ fn create_with_assets(
         )?;
         let result = PackageResult {
         schema_version: "aiw.dev/admin-package-result/v0alpha1".into(),
+        profile: request.profile,
+        isolation_preset: request.isolation_preset,
         evidence_root: evidence_root.clone(),
         bundle,
         next: "Package assembled and verified, not compatibility-certified. Preserve the manifest hash and evidence. Import through Workbench for fresh recipe review, approval, Start and disposable-worker validation. Preserve incomplete output on failure; retry in fresh locations.".into(),

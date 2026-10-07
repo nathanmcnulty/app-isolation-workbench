@@ -3,13 +3,13 @@
 
   const $ = (id) => document.getElementById(id);
   const invoke = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
-  const state = { current: null, polling: false, timer: null, startedAt: null, reviewChallenge: null, busy: false, localError: null };
+  const state = { current: null, polling: false, timer: null, startedAt: null, reviewChallenge: null, busy: false, localError: null, analysis: null, analyzedPath: null, packageResult: null };
   const clean = window.AiwDisplay.clean;
   const text = (id, value) => { $(id).textContent = clean(value); };
   const show = (id, visible) => $(id).classList.toggle("hidden", !visible);
   const value = (id) => $(id).value.trim();
   const kind = () => document.querySelector("input[name=workflowKind]:checked").value;
-  const phaseLabel = (phase) => ({ idle: "Ready", preparing: "Preparing", review: "Review required", approved: "Approved · Start required", running: "Running", completed: "Completed", cancelled: "Cancelled", failed: "Needs attention", exporting: "Exporting" }[phase] || "Loading state");
+  const phaseLabel = (phase) => ({ idle: "Ready", preparing: "Preparing", review: "Review required", approved: "Approved · Start required", running: "Running", completed: "Completed", cancelled: "Cancelled", failed: "Needs attention", exporting: "Exporting", analyzing: "Analyzing installer", packaging: "Creating package" }[phase] || "Loading state");
 
   function errorText(error) {
     if (!error) return "The backend did not provide an error.";
@@ -29,6 +29,12 @@
       state.localError = null;
       renderError(state.current && state.current.error);
       if (selected != null) text(inputId, selected), $(inputId).value = clean(selected);
+      if (selected != null && inputId === "packageInstaller") {
+        state.analysis = null; state.analyzedPath = null; state.packageResult = null;
+        text("packageStatus", "Installer changed. Analyze before selecting a recipe.");
+        renderPackage();
+      }
+      applyControls(state.current, state.busy);
     } catch (error) { displayLocalError(error); }
   }
 
@@ -64,7 +70,7 @@
     const phase = snapshot ? snapshot.phase : "idle";
     const editable = ["idle", "cancelled", "failed", "completed"].includes(phase);
     const pending = ["preparing", "review", "approved"].includes(phase);
-    const locked = busy || ["preparing", "running", "exporting"].includes(phase);
+    const locked = busy || ["preparing", "running", "exporting", "analyzing", "packaging"].includes(phase);
     ["chooseInstaller", "chooseDocument", "chooseEvidence", "operatorIdentity", "prepare"].forEach((id) => { $(id).disabled = locked || !editable; });
     $("chooseWorkspace").disabled = !!busy;
     $("loadRetained").disabled = !!busy;
@@ -75,6 +81,59 @@
     show("cancel", pending);
     $("export").disabled = busy || !(snapshot && snapshot.result && snapshot.result.canExportDocument);
     $("chooseDestination").disabled = busy || !(snapshot && snapshot.result && snapshot.result.canExportDocument);
+    ["choosePackageInstaller", "choosePackageOutput", "packageProfile", "packageIsolation"].forEach((id) => { $(id).disabled = locked || !editable; });
+    $("analyzePackage").disabled = locked || !editable || !value("packageInstaller");
+    $("createPackage").disabled = locked || !editable || !selectedPackageOption() || !value("packageOutput");
+  }
+
+  function selectedPackageOption() {
+    return state.analysis && state.analyzedPath === value("packageInstaller") &&
+      state.analysis.options.find((option) => option.profile === value("packageProfile") && option.isolationPreset === value("packageIsolation"));
+  }
+
+  function renderPackage() {
+    const options = state.analysis ? state.analysis.options : [];
+    show("packageSelection", options.length > 0);
+    show("packageAdvanced", !!state.analysis || !!state.packageResult);
+    show("packageResult", !!state.packageResult);
+    text("packageDescription", (selectedPackageOption() || {}).description || "");
+    text("packageLimits", state.analysis ? state.analysis.limitations.join("\n\n") : "");
+    text("packageAnalysisJson", state.analysis ? JSON.stringify(state.analysis, null, 2) : "");
+    text("packageResultJson", state.packageResult ? JSON.stringify(state.packageResult, null, 2) : "");
+    if (state.packageResult) {
+      text("packageResultSummary", state.packageResult.next);
+      text("packageResultPath", "Workflow: " + state.packageResult.profile + "\n" + state.packageResult.bundle.bundlePath);
+      text("packageResultHash", "Manifest SHA-256: " + state.packageResult.bundle.manifestSha256);
+    }
+  }
+
+  async function packageAction(create) {
+    if (state.busy) return;
+    const option = selectedPackageOption();
+    if (create && !option) return;
+    state.busy = true; setBusy(true); applyControls(state.current, true); state.localError = null;
+    text("packageStatus", create ? "Creating and verifying a fresh package. No Sandbox is started." : "Analyzing installer identity. No installer is executed.");
+    try {
+      if (create) {
+        state.packageResult = await call("create_package", { request: {
+          installer: state.analyzedPath, profile: option.profile, isolationPreset: option.isolationPreset,
+          analyzedInstallerSha256: state.analysis.installer.sha256, analyzedProjectSha256: option.projectSha256,
+          evidenceParent: value("evidence"), outputParent: value("packageOutput"),
+        } });
+        text("packageStatus", "Package created. Compatibility still requires an approved disposable-worker trial.");
+      } else {
+        const path = value("packageInstaller");
+        state.analysis = null; state.packageResult = null; state.analyzedPath = null; renderPackage();
+        const analysis = await call("analyze_package", { installer: path });
+        state.analysis = analysis; state.analyzedPath = path;
+        if (analysis.options.length) $("packageProfile").value = analysis.options[0].profile;
+        $("packageAssessmentOption").disabled = !analysis.options.some((option) => option.profile === "localSettingsAssessment");
+        $("packageInteractiveOption").disabled = !analysis.options.some((option) => option.profile === "interactiveDocument");
+        text("packageStatus", analysis.options.length ? "Supported installer identity. Choose an isolation preset and workflow." : "These installer bytes have no supported package recipe. Analysis is not a compatibility verdict.");
+      }
+      renderPackage(); await poll();
+    } catch (error) { displayLocalError(error); }
+    finally { state.busy = false; applyControls(state.current, false); }
   }
 
   function renderReview(review) {
@@ -138,7 +197,10 @@
     show("reviewCard", !!snapshot.review || ["approved"].includes(snapshot.phase));
     show("startBox", snapshot.phase === "approved");
     show("closeWarning", !!snapshot.closeRefused);
-    if (snapshot.defaults && snapshot.defaults.evidence && !value("evidence")) $("evidence").value = clean(snapshot.defaults.evidence);
+    if (snapshot.defaults && snapshot.defaults.evidence) {
+      if (!value("evidence")) $("evidence").value = clean(snapshot.defaults.evidence);
+      if (!value("packageOutput")) $("packageOutput").value = clean(snapshot.defaults.evidence);
+    }
     if (snapshot.review) renderReview(snapshot.review);
   }
 
@@ -179,6 +241,11 @@
   $("cancel").addEventListener("click", () => { const snapshot = state.current; if (snapshot && ["preparing", "review", "approved"].includes(snapshot.phase)) action("cancel_pending", { workflowId: snapshot.workflowId }); });
   $("export").addEventListener("click", () => action("export_document", { destination: value("destination") }));
   $("loadRetained").addEventListener("click", () => action("load_retained_report", { kind: value("retainedKind"), workspace: value("retainedWorkspace"), runId: value("retainedRunId") }));
+  $("choosePackageInstaller").addEventListener("click", () => choose("installer", "packageInstaller"));
+  $("choosePackageOutput").addEventListener("click", () => choose("package-output", "packageOutput"));
+  $("analyzePackage").addEventListener("click", () => packageAction(false));
+  $("createPackage").addEventListener("click", () => packageAction(true));
+  ["packageProfile", "packageIsolation"].forEach((id) => $(id).addEventListener("change", () => { renderPackage(); applyControls(state.current, state.busy); }));
   document.querySelectorAll("input[name=workflowKind]").forEach((radio) => radio.addEventListener("change", renderMode));
   setInterval(poll, 1000); setInterval(elapsed, 1000); poll();
 }());

@@ -33,14 +33,22 @@ creation, closed inventory and overwrite/reparse protections reuse the existing
 
 ## Remaining acceptance
 
+The desktop now has installer selection, Analyze, the closed isolation preset and
+workflow choices, and Create package. Output defaults to the existing Workbench
+evidence parent; both outputs use distinct fresh children, and a different output
+folder is optional. A changed installer clears analysis and disables creation.
+Native analysis/assembly share the controller operation lock with trial execution;
+window closure cannot abandon stage publication. Package result and independently
+retainable manifest hash are shown separately from compatibility results. Complete
+analysis and package records are optional advanced details.
+
 The service contract tests use inert source/agent fixtures, not actual application
 execution. They cover both recipe bindings, input/project drift, unsupported
 runtime selection, network-grant rejection and failed publication. They cannot
 establish real Notepad++ compatibility.
 
-- Connect the service to a simple desktop Analyze -> selection -> Create package
-  flow. Keep source changes invalidating previous analysis and avoid raw JSON as
-  the default view. Unsupported options must not appear usable.
+- Validate the new desktop Analyze -> selection -> Create package flow using the
+  actual installer on the dedicated VM. Unit controls are not native acceptance.
 - Make a created package usable through the administrator replay flow with fresh
   protected import and existing exact approval and separate Start. Display package
   identity and retained validation together; assembly is not a compatibility pass.

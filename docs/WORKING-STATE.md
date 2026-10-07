@@ -9,8 +9,11 @@ The active goal is initial packaging validated using Notepad++ with a simple
 installer -> analysis -> isolation/recipe selection experience. On
 `codex/notepad-package-workflow`, the new `aiw-admin-workflow::packaging` service
 reuses fixed recipe compilation, protected intake and bundle export/verification.
-Service tests use inert fixtures. GUI wiring, real-installer package
-creation and fresh package-bound disposable-worker validation remain required.
+The desktop now wires installer analysis, typed preset/workflow selection and
+package creation with optional technical details and operation locking. Service
+tests use inert fixtures; UI controls and controller tests pass. Native desktop
+acceptance, real-installer package creation and fresh package-bound disposable-
+worker validation remain required. Package replay still needs its desktop entry.
 See [administrator packaging](ADMIN-PACKAGING.md). Do not treat assembly tests or
 older public-alpha trials as acceptance of this new end-to-end experience.
 

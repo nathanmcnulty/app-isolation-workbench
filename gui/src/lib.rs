@@ -15,13 +15,21 @@ pub enum Phase {
     Cancelled,
     Failed,
     Exporting,
+    Analyzing,
+    Packaging,
 }
 
 impl Phase {
     fn busy(self) -> bool {
         matches!(
             self,
-            Self::Preparing | Self::Review | Self::Approved | Self::Running | Self::Exporting
+            Self::Preparing
+                | Self::Review
+                | Self::Approved
+                | Self::Running
+                | Self::Exporting
+                | Self::Analyzing
+                | Self::Packaging
         )
     }
 }
@@ -131,12 +139,21 @@ impl Controller {
             .clone()
     }
     pub fn begin(&self) -> Result<String, String> {
+        self.begin_phase(Phase::Preparing)
+    }
+    pub fn begin_analysis(&self) -> Result<String, String> {
+        self.begin_phase(Phase::Analyzing)
+    }
+    pub fn begin_packaging(&self) -> Result<String, String> {
+        self.begin_phase(Phase::Packaging)
+    }
+    fn begin_phase(&self, phase: Phase) -> Result<String, String> {
         let mut i = self.0.lock().map_err(|_| "controller unavailable")?;
         if i.worker_active || i.snapshot.phase.busy() || i.closing {
             return Err("Wait for the current workflow to finish.".into());
         }
         let id = Uuid::new_v4().to_string();
-        i.snapshot.phase = Phase::Preparing;
+        i.snapshot.phase = phase;
         i.snapshot.workflow_id = Some(id.clone());
         i.snapshot.review = None;
         i.snapshot.start_challenge_id = None;
@@ -332,6 +349,25 @@ impl Controller {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn packaging_operations_exclude_execution_and_guard_close_until_publication() {
+        let c = Controller::new("test".into());
+        let id = c.begin_analysis().unwrap();
+        assert_eq!(c.snapshot().phase, Phase::Analyzing);
+        assert!(c.begin().is_err());
+        assert!(c.begin_packaging().is_err());
+        assert!(c.cancel(&id).is_err());
+        assert!(!c.request_close());
+        c.finish(&id, Phase::Idle, None, None);
+        assert!(c.request_close());
+        let id = c.begin_packaging().unwrap();
+        assert_eq!(c.snapshot().phase, Phase::Packaging);
+        assert!(c.offer_review(&id, review()).is_err());
+        assert!(!c.request_close());
+        c.finish(&id, Phase::Idle, None, None);
+        assert!(c.request_close());
+    }
     fn review() -> Review {
         Review {
             workflow_name: "Test workflow".into(),
