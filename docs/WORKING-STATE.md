@@ -8,10 +8,15 @@ This handoff is a pointer, not execution authority or a run receipt.
 `codex/bambu-reusable-package` is implementing the second application package loop.
 The [milestone contract](BAMBU-PACKAGING.md) keeps the existing fixed EXE recipe,
 adds a closed bundle, fresh protected replay and exact package/run association.
-Core APIs and desktop controls are implemented; 34 administrator tests, two
-Bambu bundle tests, the MSI relocation regression, 11 UI tests and focused
-warnings-as-errors Clippy passed. These are development checks, not native proof.
-Exact-commit review, desktop build, dedicated-VM replay, integration CI and signed
+Core APIs and desktop controls are implemented and pushed through `284cd58`.
+Independent review found and fixed two legacy API/schema compatibility issues.
+36 administrator tests, two Bambu bundle tests, the MSI relocation regression,
+30 CLI contracts, 11 UI tests, focused warnings-as-errors Clippy, governance,
+formatting and static Windows CLI/desktop release builds passed.
+Dedicated-VM operator-context export/relocation/import passed, including rejection
+of matching installer bytes from another intake against a reverified successful
+historical Bambu run. Detailed identities and gaps: [development proof](BAMBU-PACKAGING.md#development-proof).
+Native desktop assembly/fresh approved package replay, integration CI and signed
 candidate acceptance remain open. Computer-use initialization currently fails
 with `failed to write kernel assets` after the documented retry/reset.
 
