@@ -33,6 +33,36 @@ creation, closed inventory and overwrite/reparse protections reuse the existing
 
 ## Remaining acceptance
 
+### Development VM checkpoint (2026-10-07)
+
+Exact source `e881c59f328f6aab2b8c1ce70881b298dacc72a2` passed independent
+review after four desktop findings were corrected. Local checks passed: 31
+service tests, 7 controller tests, 10 UI tests, both warnings-as-errors Clippy
+suites, formatting and governance. The Windows release/static-CRT desktop built.
+
+Native RDP acceptance on the dedicated VM selected the real Notepad++ MSI,
+analyzed its identity, selected the offline local-settings recipe and created
+`bundle-package-1791358312403859600`. Its manifest SHA-256 is
+`315de78af896740f66679c5d1b1574e17028d7ea765a8e33bdc6b8371385408e`.
+The original MSI still hashes to
+`c29cbe1a9aaef322cc3f316ceeabe8a8071b18441a5e3c3ec348069739e59e80`;
+the retained selection records `executionStarted: false`. The launch control
+observed an empty provider before launch and compared all nine copied product
+files. Desktop SHA-256:
+`db656757baf1fee5e62ae50cb40bc837bfde5970c235f76b4ceb31bcb8336d0f`.
+
+Host evidence is under the directory named by
+`%TEMP%\aiw-public-alpha-proof-root.txt`, in `package-ui-build-identity.json`,
+`package-ui-vm-setup-retry2.json` and `package-ui-created-read.json`. The initial
+setup failure and transport diagnostic are retained separately. VM package
+evidence is under the operator Workbench Evidence folder in
+`package-1791358312403859600`; launch proof is
+`C:\AIW-Package-GUI-Proof-e881c59`.
+
+Native inspection found horizontal overflow in the result card. `f6746b8` fixes
+that display issue; corrected native acceptance and package-bound execution
+remain pending. This checkpoint proves package assembly, not compatibility.
+
 The desktop now has installer selection, Analyze, the closed isolation preset and
 workflow choices, and Create package. Output defaults to the existing Workbench
 evidence parent; both outputs use distinct fresh children, and a different output
