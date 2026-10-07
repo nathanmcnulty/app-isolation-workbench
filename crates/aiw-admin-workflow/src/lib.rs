@@ -12,6 +12,7 @@ use aiw_schema::{ApplicationSource, Project, validate_project_for_planning};
 
 mod admin_progress;
 pub mod approval_review;
+pub mod packaging;
 
 const MAX_CONFIG_BYTES: u64 = 16 * 1024 * 1024;
 

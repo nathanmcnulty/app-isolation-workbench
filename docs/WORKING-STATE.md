@@ -5,6 +5,17 @@ This handoff is a pointer, not execution authority or a run receipt.
 
 ## Current slice
 
+The active goal is initial packaging validated using Notepad++ with a simple
+installer -> analysis -> isolation/recipe selection experience. On
+`codex/notepad-package-workflow`, the new `aiw-admin-workflow::packaging` service
+reuses fixed recipe compilation, protected intake and bundle export/verification.
+Service tests use inert fixtures. GUI wiring, real-installer package
+creation and fresh package-bound disposable-worker validation remain required.
+See [administrator packaging](ADMIN-PACKAGING.md). Do not treat assembly tests or
+older public-alpha trials as acceptance of this new end-to-end experience.
+
+## Previous completed slice
+
 `codex/admin-approval-summary` adds backend-authored approval prose by default
 and expandable complete recipe, plan, workspace and approval identity. Unknown
 or incomplete summaries open full details. Exact approval and separate Start
@@ -53,8 +64,8 @@ One build owner per target. Core cache: `%LOCALAPPDATA%\Temp\aiw-os-validation-2
 desktop cache: `%LOCALAPPDATA%\Temp\aiw-desktop-validation-20261002`.
 Use explicit Windows target and target-scoped static CRT for packages.
 
-Follow ROADMAP and EXECUTION-PLAN: select the next concrete administrator application workflow;
-keep generic conversion and new providers outside that bounded slice.
+Finish the active Notepad++ packaging goal before selecting another application.
+Keep generic conversion and new providers outside this initial packaging slice.
 
 ## Boundaries
 
