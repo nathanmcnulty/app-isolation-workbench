@@ -3,117 +3,61 @@
 Updated 2026-10-07. Verify this checkout with `scripts/work-status.ps1`.
 This handoff is a pointer, not execution authority or a run receipt.
 
-## Current slice
+## Completed milestone
 
-PR #93 integrated the second application package loop at `4e39c78`.
-The [milestone contract](BAMBU-PACKAGING.md) keeps the existing fixed EXE recipe,
-adds a closed bundle, fresh protected replay and exact package/run association.
-Core APIs and desktop controls are implemented and pushed through `284cd58`.
-Independent review found and fixed two legacy API/schema compatibility issues.
-36 administrator tests, two Bambu bundle tests, the MSI relocation regression,
-30 CLI contracts, 11 UI tests, focused warnings-as-errors Clippy, governance,
-formatting and static Windows CLI/desktop release builds passed.
-Dedicated-VM operator-context export/relocation/import passed, including rejection
-of matching installer bytes from another intake against a reverified successful
-historical Bambu run. Detailed identities and gaps: [development proof](BAMBU-PACKAGING.md#development-proof).
-All three required integration checks passed on exact `b8ad8e1` (CI `37681516883`).
-Computer use is working again after the bundled runtime update. The dedicated VM
-verified all eleven development payload files, then native Bambu analysis and
-package assembly passed. Fresh native package run `admin-1791408579808193500`
-passed all five export checks, matched bundle reporting, independent artifact
-hashing and cleanup; the provider list is empty. The current CLI independently
-reverified both retained Notepad package/report associations as the limited
-operator. Test registrations are removed and evidence is preserved. PR #93 is
-merged after independent final review and all three required checks passed at
-exact `0815cbb` (CI `37693018289`); main has the identical tree and passed all
-three checks (`37694385449`). Signed candidate run `37695560530` targets exact
-`4e39c78`. Downloaded-byte acceptance remains open; keep the existing tested download.
+PR #93 integrated Bambu Studio reusable Sandbox packaging at `4e39c787e63a43cbeb07976117288d059be9818e`.
+Independent final review approved `0815cbb`; all three required PR checks passed
+(`37693018289`). Main has the identical tree and passed CI `37694385449`.
+Signed release run `37695560530` published `desktop-alpha-4e39c787e63a`.
+Fresh host and dedicated-VM downloads verified asset identities, attestations on
+host, publisher signatures, closed inventory and receipt. Native GUI analysis,
+assembly, fresh approval and replay passed for Bambu and both Notepad++ recipes.
+Independent CLI reporting verified every exact package/import/run association.
+Interactive edit/save/export and overwrite refusal passed with independently
+verified bytes. All three trials recorded cleanup; the provider list is empty.
+Broader isolation remains `insufficientEvidence`. Detailed identities, corrections
+and limits: [signed acceptance](BAMBU-PUBLIC-ACCEPTANCE.md).
 
-PR #92 merged at `0a88db6`; its tree matches reviewed `1d6082e`. All required PR
-checks (`37669599045`) and main checks (`37670881454`) passed. It shares held-file
-identity/stream/signature observations across assessment and packaging without
-changing hashes, import or approval. See [shared observations](ADMIN-PACKAGING.md#shared-assessment-observations).
+Acceptance documentation and tested-download update are on
+`codex/bambu-signed-acceptance`, pending independent review and hosted CI.
+The release binaries remain built from exact `4e39c78`, not this documentation head.
 
-## Latest public milestone
+## Next bounded work
 
-Initial Notepad++ packaging is integrated in PR #90 at
-`08dcc310aa30ea9c0bc4b68deb46ac09337ea012`. Exact `e881c59` passed independent
-code review; final head `a7714f1` passed all three hosted checks (`37594030722`).
-Main matches the tested tree and passed CI `37595301328`. Detailed service,
-negative-test and unsigned native proof: [administrator packaging](ADMIN-PACKAGING.md).
+Pause feature expansion for a focused shared-foundation quality checkpoint:
+verify closed MSI/EXE packaging contracts, legacy API/schema compatibility,
+approval/data-lifetime presentation and completeness of the three retained reports.
+Use [Bambu contract](BAMBU-PACKAGING.md), [administrator packaging](ADMIN-PACKAGING.md)
+and [roadmap](ROADMAP.md); avoid repeating accepted application trials for prose.
+Choose the next application or measured isolation slice after that checkpoint.
+Generic conversion, broader isolation and Studio authoring remain open.
+PR #92's shared held-file observations already inform assessment and packaging;
+see [shared observations](ADMIN-PACKAGING.md#shared-assessment-observations).
 
-Signed prerelease `desktop-alpha-08dcc310aa30` was published by successful
-release run `37595331022`. Fresh host and VM downloads verified five asset
-identities, attestations on host, signatures, closed inventory and receipt.
-Native GUI analysis and both package assemblies passed. Package-bound fixed run
-`admin-1791363728884366700` and interactive run `admin-1791364558757379700`
-passed fresh full recipe review, exact approval, separate Start, verified results
-and cleanup. Interactive native edit/save/close retained 224 bytes; explicit
-export matched exact text/hash and existing-destination export was refused.
-Operator-context CLI independently reverified both bundle/import/run associations.
-Bambu run `admin-1791365433522265300` completed all five fixed export checks
-and cleanup; independent artifact hashing matches its retained report and result.
-The final provider list was empty at `2026-10-07T09:45:42Z`.
-See [signed packaging acceptance](PUBLIC-PACKAGING-ACCEPTANCE.md).
-
-## Previous completed slice
-
-`codex/admin-approval-summary` adds backend-authored approval prose by default
-and expandable complete recipe, plan, workspace and approval identity. Unknown
-or incomplete summaries open full details. Exact approval and separate Start
-remain unchanged. Independent review found and corrected omitted Bambu access
-changes; final code review approved `4abdde6`.
-
-Seven UI tests pass, including inert text, fallback, challenge reset, polling,
-exact approval arguments and separate Start. The release desktop build passed
-with explicit Windows target and static CRT. Retained recipes for all three
-products project successfully. Automated RDP preparation/expand/cancel acceptance
-on the dedicated VM passed without approving or starting a Sandbox workflow.
-Detailed source/binary/run identities are in [GUI acceptance](GUI-FIRST-FINISH-LINE.md#approval-presentation).
-PR #89 integrated this slice at `612cd2926b5678f817f83869e04ae22f15d39a18`.
-All three hosted checks passed; the merged tree matches the tested PR head.
-
-## Preserved public milestone
-
-Public signed prerelease `desktop-alpha-6c7873c4e80c` was built from exact source
-`6c7873c4e80c889394ec43b27138cc52fc7df1c2` by successful release run
-`37254512259`. Its assets remain unchanged. Independent downloads verified
-attestations, signatures, closed inventory and receipt on host and dedicated VM.
-All three public-byte GUI workflows completed, with exact approval, separate
-Start, artifact verification, cleanup and explicit document export where supported.
-Broader isolation remains insufficient evidence; no stable promotion is implied.
-See [public acceptance](PUBLIC-ALPHA-ACCEPTANCE.md) and
-[CI review](RELEASE-CI-REVIEW-2026-10-04.md). PR #88 integrated this evidence.
-
-Historical human edit/save/export evidence and diagnostic failures remain
-preserved in INTERACTIVE-SANDBOX.md and the associated retained directories.
-Old unsigned `desktop-preview-e08115b` remains unpublished. Automatic policy
-review rejected cleanup of two host handoffs; do not bypass or retry deletion.
-
-## Environment and next step
+## Environment and evidence
 
 Dedicated VM: `aiw-clean-host-0921`, resource group `RG-AIW-CLEAN-HOST-20260921`,
-subscription `43babb60-9e73-4dc8-b769-4401c01aad73`; aiwoperator session 2.
-RDP computer use and file clipboard transfer are working and authorized.
-Drive redirection is unavailable in this connection. Cached Azure login lacks
-blob upload authority; do not grant roles merely for development transfer.
-File-based Azure Run Command with marker/error/typed-record checks is proven;
-inline transport success with empty output is not execution proof.
+subscription `43babb60-9e73-4dc8-b769-4401c01aad73`; aiwoperator RDP session 2.
+The VM is running. Sandbox workers close after trial completion; that does not
+shut down the VM. The actual host operator token is administrator; guest standard
+user execution is separately verified. RDP computer use/file transfer and terminal
+use are authorized. Drive redirection is unavailable; do not grant Azure roles
+merely for development transfer. Use cached authentication; never device code.
 
-Host evidence pointers: `%TEMP%\aiw-package-public-proof-root.txt` (current)
-and `%TEMP%\aiw-public-alpha-proof-root.txt` (earlier proofs).
-Verified input identities: `%TEMP%\aiw-public-acceptance-input-records.json`.
+Current host proof pointer: `%TEMP%\aiw-bambu-public-proof-root.txt`.
+Development proof pointer: `%TEMP%\aiw-bambu-package-proof-root.txt`.
+Earlier signed milestones: [Notepad packaging](PUBLIC-PACKAGING-ACCEPTANCE.md)
+and [public alpha](PUBLIC-ALPHA-ACCEPTANCE.md). Historical human editing and failures
+remain in [interactive evidence](INTERACTIVE-SANDBOX.md) and retained directories.
+Automatic policy review previously rejected cleanup of two host handoffs; do not
+bypass or retry those deletions. Preserve evidence after diagnosed failures.
+
 One build owner per target. Core cache: `%LOCALAPPDATA%\Temp\aiw-os-validation-20260919`;
 desktop cache: `%LOCALAPPDATA%\Temp\aiw-desktop-validation-20261002`.
 Use explicit Windows target and target-scoped static CRT for packages.
 
-Signed-byte acceptance documentation is integrated in PR #91 at `2ecd17a`.
-Finish the Bambu packaging contract and its live acceptance before broader
-coverage. Keep generic conversion and new providers outside this milestone.
-
 ## Boundaries
 
 No host installer execution, generic execution interface, implicit approval,
-automatic export/overwrite or unrelated Sandbox recovery. Never device-code auth.
-Use fresh evidence after diagnosed failures. Commit/push milestones; merge only
-after required exact-head CI and review, then verify merged main tree.
+automatic export/overwrite or unrelated Sandbox recovery. Commit/push milestones;
+merge only after required exact-head CI and review, then verify merged main tree.
