@@ -179,6 +179,16 @@ preparation or approval alone. Results distinguish verified application
 functions and cleanup from broader isolation evidence, which remains measured
 only where the retained report says it is measured.
 
+To assemble a reusable Notepad++ package, use Build a Notepad++ Sandbox package:
+Choose MSI, Analyze installer, select the offline preset and application workflow,
+then Create package. Assembly does not execute the installer. Keep the package
+folder and displayed manifest hash together. Identify the operator below; an
+interactive package also needs its own text input. Press Prepare package validation,
+review the recipe, approve its exact literal, then Start separately. Interactive
+validation requires editing, saving and closing the editor; export its verified
+document explicitly to a new file. This supports only the fixed Notepad++ recipes
+in this desktop, not arbitrary installer conversion or AppContainer packaging.
+
 Source revision: $SourceRevision
 CLI SHA-256: $cliHash
 Desktop SHA-256: $desktopHash

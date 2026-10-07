@@ -5,6 +5,30 @@ recipes, select the isolation/workflow option, assemble a reusable package, then
 validate that package in a disposable worker. Analysis, assembly, approval and
 execution remain distinct actions.
 
+## Administrator path
+
+This flow is in the current source; signed alpha `desktop-alpha-6c7873c4e80c`
+predates it. Use a verified desktop build containing the packaging component.
+
+1. Under **Build a Notepad++ Sandbox package**, choose the supported Notepad++
+   8.9.8 x64 MSI and press **Analyze installer**.
+2. Choose **Windows Sandbox · offline and ephemeral** and either **Fixed assessment
+   with local settings** or **Interactive document · input selected at launch**.
+3. Press **Create package**. Keep the displayed package folder and manifest hash;
+   creating a package does not install or execute the application.
+4. Enter your **Operator identity** below. For an interactive package, use its
+   **Text input for this validation** picker. Press **Prepare package validation**.
+5. Review execution, access and data lifetime; full records are under technical
+   details. Approve the exact displayed literal, then press **Start** separately.
+6. The fixed assessment completes automatically. For interactive validation,
+   edit the document in Notepad++, save and close the editor. Read the verified
+   function and cleanup result, then export needed output explicitly to a new file.
+
+Only the installed fixed recipes and supported installer bytes are accepted.
+This produces a reusable Sandbox bundle, not an MSIX or AppContainer package.
+The compatibility result belongs to the verified workflow; assembly and signing
+do not establish broader isolation.
+
 ## Implemented service
 
 `aiw-admin-workflow::packaging` exposes Windows-only read-only installer analysis
