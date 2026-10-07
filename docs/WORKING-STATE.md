@@ -11,9 +11,11 @@ installer -> analysis -> isolation/recipe selection experience. On
 reuses fixed recipe compilation, protected intake and bundle export/verification.
 The desktop now wires installer analysis, typed preset/workflow selection and
 package creation with optional technical details and operation locking. Service
-tests use inert fixtures; UI controls and controller tests pass. Native desktop
+tests use inert fixtures; 31 service, 7 controller and 10 UI tests pass. Native desktop
 acceptance, real-installer package creation and fresh package-bound disposable-
-worker validation remain required. Package replay still needs its desktop entry.
+worker validation remain required. Package replay now imports a verified bundle
+only when its recipe matches the installed profile, then uses the existing review,
+exact approval and separate Start. Packaging preserves completed trial/export state.
 See [administrator packaging](ADMIN-PACKAGING.md). Do not treat assembly tests or
 older public-alpha trials as acceptance of this new end-to-end experience.
 
@@ -31,8 +33,8 @@ with explicit Windows target and static CRT. Retained recipes for all three
 products project successfully. Automated RDP preparation/expand/cancel acceptance
 on the dedicated VM passed without approving or starting a Sandbox workflow.
 Detailed source/binary/run identities are in [GUI acceptance](GUI-FIRST-FINISH-LINE.md#approval-presentation).
-Local acceptance is complete. Integration requires all three hosted checks for
-the final PR head and verification of the merged tree against that tested head.
+PR #89 integrated this slice at `612cd2926b5678f817f83869e04ae22f15d39a18`.
+All three hosted checks passed; the merged tree matches the tested PR head.
 
 ## Preserved public milestone
 

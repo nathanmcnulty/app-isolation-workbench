@@ -103,6 +103,7 @@ enum Pending {
 }
 struct Inner {
     snapshot: Snapshot,
+    package_snapshot: Option<Snapshot>,
     pending: Option<Pending>,
     cancelled: bool,
     closing: bool,
@@ -126,6 +127,7 @@ impl Controller {
                 close_refused: false,
             },
             pending: None,
+            package_snapshot: None,
             cancelled: false,
             closing: false,
             worker_active: false,
@@ -153,6 +155,8 @@ impl Controller {
             return Err("Wait for the current workflow to finish.".into());
         }
         let id = Uuid::new_v4().to_string();
+        i.package_snapshot =
+            matches!(phase, Phase::Analyzing | Phase::Packaging).then(|| i.snapshot.clone());
         i.snapshot.phase = phase;
         i.snapshot.workflow_id = Some(id.clone());
         i.snapshot.review = None;
@@ -315,6 +319,15 @@ impl Controller {
             return false;
         }
         Self::cancel_gate(&mut i);
+        if let Some(mut previous) = i.package_snapshot.take() {
+            if error.is_some() {
+                previous.error = error;
+            }
+            i.snapshot = previous;
+            i.worker_active = false;
+            i.snapshot.close_refused = false;
+            return i.closing;
+        }
         i.snapshot.phase = phase;
         i.worker_active = false;
         i.snapshot.close_refused = false;
@@ -367,6 +380,32 @@ mod tests {
         assert!(!c.request_close());
         c.finish(&id, Phase::Idle, None, None);
         assert!(c.request_close());
+    }
+
+    #[test]
+    fn auxiliary_packaging_preserves_completed_transfer_export_authority() {
+        let c = Controller::new("test".into());
+        let id = c.begin().unwrap();
+        let result = ResultView {
+            outcome: ResultOutcome::Verified,
+            run_id: "retained-run".into(),
+            workspace: "retained-workspace".into(),
+            evidence_root: "retained-evidence".into(),
+            summary: "Verified transfer".into(),
+            can_export_document: true,
+            report_markdown: "retained report".into(),
+        };
+        c.finish(&id, Phase::Completed, Some(result), None);
+        let auxiliary = c.begin_analysis().unwrap();
+        assert!(c.begin_export().is_err());
+        c.finish(&auxiliary, Phase::Idle, None, None);
+        assert_eq!(c.snapshot().phase, Phase::Completed);
+        assert_eq!(c.snapshot().result.unwrap().run_id, "retained-run");
+        let auxiliary = c.begin_packaging().unwrap();
+        c.finish(&auxiliary, Phase::Failed, None, None);
+        let (_, result) = c.begin_export().unwrap();
+        assert!(result.can_export_document);
+        assert_eq!(result.run_id, "retained-run");
     }
     fn review() -> Review {
         Review {

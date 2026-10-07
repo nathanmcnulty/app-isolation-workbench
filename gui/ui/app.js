@@ -79,11 +79,12 @@
     $("start").disabled = busy || phase !== "approved";
     $("cancel").disabled = busy || !pending;
     show("cancel", pending);
-    $("export").disabled = busy || !(snapshot && snapshot.result && snapshot.result.canExportDocument);
-    $("chooseDestination").disabled = busy || !(snapshot && snapshot.result && snapshot.result.canExportDocument);
-    ["choosePackageInstaller", "choosePackageOutput", "packageProfile", "packageIsolation"].forEach((id) => { $(id).disabled = locked || !editable; });
+    $("export").disabled = busy || phase !== "completed" || !(snapshot && snapshot.result && snapshot.result.canExportDocument);
+    $("chooseDestination").disabled = busy || phase !== "completed" || !(snapshot && snapshot.result && snapshot.result.canExportDocument);
+    ["choosePackageInstaller", "choosePackageOutput", "choosePackageDocument", "packageProfile", "packageIsolation"].forEach((id) => { $(id).disabled = locked || !editable; });
     $("analyzePackage").disabled = locked || !editable || !value("packageInstaller");
     $("createPackage").disabled = locked || !editable || !selectedPackageOption() || !value("packageOutput");
+    $("validatePackage").disabled = locked || !editable || !state.packageResult;
   }
 
   function selectedPackageOption() {
@@ -96,6 +97,7 @@
     show("packageSelection", options.length > 0);
     show("packageAdvanced", !!state.analysis || !!state.packageResult);
     show("packageResult", !!state.packageResult);
+    show("packageDocumentField", !!state.packageResult && state.packageResult.profile === "interactiveDocument");
     text("packageDescription", (selectedPackageOption() || {}).description || "");
     text("packageLimits", state.analysis ? state.analysis.limitations.join("\n\n") : "");
     text("packageAnalysisJson", state.analysis ? JSON.stringify(state.analysis, null, 2) : "");
@@ -115,6 +117,7 @@
     text("packageStatus", create ? "Creating and verifying a fresh package. No Sandbox is started." : "Analyzing installer identity. No installer is executed.");
     try {
       if (create) {
+        state.packageResult = null; renderPackage();
         state.packageResult = await call("create_package", { request: {
           installer: state.analyzedPath, profile: option.profile, isolationPreset: option.isolationPreset,
           analyzedInstallerSha256: state.analysis.installer.sha256, analyzedProjectSha256: option.projectSha256,
@@ -132,7 +135,7 @@
         text("packageStatus", analysis.options.length ? "Supported installer identity. Choose an isolation preset and workflow." : "These installer bytes have no supported package recipe. Analysis is not a compatibility verdict.");
       }
       renderPackage(); await poll();
-    } catch (error) { displayLocalError(error); }
+    } catch (error) { text("packageStatus", "Packaging action stopped. Read the error and preserve retained evidence before retrying."); displayLocalError(error); }
     finally { state.busy = false; applyControls(state.current, false); }
   }
 
@@ -243,8 +246,17 @@
   $("loadRetained").addEventListener("click", () => action("load_retained_report", { kind: value("retainedKind"), workspace: value("retainedWorkspace"), runId: value("retainedRunId") }));
   $("choosePackageInstaller").addEventListener("click", () => choose("installer", "packageInstaller"));
   $("choosePackageOutput").addEventListener("click", () => choose("package-output", "packageOutput"));
+  $("choosePackageDocument").addEventListener("click", () => choose("document", "packageDocumentInput"));
   $("analyzePackage").addEventListener("click", () => packageAction(false));
   $("createPackage").addEventListener("click", () => packageAction(true));
+  $("validatePackage").addEventListener("click", () => {
+    const result = state.packageResult;
+    if (!result || state.busy) return;
+    return action("prepare_workflow", { kind: result.profile === "interactiveDocument" ? "interactive" : "assessment", installer: "",
+      documentInput: result.profile === "interactiveDocument" ? value("packageDocumentInput") : null,
+      evidence: value("evidence"), operatorIdentity: value("operatorIdentity"),
+      package: { bundleRoot: result.bundle.bundlePath, manifestSha256: result.bundle.manifestSha256 } });
+  });
   ["packageProfile", "packageIsolation"].forEach((id) => $(id).addEventListener("change", () => { renderPackage(); applyControls(state.current, state.busy); }));
   document.querySelectorAll("input[name=workflowKind]").forEach((radio) => radio.addEventListener("change", renderMode));
   setInterval(poll, 1000); setInterval(elapsed, 1000); poll();

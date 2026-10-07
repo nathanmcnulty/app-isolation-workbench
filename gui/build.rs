@@ -4,6 +4,8 @@ fn main() {
         tauri_build::AppManifest::new().commands(&[
             "get_state",
             "choose_input",
+            "analyze_package",
+            "create_package",
             "prepare_workflow",
             "submit_approval",
             "start_approved_workflow",

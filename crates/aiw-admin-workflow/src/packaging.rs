@@ -185,6 +185,32 @@ pub fn create_notepad_package(request: &NotepadPackageRequest) -> Result<Package
 }
 
 #[cfg(windows)]
+pub(crate) fn import_for_replay(
+    bundle: &Path,
+    manifest_sha256: &str,
+    intake_parent: &Path,
+    expected_project: &Project,
+) -> Result<aiw_runner::SandboxBundleImport> {
+    let verified = aiw_runner::verify_notepad_plus_plus_msi_bundle(bundle, manifest_sha256)?;
+    if &verified.project != expected_project {
+        bail!(
+            "package recipe differs from the selected installed workflow; preserve it and choose the matching workflow or rebuild with current product assets"
+        );
+    }
+    // Import reopens and verifies the closed bundle while holding all objects.
+    let imported = aiw_runner::import_notepad_plus_plus_msi_bundle(
+        bundle,
+        intake_parent,
+        "notepad-plus-plus",
+        manifest_sha256,
+    )?;
+    if &imported.project != expected_project {
+        bail!("package project changed during import; preserve the intake and use fresh evidence");
+    }
+    Ok(imported)
+}
+
+#[cfg(windows)]
 fn create_with_assets(
     request: &NotepadPackageRequest,
     assets_root: &Path,
@@ -409,6 +435,49 @@ mod tests {
             2
         );
         assert!(serde_json::from_str::<PackageIsolationPreset>("\"networkAllowed\"").is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn replay_import_requires_the_matching_installed_recipe_and_manifest() {
+        let (root, assets, request) = fixture(NotepadPackageProfile::LocalSettingsAssessment);
+        let result = create_with_assets(&request, &assets).unwrap();
+        let (mut project, _) = fixed_assets(&assets, request.profile).unwrap();
+        let intake = root.join("replay-intakes");
+        std::fs::create_dir(&intake).unwrap();
+        let imported = import_for_replay(
+            Path::new(&result.bundle.bundle_path),
+            &result.bundle.manifest_sha256,
+            &intake,
+            &project,
+        )
+        .unwrap();
+        assert_eq!(
+            imported.import_receipt.sha256,
+            request.analyzed_installer_sha256
+        );
+        let rejected = root.join("rejected-intakes");
+        std::fs::create_dir(&rejected).unwrap();
+        assert!(
+            import_for_replay(
+                Path::new(&result.bundle.bundle_path),
+                &"0".repeat(64),
+                &rejected,
+                &project
+            )
+            .is_err()
+        );
+        project.metadata.display_name = "different recipe".into();
+        assert!(
+            import_for_replay(
+                Path::new(&result.bundle.bundle_path),
+                &result.bundle.manifest_sha256,
+                &rejected,
+                &project
+            )
+            .is_err()
+        );
+        assert_eq!(std::fs::read_dir(&rejected).unwrap().count(), 0);
         std::fs::remove_dir_all(root).unwrap();
     }
 }

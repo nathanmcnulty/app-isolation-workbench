@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const vm = require("node:vm");
 const display = require("../ui/display.js");
 
-test("package selection binds analysis and changing installer invalidates it without execution", async () => {
+for (const profile of ["localSettingsAssessment", "interactiveDocument"]) test(`package ${profile} binds analysis and changing installer invalidates it without execution`, async () => {
   const elements = new Map();
   const element = (id) => {
     if (!elements.has(id)) elements.set(id, {
@@ -18,9 +18,10 @@ test("package selection binds analysis and changing installer invalidates it wit
   let finishAnalysis;
   const analysisGate = new Promise((resolve) => { finishAnalysis = resolve; });
   let selected = "C:\\input\\notepad.msi";
+  let failCreation = false;
   const analysis = {
     installer: { sha256: "installer-hash" },
-    options: [{ profile: "localSettingsAssessment", isolationPreset: "offlineWindowsSandbox", projectSha256: "project-hash", description: "<script>inert recipe</script>" }],
+    options: [{ profile, isolationPreset: "offlineWindowsSandbox", projectSha256: "project-hash", description: "<script>inert recipe</script>" }],
     limitations: ["Not a compatibility verdict"],
   };
   const context = {
@@ -29,7 +30,10 @@ test("package selection binds analysis and changing installer invalidates it wit
       calls.push({ name, args });
       if (name === "choose_input") return selected;
       if (name === "analyze_package") return analysisGate;
-      if (name === "create_package") return { next: "Not compatibility-certified", bundle: { bundlePath: "C:\\out\\bundle", manifestSha256: "manifest-hash" } };
+      if (name === "create_package") {
+        if (failCreation) throw new Error("Retain partial output");
+        return { profile, next: "Not compatibility-certified", bundle: { bundlePath: "C:\\out\\bundle", manifestSha256: "manifest-hash" } };
+      }
       return { phase: "idle", defaults: { evidence: "C:\\evidence" } };
     } } } },
     setInterval: (callback) => intervals.push(callback),
@@ -46,7 +50,7 @@ test("package selection binds analysis and changing installer invalidates it wit
   finishAnalysis(analysis);
   await analyzing;
   assert.equal(element("packageSelection").hidden, false);
-  assert.equal(element("packageInteractiveOption").disabled, true);
+  assert.equal(element("packageInteractiveOption").disabled, profile !== "interactiveDocument");
   assert.equal(element("packageDescription").textContent, "<script>inert recipe</script>");
   assert.equal(element("packageDescription").innerHTML, "untouched");
   selected = "C:\\out";
@@ -57,14 +61,40 @@ test("package selection binds analysis and changing installer invalidates it wit
   assert.equal(request.analyzedInstallerSha256, "installer-hash");
   assert.equal(request.analyzedProjectSha256, "project-hash");
   assert.equal(request.isolationPreset, "offlineWindowsSandbox");
-  assert.equal(request.profile, "localSettingsAssessment");
+  assert.equal(request.profile, profile);
   assert.equal(element("packageResult").hidden, false);
   assert.equal(element("packageResultHash").textContent, "Manifest SHA-256: manifest-hash");
+  assert.equal(calls.some((call) => call.name === "prepare_workflow"), false);
+  assert.equal(element("packageDocumentField").hidden, profile !== "interactiveDocument");
+  selected = "C:\\input\\document.txt";
+  await element("choosePackageDocument").handlers.click();
+  await element("validatePackage").handlers.click();
+  const validation = calls.find((call) => call.name === "prepare_workflow").args;
+  assert.equal(validation.package.bundleRoot, "C:\\out\\bundle");
+  assert.equal(validation.package.manifestSha256, "manifest-hash");
+  assert.equal(validation.kind, profile === "interactiveDocument" ? "interactive" : "assessment");
+  assert.equal(validation.documentInput, profile === "interactiveDocument" ? selected : null);
+  failCreation = true;
+  await element("createPackage").handlers.click();
+  assert.equal(element("packageResult").hidden, true);
+  assert.match(element("packageStatus").textContent, /stopped/);
+  await element("validatePackage").handlers.click();
+  assert.equal(calls.filter((call) => call.name === "prepare_workflow").length, 1);
   selected = "C:\\input\\changed.msi";
   await element("choosePackageInstaller").handlers.click();
   assert.equal(element("packageSelection").hidden, true);
   assert.equal(element("createPackage").disabled, true);
   await element("createPackage").handlers.click();
-  assert.equal(calls.filter((call) => call.name === "create_package").length, 1);
-  assert.equal(calls.some((call) => ["prepare_workflow", "submit_approval", "start_approved_workflow"].includes(call.name)), false);
+  assert.equal(calls.filter((call) => call.name === "create_package").length, 2);
+  assert.equal(calls.some((call) => ["submit_approval", "start_approved_workflow"].includes(call.name)), false);
+});
+
+test("packaging IPC has both generated commands and local-window permissions", () => {
+  const manifest = fs.readFileSync(require.resolve("../build.rs"), "utf8");
+  const capability = JSON.parse(fs.readFileSync(require.resolve("../capabilities/administrator.json"), "utf8"));
+  assert.deepEqual(capability.windows, ["main"]);
+  for (const command of ["analyze_package", "create_package"]) {
+    assert.ok(manifest.includes('"' + command + '"'));
+    assert.ok(capability.permissions.includes("allow-" + command.replaceAll("_", "-")));
+  }
 });

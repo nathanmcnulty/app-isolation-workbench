@@ -208,7 +208,15 @@ mod desktop {
         })
         .await
     }
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct PackageValidationInput {
+        bundle_root: String,
+        manifest_sha256: String,
+    }
     #[tauri::command]
+    // Keep the existing named IPC arguments compatible; package is an optional source.
+    #[allow(clippy::too_many_arguments)]
     fn prepare_workflow(
         app: tauri::AppHandle,
         c: State<'_, Controller>,
@@ -217,11 +225,18 @@ mod desktop {
         document_input: Option<String>,
         evidence: String,
         operator_identity: String,
+        package: Option<PackageValidationInput>,
     ) -> std::result::Result<(), String> {
         if !matches!(kind.as_str(), "assessment" | "interactive" | "bambu") {
             return Err("Unsupported workflow.".into());
         }
-        if installer.is_empty() || evidence.is_empty() || operator_identity.trim().is_empty() {
+        if package.is_some() && kind == "bambu" {
+            return Err("Notepad++ packages cannot select the Bambu workflow.".into());
+        }
+        if (package.is_none() && installer.is_empty())
+            || evidence.is_empty()
+            || operator_identity.trim().is_empty()
+        {
             return Err(
                 "Choose the supported installer, evidence folder, and operator identity.".into(),
             );
@@ -244,7 +259,20 @@ mod desktop {
             .into(),
         };
         spawn_work(app, c, id, move || {
-            let result = if kind == "interactive" {
+            let result = if let Some(package) = package {
+                service::assess_package_with_gate(
+                    Path::new(&package.bundle_root),
+                    &package.manifest_sha256,
+                    if kind == "interactive" {
+                        document_input.as_deref().map(Path::new)
+                    } else {
+                        None
+                    },
+                    Path::new(&evidence),
+                    &operator_identity,
+                    &gate,
+                )?
+            } else if kind == "interactive" {
                 service::launch_document_with_gate(
                     Path::new(&installer),
                     Path::new(

@@ -37,7 +37,7 @@
         <p class="helper">Output defaults to the Workbench evidence folder. Each package and its evidence use separate fresh child folders. Exact runtime settings are disclosed again before approval and Start.</p>
         <button id="createPackage" class="primary" type="button">Create package</button>
       </div>
-      <div id="packageResult" class="notice hidden"><strong>Package assembled and verified</strong><p id="packageResultSummary"></p><p id="packageResultPath" class="mono"></p><p id="packageResultHash" class="mono"></p></div>
+      <div id="packageResult" class="notice hidden"><strong>Package assembled and verified</strong><p id="packageResultSummary"></p><p id="packageResultPath" class="mono"></p><p id="packageResultHash" class="mono"></p><p>Identify the operator below. Interactive packages also require a text input. Validation prepares a fresh review; approve and Start separately.</p><label id="packageDocumentField" class="field hidden"><span>Text input for this validation</span><div class="input-action"><input id="packageDocumentInput" type="text" readonly placeholder="Choose a UTF-8 text file"><button id="choosePackageDocument" class="secondary" type="button">Choose text</button></div></label><button id="validatePackage" class="secondary" type="button">Prepare package validation</button></div>
       <details id="packageAdvanced" class="advanced hidden"><summary>Analysis and package identity details</summary><pre id="packageAnalysisJson"></pre><pre id="packageResultJson"></pre></details>
     </section>
 

@@ -42,6 +42,13 @@ window closure cannot abandon stage publication. Package result and independentl
 retainable manifest hash are shown separately from compatibility results. Complete
 analysis and package records are optional advanced details.
 
+Prepare package validation imports the closed bundle using its displayed manifest
+hash into fresh protected intake. Both verified and imported recipes must equal
+the installed fixed profile before preparation can proceed. The ordinary review,
+exact approval and separate Start still apply. Interactive packages have their
+own text-input picker. Auxiliary analysis/creation preserves any completed trial
+and its verified export authority; failed creation clears the prior package card.
+
 The service contract tests use inert source/agent fixtures, not actual application
 execution. They cover both recipe bindings, input/project drift, unsupported
 runtime selection, network-grant rejection and failed publication. They cannot
@@ -49,9 +56,9 @@ establish real Notepad++ compatibility.
 
 - Validate the new desktop Analyze -> selection -> Create package flow using the
   actual installer on the dedicated VM. Unit controls are not native acceptance.
-- Make a created package usable through the administrator replay flow with fresh
-  protected import and existing exact approval and separate Start. Display package
-  identity and retained validation together; assembly is not a compatibility pass.
+- Validate package import and replay through the desktop using the displayed
+  manifest identity and retained bundle-import stage; assembly is not a
+  compatibility pass.
 - Build and stage a new development package on the dedicated VM. Use the actual
   supported Notepad++ MSI, retain identities and negative controls, create the
   bundle through the new flow, and complete fresh package-bound worker validation.
