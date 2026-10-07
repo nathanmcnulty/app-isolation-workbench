@@ -16,9 +16,16 @@ formatting and static Windows CLI/desktop release builds passed.
 Dedicated-VM operator-context export/relocation/import passed, including rejection
 of matching installer bytes from another intake against a reverified successful
 historical Bambu run. Detailed identities and gaps: [development proof](BAMBU-PACKAGING.md#development-proof).
-Native desktop assembly/fresh approved package replay, integration CI and signed
-candidate acceptance remain open. Computer-use initialization currently fails
-with `failed to write kernel assets` after the documented retry/reset.
+All three required integration checks passed on exact `b8ad8e1` (CI `37681516883`).
+Computer use is working again after the bundled runtime update. The dedicated VM
+verified all eleven development payload files, then native Bambu analysis and
+package assembly passed. Fresh native package run `admin-1791408579808193500`
+passed all five export checks, matched bundle reporting, independent artifact
+hashing and cleanup; the provider list is empty. The current CLI independently
+reverified both retained Notepad package/report associations as the limited
+operator. Test registrations are removed and evidence is preserved. PR #93 is
+ready for final evidence review and required final-head checks. Integration and
+signed candidate acceptance remain open; keep the existing tested download.
 
 PR #92 merged at `0a88db6`; its tree matches reviewed `1d6082e`. All required PR
 checks (`37669599045`) and main checks (`37670881454`) passed. It shares held-file

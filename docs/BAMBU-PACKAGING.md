@@ -86,7 +86,54 @@ successful fresh package replay. No installer or Sandbox was started by this pro
 Failed transport-script preparation and the initial SYSTEM-context import remain
 preserved. SYSTEM collapses the required distinct owner-and-SYSTEM ACL entries;
 the retry used the normal operator context and a fresh evidence directory without
-weakening the protection. Signed-candidate acceptance and fresh native desktop
-assembly/replay remain open: computer-use initialization fails before application
-inventory with `failed to write kernel assets`, including after documented reset.
-Keep the existing tested signed download recommendation until those gates pass.
+weakening the protection. Required integration CI `37681516883` passed all three
+jobs on exact `b8ad8e1`. The updated bundled computer-use runtime restored RDP
+automation. The VM independently verified the development archive and all eleven
+payload files before launching the desktop as `aiwoperator`; this unsigned stage
+does not replace public signed-byte acceptance.
+
+Native installer selection, analysis and Bambu package assembly passed. The
+retained v0alpha2 result names `bundle-package-1791408150475946000` under the
+operator's Workbench evidence directory. Its manifest SHA-256 is
+`6e880f03a22fed3d2fb236941f01cb3205877da20b233277d2987f8fe7c7a11e`,
+independently read from the VM file.
+
+Native preparation created fresh run `admin-1791408579808193500`. The complete
+retained recipe was reviewed, then literal plan approval and the separate Start
+action were exercised through RDP. All five fixed export checks passed. The
+retained `report-bundle.json` matches this manifest and the complete fresh intake;
+its canonical replay receipt SHA-256 was independently recomputed as
+`ac3b90a5134e96e6ed82589272490e19ef29572153a18701412a0c2120159225`.
+This canonical bundle-report digest is distinct from the preparation's typed
+receipt serialization digest; the underlying receipt identity matches exactly.
+
+The independently hashed `output\aiw-tetrahedron.3mf` is 9,063 bytes, with SHA-256
+`4f26886a98af377b280b476957129fe898765019926635be2fcb8727fe055ff6`.
+The verified artifact contains four vertices and four triangles. The run records
+cleanup complete, its exact session is disposed, and the provider list is empty.
+The native result presents all five function checks and the separate broader
+isolation limitation. No graphical Bambu editing, slicing or printer workflow
+was tested.
+
+Host proof is `native-complete-review.json`, `native-reviewed-identities.json`
+and `native-replay-terminal.json` under the evidence pointer above. VM evidence
+remains under the operator Workbench Evidence directory for the stated run.
+The initial oversized diagnostic response and a collector's incorrect status
+filename remain preserved. Bounded readback of the existing `result.json`
+corrected collection without repeating installation or execution.
+Signed candidate acceptance remains open. Keep the existing tested signed
+download recommendation until that gate passes.
+
+The current CLI also reverified both retained Notepad++ package/report
+associations as the limited operator: fixed assessment
+`admin-1791363728884366700` and interactive session
+`admin-1791364558757379700`. Both commands exited zero, retained the correct
+report kinds, successful scenario evidence and verified cleanup. These are
+read-only regressions against historical evidence, not new installations or
+signed-candidate execution proof. VM results remain in
+`C:\Users\aiwoperator\AppData\Local\Temp\AIW-MSI-Regression-b8ad8e1-7d6bf1a8-r2`;
+host readback is `msi-regression-terminal-cleanup-r2.json`. The first collector
+incorrectly expected an assessment outcome field on the interactive report;
+its failure and outputs remain preserved separately. All three owned staging/
+regression registrations were removed only after exact action and terminal exit
+verification; no evidence directory or unrelated task was removed.
