@@ -193,8 +193,12 @@ mod desktop {
         let id = c.begin_analysis()?;
         package_action(app, c, id, move || {
             match product.unwrap_or(PackageApplication::Notepad) {
-                PackageApplication::Notepad => service::packaging::analyze_notepad_installer(Path::new(&installer)),
-                PackageApplication::Bambu => service::packaging::analyze_bambu_installer(Path::new(&installer)),
+                PackageApplication::Notepad => {
+                    service::packaging::analyze_notepad_installer(Path::new(&installer))
+                }
+                PackageApplication::Bambu => {
+                    service::packaging::analyze_bambu_installer(Path::new(&installer))
+                }
             }
         })
         .await
@@ -214,7 +218,10 @@ mod desktop {
     }
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase")]
-    enum PackageApplication { Notepad, Bambu }
+    enum PackageApplication {
+        Notepad,
+        Bambu,
+    }
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
     struct PackageValidationInput {
@@ -265,21 +272,27 @@ mod desktop {
         spawn_work(app, c, id, move || {
             let result = if let Some(package) = package {
                 if kind == "bambu" {
-                    service::assess_bambu_package_with_gate(Path::new(&package.bundle_root), &package.manifest_sha256,
-                        Path::new(&evidence), &operator_identity, &gate)?
+                    service::assess_bambu_package_with_gate(
+                        Path::new(&package.bundle_root),
+                        &package.manifest_sha256,
+                        Path::new(&evidence),
+                        &operator_identity,
+                        &gate,
+                    )?
                 } else {
-                service::assess_package_with_gate(
-                    Path::new(&package.bundle_root),
-                    &package.manifest_sha256,
-                    if kind == "interactive" {
-                        document_input.as_deref().map(Path::new)
-                    } else {
-                        None
-                    },
-                    Path::new(&evidence),
-                    &operator_identity,
-                    &gate,
-                )? }
+                    service::assess_package_with_gate(
+                        Path::new(&package.bundle_root),
+                        &package.manifest_sha256,
+                        if kind == "interactive" {
+                            document_input.as_deref().map(Path::new)
+                        } else {
+                            None
+                        },
+                        Path::new(&evidence),
+                        &operator_identity,
+                        &gate,
+                    )?
+                }
             } else if kind == "interactive" {
                 service::launch_document_with_gate(
                     Path::new(&installer),
