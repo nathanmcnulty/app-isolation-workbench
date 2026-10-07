@@ -11,9 +11,14 @@ installer -> analysis -> isolation/recipe selection experience. On
 reuses fixed recipe compilation, protected intake and bundle export/verification.
 The desktop now wires installer analysis, typed preset/workflow selection and
 package creation with optional technical details and operation locking. Service
-tests use inert fixtures; 31 service, 7 controller and 10 UI tests pass. Native desktop
-acceptance, real-installer package creation and fresh package-bound disposable-
-worker validation remain required. Package replay now imports a verified bundle
+tests use inert fixtures; 31 service, 7 controller and 10 UI tests pass. Exact
+`e881c59` passed independent review; the native VM flow analyzed the real MSI
+and created a verified package. Native inspection caught result-card overflow,
+fixed at `f6746b8`; the rebuilt candidate created another package with readable
+controls. Package-bound run `admin-1791358675396046500` completed the fixed
+workflow and verified cleanup after full recipe review, exact approval and Start.
+Broader isolation remains insufficient evidence. Hosted integration remains.
+Package replay imports a verified bundle
 only when its recipe matches the installed profile, then uses the existing review,
 exact approval and separate Start. Packaging preserves completed trial/export state.
 See [administrator packaging](ADMIN-PACKAGING.md). Do not treat assembly tests or
