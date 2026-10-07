@@ -193,7 +193,18 @@ pub fn analyze_notepad_installer(installer: &Path) -> Result<PackageAnalysis> {
 /// Preserve the two-profile v0alpha1 Notepad assembly contract.
 #[cfg(windows)]
 pub fn create_notepad_package(request: &NotepadPackageRequest) -> Result<PackageResult> {
-    let result = create_sandbox_package(&SandboxPackageRequest {
+    create_notepad_with_assets(
+        request,
+        &packaged_asset_root(SandboxPackageProfile::from(request.profile).directory())?,
+    )
+}
+
+#[cfg(windows)]
+fn create_notepad_with_assets(
+    request: &NotepadPackageRequest,
+    assets_root: &Path,
+) -> Result<PackageResult> {
+    let request = SandboxPackageRequest {
         installer: request.installer.clone(),
         profile: request.profile.into(),
         isolation_preset: request.isolation_preset,
@@ -201,14 +212,26 @@ pub fn create_notepad_package(request: &NotepadPackageRequest) -> Result<Package
         analyzed_project_sha256: request.analyzed_project_sha256.clone(),
         evidence_parent: request.evidence_parent.clone(),
         output_parent: request.output_parent.clone(),
+    };
+    let result = assemble_with_assets(&request, assets_root, |result| {
+        save_stage(
+            &result.evidence_root,
+            "package-result",
+            &legacy_package_result(result)?,
+        )
     })?;
+    legacy_package_result(&result)
+}
+
+#[cfg(windows)]
+fn legacy_package_result(result: &SandboxPackageResult) -> Result<PackageResult> {
     Ok(PackageResult {
         schema_version: "aiw.dev/admin-package-result/v0alpha1".into(),
         profile: notepad_profile(result.profile)?,
         isolation_preset: result.isolation_preset,
-        evidence_root: result.evidence_root,
-        bundle: result.bundle,
-        next: result.next,
+        evidence_root: result.evidence_root.clone(),
+        bundle: result.bundle.clone(),
+        next: result.next.clone(),
     })
 }
 
@@ -390,6 +413,17 @@ fn create_with_assets(
     request: &SandboxPackageRequest,
     assets_root: &Path,
 ) -> Result<SandboxPackageResult> {
+    assemble_with_assets(request, assets_root, |result| {
+        save_stage(&result.evidence_root, "package-result", result)
+    })
+}
+
+#[cfg(windows)]
+fn assemble_with_assets(
+    request: &SandboxPackageRequest,
+    assets_root: &Path,
+    publish: impl FnOnce(&SandboxPackageResult) -> Result<()>,
+) -> Result<SandboxPackageResult> {
     let (project, manifest) = fixed_assets(assets_root, request.profile)?;
     if !valid_sha256(&request.analyzed_installer_sha256)
         || !valid_sha256(&request.analyzed_project_sha256)
@@ -457,7 +491,7 @@ fn create_with_assets(
         bundle,
         next: "Package assembled and verified, not compatibility-certified. Preserve the manifest hash and evidence. Import through Workbench for fresh recipe review, approval, Start and disposable-worker validation. Preserve incomplete output on failure; retry in fresh locations.".into(),
     };
-        save_stage(&result.evidence_root, "package-result", &result)?;
+        publish(&result)?;
         Ok(result)
     })();
     assembled.map_err(|error| {
@@ -612,6 +646,41 @@ mod tests {
             output_parent: root.join("bundles"),
         };
         (root, assets, request)
+    }
+
+    #[test]
+    fn legacy_assembly_returns_and_retains_the_same_v1_result() {
+        for profile in [
+            SandboxPackageProfile::LocalSettingsAssessment,
+            SandboxPackageProfile::InteractiveDocument,
+        ] {
+            let (root, assets, request) = fixture(profile);
+            let legacy = NotepadPackageRequest {
+                installer: request.installer,
+                profile: notepad_profile(profile).unwrap(),
+                isolation_preset: request.isolation_preset,
+                analyzed_installer_sha256: request.analyzed_installer_sha256,
+                analyzed_project_sha256: request.analyzed_project_sha256,
+                evidence_parent: request.evidence_parent,
+                output_parent: request.output_parent,
+            };
+            let result = create_notepad_with_assets(&legacy, &assets).unwrap();
+            let retained: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(result.evidence_root.join("package-result.json")).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(retained, serde_json::to_value(&result).unwrap());
+            assert_eq!(
+                retained["schemaVersion"],
+                "aiw.dev/admin-package-result/v0alpha1"
+            );
+            assert_eq!(
+                serde_json::from_value::<NotepadPackageProfile>(retained["profile"].clone())
+                    .unwrap(),
+                legacy.profile
+            );
+            std::fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[test]
