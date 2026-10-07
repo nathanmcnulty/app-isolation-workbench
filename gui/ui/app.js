@@ -81,7 +81,7 @@
     show("cancel", pending);
     $("export").disabled = busy || phase !== "completed" || !(snapshot && snapshot.result && snapshot.result.canExportDocument);
     $("chooseDestination").disabled = busy || phase !== "completed" || !(snapshot && snapshot.result && snapshot.result.canExportDocument);
-    ["choosePackageInstaller", "choosePackageOutput", "choosePackageDocument", "packageProfile", "packageIsolation"].forEach((id) => { $(id).disabled = locked || !editable; });
+    ["choosePackageInstaller", "choosePackageOutput", "choosePackageDocument", "packageProduct", "packageProfile", "packageIsolation"].forEach((id) => { $(id).disabled = locked || !editable; });
     $("analyzePackage").disabled = locked || !editable || !value("packageInstaller");
     $("createPackage").disabled = locked || !editable || !selectedPackageOption() || !value("packageOutput");
     $("validatePackage").disabled = locked || !editable || !state.packageResult;
@@ -127,11 +127,12 @@
       } else {
         const path = value("packageInstaller");
         state.analysis = null; state.packageResult = null; state.analyzedPath = null; renderPackage();
-        const analysis = await call("analyze_package", { installer: path });
+        const analysis = await call("analyze_package", { installer: path, product: value("packageProduct") || "notepad" });
         state.analysis = analysis; state.analyzedPath = path;
         if (analysis.options.length) $("packageProfile").value = analysis.options[0].profile;
         $("packageAssessmentOption").disabled = !analysis.options.some((option) => option.profile === "localSettingsAssessment");
         $("packageInteractiveOption").disabled = !analysis.options.some((option) => option.profile === "interactiveDocument");
+        $("packageBambuOption").disabled = !analysis.options.some((option) => option.profile === "bambuStudioExport");
         text("packageStatus", analysis.options.length ? "Supported installer identity. Choose an isolation preset and workflow." : "These installer bytes have no supported package recipe. Analysis is not a compatibility verdict.");
       }
       renderPackage(); await poll();
@@ -245,7 +246,14 @@
   $("cancel").addEventListener("click", () => { const snapshot = state.current; if (snapshot && ["preparing", "review", "approved"].includes(snapshot.phase)) action("cancel_pending", { workflowId: snapshot.workflowId }); });
   $("export").addEventListener("click", () => action("export_document", { destination: value("destination") }));
   $("loadRetained").addEventListener("click", () => action("load_retained_report", { kind: value("retainedKind"), workspace: value("retainedWorkspace"), runId: value("retainedRunId") }));
-  $("choosePackageInstaller").addEventListener("click", () => choose("installer", "packageInstaller"));
+  $("choosePackageInstaller").addEventListener("click", () => choose(value("packageProduct") === "bambu" ? "bambu-installer" : "installer", "packageInstaller"));
+  $("packageProduct").addEventListener("change", () => {
+    if (state.busy || $("packageProduct").disabled) return;
+    $("packageInstaller").value = "";
+    state.analysis = null; state.analyzedPath = null; state.packageResult = null;
+    renderPackage(); applyControls(state.current, false);
+    text("packageStatus", "Choose the supported installer for this application and analyze again.");
+  });
   $("choosePackageOutput").addEventListener("click", () => choose("package-output", "packageOutput"));
   $("choosePackageDocument").addEventListener("click", () => choose("document", "packageDocumentInput"));
   $("analyzePackage").addEventListener("click", () => packageAction(false));
@@ -253,7 +261,7 @@
   $("validatePackage").addEventListener("click", () => {
     const result = state.packageResult;
     if (!result || state.busy) return;
-    return action("prepare_workflow", { kind: result.profile === "interactiveDocument" ? "interactive" : "assessment", installer: "",
+    return action("prepare_workflow", { kind: result.profile === "bambuStudioExport" ? "bambu" : result.profile === "interactiveDocument" ? "interactive" : "assessment", installer: "",
       documentInput: result.profile === "interactiveDocument" ? value("packageDocumentInput") : null,
       evidence: value("evidence"), operatorIdentity: value("operatorIdentity"),
       package: { bundleRoot: result.bundle.bundlePath, manifestSha256: result.bundle.manifestSha256 } });

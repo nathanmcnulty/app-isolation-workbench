@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const vm = require("node:vm");
 const display = require("../ui/display.js");
 
-for (const profile of ["localSettingsAssessment", "interactiveDocument"]) test(`package ${profile} binds analysis and changing installer invalidates it without execution`, async () => {
+for (const profile of ["localSettingsAssessment", "interactiveDocument", "bambuStudioExport"]) test(`package ${profile} binds analysis and changing installer invalidates it without execution`, async () => {
   const elements = new Map(), scrolled = [];
   const element = (id) => {
     if (!elements.has(id)) elements.set(id, {
@@ -17,7 +17,8 @@ for (const profile of ["localSettingsAssessment", "interactiveDocument"]) test(`
   const calls = [], intervals = [];
   let finishAnalysis;
   const analysisGate = new Promise((resolve) => { finishAnalysis = resolve; });
-  let selected = "C:\\input\\notepad.msi";
+  const installerPath = profile === "bambuStudioExport" ? "C:\\input\\bambu.exe" : "C:\\input\\notepad.msi";
+  let selected = installerPath;
   let failCreation = false;
   let phase = "completed";
   const analysis = {
@@ -45,16 +46,21 @@ for (const profile of ["localSettingsAssessment", "interactiveDocument"]) test(`
   vm.runInNewContext(fs.readFileSync(require.resolve("../ui/app.js"), "utf8"), context);
   await new Promise(setImmediate);
   element("packageIsolation").value = "offlineWindowsSandbox";
+  element("packageProduct").value = profile === "bambuStudioExport" ? "bambu" : "notepad";
   await element("choosePackageInstaller").handlers.click();
   const analyzing = element("analyzePackage").handlers.click();
   assert.equal(element("choosePackageInstaller").disabled, true);
   assert.equal(element("analyzePackage").disabled, true);
+  assert.equal(element("packageProduct").disabled, true);
   await element("analyzePackage").handlers.click();
   assert.equal(calls.filter((call) => call.name === "analyze_package").length, 1);
   finishAnalysis(analysis);
   await analyzing;
   assert.equal(element("packageSelection").hidden, false);
   assert.equal(element("packageInteractiveOption").disabled, profile !== "interactiveDocument");
+  assert.equal(element("packageBambuOption").disabled, profile !== "bambuStudioExport");
+  assert.equal(calls.find((call) => call.name === "analyze_package").args.product, profile === "bambuStudioExport" ? "bambu" : "notepad");
+  assert.equal(calls.find((call) => call.name === "choose_input").args.kind, profile === "bambuStudioExport" ? "bambu-installer" : "installer");
   assert.equal(element("packageDescription").textContent, "<script>inert recipe</script>");
   assert.equal(element("packageDescription").innerHTML, "untouched");
   selected = "C:\\out";
@@ -64,7 +70,7 @@ for (const profile of ["localSettingsAssessment", "interactiveDocument"]) test(`
   assert.deepEqual(scrolled, ["packageResult"]);
   assert.equal(element("resultRun").textContent, "previous-trial");
   const request = calls.find((call) => call.name === "create_package").args.request;
-  assert.equal(request.installer, "C:\\input\\notepad.msi");
+  assert.equal(request.installer, installerPath);
   assert.equal(request.analyzedInstallerSha256, "installer-hash");
   assert.equal(request.analyzedProjectSha256, "project-hash");
   assert.equal(request.isolationPreset, "offlineWindowsSandbox");
@@ -79,7 +85,7 @@ for (const profile of ["localSettingsAssessment", "interactiveDocument"]) test(`
   const validation = calls.find((call) => call.name === "prepare_workflow").args;
   assert.equal(validation.package.bundleRoot, "C:\\out\\bundle");
   assert.equal(validation.package.manifestSha256, "manifest-hash");
-  assert.equal(validation.kind, profile === "interactiveDocument" ? "interactive" : "assessment");
+  assert.equal(validation.kind, profile === "bambuStudioExport" ? "bambu" : profile === "interactiveDocument" ? "interactive" : "assessment");
   assert.equal(validation.documentInput, profile === "interactiveDocument" ? selected : null);
   failCreation = true;
   await element("createPackage").handlers.click();
@@ -94,6 +100,12 @@ for (const profile of ["localSettingsAssessment", "interactiveDocument"]) test(`
   await element("createPackage").handlers.click();
   assert.equal(calls.filter((call) => call.name === "create_package").length, 2);
   assert.equal(calls.some((call) => ["submit_approval", "start_approved_workflow"].includes(call.name)), false);
+  element("packageProduct").value = profile === "bambuStudioExport" ? "notepad" : "bambu";
+  element("packageProduct").handlers.change();
+  assert.equal(element("packageInstaller").value, "");
+  assert.equal(element("packageSelection").hidden, true);
+  assert.equal(element("packageResult").hidden, true);
+  assert.equal(element("createPackage").disabled, true);
 });
 
 test("packaging IPC has both generated commands and local-window permissions", () => {

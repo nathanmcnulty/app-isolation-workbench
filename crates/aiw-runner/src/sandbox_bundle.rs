@@ -35,6 +35,38 @@ pub enum SandboxBundleError {
     #[error("bundle native: {0}")]
     Native(String),
 }
+
+/// Closed file layouts selected by reviewed code, never by manifest paths.
+#[cfg(windows)]
+#[derive(Clone, Copy)]
+pub(crate) enum BundlePayloadKind {
+    Msi,
+    BambuExe,
+}
+
+#[cfg(windows)]
+impl BundlePayloadKind {
+    fn leaf(self) -> &'static str {
+        match self {
+            Self::Msi => APPLICATION_FILE,
+            Self::BambuExe => "app.exe",
+        }
+    }
+
+    fn limit(self) -> u64 {
+        match self {
+            Self::Msi => 128 * 1024 * 1024,
+            Self::BambuExe => 512 * 1024 * 1024,
+        }
+    }
+
+    fn source_kind(self) -> ApplicationInspectionKind {
+        match self {
+            Self::Msi => ApplicationInspectionKind::Msi,
+            Self::BambuExe => ApplicationInspectionKind::Exe,
+        }
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SandboxBundleManifest {
@@ -195,7 +227,6 @@ pub fn export_notepad_plus_plus_msi_bundle(
     scenario_id: &str,
     receipt: &ApplicationFileImportReceipt,
 ) -> Result<SandboxBundleExport, SandboxBundleError> {
-    use aiw_windows_platform::{CreatedWorkspaceDirectory, open_verified_application_file_import};
     let scenario = compile(project, scenario_id)?;
     let project_bytes = canonical(project)?;
     if project_bytes.len() > 524288 {
@@ -206,17 +237,16 @@ pub fn export_notepad_plus_plus_msi_bundle(
     if receipt.source_kind != ApplicationInspectionKind::Msi {
         return Err(contract_error("MSI intake required"));
     }
-    let root = CreatedWorkspaceDirectory::create_protected(parent, id).map_err(native)?;
-    // Create the destination before the verified intake locks its parent against
-    // writes. Retain source authority for the entire copy and publish manifest last.
-    let mut held = open_verified_application_file_import(receipt).map_err(native)?;
-    let app = root.create_file_new(APPLICATION_FILE).map_err(native)?;
-    held.copy_to(app).map_err(native)?;
-    write(&root, PROJECT_FILE, &project_bytes)?;
-    write(&root, MANIFEST_FILE, &manifest_bytes)?;
-    held.revalidate().map_err(native)?;
+    let bundle_path = write_bundle_files(
+        parent,
+        id,
+        BundlePayloadKind::Msi,
+        receipt,
+        &project_bytes,
+        &manifest_bytes,
+    )?;
     Ok(SandboxBundleExport {
-        bundle_path: root.final_path().display().to_string(),
+        bundle_path,
         manifest_sha256: hash(&manifest_bytes),
         manifest,
     })
@@ -239,18 +269,58 @@ struct HeldBundle {
 }
 
 #[cfg(windows)]
+pub(crate) struct HeldBundleFiles {
+    pub directory: aiw_windows_platform::HeldPortableDirectory,
+    pub application: aiw_windows_platform::HeldApplicationFile,
+    pub manifest_bytes: Vec<u8>,
+    pub project_bytes: Vec<u8>,
+}
+
+#[cfg(windows)]
 fn open_bundle(dir: &Path, expected: &str) -> Result<HeldBundle, SandboxBundleError> {
+    let files = open_bundle_files(dir, expected, BundlePayloadKind::Msi)?;
+    let manifest: SandboxBundleManifest = serde_json::from_slice(&files.manifest_bytes)
+        .map_err(|_| contract_error("manifest JSON"))?;
+    let project: Project =
+        serde_json::from_slice(&files.project_bytes).map_err(|_| contract_error("project JSON"))?;
+    let scenario = compile(&project, &manifest.scenario_id)?;
+    validate(&manifest, &files.project_bytes, &scenario)?;
+    if files.application.observation().sha256 != manifest.application_sha256
+        || files.application.observation().size_bytes != manifest.application_size_bytes
+    {
+        return Err(contract_error("application binding"));
+    }
+    files.application.revalidate().map_err(native)?;
+    files.directory.revalidate().map_err(native)?;
+    Ok(HeldBundle {
+        directory: files.directory,
+        application: files.application,
+        verification: SandboxBundleVerification {
+            manifest_sha256: expected.into(),
+            manifest,
+            project,
+            scenario,
+        },
+    })
+}
+
+#[cfg(windows)]
+pub(crate) fn open_bundle_files(
+    dir: &Path,
+    expected: &str,
+    kind: BundlePayloadKind,
+) -> Result<HeldBundleFiles, SandboxBundleError> {
     use aiw_windows_platform::{HeldApplicationFile, HeldPortableDirectory};
     if !valid_hash(expected) {
         return Err(contract_error(
             "expected manifest hash must be lowercase SHA-256",
         ));
     }
-    inventory(dir)?;
+    inventory(dir, kind)?;
     for (leaf, limit) in [
         (MANIFEST_FILE, 65536),
         (PROJECT_FILE, 524288),
-        (APPLICATION_FILE, 128 * 1024 * 1024),
+        (kind.leaf(), kind.limit()),
     ] {
         let metadata = fs::symlink_metadata(dir.join(leaf))
             .map_err(|e| SandboxBundleError::Io(e.to_string()))?;
@@ -261,44 +331,58 @@ fn open_bundle(dir: &Path, expected: &str) -> Result<HeldBundle, SandboxBundleEr
     let directory = HeldPortableDirectory::open(dir).map_err(native)?;
     let manifest_file = HeldApplicationFile::open(&dir.join(MANIFEST_FILE)).map_err(native)?;
     let project_file = HeldApplicationFile::open(&dir.join(PROJECT_FILE)).map_err(native)?;
-    let application_file =
-        HeldApplicationFile::open(&dir.join(APPLICATION_FILE)).map_err(native)?;
+    let application_file = HeldApplicationFile::open(&dir.join(kind.leaf())).map_err(native)?;
     let manifest_bytes = read(&dir.join(MANIFEST_FILE), 65536)?;
     if hash(&manifest_bytes) != expected
         || hash(&manifest_bytes) != manifest_file.observation().sha256
     {
         return Err(contract_error("manifest hash"));
     }
-    let manifest: SandboxBundleManifest =
-        serde_json::from_slice(&manifest_bytes).map_err(|_| contract_error("manifest JSON"))?;
     let project_bytes = read(&dir.join(PROJECT_FILE), 524288)?;
     if hash(&project_bytes) != project_file.observation().sha256 {
         return Err(contract_error("project drift"));
-    }
-    let project: Project =
-        serde_json::from_slice(&project_bytes).map_err(|_| contract_error("project JSON"))?;
-    let scenario = compile(&project, &manifest.scenario_id)?;
-    validate(&manifest, &project_bytes, &scenario)?;
-    if application_file.observation().sha256 != manifest.application_sha256
-        || application_file.observation().size_bytes != manifest.application_size_bytes
-    {
-        return Err(contract_error("application binding"));
     }
     manifest_file.revalidate().map_err(native)?;
     project_file.revalidate().map_err(native)?;
     application_file.revalidate().map_err(native)?;
     directory.revalidate().map_err(native)?;
-    inventory(dir)?;
-    Ok(HeldBundle {
+    inventory(dir, kind)?;
+    Ok(HeldBundleFiles {
         directory,
         application: application_file,
-        verification: SandboxBundleVerification {
-            manifest_sha256: expected.into(),
-            manifest,
-            project,
-            scenario,
-        },
+        manifest_bytes,
+        project_bytes,
     })
+}
+
+#[cfg(windows)]
+pub(crate) fn write_bundle_files(
+    parent: &Path,
+    id: &str,
+    kind: BundlePayloadKind,
+    receipt: &ApplicationFileImportReceipt,
+    project_bytes: &[u8],
+    manifest_bytes: &[u8],
+) -> Result<String, SandboxBundleError> {
+    use aiw_windows_platform::{CreatedWorkspaceDirectory, open_verified_application_file_import};
+    if receipt.source_kind != kind.source_kind()
+        || receipt.size_bytes == 0
+        || receipt.size_bytes > kind.limit()
+        || project_bytes.len() > 524288
+        || manifest_bytes.len() > 65536
+    {
+        return Err(contract_error("bundle transport bounds or source kind"));
+    }
+    // Create before source custody locks its parent; retain it through copy,
+    // then publish the closed manifest last. Failure leaves output for diagnosis.
+    let root = CreatedWorkspaceDirectory::create_protected(parent, id).map_err(native)?;
+    let mut held = open_verified_application_file_import(receipt).map_err(native)?;
+    held.copy_to(root.create_file_new(kind.leaf()).map_err(native)?)
+        .map_err(native)?;
+    write(&root, PROJECT_FILE, project_bytes)?;
+    write(&root, MANIFEST_FILE, manifest_bytes)?;
+    held.revalidate().map_err(native)?;
+    Ok(root.final_path().display().to_string())
 }
 #[cfg(windows)]
 pub fn import_notepad_plus_plus_msi_bundle(
@@ -385,7 +469,7 @@ fn validate(
     Ok(())
 }
 #[cfg(windows)]
-fn canonical<T: Serialize>(x: &T) -> Result<Vec<u8>, SandboxBundleError> {
+pub(crate) fn canonical<T: Serialize>(x: &T) -> Result<Vec<u8>, SandboxBundleError> {
     canonical_json_bytes(&serde_json::to_value(x).map_err(|e| contract_error(e.to_string()))?)
         .map_err(|e| contract_error(e.to_string()))
 }
@@ -398,18 +482,18 @@ fn data_contract(scenario: &CompiledMsiScenario) -> &'static str {
     }
 }
 #[cfg(windows)]
-fn hash(b: &[u8]) -> String {
+pub(crate) fn hash(b: &[u8]) -> String {
     hex::encode(Sha256::digest(b))
 }
 #[cfg(windows)]
-fn valid_hash(value: &str) -> bool {
+pub(crate) fn valid_hash(value: &str) -> bool {
     value.len() == 64
         && value
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 #[cfg(windows)]
-fn contract_error(x: impl Into<String>) -> SandboxBundleError {
+pub(crate) fn contract_error(x: impl Into<String>) -> SandboxBundleError {
     SandboxBundleError::Contract(x.into())
 }
 #[cfg(windows)]
@@ -431,7 +515,7 @@ fn read(p: &Path, max: u64) -> Result<Vec<u8>, SandboxBundleError> {
     Ok(b)
 }
 #[cfg(windows)]
-fn inventory(d: &Path) -> Result<(), SandboxBundleError> {
+fn inventory(d: &Path, kind: BundlePayloadKind) -> Result<(), SandboxBundleError> {
     let mut n = fs::read_dir(d)
         .map_err(|e| SandboxBundleError::Io(e.to_string()))?
         .take(4)
@@ -445,7 +529,7 @@ fn inventory(d: &Path) -> Result<(), SandboxBundleError> {
         })
         .collect::<Result<Vec<_>, _>>()?;
     n.sort();
-    if n != [APPLICATION_FILE, MANIFEST_FILE, PROJECT_FILE] {
+    if n != [kind.leaf(), MANIFEST_FILE, PROJECT_FILE] {
         Err(contract_error("inventory"))
     } else {
         Ok(())
@@ -468,6 +552,6 @@ fn write(
     Ok(())
 }
 #[cfg(windows)]
-fn native(e: impl std::fmt::Display) -> SandboxBundleError {
+pub(crate) fn native(e: impl std::fmt::Display) -> SandboxBundleError {
     SandboxBundleError::Native(e.to_string())
 }

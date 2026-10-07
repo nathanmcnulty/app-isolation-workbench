@@ -3,10 +3,13 @@ use super::*;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub enum NotepadPackageProfile {
+pub enum SandboxPackageProfile {
     LocalSettingsAssessment,
     InteractiveDocument,
+    BambuStudioExport,
 }
+// Preserve source compatibility for the first packaging API.
+pub type NotepadPackageProfile = SandboxPackageProfile;
 
 /// Only the existing fixed offline Sandbox policy can be selected. Device,
 /// resource and exact mapping disclosures are resolved in the replay recipe.
@@ -16,17 +19,40 @@ pub enum PackageIsolationPreset {
     OfflineWindowsSandbox,
 }
 
-impl NotepadPackageProfile {
+impl SandboxPackageProfile {
     fn directory(self) -> &'static str {
         match self {
             Self::LocalSettingsAssessment => "notepad-plus-plus",
             Self::InteractiveDocument => "notepad-plus-plus-interactive",
+            Self::BambuStudioExport => "bambu-studio",
         }
     }
     fn product(self) -> &'static str {
         match self {
             Self::LocalSettingsAssessment => PRODUCT_ID,
             Self::InteractiveDocument => INTERACTIVE_PRODUCT_ID,
+            Self::BambuStudioExport => BAMBU_PRODUCT_ID,
+        }
+    }
+    fn scenario(self) -> &'static str {
+        if self == Self::BambuStudioExport {
+            BAMBU_SCENARIO_ID
+        } else {
+            SCENARIO_ID
+        }
+    }
+    fn source_kind(self) -> ApplicationInspectionKind {
+        if self == Self::BambuStudioExport {
+            ApplicationInspectionKind::Exe
+        } else {
+            ApplicationInspectionKind::Msi
+        }
+    }
+    fn intake_id(self) -> &'static str {
+        if self == Self::BambuStudioExport {
+            "bambu-studio"
+        } else {
+            "notepad-plus-plus"
         }
     }
 }
@@ -51,7 +77,7 @@ pub struct PackageAnalysis {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct NotepadPackageRequest {
+pub struct SandboxPackageRequest {
     pub installer: PathBuf,
     pub profile: NotepadPackageProfile,
     pub isolation_preset: PackageIsolationPreset,
@@ -60,6 +86,7 @@ pub struct NotepadPackageRequest {
     pub evidence_parent: PathBuf,
     pub output_parent: PathBuf,
 }
+pub type NotepadPackageRequest = SandboxPackageRequest;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -84,6 +111,7 @@ fn fixed_assets(
     let assets = match profile {
         NotepadPackageProfile::LocalSettingsAssessment => manifest.resolve(root)?,
         NotepadPackageProfile::InteractiveDocument => manifest.resolve_interactive(root)?,
+        NotepadPackageProfile::BambuStudioExport => manifest.resolve_bambu(root)?,
     };
     let bytes = read_file_bounded(&assets.project, MAX_CONFIG_BYTES)?;
     if lowercase_sha256(&bytes) != manifest.project_sha256 {
@@ -93,11 +121,16 @@ fn fixed_assets(
     if project.metadata.name != profile.product()
         || !validate_project_for_planning(&project).is_empty()
     {
-        bail!("packaged project is not the selected Notepad++ recipe");
+        bail!("packaged project is not the selected application recipe");
     }
     // Reuse the executor's fixed compiler; package metadata cannot add grants.
-    aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(&project, SCENARIO_ID)
-        .map_err(|error| anyhow!("unsupported package recipe: {error}"))?;
+    if profile == SandboxPackageProfile::BambuStudioExport {
+        aiw_provider_wsb::compile_bambu_studio_export_scenario(&project, BAMBU_SCENARIO_ID)
+            .map_err(|error| anyhow!("unsupported package recipe: {error}"))?;
+    } else {
+        aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(&project, SCENARIO_ID)
+            .map_err(|error| anyhow!("unsupported package recipe: {error}"))?;
+    }
     Ok((project, manifest))
 }
 
@@ -105,7 +138,8 @@ fn fixed_assets(
 fn supported_hash(project: &Project) -> Result<&str> {
     match &project.application {
         ApplicationSource::Msi(source) => Ok(&source.sha256),
-        _ => bail!("the selected recipe requires an MSI"),
+        ApplicationSource::Exe(source) => Ok(&source.sha256),
+        _ => bail!("the selected recipe requires an MSI or EXE"),
     }
 }
 
@@ -113,14 +147,35 @@ fn supported_hash(project: &Project) -> Result<&str> {
 /// The result is advisory; assembly reopens and revalidates installer and assets.
 #[cfg(windows)]
 pub fn analyze_notepad_installer(installer: &Path) -> Result<PackageAnalysis> {
+    analyze_installer(
+        installer,
+        &[
+            SandboxPackageProfile::LocalSettingsAssessment,
+            SandboxPackageProfile::InteractiveDocument,
+        ],
+        ApplicationInspectionKind::Msi,
+    )
+}
+
+#[cfg(windows)]
+pub fn analyze_bambu_installer(installer: &Path) -> Result<PackageAnalysis> {
+    analyze_installer(
+        installer,
+        &[SandboxPackageProfile::BambuStudioExport],
+        ApplicationInspectionKind::Exe,
+    )
+}
+
+#[cfg(windows)]
+fn analyze_installer(
+    installer: &Path,
+    profiles: &[SandboxPackageProfile],
+    kind: ApplicationInspectionKind,
+) -> Result<PackageAnalysis> {
     let held = aiw_windows_platform::HeldApplicationFile::open_with_download_metadata(installer)?;
-    let inspection =
-        installer_inspection::inspect_held_installer(&held, ApplicationInspectionKind::Msi)?;
+    let inspection = installer_inspection::inspect_held_installer(&held, kind)?;
     let mut options = Vec::new();
-    for profile in [
-        NotepadPackageProfile::LocalSettingsAssessment,
-        NotepadPackageProfile::InteractiveDocument,
-    ] {
+    for &profile in profiles {
         let (project, manifest) =
             fixed_assets(&packaged_asset_root(profile.directory())?, profile)?;
         if inspection.sha256.as_deref() == Some(supported_hash(&project)?) {
@@ -131,6 +186,7 @@ pub fn analyze_notepad_installer(installer: &Path) -> Result<PackageAnalysis> {
                 description: match profile {
                     NotepadPackageProfile::LocalSettingsAssessment => "Fixed assessment with ephemeral local settings; no user document is included.",
                     NotepadPackageProfile::InteractiveDocument => "Interactive document workflow; a bounded text input is selected and approved separately at launch, with explicit verified export.",
+                    NotepadPackageProfile::BambuStudioExport => "Fixed standard-user STL-to-3MF export using the reviewed fixture; no slicing, printing or cloud access is tested.",
                 }.into(),
             });
         }
@@ -141,7 +197,7 @@ pub fn analyze_notepad_installer(installer: &Path) -> Result<PackageAnalysis> {
         installer: inspection,
         options,
         limitations: vec![
-            "Only the exact supported Notepad++ MSI recipes can be packaged. Other isolation modes and custom grants are unavailable.".into(),
+            "Only the exact supported installer and selected fixed recipes can be packaged. Other isolation modes and custom grants are unavailable.".into(),
             "Windows Sandbox settings request blocked network and disabled clipboard. Fixed guest-tool and output mappings remain part of the recipe; requested settings are not measured isolation.".into(),
             "Exact runtime mappings, devices, protected-client and resource settings are resolved and disclosed in the fresh replay recipe before approval; packaging does not enable arbitrary settings.".into(),
             "Analysis does not install the application or establish compatibility. The bundle needs a verified Workbench guest/runtime and fresh plan approval and Start before replay.".into(),
@@ -153,6 +209,14 @@ pub fn analyze_notepad_installer(installer: &Path) -> Result<PackageAnalysis> {
 /// an installer, approves a plan, starts Sandbox, or overwrites an existing bundle.
 #[cfg(windows)]
 pub fn create_notepad_package(request: &NotepadPackageRequest) -> Result<PackageResult> {
+    if request.profile == SandboxPackageProfile::BambuStudioExport {
+        bail!("the Notepad++ packaging entry does not accept a Bambu recipe");
+    }
+    create_sandbox_package(request)
+}
+
+#[cfg(windows)]
+pub fn create_sandbox_package(request: &SandboxPackageRequest) -> Result<PackageResult> {
     create_with_assets(request, &packaged_asset_root(request.profile.directory())?)
 }
 
@@ -178,6 +242,40 @@ pub(crate) fn import_for_replay(
     )?;
     if &imported.project != expected_project {
         bail!("package project changed during import; preserve the intake and use fresh evidence");
+    }
+    Ok(imported)
+}
+
+#[cfg(windows)]
+pub(crate) fn import_bambu_for_replay(
+    bundle: &Path,
+    manifest_sha256: &str,
+    intake_parent: &Path,
+    expected_project: &Project,
+) -> Result<aiw_runner::BambuSandboxBundleImport> {
+    let verified = aiw_runner::verify_bambu_studio_bundle(bundle, manifest_sha256)?;
+    if &verified.project != expected_project {
+        bail!(
+            "Bambu package recipe differs from installed workflow; preserve it and rebuild with current product assets"
+        );
+    }
+    let expected_scenario = aiw_provider_wsb::compile_bambu_studio_export_scenario(
+        expected_project,
+        BAMBU_SCENARIO_ID,
+    )?;
+    if verified.scenario != expected_scenario {
+        bail!("Bambu package scenario differs from installed workflow");
+    }
+    let imported = aiw_runner::import_bambu_studio_bundle(
+        bundle,
+        intake_parent,
+        "bambu-studio",
+        manifest_sha256,
+    )?;
+    if &imported.project != expected_project || imported.scenario != expected_scenario {
+        bail!(
+            "Bambu package recipe changed during import; preserve the intake and use fresh evidence"
+        );
     }
     Ok(imported)
 }
@@ -217,23 +315,35 @@ fn create_with_assets(
         std::fs::create_dir(&intake_parent)?;
         let receipt = aiw_windows_platform::import_application_file_with_metadata(
             &intake_parent,
-            "notepad-plus-plus",
-            ApplicationInspectionKind::Msi,
+            request.profile.intake_id(),
+            request.profile.source_kind(),
             &held,
             true,
         )?;
         save_stage(&evidence_root, "intake-receipt", &receipt)?;
-        let bundle = aiw_runner::export_notepad_plus_plus_msi_bundle(
+        let export = if request.profile == SandboxPackageProfile::BambuStudioExport {
+            aiw_runner::export_bambu_studio_bundle
+        } else {
+            aiw_runner::export_notepad_plus_plus_msi_bundle
+        };
+        let bundle = export(
             &request.output_parent,
             &format!("bundle-{id}"),
             &project,
-            SCENARIO_ID,
+            request.profile.scenario(),
             &receipt,
         )?;
-        aiw_runner::verify_notepad_plus_plus_msi_bundle(
-            Path::new(&bundle.bundle_path),
-            &bundle.manifest_sha256,
-        )?;
+        if request.profile == SandboxPackageProfile::BambuStudioExport {
+            aiw_runner::verify_bambu_studio_bundle(
+                Path::new(&bundle.bundle_path),
+                &bundle.manifest_sha256,
+            )?;
+        } else {
+            aiw_runner::verify_notepad_plus_plus_msi_bundle(
+                Path::new(&bundle.bundle_path),
+                &bundle.manifest_sha256,
+            )?;
+        }
         let result = PackageResult {
         schema_version: "aiw.dev/admin-package-result/v0alpha1".into(),
         profile: request.profile,
@@ -258,6 +368,68 @@ fn create_with_assets(
 mod tests {
     use super::*;
 
+    #[test]
+    fn bambu_installer_and_recipe_drift_reject_before_intake() {
+        let (root, assets, mut request) = fixture(NotepadPackageProfile::LocalSettingsAssessment);
+        let mut project: Project = serde_json::from_slice(include_bytes!(
+            "../../aiw-cli/product/bambu-studio/project.json"
+        ))
+        .unwrap();
+        let installer = root.join("inert.exe");
+        std::fs::write(&installer, b"inert EXE, never executed").unwrap();
+        request.installer = installer;
+        request.profile = SandboxPackageProfile::BambuStudioExport;
+        request.analyzed_installer_sha256 =
+            aiw_provider_wsb::BAMBU_STUDIO_APPLICATION_SHA256.into();
+        let publish_assets = |project: &Project| -> String {
+            let bytes = serde_json::to_vec(project).unwrap();
+            let project_hash = lowercase_sha256(&bytes);
+            std::fs::write(assets.join("project.json"), bytes).unwrap();
+            std::fs::write(assets.join("manifest.json"), serde_json::to_vec(&serde_json::json!({
+                "schemaVersion": MANIFEST_SCHEMA, "productId": BAMBU_PRODUCT_ID, "scenarioId": BAMBU_SCENARIO_ID,
+                "projectPath": "project.json", "projectSha256": project_hash,
+                "guestAgentPath": "tools/agent.exe", "guestAgentSha256": lowercase_sha256(b"inert agent"),
+            })).unwrap()).unwrap();
+            project_hash
+        };
+        request.analyzed_project_sha256 = publish_assets(&project);
+        assert!(
+            create_with_assets(&request, &assets)
+                .unwrap_err()
+                .to_string()
+                .contains("installer changed since analysis")
+        );
+        request.analyzed_installer_sha256 = lowercase_sha256(b"inert EXE, never executed");
+        assert!(
+            create_with_assets(&request, &assets)
+                .unwrap_err()
+                .to_string()
+                .contains("differs from analysis")
+        );
+        request.analyzed_installer_sha256 =
+            aiw_provider_wsb::BAMBU_STUDIO_APPLICATION_SHA256.into();
+        let ApplicationSource::Exe(application) = &mut project.application else {
+            panic!("EXE fixture")
+        };
+        application.silent_arguments.push("/caller-option".into());
+        request.analyzed_project_sha256 = publish_assets(&project);
+        assert!(
+            create_with_assets(&request, &assets)
+                .unwrap_err()
+                .to_string()
+                .contains("unsupported package recipe")
+        );
+        assert_eq!(
+            std::fs::read_dir(&request.evidence_parent).unwrap().count(),
+            0
+        );
+        assert_eq!(
+            std::fs::read_dir(&request.output_parent).unwrap().count(),
+            0
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     fn fixture(profile: NotepadPackageProfile) -> (PathBuf, PathBuf, NotepadPackageRequest) {
         static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let sequence = SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -281,6 +453,7 @@ mod tests {
             NotepadPackageProfile::InteractiveDocument => {
                 include_bytes!("../../aiw-cli/product/notepad-plus-plus-interactive/project.yaml")
             }
+            NotepadPackageProfile::BambuStudioExport => panic!("Notepad fixture only"),
         };
         let mut project: Project = serde_yaml::from_slice(bytes).unwrap();
         let ApplicationSource::Msi(source) = &mut project.application else {

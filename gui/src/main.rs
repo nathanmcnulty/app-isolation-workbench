@@ -187,11 +187,15 @@ mod desktop {
         app: tauri::AppHandle,
         c: State<'_, Controller>,
         installer: String,
+        product: Option<PackageApplication>,
     ) -> std::result::Result<service::packaging::PackageAnalysis, String> {
         let c = c.inner().clone();
         let id = c.begin_analysis()?;
         package_action(app, c, id, move || {
-            service::packaging::analyze_notepad_installer(Path::new(&installer))
+            match product.unwrap_or(PackageApplication::Notepad) {
+                PackageApplication::Notepad => service::packaging::analyze_notepad_installer(Path::new(&installer)),
+                PackageApplication::Bambu => service::packaging::analyze_bambu_installer(Path::new(&installer)),
+            }
         })
         .await
     }
@@ -199,15 +203,18 @@ mod desktop {
     async fn create_package(
         app: tauri::AppHandle,
         c: State<'_, Controller>,
-        request: service::packaging::NotepadPackageRequest,
+        request: service::packaging::SandboxPackageRequest,
     ) -> std::result::Result<service::packaging::PackageResult, String> {
         let c = c.inner().clone();
         let id = c.begin_packaging()?;
         package_action(app, c, id, move || {
-            service::packaging::create_notepad_package(&request)
+            service::packaging::create_sandbox_package(&request)
         })
         .await
     }
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    enum PackageApplication { Notepad, Bambu }
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
     struct PackageValidationInput {
@@ -229,9 +236,6 @@ mod desktop {
     ) -> std::result::Result<(), String> {
         if !matches!(kind.as_str(), "assessment" | "interactive" | "bambu") {
             return Err("Unsupported workflow.".into());
-        }
-        if package.is_some() && kind == "bambu" {
-            return Err("Notepad++ packages cannot select the Bambu workflow.".into());
         }
         if (package.is_none() && installer.is_empty())
             || evidence.is_empty()
@@ -260,6 +264,10 @@ mod desktop {
         };
         spawn_work(app, c, id, move || {
             let result = if let Some(package) = package {
+                if kind == "bambu" {
+                    service::assess_bambu_package_with_gate(Path::new(&package.bundle_root), &package.manifest_sha256,
+                        Path::new(&evidence), &operator_identity, &gate)?
+                } else {
                 service::assess_package_with_gate(
                     Path::new(&package.bundle_root),
                     &package.manifest_sha256,
@@ -271,7 +279,7 @@ mod desktop {
                     Path::new(&evidence),
                     &operator_identity,
                     &gate,
-                )?
+                )? }
             } else if kind == "interactive" {
                 service::launch_document_with_gate(
                     Path::new(&installer),

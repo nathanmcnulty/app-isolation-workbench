@@ -20,6 +20,7 @@ pub use launch_profile::{
 pub use launch_profile::{
     check_windows_sandbox_launch_profile, create_windows_sandbox_launch_profile,
 };
+mod bambu_sandbox_bundle;
 mod sandbox_bundle;
 #[cfg(windows)]
 pub use bambu_report::report_windows_sandbox_bambu_run;
@@ -27,6 +28,15 @@ pub use bambu_report::{
     BambuReportEvidenceStatus, WsbBambuRunReport, render_bambu_run_report_markdown,
 };
 use bambu_report::{add_bambu_artifact_expectation, verify_bambu_output};
+pub use bambu_sandbox_bundle::{
+    BAMBU_BUNDLE_DATA_CONTRACT, BambuSandboxBundleImport, BambuSandboxBundleRunReport,
+    BambuSandboxBundleVerification,
+};
+#[cfg(windows)]
+pub use bambu_sandbox_bundle::{
+    export_bambu_studio_bundle, import_bambu_studio_bundle, report_bambu_studio_bundle,
+    verify_bambu_studio_bundle,
+};
 #[cfg(windows)]
 pub use packaging_recipe::inspect_windows_sandbox_msi_recipe;
 pub use packaging_recipe::{

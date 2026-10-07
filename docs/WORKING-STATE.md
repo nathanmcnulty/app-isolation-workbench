@@ -5,16 +5,20 @@ This handoff is a pointer, not execution authority or a run receipt.
 
 ## Current slice
 
-PR #92 shares packaging's held-file inspection with
-direct Notepad++ and Bambu assessment preparation. The advisory application stage
-now records held identity, stream authority and cache-only signature status.
-Fixed hashes, protected import and approval remain unchanged. Exact `e287df0`
-passed independent review after restoring the effective-isolation limitation.
-All 33 service tests and focused warnings-as-errors Clippy passed; the two
-inspection tests passed again after that review fix. Format/governance passed.
-Before expanding this slice, verify PR #92's required exact-head checks,
-authorized merge and matching main tree; local validation is not integration proof.
-See [shared observations](ADMIN-PACKAGING.md#shared-assessment-observations).
+`codex/bambu-reusable-package` is implementing the second application package loop.
+The [milestone contract](BAMBU-PACKAGING.md) keeps the existing fixed EXE recipe,
+adds a closed bundle, fresh protected replay and exact package/run association.
+Core APIs and desktop controls are implemented; 34 administrator tests, two
+Bambu bundle tests, the MSI relocation regression, 11 UI tests and focused
+warnings-as-errors Clippy passed. These are development checks, not native proof.
+Exact-commit review, desktop build, dedicated-VM replay, integration CI and signed
+candidate acceptance remain open. Computer-use initialization currently fails
+with `failed to write kernel assets` after the documented retry/reset.
+
+PR #92 merged at `0a88db6`; its tree matches reviewed `1d6082e`. All required PR
+checks (`37669599045`) and main checks (`37670881454`) passed. It shares held-file
+identity/stream/signature observations across assessment and packaging without
+changing hashes, import or approval. See [shared observations](ADMIN-PACKAGING.md#shared-assessment-observations).
 
 ## Latest public milestone
 
@@ -90,9 +94,8 @@ desktop cache: `%LOCALAPPDATA%\Temp\aiw-desktop-validation-20261002`.
 Use explicit Windows target and target-scoped static CRT for packages.
 
 Signed-byte acceptance documentation is integrated in PR #91 at `2ecd17a`.
-After that integration gate, choose the next application by a concrete admin
-workflow need; measure profile-specific cost before expanding coverage.
-Keep generic conversion and new providers outside this initial packaging slice.
+Finish the Bambu packaging contract and its live acceptance before broader
+coverage. Keep generic conversion and new providers outside this milestone.
 
 ## Boundaries
 

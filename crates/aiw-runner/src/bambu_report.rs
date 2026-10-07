@@ -7,6 +7,20 @@ pub fn report_windows_sandbox_bambu_run(
     project: &Project,
     expected_guest_agent_sha256: &str,
 ) -> Result<WsbBambuRunReport, RunnerError> {
+    report_windows_sandbox_bambu_run_bound(root, run_id, project, expected_guest_agent_sha256, None)
+}
+
+#[cfg(windows)]
+pub(crate) fn report_windows_sandbox_bambu_run_bound(
+    root: &Path,
+    run_id: &str,
+    project: &Project,
+    expected_guest_agent_sha256: &str,
+    expected_import: Option<(
+        &aiw_probe::ApplicationFileImportReceipt,
+        &aiw_provider_wsb::CompiledBambuExportScenario,
+    )>,
+) -> Result<WsbBambuRunReport, RunnerError> {
     if !aiw_schema::validate_project_for_planning(project).is_empty() {
         return Err(RunnerError::ApprovalBinding);
     }
@@ -85,6 +99,13 @@ pub fn report_windows_sandbox_bambu_run(
         .bambu
         .as_ref()
         .ok_or(RunnerError::ApprovalBinding)?;
+    // Match the full fresh intake identity, not merely identical application bytes.
+    // This comparison stays inside the held, validated preparation boundary.
+    if let Some((receipt, scenario)) = expected_import {
+        if receipt != &bambu.import_receipt || scenario != &bambu.scenario {
+            return Err(RunnerError::ApprovalBinding);
+        }
+    }
     if aiw_provider_wsb::compile_bambu_studio_export_scenario(project, &bambu.scenario.scenario_id)
         .map_err(|e| RunnerError::Preparation(e.to_string()))?
         != bambu.scenario
