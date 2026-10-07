@@ -5,7 +5,7 @@ This handoff is a pointer, not execution authority or a run receipt.
 
 ## Current slice
 
-`codex/bambu-reusable-package` is implementing the second application package loop.
+PR #93 integrated the second application package loop at `4e39c78`.
 The [milestone contract](BAMBU-PACKAGING.md) keeps the existing fixed EXE recipe,
 adds a closed bundle, fresh protected replay and exact package/run association.
 Core APIs and desktop controls are implemented and pushed through `284cd58`.
@@ -24,8 +24,10 @@ passed all five export checks, matched bundle reporting, independent artifact
 hashing and cleanup; the provider list is empty. The current CLI independently
 reverified both retained Notepad package/report associations as the limited
 operator. Test registrations are removed and evidence is preserved. PR #93 is
-ready for final evidence review and required final-head checks. Integration and
-signed candidate acceptance remain open; keep the existing tested download.
+merged after independent final review and all three required checks passed at
+exact `0815cbb` (CI `37693018289`); main has the identical tree and passed all
+three checks (`37694385449`). Signed candidate run `37695560530` targets exact
+`4e39c78`. Downloaded-byte acceptance remains open; keep the existing tested download.
 
 PR #92 merged at `0a88db6`; its tree matches reviewed `1d6082e`. All required PR
 checks (`37669599045`) and main checks (`37670881454`) passed. It shares held-file
