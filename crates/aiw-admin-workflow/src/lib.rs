@@ -1230,6 +1230,53 @@ pub fn assess_bambu_with_gate(
     gate: &dyn ApprovalGate,
     show_progress: bool,
 ) -> Result<AdminAssessmentResult> {
+    assess_bambu_source(
+        BambuSource::Installer(installer),
+        evidence_parent,
+        identity,
+        gate,
+        show_progress,
+    )
+}
+
+#[cfg(windows)]
+#[derive(Clone, Copy)]
+enum BambuSource<'a> {
+    Installer(&'a Path),
+    Bundle {
+        root: &'a Path,
+        manifest_sha256: &'a str,
+    },
+}
+
+#[cfg(windows)]
+pub fn assess_bambu_package_with_gate(
+    bundle_root: &Path,
+    manifest_sha256: &str,
+    evidence_parent: &Path,
+    identity: &str,
+    gate: &dyn ApprovalGate,
+) -> Result<AdminAssessmentResult> {
+    assess_bambu_source(
+        BambuSource::Bundle {
+            root: bundle_root,
+            manifest_sha256,
+        },
+        evidence_parent,
+        identity,
+        gate,
+        false,
+    )
+}
+
+#[cfg(windows)]
+fn assess_bambu_source(
+    source: BambuSource<'_>,
+    evidence_parent: &Path,
+    identity: &str,
+    gate: &dyn ApprovalGate,
+    show_progress: bool,
+) -> Result<AdminAssessmentResult> {
     if identity.trim().is_empty() {
         bail!("operator identity is required");
     }
@@ -1286,32 +1333,41 @@ pub fn assess_bambu_with_gate(
             detail: "No protected intake was created and AIW did not acquire, recover, or stop a Sandbox session.".into(),
         }));
     }
-    let held = aiw_windows_platform::HeldApplicationFile::open_with_download_metadata(installer)
-        .map_err(|error| {
-            unsupported_application_error(
-                &evidence_root,
-                &run_id,
-                error.to_string(),
-                "exe",
-                "Bambu Studio EXE",
-            )
-        })?;
-    let inspection =
-        installer_inspection::inspect_held_installer(&held, ApplicationInspectionKind::Exe)
-            .map_err(|error| {
-                unsupported_application_error(
-                    &evidence_root,
-                    &run_id,
-                    error.to_string(),
-                    "exe",
-                    "Bambu Studio EXE",
-                )
-            })?;
-    save_stage(&evidence_root, "installer-inspection", &inspection)?;
-    if inspection.sha256.as_deref() != Some(&held.observation().sha256)
-        || inspection.sha256.as_deref() != Some(expected_exe.as_str())
-    {
-        return Err(anyhow!(AiwError {
+    let installer = match source {
+        BambuSource::Installer(path) => Some(path),
+        BambuSource::Bundle { .. } => None,
+    };
+    let held = installer
+        .map(|installer| {
+            aiw_windows_platform::HeldApplicationFile::open_with_download_metadata(installer)
+                .map_err(|error| {
+                    unsupported_application_error(
+                        &evidence_root,
+                        &run_id,
+                        error.to_string(),
+                        "exe",
+                        "Bambu Studio EXE",
+                    )
+                })
+        })
+        .transpose()?;
+    if let Some(held) = held.as_ref() {
+        let inspection =
+            installer_inspection::inspect_held_installer(held, ApplicationInspectionKind::Exe)
+                .map_err(|error| {
+                    unsupported_application_error(
+                        &evidence_root,
+                        &run_id,
+                        error.to_string(),
+                        "exe",
+                        "Bambu Studio EXE",
+                    )
+                })?;
+        save_stage(&evidence_root, "installer-inspection", &inspection)?;
+        if inspection.sha256.as_deref() != Some(&held.observation().sha256)
+            || inspection.sha256.as_deref() != Some(expected_exe.as_str())
+        {
+            return Err(anyhow!(AiwError {
             code: "AIW_ADMIN_UNSUPPORTED_INSTALLER".into(),
             summary: "installer bytes are not supported by this Bambu Studio profile".into(),
             stage: "adminInstallerInspection".into(),
@@ -1323,21 +1379,42 @@ pub fn assess_bambu_with_gate(
             ).into(),
             detail: "No protected intake was created and no Sandbox session was acquired.".into(),
         }));
+        }
+        held.revalidate()
+            .map_err(|error| anyhow!("installer drifted before protected intake: {error}"))?;
     }
-    held.revalidate()
-        .map_err(|error| anyhow!("installer drifted before protected intake: {error}"))?;
     let intake_parent = evidence_root.join("intakes");
     std::fs::create_dir(&intake_parent)?;
-    let receipt = aiw_windows_platform::import_application_file_with_metadata(
+    let bundle_import = match source {
+        BambuSource::Installer(_) => None,
+        BambuSource::Bundle {
+            root,
+            manifest_sha256,
+        } => {
+            let imported = packaging::import_bambu_for_replay(
+                root,
+                manifest_sha256,
+                &intake_parent,
+                &project,
+            )?;
+            save_stage(&evidence_root, "bundle-import", &imported)?;
+            Some(imported)
+        }
+    };
+    let receipt = if let Some(imported) = bundle_import.as_ref() {
+        imported.import_receipt.clone()
+    } else {
+        aiw_windows_platform::import_application_file_with_metadata(
         &intake_parent,
         "bambu-studio",
         ApplicationInspectionKind::Exe,
-        &held,
+        held.as_ref().ok_or_else(|| anyhow!("held Bambu installer missing"))?,
         true,
     )
     .map_err(|error| {
         anyhow!("protected intake failed; preserve evidence and use a new evidence location to retry: {error}")
-    })?;
+    })?
+    };
     save_stage(&evidence_root, "intake-receipt", &receipt)?;
     let prepared = aiw_runner::prepare_windows_sandbox_bambu_bundle(
         &run_id,
@@ -1449,18 +1526,54 @@ pub fn assess_bambu_with_gate(
             1500,
         )
     };
+    let report_run = |stage: &str| -> Result<aiw_runner::WsbBambuRunReport> {
+        if let BambuSource::Bundle {
+            root,
+            manifest_sha256,
+        } = source
+        {
+            let bound = aiw_runner::report_bambu_studio_bundle(
+                root,
+                manifest_sha256,
+                bundle_import
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("Bambu bundle import record missing"))?,
+                &workspace,
+                &run_id,
+                &manifest.guest_agent_sha256,
+            )?;
+            save_stage(&evidence_root, &format!("{stage}-bundle"), &bound)?;
+            std::fs::write(
+                evidence_root.join(format!("{stage}-bundle.md")),
+                bound.to_markdown(),
+            )?;
+            Ok(bound.report)
+        } else {
+            Ok(aiw_runner::report_windows_sandbox_bambu_run(
+                &workspace,
+                &run_id,
+                &project,
+                &manifest.guest_agent_sha256,
+            )?)
+        }
+    };
     let execution = match execution_result {
         Ok(execution) => execution,
         Err(error) => {
             if let Ok(status) = layout.status() {
                 let _ = save_stage(&evidence_root, "failed-status", &status);
             }
-            if let Ok(report) = aiw_runner::report_windows_sandbox_bambu_run(
-                &workspace,
-                &run_id,
-                &project,
-                &manifest.guest_agent_sha256,
-            ) {
+            let failed_report = report_run("failed-report").or_else(|association_error| {
+                // Preserve independently verified workflow facts without claiming
+                // that a changed/unavailable bundle is associated with this run.
+                let _ = save_stage(&evidence_root, "failed-bundle-association", &serde_json::json!({
+                    "packageAssociationVerified": false, "detail": association_error.to_string(),
+                }));
+                Ok::<_, anyhow::Error>(aiw_runner::report_windows_sandbox_bambu_run(
+                    &workspace, &run_id, &project, &manifest.guest_agent_sha256,
+                )?)
+            });
+            if let Ok(report) = failed_report {
                 let _ = save_stage(&evidence_root, "failed-report", &report);
                 let _ = std::fs::write(
                     evidence_root.join("failed-report.md"),
@@ -1473,13 +1586,8 @@ pub fn assess_bambu_with_gate(
     save_stage(&evidence_root, "execution", &execution).map_err(|error| {
         retained_result_error(&evidence_root, &run_id, "adminExecutionRecord", error)
     })?;
-    let report = aiw_runner::report_windows_sandbox_bambu_run(
-        &workspace,
-        &run_id,
-        &project,
-        &manifest.guest_agent_sha256,
-    )
-    .map_err(|error| retained_result_error(&evidence_root, &run_id, "adminReport", error))?;
+    let report = report_run("report")
+        .map_err(|error| retained_result_error(&evidence_root, &run_id, "adminReport", error))?;
     save_stage(&evidence_root, "report", &report).map_err(|error| {
         retained_result_error(&evidence_root, &run_id, "adminReportRecord", error)
     })?;

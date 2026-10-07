@@ -5,16 +5,32 @@ This handoff is a pointer, not execution authority or a run receipt.
 
 ## Current slice
 
-PR #92 shares packaging's held-file inspection with
-direct Notepad++ and Bambu assessment preparation. The advisory application stage
-now records held identity, stream authority and cache-only signature status.
-Fixed hashes, protected import and approval remain unchanged. Exact `e287df0`
-passed independent review after restoring the effective-isolation limitation.
-All 33 service tests and focused warnings-as-errors Clippy passed; the two
-inspection tests passed again after that review fix. Format/governance passed.
-Before expanding this slice, verify PR #92's required exact-head checks,
-authorized merge and matching main tree; local validation is not integration proof.
-See [shared observations](ADMIN-PACKAGING.md#shared-assessment-observations).
+`codex/bambu-reusable-package` is implementing the second application package loop.
+The [milestone contract](BAMBU-PACKAGING.md) keeps the existing fixed EXE recipe,
+adds a closed bundle, fresh protected replay and exact package/run association.
+Core APIs and desktop controls are implemented and pushed through `284cd58`.
+Independent review found and fixed two legacy API/schema compatibility issues.
+36 administrator tests, two Bambu bundle tests, the MSI relocation regression,
+30 CLI contracts, 11 UI tests, focused warnings-as-errors Clippy, governance,
+formatting and static Windows CLI/desktop release builds passed.
+Dedicated-VM operator-context export/relocation/import passed, including rejection
+of matching installer bytes from another intake against a reverified successful
+historical Bambu run. Detailed identities and gaps: [development proof](BAMBU-PACKAGING.md#development-proof).
+All three required integration checks passed on exact `b8ad8e1` (CI `37681516883`).
+Computer use is working again after the bundled runtime update. The dedicated VM
+verified all eleven development payload files, then native Bambu analysis and
+package assembly passed. Fresh native package run `admin-1791408579808193500`
+passed all five export checks, matched bundle reporting, independent artifact
+hashing and cleanup; the provider list is empty. The current CLI independently
+reverified both retained Notepad package/report associations as the limited
+operator. Test registrations are removed and evidence is preserved. PR #93 is
+ready for final evidence review and required final-head checks. Integration and
+signed candidate acceptance remain open; keep the existing tested download.
+
+PR #92 merged at `0a88db6`; its tree matches reviewed `1d6082e`. All required PR
+checks (`37669599045`) and main checks (`37670881454`) passed. It shares held-file
+identity/stream/signature observations across assessment and packaging without
+changing hashes, import or approval. See [shared observations](ADMIN-PACKAGING.md#shared-assessment-observations).
 
 ## Latest public milestone
 
@@ -90,9 +106,8 @@ desktop cache: `%LOCALAPPDATA%\Temp\aiw-desktop-validation-20261002`.
 Use explicit Windows target and target-scoped static CRT for packages.
 
 Signed-byte acceptance documentation is integrated in PR #91 at `2ecd17a`.
-After that integration gate, choose the next application by a concrete admin
-workflow need; measure profile-specific cost before expanding coverage.
-Keep generic conversion and new providers outside this initial packaging slice.
+Finish the Bambu packaging contract and its live acceptance before broader
+coverage. Keep generic conversion and new providers outside this milestone.
 
 ## Boundaries
 

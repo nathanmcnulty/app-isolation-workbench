@@ -267,6 +267,54 @@ enum PackageCommand {
         #[arg(long)]
         intake_id: String,
     },
+    /// Match a Bambu bundle and exact import to reverified terminal export evidence.
+    ReportWsbBambu {
+        #[arg(long)]
+        bundle: PathBuf,
+        #[arg(long)]
+        manifest_sha256: String,
+        #[arg(long)]
+        import_record: PathBuf,
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        run_id: String,
+        #[arg(long)]
+        guest_agent_sha256: String,
+        #[arg(long, value_enum, default_value_t = AssessmentReportFormat::Json)]
+        format: AssessmentReportFormat,
+    },
+    /// Export only the reviewed fixed Bambu Studio EXE recipe.
+    ExportWsbBambu {
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        import_receipt: PathBuf,
+        #[arg(long)]
+        scenario: String,
+        #[arg(long)]
+        output_parent: PathBuf,
+        #[arg(long)]
+        bundle_id: String,
+    },
+    /// Verify the closed Bambu EXE layout and fixed recipe.
+    VerifyBambu {
+        #[arg(long)]
+        bundle: PathBuf,
+        #[arg(long)]
+        manifest_sha256: String,
+    },
+    /// Create fresh protected EXE intake from the verified Bambu bundle.
+    ImportBambu {
+        #[arg(long)]
+        bundle: PathBuf,
+        #[arg(long)]
+        manifest_sha256: String,
+        #[arg(long)]
+        intake_parent: PathBuf,
+        #[arg(long)]
+        intake_id: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1561,6 +1609,113 @@ fn run(command: Command) -> Result<()> {
                 #[cfg(windows)]
                 {
                     write_json(&aiw_runner::import_notepad_plus_plus_msi_bundle(
+                        &bundle,
+                        &intake_parent,
+                        &intake_id,
+                        &manifest_sha256,
+                    )?)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (bundle, manifest_sha256, intake_parent, intake_id);
+                    bail!("Sandbox packaging requires Windows")
+                }
+            }
+            PackageCommand::ReportWsbBambu {
+                bundle,
+                manifest_sha256,
+                import_record,
+                root,
+                run_id,
+                guest_agent_sha256,
+                format,
+            } => {
+                #[cfg(windows)]
+                {
+                    let imported: aiw_runner::BambuSandboxBundleImport =
+                        read_document(&import_record, 1024 * 1024)?;
+                    let report = aiw_runner::report_bambu_studio_bundle(
+                        &bundle,
+                        &manifest_sha256,
+                        &imported,
+                        &root,
+                        &run_id,
+                        &guest_agent_sha256,
+                    )?;
+                    match format {
+                        AssessmentReportFormat::Json => write_json(&report),
+                        AssessmentReportFormat::Markdown => {
+                            print!("{}", report.to_markdown());
+                            Ok(())
+                        }
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (
+                        bundle,
+                        manifest_sha256,
+                        import_record,
+                        root,
+                        run_id,
+                        guest_agent_sha256,
+                        format,
+                    );
+                    bail!("Sandbox bundle reporting requires Windows")
+                }
+            }
+            PackageCommand::ExportWsbBambu {
+                project,
+                import_receipt,
+                scenario,
+                output_parent,
+                bundle_id,
+            } => {
+                #[cfg(windows)]
+                {
+                    let loaded = read_project(&project)?;
+                    let receipt: ApplicationFileImportReceipt =
+                        read_document(&import_receipt, MAX_CONFIG_BYTES)?;
+                    write_json(&aiw_runner::export_bambu_studio_bundle(
+                        &output_parent,
+                        &bundle_id,
+                        &loaded.project,
+                        &scenario,
+                        &receipt,
+                    )?)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (project, import_receipt, scenario, output_parent, bundle_id);
+                    bail!("Sandbox packaging requires Windows")
+                }
+            }
+            PackageCommand::VerifyBambu {
+                bundle,
+                manifest_sha256,
+            } => {
+                #[cfg(windows)]
+                {
+                    write_json(&aiw_runner::verify_bambu_studio_bundle(
+                        &bundle,
+                        &manifest_sha256,
+                    )?)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (bundle, manifest_sha256);
+                    bail!("Sandbox packaging requires Windows")
+                }
+            }
+            PackageCommand::ImportBambu {
+                bundle,
+                manifest_sha256,
+                intake_parent,
+                intake_id,
+            } => {
+                #[cfg(windows)]
+                {
+                    write_json(&aiw_runner::import_bambu_studio_bundle(
                         &bundle,
                         &intake_parent,
                         &intake_id,
