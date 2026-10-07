@@ -45,7 +45,7 @@ pub(crate) fn inspect_held_installer(
         download_metadata: observed.download_metadata.clone(),
     });
     inspection.limitations = vec![
-        "Held file identity, streams and embedded signature were observed. Signature status is not publisher identity, execution approval or application compatibility.".into(),
+        "Held file identity, streams and embedded signature were observed. These observations do not establish publisher identity, execution approval, application compatibility, containment or effective isolation.".into(),
         "Allow-listed download metadata is bound by name, size and hash; its contents are untrusted and do not establish source provenance.".into(),
         "Inspection grants no import or execution authority. Protected intake and execution independently revalidate the selected bytes.".into(),
     ];
@@ -77,6 +77,10 @@ mod tests {
                 inspection.signature_status,
                 aiw_probe::ReadinessState::Unknown
             );
+            assert!(inspection.limitations.iter().any(|limitation| {
+                limitation.contains("do not establish")
+                    && limitation.contains("containment or effective isolation")
+            }));
             let authority = inspection.file_authority.unwrap();
             assert_eq!(
                 authority.schema_version,
