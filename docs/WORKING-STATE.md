@@ -5,6 +5,19 @@ This handoff is a pointer, not execution authority or a run receipt.
 
 ## Current slice
 
+PR #92 shares packaging's held-file inspection with
+direct Notepad++ and Bambu assessment preparation. The advisory application stage
+now records held identity, stream authority and cache-only signature status.
+Fixed hashes, protected import and approval remain unchanged. Exact `e287df0`
+passed independent review after restoring the effective-isolation limitation.
+All 33 service tests and focused warnings-as-errors Clippy passed; the two
+inspection tests passed again after that review fix. Format/governance passed.
+Before expanding this slice, verify PR #92's required exact-head checks,
+authorized merge and matching main tree; local validation is not integration proof.
+See [shared observations](ADMIN-PACKAGING.md#shared-assessment-observations).
+
+## Latest public milestone
+
 Initial Notepad++ packaging is integrated in PR #90 at
 `08dcc310aa30ea9c0bc4b68deb46ac09337ea012`. Exact `e881c59` passed independent
 code review; final head `a7714f1` passed all three hosted checks (`37594030722`).
@@ -76,8 +89,8 @@ One build owner per target. Core cache: `%LOCALAPPDATA%\Temp\aiw-os-validation-2
 desktop cache: `%LOCALAPPDATA%\Temp\aiw-desktop-validation-20261002`.
 Use explicit Windows target and target-scoped static CRT for packages.
 
-Integrate the signed-byte acceptance documentation after governance/link review
-and required exact-head CI. Then choose the next application by a concrete admin
+Signed-byte acceptance documentation is integrated in PR #91 at `2ecd17a`.
+After that integration gate, choose the next application by a concrete admin
 workflow need; measure profile-specific cost before expanding coverage.
 Keep generic conversion and new providers outside this initial packaging slice.
 

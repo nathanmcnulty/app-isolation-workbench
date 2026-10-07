@@ -42,6 +42,31 @@ Unknown signature/compatibility/isolation observations remain unknown. Recipe
 choices describe data/workflow behavior; they do not represent different measured
 isolation strengths.
 
+### Shared assessment observations
+
+Direct Notepad++ and Bambu assessment preparation now uses the same private
+held-installer inspection as package analysis. The retained application stage
+binds canonical file identity, size, SHA-256, link count, stream inventory and
+cache-only embedded signature status to the file held through protected import.
+Allow-listed download streams retain only name, size and hash; their raw URLs
+are not copied into the inspection record and do not establish provenance.
+
+Windows signature verification distinguishes available, explicitly missing and
+unknown results. Malformed inert fixtures remain unknown. Operational inspection
+errors stop preparation before intake, rather than publishing a weaker snapshot.
+Neither signature status nor file observations grant execution authority or
+establish compatibility; fixed installer hashes, protected import, exact approval
+and independent execution verification still apply. Historical application-stage
+records are preserved as recorded and are not enriched retroactively.
+
+Independent review approved exact `e287df0` after restoring the explicit
+containment/effective-isolation limitation. All 33 service tests and focused
+all-targets warnings-as-errors Clippy passed on Windows; the two new inspection
+tests passed again after the review fix. These use inert MSI/EXE fixtures and
+verify held custody, authority schemas, metadata privacy and rejected kinds.
+They do not execute installers or establish application compatibility. The
+integration milestone is [PR #92](https://github.com/nathanmcnulty/app-isolation-workbench/pull/92).
+
 Creation takes the selected typed recipe plus the analyzed installer and packaged
 project hashes. It reloads the packaged project and fixed compiler, reopens the
 installer with held-file authority, revalidates its hash and imports protected
