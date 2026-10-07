@@ -5,33 +5,25 @@ This handoff is a pointer, not execution authority or a run receipt.
 
 ## Current slice
 
-Initial packaging is complete using Notepad++ with a simple
-installer -> analysis -> isolation/recipe selection experience. On
-`codex/notepad-package-workflow`, the new `aiw-admin-workflow::packaging` service
-reuses fixed recipe compilation, protected intake and bundle export/verification.
-The desktop now wires installer analysis, typed preset/workflow selection and
-package creation with optional technical details and operation locking. Service
-tests use inert fixtures; 31 service, 7 controller and 10 UI tests pass. Exact
-`e881c59` passed independent review; the native VM flow analyzed the real MSI
-and created a verified package. Native inspection caught result-card overflow,
-fixed at `f6746b8`; the rebuilt candidate created another package with readable
-controls. Package-bound run `admin-1791358675396046500` completed the fixed
-workflow and verified cleanup after full recipe review, exact approval and Start.
-The rebuilt `b61e0a7` passed native scroll/result preservation. Interactive package
-run `admin-1791360654757886700` completed native editing, saving, graceful close,
-verified 217-byte retention, cleanup and explicit export. Existing-destination
-export was refused; source bytes remained unchanged. Both package/run associations
-were independently reverified under the operator account. Broader isolation
-remains insufficient evidence. PR #90 merged at
-`08dcc310aa30ea9c0bc4b68deb46ac09337ea012` after all three checks passed at
-`a7714f1` (CI `37594030722`); main matches the tested PR tree. Signed public-alpha
-CI `37595331022` is building that exact merged source. Its downloaded-byte
-verification and runtime acceptance remain pending.
-Package replay imports a verified bundle
-only when its recipe matches the installed profile, then uses the existing review,
-exact approval and separate Start. Packaging preserves completed trial/export state.
-See [administrator packaging](ADMIN-PACKAGING.md). Do not treat assembly tests or
-older public-alpha trials as acceptance of this new end-to-end experience.
+Initial Notepad++ packaging is integrated in PR #90 at
+`08dcc310aa30ea9c0bc4b68deb46ac09337ea012`. Exact `e881c59` passed independent
+code review; final head `a7714f1` passed all three hosted checks (`37594030722`).
+Main matches the tested tree and passed CI `37595301328`. Detailed service,
+negative-test and unsigned native proof: [administrator packaging](ADMIN-PACKAGING.md).
+
+Signed prerelease `desktop-alpha-08dcc310aa30` was published by successful
+release run `37595331022`. Fresh host and VM downloads verified five asset
+identities, attestations on host, signatures, closed inventory and receipt.
+Native GUI analysis and both package assemblies passed. Package-bound fixed run
+`admin-1791363728884366700` and interactive run `admin-1791364558757379700`
+passed fresh full recipe review, exact approval, separate Start, verified results
+and cleanup. Interactive native edit/save/close retained 224 bytes; explicit
+export matched exact text/hash and existing-destination export was refused.
+Operator-context CLI independently reverified both bundle/import/run associations.
+Bambu run `admin-1791365433522265300` completed all five fixed export checks
+and cleanup; independent artifact hashing matches its retained report and result.
+The final provider list was empty at `2026-10-07T09:45:42Z`.
+See [signed packaging acceptance](PUBLIC-PACKAGING-ACCEPTANCE.md).
 
 ## Previous completed slice
 
@@ -77,13 +69,16 @@ blob upload authority; do not grant roles merely for development transfer.
 File-based Azure Run Command with marker/error/typed-record checks is proven;
 inline transport success with empty output is not execution proof.
 
-Host evidence pointer: `%TEMP%\aiw-public-alpha-proof-root.txt`.
+Host evidence pointers: `%TEMP%\aiw-package-public-proof-root.txt` (current)
+and `%TEMP%\aiw-public-alpha-proof-root.txt` (earlier proofs).
 Verified input identities: `%TEMP%\aiw-public-acceptance-input-records.json`.
 One build owner per target. Core cache: `%LOCALAPPDATA%\Temp\aiw-os-validation-20260919`;
 desktop cache: `%LOCALAPPDATA%\Temp\aiw-desktop-validation-20261002`.
 Use explicit Windows target and target-scoped static CRT for packages.
 
-Verify the new signed distribution and its package workflows before selecting another application.
+Integrate the signed-byte acceptance documentation after governance/link review
+and required exact-head CI. Then choose the next application by a concrete admin
+workflow need; measure profile-specific cost before expanding coverage.
 Keep generic conversion and new providers outside this initial packaging slice.
 
 ## Boundaries

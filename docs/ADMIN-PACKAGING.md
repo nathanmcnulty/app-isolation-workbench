@@ -7,8 +7,9 @@ execution remain distinct actions.
 
 ## Administrator path
 
-This flow is in the current source; signed alpha `desktop-alpha-6c7873c4e80c`
-predates it. Use a verified desktop build containing the packaging component.
+This flow is available in signed alpha `desktop-alpha-08dcc310aa30`.
+See [downloaded-package acceptance](PUBLIC-PACKAGING-ACCEPTANCE.md) for exact
+distribution identities and fresh native package replay/export evidence.
 
 1. Under **Build a Notepad++ Sandbox package**, choose the supported Notepad++
    8.9.8 x64 MSI and press **Analyze installer**.
@@ -214,6 +215,6 @@ establish real Notepad++ compatibility.
 
 - Both fixed recipes have native assembly and fresh package replay acceptance;
   interactive replay also has explicit export and overwrite-refusal acceptance.
-- Obtain exact-code independent review and required hosted CI at integration,
-  then commit/push/merge and verify the merged tree. Keep signed public-alpha
-  acceptance separate; this development component has not been publicly released.
+- Independent code review and required integration CI passed; PR #90 merged with
+  the tested tree. Signed public-alpha acceptance is separately recorded in
+  [downloaded-package acceptance](PUBLIC-PACKAGING-ACCEPTANCE.md).
