@@ -5,11 +5,14 @@ This handoff is a pointer, not execution authority or a run receipt.
 
 ## Current slice
 
-`codex/assessment-held-inspection` shares packaging's held-file inspection with
+PR #92 shares packaging's held-file inspection with
 direct Notepad++ and Bambu assessment preparation. The advisory application stage
 now records held identity, stream authority and cache-only signature status.
-Fixed hashes, protected import and approval remain unchanged. Focused inert-file
-tests cover custody, metadata privacy and rejected kinds; integration is pending.
+Fixed hashes, protected import and approval remain unchanged. Exact `e287df0`
+passed independent review after restoring the effective-isolation limitation.
+All 33 service tests and focused warnings-as-errors Clippy passed; the two
+inspection tests passed again after that review fix. Format/governance passed.
+Required integration checks and merge identity are available on PR #92.
 See [shared observations](ADMIN-PACKAGING.md#shared-assessment-observations).
 
 ## Latest public milestone
@@ -86,7 +89,7 @@ desktop cache: `%LOCALAPPDATA%\Temp\aiw-desktop-validation-20261002`.
 Use explicit Windows target and target-scoped static CRT for packages.
 
 Signed-byte acceptance documentation is integrated in PR #91 at `2ecd17a`.
-Finish shared assessment inspection review and exact-head CI. Choose the next application by a concrete admin
+Choose the next application by a concrete admin
 workflow need; measure profile-specific cost before expanding coverage.
 Keep generic conversion and new providers outside this initial packaging slice.
 

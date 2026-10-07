@@ -59,6 +59,14 @@ establish compatibility; fixed installer hashes, protected import, exact approva
 and independent execution verification still apply. Historical application-stage
 records are preserved as recorded and are not enriched retroactively.
 
+Independent review approved exact `e287df0` after restoring the explicit
+containment/effective-isolation limitation. All 33 service tests and focused
+all-targets warnings-as-errors Clippy passed on Windows; the two new inspection
+tests passed again after the review fix. These use inert MSI/EXE fixtures and
+verify held custody, authority schemas, metadata privacy and rejected kinds.
+They do not execute installers or establish application compatibility. The
+integration milestone is [PR #92](https://github.com/nathanmcnulty/app-isolation-workbench/pull/92).
+
 Creation takes the selected typed recipe plus the analyzed installer and packaged
 project hashes. It reloads the packaged project and fixed compiler, reopens the
 installer with held-file authority, revalidates its hash and imports protected
