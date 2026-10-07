@@ -12,7 +12,8 @@ Signed release run `37695560530` published `desktop-alpha-4e39c787e63a`.
 Fresh host and dedicated-VM downloads verified asset identities, attestations on
 host, publisher signatures, closed inventory and receipt. Native GUI analysis,
 assembly, fresh approval and replay passed for Bambu and both Notepad++ recipes.
-Independent CLI reporting verified every exact package/import/run association.
+Independent canonical checks verified every exact package/import/run association;
+both MSI associations also passed separate signed CLI reporting.
 Interactive edit/save/export and overwrite refusal passed with independently
 verified bytes. All three trials recorded cleanup; the provider list is empty.
 Broader isolation remains `insufficientEvidence`. Detailed identities, corrections

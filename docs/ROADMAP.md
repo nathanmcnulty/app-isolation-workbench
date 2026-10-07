@@ -88,7 +88,8 @@ PR #93 extended that packaging component to the existing fixed Bambu Studio EXE
 recipe. Signed alpha `desktop-alpha-4e39c787e63a` passed fresh public-download
 verification and native package assembly/replay for Bambu and both Notepad++
 recipes, including explicit interactive export and overwrite refusal. Independent
-CLI reporting verified every package/run association. See [second-application
+canonical receipt/plan checks verified all package/run associations; the MSI
+associations also passed separate signed CLI reporting. See [second-application
 acceptance](BAMBU-PUBLIC-ACCEPTANCE.md). This closes the second application bundle
 milestone; measured baseline/candidate isolation and arbitrary conversion remain
 open. Review this shared foundation before expanding application coverage.

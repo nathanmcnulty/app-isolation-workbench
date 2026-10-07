@@ -104,7 +104,10 @@ and observed saved-document hash matched
 The application token was medium integrity and non-elevated, administrators were
 disabled, and the protected ACL negative control verified access denied (error 5).
 The signed CLI independently reverified the exact bundle/import/run association
-in the RDP operator context, exited zero and captured empty standard error.
+in the RDP operator context (PID 4752, exit zero, empty standard error). Its report
+SHA-256 is `00f4c28e6f456e9eb886aa86b5ddd97586c84356c10e2b3a501e119c3084ae7c`.
+The VM control record, current CLI identity and unchanged report digest were
+copied into host evidence as `signed-msi-fixed-control-readback.json`.
 The administrator MSI flow publishes `report.json`; the separate read-only CLI
 check produced `report-bundle.json`. A collector initially expected that second
 filename too soon. Collection was corrected without repeating application execution.
@@ -138,6 +141,11 @@ empty. The initial reporting helper used `Start-Process` and observed a null exi
 code despite captured output; its files remain preserved. A fresh read-only helper
 used a held process handle, asynchronous output capture and a bounded deadline.
 It did not repeat installation or application execution.
+
+Both owned staging task registrations were removed after their exact wrapper
+actions and terminal results were verified (initial failure 1, fresh retry 0).
+Fresh readback verified the registrations absent and retained all evidence.
+No VM power action or unrelated task/session cleanup was performed.
 
 Full host evidence includes `signed-msi-fixed-terminal-complete.json`,
 `signed-msi-interactive-terminal-complete.json` and their complete pre-approval
