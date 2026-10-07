@@ -30,6 +30,35 @@ a document. Package contract `v0alpha2` binds all three products; historical
 GUI trial and corrected retained-result verification are recorded in
 [Bambu desktop acceptance](BAMBU-ADMIN-ENTRY.md#completed-desktop-acceptance-2026-10-03).
 
+## Approval presentation
+
+The default review shows backend-authored execution/access, requested changes
+and scope, and data/export lifetime prose. Complete recipe, plan, workspace and
+approval identity remain available in **Full technical details**. Unknown or
+incomplete recipe summaries open those details automatically rather than guessing.
+Polling preserves the operator's expanded view; a new challenge resets the
+confirmation and returns a recognized recipe to the concise view. All text remains
+inert and visibly escapes control characters. Exact-plan confirmation and separate
+Start still use the existing backend gates; the overview grants no authority.
+This presentation change does not alter the already published alpha's bytes.
+
+Automated acceptance on 2026-10-07 used unsigned development source `4abdde6`
+and desktop SHA-256
+`96060cba97d2ce9fb0e9f441ade0b5997c7cd7165120c1d8e88163981cc52ddc`.
+RDP file transfer and VM hash verification preceded launch as the existing
+operator. Nine copied product files matched the public package; the development
+directory carries no public distribution receipt. The bounded launch control
+verified the CLI and an empty provider list in the operator's desktop session.
+Fresh assessment review `admin-1791353963291669700` displayed all three prose
+sections, expandable complete records that remained open through polling, and
+the exact confirmation outside advanced details. The review was cancelled before
+approval or Start; this checks presentation, not another application trial.
+Seven UI tests cover fallback, inert text, challenge reset and unchanged gates;
+the Windows release build and projection of all three retained recipes passed.
+Evidence is under VM `C:\AIW-Approval-GUI-Proof-4abdde6` and the host public-alpha
+proof root (`approval-ui-*` records). Prior signed-alpha acceptance remains
+separate in [PUBLIC-ALPHA-ACCEPTANCE.md](PUBLIC-ALPHA-ACCEPTANCE.md).
+
 ## Architecture and delivery
 
 1. Extract the existing administrator workflow into a shared Rust crate. Keep

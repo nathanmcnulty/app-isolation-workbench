@@ -43,16 +43,27 @@
 
     <section id="reviewCard" class="card hidden" aria-labelledby="review-title">
       <div class="card-heading"><div><p class="eyebrow">Step 2</p><h2 id="review-title">Review the exact plan</h2></div><span class="step-mark">Review</span></div>
-      <p class="section-intro">Read the complete recipe, plan, and approval identity. These fields are display-only. The Sandbox has not started.</p>
+      <p class="section-intro">Check what will run and what happens to your data. Full technical details are available below. The Sandbox has not started.</p>
       <div class="review-grid">
         <div class="review-fact"><span>Workflow</span><strong id="reviewWorkflow">—</strong></div>
         <div class="review-fact"><span>Operator</span><strong id="reviewOperator">—</strong></div>
         <div class="review-fact"><span>Evidence root</span><strong id="reviewEvidence">—</strong></div>
+      </div>
+      <div id="reviewSummary" class="review-summary">
+        <div><h3>Execution and access</h3><p id="reviewExecution"></p></div>
+        <div><h3>Requested changes and scope</h3><p id="reviewChanges"></p></div>
+        <div><h3>Your data and export</h3><p id="reviewLifetime"></p></div>
+      </div>
+      <p id="reviewSummaryUnavailable" class="notice hidden">A concise summary is unavailable for this recipe. Read the full technical details before approving.</p>
+      <details id="reviewDetails" class="advanced"><summary>Full technical details: recipe, plan and approval identity</summary>
+      <p class="helper">These complete backend records are display-only. The overview does not replace the exact plan or its approval binding.</p>
+      <div class="review-grid">
         <div class="review-fact"><span>Workspace</span><strong id="reviewWorkspace">—</strong></div>
         <div class="review-fact"><span>Plan hash</span><strong id="reviewPlanHash" class="mono">—</strong></div>
         <div class="review-fact"><span>Approval challenge</span><strong id="reviewChallenge" class="mono">—</strong></div>
       </div>
       <div class="plan-details" aria-label="Complete plan details"><div><h3>Recipe</h3><pre id="recipeJson"></pre></div><div><h3>Plan</h3><pre id="planJson"></pre></div><div><h3>Approval identity</h3><pre id="approvalJson"></pre></div></div>
+      </details>
       <div class="approval-box">
         <div><span class="eyebrow">Approval gate</span><h3>Confirm the displayed plan</h3><p>Type the exact confirmation shown below, including <code>approve</code> and the full plan hash.</p><code id="exactConfirmation" class="confirmation">—</code></div>
         <label class="field"><span>Typed confirmation</span><input id="confirmation" type="text" spellcheck="false" autocomplete="off" placeholder="approve &lt;plan hash&gt;"></label>
