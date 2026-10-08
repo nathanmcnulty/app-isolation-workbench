@@ -52,7 +52,7 @@ serde_yaml = { package = "serde_yaml_ng", version = "0.10" }
 sha2 = "0.11"
 thiserror = "2.0"
 quick-xml = "0.41"
-zip = { version = "2.4", default-features = false, features = ["deflate"] }
+zip = { version = "7.2", default-features = false, features = ["deflate"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
