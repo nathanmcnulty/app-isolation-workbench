@@ -26,6 +26,12 @@ built from exact `4e39c78`, not the acceptance documentation head.
 
 ## Next bounded work
 
+The [October 7 containment review](MXC-TRAJECTORY-REVIEW-2026-10-07.md) prioritizes
+one real-application baseline/candidate isolation comparison after this MSIX
+lifecycle slice: classic AppContainer first, then MXC against the same workflow.
+Review exact MXC v1.0.0 source/SDK and disposable controls independently; no
+runtime pin or containment claim changed in this review.
+
 Active branch: `codex/msix-worker-lifecycle`. The [first MSIX lifecycle contract](NOTEPAD-MSIX-LIFECYCLE.md)
 targets a real signed Notepad++ package: fresh-worker install, package-identity/token
 observation, document edit/save, per-user configuration and exact uninstall.

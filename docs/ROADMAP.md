@@ -1,6 +1,6 @@
 # Roadmap
 
-Reviewed 2026-10-04 against the implemented runner, publication controls, and retained live evidence. The release sequence below is authoritative; numbered capability benchmarks retain research acceptance criteria, not a serial release backlog. External platform research below is dated context and must be reverified before implementation.
+Reviewed 2026-10-07 against the implemented runner, publication controls, retained live evidence, and Microsoft's current MXC guidance. The release sequence below is authoritative; numbered capability benchmarks retain research acceptance criteria, not a serial release backlog. External platform research below is dated context and must be reverified before implementation. See the [containment trajectory review](MXC-TRAJECTORY-REVIEW-2026-10-07.md) for source identities, backend/scenario coverage and acceptance gates; it does not advance our MXC runtime pin.
 
 The goal is a free community tool that answers **which tested application functions work under which measured isolation configuration**, helps an administrator adapt the application, and produces a launch profile or package that passes the same tests. Workbench evolves into Studio when authoring is useful; this is one product.
 
@@ -94,6 +94,16 @@ acceptance](BAMBU-PUBLIC-ACCEPTANCE.md). This closes the second application bund
 milestone; measured baseline/candidate isolation and arbitrary conversion remain
 open. Review this shared foundation before expanding application coverage.
 
+**Next security milestone:** finish the bounded [signed MSIX lifecycle](NOTEPAD-MSIX-LIFECYCLE.md),
+then prioritize Benchmark 2's real-application baseline/candidate comparison over
+additional packaging recipes. Complete the real classic AppContainer comparison
+using the existing control foundation. Independently review the exact MXC v1.0.0
+release/SDK without executing it; after its disposable controls pass, evaluate
+ProcessContainer against the same workflow. Record differences in effective tier
+and policy support rather than substituting one candidate's result for another.
+Keep delivery, function success and measured containment separate. Unsupported
+results remain useful outcomes; no silent backend downgrade or automatic grants.
+
 ## What is already working
 
 - Protected MSI/EXE and portable intake; held-file integrity and embedded signature observations.
@@ -142,7 +152,17 @@ General tracing, every installer type, printing, networking, updates, and reboot
 
 The bounded classic AppContainer feasibility control now passes a same-user file/registry/child comparison in two fresh disposable workers, using documented APIs in the native authority layer. Approved evidence integration and a real-application candidate remain next for this provider; they do not block the first Sandbox bundle. Unpackaged AppContainer launch is documented, so an MSIX converter need not precede this experiment. This is not a claim that Notepad++ will work unchanged. See [control proof and limits](CONTROL-FIXTURE.md), [Launch an AppContainer](https://learn.microsoft.com/en-us/windows/win32/secauthz/implementing-an-appcontainer), and [MSIX AppContainer apps](https://learn.microsoft.com/en-us/windows/msix/msix-container).
 
-Also evaluate Microsoft's newly documented [experimental process-in-sandbox APIs](https://learn.microsoft.com/en-us/windows/win32/secauthz/createprocessinsandbox) as a bounded alternative implementation. They offer a declarative AppContainer specification and an alternate-user entry point, but currently have an experimental ABI, no public header/schema source on the documentation page, and no precise minimum Windows build. First verify exports, specification availability and a project-owned control fixture inside a disposable worker. Keep the documented classic AppContainer path available; the presence of `processmodel.dll` alone is not a supported-provider result.
+Evaluate current MXC ProcessContainer as a bounded alternative implementation,
+using the [October 7 review](MXC-TRAJECTORY-REVIEW-2026-10-07.md#ordered-work-and-closure-gates).
+Our pinned `0.8.0-alpha` adapter is planning-only; current upstream SDK and native
+contracts need a source/provenance/side-effect review before adoption. Microsoft's
+process/session support now has servicing-build requirements and runtime feature
+checks. An OS marketing version or `processmodel.dll` export alone is inadequate.
+Record effective tier and the complete policy support, not merely backend name.
+Keep classic AppContainer as a reference; BaseContainer/PSEC must have its own
+effective-boundary evidence rather than being mislabeled AppContainer. Direct
+[CreateProcessInSandbox](https://learn.microsoft.com/en-us/windows/win32/secauthz/createprocessinsandbox)
+ABI research is conditional on a concrete SDK gap, not a parallel default adapter.
 
 End the feasibility slice with a recorded supported/unsupported result for the exact fixture and environment. If a real application cannot run, preserve the control-fixture evidence and identify whether the limitation is in the adapter, driver, or still unknown. Choose the next application/candidate explicitly; do not leave the whole roadmap waiting on one AppContainer experiment or silently fall back to a weaker mode.
 
@@ -155,6 +175,15 @@ Declare the candidate's minimum check set before approval. For the first AppCont
 **Completion criteria:** target and required descendants have the intended effective boundary, selected denial canaries work, cleanup is verified, and identical scenarios produce a baseline/candidate matrix. A baseline or driver failure prevents attributing a difference to isolation. Missing evidence blocks the claims that require it and never becomes a passing isolation verdict.
 
 Reuse `aiw-core` comparison primitives behind verification of bound run evidence. Do not introduce a competing verdict engine or trust caller-constructed summaries.
+
+The [additional security gates](MXC-TRAJECTORY-REVIEW-2026-10-07.md#security-and-evidence-gates-to-add-to-benchmark-2)
+cover secret/environment/IPC access, policy tampering, child escape, network
+ingress/egress/loopback, UI/broker boundaries, diagnostic completeness and lifecycle
+ownership. Declare the subset required by each profile's claims before approval;
+everything else stays unmeasured. Prefer enforced deny-and-record for diagnosis.
+Permissive/audit observation is separate research and cannot close containment
+acceptance. Suggested policy changes require a reviewed grant diff, fresh approval
+and affected function/canary validation; no automatic policy widening.
 
 ## When packaging work starts
 
@@ -192,7 +221,8 @@ Keep delivery and runtime isolation separate. A full-trust MSIX is an intermedia
 
 - Broaden the fixture corpus and MSI/EXE/portable profiles. New executable behavior is reviewed code with a bounded, hash-bound contract; community metadata cannot inject commands, scripts, arbitrary paths, or privileged verbs.
 - Add lifecycle functions and collectors for concrete application classes: persistence, update/uninstall, reboot, network, printing, shell/COM, services, and drivers. Each addition states the claim its evidence supports.
-- Evaluate Win32 app isolation/App Silo and MXC as independent adapters. Classic AppContainer and Win32 app isolation are not interchangeable. Microsoft still labels [Win32 app isolation as preview](https://learn.microsoft.com/en-us/windows/win32/secauthz/app-isolation-overview), and its [release notes describe full-trust fallback](https://learn.microsoft.com/en-us/windows/win32/secauthz/app-isolation-release-notes); effective-boundary checks must reject that fallback for isolation claims. Neither adapter gates the first package or launch capability.
+- Evaluate Win32 app isolation/App Silo as an independent adaptation option. Classic AppContainer and Win32 app isolation are not interchangeable. The previously reviewed [overview](https://learn.microsoft.com/en-us/windows/win32/secauthz/app-isolation-overview) and [release notes](https://learn.microsoft.com/en-us/windows/win32/secauthz/app-isolation-release-notes) described preview status and full-trust fallback; reverify before implementation and reject that fallback for isolation claims. MXC ProcessContainer feasibility now belongs to Benchmark 2; it does not gate the accepted Sandbox packages.
+- Consider MXC IsolationSession for a concrete separated-desktop workflow, WSLC for Linux-first tools, and MicroVM/Hyperlight for a justified virtualization need. Track Bubblewrap/LXC/Seatbelt for future non-Windows workflows. Use the [backend/scenario matrix](MXC-TRAJECTORY-REVIEW-2026-10-07.md#backend-selection-and-scenario-coverage); a shared schema does not imply equivalent enforcement. Intune, Entra/Agent 365 and Windows 365 integration remain conditional on available contracts and administrator need.
 - Add Tauri flows over existing services as capabilities become stable: intake, run/recovery, function matrix, adaptation diff, and validated launch/package. UI work can accompany benchmarks; it need not wait for every provider.
 - Add opt-in sanitized evidence export and community profile/fixture contributions. No central service or automatic telemetry is required. Optional AI may summarize cited evidence or suggest a recipe, but never alter deterministic findings, grant permissions, or execute adaptations.
 
@@ -208,6 +238,12 @@ Finish public discard for actual retained workspace shapes as repeated runs requ
 
 ## Not on the critical path
 
-CreateProcessInSandbox research; mandatory MXC support; universal installer conversion; arbitrary PSF scripts; enterprise certificate/fleet services; centralized telemetry; broad OS/ARM64 support; automatic feature/provider installation; and a product rename. The initial host target remains Windows 11 24H2+ x64, with each actual provider capability checked independently.
+Direct CreateProcessInSandbox ABI research without a demonstrated SDK gap;
+mandatory or all-backend MXC support; universal installer conversion; arbitrary
+PSF scripts; enterprise certificate/fleet services; centralized telemetry; broad
+OS/ARM64 support; automatic feature/provider installation; and a product rename.
+The initial host target remains Windows 11 24H2+ x64, with exact servicing build
+and each actual provider capability checked independently. Bounded current-MXC
+review/control feasibility is prioritized for Benchmark 2, not deferred wholesale.
 
 Master Packager remains a manual, provider-neutral handoff. Existing research and pinned adapter work are retained. Revisit deferred work when a concrete application need or verified platform capability justifies it.
