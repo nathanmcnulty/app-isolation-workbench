@@ -16,6 +16,12 @@ observation contracts are integrated.
 - Tool: Microsoft-signed x64 MakeAppx 10.0.26100.7705, SHA-256
   `00fff202b71c1266b8c3899701e42b5468ea153b2b33a0a47215fe27695f16d0`.
   Tool drift stops assembly; inspect it before approving a different pinned tool.
+  Hosted assembly obtains this identical Microsoft-signed binary from the fixed
+  `Microsoft.Windows.SDK.BuildTools` 10.0.26100.7705 NuGet archive (22,582,767 bytes,
+  SHA-256 `48a81375752f9f1ff56a34062084b426bfe412a5a8072e1c99b6a4be0e774841`).
+  The archive is verified before extraction and the tool is independently held,
+  hash-checked and publisher-verified before execution. A supplied tool path does
+  not admit a different executable identity.
 - Identity: `AIWResearch.NotepadPP`, version `8.9.8.0`, x64, Windows 11 24H2+.
 - Publisher: `CN=Nathan McNulty, O=Nathan McNulty, L=Soldotna, S=Alaska, C=US`.
   Use the existing personal Artifact Signing profile outside the application worker.
@@ -72,6 +78,11 @@ Host evidence pointer: `%TEMP%\aiw-msix-proof-root.txt`.
 `assembly-checks-r2/checks.json` and both assembly records retain exact identities.
 No Notepad++ executable or application installer ran on the host.
 Signing and the final worker lifecycle are **not yet verified**.
+PR #95 merged at `9c25780` after exact-head review and all required checks passed.
+The first hosted signing research run `37710593027` stopped before assembly or
+signing because the runner's installed SDK differed from the approved tool. The
+fixed NuGet archive provides the same approved tool without accepting runner drift;
+SDK mismatch diagnostics now include the observed hash and version.
 `notepad-msix-research.yml` is a manual owner/main-only assembly/signing workflow;
 it has no public-release permission and never installs or executes the application.
 Owner gates require both the original `github.actor` and the current

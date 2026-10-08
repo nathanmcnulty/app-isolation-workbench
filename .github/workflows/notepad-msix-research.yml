@@ -29,8 +29,13 @@ jobs:
           if ((git rev-parse HEAD).Trim() -cne $env:SOURCE_REVISION) { throw 'Source differs' }
           if ($env:ACTIONS_ID_TOKEN_REQUEST_URL -or $env:ACTIONS_ID_TOKEN_REQUEST_TOKEN) { throw 'Assembly has signing authority' }
           New-Item -ItemType Directory -Path inputs | Out-Null
+          # Runner SDK installations drift. Supply the exact already-approved tool
+          # from Microsoft's immutable versioned NuGet archive instead.
+          Invoke-WebRequest 'https://api.nuget.org/v3-flatcontainer/microsoft.windows.sdk.buildtools/10.0.26100.7705/microsoft.windows.sdk.buildtools.10.0.26100.7705.nupkg' -OutFile inputs\sdk.nupkg
+          if ((Get-Item inputs\sdk.nupkg).Length -ne 22582767 -or (Get-FileHash inputs\sdk.nupkg).Hash.ToLowerInvariant() -cne '48a81375752f9f1ff56a34062084b426bfe412a5a8072e1c99b6a4be0e774841') { throw 'Pinned SDK archive differs' }
+          [IO.Compression.ZipFile]::ExtractToDirectory((Join-Path $PWD 'inputs\sdk.nupkg'), (Join-Path $PWD 'inputs\sdk'))
           Invoke-WebRequest 'https://github.com/notepad-plus-plus/notepad-plus-plus/releases/download/v8.9.8/npp.8.9.8.portable.x64.zip' -OutFile inputs\portable.zip
-          .\scripts\research\build-notepad-msix.ps1 -PortableArchive inputs\portable.zip -OutputDirectory assembled
+          .\scripts\research\build-notepad-msix.ps1 -PortableArchive inputs\portable.zip -OutputDirectory assembled -MakeAppxPath inputs\sdk\bin\10.0.26100.0\x64\makeappx.exe
           New-Item -ItemType Directory -Path transfer | Out-Null
           Copy-Item assembled\AIWResearch.NotepadPP.8.9.8.0.x64.msix transfer\application.msix
           $assembly = Get-Content assembled\assembly.json -Raw | ConvertFrom-Json

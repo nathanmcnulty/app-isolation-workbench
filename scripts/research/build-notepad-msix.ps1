@@ -2,7 +2,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$PortableArchive,
-    [Parameter(Mandatory)][string]$OutputDirectory
+    [Parameter(Mandatory)][string]$OutputDirectory,
+    [string]$MakeAppxPath = 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\makeappx.exe'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -10,7 +11,7 @@ Set-StrictMode -Version Latest
 # Research-only closed recipe. Never installs or executes the application.
 $sourceHash = 'b269383239464a945d17cfabfccf53935b83d80d907922310fdfd50d80274c66'
 $toolHash = '00fff202b71c1266b8c3899701e42b5468ea153b2b33a0a47215fe27695f16d0'
-$tool = 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\makeappx.exe'
+$tool = [IO.Path]::GetFullPath($MakeAppxPath)
 $publisher = 'CN=Nathan McNulty, O=Nathan McNulty, L=Soldotna, S=Alaska, C=US'
 
 function Assert-OrdinaryPath([string]$Path) {
@@ -42,7 +43,11 @@ if (Test-Path -LiteralPath $output) { throw 'A fresh output directory is require
 Assert-OrdinaryPath $tool
 $heldTool = [IO.File]::Open($tool, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
 try {
-if ((Get-StreamHash $heldTool) -cne $toolHash) { throw 'Pinned SDK tool differs' }
+$observedToolHash = Get-StreamHash $heldTool
+if ($observedToolHash -cne $toolHash) {
+    $diagnostic = [ordered]@{ code = 'AIW_RESEARCH_SDK_PIN_MISMATCH'; path = $tool; expectedSha256 = $toolHash; observedSha256 = $observedToolHash; observedVersion = (Get-Item -LiteralPath $tool).VersionInfo.FileVersion }
+    throw ($diagnostic | ConvertTo-Json -Compress)
+}
 $signature = Get-AuthenticodeSignature -LiteralPath $tool
 if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) -cne 'Microsoft Corporation') { throw 'SDK publisher verification failed' }
 

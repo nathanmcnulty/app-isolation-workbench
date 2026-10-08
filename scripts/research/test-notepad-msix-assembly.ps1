@@ -1,6 +1,7 @@
 #requires -Version 7.0
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$PortableArchive, [Parameter(Mandatory)][string]$EvidenceDirectory)
+param([Parameter(Mandatory)][string]$PortableArchive, [Parameter(Mandatory)][string]$EvidenceDirectory,
+    [string]$MakeAppxPath = 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\makeappx.exe')
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if (Test-Path -LiteralPath $EvidenceDirectory) { throw 'Fresh evidence directory required' }
@@ -11,8 +12,8 @@ function Assert-Rejected([scriptblock]$Action, [string]$Expected) {
     try { & $Action | Out-Null } catch { if ($_.Exception.Message -notlike "*$Expected*") { throw }; $rejected = $true }
     if (!$rejected) { throw "Expected rejection: $Expected" }
 }
-$first = & $builder -PortableArchive $PortableArchive -OutputDirectory (Join-Path $EvidenceDirectory 'first') | ConvertFrom-Json
-$second = & $builder -PortableArchive $PortableArchive -OutputDirectory (Join-Path $EvidenceDirectory 'second') | ConvertFrom-Json
+$first = & $builder -MakeAppxPath $MakeAppxPath -PortableArchive $PortableArchive -OutputDirectory (Join-Path $EvidenceDirectory 'first') | ConvertFrom-Json
+$second = & $builder -MakeAppxPath $MakeAppxPath -PortableArchive $PortableArchive -OutputDirectory (Join-Path $EvidenceDirectory 'second') | ConvertFrom-Json
 $a = Get-Content (Join-Path $EvidenceDirectory 'first\assembly.json') -Raw | ConvertFrom-Json
 $b = Get-Content (Join-Path $EvidenceDirectory 'second\assembly.json') -Raw | ConvertFrom-Json
 if (($a.payloadInventory | ConvertTo-Json -Depth 8 -Compress) -cne ($b.payloadInventory | ConvertTo-Json -Depth 8 -Compress)) { throw 'Semantic payload reproducibility failed' }
@@ -33,14 +34,19 @@ foreach ($candidate in @($first, $second)) {
         if ($zip.Entries.Count -ne $a.payloadInventory.Count + 2) { throw 'Unexpected MSIX archive inventory' }
     } finally { $zip.Dispose() }
 }
-Assert-Rejected { & $builder -PortableArchive $PortableArchive -OutputDirectory (Join-Path $EvidenceDirectory 'first') } 'fresh output'
+Assert-Rejected { & $builder -MakeAppxPath $MakeAppxPath -PortableArchive $PortableArchive -OutputDirectory (Join-Path $EvidenceDirectory 'first') } 'fresh output'
 $tampered = Join-Path $EvidenceDirectory 'tampered.zip'
 Copy-Item -LiteralPath $PortableArchive -Destination $tampered
 $stream = [IO.File]::OpenWrite($tampered)
 try { $stream.WriteByte(0) } finally { $stream.Dispose() }
 $refused = Join-Path $EvidenceDirectory 'refused'
-Assert-Rejected { & $builder -PortableArchive $tampered -OutputDirectory $refused } 'pinned Notepad'
+Assert-Rejected { & $builder -MakeAppxPath $MakeAppxPath -PortableArchive $tampered -OutputDirectory $refused } 'pinned Notepad'
 if (Test-Path -LiteralPath $refused) { throw 'Tampered input created assembly output' }
-$result = [ordered]@{ passed = $true; semanticPayloadEquivalent = $true; archivePayloadVerified = $true; existingOutputRefused = $true; tamperedSourceRefusedBeforeOutput = $true; unsignedByteHashesEqual = ($first.sha256 -ceq $second.sha256); lifecycleAcceptance = 'notRun'; evidenceDirectory = [IO.Path]::GetFullPath($EvidenceDirectory) }
+$wrongTool = Join-Path $EvidenceDirectory 'wrong-makeappx.exe'
+[IO.File]::WriteAllBytes($wrongTool, [byte[]]@(0))
+$toolRefused = Join-Path $EvidenceDirectory 'tool-refused'
+Assert-Rejected { & $builder -MakeAppxPath $wrongTool -PortableArchive $PortableArchive -OutputDirectory $toolRefused } 'AIW_RESEARCH_SDK_PIN_MISMATCH'
+if (Test-Path -LiteralPath $toolRefused) { throw 'Wrong tool created assembly output' }
+$result = [ordered]@{ passed = $true; semanticPayloadEquivalent = $true; archivePayloadVerified = $true; existingOutputRefused = $true; tamperedSourceRefusedBeforeOutput = $true; wrongToolRefusedBeforeOutput = $true; unsignedByteHashesEqual = ($first.sha256 -ceq $second.sha256); lifecycleAcceptance = 'notRun'; evidenceDirectory = [IO.Path]::GetFullPath($EvidenceDirectory) }
 $result | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $EvidenceDirectory 'checks.json') -Encoding utf8NoBOM
 $result | ConvertTo-Json -Compress
