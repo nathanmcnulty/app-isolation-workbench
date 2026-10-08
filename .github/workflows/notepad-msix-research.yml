@@ -1,0 +1,117 @@
+name: Notepad MSIX lifecycle research
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aiw-notepad-msix-research
+  cancel-in-progress: false
+
+jobs:
+  assemble:
+    if: github.repository == 'nathanmcnulty/app-isolation-workbench' && github.ref == 'refs/heads/main' && github.actor == 'nathanmcnulty' && github.triggering_actor == 'nathanmcnulty'
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Assemble only the pinned portable recipe without execution
+        shell: pwsh
+        env:
+          SOURCE_REVISION: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ((git rev-parse HEAD).Trim() -cne $env:SOURCE_REVISION) { throw 'Source differs' }
+          if ($env:ACTIONS_ID_TOKEN_REQUEST_URL -or $env:ACTIONS_ID_TOKEN_REQUEST_TOKEN) { throw 'Assembly has signing authority' }
+          New-Item -ItemType Directory -Path inputs | Out-Null
+          Invoke-WebRequest 'https://github.com/notepad-plus-plus/notepad-plus-plus/releases/download/v8.9.8/npp.8.9.8.portable.x64.zip' -OutFile inputs\portable.zip
+          .\scripts\research\build-notepad-msix.ps1 -PortableArchive inputs\portable.zip -OutputDirectory assembled
+          New-Item -ItemType Directory -Path transfer | Out-Null
+          Copy-Item assembled\AIWResearch.NotepadPP.8.9.8.0.x64.msix transfer\application.msix
+          $assembly = Get-Content assembled\assembly.json -Raw | ConvertFrom-Json
+          @{ sourceRevision = $env:SOURCE_REVISION; unsignedSha256 = $assembly.package.sha256; sizeBytes = $assembly.package.sizeBytes; sourceArchiveSha256 = $assembly.source.sha256; publisher = $assembly.publisher } | ConvertTo-Json | Set-Content transfer\unsigned-build.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: aiw-msix-unsigned-${{ github.sha }}
+          path: transfer/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Preserve assembly evidence, including failures
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: aiw-msix-assembly-${{ github.sha }}
+          path: assembled/
+          if-no-files-found: warn
+          retention-days: 14
+
+  sign:
+    if: github.repository == 'nathanmcnulty/app-isolation-workbench' && github.ref == 'refs/heads/main' && github.actor == 'nathanmcnulty' && github.triggering_actor == 'nathanmcnulty'
+    needs: assemble
+    runs-on: windows-2025
+    timeout-minutes: 15
+    environment: artifact-signing
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: aiw-msix-unsigned-${{ github.sha }}
+          path: transfer
+      - name: Check the exact unsigned transfer before authentication
+        shell: pwsh
+        env:
+          SOURCE_REVISION: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (@(Get-ChildItem transfer -Recurse -File).Count -ne 2 -or (Get-Item transfer\unsigned-build.json).Length -gt 4096) { throw 'Transfer inventory differs' }
+          $record = Get-Content transfer\unsigned-build.json -Raw | ConvertFrom-Json
+          $package = Get-Item transfer\application.msix
+          if ($record.sourceRevision -cne $env:SOURCE_REVISION -or $record.sourceArchiveSha256 -cne 'b269383239464a945d17cfabfccf53935b83d80d907922310fdfd50d80274c66' -or $record.publisher -cne 'CN=Nathan McNulty, O=Nathan McNulty, L=Soldotna, S=Alaska, C=US' -or $package.Length -gt 64MB -or $package.Length -ne $record.sizeBytes -or (Get-FileHash $package.FullName).Hash.ToLowerInvariant() -cne $record.unsignedSha256) { throw 'Unsigned transfer source, identity or bytes differ' }
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AIW_SIGNING_CLIENT_ID }}
+          tenant-id: 847b5907-ca15-40f4-b171-eb18619dbfab
+          subscription-id: a80941e8-c2b9-4bc9-83ad-117cc40d0bea
+      - name: Sign only the fixed MSIX, never execute it
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2
+        with:
+          endpoint: https://wus2.codesigning.azure.net/
+          signing-account-name: asa-nathanmcnulty
+          certificate-profile-name: kvpp-public-trust
+          files: ${{ github.workspace }}\transfer\application.msix
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          cache-dependencies: false
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+      - name: Verify the signed publisher and retain the final byte identity
+        shell: pwsh
+        env:
+          SOURCE_REVISION: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $signature = Get-AuthenticodeSignature transfer\application.msix
+          if ($signature.Status -ne 'Valid' -or $null -eq $signature.TimeStamperCertificate -or $signature.SignerCertificate.Subject -cne 'CN=Nathan McNulty, O=Nathan McNulty, L=Soldotna, S=Alaska, C=US') { throw 'MSIX signature, subject or timestamp differs' }
+          @{ sourceRevision = $env:SOURCE_REVISION; signedSha256 = (Get-FileHash transfer\application.msix).Hash.ToLowerInvariant(); publisher = $signature.SignerCertificate.Subject; lifecycleAcceptance = 'notRun'; isolationAcceptance = 'notMeasured' } | ConvertTo-Json | Set-Content transfer\signing.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: aiw-msix-signed-${{ github.sha }}
+          path: transfer/
+          if-no-files-found: error
+          retention-days: 14

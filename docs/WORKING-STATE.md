@@ -19,18 +19,20 @@ verified bytes. All three trials recorded cleanup; the provider list is empty.
 Broader isolation remains `insufficientEvidence`. Detailed identities, corrections
 and limits: [signed acceptance](BAMBU-PUBLIC-ACCEPTANCE.md).
 
-Acceptance documentation and tested-download update are on
-`codex/bambu-signed-acceptance`, pending independent review and hosted CI.
-The release binaries remain built from exact `4e39c78`, not this documentation head.
+Acceptance documentation and tested-download update merged in PR #94 at `922d0a7`.
+Independent review approved `08a44c5`; all three required checks passed in CI
+`37704549006`, and merged main passed `37705606165`. The release binaries remain
+built from exact `4e39c78`, not the acceptance documentation head.
 
 ## Next bounded work
 
-Pause feature expansion for a focused shared-foundation quality checkpoint:
-verify closed MSI/EXE packaging contracts, legacy API/schema compatibility,
-approval/data-lifetime presentation and completeness of the three retained reports.
-Use [Bambu contract](BAMBU-PACKAGING.md), [administrator packaging](ADMIN-PACKAGING.md)
-and [roadmap](ROADMAP.md); avoid repeating accepted application trials for prose.
-Choose the next application or measured isolation slice after that checkpoint.
+Active branch: `codex/package-lifecycle`. The [first MSIX lifecycle contract](NOTEPAD-MSIX-LIFECYCLE.md)
+targets a real signed Notepad++ package: fresh-worker install, package-identity/token
+observation, document edit/save, per-user configuration and exact uninstall.
+The closed research assembler and independent archive/negative checks pass locally.
+Unsigned byte hashes differ; semantic payload/manifest equivalence passes. Signing
+and final runtime lifecycle remain open. Review the exact signing/assembly slice
+before integration and dispatch; do not claim an unsigned package is accepted.
 Generic conversion, broader isolation and Studio authoring remain open.
 PR #92's shared held-file observations already inform assessment and packaging;
 see [shared observations](ADMIN-PACKAGING.md#shared-assessment-observations).

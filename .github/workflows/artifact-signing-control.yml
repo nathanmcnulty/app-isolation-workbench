@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   build-control:
-    if: github.repository == 'nathanmcnulty/app-isolation-workbench' && github.ref == 'refs/heads/main' && github.actor == 'nathanmcnulty'
+    if: github.repository == 'nathanmcnulty/app-isolation-workbench' && github.ref == 'refs/heads/main' && github.actor == 'nathanmcnulty' && github.triggering_actor == 'nathanmcnulty'
     runs-on: windows-2025
     timeout-minutes: 30
     env:
@@ -49,6 +49,7 @@ jobs:
           retention-days: 7
 
   sign-control:
+    if: github.repository == 'nathanmcnulty/app-isolation-workbench' && github.ref == 'refs/heads/main' && github.actor == 'nathanmcnulty' && github.triggering_actor == 'nathanmcnulty'
     needs: build-control
     runs-on: windows-2025
     timeout-minutes: 15
