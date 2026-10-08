@@ -121,11 +121,13 @@ remains under the operator Workbench Evidence directory for the stated run.
 The initial oversized diagnostic response and a collector's incorrect status
 filename remain preserved. Bounded readback of the existing `result.json`
 corrected collection without repeating installation or execution.
-Signed candidate acceptance remains open. Keep the existing tested signed
-download recommendation until that gate passes.
+Signed public-download acceptance subsequently passed for Bambu and both
+Notepad++ package regressions at exact release source `4e39c78`. See
+[signed acceptance](BAMBU-PUBLIC-ACCEPTANCE.md) for distribution identities,
+fresh runs, independent package/report checks and claim limits.
 
 The current CLI also reverified both retained Notepad++ package/report
-associations as the limited operator: fixed assessment
+associations as the recorded operator: fixed assessment
 `admin-1791363728884366700` and interactive session
 `admin-1791364558757379700`. Both commands exited zero, retained the correct
 report kinds, successful scenario evidence and verified cleanup. These are
