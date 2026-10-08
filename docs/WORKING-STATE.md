@@ -26,13 +26,16 @@ built from exact `4e39c78`, not the acceptance documentation head.
 
 ## Next bounded work
 
-Active branch: `codex/package-lifecycle`. The [first MSIX lifecycle contract](NOTEPAD-MSIX-LIFECYCLE.md)
+Active branch: `codex/msix-worker-lifecycle`. The [first MSIX lifecycle contract](NOTEPAD-MSIX-LIFECYCLE.md)
 targets a real signed Notepad++ package: fresh-worker install, package-identity/token
 observation, document edit/save, per-user configuration and exact uninstall.
-The closed research assembler and independent archive/negative checks pass locally.
-Unsigned byte hashes differ; semantic payload/manifest equivalence passes. Signing
-and final runtime lifecycle remain open. Review the exact signing/assembly slice
-before integration and dispatch; do not claim an unsigned package is accepted.
+PR #95's closed research assembler/signing workflow merged at `9c25780` after
+independent review and all three exact-head required checks passed (`37709435055`).
+Signing run `37710593027` stopped before assembly/signing on hosted SDK drift.
+The current fix supplies the identical approved tool from a byte-pinned Microsoft
+NuGet archive; local archive/negative checks pass with that tool. Unsigned byte
+hashes differ; semantic payload/manifest equivalence passes. Signing and final
+runtime lifecycle remain open; do not claim an unsigned package is accepted.
 Generic conversion, broader isolation and Studio authoring remain open.
 PR #92's shared held-file observations already inform assessment and packaging;
 see [shared observations](ADMIN-PACKAGING.md#shared-assessment-observations).
