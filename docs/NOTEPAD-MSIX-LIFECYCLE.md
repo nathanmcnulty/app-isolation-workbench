@@ -77,7 +77,9 @@ The first verifier's literal-path failure is retained separately.
 Host evidence pointer: `%TEMP%\aiw-msix-proof-root.txt`.
 `assembly-checks-r2/checks.json` and both assembly records retain exact identities.
 No Notepad++ executable or application installer ran on the host.
-Signing and the final worker lifecycle are **not yet verified**.
+Signing and installed payload verification are complete. The required
+non-elevated lifecycle is **not yet verified**; the first activation stopped at
+the token check, before document editing.
 PR #95 merged at `9c25780` after exact-head review and all required checks passed.
 The first hosted signing research run `37710593027` stopped before assembly or
 signing because the runner's installed SDK differed from the approved tool. The
@@ -91,6 +93,52 @@ personal signing control and desktop candidate use the same direct signing gate;
 desktop publication also checks the triggering actor. See [GitHub's actor context
 semantics](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts).
 
+### Signed package and first worker result
+
+PR #96 merged the pinned SDK supply at `bcf6f8243334c4478f06ee825b8ef20867c9da38`.
+Research signing run [37711841372](https://github.com/nathanmcnulty/app-isolation-workbench/actions/runs/37711841372)
+assembled and signed that exact source. The signed `application.msix` is
+8,641,353 bytes, SHA-256
+`2ae3a7c685e811eb34479980bff41d1442b023578074e19f4dca8fc676070437`.
+Host and dedicated-worker verification independently checked its valid personal
+publisher signature and timestamp. Host verification hashed all 220 signed
+payload entries against the hosted assembly inventory and bound the source,
+assembly and signing records. Local and hosted raw manifests differed only by
+eight CRLF sequences; this was explicitly recorded, while the raw signed manifest
+was still verified against its hosted inventory. The producer now emits LF
+regardless of checkout format; the assembly test exercises actual LF and CRLF
+script copies. This change does not change the identity of the already signed output.
+
+On the dedicated disposable VM, the project-owned process control passed before
+installation. The signed package installed as
+`AIWResearch.NotepadPP_8.9.8.0_x64__q1fhfzcjv9wt6`; all 220 installed payload
+entries matched. Package activation returned PID 8072 in interactive session 2.
+Its observed package identity and executable hash matched, but its actual token
+was elevated, high integrity (`S-1-16-12288`), and not AppContainer. The recorded
+`aiwoperator` SID ends in RID 500: the renamed built-in Administrator. The visible
+editor also displayed `[Administrator]`. The driver stopped at activation and
+retained the failure before editing. A manifest declaration of `mediumIL` did
+not establish the required non-elevated execution observation.
+
+The exact owned editor was closed. A SYSTEM-context removal targeting the recorded
+operator SID returned but left registration pending removal. That failed cleanup
+check remains preserved. Removal in the actual operator's context then completed;
+fresh independent readback found no current-user or all-user registration, no
+Notepad++ process, and no package-private configuration directory. Configuration
+had previously appeared in `LocalCache/Roaming/Notepad++` under the package's
+per-user directory. Neither the accepted cross-user command nor early configuration
+creation proves the required completed lifecycle.
+
+Under the host proof root, `signed-artifacts-bcf6f82/signed-verification.json`,
+`vm-msix-lifecycle-readback.json`, `vm-msix-recovery-inspection.json` and
+`vm-msix-recovery-final-readback.json` preserve these distinct observations.
+The worker's original `lifecycle-evidence` directory retains the failure and both
+cleanup results. Document edit/save, post-workflow immutable payload and normal
+uninstall remain open. The next trial must first prove a fresh standard user's
+profile, medium non-elevated token and visible owned control, then install the
+same verified package with new evidence. Do not weaken the token gate or change
+the VM's UAC policy to pass this trial.
+
 ## Feedback into assessment
 
 The completed trial must inform shared assessment without introducing a second
@@ -101,3 +149,10 @@ deletion. Preserve the explicit adaptation and before/after inventories. A packa
 or SDK error is a delivery/driver result, not application incompatibility. Reuse
 the existing protected intake, approval/session binding and receipt-last evidence
 publication when promoting this research into a production path.
+
+The first worker result already demonstrates two reporting requirements: token
+claims need observations of the actual application process, and uninstall success
+needs registration readback rather than command acceptance. An unsuitable worker
+operator is a trial prerequisite failure, not evidence that the application is
+incompatible. Existing assessment standard-user controls remain the implementation
+to reuse; this research does not introduce a separate compatibility verdict.

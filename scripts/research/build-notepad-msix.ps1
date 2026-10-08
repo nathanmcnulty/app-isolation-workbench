@@ -95,6 +95,8 @@ try {
   <Capabilities><rescap:Capability Name="runFullTrust" /></Capabilities>
 </Package>
 "@
+    # Here-string newlines follow the script checkout; package bytes must not.
+    $manifest = $manifest.Replace("`r`n", "`n")
     [IO.File]::WriteAllText((Join-Path $layout 'AppxManifest.xml'), $manifest, [Text.UTF8Encoding]::new($false))
     $package = Join-Path $output 'AIWResearch.NotepadPP.8.9.8.0.x64.msix'
     $psi = [Diagnostics.ProcessStartInfo]::new($tool)

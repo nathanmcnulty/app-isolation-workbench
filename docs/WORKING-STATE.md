@@ -38,10 +38,18 @@ observation, document edit/save, per-user configuration and exact uninstall.
 PR #95's closed research assembler/signing workflow merged at `9c25780` after
 independent review and all three exact-head required checks passed (`37709435055`).
 Signing run `37710593027` stopped before assembly/signing on hosted SDK drift.
-The current fix supplies the identical approved tool from a byte-pinned Microsoft
-NuGet archive; local archive/negative checks pass with that tool. Unsigned byte
-hashes differ; semantic payload/manifest equivalence passes. Signing and final
-runtime lifecycle remain open; do not claim an unsigned package is accepted.
+PR #96 merged the identical approved tool supply from a byte-pinned Microsoft
+NuGet archive at `bcf6f82`; required PR/main CI passed. Signing run `37711841372`
+succeeded. Independent signed payload verification and VM installation passed.
+Actual activation had correct package/image identity but a high elevated token:
+the VM operator is the renamed built-in Administrator. The driver stopped before
+editing; failure evidence is retained. Exact editor closure and operator-context
+uninstall are independently verified, including absent registration/process/config.
+The next trial needs a proven fresh standard-user context and new evidence;
+edit/save, final payload verification and normal lifecycle remain open.
+Local/hosted manifest line-ending drift also prompted canonical LF generation;
+LF/CRLF source assembly checks cover that correction. See the lifecycle document
+for exact package identities and evidence; unsigned package byte identity is not claimed.
 Generic conversion, broader isolation and Studio authoring remain open.
 PR #92's shared held-file observations already inform assessment and packaging;
 see [shared observations](ADMIN-PACKAGING.md#shared-assessment-observations).
