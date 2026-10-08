@@ -156,6 +156,33 @@ The account and desktop grant live only in the disposable Sandbox and require
 disposal of that exact owned session. A passing control is a prerequisite for
 the application trial; it is not install or compatibility proof.
 
+The first control-only Sandbox (`b316e9ee-19be-4eab-b25a-663ac96d08ff`)
+opened but never entered its PowerShell file bootstrap. Guest inspection observed
+`Restricted` execution policy; an explicitly attributed diagnostic reproduction
+retained the script-disabled `SecurityError`/`UnauthorizedAccess` rejection.
+No application ran. The exact session was stopped in its recorded operator's
+context, and a fresh provider readback was empty. The failed stage remains intact.
+The corrected research launch uses the fixed compiled control directly, with its
+input held read-only against host replacement throughout the connected session.
+It does not change execution policy. Missing control receipts remain an
+unaccepted trial; provider start/connect alone cannot prove process completion.
+
+This diagnosis also exposed a monitoring boundary: SYSTEM/session-0 provider
+inventory was empty while the interactive operator's exact Sandbox was visibly
+running and appeared in that operator's provider inventory. Readiness and cleanup
+observations must retain the querying identity/session; a different actor's empty
+list cannot establish that the owned interactive worker is absent.
+
+The fresh direct-launch control (`146a783d-9856-43fe-9798-082ea65143f3`)
+retained a standard-user profile context, then failed before child creation with
+`CreateProcessWithLogonW` error 87. Independent readback verified the input lock
+denied write access. The control command exceeded that API's documented 1024
+character limit. The shared launcher now checks the actual quoted UTF-16 buffer
+before launch side effects, using a conservative limit including its terminator;
+tests cover ASCII and supplementary Unicode boundaries. The shortened fixed
+control has a separate test against the same quoting and native limit. These
+checks do not prove a successful live standard-user control or application trial.
+
 ## Feedback into assessment
 
 The completed trial must inform shared assessment without introducing a second

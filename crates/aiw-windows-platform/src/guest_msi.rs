@@ -1456,6 +1456,7 @@ impl GuestProcess {
         let executable_wide = wide(path)?;
         let parent_wide = wide_os(parent.as_os_str())?;
         let mut command_line_wide = wide(&command_line)?;
+        validate_standard_user_command_line(&command_line_wide)?;
         let job = ScenarioJob::create()?;
         let startup = STARTUPINFOW {
             cb: std::mem::size_of::<STARTUPINFOW>() as u32,
@@ -1976,6 +1977,22 @@ fn wide(value: &str) -> Result<Vec<u16>, GuestMsiExecutionError> {
     Ok(OsStr::new(value).encode_wide().chain(Some(0)).collect())
 }
 
+// CreateProcessWithLogonW has a smaller limit than CreateProcessW. Include the
+// terminator conservatively and check before consuming credentials or granting
+// desktop access. Count the actual UTF-16 buffer, not UTF-8 bytes or Rust chars.
+pub(crate) const MAX_STANDARD_USER_COMMAND_LINE_UNITS: usize = 1024;
+
+fn validate_standard_user_command_line(value: &[u16]) -> Result<(), GuestMsiExecutionError> {
+    if value.len() > MAX_STANDARD_USER_COMMAND_LINE_UNITS {
+        return Err(GuestMsiExecutionError::Process(format!(
+            "standard-user command line exceeds the CreateProcessWithLogonW limit: {} UTF-16 units including terminator; maximum {}",
+            value.len(),
+            MAX_STANDARD_USER_COMMAND_LINE_UNITS
+        )));
+    }
+    Ok(())
+}
+
 fn wide_os(value: &OsStr) -> Result<Vec<u16>, GuestMsiExecutionError> {
     let encoded: Vec<u16> = value.encode_wide().collect();
     if encoded.contains(&0) {
@@ -1989,6 +2006,18 @@ fn wide_os(value: &OsStr) -> Result<Vec<u16>, GuestMsiExecutionError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn standard_user_command_line_checks_native_utf16_boundary() {
+        assert!(validate_standard_user_command_line(&wide(&"a".repeat(1023)).unwrap()).is_ok());
+        assert!(validate_standard_user_command_line(&wide(&"a".repeat(1024)).unwrap()).is_err());
+        assert!(
+            validate_standard_user_command_line(&wide(&"\u{1f600}".repeat(511)).unwrap()).is_ok()
+        );
+        assert!(
+            validate_standard_user_command_line(&wide(&"\u{1f600}".repeat(512)).unwrap()).is_err()
+        );
+    }
 
     #[test]
     fn bounded_job_diagnostic_reads_an_empty_job() {

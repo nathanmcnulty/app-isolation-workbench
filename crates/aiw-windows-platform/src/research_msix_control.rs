@@ -1,4 +1,26 @@
-//! Closed research control. Compiled only with the explicit research feature.
+const CONTROL_SCRIPT: &str = r#"$ErrorActionPreference='Stop'
+$d='C:\Users\AiwStandardUser\AppData\Local\AIW\'
+try {
+Start-Transcript ($d+'msix-control-transcript.txt')|Out-Null
+Add-Type -AssemblyName System.Windows.Forms
+$i=[Security.Principal.WindowsIdentity]::GetCurrent()
+$p=[Environment]::GetFolderPath('UserProfile')
+if($p -cne $env:USERPROFILE -or $p -cne 'C:\Users\AiwStandardUser' -or !(Test-Path ('Registry::HKEY_USERS\'+$i.User.Value))){throw 'Profile mismatch'}
+$f=New-Object Windows.Forms.Form
+$f.Text='AIW control'
+$t=New-Object Windows.Forms.Timer
+$t.Interval=30000
+$t.add_Tick({$t.Stop();$f.Close()})
+$f.add_Shown({$t.Start()})
+$f.ShowDialog()|Out-Null
+@{sid=$i.User.Value;profile=$p;session=[Diagnostics.Process]::GetCurrentProcess().SessionId;guiLoopCompleted=$true}|ConvertTo-Json|Set-Content ($d+'msix-control.json') -Encoding UTF8
+Stop-Transcript|Out-Null
+} catch {
+$_.ToString()|Set-Content ($d+'msix-control-failure.txt')
+exit 1
+}
+"#;
+// Closed research control. Compiled only with the explicit research feature.
 use crate::guest_msi::GuestProcess;
 use crate::guest_standard_user::StandardUserSession;
 use std::path::Path;
@@ -48,32 +70,9 @@ fn run_child(evidence: &Path) -> Result<(), Box<dyn std::error::Error>> {
         std::fs::create_dir_all(standard.document_root())
             .map_err(|e| crate::GuestMsiExecutionError::Process(e.to_string()))
     })?;
-    let script = r#"$ErrorActionPreference='Stop'
-try {
-Start-Transcript -LiteralPath 'C:\Users\AiwStandardUser\AppData\Local\AIW\msix-control-transcript.txt' | Out-Null
-Add-Type -AssemblyName System.Windows.Forms
-$identity=[Security.Principal.WindowsIdentity]::GetCurrent()
-$profile=[Environment]::GetFolderPath('UserProfile')
-if($env:USERPROFILE -cne $profile -or $profile -cne 'C:\Users\AiwStandardUser'){throw 'Standard profile mismatch'}
-if(!(Test-Path ('Registry::HKEY_USERS\'+$identity.User.Value))){throw 'User hive is not loaded'}
-$form=New-Object Windows.Forms.Form
-$form.Text='AIW standard-user research control'; $form.Width=560; $form.Height=160
-$label=New-Object Windows.Forms.Label; $label.Dock='Fill'; $label.Text='Project-owned control only. This window closes automatically.'
-$form.Controls.Add($label)
-$timer=New-Object Windows.Forms.Timer; $timer.Interval=30000
-$timer.Add_Tick({$timer.Stop();$form.Close()}); $form.Add_Shown({$timer.Start()})
-$form.ShowDialog() | Out-Null
-$timer.Dispose(); $form.Dispose()
-@{sid=$identity.User.Value;profile=$profile;session=[Diagnostics.Process]::GetCurrentProcess().SessionId;guiLoopCompleted=$true} | ConvertTo-Json -Compress | Set-Content -LiteralPath 'C:\Users\AiwStandardUser\AppData\Local\AIW\msix-control.json' -Encoding UTF8
-Stop-Transcript | Out-Null
-} catch {
-@{message=$_.Exception.Message;detail=$_.ToString();line=$_.InvocationInfo.PositionMessage} | ConvertTo-Json -Compress | Set-Content -LiteralPath 'C:\Users\AiwStandardUser\AppData\Local\AIW\msix-control-failure.json' -Encoding UTF8
-try { Stop-Transcript | Out-Null } catch {}
-exit 1
-}
-"#;
+
     let executable = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe";
-    let arguments = ["-NoProfile", "-NonInteractive", "-Command", script].map(str::to_owned);
+    let arguments = ["-NoProfile", "-Command", CONTROL_SCRIPT].map(str::to_owned);
     // Actual production launcher: one-use secret, validated suspended child,
     // exact-SID desktop grant/access preflight, held handles and owned kill job.
     let child = GuestProcess::start_standard_user(executable, &arguments, &standard)?;
@@ -121,7 +120,7 @@ exit 1
     let cleanup = child.cleanup();
     let active = child.active_processes();
     let mut exports = Vec::new();
-    for name in ["msix-control-transcript.txt", "msix-control-failure.json"] {
+    for name in ["msix-control-transcript.txt", "msix-control-failure.txt"] {
         let path = standard.document_root().join(name);
         if path.is_file() {
             if let Err(error) = std::fs::copy(path, evidence.join(name)) {
@@ -150,4 +149,20 @@ exit 1
         )?,
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn fixed_control_command_line_fits_after_windows_argument_quoting() {
+        let command = aiw_windows_command_line::join_arguments([
+            r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+            "-NoProfile",
+            "-Command",
+            super::CONTROL_SCRIPT,
+        ]);
+        assert!(
+            command.encode_utf16().count() < crate::guest_msi::MAX_STANDARD_USER_COMMAND_LINE_UNITS
+        );
+    }
 }
