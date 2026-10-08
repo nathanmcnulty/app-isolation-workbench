@@ -51,7 +51,10 @@ The feature-gated closed control reuses the production standard-user launcher.
 Live control-only attempts diagnosed a Restricted-policy file bootstrap and an
 oversized `CreateProcessWithLogonW` command. The direct executable launch holds
 its input against replacement; the shorter fixed control and shared UTF-16 length
-guard are validated locally. Live control success is still open. Provider inventory
+guard are validated locally. The fresh control at `965b07a` passed: visible GUI,
+matching standard-user SID/profile, medium non-elevated child, exit zero and empty
+owned job. Exact worker disposal and operator-context empty inventory were
+independently read back. The real application lifecycle remains open. Provider inventory
 must be queried in the owned operator's context; SYSTEM absence is not global proof.
 Local/hosted manifest line-ending drift also prompted canonical LF generation;
 LF/CRLF source assembly checks cover that correction. See the lifecycle document

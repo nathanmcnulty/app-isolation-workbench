@@ -183,6 +183,29 @@ tests cover ASCII and supplementary Unicode boundaries. The shortened fixed
 control has a separate test against the same quoting and native limit. These
 checks do not prove a successful live standard-user control or application trial.
 
+The next fresh control, built from `965b07ac71c11c2acc2e727f976886043714f885`,
+passed in owned Sandbox `3b6428bd-28e0-4bf1-8b87-9b6d911dd6ee`. Independent
+readback bound the held input hash
+`2487c7cf42ab250ecec8fd480fc66e434a21e56e815140520e046d55500da88b`
+to the recorded source and worker. Child PID 6736 had the context's exact SID,
+medium integrity and no elevation. Its GUI was visibly observed over RDP;
+the retained window observation matched the PID. The child result recorded
+the same SID/profile, guest session 1 and completed GUI loop. Exit was zero;
+normal cleanup and evidence export had no errors, with zero job processes
+before and after cleanup. The terminal research result explicitly says the
+application trial was not run.
+
+The exact worker was subsequently stopped in its recorded operator SID/session;
+native exit zero and the operator's empty provider inventory were independently
+read back. The dedicated VM remained running and its RDP desktop remained
+accessible. Under the host proof root, `vm-msix-control-short-readback-r2.json`
+and `vm-msix-control-short-final-readback.json` retain these observations. The VM
+stage `AIW-MSIX-Control-0a335285792644c1a35de52ece073974` retains the complete
+control output and ownership/provider records. This proves the narrow launcher
+prerequisite, not MSIX installation, editing or isolation. Independent outer
+driver process/stream/deadline supervision and the real application lifecycle
+remain required before accepting that trial.
+
 ## Feedback into assessment
 
 The completed trial must inform shared assessment without introducing a second
