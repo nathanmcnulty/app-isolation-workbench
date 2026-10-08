@@ -1651,7 +1651,10 @@ impl GuestProcess {
         }
     }
 
-    fn wait_for_window(&self, timeout: Duration) -> Result<HWND, GuestMsiExecutionError> {
+    pub(crate) fn wait_for_window(
+        &self,
+        timeout: Duration,
+    ) -> Result<HWND, GuestMsiExecutionError> {
         let deadline = Instant::now().checked_add(timeout).ok_or_else(|| {
             GuestMsiExecutionError::Process(
                 "window observation timeout overflowed monotonic clock".to_owned(),

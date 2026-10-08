@@ -7,6 +7,13 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
+[features]
+research-msix-control = []
+
+[[example]]
+name = "msix_standard_user_control"
+required-features = ["research-msix-control"]
+
 [dependencies]
 aiw-probe.workspace = true
 aiw-provider-wsb.workspace = true

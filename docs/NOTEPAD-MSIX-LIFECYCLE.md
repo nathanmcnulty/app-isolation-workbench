@@ -139,6 +139,23 @@ profile, medium non-elevated token and visible owned control, then install the
 same verified package with new evidence. Do not weaken the token gate or change
 the VM's UAC policy to pass this trial.
 
+### Standard-user research control
+
+The `aiw-windows-platform` example `msix_standard_user_control` is compiled only
+with the explicit `research-msix-control` feature. Default production builds
+exclude it. It accepts no command or path arguments and requires the native
+Sandbox operator name plus a fresh `C:\AIW-Msix-Control-Output` mapping.
+It calls the production `StandardUserSession` and `GuestProcess` implementations:
+fresh account/profile/environment, one-use credentials, suspended-child token
+and session validation, exact-SID desktop grant/access preflight, owned handles
+and job. Its only child is a fixed project-owned GUI control, not Notepad++.
+It retains process/token/window/profile observations, a child transcript,
+pre-cleanup PID inventory and post-cleanup job readback before a terminal result.
+Cleanup and evidence-export failures preserve the primary operation error.
+The account and desktop grant live only in the disposable Sandbox and require
+disposal of that exact owned session. A passing control is a prerequisite for
+the application trial; it is not install or compatibility proof.
+
 ## Feedback into assessment
 
 The completed trial must inform shared assessment without introducing a second
