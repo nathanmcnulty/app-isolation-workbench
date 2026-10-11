@@ -312,7 +312,10 @@ pub fn run() -> TrialResult<()> {
         return attempt;
     }
     if arguments.len() == 1 && arguments[0] == "vm-controller" {
-        return run_vm_parent(&image_hash);
+        return run_vm_parent(&image_hash, false);
+    }
+    if arguments.len() == 1 && arguments[0] == "vm-launch-control" {
+        return run_vm_parent(&image_hash, true);
     }
     if !arguments.is_empty() || user_name()? != "WDAGUtilityAccount" {
         return Err("Closed parent requires Sandbox operator and no arguments".into());
@@ -586,22 +589,20 @@ fn run_fixed_powershell(command: String, deadline: u64) -> TrialResult<()> {
             command,
         ],
     )?;
-    let operation = child.wait_for_exit(Duration::from_secs(deadline));
-    let normal = if operation.as_ref().is_ok_and(|v| *v == 0) {
+    let operation = (|| {
+        let code = child.wait_for_exit(Duration::from_secs(deadline))?;
+        if code != 0 {
+            return Err(crate::GuestMsiExecutionError::Process(format!(
+                "Fixed primary-context PowerShell failed: {code}"
+            )));
+        }
         child.verify_empty_after_success()
-    } else {
-        Ok(())
-    };
+    })();
     let cleanup = child.cleanup();
-    let code = operation?;
-    normal?;
-    cleanup?;
-    if code != 0 {
-        return Err(format!("Fixed primary-context PowerShell failed: {code}").into());
-    }
+    crate::guest_msi::complete_process_operation(operation, cleanup)?;
     Ok(())
 }
-fn run_vm_parent(image_hash: &str) -> TrialResult<()> {
+fn run_vm_parent(image_hash: &str, launch_control: bool) -> TrialResult<()> {
     let token = aiw_token::collect_current_process_token()?;
     if token.user_sid != "S-1-5-18" || session_id(std::process::id())? != 0 {
         return Err("Dedicated VM controller requires LocalSystem session zero".into());
@@ -699,6 +700,9 @@ $user=Get-LocalUser -Name AiwStandardUser;if($user.SID.Value -cne '{sid}'){{thro
             "primary-context.json",
             serde_json::json!({"prepared":prepared,"runNonce":prepared.run_nonce,"authenticationId":user.authentication_id,"sourceImageSha256":image_hash}),
         )?;
+        if launch_control {
+            return run_primary_launch_control(&evidence, &user);
+        }
         // Grant only read access to the fixed context; the application writes its
         // own profile, never this privileged evidence destination.
         run_fixed_powershell(
@@ -733,10 +737,77 @@ $user=Get-LocalUser -Name AiwStandardUser;if($user.SID.Value -cne '{sid}'){{thro
         record(
             &evidence,
             "failure.json",
-            serde_json::json!({"error":error.to_string(),"researchOnly":true,"recovery":"retain stage; restore exact dedicated VM boundary; no account adoption or automatic retry"}),
+            serde_json::json!({"error":error.to_string(),"researchOnly":true,"controlOnly":launch_control,"recovery":"retain stage; restore exact dedicated VM boundary; no account adoption or automatic retry"}),
         )?;
     }
     attempt
+}
+
+fn run_primary_launch_control(
+    evidence: &Path,
+    user: &crate::research_msix_primary_user::PrimaryInteractiveUser,
+) -> TrialResult<()> {
+    let path = Path::new(r"C:\Windows\System32\cmd.exe");
+    let _directory = hold_directory(path.parent().ok_or("OS control parent absent")?)?;
+    let mut image = OpenOptions::new()
+        .read(true)
+        .share_mode(1)
+        .custom_flags(0x00200000)
+        .open(path)?;
+    let metadata = image.metadata()?;
+    if !metadata.is_file()
+        || metadata.file_attributes() & 0x400 != 0
+        || metadata.len() > 16 * 1024 * 1024
+    {
+        return Err("Bounded non-reparse OS control image required".into());
+    }
+    let mut digest = Sha256::new();
+    let mut buffer = [0u8; 65536];
+    loop {
+        let count = image.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    let hash = hex::encode(digest.finalize());
+    run_fixed_powershell(
+        "$ErrorActionPreference='Stop';$s=Get-AuthenticodeSignature -LiteralPath 'C:\\Windows\\System32\\cmd.exe';if($s.Status -ne 'Valid'){throw 'OS control signature invalid'}".into(),
+        30,
+    )?;
+    record(
+        evidence,
+        "launch-control-request.json",
+        serde_json::json!({
+            "controlOnly":true,"imagePath":path,"imageSha256":hash,
+            "signatureValid":true,"expectedExitCode":42,"breakawayRequested":false,
+            "userSid":user.context().user_sid,"sessionId":user.session,
+            "authenticationId":user.authentication_id
+        }),
+    )?;
+    let child = GuestProcess::start_primary_launch_control(user)?;
+    let operation = (|| {
+        let code = child.wait_for_exit(Duration::from_secs(10))?;
+        if code != 42 {
+            return Err(crate::GuestMsiExecutionError::Process(format!(
+                "Fixed primary launch control exited {code}"
+            )));
+        }
+        child.verify_empty_after_success()?;
+        Ok(code)
+    })();
+    let cleanup = child.cleanup();
+    let code = crate::guest_msi::complete_process_operation(operation, cleanup)?;
+    // A control receipt is deliberately distinct from lifecycle result.json.
+    record(
+        evidence,
+        "launch-control-result.json",
+        serde_json::json!({
+            "researchOnly":true,"controlOnly":true,"passed":true,
+            "exitCode":code,"processId":child.process_id(),"jobEmpty":true,
+            "applicationCompatibility":"notMeasured","isolation":"notMeasured"
+        }),
+    )
 }
 
 // Diagnostic only: a nested job query describes the immediate job, not every

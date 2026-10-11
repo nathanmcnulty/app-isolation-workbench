@@ -274,6 +274,43 @@ Ten focused lifecycle tests pass, including the read-only native observer; this
 does not establish cross-session launch or packaged execution. Next use a fixed
 owned control through the actual controller chain before another installation.
 
+### Fixed primary launch control
+
+The closed `vm-launch-control` mode reuses the lifecycle controller's protected
+input/source/preparation, dedicated SYSTEM/VM identity, before inventory, and WTS
+primary-user gates. It branches before profile evidence creation or installation.
+It holds the non-reparse System32 parent and bounded `cmd.exe` image, hashes that
+held image, and requires a valid Windows Authenticode observation before launch.
+The sole command is `C:\Windows\System32\cmd.exe /d /c "exit 42"`; no caller
+arguments, credentials, new launch flags, breakaway, or desktop ACL changes exist.
+The same suspended `CreateProcessAsUserW` path verifies held token/session/logon
+and image identity, assigns the exact kill-on-close job, restores privileges,
+and resumes once. Require exit 42 within ten seconds and confirmed job cleanup.
+
+Request and terminal records are `launch-control-request.json` and
+`launch-control-result.json` under the protected stage. A control never publishes
+lifecycle `result.json`, and its result explicitly leaves compatibility/isolation
+unmeasured. Failures identify `controlOnly` and preserve simultaneous operation
+and cleanup errors, including in the prerequisite PowerShell helper. Existing
+preparation expiry and fresh-output rules still apply: do not run this mode with
+the retained failed trial's expired preparation or populated output.
+
+The real local command test exercises exact command quoting, exit 42, and owned-job
+cleanup. It does not prove the VM's WTS/cross-session launch. After the pending
+diagnostic command is terminal and the disposable baseline is restored, perform
+this control through the same Azure chain before another installation. Success
+narrows the earlier failure toward the lifecycle image or execution-policy path;
+the same pre-PID denial instead strengthens the common job/token/desktop hypothesis.
+Neither outcome alone proves packaged activation or application compatibility.
+
+Local validation passed 172 platform tests (ten explicitly ignored), then eight
+guest-process and ten lifecycle tests on the final cleanup changes. Research-feature
+warnings-as-errors clippy, release build, formatting and governance passed. The
+initial platform run used the crowded long-lived TEMP and failed bounded parent
+inventory checks; retained logs preserve that failure and the fresh-TEMP rerun.
+No live primary-launch control has run yet. At 2026-10-11 07:42 UTC, independent
+RDP readback still observed diagnostic PID 1820 and `RunCommand_470` transitioning.
+
 ## Current evidence
 
 The first unsigned package assembled with the pinned tool. Two subsequent fresh

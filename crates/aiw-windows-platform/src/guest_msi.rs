@@ -1345,7 +1345,7 @@ fn validate_fixed_document_contract(
     Ok(expected_sha256)
 }
 
-fn complete_process_operation<T>(
+pub(crate) fn complete_process_operation<T>(
     operation: Result<T, GuestMsiExecutionError>,
     cleanup: Result<(), GuestMsiExecutionError>,
 ) -> Result<T, GuestMsiExecutionError> {
@@ -1366,6 +1366,11 @@ pub(crate) struct GuestProcess {
     initial_thread_id: u32,
     initial_thread: OwnedHandle,
 }
+
+#[cfg(feature = "research-msix-lifecycle")]
+const PRIMARY_CONTROL_IMAGE: &str = r"C:\Windows\System32\cmd.exe";
+#[cfg(feature = "research-msix-lifecycle")]
+const PRIMARY_CONTROL_ARGUMENTS: [&str; 3] = ["/d", "/c", "exit 42"];
 
 /// The installer writes locally inside the disposable worker. Publish a bounded
 /// raw tail only after process/job cleanup, with no compatibility claims.
@@ -1404,14 +1409,35 @@ impl GuestProcess {
     pub(crate) fn start_primary_interactive(
         user: &crate::research_msix_primary_user::PrimaryInteractiveUser,
     ) -> Result<Self, GuestMsiExecutionError> {
+        Self::start_primary_fixed(user, false)
+    }
+    #[cfg(feature = "research-msix-lifecycle")]
+    pub(crate) fn start_primary_launch_control(
+        user: &crate::research_msix_primary_user::PrimaryInteractiveUser,
+    ) -> Result<Self, GuestMsiExecutionError> {
+        Self::start_primary_fixed(user, true)
+    }
+    #[cfg(feature = "research-msix-lifecycle")]
+    fn start_primary_fixed(
+        user: &crate::research_msix_primary_user::PrimaryInteractiveUser,
+        control: bool,
+    ) -> Result<Self, GuestMsiExecutionError> {
         use windows::Win32::System::Threading::CreateProcessAsUserW;
-        let path = r"C:\AIW-Msix-Lifecycle-Input\msix_standard_user_lifecycle.exe";
+        // Both commands are compiled in. The control cannot run application
+        // code, change launch flags, or escape inherited job restrictions.
+        let (path, arguments): (&str, &[&str]) = if control {
+            (PRIMARY_CONTROL_IMAGE, &PRIMARY_CONTROL_ARGUMENTS)
+        } else {
+            (
+                r"C:\AIW-Msix-Lifecycle-Input\msix_standard_user_lifecycle.exe",
+                &["vm-lifecycle-child"],
+            )
+        };
         let application = wide(path)?;
         let directory = wide(r"C:\AIW-Msix-Lifecycle-Input")?;
-        let mut command = wide(&aiw_windows_command_line::join_arguments([
-            path,
-            "vm-lifecycle-child",
-        ]))?;
+        let mut command = wide(&aiw_windows_command_line::join_arguments(
+            std::iter::once(path).chain(arguments.iter().copied()),
+        ))?;
         let mut desktop = wide(r"winsta0\default")?;
         let startup = STARTUPINFOW {
             cb: std::mem::size_of::<STARTUPINFOW>() as u32,
@@ -2144,6 +2170,37 @@ fn wide_os(value: &OsStr) -> Result<Vec<u16>, GuestMsiExecutionError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_process_operation_preserves_unconfirmed_containment_cleanup() {
+        let error = complete_process_operation::<()>(
+            Err(GuestMsiExecutionError::Process(
+                "control deadline exceeded".into(),
+            )),
+            Err(GuestMsiExecutionError::Process(
+                "owned job still active".into(),
+            )),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("control deadline exceeded"));
+        assert!(error.contains("containment cleanup also failed"));
+        assert!(error.contains("owned job still active"));
+    }
+
+    #[test]
+    #[cfg(feature = "research-msix-lifecycle")]
+    fn primary_control_command_exits_42_and_leaves_its_owned_job_empty() {
+        let arguments = PRIMARY_CONTROL_ARGUMENTS.map(str::to_owned);
+        let child = GuestProcess::start(PRIMARY_CONTROL_IMAGE, &arguments).unwrap();
+        let operation = (|| {
+            let exit = child.wait_for_exit(Duration::from_secs(10))?;
+            child.verify_empty_after_success()?;
+            Ok(exit)
+        })();
+        let cleanup = child.cleanup();
+        assert_eq!(complete_process_operation(operation, cleanup).unwrap(), 42);
+    }
 
     #[test]
     fn standard_user_command_line_checks_native_utf16_boundary() {

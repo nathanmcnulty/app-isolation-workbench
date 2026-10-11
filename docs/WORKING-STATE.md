@@ -97,7 +97,12 @@ account. The diagnostic guest command remains live as PowerShell PID 1820,
 SDK response after an observation timeout is not completion proof. Research-only
 prelaunch job-limit diagnostics now distinguish an inherited-job hypothesis;
 launch permissions are unchanged. See the lifecycle document for exact evidence.
-Next prove a fixed control through that same chain before repeating installation.
+The closed `vm-launch-control` now tests signed Windows cmd exit 42 through the
+same suspended WTS launch and exact owned-job path, before any installation.
+Control receipts cannot satisfy lifecycle acceptance; fresh preparation/output
+remain mandatory. Next run that control after the live diagnostic is terminal
+and the disposable baseline is restored, then resolve its observed cause before
+repeating installation.
 Packaged execution remains unproven.
 Cold recovery was exercised: the same VM boots `aiw-msix-restored-123e286bd0cf`
 from snapshot `aiw-msix-cold-123e286bd0cf`. The original disk is retained and
