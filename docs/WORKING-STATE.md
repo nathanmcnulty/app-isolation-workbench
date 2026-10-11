@@ -82,48 +82,31 @@ PowerShell 5.1 and 7 pass two positive and twenty negative acceptance cases.
 The same check passed in the VM's actual RDP terminal, independently read back:
 real remote-interactive session/shell binding, but elevated operator and shell.
 That context remains diagnostic and is not accepted for a standard-user trial.
-The fixed VM path now reuses the same parent-owned lifecycle, with a WTS primary
-user token and suspended `CreateProcessAsUserW` launch into the already logged-on
-user's desktop. Exact VM/SYSTEM, immutable preparation and native interactive
-context checks precede installation. No file/pipe coordinator protocol or service
-was added. Reviewed code is pushed at `a7de2ee`; focused tests, clippy, release
-build, formatting and governance pass. Fresh account RID 1001, normal RDP login,
-session/profile preparation and transferred input hashes are verified. The actual
-controller exited 1 without timeout. Recovered stage evidence shows
-`CreateProcessAsUserW` access denied before child creation/installation; a final
-cleanup inventory is still missing. RDP is recovered with the dedicated test
-account. Fresh RDP readback confirms `RunCommand_470` finished at 07:59 UTC and
-PID 1820 is absent. Its final JSON serialization failed; the missing cleanup
-inventory remains unresolved. Bounded SYSTEM readback recovered the matching
-controller stderr and confirmed no lifecycle driver process; the profile evidence
-directory existed. The failed disk is retained. An empty
-SDK response after an observation timeout is not completion proof. Research-only
-prelaunch job-limit diagnostics now distinguish an inherited-job hypothesis;
-launch permissions are unchanged. See the lifecycle document for exact evidence.
-The closed `vm-launch-control` now tests signed Windows cmd exit 42 through the
-same suspended WTS launch and exact owned-job path, before any installation.
-Control receipts cannot satisfy lifecycle acceptance; fresh preparation/output
-remain mandatory. A separate managed SYSTEM command passed fixed cmd exit 42
-and process closure; it does not exercise WTS or packaged activation. The reviewed
-rollback restored the original disk and restarted the VM. Fresh SYSTEM readback
-verified the marker, account baseline, absent trial paths/package/processes, guest
-agent and unchanged clear-key recovery state. Fresh account preparation r4 passed
-with only Users/RDP Users membership; its new creation time and nonce are retained.
-RDP reached the fresh standard user's desktop; protected preparation bound its
-actual shell in session 4 and verified all four frozen input hashes. The native
-launch control exited before WTS creation: the account helper generated a
-32-character nonce while the driver requires 64. Independent bounded readback
-confirmed exit and no remaining driver or profile AIW evidence directory.
-Canonical repository preparation helpers and a PowerShell-producer-to-native
-contract test now cover this mismatch. Next restore from the immutable snapshot
-into a fresh disk, validate the canonical account/preparation contract before
-mutation, and run the control under a new account/nonce/time binding. Preserve the
-failed account receipts and expired window; do not repeat installation yet.
-Packaged execution remains unproven.
+The reviewed fixed VM path uses a WTS primary token and suspended
+`CreateProcessAsUserW` launch into the real logged-on user's desktop. Earlier
+pre-installation access-denied and missing final-inventory evidence remain
+retained in the lifecycle document and failed disks. The closed `vm-launch-control`
+tests signed Windows cmd exit 42 through the same launch and owned-job path;
+its receipts cannot satisfy application lifecycle acceptance. A separate managed
+SYSTEM cmd control passed, but did not exercise WTS or packaged activation.
+After rollback, r4 reached real standard-user RDP but stopped before WTS creation
+because the account helper produced a 32-character nonce instead of 64.
+Canonical preparation helpers and a PowerShell-producer-to-native contract test
+fix this mismatch at `9d4a4aa`; independent review and focused checks passed.
+A fresh snapshot clone, account and real RDP login passed the canonical preparation
+contract. The frozen `c2fda15` control then failed `CreateProcessAsUserW` with
+`0x80070005` before child handles or installation. Retained records bind the
+standard user's primary token in session 2 to a SYSTEM controller in session 0
+inside an inherited job. Job/session conflict is a hypothesis, not a package verdict.
+Next measure a fixed protected Task Scheduler controller's job and privilege
+context, then prove its fixed cmd control before any fresh native trial. Preserve
+failed accounts, preparations and windows; no retry or adoption. Packaged execution
+remains unproven. Detailed r5 identities are in the lifecycle document.
 Cold recovery was exercised from snapshot `aiw-msix-cold-123e286bd0cf`.
-The VM now boots the original disk; failed disk `aiw-msix-restored-123e286bd0cf`
-is retained and unattached. Marker/account baseline, earlier clean-shutdown events, absent research
-package/trial paths and unchanged BitLocker state are independently verified.
+The VM now boots fresh clone `aiw-msix-primary-r5-1e48cc0d203e`; the original disk
+and failed disk `aiw-msix-restored-123e286bd0cf` are retained and unattached.
+At baseline readback, marker/accounts, earlier clean-shutdown events, absent
+research package/trial paths and unchanged BitLocker state were independently verified.
 Details and exact rollback/evidence pointers are in the lifecycle document.
 The held suspended-process control passes local checks, with any-job membership
 explicitly diagnostic. Packaged execution remains unverified.

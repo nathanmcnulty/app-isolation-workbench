@@ -421,6 +421,70 @@ trial must restore from the immutable snapshot into a new disk, use the canonica
 helpers before account mutation, and retain a new account/nonce/time binding.
 Do not alter the failed account receipts or extend their expired window.
 
+### Fresh canonical preparation and inherited-job control, October 11
+
+The canonical producer and native contract checks were independently reviewed and
+pushed at `9d4a4aa`. PowerShell 5.1 and 7 each passed twelve preparation cases;
+the two focused Windows-native tests, formatting and governance passed. Runtime
+launch behavior was unchanged, so the live control retained the frozen `c2fda15`
+driver and its independently supplied input hashes.
+
+The immutable snapshot was copied to `aiw-msix-primary-r5-1e48cc0d203e`, disk
+unique ID `c5642022-73fc-4fdf-83a9-63fb4d486c59`. Reviewed recovery preserved
+both earlier disks, used the exact VM ETag and `Detach` policy, and started the VM.
+Fresh SYSTEM readback at `2026-10-11T09:12:55.1533974Z` verified the baseline
+marker/accounts, absent trial paths/package/processes, running guest agent and
+unchanged clear-key recovery state. Recovery is not packaged execution proof.
+
+Fresh account creation at `2026-10-11T09:14:48.4956766Z` recorded SID
+`S-1-5-21-3407263227-439785483-4249424476-1001`, only Users/RDP Users membership
+and the canonical 64-character nonce
+`229eabfd92af9ea71f5db826d2abf1745912e3d72d5b916ba7823b0762692429`.
+The immutable account window was `09:14:42.9314251Z`–`09:44:42.9314251Z`.
+Real RDP sign-in reached the new user's desktop. An initial file-copy preparation
+stopped on a missing Downloads input, before native launch; its record remains
+retained. Corrected Explorer clipboard transfer produced all four expected files.
+A new protected preparation then passed at `09:22:56.420972Z`, binding shell
+PID 7680/session 2 and all input hashes. Preparation SHA-256:
+`3abbf8fb81f1c466fbfd35e413c4a1dc83523576981af8260111d6220aa15f4a`.
+
+The native control PID 6548 exited 1 at `09:23:33.8698166Z`, without timeout,
+on `CreateProcessAsUserW: Access is denied. (0x80070005)`. No child handles,
+control success receipt or application installation were established. Independent
+bounded SYSTEM readback verified the retained failure, stderr and wrapper receipt,
+no remaining driver process and no profile AIW evidence directory. Package
+inventory was not queried by that final readback.
+
+The retained primary context bound RemoteInteractive authentication ID
+`00000000001452b2`, the standard-user SID and session 2. The signed fixed Windows
+cmd image hash was
+`97ac98b1a92c286054cce55239cfccdfc23a5517bd07fe693072c9ca96c7dabb`.
+The request explicitly recorded `breakawayRequested=false`. The SYSTEM controller
+reported session 0 and `inAnyJob=true`; its immediate limits/UI restrictions were
+zero. Microsoft's [job contract](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-assignprocesstojobobject)
+requires job members to share a session, and [child creation normally inherits the
+parent's job](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects).
+Inherited Azure job/session conflict is therefore a strong hypothesis, not a
+proven cause or application compatibility verdict; ancestor limits remain unknown.
+
+Evidence under the host proof root: `primary-r5-recovery-state.json`,
+`managed-primary-baseline-r5-verified.json`,
+`managed-primary-preparation-r5b-observed-*.json`,
+`managed-primary-control-readback-r5-observed-*.json`, and
+`managed-primary-control-context-r5-observed-*.json`. Current failed guest stages
+remain on the attached r5 disk. Do not repeat the native control against this
+account/output or adopt its expired preparation.
+
+The next discriminator is a protected, create-only, demand-start SYSTEM Task
+Scheduler observation with a fixed action, no triggers/retries, exact task/action
+binding and a deadline. The action must measure its actual job membership and
+required privilege presence/enable/restore; Scheduler ancestry alone is not proof.
+Then a held fixed cmd exit-42 control must prove process ownership and cleanup.
+Only after those controls pass should a new snapshot clone, account and protected
+preparation run the unchanged native WTS control. No breakaway flags, desktop or
+executable ACL relaxation, generic command interface, or production launcher change
+is justified by the current evidence.
+
 ## Current evidence
 
 The first unsigned package assembled with the pinned tool. Two subsequent fresh
