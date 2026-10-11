@@ -58,8 +58,12 @@ independently read back. A closed, feature-gated native lifecycle driver now cov
 the full fixed install/edit/save/configuration/uninstall contract, with required
 receipts and negative acceptance tests. Its VM read-only preflight diagnosed and
 retained kernel image-query failures; positive no-package observations now remain
-distinct from unknown identity and incomplete image visibility. No live application
-trial has run with this driver. The real application lifecycle remains open. Provider inventory
+distinct from unknown identity and incomplete image visibility. The first live
+attempt at `83b55a7` stopped before installation because the standard-user scan
+could not inspect system processes. Failure export and exact worker disposal are
+verified. Global inventory now belongs to the privileged parent, including a gate
+before job cleanup; child unknown queries remain explicit diagnostics. A fresh
+application trial is required. The real application lifecycle remains open. Provider inventory
 must be queried in the owned operator's context; SYSTEM absence is not global proof.
 Local/hosted manifest line-ending drift also prompted canonical LF generation;
 LF/CRLF source assembly checks cover that correction. See the lifecycle document

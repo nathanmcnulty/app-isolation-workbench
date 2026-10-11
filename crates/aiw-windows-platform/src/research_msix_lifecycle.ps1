@@ -44,8 +44,10 @@ try {
  Record 'preflight-inventory' @{packages=$preexistingPackages;processes=$preexistingProcesses}
  if($preexistingPackages.Count -ne 0 -or $preexistingProcesses.Count -ne 0){throw 'Preexisting application registration or process refused'}
  $packageProcesses=Get-AiwPackageProcessInventory
+ $packageProcesses|Add-Member -NotePropertyName queryAuthority -NotePropertyValue 'applicationUserDiagnostic'
+ $packageProcesses|Add-Member -NotePropertyName globalAbsenceVerified -NotePropertyValue $false
  Record 'package-processes-before' $packageProcesses
- if($packageProcesses.matches.Count -ne 0 -or $packageProcesses.queryErrors.Count -ne 0){throw 'Preflight package process inventory is not proven empty'}
+ if($packageProcesses.matches.Count -ne 0 -or @($packageProcesses.queryErrors|Where-Object name -ieq 'notepad++').Count -ne 0){throw 'Preflight application candidate refused'}
  Invoke-AiwDriverControl -EvidenceDirectory (Join-Path $evidence 'driver-control')|Out-Null
  $control=Get-Content (Join-Path $evidence 'driver-control\control.json') -Raw|ConvertFrom-Json
  if(!$control.passed){throw 'Driver control failed'}
@@ -116,8 +118,10 @@ try {
  Record 'editor-exit' @{processId=$activatedPid;exitCode=$ownedProcess.ExitCode;closed=$ownedProcess.HasExited}
  if($ownedProcess.ExitCode -ne 0){throw 'Packaged editor exited unsuccessfully'}
  $packageProcesses=Get-AiwPackageProcessInventory
+ $packageProcesses|Add-Member -NotePropertyName queryAuthority -NotePropertyValue 'applicationUserDiagnostic'
+ $packageProcesses|Add-Member -NotePropertyName globalAbsenceVerified -NotePropertyValue $false
  Record 'package-processes-after-close' $packageProcesses
- if($packageProcesses.matches.Count -ne 0 -or $packageProcesses.queryErrors.Count -ne 0){throw 'Package-associated process cleanup is not proven'}
+ if($packageProcesses.matches.Count -ne 0 -or @($packageProcesses.queryErrors|Where-Object name -ieq 'notepad++').Count -ne 0){throw 'Application candidate remains after editor close'}
  $bytes=[IO.File]::ReadAllBytes($document)
  $expectedBytes=[Text.Encoding]::UTF8.GetBytes($expected)
  if([Convert]::ToBase64String($bytes) -cne [Convert]::ToBase64String($expectedBytes)){throw 'Saved document bytes differ'}
@@ -140,8 +144,10 @@ try {
  $processes=@(Get-Process -Name 'notepad++' -ErrorAction SilentlyContinue)
  $configAfterUninstall=@(ConfigSnapshot $family)
  $packageProcesses=Get-AiwPackageProcessInventory
+ $packageProcesses|Add-Member -NotePropertyName queryAuthority -NotePropertyValue 'applicationUserDiagnostic'
+ $packageProcesses|Add-Member -NotePropertyName globalAbsenceVerified -NotePropertyValue $false
  Record 'package-processes-after-uninstall' $packageProcesses
- if($packageProcesses.matches.Count -ne 0 -or $packageProcesses.queryErrors.Count -ne 0){throw 'Post-uninstall package process cleanup is not proven'}
+ if($packageProcesses.matches.Count -ne 0 -or @($packageProcesses.queryErrors|Where-Object name -ieq 'notepad++').Count -ne 0){throw 'Application candidate remains after uninstall'}
  Record 'cleanup' @{registrationAbsent=($remaining.Count -eq 0);applicationProcessesAbsent=($processes.Count -eq 0);installLocationPresent=(Test-Path -LiteralPath $installed.InstallLocation);configurationAfterUninstall=$configAfterUninstall;userDataDeletionClaim='notInferredFromUninstall'}
  if($remaining.Count -ne 0 -or $processes.Count -ne 0){throw 'Exact registration/process cleanup not verified'}
  Record 'result' ([ordered]@{completed=$true;researchOnly=$true;signedSha256=$SignedSha256;packageFullName=$installedFullName;packageIdentity='observed';runtime='mediumIlFullTrust';documentWorkflow='exactBytesVerified';configuration='perUserLocationObserved';payloadUnchanged=$true;registrationCleanup='verified';isolation='notMeasured';evidenceRoot=$evidence})

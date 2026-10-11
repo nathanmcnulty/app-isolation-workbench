@@ -222,8 +222,9 @@ disposal of the exact worker, not automatically adopted or retried.
 A read-only VM check exposed kernel pseudo-processes whose executable image
 query fails although Windows positively reports no package identity. The fixed
 inventory queries package identity first on the same held handle. Unknown
-identity, open/session failures and unqueryable named Notepad++ candidates still
-stop acceptance. Image failures are retained separately only after native
+identity and open/session failures stop the privileged parent's global acceptance;
+unqueryable named Notepad++ candidates stop either actor. Image failures are
+retained separately only after native
 `APPMODEL_ERROR_NO_PACKAGE`; their receipt shape is validated. This proves absence
 of the target package identity and named application, plus absence of its path
 among successfully queried images. It does not prove complete image visibility;
@@ -233,6 +234,28 @@ The initial failing observation is retained as `lifecycle-parser-current-r2.json
 under the host proof root, separately from subsequent corrected probes. These
 SYSTEM-context checks are syntax/native-query diagnostics, not standard-user
 execution, operator provider readiness or application compatibility proof.
+
+The first full-driver attempt used source `83b55a7` and executable SHA-256
+`911b17a313204c8e28382026a380e70c73387478eb080a6ca57eb560ed02cb14`,
+in Sandbox `60c0ef25-47ba-4885-a72b-018f9dc2add0`. It stopped at preflight:
+the standard user could not inspect 68 system processes. No install-started
+receipt or success result was published. Failure export, exact child identity,
+empty owned-job cleanup and the privileged parent's empty registration/process
+inventory were independently read back. The exact worker was stopped by its
+recorded operator; exit zero and that operator's empty provider inventory were
+independently verified. The VM remains available. Retained evidence:
+`vm-lifecycle-failure-detail-r1.json` and `vm-lifecycle-final-readback-r1.json`;
+VM stage `AIW-MSIX-Lifecycle-1baaecea11d945c6b59e951880999b48`.
+
+The correction assigns global inventory to the privileged parent before launch,
+after child completion **before** job cleanup, and after job cleanup. Each scan
+must prove absent registration/provisioning, no application candidate and no
+unknown package-identity query. The application user's scans retain every failed
+query with explicit diagnostic authority; they cannot claim global absence.
+Positive application matches and named-target failures still stop that child.
+It proves exact held-editor closure before current-user uninstall; global absence
+is verified at the parent's recorded checkpoints, not inferred during the
+editor-close/uninstall interval. This correction still requires a fresh live trial.
 
 ## Feedback into assessment
 

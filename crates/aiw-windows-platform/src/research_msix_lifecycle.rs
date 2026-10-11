@@ -196,9 +196,9 @@ fn parent_inventory(evidence: &Path, stage: InventoryStage) -> TrialResult<()> {
     let bytes = std::fs::read(evidence.join(stage.name()))?;
     let value: serde_json::Value =
         serde_json::from_slice(bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(&bytes))?;
-    if matches!(stage, InventoryStage::BeforeCleanup) {
-        return Ok(());
-    }
+    require_global_inventory(&value)
+}
+fn require_global_inventory(value: &serde_json::Value) -> TrialResult<()> {
     for name in ["packages", "provisioned"] {
         if !value[name].as_array().is_some_and(Vec::is_empty) {
             return Err(format!("Parent {name} inventory is not empty").into());
@@ -523,6 +523,37 @@ fn require_empty_process_inventory(value: &serde_json::Value) -> TrialResult<()>
     }
     Ok(())
 }
+fn require_application_user_process_diagnostics(value: &serde_json::Value) -> TrialResult<()> {
+    if value["queryAuthority"] != "applicationUserDiagnostic"
+        || value["globalAbsenceVerified"] != false
+    {
+        return Err("Application-user process diagnostic authority missing".into());
+    }
+    let errors = value["queryErrors"]
+        .as_array()
+        .ok_or("Missing process query diagnostics")?;
+    if errors.len() > 512 {
+        return Err("Process query diagnostic bound exceeded".into());
+    }
+    for error in errors {
+        if error["pid"].as_u64().is_none_or(|pid| pid <= 4)
+            || error["name"]
+                .as_str()
+                .is_none_or(|name| name.is_empty() || name.eq_ignore_ascii_case("notepad++"))
+            || error["error"]
+                .as_str()
+                .is_none_or(|message| message.is_empty() || message.len() > 4096)
+        {
+            return Err("Unknown or named-target process diagnostic refused".into());
+        }
+    }
+    // Retain unknown queries in the original receipt. Reuse positive-match and
+    // no-package image validation here; only the privileged parent's inventories
+    // before and after job cleanup can establish global absence.
+    let mut observed = value.clone();
+    observed["queryErrors"] = serde_json::json!([]);
+    require_empty_process_inventory(&observed)
+}
 const LIFECYCLE_RECEIPTS: &[&str] = &[
     "install-started.json",
     "worker.json",
@@ -795,7 +826,7 @@ fn validate_lifecycle(
         "package-processes-after-close.json",
         "package-processes-after-uninstall.json",
     ] {
-        require_empty_process_inventory(&get(name)?)?;
+        require_application_user_process_diagnostics(&get(name)?)?;
     }
     let cleanup = get("cleanup.json")?;
     if cleanup["registrationAbsent"] != true
@@ -964,7 +995,7 @@ mod tests {
                 super::record(
                     &stages,
                     name,
-                    json!({"matches":[],"queryErrors":[],"nonPackageImageUnavailable":[]}),
+                    json!({"matches":[],"queryErrors":[],"nonPackageImageUnavailable":[],"queryAuthority":"applicationUserDiagnostic","globalAbsenceVerified":false}),
                 )
                 .unwrap();
             }
@@ -1044,6 +1075,38 @@ mod tests {
         )
         .unwrap();
         assert!(fixture.validate().is_err());
+    }
+    #[test]
+    fn unknown_queries_are_diagnostic_only_under_application_user_authority() {
+        let mut inventory = serde_json::json!({"matches":[],"queryErrors":[{"pid":680,"name":"csrss","error":"Access is denied"}],"nonPackageImageUnavailable":[],"queryAuthority":"applicationUserDiagnostic","globalAbsenceVerified":false});
+        super::require_application_user_process_diagnostics(&inventory).unwrap();
+        assert!(
+            super::require_global_inventory(
+                &serde_json::json!({"packages":[],"provisioned":[],"processes":inventory})
+            )
+            .is_err()
+        );
+        inventory["queryErrors"][0]["name"] = serde_json::json!("Notepad++");
+        assert!(super::require_application_user_process_diagnostics(&inventory).is_err());
+        inventory["queryErrors"][0]["name"] = serde_json::json!("csrss");
+        inventory["globalAbsenceVerified"] = serde_json::json!(true);
+        assert!(super::require_application_user_process_diagnostics(&inventory).is_err());
+        inventory["globalAbsenceVerified"] = serde_json::json!(false);
+        inventory["matches"] = serde_json::json!([{"PackageFullName":"AIWResearch.NotepadPP"}]);
+        assert!(super::require_application_user_process_diagnostics(&inventory).is_err());
+        inventory["matches"] = serde_json::json!([]);
+        inventory["queryErrors"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("error");
+        assert!(super::require_application_user_process_diagnostics(&inventory).is_err());
+        let clear =
+            serde_json::json!({"matches":[],"queryErrors":[],"nonPackageImageUnavailable":[]});
+        super::require_global_inventory(
+            &serde_json::json!({"packages":[],"provisioned":[],"processes":clear}),
+        )
+        .unwrap();
+        assert!(super::require_global_inventory(&serde_json::json!({"packages":[{"PackageFullName":"AIWResearch.NotepadPP"}],"provisioned":[],"processes":clear})).is_err());
     }
     #[test]
     fn image_diagnostics_require_positive_no_package_observation() {
