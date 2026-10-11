@@ -65,8 +65,16 @@ verified. Global inventory now belongs to the privileged parent, including a gat
 before job cleanup; child unknown queries remain explicit diagnostics. A fresh
 retry passed the real driver controls, then found a PowerShell 5.1 empty-snapshot
 bug before installation. Exact worker disposal is verified; the sum fix and its
-empty/count/size regression tests pass in PowerShell 7 and 5.1. A fresh application
-trial is required. The real application lifecycle remains open. Provider inventory
+empty/count/size regression tests pass in PowerShell 7 and 5.1. At `ba1fb17` a fresh
+standard-user worker installed the signed MSIX and verified all 220 payload entries;
+packaged activation failed with logon-session HRESULT `0x80070520` before an editor
+appeared. Failure evidence is retained; exact worker disposal and the recorded
+operator's empty provider inventory are independently verified. RDP stayed connected.
+Next test a suspended launch of the exact registered executable, requiring actual
+package/application/image/token identity before resume; otherwise stop and compare
+with a disposable VM's real standard-user interactive login. Matching session
+ID/profile and the earlier GUI control are insufficient activation proof.
+The real application lifecycle remains open. Provider inventory
 must be queried in the owned operator's context; SYSTEM absence is not global proof.
 Local/hosted manifest line-ending drift also prompted canonical LF generation;
 LF/CRLF source assembly checks cover that correction. See the lifecycle document

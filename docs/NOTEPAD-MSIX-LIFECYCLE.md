@@ -274,8 +274,54 @@ The configuration helper now starts its byte sum at zero. The focused
 `scripts/research/test-msix-lifecycle-configuration.ps1` test extracts only the
 actual configuration helpers without executing the trial. Empty and single-file
 snapshots, combined count/byte bounds and individual file bounds pass in both
-PowerShell 7 and 5.1. Application installation and execution still require a fresh
-worker trial.
+PowerShell 7 and 5.1. The subsequent fresh worker reached installation, as recorded
+below; the complete application lifecycle remains unverified.
+
+The retry at `ba1fb17` used executable SHA-256
+`89bc3729c65d9079088e660bfbdd2c32b740a03e2881a9a97973119344c9e6d5`
+in Sandbox `4c678c71-1c21-4c9a-8631-d89a7009636f`. The actual application-user
+supervisor had the expected SID/profile, medium integrity, no elevation, no enabled
+Administrators group and inherited job ownership. The signed MSIX installed with
+status `Ok` and the exact expected registration. All 220 installed payload entries
+passed the driver checks; independent retained-receipt comparison against the
+hash-verified assembly confirmed their paths and hashes. The raw installed manifest
+also matched the expected hash. Evidence: `vm-lifecycle-install-detail-r3.json` and
+`vm-lifecycle-payload-readback-r4.json`, under the host proof root; VM stage
+`AIW-MSIX-Lifecycle-52389bcc9c4f448e9a297b97fdfdec4b`.
+
+`IApplicationActivationManager::ActivateApplication` then failed with
+`0x80070520` (the specified logon session does not exist). No activation-returned,
+observed-application, awaiting-edit or success receipt was published. The owned job
+was emptied, but the parent's registration inventory correctly refused success
+because the package remained installed. Failure evidence was retained before
+disposing only the exact owned worker; no automatic uninstall or repeated install
+was performed. Independent readback of `vm-lifecycle-final-readback-r3.json`
+confirmed stop exit zero and the recorded operator's empty provider inventory.
+RDP remained connected to the VM. This is an activation-context failure, not an
+application compatibility verdict.
+
+The launcher uses `CreateProcessWithLogonW` for the alternate standard user on the
+existing desktop. A matching Windows session ID, loaded profile and visible control
+GUI do not establish that packaged activation works in that context. Microsoft's
+[activation API contract](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-iapplicationactivationmanager-activateapplication)
+specifies activation in the current session; it does not establish this alternate
+user arrangement as supported. The next control must establish the actual package
+activation context and independently observe package/image/token identity before
+another full document lifecycle. Do not substitute elevated or unpackaged execution
+for the required observation, or infer that every alternate-user activation is
+unsupported from this single HRESULT.
+
+The next bounded research control will attempt suspended creation of the exact
+registered installed executable. Before resuming application code, require the
+held process's exact package full name and
+`AIWResearch.NotepadPP_q1fhfzcjv9wt6!Notepad` application identity, image hash/path
+and standard-user token/session. Missing or mismatched identity must terminate
+the suspended process and stop; an unpackaged launch cannot satisfy this control.
+Use [GetApplicationUserModelId](https://learn.microsoft.com/en-us/windows/win32/api/appmodel/nf-appmodel-getapplicationusermodelid)
+to distinguish the declared application from its package. This is an experiment,
+not an accepted replacement activation route. If it fails, compare against a
+disposable VM with a real standard-user interactive sign-in before changing the
+production launcher or inferring application incompatibility.
 
 ## Feedback into assessment
 
@@ -294,3 +340,10 @@ needs registration readback rather than command acceptance. An unsuitable worker
 operator is a trial prerequisite failure, not evidence that the application is
 incompatible. Existing assessment standard-user controls remain the implementation
 to reuse; this research does not introduce a separate compatibility verdict.
+
+Installation and activation readiness must also stay separate. The latest worker
+proves that successful signed installation and payload verification do not establish
+a usable packaged activation session. Shared assessment should retain this as an
+unverified execution prerequisite until a matching activation control passes,
+preserving the successful installation observation without upgrading compatibility
+or isolation claims.
