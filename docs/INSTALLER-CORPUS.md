@@ -2,7 +2,7 @@
 
 Read-only inventory on 2026-09-07 of the user-supplied `%USERPROFILE%\Downloads\installers` folder. No installer was executed, downloaded, unblocked, copied, or modified. These are candidate fixtures, not supported application profiles or successful installation results. Passive fingerprints below are not protected intake receipts.
 
-Subsequent 2026-09-09 [Bambu feasibility trials](BAMBU-STUDIO-PROFILE.md) used its verified protected intake inside disposable Windows Sandbox sessions. Silent offline installation and standard-user local STL-to-3MF export completed; bounded artifact inspection found the expected tetrahedron mesh. This supersedes the inventory's untested Bambu installation status, but approved production execution/reporting remains unimplemented. The original installers were not executed on the host.
+Subsequent [Bambu feasibility trials](BAMBU-STUDIO-PROFILE.md) and [signed public acceptance](BAMBU-PUBLIC-ACCEPTANCE.md) supersede the inventory's original untested status. Approved standard-user local STL-to-3MF export, reporting, package assembly/replay and cleanup have retained acceptance evidence. The original installers were not executed on the host.
 
 | File | MiB | Observed classification | Proposed coverage |
 |---|---:|---|---|
@@ -14,13 +14,33 @@ Subsequent 2026-09-09 [Bambu feasibility trials](BAMBU-STUDIO-PROFILE.md) used i
 | `Signal Private Messenger Installer.exe` | 0.78 | Microsoft Store Installer wrapper | Acquire direct desktop payload for an offline install/UI test; linking/messaging separate |
 | `vs_BuildTools.exe` | 4.25 | Visual Studio 2022 bootstrapper | Pinned workload/layout acquisition and dependency-heavy installation later |
 
-## Important distinctions
+## Planned addition: Visual Studio Code
+
+Requested 2026-10-11. VS Code is distinct from the Visual Studio Build Tools
+bootstrapper above; no VS Code payload has been acquired or accepted by this record.
+Microsoft supplies [user/system installers and ZIP archives](https://code.visualstudio.com/docs/setup/windows)
+and documents [portable mode](https://code.visualstudio.com/docs/setup/portable).
+Pin one x64 release and its exact payload/signature before any disposable-worker trial.
+
+First compare an offline ZIP baseline with a user-install scenario: open a tiny
+project-owned folder, edit/save a UTF-8 file, close/reopen and verify exact bytes,
+settings location, process tree and cleanup. Keep portable and installed modes
+separate because they place user data differently. Run as an observed standard
+user; preserve Chromium sandboxing and record unsupported launch behavior.
+Then add one fixed project-owned integrated-terminal command to test child
+inheritance, deadlines and closure. Marketplace extensions, account sign-in,
+Settings Sync, remote development and agent workflows require separate scenarios.
+This candidate follows the current MSIX lifecycle and isolation-comparison gates;
+it does not replace the existing comparison workflow or establish VS Code support.
+
+## Installer distinctions
 
 Signal and ChatGPT both expose `Store Installer` / `StoreInstaller.exe` version resources and Microsoft signer identities. Their small files are acquisition wrappers; installed app bytes and versions must be measured after acquisition. Signal's [official download page](https://signal.org/download/) offers direct Windows and Microsoft Store routes. Its [desktop installation guidance](https://support.signal.org/hc/en-us/articles/360008216551-Installing-Signal) requires linking to a phone for actual use. An install/first-window test must not imply messaging was tested, and no personal account linking or message sending is part of the initial fixture.
 
 The DriveManager file is signed by SK hynix. Its [C3.2.0 manual](https://ssd.skhynix.com/download/driver_manager/Drive_Manager_Easy_Kit_Manual_C3.2.0_ENG.pdf) describes SSD monitoring, firmware updates, and drive erase, and requires administrator access for installation and use. Installation/window/close may be small tests, but physical-device functionality is a separate dependency. Missing hardware or denied device access in a worker must be reported explicitly. Physical host disks, firmware changes, erase, and hardware passthrough are outside this fixture's scope.
 
-The Bambu filename/version and large payload make it a useful candidate for a richer offline file workflow; this has not established offline installation or driver requirements. Use a project-owned tiny model for import/slice/save before adding cloud login, printer discovery, or hardware interactions.
+Bambu's accepted local export is a richer offline workflow. Slicing, cloud login,
+printer discovery and hardware interactions remain separate unmeasured functions.
 
 Visual Studio supports explicit workload selection and an offline layout, documented by [Microsoft](https://learn.microsoft.com/en-us/visualstudio/install/create-an-offline-installation-of-visual-studio?view=visualstudio). Pin the acquired payload/workload set rather than treating the bootstrapper hash as the final application identity. This inventory does not create that layout.
 

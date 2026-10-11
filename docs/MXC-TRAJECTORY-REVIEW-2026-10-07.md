@@ -22,6 +22,35 @@ warns of possible recovery mutation. No MXC binary was run for this review.
 
 ## What Microsoft's guidance changes
 
+### Codex integration reference inspected 2026-10-11
+
+OpenAI now [documents MXC on compatible Windows devices](https://learn.chatgpt.com/docs/windows/windows-sandbox).
+The local CLI reports `0.162.0-alpha.17.2`; this does not establish that this
+session uses MXC or that the host supports it. No host containment probe was run.
+Public source was sampled at `8c0f7011674145da7e10627769fb221c74fbf7a0`:
+[adapter contract](https://github.com/openai/codex/blob/8c0f7011674145da7e10627769fb221c74fbf7a0/codex-rs/mxc-sandbox/README.md),
+[policy translation](https://github.com/openai/codex/blob/8c0f7011674145da7e10627769fb221c74fbf7a0/codex-rs/mxc-sandbox/src/policy.rs),
+and [Windows entry](https://github.com/openai/codex/blob/8c0f7011674145da7e10627769fb221c74fbf7a0/codex-rs/mxc-sandbox/src/windows.rs).
+This snapshot is not verified as the installed binary's source or a full security review.
+
+Useful inputs to our existing MXC review gates:
+
+- Probe native availability and each requested feature before execution; an OS
+  version or broad SDK support flag alone is insufficient.
+- The inspected policy explicitly disables DACL mutation fallback. The adapter
+  contract distinguishes backend selection from runtime command failure and
+  rejects unsupported requests rather than retrying a failed command elsewhere.
+- Managed proxy networking permits bidirectional host loopback. Domain proxy
+  policy is not a host-loopback denial boundary; test both directions separately.
+- The contract records descendant termination on foreground exit and cancellation.
+  Test that lifecycle against applications and terminal children; a working
+  command is not proof that a detached-server workflow is supported.
+
+Reuse these questions in our disposable controls and exact SDK review. No AIW
+runtime pin, backend priority, requested policy or containment claim changes here.
+
+### Microsoft platform guidance
+
 The [October 7 announcement](https://blogs.windows.com/windowsdeveloper/2026/10/07/microsoft-execution-containers-policy-driven-containment-for-ai-agents/)
 usefully separates containment, identity and management, and recommends process,
 session, WSL and experimental MicroVM configurations for different workloads.
