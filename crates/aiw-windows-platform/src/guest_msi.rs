@@ -1425,6 +1425,23 @@ impl GuestProcess {
         self.process_id
     }
 
+    #[cfg(feature = "research-msix-lifecycle")]
+    pub(crate) fn is_in_owned_job(&self) -> Result<bool, GuestMsiExecutionError> {
+        let mut assigned = BOOL(0);
+        // SAFETY: exact retained process and job handles remain live.
+        unsafe {
+            IsProcessInJob(
+                raw_handle(&self.process),
+                Some(self.job.raw()),
+                &mut assigned,
+            )
+        }
+        .map_err(|error| {
+            GuestMsiExecutionError::Process(format!("Owned job membership: {error}"))
+        })?;
+        Ok(assigned.as_bool())
+    }
+
     pub(crate) fn active_processes(&self) -> Result<u32, GuestMsiExecutionError> {
         self.job.active_processes()
     }

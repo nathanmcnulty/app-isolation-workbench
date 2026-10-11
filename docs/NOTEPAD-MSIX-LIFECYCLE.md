@@ -206,6 +206,34 @@ prerequisite, not MSIX installation, editing or isolation. Independent outer
 driver process/stream/deadline supervision and the real application lifecycle
 remain required before accepting that trial.
 
+### Closed lifecycle driver
+
+The feature-gated `msix_standard_user_lifecycle` example implements the full
+fixed trial; it is excluded from production builds and has not yet passed a live
+application trial. Its native parent reuses the held standard-user launcher and
+owns the process job. The native child runs only the embedded lifecycle script,
+with the package, assembly and signing identities compiled in. No caller command,
+script path or executable identity is accepted. Success requires every stage
+receipt, independently checked document/configuration bytes, all 220 payload
+entries, actual application token/package identity, registration readback and
+owned-job cleanup. A failed brokered application is retained for inspection and
+disposal of the exact worker, not automatically adopted or retried.
+
+A read-only VM check exposed kernel pseudo-processes whose executable image
+query fails although Windows positively reports no package identity. The fixed
+inventory queries package identity first on the same held handle. Unknown
+identity, open/session failures and unqueryable named Notepad++ candidates still
+stop acceptance. Image failures are retained separately only after native
+`APPMODEL_ERROR_NO_PACKAGE`; their receipt shape is validated. This proves absence
+of the target package identity and named application, plus absence of its path
+among successfully queried images. It does not prove complete image visibility;
+listed non-package image paths remain unmeasured. See Microsoft's
+[package identity API contract](https://learn.microsoft.com/en-us/windows/win32/api/appmodel/nf-appmodel-getpackagefullname).
+The initial failing observation is retained as `lifecycle-parser-current-r2.json`
+under the host proof root, separately from subsequent corrected probes. These
+SYSTEM-context checks are syntax/native-query diagnostics, not standard-user
+execution, operator provider readiness or application compatibility proof.
+
 ## Feedback into assessment
 
 The completed trial must inform shared assessment without introducing a second

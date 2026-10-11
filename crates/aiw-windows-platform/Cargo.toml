@@ -9,10 +9,15 @@ rust-version.workspace = true
 
 [features]
 research-msix-control = []
+research-msix-lifecycle = []
 
 [[example]]
 name = "msix_standard_user_control"
 required-features = ["research-msix-control"]
+
+[[example]]
+name = "msix_standard_user_lifecycle"
+required-features = ["research-msix-lifecycle"]
 
 [dependencies]
 aiw-probe.workspace = true

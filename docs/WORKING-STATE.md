@@ -1,6 +1,6 @@
 # Working state
 
-Updated 2026-10-07. Verify this checkout with `scripts/work-status.ps1`.
+Updated 2026-10-10. Verify this checkout with `scripts/work-status.ps1`.
 This handoff is a pointer, not execution authority or a run receipt.
 
 ## Completed milestone
@@ -54,7 +54,12 @@ its input against replacement; the shorter fixed control and shared UTF-16 lengt
 guard are validated locally. The fresh control at `965b07a` passed: visible GUI,
 matching standard-user SID/profile, medium non-elevated child, exit zero and empty
 owned job. Exact worker disposal and operator-context empty inventory were
-independently read back. The real application lifecycle remains open. Provider inventory
+independently read back. A closed, feature-gated native lifecycle driver now covers
+the full fixed install/edit/save/configuration/uninstall contract, with required
+receipts and negative acceptance tests. Its VM read-only preflight diagnosed and
+retained kernel image-query failures; positive no-package observations now remain
+distinct from unknown identity and incomplete image visibility. No live application
+trial has run with this driver. The real application lifecycle remains open. Provider inventory
 must be queried in the owned operator's context; SYSTEM absence is not global proof.
 Local/hosted manifest line-ending drift also prompted canonical LF generation;
 LF/CRLF source assembly checks cover that correction. See the lifecycle document
