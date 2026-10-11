@@ -361,6 +361,30 @@ projection avoided the previous diagnostic's serialization failure. Its retained
 evidence. Fresh RDP login and account/session preparation are still required;
 no primary-user launch control or packaged lifecycle has passed on this baseline.
 
+Fresh account preparation r3 stopped before `New-LocalUser` execution because the
+stale template's description exceeded Windows' 48-character limit. Failure and
+request records were retained. Preparation r4 used a fresh protected directory,
+checked the exact previous nonce, absent created/ready receipts, null owned failure
+SID and absent account/profile, and shortened the description. It passed at
+`2026-10-11T08:28:36.5968521Z`: `AiwStandardUser`, SID
+`S-1-5-21-3407263227-439785483-4249424476-1001`, only Users/RDP Users, nonce
+`43cd415eb41808ba1396b52a69efec17`. Credential delivery remains encrypted and
+host-private. This account is fresh even though baseline restoration allowed the
+same RID to be allocated again; later login binding must use the new lower time
+and nonce, not the previous trial's session or preparation.
+
+Azure network readback confirmed the unchanged static RDP endpoint
+`20.118.172.1`, with TCP 3389 reachable. File-based RDP launches produced windowless
+clients; only the exact owned ended/windowless clients were closed after held
+process/generation checks. A normal RDP client launched with a returned window,
+but computer-use capture failed with `foreground window did not report a process
+id`. No authentication dialog or fresh interactive login is verified. The user
+was asked to inspect the host desktop. A fixed managed remote-session diagnostic
+was rejected by automatic approval review as `blocked by policy`, without a
+specific reason, before submission; it was not rerun. Retained handoff:
+`vm-primary-login-pending-r4.json`. Do not install or dispatch the launch control
+until the actual fresh login and preparation pass.
+
 ## Current evidence
 
 The first unsigned package assembled with the pinned tool. Two subsequent fresh

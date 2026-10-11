@@ -107,8 +107,13 @@ remain mandatory. A separate managed SYSTEM command passed fixed cmd exit 42
 and process closure; it does not exercise WTS or packaged activation. The reviewed
 rollback restored the original disk and restarted the VM. Fresh SYSTEM readback
 verified the marker, account baseline, absent trial paths/package/processes, guest
-agent and unchanged clear-key recovery state. Next establish a fresh account/RDP
-login and preparation, then run the primary-user control and resolve its cause before
+agent and unchanged clear-key recovery state. Fresh account preparation r4 passed
+with only Users/RDP Users membership; its new creation time and nonce are retained.
+RDP login remains unverified: file-based clients had no usable window, and a normal
+client launch failed computer-use capture with an unknown foreground process.
+The user has been asked to inspect the host desktop prompt/lock state. No launch
+control or installation was dispatched. Next verify the fresh interactive login
+and preparation, then run the primary-user control and resolve its cause before
 repeating installation.
 Packaged execution remains unproven.
 Cold recovery was exercised from snapshot `aiw-msix-cold-123e286bd0cf`.
@@ -131,7 +136,8 @@ see [shared observations](ADMIN-PACKAGING.md#shared-assessment-observations).
 
 Dedicated VM: `aiw-clean-host-0921`, resource group `RG-AIW-CLEAN-HOST-20260921`,
 subscription `43babb60-9e73-4dc8-b769-4401c01aad73`. Fresh RDP verification is
-pending after baseline recovery; the failed trial's standard-user login is gone.
+pending after baseline recovery. The newly created account is distinct from the
+failed trial's removed login, despite reusing its name and SID after rollback.
 The VM is running. Sandbox workers close after trial completion; that does not
 shut down the VM. The actual host operator token is administrator; guest standard
 user execution is separately verified. RDP computer use/file transfer and terminal
