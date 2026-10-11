@@ -311,7 +311,7 @@ another full document lifecycle. Do not substitute elevated or unpackaged execut
 for the required observation, or infer that every alternate-user activation is
 unsupported from this single HRESULT.
 
-The next bounded research control will attempt suspended creation of the exact
+The closed driver now implements a bounded research control for suspended creation of the exact
 registered installed executable. Before resuming application code, require the
 held process's exact package full name and
 `AIWResearch.NotepadPP_q1fhfzcjv9wt6!Notepad` application identity, image hash/path
@@ -322,6 +322,15 @@ to distinguish the declared application from its package. This is an experiment,
 not an accepted replacement activation route. If it fails, compare against a
 disposable VM with a real standard-user interactive sign-in before changing the
 production launcher or inferring application incompatibility.
+
+The native helper holds both creation handles, permits one resume with the expected
+suspend count, and terminates/waits on an unresumed process when disposed. The
+pre-resume and resume receipts are required for terminal acceptance; absent/wrong
+application identity or an unverified launch cannot pass. Any-job membership is a
+diagnostic only: it does not identify the project's owned job. Application closure
+and privileged process inventories remain separate from owned-job cleanup. Local
+PowerShell 5.1 compilation and the focused negative receipt checks pass; these are
+driver checks, not a live packaged-execution result.
 
 ## Feedback into assessment
 

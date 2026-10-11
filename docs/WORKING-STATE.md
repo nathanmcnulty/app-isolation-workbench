@@ -74,6 +74,8 @@ Next test a suspended launch of the exact registered executable, requiring actua
 package/application/image/token identity before resume; otherwise stop and compare
 with a disposable VM's real standard-user interactive login. Matching session
 ID/profile and the earlier GUI control are insufficient activation proof.
+The feature-gated driver implements that held suspended-process control; local
+checks pass, with any-job membership explicitly diagnostic. A fresh trial is pending.
 The real application lifecycle remains open. Provider inventory
 must be queried in the owned operator's context; SYSTEM absence is not global proof.
 Local/hosted manifest line-ending drift also prompted canonical LF generation;

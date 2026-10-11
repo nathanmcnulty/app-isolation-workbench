@@ -569,6 +569,7 @@ const LIFECYCLE_RECEIPTS: &[&str] = &[
     "config-installed-before-launch.json",
     "payload-before.json",
     "document-input.json",
+    "activation-suspended.json",
     "activation-returned.json",
     "activated.json",
     "application-window.json",
@@ -725,6 +726,22 @@ fn validate_lifecycle(
         return Err("Exact registration readback missing".into());
     }
     let activated = get("activated.json")?;
+    let suspended = get("activation-suspended.json")?;
+    for key in [
+        "processId",
+        "sessionId",
+        "startTime",
+        "imagePath",
+        "imageSha256",
+        "packageObservation",
+        "applicationUserModelId",
+        "inAnyJob",
+        "launchMethod",
+    ] {
+        if suspended[key] != activated[key] {
+            return Err("Suspended application observation differs".into());
+        }
+    }
     let observation = &activated["packageObservation"];
     let expected_image = inventory
         .iter()
@@ -739,7 +756,11 @@ fn validate_lifecycle(
         .ok_or("Installed location missing")?
         .to_owned()
         + r"\Application\notepad++.exe";
-    if activated["sessionId"] != session
+    if activated["applicationUserModelId"] != "AIWResearch.NotepadPP_q1fhfzcjv9wt6!Notepad"
+        || !activated["inAnyJob"].is_boolean()
+        || activated["identityVerifiedBeforeResume"] != true
+        || activated["launchMethod"] != "fixedInstalledExecutableSuspended"
+        || activated["sessionId"] != session
         || activated["imageSha256"] != expected_image["sha256"]
         || !activated["imagePath"]
             .as_str()
@@ -758,6 +779,8 @@ fn validate_lifecycle(
     let window = get("application-window.json")?;
     let exit = get("editor-exit.json")?;
     if returned["processId"] != pid
+        || returned["resumed"] != true
+        || returned["launchMethod"] != "fixedInstalledExecutableSuspended"
         || window["processId"] != pid
         || window["visible"] != true
         || window["ownedProcessHandle"] != true
@@ -960,11 +983,14 @@ mod tests {
             .unwrap();
             let mut app_token = token;
             app_token["PackageFullName"] = json!(package);
-            super::record(&stages,"activated.json",json!({"processId":300,"sessionId":1,"imageSha256":"fixture hash","imagePath":location+r"\Application\notepad++.exe","packageObservation":app_token})).unwrap();
+            let mut activated = json!({"processId":300,"sessionId":1,"imageSha256":"fixture hash","imagePath":location+r"\Application\notepad++.exe","packageObservation":app_token,"applicationUserModelId":"AIWResearch.NotepadPP_q1fhfzcjv9wt6!Notepad","inAnyJob":true,"launchMethod":"fixedInstalledExecutableSuspended"});
+            super::record(&stages, "activation-suspended.json", activated.clone()).unwrap();
+            activated["identityVerifiedBeforeResume"] = json!(true);
+            super::record(&stages, "activated.json", activated).unwrap();
             super::record(
                 &stages,
                 "activation-returned.json",
-                json!({"processId":300}),
+                json!({"processId":300,"resumed":true,"launchMethod":"fixedInstalledExecutableSuspended"}),
             )
             .unwrap();
             super::record(
@@ -1049,6 +1075,44 @@ mod tests {
             );
             std::fs::write(path, bytes).unwrap();
         }
+    }
+    #[test]
+    fn unpackaged_unidentified_or_unverified_launch_cannot_pass() {
+        let fixture = Fixture::new();
+        fixture.validate().unwrap();
+        let stages = fixture.root.join("msix-lifecycle");
+        let original = super::read_receipt(&stages, "activated.json").unwrap();
+        let suspended = super::read_receipt(&stages, "activation-suspended.json").unwrap();
+        for (key, value) in [
+            ("applicationUserModelId", serde_json::Value::Null),
+            (
+                "applicationUserModelId",
+                serde_json::json!("AIWResearch.NotepadPP_q1fhfzcjv9wt6!Other"),
+            ),
+            ("inAnyJob", serde_json::Value::Null),
+            ("identityVerifiedBeforeResume", serde_json::json!(false)),
+            ("launchMethod", serde_json::json!("unpackagedFallback")),
+        ] {
+            let mut changed = original.clone();
+            let mut changed_suspended = suspended.clone();
+            changed[key] = value.clone();
+            changed_suspended[key] = value;
+            super::record(&stages, "activated.json", changed).unwrap();
+            super::record(&stages, "activation-suspended.json", changed_suspended).unwrap();
+            assert!(fixture.validate().is_err(), "Must reject {key}");
+        }
+        let mut diagnostic = original;
+        let mut diagnostic_suspended = suspended;
+        diagnostic["inAnyJob"] = serde_json::json!(false);
+        diagnostic_suspended["inAnyJob"] = serde_json::json!(false);
+        super::record(&stages, "activated.json", diagnostic).unwrap();
+        super::record(&stages, "activation-suspended.json", diagnostic_suspended).unwrap();
+        // Any-job membership does not establish project-job ownership or identity.
+        fixture.validate().unwrap();
+        let mut returned = super::read_receipt(&stages, "activation-returned.json").unwrap();
+        returned["resumed"] = serde_json::json!(false);
+        super::record(&stages, "activation-returned.json", returned).unwrap();
+        assert!(fixture.validate().is_err());
     }
     #[test]
     fn token_session_document_and_unknown_process_drift_preclude_acceptance() {

@@ -28,7 +28,7 @@ function ConfigSnapshot([string]$Family){
  if($values.Count -gt 16 -or $totalBytes -gt 16MB){throw 'Combined configuration snapshot bound exceeded'}
  return $values
 }
-$held=$null;$ownedProcess=$null;$activatedPid=$null;$installedFullName=$null;$stage='preflight'
+$held=$null;$ownedProcess=$null;$suspended=$null;$activatedPid=$null;$installedFullName=$null;$stage='preflight'
 try {
 
 
@@ -97,17 +97,23 @@ try {
  Record 'document-input' @{path=$document;sha256=(Hash $document);sizeBytes=(Get-Item $document).Length}
  $stage='activation'
  $activationStarted=[DateTime]::UtcNow
- $activatedPid=[AiwPackagedActivation]::ActivateNotepad($family)
- Record 'activation-returned' @{processId=$activatedPid;packageFamilyName=$family}
+ $suspended=[AiwSuspendedNotepad]::Create()
+ $activatedPid=$suspended.Pid
  $ownedProcess=[Diagnostics.Process]::GetProcessById([int]$activatedPid)
- $heldProcessHandle=$ownedProcess.Handle
+ $heldProcessHandle=$suspended.Handle
  $observation=[AiwMsixNative]::Observe($heldProcessHandle)
+ $applicationId=[AiwMsixNative]::ApplicationId($heldProcessHandle)
+ $applicationInJob=[AiwMsixNative]::InJob($heldProcessHandle)
  $image=[AiwMsixNative]::ImagePath($heldProcessHandle)
  $actualImageHash=Hash $image
  $expectedImage=@($assembly.payloadInventory|Where-Object {$_.path -ceq 'Application/notepad++.exe'})
  if($expectedImage.Count -ne 1){throw 'Unique fixed executable inventory required'}
- Record 'activated' ([ordered]@{processId=$activatedPid;sessionId=$ownedProcess.SessionId;startTime=$ownedProcess.StartTime.ToUniversalTime().ToString('o');imagePath=$image;imageSha256=$actualImageHash;packageObservation=$observation})
+ Record 'activation-suspended' ([ordered]@{processId=$activatedPid;sessionId=$ownedProcess.SessionId;startTime=$ownedProcess.StartTime.ToUniversalTime().ToString('o');imagePath=$image;imageSha256=$actualImageHash;packageObservation=$observation;applicationUserModelId=$applicationId;inAnyJob=$applicationInJob;launchMethod='fixedInstalledExecutableSuspended'})
+ if($applicationId -cne 'AIWResearch.NotepadPP_q1fhfzcjv9wt6!Notepad'){throw 'Suspended application identity differs'}
  if($actualImageHash -cne $expectedImage[0].sha256 -or $observation.PackageFullName -cne 'AIWResearch.NotepadPP_8.9.8.0_x64__q1fhfzcjv9wt6' -or $observation.PackageFullName -cne $installedFullName -or $observation.UserSid -cne $identity.User.Value -or $observation.IsElevated -or $observation.AdministratorsEnabled -or $observation.IsAppContainer -or $observation.TokenSessionId -ne $session -or $observation.TokenSessionId -ne $ownedProcess.SessionId -or $observation.IntegritySid -cne 'S-1-16-8192' -or $ownedProcess.SessionId -ne $session -or $ownedProcess.StartTime.ToUniversalTime() -lt $activationStarted -or $image -ine (Join-Path $installed.InstallLocation 'Application\notepad++.exe')){throw 'Actual package identity, image path or medium non-elevated token differs'}
+ Record 'activated' ([ordered]@{processId=$activatedPid;sessionId=$ownedProcess.SessionId;startTime=$ownedProcess.StartTime.ToUniversalTime().ToString('o');imagePath=$image;imageSha256=$actualImageHash;packageObservation=$observation;applicationUserModelId=$applicationId;inAnyJob=$applicationInJob;identityVerifiedBeforeResume=$true;launchMethod='fixedInstalledExecutableSuspended'})
+ $suspended.Resume()
+ Record 'activation-returned' @{processId=$activatedPid;packageFamilyName=$family;launchMethod='fixedInstalledExecutableSuspended';resumed=$true}
  $windowDeadline=[DateTime]::UtcNow.AddSeconds(20)
  do{$ownedProcess.Refresh();$window=$ownedProcess.MainWindowHandle;if([AiwMsixNative]::VisibleOwnedWindow($window,$activatedPid)){break};if($ownedProcess.HasExited){throw 'Owned application exited before window'};Start-Sleep -Milliseconds 100}while([DateTime]::UtcNow -lt $windowDeadline)
  if(![AiwMsixNative]::VisibleOwnedWindow($window,$activatedPid)){throw 'Visible owned application window absent'}
@@ -159,4 +165,4 @@ try {
  Record 'failure' ([ordered]@{stage=$stage;summary=$_.Exception.Message;exception=$_.Exception.ToString();errorRecord=($_|Out-String);packageFullName=$installedFullName;processId=$activatedPid;automaticRetry=$false;automaticUninstall=$false;time=[DateTime]::UtcNow.ToString('o')})
  try{Record 'failure-state' @{packages=@(Get-AppxPackage -Name AIWResearch.NotepadPP|Select-Object PackageFullName,InstallLocation,PackageUserInformation);processes=Get-AiwPackageProcessInventory;configuration=@(ConfigSnapshot 'AIWResearch.NotepadPP_q1fhfzcjv9wt6');applicationCleanupVerified=$false}}catch{Record 'failure-state-error' @{error=$_.Exception.Message;primaryError=$primaryError.Exception.Message}}
  throw $primaryError
-} finally {if($ownedProcess){$ownedProcess.Dispose()};if($held){$held.Dispose()}}
+} finally {try{if($suspended){$suspended.Dispose()}}finally{if($ownedProcess){$ownedProcess.Dispose()};if($held){$held.Dispose()}}}

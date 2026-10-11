@@ -7,6 +7,13 @@ public sealed class AiwMsixObservation {
 }
 public sealed class AiwMsixProcess {public uint Pid;public uint SessionId;public string ImagePath;public string PackageFullName;public string PackageIdentityStatus;public int? ImageQueryError;}
 public static class AiwMsixNative {
+ [DllImport("kernel32.dll",CharSet=CharSet.Unicode)] static extern int GetApplicationUserModelId(IntPtr process,ref uint length,StringBuilder name);
+ public static string ApplicationId(IntPtr process) {
+  uint length=0;int result=GetApplicationUserModelId(process,ref length,null);
+  if(result!=122)throw new Win32Exception(result);
+  if(length==0 || length>1024)throw new InvalidOperationException("Application identity length refused");
+  var name=new StringBuilder((int)length);result=GetApplicationUserModelId(process,ref length,name);if(result!=0)throw new Win32Exception(result);return name.ToString();
+ }
  [DllImport("kernel32.dll",SetLastError=true)] static extern IntPtr OpenProcess(uint access,bool inherit,uint pid);
  [DllImport("kernel32.dll",SetLastError=true,CharSet=CharSet.Unicode)] static extern bool QueryFullProcessImageNameW(IntPtr process,uint flags,StringBuilder name,ref uint length);
  [DllImport("kernel32.dll",SetLastError=true)] static extern bool ProcessIdToSessionId(uint pid,out uint session);
@@ -61,21 +68,36 @@ public static class AiwMsixNative {
   }finally{CloseHandle(token);}
  }
 }
-[ComImport, Guid("2e941141-7f97-4756-ba1d-9decde894a3d"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-interface AiwActivationManager {
- [PreserveSig] int ActivateApplication([MarshalAs(UnmanagedType.LPWStr)] string id,[MarshalAs(UnmanagedType.LPWStr)] string arguments,uint options,out uint processId);
- [PreserveSig] int ActivateForFile([MarshalAs(UnmanagedType.LPWStr)] string id,IntPtr items,[MarshalAs(UnmanagedType.LPWStr)] string verb,out uint processId);
- [PreserveSig] int ActivateForProtocol([MarshalAs(UnmanagedType.LPWStr)] string id,IntPtr items,out uint processId);
-}
-public static class AiwPackagedActivation {
- public static uint ActivateNotepad(string family) {
-  if(!System.Text.RegularExpressions.Regex.IsMatch(family,@"\AAIWResearch\.NotepadPP_[a-z0-9]{13}\z"))throw new InvalidOperationException("Closed package family refused");
-  object instance=Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("45BA127D-10A8-46EA-8AB7-56EA9078943C")));
-  try {
-   uint pid; int result=((AiwActivationManager)instance).ActivateApplication(family+"!Notepad",null,0,out pid);
-   if(result<0)Marshal.ThrowExceptionForHR(result);
-   if(pid==0)throw new InvalidOperationException("Activation returned no process");
-   return pid;
-  }finally{Marshal.ReleaseComObject(instance);}
+// Research-only fixed launch. The caller must verify the held suspended process
+// before Resume; disposal kills an unresumed process, never an unrelated PID.
+public sealed class AiwSuspendedNotepad : IDisposable {
+ [StructLayout(LayoutKind.Sequential)] struct Startup {
+  public uint cb;public IntPtr reserved,desktop,title;public uint x,y,xSize,ySize,xChars,yChars,fill,flags;public ushort show,reservedBytes;public IntPtr reservedData,input,output,error;
+ }
+ [StructLayout(LayoutKind.Sequential)] struct ProcessInfo {public IntPtr process,thread;public uint pid,tid;}
+ [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool CreateProcessW(string application,StringBuilder command,IntPtr processAttributes,IntPtr threadAttributes,bool inherit,uint flags,IntPtr environment,string directory,ref Startup startup,out ProcessInfo process);
+ [DllImport("kernel32.dll",SetLastError=true)] static extern uint ResumeThread(IntPtr thread);
+ [DllImport("kernel32.dll",SetLastError=true)] static extern bool TerminateProcess(IntPtr process,uint code);
+ [DllImport("kernel32.dll",SetLastError=true)] static extern uint WaitForSingleObject(IntPtr handle,uint milliseconds);
+ [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+ ProcessInfo info;bool resumed,disposed;
+ AiwSuspendedNotepad(ProcessInfo value){info=value;}
+ public uint Pid {get{return info.pid;}}
+ public IntPtr Handle {get{if(disposed)throw new ObjectDisposedException("AiwSuspendedNotepad");return info.process;}}
+ public static AiwSuspendedNotepad Create() {
+  const string directory=@"C:\Program Files\WindowsApps\AIWResearch.NotepadPP_8.9.8.0_x64__q1fhfzcjv9wt6\Application";
+  var startup=new Startup();startup.cb=(uint)Marshal.SizeOf(typeof(Startup));ProcessInfo value;
+  if(!CreateProcessW(directory+@"\notepad++.exe",null,IntPtr.Zero,IntPtr.Zero,false,4,IntPtr.Zero,directory,ref startup,out value))throw new Win32Exception(Marshal.GetLastWin32Error());
+  return new AiwSuspendedNotepad(value);
+ }
+ public void Resume() {
+  if(disposed || resumed)throw new InvalidOperationException("Single suspended resume required");
+  uint previous=ResumeThread(info.thread);if(previous==0xffffffff)throw new Win32Exception(Marshal.GetLastWin32Error());
+  if(previous!=1)throw new InvalidOperationException("Unexpected thread suspend count");resumed=true;
+ }
+ public void Dispose() {
+  if(disposed)return;
+  try{if(!resumed){if(!TerminateProcess(info.process,1))throw new Win32Exception(Marshal.GetLastWin32Error());if(WaitForSingleObject(info.process,5000)!=0)throw new InvalidOperationException("Suspended process cleanup not verified");}}
+  finally{CloseHandle(info.thread);CloseHandle(info.process);disposed=true;}
  }
 }
