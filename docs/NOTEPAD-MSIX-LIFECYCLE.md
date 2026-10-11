@@ -222,8 +222,16 @@ The controller ran as SYSTEM and exited with code 1 at
 `2026-10-11T06:49:03.9871451Z`, without timeout. No editor was observed.
 `vm-primary-controller-launch-result-r2.json` retains PID 14632 and the owned
 nonce; VM wrapper logs remain in `C:\AIW-Msix-Primary-Controller-r1`.
-Installation, failure cause and cleanup remain unverified until their records
-are read back. Do not retry or restore while the diagnostic command is unresolved.
+RDP readback recovered the four retained stage records under
+`vm-primary-failure-rdp-readback-r1`. The failure is
+`CreateProcessAsUserW: Access is denied. (0x80070005)` before a child handle
+or application installation. The primary context matches the prepared SID,
+session, authentication LUID, source hash and nonce. The privileged before
+inventory has no research registration or application process. These records
+identify a controller launch failure; they do not replace a final cleanup inventory.
+Failure record SHA-256:
+`bcc5aa7692ee01c28bd3f61fed5a1d98d1741c2a046744ed917d85f022e4b77f`.
+Do not retry or restore while the diagnostic command is unresolved.
 The diagnostic SDK returned an empty object, retained in
 `vm-primary-controller-failure-readback-raw-r1.json`; this is not a clean-state
 receipt. Azure activity correlation `4b8a3733-280e-4c4d-9586-299a93d604b9`
@@ -237,10 +245,34 @@ guest-command completion. Future command helpers must retain protected polling
 state before waiting, check completion explicitly, and require the expected
 typed stdout before interpreting a result. An observation timeout does not
 authorize another command, recovery or restoration.
-Computer-use reconnection also failed with
-`failed to activate captured window`, including after helper reset.
-Preserve the current disk, account and evidence until the exact failure and
-diagnostic operation are accounted for; packaged execution remains unproven.
+Computer-use reconnection initially failed with `failed to activate captured
+window`. A later capture exposed pending host credential dialogs. Only the three
+exact owned RDP clients were closed; a protected test-account RDP file then
+reconnected successfully. No personal PIN was entered and no VM power change
+occurred. Clipboard-enabled RDP copied the retained JSON records into a fresh
+host directory. Independent terminal observation reconfirmed RID 1001 and the
+driver hash; both input-directory and executable ACLs grant that SID read/execute.
+
+`vm-primary-rdp-diagnostics-r1.json` retains observations at
+`2026-10-11T07:18:35.0948049Z`: guest `RunCommand_470` remains `transitioning`,
+with its PowerShell process 1820 created at `06:49:46.904Z`, parent 10320, still
+present. This confirms the timed-out observer did not stop guest execution.
+Preserve the current disk, account and evidence until that command is terminal.
+
+The inherited Azure-agent job is a leading hypothesis, not a verified cause.
+Microsoft's [job assignment contract](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-assignprocesstojobobject)
+requires processes in a job to share a session. The controller is in session zero
+and attempts a session-three child without breakaway. The research driver now
+retains `controller-job.json` before launch, including native membership, immediate
+job limit flags and UI restrictions. The [query contract](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-queryinformationjobobject)
+exposes only the immediate job, so this record cannot prove the whole parent chain
+permits breakaway. Launch flags, executable ACLs and cleanup policy are unchanged.
+The observation is mandatory: query or publication failure stops the research
+path before inventory or installation. It cannot retroactively explain the
+earlier controller's job limits.
+Ten focused lifecycle tests pass, including the read-only native observer; this
+does not establish cross-session launch or packaged execution. Next use a fixed
+owned control through the actual controller chain before another installation.
 
 ## Current evidence
 

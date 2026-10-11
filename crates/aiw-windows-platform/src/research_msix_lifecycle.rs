@@ -679,6 +679,11 @@ $user=Get-LocalUser -Name AiwStandardUser;if($user.SID.Value -cne '{sid}'){{thro
     }
     std::fs::create_dir(&evidence)?;
     let attempt = (|| -> TrialResult<()> {
+        record(
+            &evidence,
+            "controller-job.json",
+            controller_job_observation()?,
+        )?;
         parent_inventory(&evidence, InventoryStage::Before)?;
         let user = crate::research_msix_primary_user::PrimaryInteractiveUser::establish(
             &prepared.user_sid,
@@ -732,6 +737,54 @@ $user=Get-LocalUser -Name AiwStandardUser;if($user.SID.Value -cne '{sid}'){{thro
         )?;
     }
     attempt
+}
+
+// Diagnostic only: a nested job query describes the immediate job, not every
+// ancestor. It neither grants breakaway nor establishes child-job ownership.
+fn controller_job_observation() -> TrialResult<serde_json::Value> {
+    use windows::Win32::System::JobObjects::{
+        IsProcessInJob, JOBOBJECT_BASIC_UI_RESTRICTIONS, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JobObjectBasicUIRestrictions, JobObjectExtendedLimitInformation, QueryInformationJobObject,
+    };
+    use windows::Win32::System::Threading::GetCurrentProcess;
+    let mut member = windows::core::BOOL(0);
+    // SAFETY: current-process pseudo handle and writable membership output.
+    unsafe { IsProcessInJob(GetCurrentProcess(), None, &mut member) }?;
+    let mut limits = None;
+    let mut ui_restrictions = None;
+    if member.as_bool() {
+        let mut extended = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        let mut ui = JOBOBJECT_BASIC_UI_RESTRICTIONS::default();
+        // SAFETY: NULL selects this process's immediate job; each output has
+        // the exact native structure size. No job settings are modified.
+        unsafe {
+            QueryInformationJobObject(
+                None,
+                JobObjectExtendedLimitInformation,
+                (&mut extended as *mut JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                std::mem::size_of_val(&extended) as u32,
+                None,
+            )?;
+            QueryInformationJobObject(
+                None,
+                JobObjectBasicUIRestrictions,
+                (&mut ui as *mut JOBOBJECT_BASIC_UI_RESTRICTIONS).cast(),
+                std::mem::size_of_val(&ui) as u32,
+                None,
+            )?;
+        }
+        limits = Some(extended.BasicLimitInformation.LimitFlags.0);
+        ui_restrictions = Some(ui.UIRestrictionsClass.0);
+    }
+    Ok(serde_json::json!({
+        "processId": std::process::id(),
+        "sessionId": session_id(std::process::id())?,
+        "inAnyJob": member.as_bool(),
+        "queryScope": "immediateJobOnly",
+        "limitFlags": limits,
+        "uiRestrictions": ui_restrictions,
+        "diagnosticOnly": true
+    }))
 }
 fn hold_directory(path: &Path) -> TrialResult<File> {
     // Allow child writes, deny delete/rename of this exact directory entry.
@@ -1217,6 +1270,24 @@ fn export(source: &Path, target: &Path) -> TrialResult<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn controller_job_observer_reads_current_native_context() {
+        let value = super::controller_job_observation().unwrap();
+        assert_eq!(value["processId"], std::process::id());
+        assert_eq!(
+            value["sessionId"],
+            super::session_id(std::process::id()).unwrap()
+        );
+        assert_eq!(value["diagnosticOnly"], true);
+        assert_eq!(value["queryScope"], "immediateJobOnly");
+        if value["inAnyJob"].as_bool().unwrap() {
+            assert!(value["limitFlags"].as_u64().is_some());
+            assert!(value["uiRestrictions"].as_u64().is_some());
+        } else {
+            assert!(value["limitFlags"].is_null());
+            assert!(value["uiRestrictions"].is_null());
+        }
+    }
     fn primary_preparation() -> serde_json::Value {
         serde_json::json!({"schemaVersion":"aiw.dev/research-primary-msix/v1","vmId":super::VM_ID,"sourceImageSha256":"a".repeat(64),"userSid":"S-1-5-21-3407263227-439785483-4249424476-1001","sessionId":3,"notBeforeFileTime":100,"notAfterFileTime":300,"runNonce":"b".repeat(64),"accountCreated":true,"accountName":"AiwStandardUser"})
     }
