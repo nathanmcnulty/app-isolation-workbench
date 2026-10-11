@@ -63,7 +63,10 @@ attempt at `83b55a7` stopped before installation because the standard-user scan
 could not inspect system processes. Failure export and exact worker disposal are
 verified. Global inventory now belongs to the privileged parent, including a gate
 before job cleanup; child unknown queries remain explicit diagnostics. A fresh
-application trial is required. The real application lifecycle remains open. Provider inventory
+retry passed the real driver controls, then found a PowerShell 5.1 empty-snapshot
+bug before installation. Exact worker disposal is verified; the sum fix and its
+empty/count/size regression tests pass in PowerShell 7 and 5.1. A fresh application
+trial is required. The real application lifecycle remains open. Provider inventory
 must be queried in the owned operator's context; SYSTEM absence is not global proof.
 Local/hosted manifest line-ending drift also prompted canonical LF generation;
 LF/CRLF source assembly checks cover that correction. See the lifecycle document

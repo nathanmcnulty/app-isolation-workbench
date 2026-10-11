@@ -23,7 +23,9 @@ function ConfigSnapshot([string]$Family){
   if($files.Count -gt 32){throw 'Configuration inventory exceeds research bound'}
   foreach($file in $files){if($file.Length -gt 4MB -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Configuration file refused'};$values += [pscustomobject]@{path=$file.FullName;sizeBytes=$file.Length;sha256=(Hash $file.FullName)}}
  }
- if($values.Count -gt 16 -or ($values|Measure-Object sizeBytes -Sum).Sum -gt 16MB){throw 'Combined configuration snapshot bound exceeded'}
+ $totalBytes=0L
+ foreach($value in $values){$totalBytes += $value.sizeBytes}
+ if($values.Count -gt 16 -or $totalBytes -gt 16MB){throw 'Combined configuration snapshot bound exceeded'}
  return $values
 }
 $held=$null;$ownedProcess=$null;$activatedPid=$null;$installedFullName=$null;$stage='preflight'

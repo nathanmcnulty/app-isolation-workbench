@@ -257,6 +257,26 @@ It proves exact held-editor closure before current-user uninstall; global absenc
 is verified at the parent's recorded checkpoints, not inferred during the
 editor-close/uninstall interval. This correction still requires a fresh live trial.
 
+The retry at `ff822b8` in Sandbox `049769b2-df60-4e36-8ba1-be4039bf97d9`
+passed all three actual standard-user driver controls: captured stdout/stderr,
+exit zero, deliberate exit 42, and exact deadline termination, each in the
+inherited job. It then stopped before installation because PowerShell 5.1
+StrictMode rejected `.Sum` on an empty configuration snapshot. The native child
+and failure export completed; the parent recorded absent registration/processes
+and zero job processes. This is another driver prerequisite failure, not an
+application compatibility observation. Retained evidence is
+`vm-lifecycle-failure-summary-r2.json`, in VM stage
+`AIW-MSIX-Lifecycle-7885747d0a394539bdab52c94520c783`.
+Exact worker disposal subsequently returned zero; independent readback of
+`vm-lifecycle-final-readback-r2.json` confirmed the recorded operator's empty
+provider inventory. The dedicated VM remained running and accessible.
+The configuration helper now starts its byte sum at zero. The focused
+`scripts/research/test-msix-lifecycle-configuration.ps1` test extracts only the
+actual configuration helpers without executing the trial. Empty and single-file
+snapshots, combined count/byte bounds and individual file bounds pass in both
+PowerShell 7 and 5.1. Application installation and execution still require a fresh
+worker trial.
+
 ## Feedback into assessment
 
 The completed trial must inform shared assessment without introducing a second
