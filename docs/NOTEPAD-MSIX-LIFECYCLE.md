@@ -63,6 +63,69 @@ unsupported lifecycle/functions for this first recipe, not implicit successes.
 A failed function is attributed to packaging only after the driver and ordinary
 application control establish the relevant comparison.
 
+### Next control: real standard-user sign-in
+
+The secondary-logon worker installed the package but neither tested launch path
+created a usable editor. Compare the unchanged signed package under a fresh
+`AiwStandardUser` Windows sign-in on the dedicated disposable VM. Do not change
+package ACLs, substitute elevated/unpackaged execution, or add an automatic launch
+fallback. Direct suspended launch is the first comparison; a COM comparison, if
+needed, is a separate retained attempt in a restored disposable environment.
+
+Before creating an account or installing, establish and verify a recoverable VM
+boundary. A fixed privileged controller must refuse an existing account, bind
+the created SID and run time, hold the executable and three signed inputs, and
+record a clean global inventory. The standard user signs in through Windows,
+then opens a controller-created fixed shortcut. No secondary logon, stored-
+credential task or SYSTEM token broker substitutes for that sign-in.
+
+The read-only `research_msix_interactive.cs` observer captures the process token's
+authentication LUID, corresponding LSA SID/logon type/time/session, WTS owner and
+active state, and the shell's SID/session/authentication LUID. Its validator
+requires the exact controller-owned SID and run time bounds, interactive or
+remote-interactive logon, matching shell logon, and medium non-elevated tokens
+without enabled administrators. A session ID or loaded profile alone is
+insufficient. The observer is not yet connected to a VM execution entry point;
+its local tests do not prove packaged execution.
+
+The fixed same-user coordinator stays outside its owned cleanup job and uses
+`GuestProcess::start` to launch only `lifecycle-child` suspended into that job.
+Keep the existing no-argument Sandbox guard unchanged. A run/SID-restricted
+controller channel carries only closed lifecycle transitions, never command
+strings. The privileged controller retains global before, before-cleanup and
+after inventories; the coordinator retains the job until the before-cleanup
+response, then proves zero owned processes. A failed inventory must still allow
+cleanup. Publish success only after independent receipt validation and the final
+global gate; application closure is not inferred from job membership.
+
+On failure, preserve evidence and restore the verified disposable boundary.
+On success, sign out and remove only the controller-created account/profile after
+matching the retained SID. This control can prove the actual user lifecycle; it
+does not prove a production service can create that interactive context.
+
+The observer follows Microsoft's [LSA logon data contract](https://learn.microsoft.com/en-us/windows/win32/api/ntsecapi/ns-ntsecapi-security_logon_session_data),
+[WTS session query contract](https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/nf-wtsapi32-wtsquerysessioninformationw)
+and [shell window observation](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getshellwindow).
+Run the prerequisite checks with `./scripts/test-msix-interactive-session.ps1`;
+`-ObserveCurrent` adds read-only observations without accepting that context for
+an application trial. PowerShell 5.1 and 7 are covered separately.
+
+The initial prerequisite passed two positive and twenty rejection cases under
+host PowerShell 5.1.28000.2952 and 7.6.6. Its read-only host observation confirmed
+the LSA/WTS/shell bindings without executing any application. The exact reviewed
+sources were separately hash-checked on the dedicated VM. Running the same check
+through the actual operator RDP terminal passed on PowerShell 5.1.26100.9444:
+session 2, remote-interactive logon type 10, active WTS owner and matching shell
+authentication LUID. Both operator and shell were elevated, high integrity, with
+Administrators enabled; this observation was explicitly not accepted for a trial.
+Independent SDK readback checked the retained result and all three source hashes.
+`interactive-context-probe-r1-handoff.json`,
+`vm-interactive-context-probe-staged-r1.json` and
+`vm-interactive-context-probe-readback-r1.json` retain this evidence under the
+MSIX proof root. Result SHA-256:
+`454d86b62408e8f499493c0c7b7f19b26e2667d064fa0b835d506a28967df5e8`.
+No account, installation, application launch or VM power change occurred.
+
 ## Current evidence
 
 The first unsigned package assembled with the pinned tool. Two subsequent fresh

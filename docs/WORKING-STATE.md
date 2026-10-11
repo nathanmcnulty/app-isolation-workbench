@@ -76,6 +76,16 @@ Exact worker disposal and the operator's empty provider inventory are verified;
 retain the failed stage and do not relax ACLs or substitute elevated/unpackaged launch.
 Next compare activation with a disposable VM's real standard-user interactive login.
 Matching session ID/profile and the earlier GUI control are insufficient proof.
+The independently reviewed read-only interactive-session prerequisite now observes
+LSA authentication/logon type/time, WTS ownership and a matching shell token.
+PowerShell 5.1 and 7 pass two positive and twenty negative acceptance cases.
+The same check passed in the VM's actual RDP terminal, independently read back:
+real remote-interactive session/shell binding, but elevated operator and shell.
+That context remains diagnostic and is not accepted for a standard-user trial.
+This is not wired into a VM execution mode yet; account creation, protected
+controller/coordinator transitions and the actual standard-user trial remain open.
+Fresh Azure inventory confirms the dedicated VM is running but has no snapshot in
+its resource group; verify a recoverable boundary before the next account/install.
 The held suspended-process control passes local checks, with any-job membership
 explicitly diagnostic. Packaged execution remains unverified.
 The real application lifecycle remains open. Provider inventory
