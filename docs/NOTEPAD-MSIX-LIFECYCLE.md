@@ -332,6 +332,23 @@ and privileged process inventories remain separate from owned-job cleanup. Local
 PowerShell 5.1 compilation and the focused negative receipt checks pass; these are
 driver checks, not a live packaged-execution result.
 
+The fresh trial at `48bd1fd` used executable SHA-256
+`c12ac8107472a941499c31f98470ccbf9ba303350d55be76b611d80baea581c7`
+in Sandbox `cca23753-8bd6-4887-9ffe-b17d2879e562`. Installation succeeded,
+but the fixed suspended `CreateProcessW` call returned `Access is denied` before
+returning a process ID. No suspended-identity, resume, visible-window, document-edit
+or success receipt was published. The parent verified zero owned-job processes and
+refused success because registration remained. Evidence is retained in
+`vm-lifecycle-suspended-stage-r2.json`; VM stage
+`AIW-MSIX-Lifecycle-34344d8cf8114ee993698b8f3d070547`.
+Exact worker disposal returned zero; independent readback in
+`vm-lifecycle-suspended-final-r1.json` confirmed the recorded operator's empty
+provider inventory. The dedicated VM and RDP session remained available.
+This does not establish why the access check failed, or whether the same package
+will activate in a primary interactive standard-user session. That comparison is
+the next control; do not relax executable ACLs or use elevated/unpackaged execution
+to bypass the observed failure.
+
 ## Feedback into assessment
 
 The completed trial must inform shared assessment without introducing a second

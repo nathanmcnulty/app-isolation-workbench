@@ -70,12 +70,14 @@ standard-user worker installed the signed MSIX and verified all 220 payload entr
 packaged activation failed with logon-session HRESULT `0x80070520` before an editor
 appeared. Failure evidence is retained; exact worker disposal and the recorded
 operator's empty provider inventory are independently verified. RDP stayed connected.
-Next test a suspended launch of the exact registered executable, requiring actual
-package/application/image/token identity before resume; otherwise stop and compare
-with a disposable VM's real standard-user interactive login. Matching session
-ID/profile and the earlier GUI control are insufficient activation proof.
-The feature-gated driver implements that held suspended-process control; local
-checks pass, with any-job membership explicitly diagnostic. A fresh trial is pending.
+At `48bd1fd` the fresh suspended-launch control also installed the package, but
+`CreateProcessW` returned `Access is denied` before a process ID or resume receipt.
+Exact worker disposal and the operator's empty provider inventory are verified;
+retain the failed stage and do not relax ACLs or substitute elevated/unpackaged launch.
+Next compare activation with a disposable VM's real standard-user interactive login.
+Matching session ID/profile and the earlier GUI control are insufficient proof.
+The held suspended-process control passes local checks, with any-job membership
+explicitly diagnostic. Packaged execution remains unverified.
 The real application lifecycle remains open. Provider inventory
 must be queried in the owned operator's context; SYSTEM absence is not global proof.
 Local/hosted manifest line-ending drift also prompted canonical LF generation;
