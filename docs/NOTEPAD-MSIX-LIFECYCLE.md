@@ -195,6 +195,53 @@ retained under the MSIX proof root as `vm-cold-recovery-*-r1.json` and
 `vm-cold-recovery-rollback-r1.py`. This proves a restored boot and clean baseline;
 it does not prove the pending standard-user application lifecycle.
 
+### Primary-session attempt after recovery
+
+The fresh account `AiwStandardUser` was created with VM-domain RID 1001 and
+only Users and Remote Desktop Users membership. The first preparation failed
+on Windows' 48-character account-description limit; independent readback proved
+no account, profile or created-account receipt existed before the repaired attempt.
+That failure and its preparation directory remain preserved.
+
+Normal RDP login reached this account's desktop. SYSTEM preparation independently
+observed its loaded profile and unique Explorer process 5884 in session 3.
+The transferred package, assembly, signing receipt and driver matched all four
+expected hashes with a closed inventory. The driver hash was
+`3aaf26fb1fb4902e0f6ca222769b7b1b0d4c26b6ea98679ad3fe05caef21922b`.
+The protected preparation hash was
+`8028dbf0783c24fd958bbdbf6f87cce88b5ee3de87d259644eba4dbe57ad1a48`.
+
+Independent operational review corrected the preparation's lower time bound:
+it must precede the actual logon, using the protected account-creation receipt,
+with a fixed 30-minute upper bound. Review also corrected the launch wrapper's
+general exception path to confirm exact held-controller termination and retain
+primary, cleanup and publication errors separately. Both repaired scripts pass
+PowerShell 5.1 parsing. Neither correction relaxes the native driver's gates.
+
+The controller ran as SYSTEM and exited with code 1 at
+`2026-10-11T06:49:03.9871451Z`, without timeout. No editor was observed.
+`vm-primary-controller-launch-result-r2.json` retains PID 14632 and the owned
+nonce; VM wrapper logs remain in `C:\AIW-Msix-Primary-Controller-r1`.
+Installation, failure cause and cleanup remain unverified until their records
+are read back. Do not retry or restore while the diagnostic command is unresolved.
+The diagnostic SDK returned an empty object, retained in
+`vm-primary-controller-failure-readback-raw-r1.json`; this is not a clean-state
+receipt. Azure activity correlation `4b8a3733-280e-4c4d-9586-299a93d604b9`
+recorded acceptance at `2026-10-11T06:49:43.1118592Z` without a terminal event
+in the subsequent readback. Inspection of the installed Azure SDK and a bounded
+control using its actual `LROPoller` reproduced an empty intermediate result
+after `result(timeout=0)` while `done()` was false. An explicit completion guard
+rejected that result and accepted it only after the control completed.
+`sdk-poller-timeout-control-r1.json` retains this narrow proof; it does not prove
+guest-command completion. Future command helpers must retain protected polling
+state before waiting, check completion explicitly, and require the expected
+typed stdout before interpreting a result. An observation timeout does not
+authorize another command, recovery or restoration.
+Computer-use reconnection also failed with
+`failed to activate captured window`, including after helper reset.
+Preserve the current disk, account and evidence until the exact failure and
+diagnostic operation are accounted for; packaged execution remains unproven.
+
 ## Current evidence
 
 The first unsigned package assembled with the pinned tool. Two subsequent fresh

@@ -87,8 +87,12 @@ user token and suspended `CreateProcessAsUserW` launch into the already logged-o
 user's desktop. Exact VM/SYSTEM, immutable preparation and native interactive
 context checks precede installation. No file/pipe coordinator protocol or service
 was added. Reviewed code is pushed at `a7de2ee`; focused tests, clippy, release
-build, formatting and governance pass. Fresh-account preparation and the actual
-standard-user trial remain open; local code checks are not execution proof.
+build, formatting and governance pass. Fresh account RID 1001, normal RDP login,
+session/profile preparation and transferred input hashes are verified. The actual
+controller exited 1 without timeout; failure cause and installation/cleanup state
+await readback. An empty diagnostic SDK response is not terminal or clean-state
+proof; preserve the VM and do not retry. The lifecycle document records the exact
+Azure operation and UI reconnection failure. Packaged execution remains unproven.
 Cold recovery was exercised: the same VM boots `aiw-msix-restored-123e286bd0cf`
 from snapshot `aiw-msix-cold-123e286bd0cf`. The original disk is retained and
 unattached. Marker/account baseline, clean-shutdown events, absent research
