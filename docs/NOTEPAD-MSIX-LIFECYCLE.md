@@ -377,13 +377,49 @@ Azure network readback confirmed the unchanged static RDP endpoint
 `20.118.172.1`, with TCP 3389 reachable. File-based RDP launches produced windowless
 clients; only the exact owned ended/windowless clients were closed after held
 process/generation checks. A normal RDP client launched with a returned window,
-but computer-use capture failed with `foreground window did not report a process
-id`. No authentication dialog or fresh interactive login is verified. The user
-was asked to inspect the host desktop. A fixed managed remote-session diagnostic
+but computer-use capture initially failed with `foreground window did not report a process
+id`. The user confirmed the connection prompt. Fresh returned window bindings
+recovered capture; persistent lexical variables had shadowed newer global bindings.
+The first standard-user connection disconnected with reason 2; its cause is not
+established. After closing only the exact held administrator RDP client, a fresh
+standard-user connection reached its own desktop. A fixed managed remote-session diagnostic
 was rejected by automatic approval review as `blocked by policy`, without a
 specific reason, before submission; it was not rerun. Retained handoff:
-`vm-primary-login-pending-r4.json`. Do not install or dispatch the launch control
-until the actual fresh login and preparation pass.
+`vm-primary-login-pending-r4.json` records the earlier blocked state.
+
+Clipboard transfer delivered the four frozen inputs. Fixed SYSTEM preparation
+held each source file against writes/deletion, verified its exact size/hash, copied
+it into fresh protected intake, and verified the resulting hash. The actual owned
+shell was PID 6004 in session 4; only Users/RDP Users membership was accepted.
+Preparation hash was
+`88379f0f8210ab0309f91d35725cd5c489b36f8ea95f213569f3aa0be76622d0`.
+The original 30-minute account window was preserved. Evidence:
+`managed-primary-preparation-r4-observed-*.json` under the host proof root.
+
+The `c2fda15` native `vm-launch-control` was dispatched through the Azure action
+path using driver SHA-256
+`b6ba89f8890383ad430fd7efe6ba68887c04ea52aceeb8c01f20f41aa6c6a01c`.
+It exited 1 at `2026-10-11T08:56:38.3330171Z`, PID 13152, without timing out or
+publishing a control terminal receipt. Bounded independent SYSTEM readback
+confirmed no remaining driver process and no profile AIW evidence directory.
+The exact error was `Closed run-owned primary preparation differs or expired`.
+The retained account nonce is 32 hexadecimal characters; the native contract
+requires 64. This is an account/preparation harness defect before WTS launch or
+installation, not another `CreateProcessAsUserW` result. Readback:
+`managed-primary-control-readback-r4-observed-*.json`; stderr was 86 bytes, SHA-256
+`13b2f707eebd8c1c7da1c27598f23688d4b3190fd74d6ba6d28afbfd9fff51ba`.
+Package inventory was not queried by that readback.
+
+The repository now owns pure [preparation helpers](../scripts/research/msix-primary-preparation.ps1):
+32 random bytes produce a 64-character nonce, and the preparation builder refuses
+the actual short nonce, invalid account/session/image fields, and an expired or
+extended account window. Its output is checked by the native validator, rather
+than only testing a handwritten JSON fixture. These helpers establish record
+shape only; SYSTEM identity, held intake, fresh account/profile, interactive
+session and protected publication remain required in the live adapter. The next
+trial must restore from the immutable snapshot into a new disk, use the canonical
+helpers before account mutation, and retain a new account/nonce/time binding.
+Do not alter the failed account receipts or extend their expired window.
 
 ## Current evidence
 

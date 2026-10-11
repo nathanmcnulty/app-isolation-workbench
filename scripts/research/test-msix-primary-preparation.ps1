@@ -1,0 +1,42 @@
+#requires -Version 5.1
+[CmdletBinding()]
+param([switch]$EmitNativeFixture)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'msix-primary-preparation.ps1')
+$account = [pscustomobject]@{
+    schemaVersion = 'aiw.dev/research-primary-account/v1'
+    vmId = 'cb7cc9f0-81f7-4326-8c52-828e42673d11'
+    accountName = 'AiwStandardUser'
+    accountCreated = $true
+    userSid = 'S-1-5-21-3407263227-439785483-4249424476-1001'
+    runNonce = New-AiwMsixPrimaryNonce
+    notBeforeFileTime = [long]100
+}
+$hash = 'a' * 64
+$record = New-AiwMsixPrimaryPreparation -CreatedAccount $account -SessionId 4 -SourceImageSha256 $hash -NowFileTime 200
+if ($record.runNonce -cnotmatch '\A[0-9a-f]{64}\z' -or $record.notAfterFileTime -ne 18000000100) { throw 'Generated preparation differs' }
+if ($EmitNativeFixture) { $record | ConvertTo-Json -Compress; return }
+$passed = @('generated')
+foreach ($case in @('shortNonce', 'uppercaseNonce', 'operatorSid', 'wrongVm', 'falseCreated', 'stringCreated', 'zeroSession', 'wrongHash', 'future', 'expired', 'overflow')) {
+    $candidate = $account | ConvertTo-Json -Compress | ConvertFrom-Json
+    $session = 4; $image = $hash; $now = [long]200
+    switch ($case) {
+        shortNonce { $candidate.runNonce = '43cd415eb41808ba1396b52a69efec17' }
+        uppercaseNonce { $candidate.runNonce = 'B' * 64 }
+        operatorSid { $candidate.userSid = 'S-1-5-21-3407263227-439785483-4249424476-500' }
+        wrongVm { $candidate.vmId = 'other' }
+        falseCreated { $candidate.accountCreated = $false }
+        stringCreated { $candidate.accountCreated = 'true' }
+        zeroSession { $session = 0 }
+        wrongHash { $image = 'A' * 64 }
+        future { $now = 99 }
+        expired { $now = 18000000101 }
+        overflow { $candidate.notBeforeFileTime = [long]::MaxValue }
+    }
+    $rejected = $false
+    try { New-AiwMsixPrimaryPreparation -CreatedAccount $candidate -SessionId $session -SourceImageSha256 $image -NowFileTime $now | Out-Null } catch { $rejected = $true }
+    if (!$rejected) { throw "Preparation accepted invalid case: $case" }
+    $passed += $case
+}
+[pscustomobject]@{ passed = $true; powerShellVersion = $PSVersionTable.PSVersion.ToString(); cases = $passed; applicationTrialExecuted = $false } | ConvertTo-Json -Compress

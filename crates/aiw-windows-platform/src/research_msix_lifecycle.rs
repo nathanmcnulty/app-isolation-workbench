@@ -1377,6 +1377,10 @@ mod tests {
             ("accountName", serde_json::json!("aiwoperator")),
             ("accountCreated", serde_json::json!(false)),
             ("runNonce", serde_json::json!("wrong")),
+            (
+                "runNonce",
+                serde_json::json!("43cd415eb41808ba1396b52a69efec17"),
+            ),
             ("runNonce", serde_json::json!("B".repeat(64))),
             ("notBeforeFileTime", serde_json::json!(201)),
             ("notAfterFileTime", serde_json::json!(199)),
@@ -1393,6 +1397,30 @@ mod tests {
         let mut extra = original;
         extra["command"] = serde_json::json!("anything");
         assert!(serde_json::from_value::<super::PrimaryPreparation>(extra).is_err());
+    }
+    #[test]
+    fn powershell_producer_matches_native_primary_preparation() {
+        let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scripts/research/test-msix-primary-preparation.ps1");
+        let output = std::process::Command::new(super::POWERSHELL)
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+            ])
+            .arg(script)
+            .arg("-EmitNativeFixture")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let value = serde_json::from_slice(&output.stdout).unwrap();
+        super::validate_preparation(&value, &"a".repeat(64), 200).unwrap();
     }
     #[test]
     fn primary_script_parses_and_native_source_compiles_in_ps51() {
