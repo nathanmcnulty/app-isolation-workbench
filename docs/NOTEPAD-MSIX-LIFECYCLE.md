@@ -75,9 +75,9 @@ needed, is a separate retained attempt in a restored disposable environment.
 Before creating an account or installing, establish and verify a recoverable VM
 boundary. A fixed privileged controller must refuse an existing account, bind
 the created SID and run time, hold the executable and three signed inputs, and
-record a clean global inventory. The standard user signs in through Windows,
-then opens a controller-created fixed shortcut. No secondary logon, stored-
-credential task or SYSTEM token broker substitutes for that sign-in.
+record a clean global inventory. The standard user first signs in through Windows.
+The fixed controller then launches the child into that existing logon; it never
+creates a secondary logon or uses a stored-credential task as a substitute.
 
 The read-only `research_msix_interactive.cs` observer captures the process token's
 authentication LUID, corresponding LSA SID/logon type/time/session, WTS owner and
@@ -85,18 +85,48 @@ active state, and the shell's SID/session/authentication LUID. Its validator
 requires the exact controller-owned SID and run time bounds, interactive or
 remote-interactive logon, matching shell logon, and medium non-elevated tokens
 without enabled administrators. A session ID or loaded profile alone is
-insufficient. The observer is not yet connected to a VM execution entry point;
-its local tests do not prove packaged execution.
+insufficient. The observer now gates the fixed VM child before controls or
+installation; local tests do not prove packaged execution.
 
-The fixed same-user coordinator stays outside its owned cleanup job and uses
-`GuestProcess::start` to launch only `lifecycle-child` suspended into that job.
-Keep the existing no-argument Sandbox guard unchanged. A run/SID-restricted
-controller channel carries only closed lifecycle transitions, never command
-strings. The privileged controller retains global before, before-cleanup and
-after inventories; the coordinator retains the job until the before-cleanup
-response, then proves zero owned processes. A failed inventory must still allow
-cleanup. Publish success only after independent receipt validation and the final
-global gate; application closure is not inferred from job membership.
+The separate, feature-gated `vm-controller` mode requires LocalSystem session zero,
+no thread impersonation, the pinned computer and Azure IMDS VM identity, and a
+held, protected preparation record. It uses [WTSQueryUserToken](https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/nf-wtsapi32-wtsqueryusertoken)
+for the unique active `AiwStandardUser` session and [CreateProcessAsUserW](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessasuserw)
+for only the fixed executable and `vm-lifecycle-child` argument. Azure Run Command
+already supplies this one-shot SYSTEM authority; no new service or token broker
+is exposed. Privileges are scoped around their native calls and restored.
+
+The existing Windows login owns the loaded profile. No credentials, profile
+load/unload, desktop ACL mutation, token export or job breakaway are used.
+The child is created suspended on `winsta0\default` with the WTS user's environment,
+without inherited handles. Its held image, physical/token session, SID and
+authentication LUID are checked; assignment and membership in the exact owned
+job precede the single resume. A failure terminates that exact suspended handle.
+The child's LSA/WTS/shell receipt must agree with the protected parent context.
+
+The parent retains the existing global before, before-cleanup and after gates,
+job cleanup, export and independent receipt validation. It publishes success last.
+Application closure is not inferred from job membership. The immutable preparation
+record carries only the closed run/account/session/source/time/nonce fields;
+unknown fields are rejected. Account provisioning and recoverable-VM preparation
+remain prerequisites; this driver does not create or adopt an account.
+
+Independent review corrected one failure path: privilege restoration now occurs
+only after the suspended child belongs to the kill-on-close job. If restoration
+aborts the controller, job-handle closure terminates that child. The same-user
+interactive receipt is correlated with the parent's held token, but is not
+tamper-resistant evidence against a hostile application running as that user.
+
+Local validation covers nine focused lifecycle tests, including rejected
+preparation mutations and real PowerShell 5.1 parsing/native-source compilation;
+warnings-as-errors clippy passes. The broader platform suite passed 170 tests
+with ten ignored before the final reviewed cleanup-order correction; the nine
+focused tests and clippy were rerun after that correction. Logs are retained as
+`primary-user-platform-tests-r1.log`, `primary-user-tests-final-r1.log` and
+`primary-user-clippy-final-r1.log` under the MSIX proof root. Read-only VM preflight
+confirmed pinned identity, SYSTEM/session zero, the three required privileges,
+and no existing `AiwStandardUser`. The Azure agent is already in a job; successful
+nested owned-job assignment still requires live proof. No application was run.
 
 On failure, preserve evidence and restore the verified disposable boundary.
 On success, sign out and remove only the controller-created account/profile after

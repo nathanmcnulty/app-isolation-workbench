@@ -38,6 +38,7 @@ unsafe extern "system" {
 #[link(name = "Kernel32")]
 unsafe extern "system" {
     fn ProcessIdToSessionId(pid: u32, session: *mut u32) -> i32;
+    fn GetComputerNameW(buffer: *mut u16, length: *mut u32) -> i32;
 }
 
 fn user_name() -> TrialResult<String> {
@@ -226,7 +227,9 @@ pub fn run() -> TrialResult<()> {
     }
     let arguments: Vec<_> = std::env::args_os().skip(1).collect();
     let (_image, image_hash) = hold_self()?;
-    if arguments.len() == 1 && arguments[0] == "lifecycle-child" {
+    if arguments.len() == 1
+        && (arguments[0] == "lifecycle-child" || arguments[0] == "vm-lifecycle-child")
+    {
         if user_name()? != "AiwStandardUser" {
             return Err("Fixed standard user required".into());
         }
@@ -236,6 +239,10 @@ pub fn run() -> TrialResult<()> {
             let token = aiw_token::collect_current_process_token()?;
             if token.is_elevated || token.is_app_container || token.integrity.rid != 8192 {
                 return Err("Medium non-elevated child required".into());
+            }
+            if arguments[0] == "vm-lifecycle-child" {
+                stage = "primaryInteractiveContext";
+                verify_primary_interactive(local, &image_hash)?;
             }
             stage = "heldInputs";
             let _inputs = hold_inputs()?;
@@ -304,6 +311,9 @@ pub fn run() -> TrialResult<()> {
         }
         return attempt;
     }
+    if arguments.len() == 1 && arguments[0] == "vm-controller" {
+        return run_vm_parent(&image_hash);
+    }
     if !arguments.is_empty() || user_name()? != "WDAGUtilityAccount" {
         return Err("Closed parent requires Sandbox operator and no arguments".into());
     }
@@ -350,6 +360,24 @@ fn run_parent(evidence: &Path) -> TrialResult<()> {
             .map_err(|error| crate::GuestMsiExecutionError::Process(error.to_string()))
     })?;
     let child = GuestProcess::start_standard_user(EXE, &["lifecycle-child".into()], &standard)?;
+    finish_lifecycle(
+        evidence,
+        &child,
+        &standard.context().user_sid,
+        standard.document_root(),
+        &image_hash,
+        false,
+    )
+}
+
+fn finish_lifecycle(
+    evidence: &Path,
+    child: &GuestProcess,
+    expected_sid: &str,
+    source: &Path,
+    image_hash: &str,
+    primary: bool,
+) -> TrialResult<()> {
     let operation = (|| -> TrialResult<()> {
         let assigned = child.is_in_owned_job()?;
         if !assigned {
@@ -375,11 +403,10 @@ fn run_parent(evidence: &Path) -> TrialResult<()> {
         if code != 0 {
             return Err(format!("Fixed lifecycle child exited {code}").into());
         }
-        let identity: serde_json::Value = serde_json::from_slice(&std::fs::read(
-            standard.document_root().join("child-identity.json"),
-        )?)?;
+        let identity: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(source.join("child-identity.json"))?)?;
         if identity["pid"] != child.process_id()
-            || identity["sid"] != standard.context().user_sid
+            || identity["sid"] != expected_sid
             || identity["sessionId"] != expected_session
             || identity["imagePath"] != EXE
             || identity["imageSha256"] != image_hash
@@ -413,7 +440,6 @@ fn run_parent(evidence: &Path) -> TrialResult<()> {
             "brokeredApplicationScope":"not inferred from job; exact worker disposal required"
         }),
     )?;
-    let source = standard.document_root();
     let exported = export(source, evidence);
     if let Err(error) = &exported {
         record(
@@ -447,7 +473,7 @@ fn run_parent(evidence: &Path) -> TrialResult<()> {
     };
     let worker = read("msix-lifecycle/worker.json")?;
     let supervisor = read("powershell-launch.json")?;
-    if worker["operatorSid"] != standard.context().user_sid
+    if worker["operatorSid"] != expected_sid
         || worker["sessionId"] != supervisor["sessionId"]
         || worker["supervisorPid"] != supervisor["pid"]
         || worker["inInheritedJob"] != true
@@ -468,13 +494,25 @@ fn run_parent(evidence: &Path) -> TrialResult<()> {
     validate_lifecycle(
         evidence,
         &assembly,
-        &standard.context().user_sid,
+        expected_sid,
         session_id(child.process_id())?,
     )?;
+    if primary {
+        let context = read_receipt(evidence, "primary-context.json")?;
+        let receipt = read_receipt(evidence, "primary-session.json")?;
+        if receipt["verified"] != true
+            || receipt["runNonce"] != context["runNonce"]
+            || receipt["observation"]["UserSid"] != expected_sid
+            || receipt["observation"]["SessionId"] != session_id(child.process_id())?
+            || receipt["observation"]["AuthenticationId"] != context["authenticationId"]
+        {
+            return Err("Primary interactive receipt differs".into());
+        }
+    }
     record(
         evidence,
         "result.json",
-        serde_json::json!({"researchOnly":true,"passed":true,"jobEmpty":true,"applicationLifecycle":"see retained stage observations","workerCleanup":"dispose exact owned Sandbox","isolation":"notMeasured"}),
+        serde_json::json!({"researchOnly":true,"passed":true,"jobEmpty":true,"applicationLifecycle":"see retained stage observations","workerCleanup":if primary {"retain evidence; restore dedicated VM boundary after failure; exact account cleanup after success"} else {"dispose exact owned Sandbox"},"isolation":"notMeasured"}),
     )
 }
 
@@ -489,6 +527,292 @@ fn read_receipt(root: &Path, name: &str) -> TrialResult<serde_json::Value> {
         return Err("Structured receipt missing".into());
     }
     Ok(value)
+}
+
+const PREPARATION: &str = r"C:\AIW-Msix-Lifecycle-Preparation.json";
+const VM_ID: &str = "cb7cc9f0-81f7-4326-8c52-828e42673d11";
+const VM_OPERATOR_SID: &str = "S-1-5-21-3407263227-439785483-4249424476-500";
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PrimaryPreparation {
+    schema_version: String,
+    vm_id: String,
+    source_image_sha256: String,
+    user_sid: String,
+    session_id: u32,
+    not_before_file_time: i64,
+    not_after_file_time: i64,
+    run_nonce: String,
+    account_created: bool,
+    account_name: String,
+}
+fn validate_preparation(value: &PrimaryPreparation, image_hash: &str, now: i64) -> TrialResult<()> {
+    let sid_prefix = "S-1-5-21-3407263227-439785483-4249424476-";
+    let rid = value
+        .user_sid
+        .strip_prefix(sid_prefix)
+        .and_then(|v| v.parse::<u32>().ok());
+    if value.schema_version != "aiw.dev/research-primary-msix/v1"
+        || value.vm_id != VM_ID
+        || value.source_image_sha256 != image_hash
+        || !rid.is_some_and(|v| v >= 1000)
+        || value.session_id == 0
+        || value.account_name != "AiwStandardUser"
+        || !value.account_created
+        || value.run_nonce.len() != 64
+        || !value
+            .run_nonce
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        || value.not_before_file_time <= 0
+        || now < value.not_before_file_time
+        || now > value.not_after_file_time
+        || value
+            .not_after_file_time
+            .checked_sub(value.not_before_file_time)
+            .is_none_or(|span| span > 1800 * 10_000_000)
+    {
+        return Err("Closed run-owned primary preparation differs or expired".into());
+    }
+    Ok(())
+}
+fn run_fixed_powershell(command: String, deadline: u64) -> TrialResult<()> {
+    let child = GuestProcess::start(
+        POWERSHELL,
+        &[
+            "-NoProfile".into(),
+            "-NonInteractive".into(),
+            "-Command".into(),
+            command,
+        ],
+    )?;
+    let operation = child.wait_for_exit(Duration::from_secs(deadline));
+    let normal = if operation.as_ref().is_ok_and(|v| *v == 0) {
+        child.verify_empty_after_success()
+    } else {
+        Ok(())
+    };
+    let cleanup = child.cleanup();
+    let code = operation?;
+    normal?;
+    cleanup?;
+    if code != 0 {
+        return Err(format!("Fixed primary-context PowerShell failed: {code}").into());
+    }
+    Ok(())
+}
+fn run_vm_parent(image_hash: &str) -> TrialResult<()> {
+    let token = aiw_token::collect_current_process_token()?;
+    if token.user_sid != "S-1-5-18" || session_id(std::process::id())? != 0 {
+        return Err("Dedicated VM controller requires LocalSystem session zero".into());
+    }
+    // An impersonated thread cannot borrow SYSTEM process authority.
+    use windows::Win32::System::Threading::{GetCurrentThread, OpenThreadToken};
+    let mut thread_token = windows::Win32::Foundation::HANDLE::default();
+    // SAFETY: current thread pseudo handle and writable output handle.
+    match unsafe {
+        OpenThreadToken(
+            GetCurrentThread(),
+            windows::Win32::Security::TOKEN_QUERY,
+            true,
+            &mut thread_token,
+        )
+    } {
+        Ok(()) => {
+            use std::os::windows::io::{FromRawHandle, OwnedHandle};
+            // SAFETY: successful query transferred a real token handle.
+            let _held = unsafe { OwnedHandle::from_raw_handle(thread_token.0) };
+            return Err("Impersonated VM controller refused".into());
+        }
+        Err(error) if error.code() == windows::core::HRESULT::from_win32(1008) => {}
+        Err(error) => return Err(error.into()),
+    }
+    let mut computer = [0u16; 256];
+    let mut length = computer.len() as u32;
+    // SAFETY: bounded writable native computer-name buffer.
+    if unsafe { GetComputerNameW(computer.as_mut_ptr(), &mut length) } == 0
+        || !String::from_utf16(&computer[..length as usize])?.eq_ignore_ascii_case("aiwcleanhost")
+    {
+        return Err("Pinned dedicated VM computer required".into());
+    }
+    let _input_directory = hold_directory(Path::new(INPUT))?;
+    let _output_directory = hold_directory(Path::new(OUTPUT))?;
+    let _inputs = hold_inputs()?;
+    let (_image, _) = hold_self()?;
+    let mut preparation_file = OpenOptions::new()
+        .read(true)
+        .share_mode(1)
+        .custom_flags(0x00200000)
+        .open(PREPARATION)?;
+    let metadata = preparation_file.metadata()?;
+    if !metadata.is_file() || metadata.len() > 8192 || metadata.file_attributes() & 0x400 != 0 {
+        return Err("Bounded held preparation required".into());
+    }
+    let mut bytes = Vec::new();
+    preparation_file.read_to_end(&mut bytes)?;
+    let prepared: PrimaryPreparation =
+        serde_json::from_slice(bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(&bytes))?;
+    let now = i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos()
+            / 100,
+    )? + 116444736000000000;
+    validate_preparation(&prepared, image_hash, now)?;
+    let command = format!(
+        r#"$ErrorActionPreference='Stop'
+{identity}
+$acl=Get-Acl -LiteralPath '{PREPARATION}';$owner=$acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+if(!$acl.AreAccessRulesProtected -or $owner -notin @('S-1-5-18','{VM_OPERATOR_SID}')){{throw 'Protected preparation owner differs'}}
+$rules=$acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]);if($rules.Count -eq 0){{throw 'Preparation ACL absent'}}
+foreach($rule in $rules){{$sid=$rule.IdentityReference.Value;if($rule.AccessControlType -ne 'Allow' -or $rule.IsInherited -or $sid -notin @('S-1-5-18','{VM_OPERATOR_SID}','{sid}')){{throw 'Preparation ACL principal differs'}};if($sid -ceq '{sid}'){{$allowed=[int64][Security.AccessControl.FileSystemRights]::ReadAndExecute -bor [int64][Security.AccessControl.FileSystemRights]::Synchronize;if(([int64]$rule.FileSystemRights -band (-bnot $allowed)) -ne 0){{throw 'Application user may write preparation'}}}}}}
+if(!(Test-Path -LiteralPath 'Registry::HKEY_USERS\{sid}')){{throw 'Actual interactive profile hive not loaded'}}
+$user=Get-LocalUser -Name AiwStandardUser;if($user.SID.Value -cne '{sid}'){{throw 'Prepared account SID differs'}}
+"#,
+        sid = prepared.user_sid,
+        identity = azure_identity_script()
+    );
+    run_fixed_powershell(command, 30)?;
+    let evidence = Path::new(OUTPUT).join("standard-user-lifecycle");
+    if std::fs::read_dir(OUTPUT)?.next().is_some() {
+        return Err("Fresh dedicated VM output required".into());
+    }
+    std::fs::create_dir(&evidence)?;
+    let attempt = (|| -> TrialResult<()> {
+        parent_inventory(&evidence, InventoryStage::Before)?;
+        let user = crate::research_msix_primary_user::PrimaryInteractiveUser::establish(
+            &prepared.user_sid,
+            prepared.session_id,
+        )?;
+        record(
+            &evidence,
+            "context.json",
+            serde_json::to_value(user.context())?,
+        )?;
+        record(
+            &evidence,
+            "primary-context.json",
+            serde_json::json!({"prepared":prepared,"runNonce":prepared.run_nonce,"authenticationId":user.authentication_id,"sourceImageSha256":image_hash}),
+        )?;
+        // Grant only read access to the fixed context; the application writes its
+        // own profile, never this privileged evidence destination.
+        run_fixed_powershell(
+            format!(
+                r#"$ErrorActionPreference='Stop';$acl=[Security.AccessControl.DirectorySecurity]::new();$acl.SetAccessRuleProtection($true,$false);$acl.SetOwner([Security.Principal.SecurityIdentifier]::new('S-1-5-18'));foreach($sid in @('S-1-5-18','{VM_OPERATOR_SID}')){{$acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sid),'FullControl','ContainerInherit,ObjectInherit','None','Allow'))}};$acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('{sid}'),'ReadAndExecute','ContainerInherit,ObjectInherit','None','Allow'));Set-Acl -LiteralPath '{OUTPUT}' -AclObject $acl"#,
+                sid = prepared.user_sid
+            ),
+            30,
+        )?;
+        let source = Path::new(r"C:\Users\AiwStandardUser\AppData\Local\AIW");
+        crate::guest_standard_user::impersonate_primary_token(user.token_handle(), || {
+            if source.exists() {
+                return Err(crate::GuestMsiExecutionError::Process(
+                    "Fresh interactive evidence required".into(),
+                ));
+            }
+            std::fs::create_dir(source)
+                .map_err(|e| crate::GuestMsiExecutionError::Process(e.to_string()))
+        })?;
+        let _source_directory = hold_directory(source)?;
+        let child = GuestProcess::start_primary_interactive(&user)?;
+        finish_lifecycle(
+            &evidence,
+            &child,
+            &prepared.user_sid,
+            source,
+            image_hash,
+            true,
+        )
+    })();
+    if let Err(error) = &attempt {
+        record(
+            &evidence,
+            "failure.json",
+            serde_json::json!({"error":error.to_string(),"researchOnly":true,"recovery":"retain stage; restore exact dedicated VM boundary; no account adoption or automatic retry"}),
+        )?;
+    }
+    attempt
+}
+fn hold_directory(path: &Path) -> TrialResult<File> {
+    // Allow child writes, deny delete/rename of this exact directory entry.
+    let file = OpenOptions::new()
+        .read(true)
+        .share_mode(3)
+        .custom_flags(0x02200000)
+        .open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_dir() || metadata.file_attributes() & 0x400 != 0 {
+        return Err("Held non-reparse research directory required".into());
+    }
+    Ok(file)
+}
+fn verify_primary_interactive(local: &Path, image_hash: &str) -> TrialResult<()> {
+    let context = read_receipt(
+        &Path::new(OUTPUT).join("standard-user-lifecycle"),
+        "primary-context.json",
+    )?;
+    let prepared: PrimaryPreparation = serde_json::from_value(context["prepared"].clone())?;
+    let now = i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos()
+            / 100,
+    )? + 116444736000000000;
+    validate_preparation(&prepared, image_hash, now)?;
+    if context["sourceImageSha256"] != image_hash {
+        return Err("Held primary child source identity differs".into());
+    }
+    run_fixed_powershell(primary_observation_script(), 30)?;
+    let receipt = read_receipt(local, "primary-session.json")?;
+    if receipt["verified"] != true || receipt["runNonce"] != prepared.run_nonce {
+        return Err("Verified primary-context binding absent".into());
+    }
+    Ok(())
+}
+fn primary_native_source() -> String {
+    let interactive = include_str!("research_msix_interactive.cs")
+        .lines()
+        .filter(|line| !line.starts_with("using "))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "using System.Diagnostics;\nusing System.Security.Principal;\n{}\n{interactive}",
+        include_str!("research_msix_native.cs")
+    )
+}
+fn azure_identity_script() -> String {
+    format!(
+        r#"$request=[Net.HttpWebRequest]::Create('http://169.254.169.254/metadata/instance/compute?api-version=2021-02-01');$request.Proxy=$null;$request.Timeout=5000;$request.ReadWriteTimeout=5000;$request.Headers.Add('Metadata','true');$response=$request.GetResponse()
+try{{$reader=[IO.StreamReader]::new($response.GetResponseStream());try{{$metadata=$reader.ReadToEnd()|ConvertFrom-Json}}finally{{$reader.Dispose()}}}}finally{{$response.Dispose()}}
+if($metadata.vmId -cne '{VM_ID}' -or $metadata.name -cne 'aiw-clean-host-0921' -or $metadata.subscriptionId -cne '43babb60-9e73-4dc8-b769-4401c01aad73'){{throw 'Pinned Azure VM identity differs'}}"#
+    )
+}
+fn primary_observation_script() -> String {
+    format!(
+        r#"$ErrorActionPreference='Stop'
+try {{
+{identity}
+Add-Type -TypeDefinition @'
+{native}
+'@
+$context=Get-Content -LiteralPath 'C:\AIW-Msix-Lifecycle-Output\standard-user-lifecycle\primary-context.json' -Raw|ConvertFrom-Json
+$acl=Get-Acl -LiteralPath 'C:\AIW-Msix-Lifecycle-Output';if(!$acl.AreAccessRulesProtected -or $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -cne 'S-1-5-18'){{throw 'Protected SYSTEM context directory required'}}
+foreach($rule in $acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])){{$sid=$rule.IdentityReference.Value;if($rule.AccessControlType -ne 'Allow' -or $rule.IsInherited -or $sid -notin @('S-1-5-18','{VM_OPERATOR_SID}',$context.prepared.userSid)){{throw 'Primary context ACL differs'}};if($sid -ceq $context.prepared.userSid){{$allowed=[int64][Security.AccessControl.FileSystemRights]::ReadAndExecute -bor [int64][Security.AccessControl.FileSystemRights]::Synchronize;if(([int64]$rule.FileSystemRights -band (-bnot $allowed)) -ne 0){{throw 'Application user may write primary context'}}}}}}
+if((Get-Acl -LiteralPath 'C:\AIW-Msix-Lifecycle-Output\standard-user-lifecycle\primary-context.json').GetOwner([Security.Principal.SecurityIdentifier]).Value -cne 'S-1-5-18'){{throw 'Primary context record owner differs'}}
+$value=[AiwInteractiveNative]::ObserveCurrent();[AiwInteractiveNative]::RequireOwnedStandardSession($value,$context.prepared.userSid,$context.prepared.notBeforeFileTime,$context.prepared.notAfterFileTime)
+if($value.AuthenticationId -cne $context.authenticationId -or $value.SessionId -ne $context.prepared.sessionId){{throw 'WTS primary authentication differs'}}
+$record=@{{verified=$true;runNonce=$context.runNonce;observation=$value}}|ConvertTo-Json -Depth 10
+$bytes=[Text.Encoding]::UTF8.GetBytes($record);$file=[IO.File]::Open('C:\Users\AiwStandardUser\AppData\Local\AIW\primary-session.json',[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+try{{$file.Write($bytes,0,$bytes.Length);$file.Flush($true)}}finally{{$file.Dispose()}}
+}} catch {{
+$primary=$_;$record=@{{stage='primaryInteractiveSession';exception=$_.Exception.ToString();errorRecord=($_|Out-String);applicationTrialStarted=$false}}|ConvertTo-Json -Depth 8
+$bytes=[Text.Encoding]::UTF8.GetBytes($record);$file=[IO.File]::Open('C:\Users\AiwStandardUser\AppData\Local\AIW\primary-session-failure.json',[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+try{{$file.Write($bytes,0,$bytes.Length);$file.Flush($true)}}finally{{$file.Dispose()}};throw $primary
+}}
+"#,
+        native = primary_native_source(),
+        identity = azure_identity_script()
+    )
 }
 fn require_empty_process_inventory(value: &serde_json::Value) -> TrialResult<()> {
     for key in ["matches", "queryErrors"] {
@@ -893,6 +1217,81 @@ fn export(source: &Path, target: &Path) -> TrialResult<()> {
 
 #[cfg(test)]
 mod tests {
+    fn primary_preparation() -> serde_json::Value {
+        serde_json::json!({"schemaVersion":"aiw.dev/research-primary-msix/v1","vmId":super::VM_ID,"sourceImageSha256":"a".repeat(64),"userSid":"S-1-5-21-3407263227-439785483-4249424476-1001","sessionId":3,"notBeforeFileTime":100,"notAfterFileTime":300,"runNonce":"b".repeat(64),"accountCreated":true,"accountName":"AiwStandardUser"})
+    }
+    #[test]
+    fn primary_preparation_rejects_unowned_or_expired_run() {
+        let hash = "a".repeat(64);
+        let original = primary_preparation();
+        let value = serde_json::from_value(original.clone()).unwrap();
+        super::validate_preparation(&value, &hash, 200).unwrap();
+        for (key, wrong) in [
+            ("schemaVersion", serde_json::json!("unknown")),
+            ("vmId", serde_json::json!("other-vm")),
+            ("sourceImageSha256", serde_json::json!("c".repeat(64))),
+            ("userSid", serde_json::json!(super::VM_OPERATOR_SID)),
+            ("sessionId", serde_json::json!(0)),
+            ("accountName", serde_json::json!("aiwoperator")),
+            ("accountCreated", serde_json::json!(false)),
+            ("runNonce", serde_json::json!("wrong")),
+            ("runNonce", serde_json::json!("B".repeat(64))),
+            ("notBeforeFileTime", serde_json::json!(201)),
+            ("notAfterFileTime", serde_json::json!(199)),
+            ("notAfterFileTime", serde_json::json!(i64::MAX)),
+        ] {
+            let mut candidate = original.clone();
+            candidate[key] = wrong;
+            let value = serde_json::from_value(candidate).unwrap();
+            assert!(
+                super::validate_preparation(&value, &hash, 200).is_err(),
+                "{key}"
+            );
+        }
+        let mut extra = original;
+        extra["command"] = serde_json::json!("anything");
+        assert!(serde_json::from_value::<super::PrimaryPreparation>(extra).is_err());
+    }
+    #[test]
+    fn primary_script_parses_and_native_source_compiles_in_ps51() {
+        let root = std::env::temp_dir().join(format!(
+            "aiw-primary-source-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let script = root.join("observer.ps1");
+        let native = root.join("observer.cs");
+        std::fs::write(&script, super::primary_observation_script()).unwrap();
+        std::fs::write(&native, super::primary_native_source()).unwrap();
+        let command = format!(
+            "$ErrorActionPreference='Stop'; $tokens=$null;$errors=$null;$null=[Management.Automation.Language.Parser]::ParseFile('{}',[ref]$tokens,[ref]$errors);if($errors.Count){{throw ($errors|Out-String)}};Add-Type -Path '{}';@{{parsed=$true;nativeCompiled=$true;applicationExecuted=$false}}|ConvertTo-Json",
+            script.to_string_lossy().replace('\'', "''"),
+            native.to_string_lossy().replace('\'', "''")
+        );
+        let output = std::process::Command::new(super::POWERSHELL)
+            .args(["-NoProfile", "-NonInteractive", "-Command", &command])
+            .output()
+            .unwrap();
+        std::fs::write(root.join("stdout.log"), &output.stdout).unwrap();
+        std::fs::write(root.join("stderr.log"), &output.stderr).unwrap();
+        assert!(
+            output.status.success(),
+            "PS5.1 parse/compile failed; retained {}",
+            root.display()
+        );
+        let quoted = aiw_windows_command_line::join_arguments([
+            super::POWERSHELL,
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            &super::primary_observation_script(),
+        ]);
+        assert!(quoted.encode_utf16().count() < 32767);
+    }
     const SID: &str = "S-1-5-21-1-2-3-1000";
     struct Fixture {
         root: std::path::PathBuf,

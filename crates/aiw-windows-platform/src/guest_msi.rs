@@ -67,6 +67,12 @@ unsafe extern "system" {
     ) -> BOOL;
 }
 
+#[cfg(feature = "research-msix-lifecycle")]
+#[link(name = "Kernel32")]
+unsafe extern "system" {
+    fn ProcessIdToSessionId(pid: u32, session: *mut u32) -> i32;
+}
+
 #[link(name = "User32")]
 unsafe extern "system" {
     fn GetThreadDesktop(thread_id: u32) -> HANDLE;
@@ -1394,6 +1400,121 @@ fn retain_interactive_install_log() -> Result<(), String> {
 }
 
 impl GuestProcess {
+    #[cfg(feature = "research-msix-lifecycle")]
+    pub(crate) fn start_primary_interactive(
+        user: &crate::research_msix_primary_user::PrimaryInteractiveUser,
+    ) -> Result<Self, GuestMsiExecutionError> {
+        use windows::Win32::System::Threading::CreateProcessAsUserW;
+        let path = r"C:\AIW-Msix-Lifecycle-Input\msix_standard_user_lifecycle.exe";
+        let application = wide(path)?;
+        let directory = wide(r"C:\AIW-Msix-Lifecycle-Input")?;
+        let mut command = wide(&aiw_windows_command_line::join_arguments([
+            path,
+            "vm-lifecycle-child",
+        ]))?;
+        let mut desktop = wide(r"winsta0\default")?;
+        let startup = STARTUPINFOW {
+            cb: std::mem::size_of::<STARTUPINFOW>() as u32,
+            lpDesktop: PWSTR(desktop.as_mut_ptr()),
+            ..Default::default()
+        };
+        let mut information = PROCESS_INFORMATION::default();
+        let job = ScenarioJob::create()?;
+        let privilege = crate::guest_standard_user::ScopedPrivileges::enable(&[
+            "SeIncreaseQuotaPrivilege",
+            "SeAssignPrimaryTokenPrivilege",
+        ])?;
+        // SAFETY: held WTS primary token/environment, fixed writable command and
+        // default interactive desktop. No handles inherited across sessions.
+        let created = unsafe {
+            CreateProcessAsUserW(
+                Some(user.token()),
+                PCWSTR(application.as_ptr()),
+                Some(PWSTR(command.as_mut_ptr())),
+                None,
+                None,
+                false,
+                CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
+                Some(user.environment().cast_const()),
+                PCWSTR(directory.as_ptr()),
+                &startup,
+                &mut information,
+            )
+        };
+        created
+            .map_err(|e| GuestMsiExecutionError::Process(format!("CreateProcessAsUserW: {e}")))?;
+        // SAFETY: successful creation transferred these two real handles.
+        let process = unsafe { OwnedHandle::from_raw_handle(information.hProcess.0) };
+        let thread = unsafe { OwnedHandle::from_raw_handle(information.hThread.0) };
+        let checked = (|| {
+            user.validate_child(&process)?;
+            let mut physical_session = 0;
+            // SAFETY: exact held suspended child PID, writable session output.
+            if unsafe { ProcessIdToSessionId(information.dwProcessId, &mut physical_session) } == 0
+            {
+                return Err(GuestMsiExecutionError::Process(
+                    windows::core::Error::from_thread().to_string(),
+                ));
+            }
+            let mut image = [0u16; 32768];
+            let mut image_length = image.len() as u32;
+            // SAFETY: exact held process and bounded writable image buffer.
+            unsafe {
+                QueryFullProcessImageNameW(
+                    raw_handle(&process),
+                    PROCESS_NAME_WIN32,
+                    PWSTR(image.as_mut_ptr()),
+                    &mut image_length,
+                )
+            }
+            .map_err(|e| GuestMsiExecutionError::Process(e.to_string()))?;
+            let image_path = String::from_utf16(&image[..image_length as usize])
+                .map_err(|e| GuestMsiExecutionError::Process(e.to_string()))?;
+            if physical_session != user.session || !image_path.eq_ignore_ascii_case(path) {
+                return Err(GuestMsiExecutionError::Process(
+                    "Suspended primary child image/session differs".into(),
+                ));
+            }
+            // SAFETY: exact held suspended process and owned job.
+            unsafe { AssignProcessToJobObject(job.raw(), raw_handle(&process)) }.map_err(|e| {
+                GuestMsiExecutionError::Process(format!("Primary owned job assignment: {e}"))
+            })?;
+            let mut assigned = BOOL(0);
+            // SAFETY: exact owned job and still-suspended process handles.
+            unsafe { IsProcessInJob(raw_handle(&process), Some(job.raw()), &mut assigned) }
+                .map_err(|e| GuestMsiExecutionError::Process(e.to_string()))?;
+            if !assigned.as_bool() {
+                return Err(GuestMsiExecutionError::Process(
+                    "Suspended primary child absent from exact job".into(),
+                ));
+            }
+            Ok::<_, GuestMsiExecutionError>(())
+        })();
+        if let Err(error) = checked {
+            let cleanup = terminate_unassigned_process(&process);
+            return Err(GuestMsiExecutionError::Process(format!(
+                "{error}; suspendedCleanup={cleanup:?}"
+            )));
+        }
+        // Restoration can abort on failure. Establish kill-on-close ownership
+        // first so process teardown cannot strand the suspended child.
+        drop(privilege);
+        // SAFETY: retained initial thread is still suspended exactly once.
+        let previous = unsafe { ResumeThread(raw_handle(&thread)) };
+        if previous != 1 {
+            let cleanup = job.terminate_and_verify_empty();
+            return Err(GuestMsiExecutionError::Process(format!(
+                "Primary resume count {previous}; cleanup={cleanup:?}"
+            )));
+        }
+        Ok(Self {
+            job,
+            process,
+            process_id: information.dwProcessId,
+            initial_thread_id: information.dwThreadId,
+            initial_thread: thread,
+        })
+    }
     fn impersonate_token<T>(
         &self,
         expected: &TokenEvidence,

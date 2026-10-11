@@ -82,8 +82,12 @@ PowerShell 5.1 and 7 pass two positive and twenty negative acceptance cases.
 The same check passed in the VM's actual RDP terminal, independently read back:
 real remote-interactive session/shell binding, but elevated operator and shell.
 That context remains diagnostic and is not accepted for a standard-user trial.
-This is not wired into a VM execution mode yet; account creation, protected
-controller/coordinator transitions and the actual standard-user trial remain open.
+The fixed VM path now reuses the same parent-owned lifecycle, with a WTS primary
+user token and suspended `CreateProcessAsUserW` launch into the already logged-on
+user's desktop. Exact VM/SYSTEM, immutable preparation and native interactive
+context checks precede installation. No file/pipe coordinator protocol or service
+was added. Account provisioning, recoverable VM preparation and the actual
+standard-user trial remain open; local code checks are not execution proof.
 Fresh Azure inventory confirms the dedicated VM is running but has no snapshot in
 its resource group; verify a recoverable boundary before the next account/install.
 The held suspended-process control passes local checks, with any-job membership
