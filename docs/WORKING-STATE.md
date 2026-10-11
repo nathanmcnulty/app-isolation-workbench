@@ -98,8 +98,12 @@ contract. The frozen `c2fda15` control then failed `CreateProcessAsUserW` with
 `0x80070005` before child handles or installation. Retained records bind the
 standard user's primary token in session 2 to a SYSTEM controller in session 0
 inside an inherited job. Job/session conflict is a hypothesis, not a package verdict.
-Next measure a fixed protected Task Scheduler controller's job and privilege
-context, then prove its fixed cmd control before any fresh native trial. Preserve
+The protected default SYSTEM Task Scheduler observation passed: all five required
+privileges were observed and enable/restore passed. Its parent job has flag
+`0x1000` (silent child breakaway), unlike Azure's immediate zero limits. Exact
+action exit and task/instance cleanup passed; no application or cmd was launched.
+Next prove a suspended fixed cmd has no inherited job, then assign the exact
+owned job and verify exit 42/cleanup before any fresh native WTS trial. Preserve
 failed accounts, preparations and windows; no retry or adoption. Packaged execution
 remains unproven. Detailed r5 identities are in the lifecycle document.
 Cold recovery was exercised from snapshot `aiw-msix-cold-123e286bd0cf`.

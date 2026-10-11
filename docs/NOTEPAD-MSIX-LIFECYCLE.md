@@ -485,6 +485,63 @@ preparation run the unchanged native WTS control. No breakaway flags, desktop or
 executable ACL relaxation, generic command interface, or production launcher change
 is justified by the current evidence.
 
+### Default SYSTEM task observation
+
+The protected task experiment retained three registration/validation failures
+before running an action: `ServiceAccount` is not an XML `LogonType` value; the
+corrected compact privilege XML was rejected at `Principal`; and a typed
+`IPrincipal2` builder was rejected by validation-only at `Privilege:SeTcbPrivilege`.
+The latter stopped before task creation. These are adapter observations, not
+application failures. Do not assume that a documented privilege name or an
+in-memory COM definition establishes registration readiness on the worker.
+
+A fresh observation used the default SYSTEM service-account task without an
+explicit `RequiredPrivileges` array. Independently reviewed fixed templates were
+byte-hash pinned before normalization and placeholder expansion. The task was
+create-only, demand-start only, with no triggers/retries, an exact SYSTEM/operator
+DACL, one protected fixed action, a 40-second task limit and 30-second controller
+deadline. Validation-only, canonical definition identity and registered semantic
+readback preceded its single start. Task engine identity was retained separately
+from the action's held PID generation, image, SID and session binding.
+
+At `2026-10-11T10:00:04.5038352Z`, action PID 13040 observed SYSTEM/session 0,
+no thread impersonation, and all five expected privileges present with successful
+enable/restore: `SeTcbPrivilege`, `SeAssignPrimaryTokenPrivilege`,
+`SeIncreaseQuotaPrivilege`, `SeImpersonatePrivilege`, and
+`SeChangeNotifyPrivilege`. Actual observation governs this worker; do not infer
+privilege presence or absence from generic default-task documentation.
+
+The action reported `inAnyJob=true`, immediate limit flags `4096` (`0x1000`,
+`JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK`). It exited zero; the controller verified
+action exit, no remaining task instance, exact task deletion and task absence.
+It attempted no cmd, WTS or application launch. Its conservative prerequisite
+indicator remained false because the parent was in a job; this indicator is a
+research gate, not a production compatibility verdict.
+
+Microsoft's [job documentation](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
+allows children to leave a job with this flag without requesting explicit
+breakaway, but ancestor jobs can still prevent full escape. The next fixed cmd
+control must observe the suspended child in **no** inherited job before assigning
+it to the project's exact kill-on-close job and resuming once. Require exit 42,
+bounded output/deadline, empty job inventory and confirmed cleanup. Parent flags
+alone cannot establish complete escape, cross-session WTS launch or packaged
+activation. No job policy or launch flags were changed by this observation.
+
+Retained host records: `managed-task-context-r1-observed-*.json` through
+`managed-task-context-r4-observed-*.json`; successful r4 resource
+`aiw-task-context-r4-e35c1361e4f5`. Its task/action nonce and exact source identities
+are in `managed-task-context-r4-state-r1.json`. Guest stage:
+`C:\AIW-Task-Context-e35c1361e4f5b540611b4d8b4ec2a440a49cf2a8d4b92b2f2e53ac7f57dd5c18`.
+Keep the failed stages, registered-definition record and cleanup receipt.
+Separate SYSTEM readback at `2026-10-11T10:02:46.2742184Z` independently verified
+the expanded worker hash against the host request, held generated XML identity,
+retained terminal/cleanup records, current task absence and action PID absence.
+Evidence: `managed-task-context-readback-r1-observed-*.json`;
+controller result SHA-256
+`88aebed013dfcafa7bbe1fc94ab14db14452dbf42e36740e7307dccda55de902`,
+cleanup SHA-256
+`9ca92ae998a4195e1e7f8f66f85b96ca217de17e662affbd0c7713f15740a558`.
+
 ## Current evidence
 
 The first unsigned package assembled with the pinned tool. Two subsequent fresh
