@@ -542,6 +542,35 @@ controller result SHA-256
 cleanup SHA-256
 `9ca92ae998a4195e1e7f8f66f85b96ca217de17e662affbd0c7713f15740a558`.
 
+### Scheduler child containment control
+
+The independently reviewed closed control in
+`scripts/research/msix-scheduler-launch-control.ps1` passed on the same dedicated
+worker at `2026-10-11T10:19:22.9010198Z`. SYSTEM task action PID 2440 observed the
+same immediate `0x1000` job flag. Fixed signed Windows cmd PID 11168 was created
+suspended without explicit breakaway and observed in no job, then assigned to a
+fresh exact kill-on-close job before identity checks or resume. Its image, SYSTEM
+SID and session zero matched; one resume returned count one, exit was 42, both
+streams reached EOF with zero bytes and the owned job was empty. Native cleanup,
+action exit zero and exact task/instance removal all passed. This proves the
+Scheduler child escape and owned containment control, not cross-session WTS or
+standard-user application execution. The conservative parent-no-job diagnostic
+remains false and is distinct from this measured child result.
+
+Separate SYSTEM readback at `2026-10-11T10:21:28.5653774Z` verified the held worker
+and generated XML hashes, retained launch/controller association, cleanup, current
+task absence and both recorded PIDs absent. Host records are
+`managed-scheduler-cmd-r2-state-r1.json`, `managed-scheduler-cmd-r2-observed-*.json`
+and `managed-scheduler-cmd-readback-r1-observed-*.json`. Resource:
+`aiw-scheduler-cmd-r2-4e4a54fc13c5`; nonce:
+`4e4a54fc13c5a8c03054ec4ffdb8018078ea8f94a32fec9a992029278c533100`.
+Retained launch result SHA-256:
+`fa4fb6a572551bbcb5dca1bfcedab9f954b44f1a8fd92411a2a661e9088c959d`;
+cleanup SHA-256:
+`3b6bbb9802bfc999f005a0e69aaf5f20f51e8b87652268482952e9f4e6be5d7d`.
+Next use a fresh cold boundary, account and canonical preparation to run the
+unchanged native `vm-launch-control` through this default SYSTEM task route.
+
 ## Current evidence
 
 The first unsigned package assembled with the pinned tool. Two subsequent fresh

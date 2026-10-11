@@ -101,9 +101,12 @@ inside an inherited job. Job/session conflict is a hypothesis, not a package ver
 The protected default SYSTEM Task Scheduler observation passed: all five required
 privileges were observed and enable/restore passed. Its parent job has flag
 `0x1000` (silent child breakaway), unlike Azure's immediate zero limits. Exact
-action exit and task/instance cleanup passed; no application or cmd was launched.
-Next prove a suspended fixed cmd has no inherited job, then assign the exact
-owned job and verify exit 42/cleanup before any fresh native WTS trial. Preserve
+action exit and task/instance cleanup passed. The subsequent fixed cmd control
+proved its suspended child had no inherited job, assigned the exact owned job,
+and verified exit 42, empty output/job and cleanup. Separate SYSTEM readback
+confirmed retained bindings and absent task/action/child. Next use a fresh cold
+boundary/account/preparation for the unchanged native WTS control via this task.
+Preserve
 failed accounts, preparations and windows; no retry or adoption. Packaged execution
 remains unproven. Detailed r5 identities are in the lifecycle document.
 Cold recovery was exercised from snapshot `aiw-msix-cold-123e286bd0cf`.
