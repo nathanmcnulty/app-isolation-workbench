@@ -1,6 +1,6 @@
 # Working state
 
-Updated 2026-10-10. Verify this checkout with `scripts/work-status.ps1`.
+Updated 2026-10-11. Verify this checkout with `scripts/work-status.ps1`.
 This handoff is a pointer, not execution authority or a run receipt.
 
 ## Completed milestone
@@ -92,16 +92,19 @@ session/profile preparation and transferred input hashes are verified. The actua
 controller exited 1 without timeout. Recovered stage evidence shows
 `CreateProcessAsUserW` access denied before child creation/installation; a final
 cleanup inventory is still missing. RDP is recovered with the dedicated test
-account. The diagnostic guest command remains live as PowerShell PID 1820,
-`RunCommand_470`; preserve the VM and do not retry until it is terminal. An empty
+account. Fresh RDP readback confirms `RunCommand_470` finished at 07:59 UTC and
+PID 1820 is absent. Its final JSON serialization failed; the missing cleanup
+inventory remains unresolved. Preserve the failed disk and recover the bounded
+controller evidence before restoring the baseline. An empty
 SDK response after an observation timeout is not completion proof. Research-only
 prelaunch job-limit diagnostics now distinguish an inherited-job hypothesis;
 launch permissions are unchanged. See the lifecycle document for exact evidence.
 The closed `vm-launch-control` now tests signed Windows cmd exit 42 through the
 same suspended WTS launch and exact owned-job path, before any installation.
 Control receipts cannot satisfy lifecycle acceptance; fresh preparation/output
-remain mandatory. Next run that control after the live diagnostic is terminal
-and the disposable baseline is restored, then resolve its observed cause before
+remain mandatory. A separate managed SYSTEM command passed fixed cmd exit 42
+and process closure; it does not exercise WTS or packaged activation. Next run
+the primary-user control after the disposable baseline is restored, then resolve its observed cause before
 repeating installation.
 Packaged execution remains unproven.
 Cold recovery was exercised: the same VM boots `aiw-msix-restored-123e286bd0cf`

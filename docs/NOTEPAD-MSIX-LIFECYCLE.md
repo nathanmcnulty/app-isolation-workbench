@@ -311,6 +311,26 @@ inventory checks; retained logs preserve that failure and the fresh-TEMP rerun.
 No live primary-launch control has run yet. At 2026-10-11 07:42 UTC, independent
 RDP readback still observed diagnostic PID 1820 and `RunCommand_470` transitioning.
 
+Fresh readback at `2026-10-11T08:08:07.4499645Z` confirmed that PID 1820 was
+absent and the exact action recorded `Command Execution Finished` at
+`2026-10-11T07:59:26.8635307Z`. Despite its outer `success` status, code 1 and
+stderr identify a `ConvertTo-Json` conversion failure. The diagnostic did not
+produce the requested cleanup inventory; the long delay's cause remains unknown.
+Retained record: `vm-primary-terminal-readback-20261011T080821Z.json` under the
+proof root. Preserve the failed disk and recover bounded controller evidence
+before restoring the disposable baseline; do not repeat installation to recover
+diagnostic output.
+
+The separately reviewed managed control `aiw-primary-diag-control-9f2996ca033b`
+completed at `2026-10-11T08:05:58.993483Z`. Azure recorded execution success and
+exit zero; the held fixed SYSTEM cmd process returned 42 and closed, with no
+primary or cleanup error. This tests the managed command channel, not the WTS
+launch or application lifecycle. Its optional status parser failed on JSON input;
+only the independent RDP record above establishes the old action's terminal
+status. The old action finished before this control started, so coexistence with
+an active action was not demonstrated. Retain the managed observed record and
+remove only this exact completed research resource before disk restoration.
+
 ## Current evidence
 
 The first unsigned package assembled with the pinned tool. Two subsequent fresh
