@@ -156,6 +156,45 @@ MSIX proof root. Result SHA-256:
 `454d86b62408e8f499493c0c7b7f19b26e2667d064fa0b835d506a28967df5e8`.
 No account, installation, application launch or VM power change occurred.
 
+### Verified disposable VM recovery boundary
+
+The dedicated VM now boots a restored copy of its cold OS-disk snapshot, with
+the original disk retained and unattached. The exact VM identity and networking
+were preserved. Before shutdown, the operator's provider list was empty and the
+privileged inventory found no research package or trial process. A flushed
+nonce-bound marker records the original account baseline. Normal Windows shutdown
+returned zero; Azure independently reported stopped, then deallocated before
+snapshot creation. After restored-disk boot, the marker hash and every account
+name/SID/enabled flag matched. Windows events 1074 and 6006 correlate to the
+shutdown request; no 6008 occurred in that interval. The agent is running and
+the fixed trial input/output/preparation/profile paths remain absent.
+
+Snapshot: `aiw-msix-cold-123e286bd0cf`; current OS disk:
+`aiw-msix-restored-123e286bd0cf`, both in the dedicated resource group. They deny
+disk export and disable public network access. No export SAS was issued. The
+preserved original disk is
+`aiw-clean-host-0921_OsDisk_1_baafcb16f0de455d84333ae2926e28e1`.
+The original export policy was preserved. Recovery resources contain the VM's
+retained evidence and must not be deleted before trial evidence and rollback are
+accounted for.
+
+The existing OS volume is fully encrypted with XtsAes128, but protection is off,
+there are no key protectors, and no TPM is present. This is Microsoft's documented
+[clear-key state](https://learn.microsoft.com/en-us/windows/win32/secprov/getprotectionstatus-win32-encryptablevolume),
+not a BitLocker confidentiality claim. The exact state is unchanged after
+restore; no encryption, protector or TPM setting was modified. Azure platform-key
+encryption remains unchanged. Recovery material therefore requires the same
+access protection as the VM itself.
+
+The first swap request was rejected for attempting to change the immutable
+`osDisk.createOption`. Independent readback confirmed the original remained
+attached; the corrected request preserved that field and changed only the disk
+identity while retaining caching and detach policy. No VM recreation was needed.
+Full stage records, identities, inventories, rollback script and rejection are
+retained under the MSIX proof root as `vm-cold-recovery-*-r1.json` and
+`vm-cold-recovery-rollback-r1.py`. This proves a restored boot and clean baseline;
+it does not prove the pending standard-user application lifecycle.
+
 ## Current evidence
 
 The first unsigned package assembled with the pinned tool. Two subsequent fresh

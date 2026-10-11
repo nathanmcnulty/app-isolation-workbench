@@ -86,10 +86,14 @@ The fixed VM path now reuses the same parent-owned lifecycle, with a WTS primary
 user token and suspended `CreateProcessAsUserW` launch into the already logged-on
 user's desktop. Exact VM/SYSTEM, immutable preparation and native interactive
 context checks precede installation. No file/pipe coordinator protocol or service
-was added. Account provisioning, recoverable VM preparation and the actual
+was added. Reviewed code is pushed at `a7de2ee`; focused tests, clippy, release
+build, formatting and governance pass. Fresh-account preparation and the actual
 standard-user trial remain open; local code checks are not execution proof.
-Fresh Azure inventory confirms the dedicated VM is running but has no snapshot in
-its resource group; verify a recoverable boundary before the next account/install.
+Cold recovery was exercised: the same VM boots `aiw-msix-restored-123e286bd0cf`
+from snapshot `aiw-msix-cold-123e286bd0cf`. The original disk is retained and
+unattached. Marker/account baseline, clean-shutdown events, absent research
+package/trial paths and unchanged BitLocker state are independently verified.
+Details and exact rollback/evidence pointers are in the lifecycle document.
 The held suspended-process control passes local checks, with any-job membership
 explicitly diagnostic. Packaged execution remains unverified.
 The real application lifecycle remains open. Provider inventory
