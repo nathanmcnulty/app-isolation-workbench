@@ -331,6 +331,36 @@ status. The old action finished before this control started, so coexistence with
 an active action was not demonstrated. Retain the managed observed record and
 remove only this exact completed research resource before disk restoration.
 
+Bounded managed SYSTEM readback recovered the controller at
+`2026-10-11T08:15:18.0045873Z`. Its 121-byte stderr SHA-256 is
+`fdef2873eb760f0c45dea389351bfbb7e5fbf5b546e115b19c6226fddd63155a`:
+the same pre-child `CreateProcessAsUserW` access denial. The result and failure
+hashes were retained with their bytes. No lifecycle driver process was observed;
+the standard-user profile evidence directory existed. Package inventory was
+explicitly not queried in this readback. This is failure recovery, not lifecycle
+acceptance or complete cleanup proof.
+
+Both exact completed managed diagnostics were deleted and independently returned
+404 before disk recovery. The independently reviewed fixed helper
+`vm-baseline-restore-r2.py` (SHA-256
+`2065a546c0ffbf4b281ee289ed6d1fb48fd3a2a4328a7fda32910a190b230994`)
+requested graceful Azure stop, observed stopped/deallocated state, swapped to the
+exact retained original disk using the VM ETag and `Detach` policy, and restarted.
+The failed disk `aiw-msix-restored-123e286bd0cf` remains retained and unattached.
+The original snapshot remains available; do not treat the now-running original
+disk as an immutable baseline for subsequent trials.
+
+The resumed start poller confirmed terminal success at
+`2026-10-11T08:23:41.929143Z`. Fresh managed SYSTEM baseline verification at
+`2026-10-11T08:24:13.1550294Z` passed: exact marker hash and five baseline accounts,
+absent trial account/profile/input/output/preparation/controller paths, zero
+research package registrations/provisioning and driver processes, running guest
+agent, and unchanged clear-key BitLocker state. The bounded primitive JSON
+projection avoided the previous diagnostic's serialization failure. Its retained
+`managed-restored-baseline-observed-*.json` record is separate from application
+evidence. Fresh RDP login and account/session preparation are still required;
+no primary-user launch control or packaged lifecycle has passed on this baseline.
+
 ## Current evidence
 
 The first unsigned package assembled with the pinned tool. Two subsequent fresh

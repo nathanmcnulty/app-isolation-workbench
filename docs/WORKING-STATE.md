@@ -94,8 +94,9 @@ controller exited 1 without timeout. Recovered stage evidence shows
 cleanup inventory is still missing. RDP is recovered with the dedicated test
 account. Fresh RDP readback confirms `RunCommand_470` finished at 07:59 UTC and
 PID 1820 is absent. Its final JSON serialization failed; the missing cleanup
-inventory remains unresolved. Preserve the failed disk and recover the bounded
-controller evidence before restoring the baseline. An empty
+inventory remains unresolved. Bounded SYSTEM readback recovered the matching
+controller stderr and confirmed no lifecycle driver process; the profile evidence
+directory existed. The failed disk is retained. An empty
 SDK response after an observation timeout is not completion proof. Research-only
 prelaunch job-limit diagnostics now distinguish an inherited-job hypothesis;
 launch permissions are unchanged. See the lifecycle document for exact evidence.
@@ -103,13 +104,16 @@ The closed `vm-launch-control` now tests signed Windows cmd exit 42 through the
 same suspended WTS launch and exact owned-job path, before any installation.
 Control receipts cannot satisfy lifecycle acceptance; fresh preparation/output
 remain mandatory. A separate managed SYSTEM command passed fixed cmd exit 42
-and process closure; it does not exercise WTS or packaged activation. Next run
-the primary-user control after the disposable baseline is restored, then resolve its observed cause before
+and process closure; it does not exercise WTS or packaged activation. The reviewed
+rollback restored the original disk and restarted the VM. Fresh SYSTEM readback
+verified the marker, account baseline, absent trial paths/package/processes, guest
+agent and unchanged clear-key recovery state. Next establish a fresh account/RDP
+login and preparation, then run the primary-user control and resolve its cause before
 repeating installation.
 Packaged execution remains unproven.
-Cold recovery was exercised: the same VM boots `aiw-msix-restored-123e286bd0cf`
-from snapshot `aiw-msix-cold-123e286bd0cf`. The original disk is retained and
-unattached. Marker/account baseline, clean-shutdown events, absent research
+Cold recovery was exercised from snapshot `aiw-msix-cold-123e286bd0cf`.
+The VM now boots the original disk; failed disk `aiw-msix-restored-123e286bd0cf`
+is retained and unattached. Marker/account baseline, earlier clean-shutdown events, absent research
 package/trial paths and unchanged BitLocker state are independently verified.
 Details and exact rollback/evidence pointers are in the lifecycle document.
 The held suspended-process control passes local checks, with any-job membership
@@ -126,7 +130,8 @@ see [shared observations](ADMIN-PACKAGING.md#shared-assessment-observations).
 ## Environment and evidence
 
 Dedicated VM: `aiw-clean-host-0921`, resource group `RG-AIW-CLEAN-HOST-20260921`,
-subscription `43babb60-9e73-4dc8-b769-4401c01aad73`; aiwoperator RDP session 2.
+subscription `43babb60-9e73-4dc8-b769-4401c01aad73`. Fresh RDP verification is
+pending after baseline recovery; the failed trial's standard-user login is gone.
 The VM is running. Sandbox workers close after trial completion; that does not
 shut down the VM. The actual host operator token is administrator; guest standard
 user execution is separately verified. RDP computer use/file transfer and terminal
