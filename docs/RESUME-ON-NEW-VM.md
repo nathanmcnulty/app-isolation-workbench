@@ -42,8 +42,9 @@ $assets = Join-Path $destination 'assets'
 [IO.Compression.ZipFile]::ExtractToDirectory($archive, $assets)
 $manifest = Get-Content -LiteralPath (Join-Path $assets 'inventory.json') -Raw | ConvertFrom-Json
 $committedInventory = Join-Path $PWD 'docs\handoff\20261021\inventory.json'
-if ((Get-FileHash -LiteralPath (Join-Path $assets 'inventory.json')).Hash -cne
-    (Get-FileHash -LiteralPath $committedInventory).Hash) { throw 'Inventory differs from committed handoff' }
+$archivedInventory = [IO.File]::ReadAllText((Join-Path $assets 'inventory.json')).Replace("`r`n", "`n")
+$repositoryInventory = [IO.File]::ReadAllText($committedInventory).Replace("`r`n", "`n")
+if ($archivedInventory -cne $repositoryInventory) { throw 'Inventory differs from committed handoff' }
 $expected = @('inventory.json') + @($manifest.files.path)
 $actual = @(Get-ChildItem -LiteralPath $assets -Recurse -Force -File | ForEach-Object {
     [IO.Path]::GetRelativePath($assets, $_.FullName).Replace('\','/')
