@@ -1,157 +1,63 @@
 # Working state
 
-Updated 2026-10-11. Verify this checkout with `scripts/work-status.ps1`.
-This handoff is a pointer, not execution authority or a run receipt.
+Updated 2026-10-21 for migration to the user's new dedicated VM/Codex instance.
+Start with `scripts/work-status.ps1`. This is a pointer, not execution authority
+or a run receipt.
 
-## Completed milestone
+## Resume here
 
-PR #93 integrated Bambu Studio reusable Sandbox packaging at `4e39c787e63a43cbeb07976117288d059be9818e`.
-Independent final review approved `0815cbb`; all three required PR checks passed
-(`37693018289`). Main has the identical tree and passed CI `37694385449`.
-Signed release run `37695560530` published `desktop-alpha-4e39c787e63a`.
-Fresh host and dedicated-VM downloads verified asset identities, attestations on
-host, publisher signatures, closed inventory and receipt. Native GUI analysis,
-assembly, fresh approval and replay passed for Bambu and both Notepad++ recipes.
-Independent canonical checks verified every exact package/import/run association;
-both MSI associations also passed separate signed CLI reporting.
-Interactive edit/save/export and overwrite refusal passed with independently
-verified bytes. All three trials recorded cleanup; the provider list is empty.
-Broader isolation remains `insufficientEvidence`. Detailed identities, corrections
-and limits: [signed acceptance](BAMBU-PUBLIC-ACCEPTANCE.md).
+Branch: `codex/new-vm-handoff-20261021`, based on the complete development history
+at `5688db4eb681fdc9a7e3987bb091b89de941d1bd` (`codex/msix-worker-lifecycle`).
+Use [RESUME-ON-NEW-VM.md](RESUME-ON-NEW-VM.md) for exact download/verification
+commands, preserved asset identities, stopping point and next acceptance gates.
+Paste [RESUME-PROMPT.md](RESUME-PROMPT.md) into the new session.
 
-Acceptance documentation and tested-download update merged in PR #94 at `922d0a7`.
-Independent review approved `08a44c5`; all three required checks passed in CI
-`37704549006`, and merged main passed `37705606165`. The release binaries remain
-built from exact `4e39c78`, not the acceptance documentation head.
+The old Azure subscription ran out of funds, per the user. Its VM, account,
+approvals, TEMP pointers and checkpoints are not resumption dependencies. Do not
+contact/recover/clean up old infrastructure for this migration. Inspect the new
+machine and rebind the closed research path before testing.
 
-## Next bounded work
+## Completed product milestone
 
-The [October 7 containment review](MXC-TRAJECTORY-REVIEW-2026-10-07.md) prioritizes
-one real-application baseline/candidate isolation comparison after this MSIX
-lifecycle slice: classic AppContainer first, then MXC against the same workflow.
-Review exact MXC v1.0.0 source/SDK and disposable controls independently; no
-runtime pin or containment claim changed in this review.
+Bambu Studio and both Notepad++ recipes passed signed public-entry Sandbox
+packaging acceptance, including interactive edit/save/export and exact cleanup.
+PR #93 merged at `4e39c78`; release `desktop-alpha-4e39c787e63a` was built from
+that exact source. PR #94 integrated acceptance documentation at `922d0a7`.
+See [BAMBU-PUBLIC-ACCEPTANCE.md](BAMBU-PUBLIC-ACCEPTANCE.md).
+Broader isolation remains `insufficientEvidence`.
 
-Active branch: `codex/msix-worker-lifecycle`. The [first MSIX lifecycle contract](NOTEPAD-MSIX-LIFECYCLE.md)
-targets a real signed Notepad++ package: fresh-worker install, package-identity/token
-observation, document edit/save, per-user configuration and exact uninstall.
-PR #95's closed research assembler/signing workflow merged at `9c25780` after
-independent review and all three exact-head required checks passed (`37709435055`).
-Signing run `37710593027` stopped before assembly/signing on hosted SDK drift.
-PR #96 merged the identical approved tool supply from a byte-pinned Microsoft
-NuGet archive at `bcf6f82`; required PR/main CI passed. Signing run `37711841372`
-succeeded. Independent signed payload verification and VM installation passed.
-Actual activation had correct package/image identity but a high elevated token:
-the VM operator is the renamed built-in Administrator. The driver stopped before
-editing; failure evidence is retained. Exact editor closure and operator-context
-uninstall are independently verified, including absent registration/process/config.
-The next trial needs a proven fresh standard-user context and new evidence;
-edit/save, final payload verification and normal lifecycle remain open.
-The feature-gated closed control reuses the production standard-user launcher.
-Live control-only attempts diagnosed a Restricted-policy file bootstrap and an
-oversized `CreateProcessWithLogonW` command. The direct executable launch holds
-its input against replacement; the shorter fixed control and shared UTF-16 length
-guard are validated locally. The fresh control at `965b07a` passed: visible GUI,
-matching standard-user SID/profile, medium non-elevated child, exit zero and empty
-owned job. Exact worker disposal and operator-context empty inventory were
-independently read back. A closed, feature-gated native lifecycle driver now covers
-the full fixed install/edit/save/configuration/uninstall contract, with required
-receipts and negative acceptance tests. Its VM read-only preflight diagnosed and
-retained kernel image-query failures; positive no-package observations now remain
-distinct from unknown identity and incomplete image visibility. The first live
-attempt at `83b55a7` stopped before installation because the standard-user scan
-could not inspect system processes. Failure export and exact worker disposal are
-verified. Global inventory now belongs to the privileged parent, including a gate
-before job cleanup; child unknown queries remain explicit diagnostics. A fresh
-retry passed the real driver controls, then found a PowerShell 5.1 empty-snapshot
-bug before installation. Exact worker disposal is verified; the sum fix and its
-empty/count/size regression tests pass in PowerShell 7 and 5.1. At `ba1fb17` a fresh
-standard-user worker installed the signed MSIX and verified all 220 payload entries;
-packaged activation failed with logon-session HRESULT `0x80070520` before an editor
-appeared. Failure evidence is retained; exact worker disposal and the recorded
-operator's empty provider inventory are independently verified. RDP stayed connected.
-At `48bd1fd` the fresh suspended-launch control also installed the package, but
-`CreateProcessW` returned `Access is denied` before a process ID or resume receipt.
-Exact worker disposal and the operator's empty provider inventory are verified;
-retain the failed stage and do not relax ACLs or substitute elevated/unpackaged launch.
-Next compare activation with a disposable VM's real standard-user interactive login.
-Matching session ID/profile and the earlier GUI control are insufficient proof.
-The independently reviewed read-only interactive-session prerequisite now observes
-LSA authentication/logon type/time, WTS ownership and a matching shell token.
-PowerShell 5.1 and 7 pass two positive and twenty negative acceptance cases.
-The same check passed in the VM's actual RDP terminal, independently read back:
-real remote-interactive session/shell binding, but elevated operator and shell.
-That context remains diagnostic and is not accepted for a standard-user trial.
-The reviewed fixed VM path uses a WTS primary token and suspended
-`CreateProcessAsUserW` launch into the real logged-on user's desktop. Earlier
-pre-installation access-denied and missing final-inventory evidence remain
-retained in the lifecycle document and failed disks. The closed `vm-launch-control`
-tests signed Windows cmd exit 42 through the same launch and owned-job path;
-its receipts cannot satisfy application lifecycle acceptance. A separate managed
-SYSTEM cmd control passed, but did not exercise WTS or packaged activation.
-After rollback, r4 reached real standard-user RDP but stopped before WTS creation
-because the account helper produced a 32-character nonce instead of 64.
-Canonical preparation helpers and a PowerShell-producer-to-native contract test
-fix this mismatch at `9d4a4aa`; independent review and focused checks passed.
-A fresh snapshot clone, account and real RDP login passed the canonical preparation
-contract. The frozen `c2fda15` control then failed `CreateProcessAsUserW` with
-`0x80070005` before child handles or installation. Retained records bind the
-standard user's primary token in session 2 to a SYSTEM controller in session 0
-inside an inherited job. Job/session conflict is a hypothesis, not a package verdict.
-The protected default SYSTEM Task Scheduler observation passed: all five required
-privileges were observed and enable/restore passed. Its parent job has flag
-`0x1000` (silent child breakaway), unlike Azure's immediate zero limits. Exact
-action exit and task/instance cleanup passed. The subsequent fixed cmd control
-proved its suspended child had no inherited job, assigned the exact owned job,
-and verified exit 42, empty output/job and cleanup. Separate SYSTEM readback
-confirmed retained bindings and absent task/action/child. Next use a fresh cold
-boundary/account/preparation for the unchanged native WTS control via this task.
-Preserve
-failed accounts, preparations and windows; no retry or adoption. Packaged execution
-remains unproven. Detailed r5 identities are in the lifecycle document.
-Cold recovery was exercised from snapshot `aiw-msix-cold-123e286bd0cf`.
-The VM now boots fresh clone `aiw-msix-primary-r5-1e48cc0d203e`; the original disk
-and failed disk `aiw-msix-restored-123e286bd0cf` are retained and unattached.
-At baseline readback, marker/accounts, earlier clean-shutdown events, absent
-research package/trial paths and unchanged BitLocker state were independently verified.
-Details and exact rollback/evidence pointers are in the lifecycle document.
-The held suspended-process control passes local checks, with any-job membership
-explicitly diagnostic. Packaged execution remains unverified.
-The real application lifecycle remains open. Provider inventory
-must be queried in the owned operator's context; SYSTEM absence is not global proof.
-Local/hosted manifest line-ending drift also prompted canonical LF generation;
-LF/CRLF source assembly checks cover that correction. See the lifecycle document
-for exact package identities and evidence; unsigned package byte identity is not claimed.
-Generic conversion, broader isolation and Studio authoring remain open.
-PR #92's shared held-file observations already inform assessment and packaging;
-see [shared observations](ADMIN-PACKAGING.md#shared-assessment-observations).
+## Open bounded milestone
 
-## Environment and evidence
+Finish [NOTEPAD-MSIX-LIFECYCLE.md](NOTEPAD-MSIX-LIFECYCLE.md). PRs #95/#96
+integrated the research assembler and pinned SDK supply. Signing run
+`37711841372` succeeded at `bcf6f82`. Signed installation and all 220 installed
+payload entries passed, but normal non-elevated packaged execution/edit/save/
+configuration/final payload verification/uninstall remain open.
 
-Dedicated VM: `aiw-clean-host-0921`, resource group `RG-AIW-CLEAN-HOST-20260921`,
-subscription `43babb60-9e73-4dc8-b769-4401c01aad73`. Fresh standard-user RDP reached
-its desktop after baseline recovery. The newly created account is distinct from the
-failed trial's removed login, despite reusing its name and SID after rollback.
-The VM is running. Sandbox workers close after trial completion; that does not
-shut down the VM. The actual host operator token is administrator; guest standard
-user execution is separately verified. RDP computer use/file transfer and terminal
-use are authorized. Drive redirection is unavailable; do not grant Azure roles
-merely for development transfer. Use cached authentication; never device code.
+The r5 direct SYSTEM WTS control failed before child creation/installation.
+The subsequent default SYSTEM Scheduler fixed cmd control passed suspended child
+containment, exit 42, empty output/job and independent exact cleanup readback.
+Latest reviewed native WTS Scheduler templates were never submitted: r6's real
+standard-user RDP login did not complete before its 30-minute window expired.
+No preparation/native control was dispatched. Credentials were cleared and the
+expired client closed. Preserve those distinctions.
 
-Current host proof pointer: `%TEMP%\aiw-bambu-public-proof-root.txt`.
-Development proof pointer: `%TEMP%\aiw-bambu-package-proof-root.txt`.
-Earlier signed milestones: [Notepad packaging](PUBLIC-PACKAGING-ACCEPTANCE.md)
-and [public alpha](PUBLIC-ALPHA-ACCEPTANCE.md). Historical human editing and failures
-remain in [interactive evidence](INTERACTIVE-SANDBOX.md) and retained directories.
-Automatic policy review previously rejected cleanup of two host handoffs; do not
-bypass or retry those deletions. Preserve evidence after diagnosed failures.
+The draft migration release preserves signed inputs, the frozen old native
+executable, exact historical controllers and selected evidence. Both native and
+controller code pins old VM/SIDs and needs a narrow reviewed rebind/rebuild.
+Next prove the fixed native WTS control on the new disposable boundary, then
+complete the real-application lifecycle. Feed observations into assessment.
 
-One build owner per target. Core cache: `%LOCALAPPDATA%\Temp\aiw-os-validation-20260919`;
-desktop cache: `%LOCALAPPDATA%\Temp\aiw-desktop-validation-20261002`.
-Use explicit Windows target and target-scoped static CRT for packages.
+## Direction and boundaries
 
-## Boundaries
+Follow [EXECUTION-PLAN.md](EXECUTION-PLAN.md) and [ROADMAP.md](ROADMAP.md).
+Classic AppContainer real-application comparison follows this delivery slice;
+MXC requires its own exact-source review and disposable controls. See
+[MXC-TRAJECTORY-REVIEW-2026-10-07.md](MXC-TRAJECTORY-REVIEW-2026-10-07.md).
+VS Code is planned. Keep admin summaries simple with advanced evidence available.
 
-No host installer execution, generic execution interface, implicit approval,
-automatic export/overwrite or unrelated Sandbox recovery. Commit/push milestones;
-merge only after required exact-head CI and review, then verify merged main tree.
+One build owner per target. No host installer execution, generic command interface,
+implicit approval, automatic overwrite or unrelated Sandbox recovery. Preserve
+failed evidence in fresh directories. Never use device-code authentication.
+Commit/push stable milestones; merge only after review and required exact-head CI,
+then verify merged main. Leave the migration release draft.
