@@ -12,8 +12,23 @@ Set-StrictMode -Version Latest
 $credentialPath=Join-Path $env:USERPROFILE '.aiw-private\worker107-winrm.xml'
 $session=$null;$credential=$null
 try {
-    $credential=Import-Clixml -LiteralPath $credentialPath
-    $session=New-PSSession -ComputerName '192.168.1.174' -Authentication Negotiate -Credential $credential -ConfigurationName Microsoft.PowerShell -SessionOption (New-PSSessionOption -OpenTimeout 15000 -OperationTimeout 60000)
+    # Operator-observed certificate from the exact VM107 Proxmox console.
+    # This probe precedes credential access; the subsequent WSMan connection is
+    # a separate TLS channel on the operator-trusted lab network, not a channel pin.
+    $expectedCertificate='92BB9858EF5D21F4A30F3E2E66D54A3FAA7E1E18'
+    $tcp=[Net.Sockets.TcpClient]::new()
+    $tls=$null
+    try {
+        if(!$tcp.ConnectAsync('192.168.1.174',5986).Wait(10000)){throw 'VM107 HTTPS connection timed out'}
+        $tls=[Net.Security.SslStream]::new($tcp.GetStream(),$false,([Net.Security.RemoteCertificateValidationCallback]{param($sender,$certificate,$chain,$errors) $certificate.GetCertHashString() -ceq $expectedCertificate}))
+        $tls.ReadTimeout=10000;$tls.WriteTimeout=10000
+        $tls.AuthenticateAsClient('192.168.1.174')
+        if($tls.RemoteCertificate.GetCertHashString() -cne $expectedCertificate){throw 'VM107 console certificate differs'}
+    } finally {if($tls){$tls.Dispose()};$tcp.Dispose()}
+    $storedCredential=Import-Clixml -LiteralPath $credentialPath
+    $credential=[pscredential]::new('labadmin',$storedCredential.Password)
+    $storedCredential=$null
+    $session=New-PSSession -ComputerName '192.168.1.174' -UseSSL -Authentication Basic -Credential $credential -ConfigurationName Microsoft.PowerShell -SessionOption (New-PSSessionOption -SkipCACheck -OpenTimeout 15000 -OperationTimeout 60000)
     $identity=Invoke-Command -Session $session -ScriptBlock {
         $ErrorActionPreference='Stop'
         $uuid=(Get-CimInstance Win32_ComputerSystemProduct).UUID
@@ -130,7 +145,9 @@ exit $exitCode
         $action.Arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File '+$taskFile
         $sddl='O:SYG:SYD:P(A;;FA;;;SY)(A;;FA;;;S-1-5-21-3556347314-2314855617-1438300668-1001)'
         $registered=$folder.RegisterTaskDefinition($name,$definition,0x12,'S-1-5-18',$null,5,$sddl)
-        if($registered.Definition.Principal.UserId -cne 'S-1-5-18' -or $registered.Definition.Principal.LogonType -ne 5 -or $registered.Definition.Principal.RunLevel -ne 1){throw 'Registered SYSTEM transport identity differs'}
+        $registeredUser=$registered.Definition.Principal.UserId
+        $registeredSid=if($registeredUser -match '\AS-1-'){[Security.Principal.SecurityIdentifier]::new($registeredUser).Value}else{([Security.Principal.NTAccount]::new($registeredUser)).Translate([Security.Principal.SecurityIdentifier]).Value}
+        if($registeredSid -cne 'S-1-5-18' -or $registered.Definition.Principal.LogonType -ne 5 -or $registered.Definition.Principal.RunLevel -ne 1){throw 'Registered SYSTEM transport identity differs'}
         $request=@{operation=$Op;task=$registered.Path;sourceSha256=(Get-FileHash -LiteralPath $source).Hash.ToLowerInvariant();requestedUtc=[DateTime]::UtcNow.ToString('o')}
         [IO.File]::WriteAllText($marker,($request|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
         $instance=$registered.RunEx($null,0,0,$null)

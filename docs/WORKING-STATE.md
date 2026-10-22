@@ -83,10 +83,14 @@ This binary has not run on the worker; controls/lifecycle remain unmeasured.
 The user enabled VM107 networking at `192.168.1.174` and explicitly authorized
 all validation setup/accounts/software on 107. Its MAC matches the expected
 `CC:34:21:B8:5A:31`; user console output independently confirms UUID107.
-WinRM5985 is now reachable after the worker firewall fix, but authenticated
-`AIW\labadmin` sessions return Access denied. A read-only Security4625 and
-endpoint-permission question is pending; do not repeat login guesses or start
-an account window yet. Credentials are DPAPI-encrypted outside repo/evidence.
+WinRM authentication now works over HTTPS5986 with Basic and unqualified
+`labadmin`. Console System6167 confirmed the cloned Windows identity mismatch
+behind NTLM failures. The password validated locally; no reset was needed.
+Exact UUID107 and elevated operator SID1001 passed through the updated controller.
+The console-observed TLS certificate is probed before credential access; the
+subsequent WSMan channel uses SkipCACheck on the operator-trusted lab network,
+not production channel pinning. Credentials remain DPAPI-encrypted outside
+repo/evidence. Connection evidence: `C:\AIW-Resume-20261021\worker107-connection-r1`.
 VM203 remains development; do not touch VM106. AiwWorkerAdmin's reported106
 origin remains unverified; none of this session's trial account code has run.
 
@@ -97,7 +101,12 @@ passed. Payload: `C:\AIW-Resume-20261021\worker107-msix-payload-r1`, source
 `70b2276e2341324cffe94a745ca5d0207152daa0c80f73360e821b2b97bcb2ef`.
 Next connect and verify UUID/operator, Stage with those independently approved
 identities, inspect Stage result, then Enroll/restart/Prepare/Control before Trial.
-No remote upload, account creation, native control or installation was dispatched.
+The payload uploaded and the Stage SYSTEM task registered, but the controller
+stopped before RunEx because Scheduler normalized its principal to `SYSTEM`.
+Readback proves the exact task never ran; no request or worker root exists.
+The guard now resolves account names to SID before requiring S-1-5-18. A bounded
+recovery preserves the intake and task evidence before fresh Stage; no account,
+native control or installation has executed.
 The current Proxmox wrapper requires link_down=1 and refuses an enabled NIC.
 The clean snapshot retains NIC down; preserve exported evidence before recovery.
 Historical migration controllers and draft release remain unchanged.

@@ -465,7 +465,7 @@ was built and its directory listing inspected, but was not installed or attached
 The draft ISO's sourceCommit precedes its uncommitted draft harness and is not a
 release/provenance claim. Use the actual source files for subsequent adaptation;
 finish parsing/compilation/guard tests and exact review before executing them.
-## Reviewed WinRM harness; authentication prerequisite pending
+## Reviewed WinRM harness; authentication restored
 
 The user explicitly authorized creating accounts and installing needed software
 on validation VM107. Current development UUID203 and original seven accounts
@@ -478,12 +478,37 @@ as `CC-34-21-B8-5A-31`, matching107. The user then supplied console proof of the
 exact UUID107 and a local WinRM listener. TCP5985 became reachable, but two
 `New-PSSession` attempts with the supplied encrypted `AIW\labadmin` credential
 returned Access denied. No password contents were exposed. A scoped read-only
-request for hostname, Microsoft.PowerShell permissions and Security4625
-Status/SubStatus is pending; do not make repeated password guesses.
-This user-selected workgroup HTTP/Negotiate/TrustedHosts route assumes an
+request was subsequently executed through the user-opened VM107 Proxmox console.
+Security4625 showed Status0xc000006d/SubStatus0x0; System6167 explicitly reported
+the cloned machine-ID mismatch. Endpoint permissions include Administrators.
+This initial user-selected workgroup HTTP/Negotiate/TrustedHosts route assumed an
 operator-trusted lab network. It does not provide production cryptographic
 server-identity proof before authentication. The later UUID/SID guard remains a
 required operational wrong-target check, not a claim against LAN impersonation.
+
+HTTPS5986 now works using Basic authentication with the unqualified `labadmin`
+name. The supplied password was encrypted to VM107's newly generated server
+certificate for local validation: it was already valid, so no reset occurred.
+That encrypted diagnostic is retained only under the protected private credential
+directory, outside evidence and this repository. Plaintext was never displayed.
+The server certificate thumbprint, read independently in the Proxmox console, is
+`92BB9858EF5D21F4A30F3E2E66D54A3FAA7E1E18`; CN and IP SAN are192.168.1.174,
+with fourteen-day validity. The exact-MAC guest NIC was set to Private after
+WSMan configuration refused Public; the explicit5986 firewall rule permits only
+development203 at192.168.1.171. AllowUnencrypted remains false. Initial partial
+configuration failures and the final setup sources are retained externally.
+
+The controller probes that exact TLS certificate before accessing the encrypted
+credential, then uses HTTPS/Basic and SkipCACheck with normal name checks. The
+probe and WSMan session are separate channels; this is still operator-trusted
+lab transport, not a cryptographic pin on the authenticated WSMan channel.
+Current-user Root-store additions prompted and were canceled; no certificate
+trust change or warning dialog remains. Authenticated UUID107/elevated SID1001
+and the final controller's Connect passed. A mismatched-certificate control
+failed before credential access. Independent review found no Stage blocker under
+this lab scope. PowerShell7 and5.1 harness controls passed; the first5.1 invocation
+was refused by its default execution policy before running, and the process-only
+Bypass invocation passed. Evidence: `C:\AIW-Resume-20261021\worker107-connection-r1`.
 
 `0213bf3` adapts the preserved draft into a closed Windows management harness.
 `db2d9c3` adds independently approved manifest/source identities, exact thirteen
@@ -530,3 +555,16 @@ Export requires terminal operation evidence, labels failure/cold-recovery archiv
 without success implications, and verifies cleanup receipts for a success claim.
 Collect retains and hashes the exact bounded archive on development203.
 No remote Stage/Enroll/Control/Trial has been dispatched yet.
+
+The first live Stage transferred and verified the sealed payload, then registered
+`AIW107-Transport-Stage-r1`, but stopped before creating a request or invoking
+RunEx: Scheduler returns the principal as `SYSTEM` rather than `S-1-5-18`.
+Readback found Ready/state3, no instances/triggers, last result267011 (never run),
+last-run year1999 and the exact fixed PowerShell action. Research/input/output
+roots remain absent. The controller now resolves names to SIDs and still requires
+exact SYSTEM/logon5/runlevel1. All three SYSTEM spellings resolve; the ordinary
+operator is rejected. Bounded recovery checks those identities, manifest/content,
+inventory and absence of any started-operation markers twice, retains external
+task XML/SDDL evidence, deletes only the never-run transport task and preserves
+the entire intake at `C:\AIW-Worker107-Intake-before-system-name-fix-r1` before
+a fresh Stage. No installer or account creation is retried.
