@@ -137,9 +137,36 @@ snapshot name is `aiw-msix-worker107-clean-r1`, to be created after sanitization
 Installation will replace the bytes at `/usr/local/sbin/aiw-vm203`, the existing
 forced-command entry point, with the reviewed worker-107 wrapper. The legacy
 filename remains solely to avoid editing the root authorized-key record; the
-new code contains no VM 203 management command. Existing installed code still
-targets 203 until that replacement and independent readback complete. Do not
-bypass it. Do not guess that cloning changed Windows account SIDs or hostname.
+new code contains no VM 203 management command. The user installed revision
+`66cddd5`; both old/new script hashes verified. Independent SSH `inspect`
+confirmed stopped/offline VM 107 and active `r630-fast` LVM-thin storage:
+911142912 KiB total, 95487777 used, 815655134 available. A request for
+`qm status 203` was rejected with exit 64. Do not bypass the wrapper. Do not
+guess that cloning changed Windows account SIDs or hostname.
+
+## First offline boot: post-start observation blocked
+
+Bootstrap evidence is retained on development VM 203 at
+`C:\AIW-Resume-20261021\worker107-bootstrap-r1`. Before startup, independent
+host inspection verified the stopped worker and exact disconnected NIC.
+`start` returned zero at `2026-10-22T03:15:16.1947286Z`; stdout retained the
+swtpm message that existing TPM state was not overwritten. This is command
+completion, not successful Windows boot or guest-agent proof.
+
+Subsequent `guest-info`, `inspect` and `status` each returned 1 with no output.
+The installed revision does not identify failed identity/configuration guards.
+No guest observation, application trial, credential cleanup or recovery proof
+was accepted. Root-console `qm status 107`, `qm config 107 --current 1` and
+`qm pending 107` have been requested to diagnose actual post-start state.
+Do not adopt an assumed cause or weaken checks before that readback.
+
+The source now reports fixed stage labels on failures, without dumping guest
+data or changing the command set, identity predicates, NIC policy or lock.
+Two positive and eleven negative tests against the extracted shell identity
+function still pass and all negative cases emit a stage diagnostic; local
+results are `new-vm-preflight\worker107-identity-tests-r2\results.json` under
+the migration root. This diagnostic revision is not yet installed on Proxmox.
+
 Inspect and remove copied development authentication material from the clone
 before enabling its network or application trials; preserve the originals on 203.
 Then establish clone-specific identity, a fresh clean snapshot and verified

@@ -14,11 +14,15 @@ verified locally. Both PowerShell session probes passed. Proxmox host
 readback supplied by the user identifies VM `107`, `aiw-worker`, stopped, new MAC,
 NIC link down, no snapshots, disks on `r630-fast` and UUID
 `e5cecc90-35c2-4831-bf9c-424be23f7d4e`. A fixed offline worker wrapper is prepared;
-installation and independent SSH readback are pending. The previous VM 203
+installation and initial SSH readback passed, including rejection of VM 203
+commands. Offline `start` returned zero, but post-start `inspect`, `status` and
+`guest-info` each exited 1 without diagnostics. Root-console status/current
+configuration/pending readback has been requested; do not retry or relax checks
+without it. Stage diagnostics are added and 13 local identity tests pass.
+The previous VM 203
 snapshot/rollback plan is superseded:
 do not power-cycle or restore the development machine for trials. The installed
-SSH wrapper still targets only 203 and must be replaced with a reviewed binding
-to 107. See NEW-VM-PREFLIGHT. No trial account or
+SSH entry path now targets only 107. See NEW-VM-PREFLIGHT. No trial account or
 application trial has started. Do not use the old Azure binding on either VM.
 
 Branch: `codex/new-vm-handoff-20261021`, based on the complete development history
