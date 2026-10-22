@@ -159,17 +159,16 @@ fn provider(
     {
         bail!("Exact reviewed VM107 provider response required")
     }
-    if let Some(nonce) = nonce {
-        if value["nonce"] != nonce {
-            bail!("Lease response nonce differs")
-        }
+    if let Some(nonce) = nonce
+        && value["nonce"] != nonce
+    {
+        bail!("Lease response nonce differs")
     }
-    if let Some(profile) = expected {
-        if value["checkpointConfigSha256"] != profile.checkpoint_config_sha256
-            || value["providerSha256"] != profile.provider_sha256
-        {
-            bail!("Approved recovery/provider identity drift")
-        }
+    if let Some(profile) = expected
+        && (value["checkpointConfigSha256"] != profile.checkpoint_config_sha256
+            || value["providerSha256"] != profile.provider_sha256)
+    {
+        bail!("Approved recovery/provider identity drift")
     }
     Ok(value)
 }
