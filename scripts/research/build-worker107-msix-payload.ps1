@@ -9,7 +9,7 @@ $status=@(& git -C $repo status --porcelain=v1)
 if($LASTEXITCODE -ne 0 -or $status.Count -ne 0){throw 'Commit and review the exact clean sources before sealing a payload'}
 $commit=(& git -C $repo rev-parse HEAD).Trim();if($LASTEXITCODE){throw 'Cannot identify source'}
 $driver='C:\AIW-Build\msix-worker107-r1\x86_64-pc-windows-msvc\release\examples\msix_standard_user_lifecycle.exe'
-$driverSha='c551938fb6c6f8f8d6a5311850e8713d020f4c888f0b3f67b88babc1d6a0dad5'
+$driverSha='206f439c87a73d7d3bed55dfc90f50834afc5e5ae1442e7b8a6e1732d8d9d4d6'
 if((Get-FileHash -LiteralPath $driver).Hash.ToLowerInvariant() -cne $driverSha){throw 'Reviewed native image differs'}
 New-Item -ItemType Directory -Path $Destination|Out-Null
 foreach($file in @('worker107-msix.ps1','worker107-msix-templates.ps1','worker107-scheduler-controller.ps1.in','worker107-scheduler-worker.ps1.in','msix-primary-preparation.ps1','worker107-editor.ps1','worker107-editor-input.cs')){

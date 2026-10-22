@@ -684,3 +684,30 @@ release SHA256 is now
 `c551938fb6c6f8f8d6a5311850e8713d020f4c888f0b3f67b88babc1d6a0dad5`.
 Build/Stage native pins change together. Old binaries remain in sealedr1-r3;
 reused build target path now contains the new image. Fresh reviewedr4 is required.
+
+## R4 complete application workflow, reporting failure
+
+Reviewed sealedr4 source429c4285739388b494b301fa8c913b7bbbb746ca,
+manifestSHAf35d27de25b23e41459bad20cda02350a21fedd6be95b5330f326c6b1757b242,
+passed fresh107 Stage/Enroll/Prepare/nativeControl. The console-driven edit was
+used directly, without invoking the foreground helper. Native observations show
+editorPID10700 exit0, document-output exact53bytes SHA256
+91b82efd755bd5a46b47f6277bd050954b9fb3e78e56f9f086129d04da4dbd42,
+six retained per-user configuration XML files under the package LocalCache,
+all220payload entries unchanged and unchanged installed manifest. Remove-AppxPackage
+completed; the following cleanup Record failed because the live package object's
+InstallLocation had become null. No terminal lifecycle success is inferred.
+
+Independent elevated readback10:05:03UTC uses the immutable installed.json path
+and confirms packageAllUsers0, provisioned0, native/editor processes0 and install
+path absent. R4 failure archive is C:\AIW-Resume-20261021\worker107-trial-failure-r4\evidence.zip,
+SHA256492f1337acc92183fd21fe77f6d6f4c38a0804e9d064197eb722bfd95ebf62b9,
+116files/284257bytes. It is verified outside107 before recovery.
+
+The next focused fix captures a nonempty install-location string immediately
+after observing the single registration and uses it for all manifest/payload/
+image-path/receipt/cleanup checks. No live InstallLocation read occurs after
+uninstall. Twelve focused tests pass and staticCRT rebuild SHA256 is
+206f439c87a73d7d3bed55dfc90f50834afc5e5ae1442e7b8a6e1732d8d9d4d6;
+build/Stage pins agree. Independent review cleared the source and exact native
+image. Fresh r5 requires another cold TLS-clean restore and artifact review.

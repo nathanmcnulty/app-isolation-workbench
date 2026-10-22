@@ -22,45 +22,39 @@ The subsequent WSMan channel uses SkipCACheck on the operator-trusted lab networ
 this is not production channel pinning. Authenticated UUID107 and elevated SID1001
 passed. HTTP listener absent, unencrypted WinRM disabled, TLS firewall scoped203.
 
-R3 passed Stage/Enroll/Prepare and actual native launch control at09:10:56UTC:
-standard-user child exit42, empty job, held action/native exit, task/instance
-absence. Independent09:12:25UTC readback found no control processes/task/package.
-The signed MSIX installed, all220payload entries verified and packaged Notepad++
-launched suspended with exact image/package/SID1006/session1/medium non-elevated
-identity verified before resume. This is not AppContainer isolation.
+R4 passed Stage/Enroll/Prepare/native launch control. Packaged Notepad++ launched
+as standardSID1006/session1/medium non-elevated fulltrust, with identity/image
+verified before suspended resume. Console-driven edit completed without invoking
+the foreground helper: editor exit0, exact53saved bytes SHA256
+91b82efd755bd5a46b47f6277bd050954b9fb3e78e56f9f086129d04da4dbd42,
+six retained per-user configuration XMLs and all220payload entries unchanged.
+Uninstall completed, but cleanup reporting reread the now-null live package
+InstallLocation and failed. No native terminal lifecycle success is claimed.
 
-The keyboard helper failed foreground acquisition before input and was not retried.
-Console-driven editing saved the exact53expected bytes and closed the owned editor.
-Native validation then failed because the attached managed Process.ExitCode yielded
-null; later document-output/configuration/payload/uninstall checks did not run.
-Controller cleanup failed closed on Stop of an already-ended instance. Preserve
-these limits; do not claim lifecycle success from this run.
+Independent elevated10:05:03UTC readback confirms packageAllUsers0, provisioned0,
+native/editor processes0 and the retained fixed install path absent. Verified
+external r4 archive: C:\AIW-Resume-20261021\worker107-trial-failure-r4\evidence.zip,
+SHA256492f1337acc92183fd21fe77f6d6f4c38a0804e9d064197eb722bfd95ebf62b9,
+116files/284257bytes. Keep r2/r3 failures and all sealed payloads historical.
 
-Verified export: C:\AIW-Resume-20261021\worker107-trial-failure-r3\evidence.zip,
-SHA2569ab90949bca654e643b363f3b4b24902134dbbe5711b8bae15cdf9f9eb754609,
-107files/89948bytes, outcome failure-cold-recovery and no inferred cleanup claim.
-Historical r2 failed before RunEx, with evidence at worker107-control-failure-r2.
-Both failures and sealed payloads remain external to107.
+The managed-handle/typed-exit fix in429c428 is proven by r4's exit0 and exact file
+receipt. The next reviewed fix captures a nonempty install-location string before
+uninstall, using it for all payload/image/manifest/receipt/cleanup checks. Twelve
+focused native tests pass; new staticCRT SHA256:
+206f439c87a73d7d3bed55dfc90f50834afc5e5ae1442e7b8a6e1732d8d9d4d6.
+Build/Stage pins agree; signed MSIX/assembly/signing remain unchanged. Seal fresh
+r5 from reviewed committed sources, review artifact and confirm complete lifecycle.
 
-Cold TLS-ready checkpoint aiw-msix-worker107-tls-clean-r1 was created/restored and
-postrestore identity/clean inventory passed. It includes OS/EFI/TPM and no RAM.
-After r3 export, it was restored again; fresh boot/Connect/clean inventory must
-pass before r4 Stage. Fixed SSH wrapper only restores ORIGINAL clean-r1; use
-exact107 Proxmox GUI for TLS-clean recovery. Wrapper requires NIC down. Evidence
-and public controls: C:\AIW-Resume-20261021\worker107-connection-r3.
-
-Focused reviewed fix opens the managed Process.Handle before resume, calls
-get_ExitCode once after WaitForExit, requires an actual int and uses that value
-for receipt/predicate. PS5.1 attached-process controls on107 proved typed0/42;
-twelve focused native tests passed, including PS5.1 parse/compile and strict
-Win32 command length. New staticCRT native SHA256:
-c551938fb6c6f8f8d6a5311850e8713d020f4c888f0b3f67b88babc1d6a0dad5.
-Build/Stage pins change together; frozen signed MSIX/assembly/signing unchanged.
-Seal fresh r4 from reviewed committed sources and independently review artifact.
-Control must pass before Trial. Prefer console-driven edit if Windows refuses
-helper foreground; never repeat a helper after uncertain input. Export/Collect
-and preserve evidence before restoring worker after use. Compatibility/isolation
-remain bounded by actual native receipts. The catch Stop refinement is deferred.
+TLS-ready cold snapshot aiw-msix-worker107-tls-clean-r1 includes OS/EFI/TPM/no RAM;
+creation/restore/postrestore identity/clean inventory have passed. R4 exported
+before another recovery. Use exact107 GUI for TLS-clean rollback; fixed SSH wrapper
+only restores ORIGINAL clean-r1 and requires NIC down. Every fresh run requires
+postrestore Connect+clean inventory, real standard session/cleared sign-in values,
+Prepare and measured nativeControl beforeTrial. Use console-driven editing;
+known helper foreground failure is preserved in r3 and helper is not retried.
+Export/Collect before restoring worker after use. Evidence/controls are under
+C:\AIW-Resume-20261021\worker107-connection-r3 and worker107-connection-r4.
+Current catch's Stop error after an ended instance fails closed; refinement deferred.
 ## Product and migration pointers
 
 Bambu Studio and both Notepad++ recipes passed public-entry Sandbox packaging,
