@@ -38,7 +38,8 @@ The repaired closed Proxmox SSH helper supports fixed inspect/status/start/shutd
 snapshot/rollback operations and retains exact VM/disk/MAC/pending-config checks.
 Integration review found that extra disks were not excluded. The reviewed source
 now allows only the three pinned writable devices and the observed empty CD drive,
-and rejects host VirtIOFS shares. Live deployment of that guard is pending.
+and rejects host VirtIOFS shares. That guard is deployed; strict-key SSH inspection
+passed with the unchanged three disks and original baseline still present.
 Use [PROXMOX-VM106-CONTROLLER.md](PROXMOX-VM106-CONTROLLER.md). Encrypted NTLM WinRM
 and verified PSRP transfer work as AiwWorkerAdmin (SID ending 1006); credentials
 remain controller-user DPAPI protected outside Git. See

@@ -438,5 +438,15 @@ snapshot/rollback configurations; all 70 dispatch/identity checks passed with
 mock commands and no actual VM mutation. Independent review
 of the narrow fix found no remaining issue. Source SHA-256:
 `aafc3146148e2fb03f8f9cd62770cf2f0e8055f67b0222b62431b31a28e0e4e1`.
-Live installation of this additional guard is pending; the existing baseline is
-preserved and must not be replaced.
+The authenticated host shell downloaded source commit
+`956af5a71d093591cee2fff3bd8e66506d519d77`, verified that hash and shell syntax,
+and inspected the actual current configuration with the candidate. Under the
+existing helper lock it rechecked the deployed old hash and current/pending
+configuration, preserved the old helper at
+`/usr/local/sbin/aiw-vm106.before-storage-fix-20261022`, and atomically installed
+the root-owned mode-755 replacement. Post-install inspection and hash readback
+passed, followed by an independent strict-host-key SSH inspection. The worker
+remained running and the original baseline remained present; no guest, power,
+snapshot or rollback operation was launched. Controller evidence is
+`C:\passkeys\worker106-tools\storage-guard-live-inspect.json` and
+`storage-guard-installed.png`. The existing baseline must not be replaced.
