@@ -134,3 +134,54 @@ The state operation retrieves the protected setup record, including encrypted
 credential recovery material, even after partial setup. Read-only state and
 verification operations archive completed host observations before measuring
 again. They never relaunch an ambiguously dispatched guest process.
+
+### Pinned preparation update and execution order
+
+Source is published at `4d80297b349fcf7aed0761bd307f3d1464bacb13`, tree
+`7fb2d821f2522b3a2dd58b314d17b5f312525e5b`. The host updater is
+`scripts/research/update-proxmox-vm106-preparation.sh` at commit
+`6cc8d7373169dab23ce303626b32a273e94407f9`, SHA-256
+`d163b990e7fc8157d700dba57a632f8676885e1ee5cd8155128b23dc5369daab`.
+It requires the deployed beb5652a helper and successful retained cleanup journal,
+then verifies inputs and root-protected installation paths. It adds the two fixed
+preparation files and atomically activates the helper last, without running setup,
+changing SSH keys, rebooting, or connecting networking. Preserve partial updates
+for review. Expected completion:
+`VM 106 offline preparation operations installed; no guest setup launched.`
+Resulting helper SHA-256:
+`64651fd9ff51368a858f700c7387c25d0525d4f7c4dc9f22fc36028cc4c844a0`.
+
+Controller execution order after operator update:
+
+1. Call `worker-prepare` through the existing strict-key SSH configuration, retain
+   raw output as `C:\passkeys\worker106-tools\preparation-result.json`, and poll
+   its saved PID to completion. Do not reboot while setup is still running.
+2. Run `Save-Worker106Credential.ps1` on the controller to recover only into a
+   DPAPI CurrentUser credential file. The precreated recovery directory grants
+   access only to controller labadmin and SYSTEM. The private key is DPAPI-sealed
+   and never leaves the controller; all published key material is public.
+   If preparation failed after account creation, collect `worker-preparation-state`
+   into `preparation-state-result.json` and use `Save-Worker106Credential.ps1
+   -Receipt State` instead. This writes a separate partial-recovery credential
+   file and preserves the recorded validation/phase; it does not retry setup or
+   claim that failed preparation completed.
+3. Gracefully `shutdown`, require stopped status, then `start`. Once guest agent
+   is responsive, call `worker-verify` and retain its post-boot measurement.
+4. Run `Show-Worker106Login.ps1` locally only when the human is ready. It displays
+   the credential in a private Windows dialog, without printing to shell/history.
+   Human signs into `.\AiwWorkerAdmin` on VM 106 through Proxmox console.
+5. Re-measure with `worker-verify`. Only when fresh admin is the interactive user
+   with the expected loaded profile, call `worker-finalize` and retain its result.
+   Verify again, gracefully shut down, create the fixed stopped baseline, inspect
+   it, and start the worker when needed. No timed standard-user trial begins here.
+
+45 mocked helper dispatch/identity checks, 12 negative preparation identity
+checks, and seven preparation journal tests passed. A large-script stdin control
+passed under Windows PowerShell 5.1; native declarations compiled without being
+invoked, the atomic directory-ACL overload was present, and a PS5.1 RSA-OAEP-SHA256
+encryption / controller DPAPI-private-key decryption control passed. Governance,
+PowerShell and shell parsing checks passed. These checks do not prove live account
+creation, CreateProfile/LogonUser execution, reboot or fresh-console finalization;
+retain those observations separately when performed. Copied-profile Rust/user
+toolchains are not adopted; builds remain on the controller, while verification
+checks system-installed runtimes/SDK tools on the worker.

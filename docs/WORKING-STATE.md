@@ -17,8 +17,11 @@ the post-fix SSH start/running-readback/shutdown/stopped-readback cycle passed.
 Worker is running at the labadmin desktop, still disconnected. The reviewed host
 update and fixed guest-agent cleanup completed. The guest receipt confirms no
 Tailscale service and none of the three fixed state directories remain. See the
-controller document for evidence and the retained host journal. Fresh worker accounts/access
-and the driver rebind remain open; no application acceptance is claimed.
+controller document for evidence and the retained host journal. A reviewed offline
+preparation bundle is ready for one host update, enabling fixed account setup,
+post-boot verification, encrypted credential recovery and console-gated finalization.
+It has not executed on the worker. Account setup, fresh console sign-in, baseline
+snapshot and the driver rebind remain open; no application acceptance is claimed.
 Keep the original PASSKEYS VM as controller.
 
 Branch: `codex/new-vm-handoff-20261021`, based on the complete development history
