@@ -21,7 +21,11 @@ pass; the guest agent reports Windows 11 build 26300, hostname AIW, no logged-in
 users. NIC remains disconnected. Fixed read-only `guest-preflight` is prepared
 for account/profile/auth-path inventory; installation is pending. The user
 specifically wants Tailscale logged out/uninstalled before any network connection.
-Include its machine-wide and user state in clone-only cleanup. No fresh clean
+The user deleted its ProgramData and labadmin AppData folders and left the legacy
+system-profile path untouched. The reviewed probe sources are staged on Proxmox
+at `/home/aiw-codex/aiw-preflight-813d3b4`; root installation is the next action.
+VM 106 folder concerns were resolved by the user as a separate Codex session;
+do not touch that VM. No fresh clean
 snapshot or restoration proof exists yet.
 The previous VM 203
 snapshot/rollback plan is superseded:

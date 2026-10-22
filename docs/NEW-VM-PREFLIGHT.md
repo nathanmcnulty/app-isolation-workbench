@@ -257,6 +257,44 @@ registry metadata, without reading node keys/logs or invoking Tailscale. No
 Tailscale cleanup has been executed by the agent. Verify clone-only uninstall
 and residual state removal before creating the clean baseline or enabling NIC.
 
+The user subsequently reported deleting the ProgramData and labadmin AppData
+Tailscale directories, while leaving the legacy system-profile path alone.
+Respect that boundary: the pending probe checks path presence only. Actual
+uninstall/service state and whether a directory was recreated remain unobserved.
+A concern about AIW folders on `passkeys-worker` VM 106 was resolved by the user:
+they originated in a different Codex session given the wrong prompt. This chat
+has not targeted VM 106; no cleanup or management there is authorized or needed.
+
+## Pending read-only probe installation
+
+The independently reviewed final source revision is
+`813d3b46855e9baeb2409d0fc0fcae376c4bf3b2`. Both published files were downloaded
+back and verified on VM 203, then staged through the existing unprivileged
+`aiw-codex` account at `/home/aiw-codex/aiw-preflight-813d3b4` on `pve-r630`.
+Independent host SHA-256 readback matched:
+
+| File | SHA-256 |
+| --- | --- |
+| `proxmox-worker107.sh` | `fae3c89052fe14eeb6ab70f7d4fd857d5f9afff5f5fef2ee24943b6c9227c35f` |
+| `worker107-preflight.ps1` | `f4663c141f187e7d6f1b5cc582acd01caf510fe2d7f3c84ee792f4445d654eb9` |
+
+Staging evidence is at
+`C:\AIW-Resume-20261021\worker107-preflight-install-r1` on development VM 203.
+These are public sources, not credentials. Root must copy them into a fresh
+root-only directory before hash verification and installation, so later changes
+to the unprivileged staging files cannot alter the verified install inputs.
+Reject symlink/nonregular copies. Install the guest source root:root 0644 at
+`/usr/local/lib/aiw-worker107/preflight.ps1`, and the wrapper root:root 0755 at
+the existing forced-command entry `/usr/local/sbin/aiw-vm203`. This adds only the
+fixed `guest-preflight` operation; no generic guest command or NIC-enable route
+is exposed. The guest source accepts no arguments and requires the exact 107
+UUID plus SYSTEM session zero. Installation need not reboot the worker.
+
+After installation, run `guest-preflight` through the restricted SSH route and
+retain the raw QGA object and parsed matching observation on VM 203. Do not infer
+Tailscale cleanup, profile freshness or recovery acceptance from an installer
+exit or absent service alone. Choose subsequent cleanup from actual observations.
+
 Inspect and remove copied development authentication material from the clone
 before enabling its network or application trials; preserve the originals on 203.
 Then establish clone-specific identity, a fresh clean snapshot and verified
