@@ -80,7 +80,8 @@ pub use source_import::{
 };
 #[cfg(windows)]
 pub use source_inspection::{
-    HeldApplicationFile, HeldPortableDirectory, SourceFileObservation, SourceInspectionError,
+    HeldApplicationFile, HeldEvidenceDirectory, HeldPortableDirectory, SourceFileObservation,
+    SourceInspectionError,
 };
 
 #[cfg(windows)]

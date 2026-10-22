@@ -84,12 +84,9 @@ pub fn report_vm_msix_run(
     run_id: &str,
 ) -> Result<VmMsixAssessmentReport, String> {
     use aiw_orchestrator::{RunLayout, RunOutcome, open_vm_msix_preparation};
-    use aiw_windows_platform::{HeldApplicationFile, HeldPortableDirectory};
+    use aiw_windows_platform::HeldEvidenceDirectory;
     use sha2::{Digest, Sha256};
-    use std::{
-        collections::{BTreeMap, BTreeSet},
-        io::Read,
-    };
+    use std::{collections::BTreeSet, io::Read};
     let error = |e: &dyn std::fmt::Display| e.to_string();
     let layout = RunLayout::new(workspace, run_id).map_err(|e| error(&e))?;
     let plan = layout.read_plan().map_err(|e| error(&e))?;
@@ -172,30 +169,8 @@ pub fn report_vm_msix_run(
     let mut functions = ApplicationReportFunctions::default();
     if verified {
         let guest =
-            HeldPortableDirectory::open(&workspace.join("output/guest")).map_err(|e| error(&e))?;
-        if guest.manifest().entries.len() > 512
-            || guest.manifest().total_size_bytes > 16 * 1024 * 1024
-        {
-            return Err("Retained guest evidence bound exceeded".into());
-        }
-        let mut files = BTreeMap::new();
-        let mut handles = Vec::new();
-        for entry in &guest.manifest().entries {
-            if entry.kind == aiw_probe::PortableContentEntryKind::Directory {
-                continue;
-            }
-            if entry.size_bytes > 4 * 1024 * 1024 {
-                return Err("Retained evidence file bound exceeded".into());
-            }
-            let file = HeldApplicationFile::open_bounded(
-                &workspace.join("output/guest").join(&entry.relative_path),
-                4 * 1024 * 1024,
-            )
-            .map_err(|e| error(&e))?;
-            let bytes = file.read_bounded(4 * 1024 * 1024).map_err(|e| error(&e))?;
-            files.insert(entry.relative_path.replace('\\', "/"), bytes);
-            handles.push(file);
-        }
+            HeldEvidenceDirectory::open(&workspace.join("output/guest")).map_err(|e| error(&e))?;
+        let files = guest.read_files().map_err(|e| error(&e))?;
         let receipt = |name: &str| -> Result<Value, String> {
             let bytes = files
                 .get(name)
@@ -320,9 +295,6 @@ pub fn report_vm_msix_run(
             || cleanup["installLocationPresent"] != false
         {
             return Err("Production lifecycle cleanup incomplete".into());
-        }
-        for file in handles {
-            file.revalidate().map_err(|e| error(&e))?;
         }
         guest.revalidate().map_err(|e| error(&e))?;
         functions = ApplicationReportFunctions {

@@ -70,7 +70,58 @@ Current implementation (pending live validation):
 Live readiness now includes clean-source package builds, normal trusted HTTPS,
 the deployed fixed wrapper, cold restore/current-pending agreement, exact lease
 recovery, clean inventory/release, and native account enrollment. Retained failed
-runs and host corrections are summarized in WORKING-STATE.md. Remaining acceptance
+runs and host corrections are recorded below. Remaining acceptance
 is a fresh approved desktop run through native control, exact console edit,
 raw lifecycle verification, final cold cleanup/release and shared function report.
 Do not describe the production workflow as verified until those checks pass.
+
+Live corrections and retained failures (2026-10-22):
+- msix-1792693343407226300 failed before staging on Windows PowerShell verbatim
+  paths. The host now converts only the held path's verbatim prefix at that
+  boundary. Recovery also exposed the missing Tauri command capability and
+  inherited PowerShell7 module paths; both were corrected. Exact retained-lease
+  recovery completed19:24:15UTC without application replay.
+- msix-1792697332610735000 enrolled the standard user but exhausted the150second
+  reboot wait before Control. Read-only cold/reboot waits are now6minutes. Raw
+  enrollment evidence and successful cold cleanup/release were retained. A folder
+  was incorrectly passed as the optional generic evidenceRoot hash; omitting it
+  fixed terminal publication. Completed-nonce finalization at19:51:13UTC did not
+  repeat a restore or dispatch. Execution errors are retained before collection.
+- msix-1792699084357230000 reached the standard session and cleared temporary
+  sign-in, but Control rejected Windows cmd.exe's servicing hardlinks. A private
+  OS-image opener retains the pinned digest, non-reparse directory/file handles
+  and write/delete denial through job cleanup. Application single-link intake
+  remains strict. Cold cleanup/release completed20:15:02UTC.
+- msix-1792700924025223800 (d203590) passed native Control42 and job cleanup, then
+  failed before installation because the generated lifecycle prelude omitted the
+  driver-control function wrapper.14e5691 restores the wrapper/parameter. Native
+  Windows PowerShell AST checks now parse exact generated scripts and require
+  driver references to remain inside the explicitly invoked function. Cold
+  cleanup/release completed20:45:03UTC.
+- msix-1792702354519093600 (14e5691) passed Control, packaged install/console
+  editing/save53bytes/close/uninstall and child exit0/job cleanup. Native capture
+  rejected ordinary generated8.3 aliases, so full raw lifecycle bytes were not
+  retained and this is not a verified production lifecycle report. Failure/job
+  receipts were collected; cold cleanup/release completed21:15:17UTC.34369c9
+  adds a private read-only held evidence tree: long names only, case-collision
+  rejection,512entries/16MiB aggregate/4MiB file/depth16 bounds, and retained
+  parent-relative fileID/path/hash/nonreparse/stream/single-link checks. One bounded
+  file may be hashed before the aggregate limit is rejected; no excess is copied.
+  The public portable-input alias policy remains strict.16source-inspection and
+  3worker tests, Clippy and independent review passed.
+
+All failed runs remain under the original host's default Evidence directory.
+Never replay any of their nonces. Packages/logs are outside the repo under
+C:\AIW-Resume-20261021\production-msix-*; source is pushed on
+codex/new-vm-handoff-20261021. No credentials or private keys are included.
+
+Run msix-1792704525359564000 (34369c9) completed the native lifecycle and retained
+44inventoried evidence files, with independent hash/binding audit. Document SHA
+91b82efd755bd5a46b47f6277bd050954b9fb3e78e56f9f086129d04da4dbd42,53bytes;
+220payloads unchanged;6configuration copies retained; standard medium packaged
+process/job and uninstall absence checks passed. Final cold clean/release and
+terminal receipt completed21:52:19UTC. The retained reader initially hit the same
+alias assumption on host output; it now uses the bounded held evidence API with
+bytes read directly from retained handles, hashed and revalidated. This exposes
+no portable-import or exact-disposal authority. Re-read this run for report proof;
+never repeat its application dispatch or recovery.

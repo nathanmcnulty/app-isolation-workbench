@@ -157,10 +157,11 @@ enum DirectoryInspectionPolicy {
 
 /// Read-only capture of completed guest output, never application intake or
 /// disposal authority. Only long names are traversed; legacy aliases are ignored.
-pub(crate) struct HeldEvidenceDirectory(HeldPortableDirectory);
+#[derive(Debug)]
+pub struct HeldEvidenceDirectory(HeldPortableDirectory);
 
 impl HeldEvidenceDirectory {
-    pub(crate) fn open(path: &Path) -> Result<Self, SourceInspectionError> {
+    pub fn open(path: &Path) -> Result<Self, SourceInspectionError> {
         HeldPortableDirectory::open_for_policy(path, DirectoryInspectionPolicy::Evidence).map(Self)
     }
 
@@ -168,8 +169,41 @@ impl HeldEvidenceDirectory {
         self.0.copy_plan()
     }
 
-    pub(crate) fn revalidate(&self) -> Result<(), SourceInspectionError> {
+    pub fn revalidate(&self) -> Result<(), SourceInspectionError> {
         self.0.revalidate()
+    }
+
+    /// Read the bounded long-name inventory from the retained handles. This
+    /// exposes bytes only, never portable import or exact-disposal authority.
+    pub fn read_files(
+        &self,
+    ) -> Result<std::collections::BTreeMap<String, Vec<u8>>, SourceInspectionError> {
+        self.revalidate()?;
+        let mut files = std::collections::BTreeMap::new();
+        for object in &self.0.objects[1..] {
+            if object.kind == PortableContentEntryKind::Directory {
+                continue;
+            }
+            let size = usize::try_from(object.observation.size_bytes).map_err(native)?;
+            let mut bytes = vec![0u8; size];
+            let mut offset = 0;
+            while offset < size {
+                let count = object
+                    .file
+                    .seek_read(&mut bytes[offset..], offset as u64)
+                    .map_err(native)?;
+                if count == 0 {
+                    return Err(SourceInspectionError::Drift);
+                }
+                offset += count;
+            }
+            if Some(Sha256::digest(&bytes).into()) != object.observation.sha256 {
+                return Err(SourceInspectionError::Drift);
+            }
+            files.insert(object.relative_path.clone(), bytes);
+        }
+        self.revalidate()?;
+        Ok(files)
     }
 }
 
@@ -1258,6 +1292,13 @@ mod tests {
         assert!(names.contains(&"child-started.json".to_owned()));
         assert!(names.contains(&"msix-lifecycle/document-output.json".to_owned()));
         assert!(names.iter().all(|name| !name.contains('~')));
+        let bytes = held.read_files().unwrap();
+        assert_eq!(bytes.len(), 2);
+        assert_eq!(bytes["child-started.json"], b"{}");
+        assert_eq!(
+            bytes["msix-lifecycle/document-output.json"],
+            b"verified output"
+        );
         assert!(
             OpenOptions::new()
                 .write(true)

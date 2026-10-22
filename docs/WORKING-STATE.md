@@ -1,67 +1,33 @@
 # Working state
 
 Updated 2026-10-22. Start with `scripts/work-status.ps1`. Branch
-`codex/new-vm-handoff-20261021`, checkout `C:\aiw\app-isolation-workbench` on
-VM203. This file is a pointer, not an execution receipt.
+`codex/new-vm-handoff-20261021`, checkout `C:\aiw\app-isolation-workbench` on VM203.
+This file is a pointer, not an execution receipt.
 
 ## Current app-work slice
 
 Production VM MSIX execution is integrated in the desktop and shared assessment
-reader, **not yet lifecycle verified**. See [MSIX-EXECUTION.md](MSIX-EXECUTION.md).
-The fixed107-only Proxmox wrapper is deployed. Normal HTTPS WinRM validates the
-operator-approved public certificate BC14DCC4E37F83161EBB55AF8624E36A79E19256.
-No CA bypass is used by production transport. Credentials remain DPAPI-private.
+reader, **not yet end-to-end verified**. Implementation, fixes, test evidence and
+failed trial IDs are in [MSIX-EXECUTION.md](MSIX-EXECUTION.md). All earlier failed
+runs completed cold clean/release; never replay their nonces.
 
-Live desktop failures are retained outside the repo under the default Evidence:
-- msix-1792693343407226300 failed before staging on PowerShell verbatim paths.
-  Its exact lease was recovered through the corrected desktop; cleanup verified.
-- msix-1792697332610735000 staged and enrolled AiwStandardUser successfully, then
-  exhausted the150second post-reboot reconnect window before control/app launch.
-  Raw enrollment receipts were collected; cold cleanup/release and subsequent
-  completed-nonce finalization passed. Both runs have failed terminal results.
+Run **msix-1792704525359564000**, reviewed/approved/separately started via desktop,
+completed native lifecycle/capture and final cold clean/release at21:52:19UTC.
+All44native-inventoried files are retained and independently checked; document53
+bytes,220unchanged payloads,6configuration copies, uninstall and jobs passed.
+The desktop/shared retained reader then rejected host output aliases using the
+portable-input tree policy. A read-only held-evidence reader correction is being
+validated against this existing run. **Do not replay or recover it: lease released.**
+Package source34369c92604ed73d6e5350e39a06084741765f0a; receipt
+087e1c0af788ab19d6097f09574867501d9f9d8b6315a45b728495a28c8db3bb.
+Worker cf2ef6402ca33c51dd8a7d85cff42132a163f396e92c67b852d93852e5c3a7c9.
+Remaining acceptance: corrected original-host raw reader and desktop/shared report
+readback. No guest execution is needed. Package/logs and the prepared
+capture assessment input are under C:\AIW-Resume-20261021\production-msix-*.
 
-Committed corrections: DOS spelling at the held PowerShell path boundary; reset
-inherited PSModulePath for Windows PowerShell providers; declare/allow the guarded
-GUI recovery command;6minute read-only cold/reboot waits; immediate retained
-execution-error receipt; omit the optional generic evidenceRoot hash until a
-native hash root is defined (folder paths are not hashes). Full37admin and14UI
-checks, real PowerShell path/Certificate regression, Clippy and release builds pass.
-Other native/core/provider/shared report checks passed at the integration baseline.
-
-Attempt msix-1792699084357230000 (desktop2cd06ef) passed reconnect, cleared
-temporary sign-in and established the standard session. Control failed before
-app launch because application intake rejected Windows cmd.exe servicing hardlinks.
-Raw receipts, final cold clean/release and failed terminal result were retained;
-completed20:15:02UTC. Do not replay its dispatch. The native correction uses a
-separate OS-only held opener with the same pinned digest, non-reparse checks and
-write/delete denial through control cleanup. Application single-link intake is
-unchanged. Focused hardlink/write-denial/hash/junction checks and independent review
-pass. Fresh package production-msix-desktop-oscontrol (d203590; worker
-f46b93bae23ac04e9cf88a6f5f90dffa9a0ac29736eeeef32349c352c5332f6e)
-drove msix-1792700924025223800 through native Control: expected/observed42,
-same standard session and empty owned job. Run then failed before installation:
-the generated lifecycle prelude omitted the driver's function wrapper and read
-its unset EvidenceDirectory variable. Raw failure/job cleanup retained; host
-cold recovery/clean readback/release completed20:45:03UTC. Never replay its nonce.
-Composition corrected in14e5691; native PowerShell AST, focused3tests, Clippy and
-independent review passed. Fresh6-file package production-msix-desktop-scriptfix
-was inventory verified (receipt325eef48435e32967802b1597cbc5df142d9f26f830cfa4a8b37ea1ab10123ec).
-Run msix-1792702354519093600 was reviewed, approved and separately started through
-that desktop at20:54UTC. Native Control passed, then actual packaged editing
-saved53bytes and the lifecycle child exited0 with an empty job after uninstall.
-Native capture failed on ordinary generated8.3 aliases in the output tree;
-this is not a verified lifecycle report. Raw failure/job receipts are retained,
-but full lifecycle bytes were not captured. Cold recovery/clean readback/release
-completed21:15:17UTC. Never replay its nonce.
-The collector correction uses a private held evidence tree with long-name-only
-enumeration, case-collision rejection and512entry/16MiB total/4MiB file/depth16
-bounds. Parent-relative opens, fileIDs/hash/stream/nonreparse/single-link checks
-remain; public portable-input alias policy is unchanged.16source inspection and
-3worker tests plus independent review pass. Rebuild/re-pin and approve a fresh
-run for actual end-to-end capture/report proof.
-Logs/packages: production-msix-* under
-C:\AIW-Resume-20261021. Remaining acceptance is native control, packaged lifecycle,
-raw host verification, final cold cleanup/release and shared function report.
+The107-only Proxmox wrapper is deployed. Normal HTTPS WinRM validates the approved
+public certificate BC14DCC4E37F83161EBB55AF8624E36A79E19256. No production CA bypass.
+Saved credentials remain DPAPI-private; no credentials/private keys are staged.
 
 ## Disposable worker boundary
 
