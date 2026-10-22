@@ -15,4 +15,8 @@ CODEOWNERS text eol=lf
 *.ps1 text eol=crlf
 *.psd1 text eol=crlf
 *.psm1 text eol=crlf
+# Hash-pinned VM 106 Scheduler payloads use their committed LF bytes.
+scripts/research/msix-scheduler-launch-control.ps1 text eol=lf
+scripts/research/vm106-scheduler-worker.ps1 text eol=lf
+scripts/research/Invoke-Worker106SchedulerControl.ps1 text eol=lf
 *.sh text eol=lf

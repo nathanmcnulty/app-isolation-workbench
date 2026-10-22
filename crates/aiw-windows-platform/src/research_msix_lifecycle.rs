@@ -216,6 +216,9 @@ fn script() -> String {
         include_str!("research_msix_driver_control.ps1"),
         include_str!("research_msix_lifecycle.ps1")
     )
+    // Git checks PowerShell sources out as CRLF on Windows. Keep the embedded
+    // command's size independent of checkout line endings.
+    .replace("\r\n", "\n")
 }
 
 pub fn run() -> TrialResult<()> {
@@ -533,8 +536,8 @@ fn read_receipt(root: &Path, name: &str) -> TrialResult<serde_json::Value> {
 }
 
 const PREPARATION: &str = r"C:\AIW-Msix-Lifecycle-Preparation.json";
-const VM_ID: &str = "cb7cc9f0-81f7-4326-8c52-828e42673d11";
-const VM_OPERATOR_SID: &str = "S-1-5-21-3407263227-439785483-4249424476-500";
+const VM_ID: &str = "7e686bee-8c05-43c7-9603-a9562ece224c";
+const VM_OPERATOR_SID: &str = "S-1-5-21-3849540285-1795134874-2442050430-1006";
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PrimaryPreparation {
@@ -550,7 +553,7 @@ struct PrimaryPreparation {
     account_name: String,
 }
 fn validate_preparation(value: &PrimaryPreparation, image_hash: &str, now: i64) -> TrialResult<()> {
-    let sid_prefix = "S-1-5-21-3407263227-439785483-4249424476-";
+    let sid_prefix = "S-1-5-21-3849540285-1795134874-2442050430-";
     let rid = value
         .user_sid
         .strip_prefix(sid_prefix)
@@ -559,6 +562,7 @@ fn validate_preparation(value: &PrimaryPreparation, image_hash: &str, now: i64) 
         || value.vm_id != VM_ID
         || value.source_image_sha256 != image_hash
         || !rid.is_some_and(|v| v >= 1000)
+        || value.user_sid == VM_OPERATOR_SID
         || value.session_id == 0
         || value.account_name != "AiwStandardUser"
         || !value.account_created
@@ -632,7 +636,7 @@ fn run_vm_parent(image_hash: &str, launch_control: bool) -> TrialResult<()> {
     let mut length = computer.len() as u32;
     // SAFETY: bounded writable native computer-name buffer.
     if unsafe { GetComputerNameW(computer.as_mut_ptr(), &mut length) } == 0
-        || !String::from_utf16(&computer[..length as usize])?.eq_ignore_ascii_case("aiwcleanhost")
+        || !String::from_utf16(&computer[..length as usize])?.eq_ignore_ascii_case("PASSKEYS-WORKER")
     {
         return Err("Pinned dedicated VM computer required".into());
     }
@@ -671,7 +675,7 @@ if(!(Test-Path -LiteralPath 'Registry::HKEY_USERS\{sid}')){{throw 'Actual intera
 $user=Get-LocalUser -Name AiwStandardUser;if($user.SID.Value -cne '{sid}'){{throw 'Prepared account SID differs'}}
 "#,
         sid = prepared.user_sid,
-        identity = azure_identity_script()
+        identity = worker_identity_script()
     );
     run_fixed_powershell(command, 30)?;
     let evidence = Path::new(OUTPUT).join("standard-user-lifecycle");
@@ -904,13 +908,15 @@ fn primary_native_source() -> String {
         include_str!("research_msix_native.cs")
     )
 }
-fn azure_identity_script() -> String {
+fn worker_identity_script() -> String {
     format!(
-        r#"$request=[Net.HttpWebRequest]::Create('http://169.254.169.254/metadata/instance/compute?api-version=2021-02-01');$request.Proxy=$null;$request.Timeout=5000;$request.ReadWriteTimeout=5000;$request.Headers.Add('Metadata','true');$response=$request.GetResponse()
-try{{$reader=[IO.StreamReader]::new($response.GetResponseStream());try{{$metadata=$reader.ReadToEnd()|ConvertFrom-Json}}finally{{$reader.Dispose()}}}}finally{{$response.Dispose()}}
-if($metadata.vmId -cne '{VM_ID}' -or $metadata.name -cne 'aiw-clean-host-0921' -or $metadata.subscriptionId -cne '43babb60-9e73-4dc8-b769-4401c01aad73'){{throw 'Pinned Azure VM identity differs'}}"#
+        r#"$vm=Get-CimInstance Win32_ComputerSystemProduct
+if($vm.UUID -ine '{VM_ID}' -or $env:COMPUTERNAME -ine 'PASSKEYS-WORKER'){{throw 'Pinned Proxmox worker identity differs'}}
+$adapters=@(Get-NetAdapter -Physical)
+if($adapters.Count -ne 1 -or $adapters[0].MacAddress -ine 'CC-34-21-7E-FE-59'){{throw 'Pinned worker adapter differs'}}"#
     )
 }
+
 fn primary_observation_script() -> String {
     format!(
         r#"$ErrorActionPreference='Stop'
@@ -935,7 +941,7 @@ try{{$file.Write($bytes,0,$bytes.Length);$file.Flush($true)}}finally{{$file.Disp
 }}
 "#,
         native = primary_native_source(),
-        identity = azure_identity_script()
+        identity = worker_identity_script()
     )
 }
 fn require_empty_process_inventory(value: &serde_json::Value) -> TrialResult<()> {
@@ -1360,7 +1366,7 @@ mod tests {
         }
     }
     fn primary_preparation() -> serde_json::Value {
-        serde_json::json!({"schemaVersion":"aiw.dev/research-primary-msix/v1","vmId":super::VM_ID,"sourceImageSha256":"a".repeat(64),"userSid":"S-1-5-21-3407263227-439785483-4249424476-1001","sessionId":3,"notBeforeFileTime":100,"notAfterFileTime":300,"runNonce":"b".repeat(64),"accountCreated":true,"accountName":"AiwStandardUser"})
+        serde_json::json!({"schemaVersion":"aiw.dev/research-primary-msix/v1","vmId":super::VM_ID,"sourceImageSha256":"a".repeat(64),"userSid":"S-1-5-21-3849540285-1795134874-2442050430-1001","sessionId":3,"notBeforeFileTime":100,"notAfterFileTime":300,"runNonce":"b".repeat(64),"accountCreated":true,"accountName":"AiwStandardUser"})
     }
     #[test]
     fn primary_preparation_rejects_unowned_or_expired_run() {

@@ -48,3 +48,20 @@ before its firewall/network stages. Do not run those bootstrap or inventory-only
 updaters again. The human enabled the NIC/remoting directly; standard access now
 works. Preserve failed journals for history. Snapshot and research-driver trial
 gates remain distinct from this successful administration connection.
+
+## Encrypted file transfer
+
+`Copy-WorkerFile.ps1 -Source <local> -Destination <guest>` uses standard PSRP over
+the same sealed NTLM endpoint, with UUID/administrator checks before transfer and
+SHA-256 comparison afterward. Add `-Fetch` to copy guest evidence to the controller.
+Existing destinations are rejected by a precheck, which is not atomic no-overwrite
+custody; use fresh names and do not run concurrent transfers to the same path.
+Preserve any partial destination after failure. No credentials are placed in
+arguments, environment variables or output. Explicit credentials select the same
+pure NTLM backend used by requests-ntlm; Windows SSPI failed this cloned workgroup
+authentication. Message encryption remains mandatory.
+
+Isolated packages are in `C:\passkeys\worker106-tools\psrp-python`, with exact
+versions in `requirements-psrp.txt` (pypsrp 0.9.1). Actual readme upload/download and
+the rebound native driver's upload both passed SHA-256 verification. This general
+administration transport does not broaden the closed research-driver commands.
