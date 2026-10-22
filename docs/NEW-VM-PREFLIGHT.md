@@ -92,18 +92,36 @@ states and fresh nonce. SHA-256:
 `8fb923e208de8489ee454ccb3f8b533608a13f5104c9b52ff4be926317523434`.
 It is a recovery comparison marker, not privileged application evidence.
 
-Next, from the Proxmox root shell, use the fixed wrapper to inspect, cleanly
-shut down, create `aiw-msix-baseline-20261021`, exercise rollback to that fresh
-snapshot while still stopped, start and inspect. Retain the host transcript at
-`/root/aiw-vm203-baseline-20261021.log` without overwriting it. This must run on
-the host because the worker contains the active Codex session. After boot,
-compare the marker hash, exact accounts, VM identity and host snapshot/rollback
-readback before claiming a verified recovery boundary. No account or application
-trial may start merely because snapshot creation returned zero.
+## Revised recovery direction: separate worker VM 107
+
+The user chose a separate full clone instead of snapshotting/restoring the
+development machine. VM 203 keeps Codex, checkout and retained evidence. The
+previous host-shell shutdown/snapshot/rollback/start block for 203 is superseded;
+do not run it for application testing. The marker above describes the source
+machine only, not fresh clone identity or disposable-boundary proof.
+
+The user reports the clone is VM `107`. Agreed preparation was a clean shutdown
+of 203, full clone with a new MAC and disconnected NIC, leave the clone powered
+off, then restart 203. Actual clone name, SMBIOS UUID, disk identities, MAC/link
+state, power state and snapshot inventory still require root-console readback:
+
+```bash
+qm config 107
+qm status 107
+qm listsnapshot 107
+```
+
+Existing root SSH access remains fixed to VM 203. It does not authorize commands
+for 107; do not bypass the wrapper. After readback, prepare and independently
+review the worker-specific management binding, replacing development-VM mutation
+access. Do not guess that cloning changed Windows account SIDs or hostname.
+Inspect and remove copied development authentication material from the clone
+before enabling its network or application trials; preserve the originals on 203.
+Then establish clone-specific identity, a fresh clean snapshot and verified
+restoration, with evidence retained on 203 outside the disposable worker.
 
 Do not create the timed trial account or run the application before establishing
-and verifying recovery. Preserve current code and evidence outside this guest
-before rollback, and arrange host-side restart because shutdown interrupts Codex.
+and verifying recovery. Preserve worker evidence on VM 203 before rollback.
 Native/controller rebinding must preserve fixed identity checks, real interactive
 token/session binding, held process custody and exact cleanup. Archived
 controllers remain unchanged.
