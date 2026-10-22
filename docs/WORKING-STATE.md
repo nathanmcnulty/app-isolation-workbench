@@ -14,10 +14,10 @@ Host installation, strict-key SSH inspection and unsupported-command rejection p
 First isolated boot exposed inherited lock descriptors in swtpm/kvm; the reviewed
 fix and one-time graceful-shutdown recovery are documented there. Host update and
 the post-fix SSH start/running-readback/shutdown/stopped-readback cycle passed.
-Worker is now running at the labadmin desktop, still disconnected. Tailscale was
-uninstalled; only the copied labadmin Tailscale directory remains per operator
-readback. A fixed, journaled guest-agent cleanup is being prepared to replace
-repeated console copying; see the controller document. Fresh worker accounts/access
+Worker is running at the labadmin desktop, still disconnected. The reviewed host
+update and fixed guest-agent cleanup completed. The guest receipt confirms no
+Tailscale service and none of the three fixed state directories remain. See the
+controller document for evidence and the retained host journal. Fresh worker accounts/access
 and the driver rebind remain open; no application acceptance is claimed.
 Keep the original PASSKEYS VM as controller.
 

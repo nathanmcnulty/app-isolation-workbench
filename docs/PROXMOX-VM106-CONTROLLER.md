@@ -83,3 +83,22 @@ PowerShell parsing passed. Independent reviews of the operation and updater foun
 no actionable findings. Published source downloads matched all three input hashes.
 The fixed cleanup is published at `48038f402f8d16b78ac65229eccdc606cd94aa87`,
 matching locally reviewed tree `14fc72a7c2e35d3d8a6a8f7b56091ff546b7ebf6`.
+
+### Live cleanup result
+
+The operator installed the update and supplied the expected helper hash. At
+2026-10-22 04:53 UTC, the strict-key SSH `worker-cleanup` call launched the fixed
+payload and returned PID 6980 with phase `running`. The next call collected that
+same PID: phase `finished`, exited 1, exitcode 0, output not truncated. Here
+`exited: 1` means completion, not an error code. The guest JSON identified the
+expected UUID, reported ServicePresent/ProgramDataState/UserState/LegacyState all
+false, and recorded removal of only the labadmin local Tailscale directory.
+Network remained Disconnected and WindowsRegistrationChanged was false.
+
+Raw first-call/result records and the parsed checked receipt are retained under
+`C:\passkeys\worker106-tools\guest-cleanup-live-first.json`,
+`guest-cleanup-live-result.json`, and `guest-cleanup-verified.json`. The durable
+host journal remains `/var/lib/aiw-vm106/cleanup.json`. No retry, reboot, network
+change or snapshot was performed. This completes the bounded Tailscale cleanup;
+fresh worker accounts, other copied authentication state, driver rebind and
+application trials remain separate outstanding work.
