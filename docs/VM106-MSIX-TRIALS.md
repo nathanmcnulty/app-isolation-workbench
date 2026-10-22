@@ -1,6 +1,7 @@
 # VM 106 MSIX trial continuation
 
-This is research-driver readiness and control evidence, not application acceptance.
+The signed Notepad++ research lifecycle passed on VM 106 on 2026-10-22.
+This is bounded research acceptance, separate from production assessment and containment proof.
 The disposable baseline is `aiw-vm106-baseline-20261021`; do not replace it.
 
 ## Rebound native driver
@@ -173,3 +174,47 @@ source-property invalidation, and real directory present/absent observations.
 All 12 native tests passed, including the actual compacted-script parse/C# compile
 and the command-length limit. Final r5 executable SHA-256:
 `d4bc21662221bd681e0ec89e691a89ff9e4f1902358fdf04975cf438aed147ee`.
+## Complete application acceptance: r5, 2026-10-22
+
+The exact signed package passed the full native primary-session lifecycle using
+final driver `d4bc21662221bd681e0ec89e691a89ff9e4f1902358fdf04975cf438aed147ee`.
+Fresh nonce: `25b6c64d882b0477063c0a4defff9c8bf3d324555e14c4cb786a1e8d356e1f17`;
+standard-user SID ending 1007, actual session 1. Preparation SHA-256:
+`43c534a3ada752de419d07402df7bcfde604b27d0c4412e5a6d4fe31e17771a3`.
+Rendered outer controller SHA-256:
+`1e65d717a6b8f380bf8bbdd1f749b2f72d2af6376fc5ecf8b4d297e5bb0cc7be`.
+
+Measured results:
+
+- Valid signed publisher/timestamp and exact package/assembly/signing identities.
+- Actual non-elevated medium-integrity packaged process, full package name/AUMID,
+  installed image hash/path and matching real user/session/authentication binding.
+- GUI open/edit/save/normal close, exit zero from original native process handle.
+  Exact 53 UTF-8/CRLF bytes, SHA-256
+  `91b82efd755bd5a46b47f6277bd050954b9fb3e78e56f9f086129d04da4dbd42`.
+- Per-user configuration observed and retained; all 220 payload hashes and manifest
+  unchanged after use.
+- Normal uninstall: registration and processes absent, original install path absent,
+  observed configuration snapshot empty. General user-data erasure is not inferred.
+- Independent SYSTEM inventory, real primary-session receipt, native child/job
+  cleanup and terminal native `passed:true`, `jobEmpty:true` all verified.
+- Exact held native parent PID 5228 exited zero; Scheduler action exited zero,
+  owned task and instance absent, native exit confirmed. No failure receipts.
+
+Controller evidence directory: `C:\passkeys\worker106-tools\primary-vm106-r5`.
+`completion.json` retains the outer/native terminal and application observations;
+`packaged-editor-saved.png` shows the actual GUI save. Export `evidence.zip` was
+hash-verified during transfer and extracted for independent terminal/payload/session
+readback. ZIP SHA-256:
+`b90613660af8786b91d13a832b7a0de2c7edd5cd09112c5f56ec8275c47281c8`.
+
+All 12 native tests passed. Held-process exit regression (14 checks) and installed-
+location snapshot regression passed under PowerShell 5.1 and 7; independent reviews
+found no remaining findings. Governance passed. Previous failed attempts remain
+separate evidence and were not promoted to success. The original baseline was
+never replaced. Final cleanup restored that baseline after verified export; helper inspect confirmed
+the exact worker stopped. The trial account/profile were discarded with the worker boundary.
+
+This proves the exact mediumIL full-trust research package's tested workflow.
+Isolation remains `notMeasured`; production report/approval-contract integration
+and the real classic AppContainer comparison are subsequent work.

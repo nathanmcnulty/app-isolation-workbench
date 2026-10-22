@@ -6,6 +6,19 @@ and uninstall that exact output on a fresh disposable worker. Research results
 remain separate from production assessment reports until their authority and
 observation contracts are integrated.
 
+## VM 106 research acceptance completed, 2026-10-22
+
+The exact signed 8.9.8 package passed install, verified medium-IL packaged execution
+under a fresh real standard-user session, GUI edit/save/normal exit, exact document
+bytes, per-user configuration, all 220 unchanged payload entries, normal uninstall
+and independent native job/process/Scheduler cleanup. A complete terminal success
+receipt was exported and verified before restoring the disposable baseline.
+See [VM 106 trial record](VM106-MSIX-TRIALS.md#complete-application-acceptance-r5-2026-10-22)
+for exact driver/package/preparation identities, failed attempts, fixes, tests and
+export hashes. Research acceptance is complete for this exact workflow;
+production assessment/approval-contract integration and effective containment
+measurement remain separate work. No public release or broader compatibility
+claim follows from this trial.
 ## Closed first recipe
 
 - Input: official Notepad++ 8.9.8 x64 portable ZIP, 8,232,940 bytes, SHA-256

@@ -1,94 +1,59 @@
 # Working state
 
-Updated 2026-10-21 for migration to the user's new dedicated VM/Codex instance.
-Start with `scripts/work-status.ps1`. This is a pointer, not execution authority
-or a run receipt.
+Updated 2026-10-22. Start with `scripts/work-status.ps1`; this pointer is not a run
+receipt or execution authority. Active branch:
+`codex/proxmox-vm106-controller-20261021`.
 
-## Resume here
+## Completed current slice
 
-VM 106 `passkeys-worker` / PASSKEYS-WORKER is running at **192.168.1.173**.
-The human enabled networking and PSRemoting. Standard encrypted WinRM now actually
-works as elevated AiwWorkerAdmin (SID ending 1006), with exact guest UUID verified.
-Use [scripts/worker106-admin/README.md](../scripts/worker106-admin/README.md);
-credentials remain controller-user DPAPI-protected, never in Git. The human gives
-permission to administer/install needed software on this dedicated testing VM.
+The exact signed Notepad++ 8.9.8 MSIX research lifecycle passed on VM 106: actual
+non-elevated packaged process in a fresh standard-user console session, GUI
+edit/save/normal exit, exact 53 document bytes, per-user configuration, all 220
+unchanged payload entries, normal uninstall and independent native/job/task cleanup.
+The complete native terminal receipt passed. See [VM106-MSIX-TRIALS.md](VM106-MSIX-TRIALS.md)
+for exact hashes, failed attempts, driver fixes, tests and verified evidence export.
+[NOTEPAD-MSIX-LIFECYCLE.md](NOTEPAD-MSIX-LIFECYCLE.md) records bounded acceptance;
+production assessment/approval-contract integration remains open. Effective isolation
+is `notMeasured`, not inferred from delivery or function success.
 
-Windows preparation is finalized: fresh console profile validated, copied
-labadmin and sandbox users disabled, Tailscale/service/state absent, fresh-account
-device join flags all NO, system .NET/SDK/Git/Node present. Official machine-wide
-PowerShell 7.6.7 MSI was hash/signature verified and installed successfully; it
-actually executes as the fresh administrator. Old Store PowerShell could not.
-Copied profile caches are retained behind disabled accounts, not claimed erased.
+All 12 native tests passed. Actual held-handle exit and retained uninstall-path
+regressions passed under PowerShell 5.1 and 7. Independent consequential reviews
+found no remaining findings; governance passed. GitHub CLI authentication and
+source pushes work. The unchanged private 60-file migration archive was downloaded
+and verified; historical assets/controllers remain unchanged.
 
-The custom QGA management bootstrap failed at Public-profile remoting setup before
-its firewall/network stages. It is superseded; **do not run old bootstrap/inventory
-updaters again**. Preserve failed records. The Proxmox helper was repaired to
-accept the exact canonical enabled NIC form (omitted link_down=0); all identity
-pins remain. Baseline `aiw-vm106-baseline-20261021` was created while stopped,
-covering OS/EFI/TPM disks without saved memory, then configuration was verified.
-The native driver and preparation validators are now rebound to VM 106, built and
-independently reviewed. Eleven native tests passed, and the fixed SYSTEM Scheduler
-cmd/exit-42 control passed live with owned-job and task/process cleanup. See
-[VM106-MSIX-TRIALS.md](VM106-MSIX-TRIALS.md) for exact hashes/evidence and remaining
-WTS/application gates. GitHub CLI works; the unchanged 60-file private migration
-archive was downloaded and verified. A fresh standard-user console sign-in and
-LSA/Winlogon cleanup passed. The first primary Scheduler wrapper stopped before
-launch at normalized-duration verification; that check is fixed and independently
-reviewed. Its evidence was exported, and stopped baseline rollback/restart passed.
-A fresh primary control attempt is underway. Application compatibility remains
-unmeasured. Original PASSKEYS remains controller.
-Branch: `codex/new-vm-handoff-20261021`, based on the complete development history
-at `5688db4eb681fdc9a7e3987bb091b89de941d1bd` (`codex/msix-worker-lifecycle`).
-Use [RESUME-ON-NEW-VM.md](RESUME-ON-NEW-VM.md) for exact download/verification
-commands, preserved asset identities, stopping point and next acceptance gates.
-Paste [RESUME-PROMPT.md](RESUME-PROMPT.md) into the new session.
+## Worker and remote operation
 
-The old Azure subscription ran out of funds, per the user. Its VM, account,
-approvals, TEMP pointers and checkpoints are not resumption dependencies. Do not
-contact/recover/clean up old infrastructure for this migration. Inspect the new
-machine and rebind the closed research path before testing.
+VM 106 `passkeys-worker` / PASSKEYS-WORKER has UUID
+`7e686bee-8c05-43c7-9603-a9562ece224c`, MAC CC-34-21-7E-FE-59, guest IP 192.168.1.173.
+Proxmox `pve-r630` is 192.168.1.6. Final successful evidence was exported, hash-checked
+and independently read back before a graceful shutdown and exact baseline rollback.
+**Worker is stopped on `aiw-vm106-baseline-20261021`; the baseline was never replaced.**
+OS/EFI/TPM restore has now passed repeatedly. Controller PASSKEYS was not rolled back.
 
-## Completed product milestone
+The repaired closed Proxmox SSH helper supports fixed inspect/status/start/shutdown/
+snapshot/rollback operations and retains exact VM/disk/MAC/pending-config checks.
+Use [PROXMOX-VM106-CONTROLLER.md](PROXMOX-VM106-CONTROLLER.md). Encrypted NTLM WinRM
+and verified PSRP transfer work as AiwWorkerAdmin (SID ending 1006); credentials
+remain controller-user DPAPI protected outside Git. See
+[scripts/worker106-admin/README.md](../scripts/worker106-admin/README.md).
+After boot, wait for QGA readiness and start WinRM remotely if needed; do not ask
+the operator to copy commands into Windows. The superseded QGA management bootstrap
+is not needed and must not be rerun. No copied Tailscale identity is in the baseline.
 
-Bambu Studio and both Notepad++ recipes passed signed public-entry Sandbox
-packaging acceptance, including interactive edit/save/export and exact cleanup.
-PR #93 merged at `4e39c78`; release `desktop-alpha-4e39c787e63a` was built from
-that exact source. PR #94 integrated acceptance documentation at `922d0a7`.
-See [BAMBU-PUBLIC-ACCEPTANCE.md](BAMBU-PUBLIC-ACCEPTANCE.md).
-Broader isolation remains `insufficientEvidence`.
+Final controller evidence is `C:\passkeys\worker106-tools\primary-vm106-r5`.
+The private evidence ZIP hash and original signed-input archive hashes are recorded
+in the trial document. The original migration guide remains
+[RESUME-ON-NEW-VM.md](RESUME-ON-NEW-VM.md); old Azure infrastructure is not a dependency.
 
-## Open bounded milestone
+## Product milestones and next work
 
-Finish [NOTEPAD-MSIX-LIFECYCLE.md](NOTEPAD-MSIX-LIFECYCLE.md). PRs #95/#96
-integrated the research assembler and pinned SDK supply. Signing run
-`37711841372` succeeded at `bcf6f82`. Signed installation and all 220 installed
-payload entries passed, but normal non-elevated packaged execution/edit/save/
-configuration/final payload verification/uninstall remain open.
-
-The r5 direct SYSTEM WTS control failed before child creation/installation.
-The subsequent default SYSTEM Scheduler fixed cmd control passed suspended child
-containment, exit 42, empty output/job and independent exact cleanup readback.
-Latest reviewed native WTS Scheduler templates were never submitted: r6's real
-standard-user RDP login did not complete before its 30-minute window expired.
-No preparation/native control was dispatched. Credentials were cleared and the
-expired client closed. Preserve those distinctions.
-
-The draft migration release preserves signed inputs, the frozen old native
-executable, exact historical controllers and selected evidence. Both native and
-controller code pins old VM/SIDs and needs a narrow reviewed rebind/rebuild.
-Next prove the fixed native WTS control on the new disposable boundary, then
-complete the real-application lifecycle. Feed observations into assessment.
-
-## Direction and boundaries
-
+Bambu Studio and both Notepad++ recipes previously passed signed public-entry
+Sandbox packaging acceptance (PRs #93/#94); see
+[BAMBU-PUBLIC-ACCEPTANCE.md](BAMBU-PUBLIC-ACCEPTANCE.md).
 Follow [EXECUTION-PLAN.md](EXECUTION-PLAN.md) and [ROADMAP.md](ROADMAP.md).
-Classic AppContainer real-application comparison follows this delivery slice;
-MXC requires its own exact-source review and disposable controls. See
-[MXC-TRAJECTORY-REVIEW-2026-10-07.md](MXC-TRAJECTORY-REVIEW-2026-10-07.md).
-VS Code is planned. Keep admin summaries simple with advanced evidence available.
-
-One build owner per target. No host installer execution, generic command interface,
-implicit approval, automatic overwrite or unrelated Sandbox recovery. Preserve
-failed evidence in fresh directories. Never use device-code authentication.
-Commit/push stable milestones; merge only after review and required exact-head CI,
-then verify merged main. Leave the migration release draft.
+Integrate research observations through approved production evidence contracts,
+then complete the real classic AppContainer baseline/candidate comparison using
+the existing controls. MXC requires its own exact-source review/disposable controls.
+Keep delivery, function success and measured containment separate. Leave migration
+releases draft; do not merge or launch CI merely to check this working branch.
