@@ -26,6 +26,8 @@ cargo run -p aiw-cli -- schema msi-failed-snapshots
 cargo run -p aiw-cli -- schema msi-product-registration
 cargo run -p aiw-cli -- schema wsb-msi-report-set-input
 cargo run -p aiw-cli -- schema wsb-msi-report-set
+cargo run -p aiw-cli -- schema application-assessment-input
+cargo run -p aiw-cli -- schema application-assessment-report
 cargo run -p aiw-cli -- schema wsb-approved-execution
 cargo run -p aiw-cli -- schema run-plan-v0alpha4
 cargo run -p aiw-cli -- schema windows-sandbox-cli-lifecycle-plan
@@ -41,6 +43,12 @@ Checked-in schema snapshots will be added when the first external consumer is in
 `msi-application-token` describes the versioned guest root-process token observation. Compiled MSI profile v0alpha2 requires it; the profile/version is part of the approved scenario hash. Imported MSI execution v0alpha2 includes the verified observation, while legacy v0alpha1 without it remains explicitly missing evidence.
 
 `wsb-msi-assessment-report` describes the read-only retained-run assessment report, including recorded cleanup, original project requirements, guest observations, and explicit missing evidence.
+
+`application-assessment-input` selects retained Sandbox reports and the exact
+reviewed MSIX research archive. `application-assessment-report` uses their shared
+function matrix with provenance and explicit evidence gaps; historical lifecycle
+success does not upgrade general compatibility/isolation. See
+[the shared contract](../docs/REPORT-SETS.md#shared-assessment-observations).
 
 `msi-registry` describes the v5 profile's phase-bound registry metadata observations. It binds the actual runtime SID and represents empty keys, default values, absent roots and incomplete scopes explicitly. See [capture scope and limits](../docs/REGISTRY-CAPTURE.md).
 

@@ -52,8 +52,11 @@ console-method and independent-readback observations remain in sibling
 
 This establishes the measured workflow for this exact package and worker.
 Broader application compatibility and isolation remain unmeasured, and this is
-not yet a production assessment adapter. The next app-work slice is to integrate
-these retained observations into the shared assessment contracts described below.
+not yet a production assessment adapter. The read-only integration is documented
+in [REPORT-SETS.md](REPORT-SETS.md): `run report-assessment` projects this exact
+reviewed archive alongside retained Sandbox results through the shared function
+matrix, with provenance and explicit assessment gaps. A production MSIX execution
+adapter and acceptance of arbitrary future archives remain separate work.
 
 ## Closed first recipe
 

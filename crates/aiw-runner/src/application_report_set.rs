@@ -81,6 +81,9 @@ pub struct ApplicationReportFunctions {
     pub open_document: Option<bool>,
     pub edit_save_document: Option<bool>,
     pub close: Option<bool>,
+    /// Omitted for legacy Sandbox rows, whose versioned matrix did not include uninstall.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uninstall: Option<bool>,
     pub stl_to_3mf_export: Option<bool>,
 }
 
@@ -105,6 +108,7 @@ impl WsbReportSetResult {
                     open_document: s.functions.open_document,
                     edit_save_document: s.functions.edit_save_document,
                     close: s.functions.close,
+                    uninstall: None,
                     stl_to_3mf_export: None,
                 }
             }

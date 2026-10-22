@@ -94,3 +94,68 @@ The first set combines the current standard-user success (`aiw-msi-live-15136-17
 The read-only regression passed: repeated output matched, alternate-path duplicate selection was flagged using verified run identity, a wrong guest hash and an unreadable project stayed visible as unavailable entries, and all retained workspace inventories were unchanged. The bounded reader also rejects malformed and oversized project files. CLI JSON and Markdown exports were exercised locally. No Sandbox session or hosted CI run was needed for this reporting slice.
 
 Local review artifacts: `%TEMP%\aiw-report-set-benchmark.input.json`, `%TEMP%\aiw-report-set-benchmark.json`, and `%TEMP%\aiw-report-set-benchmark.md`. These are rebuildable reports, not execution authority or a community compatibility database. Full file/registry metadata remains available through each individual retained-run report; the set carries counts and incomplete scopes to keep output bounded.
+
+## Shared assessment observations
+
+`run report-assessment` projects retained Sandbox workflows and the independently
+reviewed MSIX research lifecycle into the same `ApplicationReportFunctions`
+matrix. It delegates Sandbox verification to `report-wsb-set`; existing Sandbox
+JSON/Markdown output remains unchanged. This is read-only reporting: no install,
+script execution, VM connection, account creation or cleanup.
+
+MSIX currently accepts only profile `worker107NotepadR5`, whose exact archive
+SHA-256 is compiled into the reader:
+`768e9ade771bbc3345067c82745c15f2d7c0ed31c4c8e281d437d14a27c321b3`.
+This is the independently verified 285340-byte/118-entry archive described in
+[NOTEPAD-MSIX-LIFECYCLE.md](NOTEPAD-MSIX-LIFECYCLE.md). A copy is retained in
+`fixtures/msix-lifecycle/worker107-r5.zip` for reproducible offline reporting and
+negative tests. Its lab identities are historical, not current credentials or
+execution authority. New archives, including recompressed copies, are rejected;
+caller-supplied hashes cannot enroll an unreviewed run. Future profiles require
+separate review of provenance and terminal receipts. This does not create a
+production MSIX launcher or accept arbitrary worker output.
+
+From this checkout on VM203:
+
+```powershell
+cargo run --locked --offline -p aiw-cli -- run report-assessment --input C:\aiw\app-isolation-workbench\examples\msix-research-assessment.json --format json
+cargo run --locked --offline -p aiw-cli -- run report-assessment --input C:\aiw\app-isolation-workbench\examples\msix-research-assessment.json --format markdown
+cargo run --locked --offline -p aiw-cli -- schema application-assessment-input
+cargo run --locked --offline -p aiw-cli -- schema application-assessment-report
+```
+
+The input schema is `aiw.dev/application-assessment-input/v0alpha1`. It accepts
+`msixResearch` entries with unique `id`, fixed `profile` and absolute `archive`.
+Optional `windowsSandbox` contains the existing `wsb-report-set-input` manifest
+shown above, allowing Notepad++ MSI, Bambu and reviewed MSIX in one matrix. There
+must be 1-32 total entries and case-insensitively unique IDs across all sources.
+Sandbox verification still requires the original Windows host. Unreadable or
+rejected MSIX archives produce unavailable rows. A second accepted copy of the
+same archive is a duplicate. Neither receives passed functions.
+
+Output schema `aiw.dev/application-assessment/v0alpha1` retains source application
+and adaptation separately from signed delivery package, requested runtime/model
+separately from actual process token, install location separately from observed
+configuration paths, exact saved-file identity, payload integrity and historical
+registration/process/job/task cleanup. Archive-entry hashes cite receipts/files.
+Editing was console-driven; the failing foreground helper was not invoked.
+Configuration was observed before uninstall; uninstall does not prove general
+user-data deletion. Null/absent functions are unmeasured. `uninstall` is omitted
+from legacy Sandbox JSON rows and appears in the new shared Markdown matrix.
+
+The overall assessment remains `insufficientEvidence`; general compatibility and
+isolation remain `notMeasured`. Passed workflow functions never imply AppContainer,
+network denial, baseline equivalence, complete descendant capture, persistence
+cleanup or broad application support. Existing shared evidence-gap categories
+remain explicit. This projection relies on the reviewed native/controller terminal
+acceptance rather than reconstructing success from an exit code or adding another
+verdict engine. It makes no claim about the worker's current state.
+
+Validation on 2026-10-22: runner+CLI tests passed174/failed0, with16 opt-in tests
+ignored. This includes the real-archive CLI test, mixed-source/legacy-shape checks,
+changed/truncated/success-shaped archive rejection, missing terminal/cleanup
+receipts, cleanup query errors, duplicate selections and strict manifest checks.
+Formatting, component all-target Clippy with warnings denied, locked desktop
+metadata and governance passed. Public JSON/Markdown and both schema commands
+were exercised against the retained r5 fixture. Independent source review found
+no material blocker. No application/VM execution was added or repeated.

@@ -43,6 +43,14 @@ pub use packaging_recipe::{
     WSB_MSI_RECIPE_SCHEMA_VERSION, WsbMsiRecipe, WsbMsiRecipeData, WsbMsiRecipeInspection,
 };
 mod application_report_set;
+mod msix_lifecycle_report;
+mod shared_assessment;
+pub use msix_lifecycle_report::{MsixLifecycleReport, MsixResearchProfile, report_msix_lifecycle};
+pub use shared_assessment::{
+    APPLICATION_ASSESSMENT_INPUT_SCHEMA, APPLICATION_ASSESSMENT_SCHEMA, ApplicationAssessmentInput,
+    ApplicationAssessmentReport, ApplicationAssessmentRow, ApplicationAssessmentSource,
+    MsixAssessmentSelection, report_application_assessment,
+};
 mod assessment_report;
 mod report_set;
 mod settings_comparison;
