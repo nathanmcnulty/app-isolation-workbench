@@ -22,10 +22,12 @@ users at boot. NIC remains disconnected. Reviewed `813d3b4` probe is now install
 and passed as SYSTEM/session zero on exact UUID 107. Tailscale uninstall and all
 three documented state-path absences are verified, including the untouched legacy
 system-profile path. Seven local accounts remain; no research registration or
-Notepad++ process. The user authorized replacing the disposable labadmin profile on 107 and knows
-its password. After an offline reboot the profile is unloaded; authentication
-directories still remain. Fixed reset helper and negative controls are prepared.
-No profile reset or credential cleanup has been executed by the agent.
+Notepad++ process. User-authorized profile reset r1 failed at DeleteProfileW
+with ERROR_INVALID_PARAMETER: PowerShell converted its string `$null` argument
+to an empty string. Post-failure SYSTEM probe confirms the original unloaded
+profile and copied auth paths remain, with unchanged seven-account inventory.
+Recovery r2 supplies native NULL inside C#, preserves r1 evidence, and uses a
+fresh non-overwriting journal. Recovery is prepared; it has not executed.
 VM 106 folder concerns were resolved by the user as a separate Codex session;
 do not touch that VM. No fresh clean snapshot or restoration proof exists yet.
 The previous VM 203

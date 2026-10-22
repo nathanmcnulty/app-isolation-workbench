@@ -350,3 +350,27 @@ and verifying recovery. Preserve worker evidence on VM 203 before rollback.
 Native/controller rebinding must preserve fixed identity checks, real interactive
 token/session binding, held process custody and exact cleanup. Archived
 controllers remain unchanged.
+
+## Profile reset r1 failure and bounded recovery
+
+The user ran reviewed helper ea5728c from root staging
+`/root/aiw-profile-reset.kLszgx`, SHA-256
+`8f144d82a0b6c423cf924a875315b6b3d210b5a950828c2c0422becbc8566463`.
+Guest exited 1 at DeleteProfileW with `The parameter is incorrect`; creation
+was not reached. The managed string parameter converted PowerShell `$null` to
+an empty string rather than a native NULL. A harmless PS5.1 managed control
+reproduced the conversion. Microsoft's API requires lpComputerName NULL.
+
+The first post-failure preflight timed out at guest-exec. Guest health then
+passed and the bounded second preflight succeeded. It confirms the original
+unloaded labadmin profile, all seven unchanged accounts, copied authentication
+paths still present and Tailscale absent. Evidence is retained outside the worker
+at `C:\AIW-Resume-20261021\worker107-profile-reset-failure-r1`; failed logs are
+preserved. This does not claim every original profile file is unchanged.
+
+Recovery r2 uses a private native import with a two-argument managed wrapper
+that supplies literal C# null. A managed stand-in exercises that exact forwarding
+method without native calls; PS5.1/7 context/path/null regression controls pass.
+The helper requires the matching r1 before/failure records with no deleted/result
+receipt and uses new `C:\AIW-Worker107-Profile-Reset-r2`, preserving the entire
+r1 journal. No recovery execution or clean recovery boundary is claimed yet.
