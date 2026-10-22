@@ -68,7 +68,7 @@ function Invoke-AiwPrimaryApplication {
 $ErrorActionPreference='Stop'
 if($env:COMPUTERNAME -ne 'PASSKEYS-WORKER' -or [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -ne 'S-1-5-18' -or [Diagnostics.Process]::GetCurrentProcess().SessionId -ne 0){throw 'Pinned SYSTEM session-zero required'}
 $exe='C:\AIW-Msix-Lifecycle-Input\msix_standard_user_lifecycle.exe';$prep='C:\AIW-Msix-Lifecycle-Preparation.json'
-if((Get-FileHash -LiteralPath $exe).Hash.ToLowerInvariant() -cne '6d312e1ad135c9bfe8be36cc810079e5607f021f514af4320c1458930fa7437d'){throw 'Reviewed driver bytes differ'}
+if((Get-FileHash -LiteralPath $exe).Hash.ToLowerInvariant() -cne '442265d9c40fefade23ccbe9db90d10058d0969643d52eb8854aa65fb921b1ca'){throw 'Reviewed driver bytes differ'}
 if((Get-FileHash -LiteralPath $prep).Hash.ToLowerInvariant() -cne '@@PREP_SHA@@'){throw 'Exact prepared receipt differs'};
 $prepared=Get-Content -LiteralPath $prep -Raw|ConvertFrom-Json
 if($prepared.userSid -cne '@@USER_SID@@' -or $prepared.vmId -cne '7e686bee-8c05-43c7-9603-a9562ece224c' -or $prepared.runNonce -cne $nonce -or [DateTime]::UtcNow.ToFileTimeUtc() -gt $prepared.notAfterFileTime){throw 'Owned preparation differs or expired'}
@@ -105,7 +105,7 @@ try{
  $nativeRoot='C:\AIW-Msix-Lifecycle-Output\standard-user-lifecycle'
  function Read-Native([string]$name){$path=Join-Path $nativeRoot $name;$item=Get-Item -LiteralPath $path -Force;if($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or $item.Length -gt 8192){throw 'Native record outside bound'};Get-Content -LiteralPath $path -Raw|ConvertFrom-Json}
  $context=Read-Native 'primary-context.json';$result=Read-Native 'result.json';$job=Read-Native 'controller-job.json';$bound=Get-Content -LiteralPath 'C:\AIW-Msix-Lifecycle-Preparation.json' -Raw|ConvertFrom-Json
- if($native.runNonce -cne $nonce -or $bound.runNonce -cne $nonce -or $context.runNonce -cne $nonce -or $context.prepared.userSid -cne '@@USER_SID@@' -or $context.prepared.sessionId -ne $bound.sessionId -or $context.prepared.sourceImageSha256 -cne '6d312e1ad135c9bfe8be36cc810079e5607f021f514af4320c1458930fa7437d' -or $job.processId -ne $native.pid -or $job.sessionId -ne 0 -or $job.inAnyJob){throw 'Native process/session/preparation binding differs'}
+ if($native.runNonce -cne $nonce -or $bound.runNonce -cne $nonce -or $context.runNonce -cne $nonce -or $context.prepared.userSid -cne '@@USER_SID@@' -or $context.prepared.sessionId -ne $bound.sessionId -or $context.prepared.sourceImageSha256 -cne '442265d9c40fefade23ccbe9db90d10058d0969643d52eb8854aa65fb921b1ca' -or $job.processId -ne $native.pid -or $job.sessionId -ne 0 -or $job.inAnyJob){throw 'Native process/session/preparation binding differs'}
  if(!$result.researchOnly -or !$result.passed -or !$result.jobEmpty -or $result.isolation -cne 'notMeasured'){throw 'Native application terminal receipt differs'}
  Publish 'native-application.json' @{nonce=$nonce;wrapper=$native;context=$context;result=$result;controllerJob=$job;applicationLaunchAttempted=$true}
 

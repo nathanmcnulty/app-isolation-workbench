@@ -68,7 +68,7 @@ function Invoke-AiwPrimaryControl {
 $ErrorActionPreference='Stop'
 if($env:COMPUTERNAME -ne 'PASSKEYS-WORKER' -or [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -ne 'S-1-5-18' -or [Diagnostics.Process]::GetCurrentProcess().SessionId -ne 0){throw 'Pinned SYSTEM session-zero required'}
 $exe='C:\AIW-Msix-Lifecycle-Input\msix_standard_user_lifecycle.exe';$prep='C:\AIW-Msix-Lifecycle-Preparation.json'
-if((Get-FileHash -LiteralPath $exe).Hash.ToLowerInvariant() -cne '6d312e1ad135c9bfe8be36cc810079e5607f021f514af4320c1458930fa7437d'){throw 'Reviewed driver bytes differ'}
+if((Get-FileHash -LiteralPath $exe).Hash.ToLowerInvariant() -cne '442265d9c40fefade23ccbe9db90d10058d0969643d52eb8854aa65fb921b1ca'){throw 'Reviewed driver bytes differ'}
 if((Get-FileHash -LiteralPath $prep).Hash.ToLowerInvariant() -cne '@@PREP_SHA@@'){throw 'Exact prepared receipt differs'};
 $prepared=Get-Content -LiteralPath $prep -Raw|ConvertFrom-Json
 if($prepared.userSid -cne '@@USER_SID@@' -or $prepared.vmId -cne '7e686bee-8c05-43c7-9603-a9562ece224c' -or $prepared.runNonce -cne $nonce -or [DateTime]::UtcNow.ToFileTimeUtc() -gt $prepared.notAfterFileTime){throw 'Owned preparation differs or expired'}

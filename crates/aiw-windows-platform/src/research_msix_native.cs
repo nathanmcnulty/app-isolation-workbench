@@ -79,6 +79,7 @@ public sealed class AiwSuspendedNotepad : IDisposable {
  [DllImport("kernel32.dll",SetLastError=true)] static extern uint ResumeThread(IntPtr thread);
  [DllImport("kernel32.dll",SetLastError=true)] static extern bool TerminateProcess(IntPtr process,uint code);
  [DllImport("kernel32.dll",SetLastError=true)] static extern uint WaitForSingleObject(IntPtr handle,uint milliseconds);
+ [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetExitCodeProcess(IntPtr process,out uint code);
  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
  ProcessInfo info;bool resumed,disposed;
  AiwSuspendedNotepad(ProcessInfo value){info=value;}
@@ -94,6 +95,15 @@ public sealed class AiwSuspendedNotepad : IDisposable {
   if(disposed || resumed)throw new InvalidOperationException("Single suspended resume required");
   uint previous=ResumeThread(info.thread);if(previous==0xffffffff)throw new Win32Exception(Marshal.GetLastWin32Error());
   if(previous!=1)throw new InvalidOperationException("Unexpected thread suspend count");resumed=true;
+ }
+ public uint WaitForExitCode(uint milliseconds) {
+  if(disposed || !resumed || milliseconds>900000)throw new InvalidOperationException("Bounded resumed process wait required");
+  uint wait=WaitForSingleObject(info.process,milliseconds);
+  if(wait==258)throw new TimeoutException("Owned editor deadline reached; retain stage before recovery");
+  if(wait==0xffffffff)throw new Win32Exception(Marshal.GetLastWin32Error());
+  if(wait!=0)throw new InvalidOperationException("Unexpected process wait status");
+  uint code;if(!GetExitCodeProcess(info.process,out code))throw new Win32Exception(Marshal.GetLastWin32Error());
+  return code;
  }
  public void Dispose() {
   if(disposed)return;

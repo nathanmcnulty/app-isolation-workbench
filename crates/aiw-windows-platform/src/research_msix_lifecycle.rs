@@ -219,6 +219,13 @@ fn script() -> String {
     // Git checks PowerShell sources out as CRLF on Windows. Keep the embedded
     // command's size independent of checkout line endings.
     .replace("\r\n", "\n")
+    // These closed sources have no indentation-sensitive literal lines. Exclude
+    // their standalone comments and indentation from the bounded native command.
+    .lines()
+    .map(str::trim_start)
+    .filter(|line| !line.starts_with("//") && !line.starts_with('#'))
+    .collect::<Vec<_>>()
+    .join("\n")
 }
 
 pub fn run() -> TrialResult<()> {
@@ -636,7 +643,8 @@ fn run_vm_parent(image_hash: &str, launch_control: bool) -> TrialResult<()> {
     let mut length = computer.len() as u32;
     // SAFETY: bounded writable native computer-name buffer.
     if unsafe { GetComputerNameW(computer.as_mut_ptr(), &mut length) } == 0
-        || !String::from_utf16(&computer[..length as usize])?.eq_ignore_ascii_case("PASSKEYS-WORKER")
+        || !String::from_utf16(&computer[..length as usize])?
+            .eq_ignore_ascii_case("PASSKEYS-WORKER")
     {
         return Err("Pinned dedicated VM computer required".into());
     }
@@ -1468,6 +1476,80 @@ mod tests {
         ]);
         assert!(quoted.encode_utf16().count() < 32767);
     }
+    #[test]
+    fn compacted_lifecycle_script_parses_and_literal_native_compiles_in_ps51() {
+        use std::os::windows::process::CommandExt;
+        let root = std::env::temp_dir().join(format!(
+            "aiw-msix-compacted-source-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let source = root.join("lifecycle.ps1");
+        std::fs::write(&source, super::script()).unwrap();
+        // Parse the actual assembled script. Compile only its fixed C# literal;
+        // neither the lifecycle AST nor any of its PowerShell commands is invoked.
+        let command = r#"$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
+$tokens=$null;$errors=$null
+$ast=[Management.Automation.Language.Parser]::ParseFile('@@SOURCE@@',[ref]$tokens,[ref]$errors)
+if($errors.Count){throw ($errors|Out-String)}
+$commands=@($ast.FindAll({param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Add-Type'},$true))
+if($commands.Count -ne 1){throw 'Expected exactly one literal Add-Type command'}
+$elements=$commands[0].CommandElements
+if($elements.Count -ne 3 -or $elements[1] -isnot [Management.Automation.Language.CommandParameterAst] -or $elements[1].ParameterName -cne 'TypeDefinition'){throw 'Expected fixed TypeDefinition parameter'}
+$native=$elements[2]
+if($native -isnot [Management.Automation.Language.StringConstantExpressionAst] -or $native.StringConstantType -ne [Management.Automation.Language.StringConstantType]::SingleQuotedHereString){throw 'Expected non-expanding C# literal'}
+Add-Type -TypeDefinition $native.Value
+@{parsed=$true;nativeCompiled=$true;applicationExecuted=$false}|ConvertTo-Json -Compress
+"#
+        .replace("@@SOURCE@@", &source.to_string_lossy().replace('\'', "''"));
+        let mut child = std::process::Command::new(super::POWERSHELL)
+            .args(["-NoProfile", "-NonInteractive", "-Command", &command])
+            .creation_flags(0x08000000)
+            .stdout(std::fs::File::create(root.join("stdout.log")).unwrap())
+            .stderr(std::fs::File::create(root.join("stderr.log")).unwrap())
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if std::time::Instant::now() >= deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                panic!(
+                    "PS5.1 compacted-source check timed out; retained {}",
+                    root.display()
+                );
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        };
+        assert!(
+            status.success(),
+            "PS5.1 compacted-source parse/compile failed; retained {}: {}",
+            root.display(),
+            String::from_utf8_lossy(&std::fs::read(root.join("stderr.log")).unwrap())
+        );
+        let result: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(root.join("stdout.log")).unwrap()).unwrap();
+        assert_eq!(result["parsed"], true);
+        assert_eq!(result["nativeCompiled"], true);
+        assert_eq!(result["applicationExecuted"], false);
+        let canonical = root.canonicalize().unwrap();
+        assert!(canonical.starts_with(std::env::temp_dir().canonicalize().unwrap()));
+        assert!(
+            canonical
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("aiw-msix-compacted-source-")
+        );
+        std::fs::remove_dir_all(canonical).unwrap();
+    }
     const SID: &str = "S-1-5-21-1-2-3-1000";
     struct Fixture {
         root: std::path::PathBuf,
@@ -1790,6 +1872,10 @@ mod tests {
             "-Command",
             &super::script(),
         ]);
-        assert!(command.encode_utf16().count() < 32767);
+        assert!(
+            command.encode_utf16().count() < 32767,
+            "Fixed lifecycle command has {} UTF-16 units",
+            command.encode_utf16().count()
+        );
     }
 }

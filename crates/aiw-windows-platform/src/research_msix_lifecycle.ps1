@@ -122,9 +122,9 @@ try {
  $stage='document-workflow'
  Record 'awaiting-edit' @{document=$document;task='Open document.txt in the observed packaged Notepad++, append AIW packaged validation followed by Enter, save and close Notepad++';deadlineSeconds=900}
  Write-Host ('Open '+$document+' in the packaged Notepad++. Append AIW packaged validation, press Enter, save and close the editor.')
- if(!$ownedProcess.WaitForExit(900000)){throw 'Owned editor deadline reached; inspect retained stage before recovery'}
- Record 'editor-exit' @{processId=$activatedPid;exitCode=$ownedProcess.ExitCode;closed=$ownedProcess.HasExited}
- if($ownedProcess.ExitCode -ne 0){throw 'Packaged editor exited unsuccessfully'}
+ $editorExitCode=$suspended.WaitForExitCode(900000)
+ Record 'editor-exit' @{processId=$activatedPid;exitCode=$editorExitCode;closed=$true;heldNativeHandle=$true}
+ if($editorExitCode -ne 0){throw 'Packaged editor exited unsuccessfully'}
  $packageProcesses=Get-AiwPackageProcessInventory
  $packageProcesses|Add-Member -NotePropertyName queryAuthority -NotePropertyValue 'applicationUserDiagnostic'
  $packageProcesses|Add-Member -NotePropertyName globalAbsenceVerified -NotePropertyValue $false

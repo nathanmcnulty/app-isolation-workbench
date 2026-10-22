@@ -103,10 +103,55 @@ proof; `cold-restore.json` retains the operation results. Baseline was not repla
 
 Attempt r2 uses a fresh account nonce and controller evidence directory. Signed
 input staging again passed hashes, publisher and timestamp verification. The
-corrected primary-session control is being rerun before any application launch.
+corrected primary-session control passed live: WTS user/session/authentication binding,
+cmd exit 42, native parent outside inherited jobs, empty owned job, held native
+exit zero, action exit zero, task and instance absent. Terminal receipt SHA-256
+`d42d4e82a77fbe258c27e250c85b82f43dbfeac152a223dc868cbe456f1a9a4a`;
+export ZIP SHA-256 `cd66cd1a025568f76f0911e444d9ec125aaea2a849d54a3d15148b1b351d15cd`.
 
-Remaining: require native `vm-launch-control` WTS-user exit 42, empty owned job and
-native/task cleanup. Then use a fresh disposable trial for the signed Notepad++
+After exporting control evidence, another cold baseline restore/restart passed.
+Attempt r3 is a fresh disposable trial for the signed Notepad++
 lifecycle: actual non-elevated packaged process, GUI edit/save, exact bytes,
 configuration, unchanged payload, normal uninstall and independent cleanup.
 Controls and builds do not establish application compatibility or effective isolation.
+## Application attempt r3 and held-handle exit fix
+
+A fresh baseline/account/nonce trial actually installed the signed package and
+validated its 220 installed payload entries. Suspended-process evidence verified
+package full name, AUMID, installed executable hash/path, standard-user SID,
+authentication/session and medium integrity before resume. Its actual visible
+Notepad++ window opened the prepared document. The GUI appended the exact validation
+line, saved, and closed normally. Retained document bytes are exactly the expected
+53 bytes (UTF-8 without BOM, CRLF). Screenshot `packaged-editor-saved.png` is under
+controller evidence directory `C:\passkeys\worker106-tools\primary-vm106-r3`.
+
+The driver then stopped at `document-workflow`: .NET's externally obtained Process
+object reported `closed:true` but `exitCode:null`. No Notepad++ crash events were
+observed. No exit zero or complete lifecycle is inferred from that absence.
+The package was deliberately retained, native child/job cleanup completed, and
+independent inventory correctly reported remaining package registration. The
+Scheduler failure path also retained a harmless stop-of-completed-instance error;
+its native held-process exit was confirmed. Export ZIP SHA-256:
+`0fe2344fe0df608573908f60d4cd3a01c08cc7f84bf1fe56395ec6b1e0dbd8f3`.
+After verified export, stopped baseline rollback/restart passed again.
+
+The fixed editor wrapper now waits on its original held CreateProcess handle and
+queries GetExitCodeProcess only after the wait signals. Timeout/query errors and
+nonzero application exits still fail; receipt records the held-handle observation.
+[Microsoft's API contract](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getexitcodeprocess)
+requires a process handle with query rights; the original CreateProcess handle
+provides them. Independent review found no remaining defect. Fourteen actual
+controlled-cmd regression checks passed under Windows PowerShell 5.1 and PowerShell
+7.6.5, including 0/42/259/uint-max exits, timeout, invalid states and query errors.
+No installer or MSIX trial ran on the controller.
+
+The first rebuilt image (`41d2757e...`) was staged but never launched: the full
+native tests caught its fixed command exceeding 32767 UTF-16 units. Removing
+standalone comments/leading indentation from the closed embedded sources retained
+current script semantics; all eleven tests then passed. The actual compacted script
+also parsed and its literal C# compiled under Windows PowerShell 5.1.
+Final static-CRT x64 driver SHA-256:
+`442265d9c40fefade23ccbe9db90d10058d0969643d52eb8854aa65fb921b1ca`.
+All current closed template/input pins use those bytes. The r4 input bundle was
+transferred, expanded and all eleven files verified on the restored worker.
+The fresh application acceptance rerun remains pending; r3 is partial evidence.
