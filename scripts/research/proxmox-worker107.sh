@@ -22,6 +22,14 @@ stage=lock
 mkdir -p /run/aiw-worker107
 exec 9>/run/aiw-worker107/lock
 flock -x -w 10 9
+# Retain the lock in this shell only. QEMU/swtpm descendants must not inherit it.
+run_qm() {
+    if /usr/sbin/qm "$@" 9>&-; then
+        return 0
+    else
+        return "$?"
+    fi
+}
 require_worker_identity() {
     stage="${identity_context-current}:name"
     printf '%s\n' "$1" | grep -Fx 'name: aiw-worker' >/dev/null
@@ -46,39 +54,39 @@ require_worker_identity() {
     printf '%s\n' "$1" | grep -Fx 'ide2: none,media=cdrom' >/dev/null
 }
 stage=current-config-read
-config=$(qm config 107 --current 1)
+config=$(run_qm config 107 --current 1)
 stage=current-pending-equality
-test "$config" = "$(qm config 107)"
+test "$config" = "$(run_qm config 107)"
 identity_context=current
 require_worker_identity "$config"
 stage="operation:${SSH_ORIGINAL_COMMAND}"
 case "${SSH_ORIGINAL_COMMAND-}" in
     inspect)
         printf '%s\n' "$config"
-        qm status 107
-        qm listsnapshot 107
-        pvesm status --storage r630-fast
+        run_qm status 107
+        run_qm listsnapshot 107
+        pvesm status --storage r630-fast 9>&-
         ;;
-    status) qm status 107 ;;
+    status) run_qm status 107 ;;
     guest-info)
-        test "$(qm status 107)" = 'status: running'
-        qm guest cmd 107 ping
-        qm guest cmd 107 get-osinfo
-        qm guest cmd 107 get-host-name
-        qm guest cmd 107 get-users
+        test "$(run_qm status 107)" = 'status: running'
+        run_qm guest cmd 107 ping
+        run_qm guest cmd 107 get-osinfo
+        run_qm guest cmd 107 get-host-name
+        run_qm guest cmd 107 get-users
         ;;
-    shutdown) qm shutdown 107 --timeout 120 ;;
-    start) qm start 107 ;;
+    shutdown) run_qm shutdown 107 --timeout 120 ;;
+    start) run_qm start 107 ;;
     snapshot)
-        test "$(qm status 107)" = 'status: stopped'
-        qm snapshot 107 aiw-msix-worker107-clean-r1 --vmstate 0
+        test "$(run_qm status 107)" = 'status: stopped'
+        run_qm snapshot 107 aiw-msix-worker107-clean-r1 --vmstate 0
         ;;
     rollback)
-        test "$(qm status 107)" = 'status: stopped'
-        snapshot_config=$(qm config 107 --snapshot aiw-msix-worker107-clean-r1)
+        test "$(run_qm status 107)" = 'status: stopped'
+        snapshot_config=$(run_qm config 107 --snapshot aiw-msix-worker107-clean-r1)
         identity_context=snapshot
         require_worker_identity "$snapshot_config"
         stage=operation:rollback
-        qm rollback 107 aiw-msix-worker107-clean-r1
+        run_qm rollback 107 aiw-msix-worker107-clean-r1
         ;;
 esac
