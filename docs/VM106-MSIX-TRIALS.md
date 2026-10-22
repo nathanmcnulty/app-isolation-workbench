@@ -74,26 +74,39 @@ Controller receipts in `C:\passkeys\worker106-tools`:
 both sides using the encrypted PSRP transport. No rollback or baseline replacement
 was performed after this successful bounded control.
 
-## Remaining gates
+## Primary interactive continuation, 2026-10-22
 
-GitHub CLI 2.103.0 on controller PASSKEYS\labadmin reported its keyring token
-invalid; the private draft release download returned HTTP 401. No token environment
-override or alternate CLI executable was present. The connected GitHub integration
-can read release metadata but cannot download release binaries. The human requested
-CLI access and later explicitly authorized `gh auth login --web` using a device
-code in the local computer's browser, overriding the earlier repository rule for
-this recovery. Do not substitute a browser asset download.
-Restore CLI authentication, then download and verify the unchanged 60-file archive
-using the sizes/hashes in RESUME-ON-NEW-VM.md. Leave the release draft and preserve
-historical controllers unchanged. No archive was downloaded in this continuation.
+GitHub CLI authentication is working and source push succeeded. The private draft
+migration ZIP was downloaded through CLI: 9,133,397 bytes, SHA-256
+`fb7b8ba88e091562bd50bab514d4b6de2181f4fa5623a8e5e6eba8750b6911e7`.
+All 59 manifest entries and the exact 60-file archive inventory were verified.
+Historical controllers remain unchanged in the extracted archive. Rebound closed
+r6 Scheduler templates are in `scripts/research/worker106-primary`.
 
-Next rebind the archived r6 Scheduler controllers into fresh source with the new
-executable hash, worker identity and baseline. Arrange actual standard-user remote
-interactive login before starting its 30-minute window. Only after that real shell
-and matching token/session are verified, publish fresh preparation and prove native
-`vm-launch-control` (WTS user, exit 42, empty exact owned job, native/task cleanup).
-The SYSTEM-only control above does not satisfy WTS standard-user proof.
-Then use a fresh disposable trial for the signed Notepad++ lifecycle: actual
-non-elevated packaged process, GUI edit/save, exact bytes, configuration, unchanged
-payload, normal uninstall and independent cleanup. No compatibility or broader
-isolation verdict follows from the controls or successful build.
+Attempt r1 created a fresh timed standard user (SID ending 1007), completed an
+actual console sign-in, and observed its unique Explorer process in session 1.
+SYSTEM cleanup verified the one-time LSA autologon secret absent and every changed
+Winlogon value restored. No plaintext password was logged or put in Git.
+The Scheduler definition then failed verification before its first RunEx call:
+Windows normalized `PT260S` to `PT4M20S`. No native driver or application launched.
+Registered instance count was zero and last-run time was the never-run default.
+The task and stage were preserved because native custody was not established.
+The exact canonical duration check was fixed; read-only COM positive and wrong-
+duration negative checks passed against the live registered definition.
+
+Attempt r1 evidence is on the controller under
+`C:\passkeys\worker106-tools\primary-vm106-r1`; `evidence.zip` SHA-256 is
+`d4d48ac6ebe2a1708dda1feb9684ebe1ef593ec9ec2d47499566de899a66fdf5`.
+A graceful shutdown, exact stopped-state check, baseline rollback of OS/EFI/TPM,
+and restart all returned exit zero (08:28 UTC). This is the first actual restore
+proof; `cold-restore.json` retains the operation results. Baseline was not replaced.
+
+Attempt r2 uses a fresh account nonce and controller evidence directory. Signed
+input staging again passed hashes, publisher and timestamp verification. The
+corrected primary-session control is being rerun before any application launch.
+
+Remaining: require native `vm-launch-control` WTS-user exit 42, empty owned job and
+native/task cleanup. Then use a fresh disposable trial for the signed Notepad++
+lifecycle: actual non-elevated packaged process, GUI edit/save, exact bytes,
+configuration, unchanged payload, normal uninstall and independent cleanup.
+Controls and builds do not establish application compatibility or effective isolation.

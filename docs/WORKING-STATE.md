@@ -30,12 +30,13 @@ The native driver and preparation validators are now rebound to VM 106, built an
 independently reviewed. Eleven native tests passed, and the fixed SYSTEM Scheduler
 cmd/exit-42 control passed live with owned-job and task/process cleanup. See
 [VM106-MSIX-TRIALS.md](VM106-MSIX-TRIALS.md) for exact hashes/evidence and remaining
-WTS/application gates. The binary is staged but has not been run. Private archive
-download is pending repair of CLI authentication (HTTP 401); the human requested
-CLI and subsequently explicitly authorized its web/device-code login for this
-authentication recovery, overriding the earlier restriction. No timed standard-user
-account or application acceptance exists yet. Original PASSKEYS remains controller.
-
+WTS/application gates. GitHub CLI works; the unchanged 60-file private migration
+archive was downloaded and verified. A fresh standard-user console sign-in and
+LSA/Winlogon cleanup passed. The first primary Scheduler wrapper stopped before
+launch at normalized-duration verification; that check is fixed and independently
+reviewed. Its evidence was exported, and stopped baseline rollback/restart passed.
+A fresh primary control attempt is underway. Application compatibility remains
+unmeasured. Original PASSKEYS remains controller.
 Branch: `codex/new-vm-handoff-20261021`, based on the complete development history
 at `5688db4eb681fdc9a7e3987bb091b89de941d1bd` (`codex/msix-worker-lifecycle`).
 Use [RESUME-ON-NEW-VM.md](RESUME-ON-NEW-VM.md) for exact download/verification
