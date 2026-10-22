@@ -42,9 +42,23 @@ drove msix-1792700924025223800 through native Control: expected/observed42,
 same standard session and empty owned job. Run then failed before installation:
 the generated lifecycle prelude omitted the driver's function wrapper and read
 its unset EvidenceDirectory variable. Raw failure/job cleanup retained; host
-cold recovery is automatic. Never replay this nonce. Correct the composition,
-check exact generated scripts with native PowerShell AST, rebuild and approve
-a fresh run. Remaining live acceptance is the actual packaged lifecycle.
+cold recovery/clean readback/release completed20:45:03UTC. Never replay its nonce.
+Composition corrected in14e5691; native PowerShell AST, focused3tests, Clippy and
+independent review passed. Fresh6-file package production-msix-desktop-scriptfix
+was inventory verified (receipt325eef48435e32967802b1597cbc5df142d9f26f830cfa4a8b37ea1ab10123ec).
+Run msix-1792702354519093600 was reviewed, approved and separately started through
+that desktop at20:54UTC. Native Control passed, then actual packaged editing
+saved53bytes and the lifecycle child exited0 with an empty job after uninstall.
+Native capture failed on ordinary generated8.3 aliases in the output tree;
+this is not a verified lifecycle report. Raw failure/job receipts are retained,
+but full lifecycle bytes were not captured. Cold recovery/clean readback/release
+completed21:15:17UTC. Never replay its nonce.
+The collector correction uses a private held evidence tree with long-name-only
+enumeration, case-collision rejection and512entry/16MiB total/4MiB file/depth16
+bounds. Parent-relative opens, fileIDs/hash/stream/nonreparse/single-link checks
+remain; public portable-input alias policy is unchanged.16source inspection and
+3worker tests plus independent review pass. Rebuild/re-pin and approve a fresh
+run for actual end-to-end capture/report proof.
 Logs/packages: production-msix-* under
 C:\AIW-Resume-20261021. Remaining acceptance is native control, packaged lifecycle,
 raw host verification, final cold cleanup/release and shared function report.

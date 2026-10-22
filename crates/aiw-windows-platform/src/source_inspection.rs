@@ -40,8 +40,8 @@ use windows::core::PCWSTR;
 
 use crate::exact_dispose::{
     DirectoryEntry, ExactDisposeError, StableFileId, basic_info, enumerate_file_streams, file_size,
-    hash_file, reject_case_sensitive_directory, source_directory_entries, stable_id, standard_info,
-    verify_stream_policy,
+    filesystem_capture_directory_entries, hash_file, reject_case_sensitive_directory,
+    source_directory_entries, stable_id, standard_info, verify_stream_policy,
 };
 use crate::workspace::{final_path, is_fixed_volume, same_path, verify_local_acl_volume};
 
@@ -146,6 +146,31 @@ pub struct HeldPortableDirectory {
     objects: Vec<HeldPortableObject>,
     manifest: PortableContentManifest,
     authority: PortableDirectoryAuthority,
+    policy: DirectoryInspectionPolicy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DirectoryInspectionPolicy {
+    PortableInput,
+    Evidence,
+}
+
+/// Read-only capture of completed guest output, never application intake or
+/// disposal authority. Only long names are traversed; legacy aliases are ignored.
+pub(crate) struct HeldEvidenceDirectory(HeldPortableDirectory);
+
+impl HeldEvidenceDirectory {
+    pub(crate) fn open(path: &Path) -> Result<Self, SourceInspectionError> {
+        HeldPortableDirectory::open_for_policy(path, DirectoryInspectionPolicy::Evidence).map(Self)
+    }
+
+    pub(crate) fn copy_plan(&self) -> impl ExactSizeIterator<Item = HeldPortableCopyObject<'_>> {
+        self.0.copy_plan()
+    }
+
+    pub(crate) fn revalidate(&self) -> Result<(), SourceInspectionError> {
+        self.0.revalidate()
+    }
 }
 
 #[derive(Debug)]
@@ -494,6 +519,13 @@ fn verify_embedded_signature(
 
 impl HeldPortableDirectory {
     pub fn open(path: &Path) -> Result<Self, SourceInspectionError> {
+        Self::open_for_policy(path, DirectoryInspectionPolicy::PortableInput)
+    }
+
+    fn open_for_policy(
+        path: &Path,
+        policy: DirectoryInspectionPolicy,
+    ) -> Result<Self, SourceInspectionError> {
         if !path.is_absolute() || path.as_os_str().is_empty() {
             return Err(SourceInspectionError::InvalidPath(
                 "path must be absolute and nonempty".to_owned(),
@@ -519,7 +551,7 @@ impl HeldPortableDirectory {
                 "opened source is not on a fixed volume".to_owned(),
             ));
         }
-        let root_observation = observe_portable_object(&root, true)?;
+        let root_observation = observe_portable_object(&root, true, policy)?;
         let root_id = root_observation.id.clone();
         let mut objects = vec![HeldPortableObject {
             relative_path: String::new(),
@@ -531,15 +563,29 @@ impl HeldPortableDirectory {
         let mut total_size_bytes = 0_u64;
 
         while let Some((parent_index, depth)) = pending.pop() {
-            if depth >= MAX_PORTABLE_DEPTH && !objects[parent_index].observation.children.is_empty()
-            {
+            let maximum_depth = if policy == DirectoryInspectionPolicy::Evidence {
+                16
+            } else {
+                MAX_PORTABLE_DEPTH
+            };
+            let maximum_entries = if policy == DirectoryInspectionPolicy::Evidence {
+                512
+            } else {
+                MAX_PORTABLE_ENTRIES
+            };
+            let maximum_bytes = if policy == DirectoryInspectionPolicy::Evidence {
+                16 * 1024 * 1024
+            } else {
+                MAX_PORTABLE_BYTES
+            };
+            if depth >= maximum_depth && !objects[parent_index].observation.children.is_empty() {
                 return Err(SourceInspectionError::BoundsExceeded);
             }
             let children = objects[parent_index].observation.children.clone();
             let parent_relative = objects[parent_index].relative_path.clone();
             let mut opened = Vec::with_capacity(children.len());
             for child in children {
-                if objects.len() + opened.len() > MAX_PORTABLE_ENTRIES {
+                if objects.len() + opened.len() > maximum_entries {
                     return Err(SourceInspectionError::BoundsExceeded);
                 }
                 let relative_path = portable_relative_path(&parent_relative, &child.name)?;
@@ -557,7 +603,7 @@ impl HeldPortableDirectory {
                 if !same_path(&final_path(&file).map_err(native)?, &expected_path) {
                     return Err(SourceInspectionError::Drift);
                 }
-                let observation = observe_portable_object(&file, directory)?;
+                let observation = observe_portable_object(&file, directory, policy)?;
                 if observation.id.volume_serial_number != root_id.volume_serial_number
                     || observation.id.file_id != child.file_id
                 {
@@ -568,7 +614,7 @@ impl HeldPortableDirectory {
                 } else {
                     total_size_bytes = total_size_bytes
                         .checked_add(observation.size_bytes)
-                        .filter(|size| *size <= MAX_PORTABLE_BYTES)
+                        .filter(|size| *size <= maximum_bytes)
                         .ok_or(SourceInspectionError::BoundsExceeded)?;
                     PortableContentEntryKind::File
                 };
@@ -595,6 +641,7 @@ impl HeldPortableDirectory {
             objects,
             manifest,
             authority,
+            policy,
         };
         held.revalidate()?;
         Ok(held)
@@ -622,6 +669,7 @@ impl HeldPortableDirectory {
             let current = observe_portable_object(
                 &object.file,
                 object.kind == PortableContentEntryKind::Directory,
+                self.policy,
             )?;
             if current != object.observation {
                 return Err(SourceInspectionError::Drift);
@@ -667,6 +715,7 @@ fn copy_held_file(
 fn observe_portable_object(
     file: &File,
     directory: bool,
+    policy: DirectoryInspectionPolicy,
 ) -> Result<PortableObjectObservation, SourceInspectionError> {
     let before = basic_info(file).map_err(exact)?;
     let standard = standard_info(file).map_err(exact)?;
@@ -684,7 +733,24 @@ fn observe_portable_object(
     if directory {
         reject_case_sensitive_directory(file).map_err(exact)?;
         verify_stream_policy(file, true, 0).map_err(exact)?;
-        let mut children = source_directory_entries(file).map_err(exact)?;
+        let mut children = if policy == DirectoryInspectionPolicy::PortableInput {
+            source_directory_entries(file).map_err(exact)?
+        } else {
+            let entries = filesystem_capture_directory_entries(file).map_err(exact)?;
+            if entries.len() > 512 {
+                return Err(SourceInspectionError::BoundsExceeded);
+            }
+            let mut names = std::collections::BTreeSet::new();
+            for entry in &entries {
+                portable_relative_path("", &entry.name)?;
+                if !names.insert(entry.name.to_ascii_lowercase()) {
+                    return Err(SourceInspectionError::PolicyRejected(
+                        "Evidence long-name case collision".into(),
+                    ));
+                }
+            }
+            entries
+        };
         // The held child handles independently bind identity, shape, content,
         // and stream policy. Do not retain the directory entry's EA byte count:
         // Windows may attach allowed kernel SmartLocker metadata after opening
@@ -703,7 +769,12 @@ fn observe_portable_object(
         })
     } else {
         let size_bytes = file_size(file).map_err(exact)?;
-        if size_bytes > MAX_PORTABLE_BYTES {
+        let maximum_file_bytes = if policy == DirectoryInspectionPolicy::Evidence {
+            4 * 1024 * 1024
+        } else {
+            MAX_PORTABLE_BYTES
+        };
+        if size_bytes > maximum_file_bytes {
             return Err(SourceInspectionError::BoundsExceeded);
         }
         verify_stream_policy(file, false, size_bytes).map_err(exact)?;
@@ -1170,6 +1241,97 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn evidence_capture_uses_held_long_names_without_portable_input_authority() {
+        let root = Root::new();
+        let directory = root.0.join("msix-lifecycle");
+        fs::create_dir(&directory).unwrap();
+        fs::write(root.0.join("child-started.json"), b"{}").unwrap();
+        fs::write(directory.join("document-output.json"), b"verified output").unwrap();
+        let held = HeldEvidenceDirectory::open(&root.0).unwrap();
+        let names = held
+            .copy_plan()
+            .map(|object| object.relative_path().to_owned())
+            .collect::<Vec<_>>();
+        assert!(names.contains(&"child-started.json".to_owned()));
+        assert!(names.contains(&"msix-lifecycle/document-output.json".to_owned()));
+        assert!(names.iter().all(|name| !name.contains('~')));
+        assert!(
+            OpenOptions::new()
+                .write(true)
+                .open(directory.join("document-output.json"))
+                .is_err()
+        );
+        assert!(fs::rename(&directory, root.0.join("moved")).is_err());
+        held.revalidate().unwrap();
+        // Native portable-input inspection remains strict when this volume
+        // generates aliases; evidence capture does not alter that path.
+        let native_root = &held.0.objects[0].file;
+        if source_directory_entries(native_root).is_err() {
+            assert!(HeldPortableDirectory::open(&root.0).is_err());
+        }
+    }
+
+    #[test]
+    fn evidence_capture_rejects_hardlinks_streams_reparse_and_oversized_files() {
+        let linked = Root::new();
+        fs::write(linked.0.join("original.json"), b"{}").unwrap();
+        fs::hard_link(linked.0.join("original.json"), linked.0.join("alias.json")).unwrap();
+        assert!(HeldEvidenceDirectory::open(&linked.0).is_err());
+        let streamed = Root::new();
+        fs::write(streamed.0.join("result.json"), b"{}").unwrap();
+        fs::write(
+            format!("{}:extra", streamed.0.join("result.json").display()),
+            b"hidden",
+        )
+        .unwrap();
+        assert!(HeldEvidenceDirectory::open(&streamed.0).is_err());
+        let big = Root::new();
+        File::create(big.0.join("oversized.json"))
+            .unwrap()
+            .set_len(4 * 1024 * 1024 + 1)
+            .unwrap();
+        assert!(matches!(
+            HeldEvidenceDirectory::open(&big.0),
+            Err(SourceInspectionError::BoundsExceeded)
+        ));
+        let redirected = Root::new();
+        let target = Root::new();
+        let junction = redirected.0.join("redirected");
+        let output = std::process::Command::new(r"C:\Windows\System32\cmd.exe")
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&target.0)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert!(HeldEvidenceDirectory::open(&redirected.0).is_err());
+        fs::remove_dir(&junction).unwrap();
+    }
+
+    #[test]
+    fn evidence_capture_enforces_entry_and_total_byte_bounds() {
+        let many = Root::new();
+        for index in 0..513 {
+            fs::write(many.0.join(format!("e{index}.txt")), b"x").unwrap();
+        }
+        assert!(matches!(
+            HeldEvidenceDirectory::open(&many.0),
+            Err(SourceInspectionError::BoundsExceeded)
+        ));
+        let total = Root::new();
+        for index in 0..5 {
+            File::create(total.0.join(format!("e{index}.txt")))
+                .unwrap()
+                .set_len(4 * 1024 * 1024)
+                .unwrap();
+        }
+        assert!(matches!(
+            HeldEvidenceDirectory::open(&total.0),
+            Err(SourceInspectionError::BoundsExceeded)
+        ));
     }
 
     #[test]

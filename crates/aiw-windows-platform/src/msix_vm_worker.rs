@@ -1,8 +1,8 @@
 //! Fixed production VM107 worker. Invoked only by the host's approved typed
 //! protocol, never with caller-selected commands, scripts, or package identities.
 use crate::{
-    HeldApplicationFile, HeldPortableDirectory, guest_msi::GuestProcess,
-    primary_interactive_user::PrimaryInteractiveUser,
+    HeldApplicationFile, guest_msi::GuestProcess, primary_interactive_user::PrimaryInteractiveUser,
+    source_inspection::HeldEvidenceDirectory,
 };
 use aiw_probe::MsixWorkerRequest;
 use serde_json::{Value, json};
@@ -188,10 +188,7 @@ fn in_job() -> Result<bool> {
     Ok(answer.as_bool())
 }
 fn collect(root: &Path, destination: &Path) -> Result<BTreeMap<String, Vec<u8>>> {
-    let held = HeldPortableDirectory::open(root)?;
-    if held.manifest().entries.len() > 512 || held.manifest().total_size_bytes > 16 * 1024 * 1024 {
-        return Err("MSIX evidence tree exceeds bound".into());
-    }
+    let held = HeldEvidenceDirectory::open(root)?;
     fs::create_dir(destination)?;
     let mut files = BTreeMap::new();
     for object in held.copy_plan() {
