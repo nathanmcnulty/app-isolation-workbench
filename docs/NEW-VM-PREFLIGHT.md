@@ -100,10 +100,24 @@ previous host-shell shutdown/snapshot/rollback/start block for 203 is superseded
 do not run it for application testing. The marker above describes the source
 machine only, not fresh clone identity or disposable-boundary proof.
 
-The user reports the clone is VM `107`. Agreed preparation was a clean shutdown
-of 203, full clone with a new MAC and disconnected NIC, leave the clone powered
-off, then restart 203. Actual clone name, SMBIOS UUID, disk identities, MAC/link
-state, power state and snapshot inventory still require root-console readback:
+Agreed preparation was a clean shutdown of 203, full clone with a new MAC and
+disconnected NIC, leave the clone powered off, then restart 203. The user's
+subsequent root-console readback identifies:
+
+| Field | Worker identity |
+| --- | --- |
+| VM ID/name | `107`, `aiw-worker` |
+| State | stopped; no snapshots |
+| SMBIOS UUID | `e5cecc90-35c2-4831-bf9c-424be23f7d4e` |
+| VM generation ID | `f2a6f03a-fae8-46d8-8398-9c26a6a54bdc` |
+| NIC | `CC:34:21:B8:5A:31`, `vmbr0`, `link_down=1` |
+| OS disk | `r630-fast:vm-107-disk-1`, 100 GiB |
+| EFI | `r630-fast:vm-107-disk-0`, 4 MiB, enrolled 2023 keys |
+| TPM | `r630-fast:vm-107-disk-2`, 4 MiB, TPM 2.0 |
+| Guest agent | enabled in VM configuration; runtime untested |
+
+The inherited description still names the source/template and `r630-bulk`;
+it does not override the actual worker disk records. The commands used were:
 
 ```bash
 qm config 107
@@ -111,10 +125,21 @@ qm status 107
 qm listsnapshot 107
 ```
 
-Existing root SSH access remains fixed to VM 203. It does not authorize commands
-for 107; do not bypass the wrapper. After readback, prepare and independently
-review the worker-specific management binding, replacing development-VM mutation
-access. Do not guess that cloning changed Windows account SIDs or hostname.
+`scripts/research/proxmox-worker107.sh` is prepared using those observed fields.
+It checks current and pending configuration, the exact worker name/UUID/disks,
+disconnected NIC, and additional attachment restrictions. A root-controlled lock
+serializes requests; rollback rechecks the snapshot's identity and NIC state.
+Only fixed `inspect`, `status`, `guest-info`, `shutdown`, `start`, `snapshot` and
+`rollback` are accepted. `guest-info` uses read-only guest-agent builtins; there
+is no caller-selected guest execution or network-enable command. Its only
+snapshot name is `aiw-msix-worker107-clean-r1`, to be created after sanitization.
+
+Installation will replace the bytes at `/usr/local/sbin/aiw-vm203`, the existing
+forced-command entry point, with the reviewed worker-107 wrapper. The legacy
+filename remains solely to avoid editing the root authorized-key record; the
+new code contains no VM 203 management command. Existing installed code still
+targets 203 until that replacement and independent readback complete. Do not
+bypass it. Do not guess that cloning changed Windows account SIDs or hostname.
 Inspect and remove copied development authentication material from the clone
 before enabling its network or application trials; preserve the originals on 203.
 Then establish clone-specific identity, a fresh clean snapshot and verified

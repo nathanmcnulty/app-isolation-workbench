@@ -10,13 +10,15 @@ New VM preflight is recorded in [NEW-VM-PREFLIGHT.md](NEW-VM-PREFLIGHT.md).
 The checkout is now `C:\aiw\app-isolation-workbench` on QEMU machine `AIW`,
 not Azure. The migration archive's exact 60-file inventory and signed MSIX
 verified locally. Both PowerShell session probes passed. Proxmox host
-`pve-r630` (`192.168.1.6`), VM `203`, is the development machine. The user reports
-the separate full clone is VM `107`; requested preparation was powered off with
-new MAC and disconnected NIC. Its configuration/status/snapshots are pending
-root-console readback. The previous VM 203 snapshot/rollback plan is superseded:
+`pve-r630` (`192.168.1.6`), VM `203`, is the development machine. Root-console
+readback supplied by the user identifies VM `107`, `aiw-worker`, stopped, new MAC,
+NIC link down, no snapshots, disks on `r630-fast` and UUID
+`e5cecc90-35c2-4831-bf9c-424be23f7d4e`. A fixed offline worker wrapper is prepared;
+installation and independent SSH readback are pending. The previous VM 203
+snapshot/rollback plan is superseded:
 do not power-cycle or restore the development machine for trials. The installed
 SSH wrapper still targets only 203 and must be replaced with a reviewed binding
-to 107 after observing its identity. See NEW-VM-PREFLIGHT. No trial account or
+to 107. See NEW-VM-PREFLIGHT. No trial account or
 application trial has started. Do not use the old Azure binding on either VM.
 
 Branch: `codex/new-vm-handoff-20261021`, based on the complete development history

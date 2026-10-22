@@ -24,9 +24,10 @@ require_worker_identity() {
     printf '%s\n' "$1" | grep -Fx 'scsi0: r630-fast:vm-107-disk-1,discard=on,iothread=1,size=100G,ssd=1' >/dev/null
     printf '%s\n' "$1" | grep -Fx 'efidisk0: r630-fast:vm-107-disk-0,efitype=4m,ms-cert=2023k,pre-enrolled-keys=1,size=4M' >/dev/null
     printf '%s\n' "$1" | grep -Fx 'tpmstate0: r630-fast:vm-107-disk-2,size=4M,version=v2.0' >/dev/null
-    # Refuse additional attached network, block, host-device or shared-directory paths.
-    if printf '%s\n' "$1" | grep -E '^(net[1-9][0-9]*|scsi([1-9][0-9]*|0[0-9]+)|sata[0-9]+|virtio[0-9]+|ide[013]|hostpci[0-9]+|usb[0-9]+|virtiofs[0-9]+|args|hookscript):' >/dev/null; then
-        printf '%s\n' 'Unexpected worker attachment or launch configuration' >&2
+    # Only observed config keys and disk-only snapshot metadata are accepted.
+    # Unknown attachments (including ivshmem, serial and parallel) fail closed.
+    if printf '%s\n' "$1" | sed 's/:.*//' | grep -Ev '^(agent|balloon|bios|boot|cores|cpu|description|efidisk0|ide2|machine|memory|meta|name|net0|numa|onboot|ostype|scsi0|scsihw|smbios1|sockets|tags|tpmstate0|vga|vmgenid|snaptime|parent)$' >/dev/null; then
+        printf '%s\n' 'Unexpected worker configuration key' >&2
         return 1
     fi
     printf '%s\n' "$1" | grep -Fx 'ide2: none,media=cdrom' >/dev/null
