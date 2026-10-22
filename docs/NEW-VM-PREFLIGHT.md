@@ -319,14 +319,21 @@ Observed at `2026-10-22T04:47:40.5714236Z` (October 21 in Alaska):
   were not read or inferred. Chrome User Data is absent.
 - No research Notepad++ registration and no Notepad++ process.
 
-The user has been asked to choose between a fresh clone labadmin profile and
-targeted authentication cleanup. A fresh profile would remove the clone's
-Desktop/Documents/settings and cached sign-ins, and requires the known local
-account password for subsequent login; preserve the original profile on 203.
-No deletion is approved by the probe itself. Prepare a concrete scoped action
-after that choice; any full-profile removal must refuse the loaded profile and
-special/system profiles. Do not silently turn this into account deletion.
-
+The user explicitly authorized replacing the disposable labadmin profile on 107
+and confirmed knowing the account password. Preserve the SAM account/password,
+original 203 profile and all special profiles. An offline reboot completed;
+SYSTEM preflight at `2026-10-22T05:08:19.6220778Z` confirms the exact profile is
+unloaded. Evidence: `C:\AIW-Resume-20261021\worker107-profile-reset-preparation-r1\pre-reset-qga-r1.json`.
+No reset has run yet. Fixed `worker107-reset-profile.ps1` checks SYSTEM/session
+zero, worker UUID, exact enabled account and unloaded nonspecial profile, then
+rechecks regular directory identities and ProfileList path immediately before
+native DeleteProfileW. CreateProfile retains the account and creates a fresh
+profile. A protected, non-overwriting stage journal prevents blind retries.
+PowerShell 5.1/7 controls passed 16 invalid context cases and six invalid path
+cases; no native profile APIs were invoked by those controls. Execution still
+requires the user's Proxmox root console: restricted SSH deliberately has no
+arbitrary guest execution capability. Keep the NIC disconnected and preserve
+any partial result before deciding recovery.
 The native driver and preparation helpers still pin the old Azure VM. The new
 operator has RID 1001, so a later identity rebind must explicitly reject the
 operator SID as the trial SID: the old `RID >= 1000` check implicitly excluded
