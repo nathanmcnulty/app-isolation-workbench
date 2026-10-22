@@ -19,4 +19,6 @@ CODEOWNERS text eol=lf
 scripts/research/msix-scheduler-launch-control.ps1 text eol=lf
 scripts/research/vm106-scheduler-worker.ps1 text eol=lf
 scripts/research/Invoke-Worker106SchedulerControl.ps1 text eol=lf
+scripts/research/worker106-primary/*.ps1 text eol=lf
+scripts/research/Worker106-AutologonSecret.ps1 text eol=lf
 *.sh text eol=lf

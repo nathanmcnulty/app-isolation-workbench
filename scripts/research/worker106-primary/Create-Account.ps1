@@ -42,6 +42,7 @@ try {
  $groups=@(Get-LocalGroup|Where-Object{@(Get-LocalGroupMember -Group $_|Where-Object{$_.SID.Value -ceq $sid}).Count}|ForEach-Object{$_.SID.Value}|Sort-Object)
  if(($groups -join ',') -cne 'S-1-5-32-545,S-1-5-32-555'){throw 'Standard-user memberships differ'}
  Record 'credential-recovery.json' @{userSid=$sid;algorithm='RSA-OAEP-SHA256';ciphertext=[Convert]::ToBase64String($rsa.Encrypt([Text.Encoding]::UTF8.GetBytes($plain),[Security.Cryptography.RSAEncryptionPadding]::OaepSHA256))}
+ Record 'autologon-intent.json' @{vmId=$account.vmId;userSid=$sid;runNonce=$nonce;existingSecretAbsent=$true;credentialAlgorithm='RSA-OAEP-SHA256'}
  $secretStored=$true;[Aiw.Research.Worker106AutologonSecret]::Store($plain)
  New-ItemProperty -LiteralPath $winlogon -Name DefaultUserName -Value AiwStandardUser -PropertyType String -Force|Out-Null
  New-ItemProperty -LiteralPath $winlogon -Name DefaultDomainName -Value PASSKEYS-WORKER -PropertyType String -Force|Out-Null
