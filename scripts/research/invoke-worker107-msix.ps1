@@ -3,7 +3,9 @@
 param(
     [Parameter(Mandatory)][ValidateSet('Connect','Stage','Enroll','ClearLogon','Prepare','Control','Trial','Edit','Status','Export','Collect','Restart')][string]$Operation,
     [string]$PayloadDirectory,
-    [string]$EvidenceDirectory
+    [string]$EvidenceDirectory,
+    [ValidatePattern('\A[0-9a-f]{64}\z')][string]$ApprovedManifestSha256,
+    [ValidatePattern('\A[0-9a-f]{40}\z')][string]$ApprovedSourceCommit
 )
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
@@ -27,14 +29,21 @@ try {
             $account=Get-Content -LiteralPath ($root+'\account.json') -Raw|ConvertFrom-Json
             $enrolled=Get-Content -LiteralPath ($root+'\Enroll.result.json') -Raw|ConvertFrom-Json
             if(!$enrolled.restartRequired -or $account.vmId -cne 'e5cecc90-35c2-4831-bf9c-424be23f7d4e' -or $account.runNonce -cne $enrolled.account.runNonce){throw 'Run-owned enrollment required before restart'}
+            $marker=$root+'\Restart.request.json'
+            $bytes=[Text.UTF8Encoding]::new($false).GetBytes((@{operation='Restart';runNonce=$account.runNonce;requestedUtc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json))
+            $file=[IO.File]::Open($marker,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::Read)
+            try{$file.Write($bytes,0,$bytes.Length);$file.Flush($true)}finally{$file.Dispose()}
             Restart-Computer -Force
         }
         return
     }
     if($Operation -eq 'Stage') {
-        if(!$PayloadDirectory){throw 'Reviewed payload directory required'}
+        if(!$PayloadDirectory -or !$ApprovedManifestSha256 -or !$ApprovedSourceCommit){throw 'Reviewed payload directory and independently approved manifest/source identities required'}
+        if((Get-FileHash -LiteralPath (Join-Path $PayloadDirectory 'bundle.json')).Hash.ToLowerInvariant() -cne $ApprovedManifestSha256){throw 'Independently approved manifest identity differs'}
         $manifest=Get-Content -LiteralPath (Join-Path $PayloadDirectory 'bundle.json') -Raw|ConvertFrom-Json
-        if($manifest.schemaVersion -cne 'aiw.dev/worker107-msix-bundle/v1' -or $manifest.driverSha256 -cne '05f2ff8638adb3a156696de60bb1fd23341ee201a497c105359fa926d6d0e812'){throw 'Reviewed bundle driver identity differs'}
+        if($manifest.sourceCommit -cne $ApprovedSourceCommit -or $manifest.workerUuid -cne 'e5cecc90-35c2-4831-bf9c-424be23f7d4e' -or $manifest.schemaVersion -cne 'aiw.dev/worker107-msix-bundle/v1' -or $manifest.driverSha256 -cne '05f2ff8638adb3a156696de60bb1fd23341ee201a497c105359fa926d6d0e812'){throw 'Reviewed bundle source/worker/driver identity differs'}
+        $expected=@('application.msix','assembly.json','signing.json','msix_standard_user_lifecycle.exe','worker107-msix.ps1','worker107-msix-templates.ps1','worker107-scheduler-controller.ps1.in','worker107-scheduler-worker.ps1.in','msix-primary-preparation.ps1','worker107-editor.ps1','worker107-editor-input.cs','research_msix_native.cs','research_msix_interactive.cs')|Sort-Object
+        if((@($manifest.files|ForEach-Object{$_.name}|Sort-Object)-join '|') -cne ($expected-join '|')){throw 'Closed payload file set differs'}
         foreach($entry in $manifest.files) {
             if($entry.name -cnotmatch '\A[a-zA-Z0-9_.-]+\z' -or (Get-FileHash -LiteralPath (Join-Path $PayloadDirectory $entry.name)).Hash.ToLowerInvariant() -cne $entry.sha256){throw 'Payload content identity differs'}
         }
@@ -48,7 +57,11 @@ try {
             Copy-Item -LiteralPath (Join-Path $PayloadDirectory $name) -Destination ('C:\AIW-Worker107-Intake-r1\'+$name) -ToSession $session
         }
         $remoteManifest=Invoke-Command -Session $session -ScriptBlock {(Get-FileHash -LiteralPath 'C:\AIW-Worker107-Intake-r1\bundle.json').Hash.ToLowerInvariant()}
-        if($remoteManifest -cne (Get-FileHash -LiteralPath (Join-Path $PayloadDirectory 'bundle.json')).Hash.ToLowerInvariant()){throw 'Remote manifest transfer differs'}
+        if($remoteManifest -cne $ApprovedManifestSha256){throw 'Remote manifest transfer differs'}
+        Invoke-Command -Session $session -ScriptBlock {
+            $ErrorActionPreference='Stop';$root='C:\AIW-Worker107-Intake-r1';$manifest=Get-Content -LiteralPath ($root+'\bundle.json') -Raw|ConvertFrom-Json
+            foreach($entry in $manifest.files){if((Get-FileHash -LiteralPath (Join-Path $root $entry.name)).Hash.ToLowerInvariant() -cne $entry.sha256){throw 'Transferred source file differs before SYSTEM dispatch'}}
+        }
     }
     if($Operation -eq 'Status') {
         $status=Invoke-Command -Session $session -ScriptBlock {
