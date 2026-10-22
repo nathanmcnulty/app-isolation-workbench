@@ -188,6 +188,9 @@ fn transport(operation: &str, run_id: &str, workspace: &Path) -> Result<Value> {
     let workspace = powershell_workspace_path(workspace)?;
     command_json(
         Command::new(PS)
+            // A desktop launched by PowerShell7 can inherit its module path.
+            // Let Windows PowerShell initialize its own providers/modules.
+            .env_remove("PSModulePath")
             .args([
                 "-NoProfile",
                 "-NonInteractive",
@@ -895,11 +898,13 @@ mod transport_path_tests {
         let path = powershell_workspace_path(&root).unwrap();
         let result = command_json(
             Command::new(PS)
-                .args(["-NoProfile", "-NonInteractive", "-Command", "$ErrorActionPreference='Stop'; $p=Join-Path $env:AIW_MSIX_PATH_TEST 'tools'; @{ usable=($p -like '*\\tools') -and (Test-Path -LiteralPath $env:AIW_MSIX_PATH_TEST) } | ConvertTo-Json -Compress"])
+                .env_remove("PSModulePath")
+                .args(["-NoProfile", "-NonInteractive", "-Command", "$ErrorActionPreference='Stop'; $p=Join-Path $env:AIW_MSIX_PATH_TEST 'tools'; $cert=Get-Item Cert:\\CurrentUser; @{ usable=($p -like '*\\tools') -and (Test-Path -LiteralPath $env:AIW_MSIX_PATH_TEST); certificateProvider=$cert.PSProvider.Name } | ConvertTo-Json -Compress"])
                 .env("AIW_MSIX_PATH_TEST", &path),
             30,
             4096,
         ).unwrap();
         assert_eq!(result["usable"], true);
+        assert_eq!(result["certificateProvider"], "Certificate");
     }
 }
