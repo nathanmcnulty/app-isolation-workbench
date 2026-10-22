@@ -606,7 +606,10 @@ pub fn assess_with_gate(
             RunOutcome::Failed
         },
         now_rfc3339(),
-        Some(evidence_root.display().to_string()),
+        // This field is a generic evidence root hash, not the folder path.
+        // VM MSIX reports reverify their held native receipt/artifact inventory;
+        // they do not currently publish a generic evidence root hash.
+        None,
         true,
         &summary,
     )?)?;
