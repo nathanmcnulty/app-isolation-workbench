@@ -216,6 +216,8 @@ fn script() -> String {
         include_str!("research_msix_driver_control.ps1"),
         include_str!("research_msix_lifecycle.ps1")
     )
+    // Checkout CRLF conversion must not inflate the fixed native command line.
+    .replace("\r\n", "\n")
 }
 
 pub fn run() -> TrialResult<()> {
@@ -1802,6 +1804,8 @@ mod tests {
             "-Command",
             &super::script(),
         ]);
-        assert!(command.encode_utf16().count() < 32767);
+        let units = command.encode_utf16().count();
+        assert!(units < 32767, "Fixed PowerShell command has {units} units");
+        assert!(!super::script().contains('\r'));
     }
 }
