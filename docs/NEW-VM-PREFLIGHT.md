@@ -626,3 +626,24 @@ preflight at2026-10-22T08:46:14Z verified UUID107, seven original accounts, abse
 copied authentication paths/Tailscale and no research package/process. Evidence:
 `C:\AIW-Resume-20261021\worker107-connection-r3`. R2 is preserved; never retry it.
 The next fresh payload must include the duration and shared-custody corrections.
+
+Cold TLS checkpoint aiw-msix-worker107-tls-clean-r1 was created with VM107 stopped
+and NIC down at08:55:38UTC. Proxmox task history reports Snapshot OK, Rollback
+08:56:40-08:56:42UTC OK, and Start08:58:22UTC OK. All three OS/EFI/TPM disks were
+snapshotted; RAM was excluded. SSH inspect retains exact107 identity and new
+snapshot parent. The fixed SSH rollback still names the OLD clean-r1; use the
+exact107 GUI for TLS-clean recovery. The14-day certificate limits later reuse.
+
+Postrestore controller Connect passed after boot. Clean authenticated readback
+at09:02:44UTC verifies sevenoriginal accounts, no trial roots/package/process/
+research tasks, soleHTTPS listener with console-observed certificate
+BC14DCC4E37F83161EBB55AF8624E36A79E19256 and no5985 listener. Registry value-name
+readback explicitly records DefaultPassword/AutoLogonCount absent and
+AutoAdminLogon disabled. No password values were exported.
+
+Fresh r3 was sealed from reviewed1ac58259e5a5a2c908985af78f4ee370959d7e19 at
+C:\AIW-Resume-20261021\worker107-msix-payload-r3, manifestSHA256
+`e58acf7b52cfe26d46565cd29075218695f43ce374bdec5aae21932bac4f1bc1`.
+Independent review matched all13file hashes/lengths, nine normalized sources and
+unchanged native/signed inputs. Stage was dispatched only after restore+Connect
+and clean inventory gates passed. Observe typed Status before advancing.

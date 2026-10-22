@@ -43,14 +43,16 @@ at08:46:14UTC verified original seven accounts, absent copied authentication pat
 and Tailscale, no research package/process. HTTPS-only setup is working again;
 clean readback at08:52:17UTC confirms no trial roots/account/package/process or
 automatic-sign-in password. Evidence: `C:\AIW-Resume-20261021\worker107-connection-r3`.
-A new cold TLS-ready checkpoint is being created and must be restored/verified
-before fresh r3 staging. Fixed SSH wrapper only restores the ORIGINAL clean-r1;
+Cold TLS-ready checkpoint aiw-msix-worker107-tls-clean-r1 was created and restored
+successfully; postrestore Connect and clean inventory passed at09:02:44UTC. Fixed SSH wrapper only restores the ORIGINAL clean-r1;
 use exact107 Proxmox GUI for the new TLS checkpoint. Wrapper requires NIC down.
 
 Native static-CRT binary remains
 `05f2ff8638adb3a156696de60bb1fd23341ee201a497c105359fa926d6d0e812`.
 Frozen signed MSIX/assembly/signing inputs are unchanged. R1/r2 payloads and failure
-evidence are historical; build a fresh sealed r3 from reviewed committed sources.
+evidence are historical. Reviewed r3 source1ac58259e5a5a2c908985af78f4ee370959d7e19,
+manifest e58acf7b52cfe26d46565cd29075218695f43ce374bdec5aae21932bac4f1bc1,
+is sealed at C:\AIW-Resume-20261021\worker107-msix-payload-r3.
 Control must pass measured exit42/job-empty/exact cleanup before Trial. Then use
 fixed Edit, Export and Collect; do not infer compatibility/isolation from setup.
 
