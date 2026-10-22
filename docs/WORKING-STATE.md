@@ -22,9 +22,9 @@ users at boot. NIC remains disconnected. Reviewed `813d3b4` probe is now install
 and passed as SYSTEM/session zero on exact UUID 107. Tailscale uninstall and all
 three documented state-path absences are verified, including the untouched legacy
 system-profile path. Seven local accounts remain; no research registration or
-Notepad++ process. The copied labadmin profile is loaded and authentication-path
-directories remain. User choice is pending: fresh clone profile (requires known
-local password and removes clone Desktop/Documents/settings) or targeted cleanup.
+Notepad++ process. The user authorized replacing the disposable labadmin profile on 107 and knows
+its password. After an offline reboot the profile is unloaded; authentication
+directories still remain. Fixed reset helper and negative controls are prepared.
 No profile reset or credential cleanup has been executed by the agent.
 VM 106 folder concerns were resolved by the user as a separate Codex session;
 do not touch that VM. No fresh clean snapshot or restoration proof exists yet.
