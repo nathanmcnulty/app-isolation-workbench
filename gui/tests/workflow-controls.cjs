@@ -5,6 +5,19 @@ const vm = require("node:vm");
 const { clean } = require("../ui/display.js");
 const display = require("../ui/display.js");
 
+test("every desktop UI command is declared and allowed for the main window", () => {
+  const source = fs.readFileSync(require.resolve("../ui/app.js"), "utf8");
+  const manifest = fs.readFileSync(require.resolve("../build.rs"), "utf8");
+  const capability = JSON.parse(fs.readFileSync(require.resolve("../capabilities/administrator.json"), "utf8"));
+  assert.deepEqual(capability.windows, ["main"]);
+  const commands = [...source.matchAll(/(?:call|action)\("([a-z_]+)"/g)].map(match => match[1]);
+  assert.ok(commands.includes("recover_msix_worker"));
+  for (const command of new Set(commands)) {
+    assert.ok(manifest.includes(`"${command}"`), `missing command declaration: ${command}`);
+    assert.ok(capability.permissions.includes(`allow-${command.replaceAll("_", "-")}`), `missing command permission: ${command}`);
+  }
+});
+
 test("MSIX selects its own file path and keeps editing and recovery under backend control", async () => {
   const elements=new Map();
   const element=id=>{if(!elements.has(id))elements.set(id,{value:"",textContent:"",disabled:false,handlers:{},classList:{toggle(){}},scrollIntoView(){},addEventListener(event,handler){this.handlers[event]=handler;}});return elements.get(id);};
