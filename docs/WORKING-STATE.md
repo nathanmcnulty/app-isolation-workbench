@@ -36,7 +36,15 @@ completed20:15:02UTC. Do not replay its dispatch. The native correction uses a
 separate OS-only held opener with the same pinned digest, non-reparse checks and
 write/delete denial through control cleanup. Application single-link intake is
 unchanged. Focused hardlink/write-denial/hash/junction checks and independent review
-pass. Build a fresh pinned agent/desktop and approve a new run for live proof.
+pass. Fresh package production-msix-desktop-oscontrol (d203590; worker
+f46b93bae23ac04e9cf88a6f5f90dffa9a0ac29736eeeef32349c352c5332f6e)
+drove msix-1792700924025223800 through native Control: expected/observed42,
+same standard session and empty owned job. Run then failed before installation:
+the generated lifecycle prelude omitted the driver's function wrapper and read
+its unset EvidenceDirectory variable. Raw failure/job cleanup retained; host
+cold recovery is automatic. Never replay this nonce. Correct the composition,
+check exact generated scripts with native PowerShell AST, rebuild and approve
+a fresh run. Remaining live acceptance is the actual packaged lifecycle.
 Logs/packages: production-msix-* under
 C:\AIW-Resume-20261021. Remaining acceptance is native control, packaged lifecycle,
 raw host verification, final cold cleanup/release and shared function report.

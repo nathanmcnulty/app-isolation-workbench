@@ -128,7 +128,7 @@ fn system_source() -> String {
 }
 fn lifecycle_source() -> String {
     format!(
-        "Add-Type -TypeDefinition @'\n{}\n'@\n{}\n{}\n{}",
+        "Add-Type -TypeDefinition @'\n{}\n'@\n{}\nfunction Invoke-AiwDriverControl {{\nparam([string]$EvidenceDirectory)\n{}\n}}\n{}",
         include_str!("research_msix_native.cs"),
         include_str!("research_msix_inventory.ps1"),
         include_str!("research_msix_driver_control.ps1"),
@@ -436,6 +436,50 @@ pub fn run() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn generated_worker_scripts_parse_with_driver_control_scoped_to_its_function() {
+        let root = std::env::temp_dir().join(format!(
+            "aiw-script-structure-{}-{}",
+            std::process::id(),
+            now().unwrap()
+        ));
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("workflow.ps1"), lifecycle_source()).unwrap();
+        fs::write(root.join("system.ps1"), system_source()).unwrap();
+        // Parse the exact generated scripts without executing application or
+        // enrollment operations. An unwrapped driver body passed syntax checks
+        // but ran before its EvidenceDirectory parameter existed in the guest.
+        let output = std::process::Command::new(POWERSHELL)
+            .args(["-NoProfile", "-NonInteractive", "-Command", r#"
+$ErrorActionPreference='Stop'
+foreach($name in @('system.ps1','workflow.ps1')) {
+ $tokens=$null;$errors=$null
+ $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $env:AIW_TEST_SCRIPT_ROOT $name),[ref]$tokens,[ref]$errors)
+ if($errors.Count){throw ($errors|Out-String)}
+ if($name -eq 'system.ps1' -and !$ast.ParamBlock){throw 'System operation parameter must remain at script scope'}
+ if($name -eq 'workflow.ps1'){
+  $functions=@($ast.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -ceq 'Invoke-AiwDriverControl'},$true))
+  if($functions.Count -ne 1){throw 'One scoped driver control function required'}
+  $function=$functions[0]
+  if($function.Body.ParamBlock.Parameters.Count -ne 1 -or $function.Body.ParamBlock.Parameters[0].Name.VariablePath.UserPath -cne 'EvidenceDirectory'){throw 'Driver evidence parameter absent'}
+  $references=@($ast.FindAll({param($n) $n -is [Management.Automation.Language.VariableExpressionAst] -and $n.VariablePath.UserPath -ceq 'EvidenceDirectory'},$true))
+  if(!$references.Count){throw 'Driver evidence references absent'}
+  foreach($reference in $references){if($reference.Extent.StartOffset -lt $function.Extent.StartOffset -or $reference.Extent.EndOffset -gt $function.Extent.EndOffset){throw 'Driver body escaped its function'}}
+  $calls=@($ast.FindAll({param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -ceq 'Invoke-AiwDriverControl'},$true))
+  if($calls.Count -ne 1 -or $calls[0].Extent.StartOffset -le $function.Extent.EndOffset){throw 'Lifecycle must explicitly invoke the defined control'}
+ }
+}
+"#])
+            .env("AIW_TEST_SCRIPT_ROOT", &root)
+            .env_remove("PSModulePath")
+            .output().unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
     #[test]
     fn os_control_accepts_servicing_hardlinks_without_weakening_application_intake() {
         let root = std::env::temp_dir().join(format!(
