@@ -597,3 +597,32 @@ into `C:\AIW-Resume-20261021\worker107-msix-payload-r2`, manifest SHA-256
 `bc81724bfdf3f13d3a1f35b215499275dd2feccf53520236dbbf51248230f9a4`.
 Native image and three signed inputs remain unchanged. The concrete Stage call
 above now names r2; retain r1 and both failure archives as historical evidence.
+
+## R2 measured failure and fresh recovery
+
+R2 Stage, Enroll and Prepare completed on exact107. The run-owned standard user
+signed into console session1; temporary automatic-sign-in values were measured
+absent before preparation. Control registered its fixed SYSTEM task but failed
+before RunEx: Scheduler normalized requested PT260S to equivalent PT4M20S.
+The catch path also read an uninitialized script-scoped native process variable.
+Independent readback found the task Ready with no instances, last-run year1999
+and result267011, no start-request record, no native process/output and no research
+package registration. No native control or MSIX/application execution occurred.
+
+The retained failure archive is
+`C:\AIW-Resume-20261021\worker107-control-failure-r2\evidence.zip`, SHA256
+`ed14f6b5751e84713517794252b21643d97f78a1c3fd99a80efc1a2e8b6d53bb`,
+36692bytes,20files. Its explicit outcome is failure-cold-recovery and it makes no
+cleanup claim. The actual registered task definition is retained separately.
+The duration guard now compares parsed TimeSpan values, preserving the exact
+260/1500-second limits. Parent-owned process custody is shared across function
+and invoked-scriptblock scope. Both PS5.1/7 checks exercise actual in-memory
+Scheduler XML round trips, reject wrong durations and exercise strict child-scope
+binding without registering/running a task. Read-only verification of the actual
+failed task also passed with the corrected predicate.
+
+Cold rollback of OS/EFI/TPM to aiw-msix-worker107-clean-r1 completed. SYSTEM
+preflight at2026-10-22T08:46:14Z verified UUID107, seven original accounts, absent
+copied authentication paths/Tailscale and no research package/process. Evidence:
+`C:\AIW-Resume-20261021\worker107-connection-r3`. R2 is preserved; never retry it.
+The next fresh payload must include the duration and shared-custody corrections.

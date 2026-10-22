@@ -15,7 +15,7 @@ try {
     # Operator-observed certificate from the exact VM107 Proxmox console.
     # This probe precedes credential access; the subsequent WSMan connection is
     # a separate TLS channel on the operator-trusted lab network, not a channel pin.
-    $expectedCertificate='92BB9858EF5D21F4A30F3E2E66D54A3FAA7E1E18'
+    $expectedCertificate='BC14DCC4E37F83161EBB55AF8624E36A79E19256'
     $tcp=[Net.Sockets.TcpClient]::new()
     $tls=$null
     try {

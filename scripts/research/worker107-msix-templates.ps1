@@ -20,7 +20,7 @@ Publish 'native-lifecycle.json' @{nonce=$nonce;wrapper=$native;result=$result;co
     $source.Replace('applicationLaunchAttempted=$false','applicationTrialMode=$true')
 }
 function ConvertTo-LifecycleController([string]$Source) {
-    $source = $Source.Replace('PT260S','PT1500S').Replace('AddSeconds(210)','AddSeconds(1440)')
+    $source = $Source.Replace('PT260S','PT1500S').Replace('FromSeconds(260)','FromSeconds(1500)').Replace('AddSeconds(210)','AddSeconds(1440)')
     $source = $source.Replace("'native-control.json'", "'native-lifecycle.json'")
     $source = $source.Replace('$result.applicationLaunchAttempted -or ', '').Replace('$native.applicationLaunchAttempted -or ', '')
     $source = $source.Replace('-or $native.result.exitCode -ne 42 ', '')

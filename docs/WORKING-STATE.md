@@ -1,128 +1,72 @@
 # Working state
 
-Updated 2026-10-21 for migration to the user's new dedicated VM/Codex instance.
-Start with `scripts/work-status.ps1`. This is a pointer, not execution authority
-or a run receipt.
+Updated 2026-10-22. Start with `scripts/work-status.ps1`; this file is a pointer,
+not an execution receipt. Branch `codex/new-vm-handoff-20261021`, checkout
+`C:\aiw\app-isolation-workbench` on development VM203. Trials target only VM107,
+UUID `e5cecc90-35c2-4831-bf9c-424be23f7d4e`, MAC `CC:34:21:B8:5A:31`.
+Do not touch VM106/passkeys-worker or restore development203.
 
 ## Resume here
 
-New VM preflight is recorded in [NEW-VM-PREFLIGHT.md](NEW-VM-PREFLIGHT.md).
-The checkout is now `C:\aiw\app-isolation-workbench` on QEMU machine `AIW`,
-not Azure. The migration archive's exact 60-file inventory and signed MSIX
-verified locally. Both PowerShell session probes passed. Proxmox host
-`pve-r630` (`192.168.1.6`), VM `203`, is the development machine. Root-console
-readback supplied by the user identifies VM `107`, `aiw-worker`, stopped, new MAC,
-NIC link down, no snapshots, disks on `r630-fast` and UUID
-`e5cecc90-35c2-4831-bf9c-424be23f7d4e`. A fixed offline worker wrapper is prepared;
-installation and initial SSH readback passed, including rejection of VM 203
-commands. The inherited-lock defect was confirmed and recovered by graceful
-shutdown; reviewed `3c9dc99` is installed. Fresh offline start, status and inspect
-pass; the guest agent reports Windows 11 build 26300, hostname AIW, no logged-in
-users at boot. NIC remains disconnected. Reviewed `813d3b4` probe is now installed
-and passed as SYSTEM/session zero on exact UUID 107. Tailscale uninstall and all
-three documented state-path absences are verified, including the untouched legacy
-system-profile path. Seven local accounts remain; no research registration or
-Notepad++ process. Profile cleanup postconditions are independently observed:
-labadmin profile exists unloaded, all enumerated copied authentication paths
-absent, and seven accounts unchanged. Latest r2 invocation refused an existing
-journal before mutation; do not repeat profile reset or delete its evidence.
-The earlier r2 completion receipt has not been retrieved. Clean disk/EFI/TPM
-checkpoint `aiw-msix-worker107-clean-r1` was created and restored successfully.
-Post-restore SYSTEM preflight verified Windows boot, unchanged accounts and
-all checked copied authentication paths absent. VM 107 is running, NIC down. Evidence is external to the worker under
-`C:\AIW-Resume-20261021\worker107-recovery-proof-r1`.
-VM 106 folder concerns were resolved by the user as a separate Codex session;
-do not touch that VM.
-The previous VM 203
-snapshot/rollback plan is superseded:
-do not power-cycle or restore the development machine for trials. The installed
-SSH entry path now targets only 107. See NEW-VM-PREFLIGHT. No trial account or
-application trial has started. Do not use the old Azure binding on either VM.
+Continue [NOTEPAD-MSIX-LIFECYCLE.md](NOTEPAD-MSIX-LIFECYCLE.md), using the closed
+worker107 controllers in `scripts/research`. [NEW-VM-PREFLIGHT.md](NEW-VM-PREFLIGHT.md)
+retains setup and measured failures. User explicitly authorized VM107 setup,
+accounts/software and autonomous disposable validation.
 
-Branch: `codex/new-vm-handoff-20261021`, based on the complete development history
-at `5688db4eb681fdc9a7e3987bb091b89de941d1bd` (`codex/msix-worker-lifecycle`).
-Use [RESUME-ON-NEW-VM.md](RESUME-ON-NEW-VM.md) for exact download/verification
-commands, preserved asset identities, stopping point and next acceptance gates.
-Paste [RESUME-PROMPT.md](RESUME-PROMPT.md) into the new session.
+HTTPS WinRM at192.168.1.174:5986 works with Basic and unqualified labadmin;
+System6167 confirmed duplicate cloned Windows identity behind NTLM failures.
+The original password validated; none was reset. Credentials remain DPAPI-private
+outside repo/evidence. Console-observed certificate now
+`BC14DCC4E37F83161EBB55AF8624E36A79E19256` is checked before credential access.
+The subsequent WSMan channel uses SkipCACheck on the operator-trusted lab network;
+this is not production channel pinning. Authenticated UUID107 and elevated SID1001
+passed. HTTP listener absent, unencrypted WinRM disabled, TLS firewall scoped203.
 
-The old Azure subscription ran out of funds, per the user. Its VM, account,
-approvals, TEMP pointers and checkpoints are not resumption dependencies. Do not
-contact/recover/clean up old infrastructure for this migration. Inspect the new
-machine and rebind the closed research path before testing.
+R2 Stage/Enroll/Prepare passed with a real standard-user console sign-in and
+measured clearing of temporary automatic-sign-in values. Control failed AFTER
+registering its fixed task but BEFORE RunEx/native launch because Scheduler
+normalized PT260S to PT4M20S. Independent readback found Ready/noinstances,
+never-run result267011, no start-request/native output/package/process. No native
+control or application executed. The failure archive is safely external:
+`C:\AIW-Resume-20261021\worker107-control-failure-r2\evidence.zip`, SHA256
+`ed14f6b5751e84713517794252b21643d97f78a1c3fd99a80efc1a2e8b6d53bb`.
+It explicitly claims failure-cold-recovery, never cleanup success.
 
-## Completed product milestone
+The corrected controller compares parsed durations at exact260/1500seconds and
+shares parent-owned native process custody across function/scriptblock scope.
+PS5.1/7 real in-memory Scheduler XML round trips, wrong-duration rejections and
+strict child-scope controls pass without registering/running tasks. Verification
+of the actual failed registered definition also passed read-only.
 
-Bambu Studio and both Notepad++ recipes passed signed public-entry Sandbox
-packaging acceptance, including interactive edit/save/export and exact cleanup.
-PR #93 merged at `4e39c78`; release `desktop-alpha-4e39c787e63a` was built from
-that exact source. PR #94 integrated acceptance documentation at `922d0a7`.
-See [BAMBU-PUBLIC-ACCEPTANCE.md](BAMBU-PUBLIC-ACCEPTANCE.md).
-Broader isolation remains `insufficientEvidence`.
+Cold OS/EFI/TPM rollback to aiw-msix-worker107-clean-r1 completed. SYSTEM preflight
+at08:46:14UTC verified original seven accounts, absent copied authentication paths
+and Tailscale, no research package/process. HTTPS-only setup is working again;
+clean readback at08:52:17UTC confirms no trial roots/account/package/process or
+automatic-sign-in password. Evidence: `C:\AIW-Resume-20261021\worker107-connection-r3`.
+A new cold TLS-ready checkpoint is being created and must be restored/verified
+before fresh r3 staging. Fixed SSH wrapper only restores the ORIGINAL clean-r1;
+use exact107 Proxmox GUI for the new TLS checkpoint. Wrapper requires NIC down.
 
-## Open bounded milestone
-
-Finish [NOTEPAD-MSIX-LIFECYCLE.md](NOTEPAD-MSIX-LIFECYCLE.md). PRs #95/#96
-integrated the research assembler and pinned SDK supply. Signing run
-`37711841372` succeeded at `bcf6f82`. Signed installation and all 220 installed
-payload entries passed, but normal non-elevated packaged execution/edit/save/
-configuration/final payload verification/uninstall remain open.
-
-The r5 direct SYSTEM WTS control failed before child creation/installation.
-The subsequent default SYSTEM Scheduler fixed cmd control passed suspended child
-containment, exit 42, empty output/job and independent exact cleanup readback.
-Latest reviewed native WTS Scheduler templates were never submitted: r6's real
-standard-user RDP login did not complete before its 30-minute window expired.
-No preparation/native control was dispatched. Credentials were cleared and the
-expired client closed. Preserve those distinctions.
-
-The native primary driver and preparation producer are now rebound to QEMU107
-at `4fe39b4`, explicitly excluding operator RID1001. Twelve focused native tests
-and both PS5.1/7 preparation controls passed; static-CRT release hash is
+Native static-CRT binary remains
 `05f2ff8638adb3a156696de60bb1fd23341ee201a497c105359fa926d6d0e812`.
-This binary has not run on the worker; controls/lifecycle remain unmeasured.
-The user enabled VM107 networking at `192.168.1.174` and explicitly authorized
-all validation setup/accounts/software on 107. Its MAC matches the expected
-`CC:34:21:B8:5A:31`; user console output independently confirms UUID107.
-WinRM authentication now works over HTTPS5986 with Basic and unqualified
-`labadmin`. Console System6167 confirmed the cloned Windows identity mismatch
-behind NTLM failures. The password validated locally; no reset was needed.
-Exact UUID107 and elevated operator SID1001 passed through the updated controller.
-The console-observed TLS certificate is probed before credential access; the
-subsequent WSMan channel uses SkipCACheck on the operator-trusted lab network,
-not production channel pinning. Credentials remain DPAPI-encrypted outside
-repo/evidence. Connection evidence: `C:\AIW-Resume-20261021\worker107-connection-r1`.
-VM203 remains development; do not touch VM106. AiwWorkerAdmin's reported106
-origin remains unverified; none of this session's trial account code has run.
+Frozen signed MSIX/assembly/signing inputs are unchanged. R1/r2 payloads and failure
+evidence are historical; build a fresh sealed r3 from reviewed committed sources.
+Control must pass measured exit42/job-empty/exact cleanup before Trial. Then use
+fixed Edit, Export and Collect; do not infer compatibility/isolation from setup.
 
-Updated harness `c468361` passed independent source review and bothPowerShell
-controls, including the actual account API description bound. Fresh payload:
-`C:\AIW-Resume-20261021\worker107-msix-payload-r2`, source
-`c46836185d398075a654fe2864c8f15001ed8998`, manifest SHA-256
-`bc81724bfdf3f13d3a1f35b215499275dd2feccf53520236dbbf51248230f9a4`.
-Independent artifact review precedes fresh Stage, then Enroll/restart/Prepare/
-Control before Trial. Initial r1 payload/failures are preserved.
-Stage passed after resolving Scheduler's `SYSTEM` name to its exact SID and
-preserving the initial never-run task/intake. Enroll then failed parameter
-validation before creating any account: its61-character Description exceeds
-Windows'48-character limit. The source now uses47characters and checks the
-literal against actual Windows cmdlet metadata in bothPowerShell test runs.
-Edit's registered user name is also resolved to SID before exact comparison.
-Status now uses a fixed process-only execution-policy invocation. Preserve the
-early enrollment failure before fresh reviewed staging; no trial account,
-native control or installation has executed.
-The current Proxmox wrapper requires link_down=1 and refuses an enabled NIC.
-The clean snapshot retains NIC down; preserve exported evidence before recovery.
-Historical migration controllers and draft release remain unchanged.
-## Direction and boundaries
+## Product and migration pointers
 
-Follow [EXECUTION-PLAN.md](EXECUTION-PLAN.md) and [ROADMAP.md](ROADMAP.md).
-Classic AppContainer real-application comparison follows this delivery slice;
-MXC requires its own exact-source review and disposable controls. See
-[MXC-TRAJECTORY-REVIEW-2026-10-07.md](MXC-TRAJECTORY-REVIEW-2026-10-07.md).
-VS Code is planned. Keep admin summaries simple with advanced evidence available.
+Bambu Studio and both Notepad++ recipes passed public-entry Sandbox packaging,
+interactive edit/save/export and exact cleanup. PR93 merged at4e39c78; alpha
+release desktop-alpha-4e39c787e63a. PR94 integrated acceptance at922d0a7. See
+[BAMBU-PUBLIC-ACCEPTANCE.md](BAMBU-PUBLIC-ACCEPTANCE.md). Broader isolation remains
+insufficientEvidence. Historical Azure MSIX installation verified220 payload
+entries; its normal launch/edit/save/uninstall remains unmeasured and is not a
+result for this worker. Old Azure resources are not resumption dependencies.
 
-One build owner per target. No host installer execution, generic command interface,
-implicit approval, automatic overwrite or unrelated Sandbox recovery. Preserve
-failed evidence in fresh directories. Never use device-code authentication.
-Commit/push stable milestones; merge only after review and required exact-head CI,
-then verify merged main. Leave the migration release draft.
+[RESUME-ON-NEW-VM.md](RESUME-ON-NEW-VM.md) records the verified60-file migration
+archive and draft release; credentials/private keys are excluded. Leave release
+draft. [EXECUTION-PLAN.md](EXECUTION-PLAN.md) and [ROADMAP.md](ROADMAP.md) retain
+future direction. No host installer execution, generic command interface, blind
+retry or device-code authentication. Preserve failed evidence before cold recovery.
+Commit/push stable milestones; no unsolicited PR, workflow dispatch or merge.
