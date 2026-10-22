@@ -12,7 +12,7 @@ test "$(id -u)" = 0
 test "$(hostname -s)" = pve-r630
 test "$#" = 0
 case "${SSH_ORIGINAL_COMMAND-}" in
-    inspect|status|shutdown|start|snapshot|rollback) ;;
+    inspect|status|shutdown|start|snapshot|rollback|worker-cleanup) ;;
     *) printf '%s\n' 'Unsupported VM 106 operation' >&2; exit 64 ;;
 esac
 
@@ -59,6 +59,10 @@ case "${SSH_ORIGINAL_COMMAND-}" in
     status) qm status 106 9>&- ;;
     shutdown) qm shutdown 106 --timeout 120 9>&- ;;
     start) qm start 106 9>&- ;;
+    worker-cleanup)
+        test "$(qm status 106 9>&-)" = 'status: running'
+        /usr/bin/python3 /usr/local/libexec/aiw-vm106-cleanup.py 9>&-
+        ;;
     snapshot)
         test "$(qm status 106 9>&-)" = 'status: stopped'
         if qm config 106 --snapshot aiw-vm106-baseline-20261021 9>&- >/dev/null 2>&1; then

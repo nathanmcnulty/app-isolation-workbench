@@ -8,7 +8,7 @@ The current helper is preserved at commit `184022c052db84e2a31a9eeee7defdfd07066
 
 The helper pins host `pve-r630`, VM 106, name `passkeys-worker`, SMBIOS UUID `7e686bee-8c05-43c7-9603-a9562ece224c`, EFI/OS/TPM disks on `r630-fast2`, `net0` MAC `CC:34:21:7E:FE:59` with `link_down=1`, `onboot=0` and the guest agent. It rejects pending configuration changes, additional network adapters, arbitrary QEMU arguments, PCI/USB passthrough and host hooks.
 
-Only exact SSH command strings `inspect`, `status`, `shutdown`, `start`, `snapshot` and `rollback` are accepted. No caller arguments, shell evaluation, clone, guest execution, network changes, snapshot deletion or arbitrary target selection exists. Baseline `aiw-vm106-baseline-20261021` creation requires stopped state and records no memory. An existing baseline cannot be replaced. Rollback requires stopped state and matching snapshot identity/disconnected configuration; memory-state snapshots are rejected.
+Exact SSH command strings `inspect`, `status`, `shutdown`, `start`, `snapshot`, `rollback` and `worker-cleanup` are accepted. No caller arguments, shell evaluation, clone, arbitrary guest execution, network changes, snapshot deletion or arbitrary target selection exists. Baseline `aiw-vm106-baseline-20261021` creation requires stopped state and records no memory. An existing baseline cannot be replaced. Rollback requires stopped state and matching snapshot identity/disconnected configuration; memory-state snapshots are rejected.
 
 The root-owned lock serializes this helper's calls, not independent administrators or automation. Descriptor 9 stays in the waiting helper shell and is closed in every qm/pvesm child; lock contention reports exit 75. Avoid concurrent out-of-band configuration changes. Root-owned helper/key files, normal SSH environment restrictions and protected snapshot custody remain deployment assumptions. This does not measure application compatibility or effective isolation.
 
@@ -33,3 +33,34 @@ The initial helper let its lock descriptor propagate into Proxmox children. The 
 The operator completed that recovery and supplied the exact fixed-helper hash. A subsequent strict-host-key SSH cycle passed all six steps: stopped inspection, start, running status, running inspection, graceful shutdown and stopped status. Calls after start succeeded while the VM was running, closing the observed lock-inheritance regression. Final state is stopped, with `link_down=1` and no snapshots. Detailed per-step UTC/exit/output records remain on the controller in `C:\passkeys\worker106-tools\lock-fix-live-cycle-20261021`. This verifies the bounded power/readback path; snapshot/rollback, guest setup and application acceptance are still untested on this worker.
 
 After live read-only inspection, prepare Windows identity/auth-state cleanup and separate worker access. Do not start copied Codex/Tailscale sessions or adopt browser/GitHub/Azure caches. Arrange real standard-user login before a time-limited window. Rebind and independently review the historical Azure-pinned driver/controllers for the actual worker. Before allowing network changes, review a new exact network binding; this initial helper deliberately rejects connected-network configurations. Take the actual baseline only after worker preparation, then prove the fixed Scheduler WTS control before the signed MSIX lifecycle. Export evidence to the controller before rollback. Provider Hello/Key Vault/RP trials remain separate.
+
+## Fixed guest-agent cleanup
+
+Manual console setup reached the elevated labadmin desktop on the disconnected
+worker. Tailscale was uninstalled; the operator confirmed its service, ProgramData
+state and legacy SYSTEM state absent, with only labadmin's local Tailscale folder
+remaining. The old cleanup script stopped safely because it expected both folders
+to exist. WorkplaceJoined remains YES in the copied profile; no Windows/cloud
+registration removal was authorized or performed.
+
+The new `worker-cleanup` operation runs only the hash-pinned
+`Complete-Worker106TailscaleCleanup.ps1` through the guest agent as 64-bit SYSTEM.
+It rechecks the guest UUID, exact disconnected physical adapter and absent service,
+validates the three fixed local Tailscale paths for junctions/reparse points, and
+removes only existing directories. Missing directories are accepted. This is
+offline file cleanup, not a server-side logout or whole-profile sanitization.
+Do not run concurrent guest filesystem changes during cleanup.
+
+`proxmox-vm106-cleanup.py` has no command/PID arguments. A durable root-only host
+journal at `/var/lib/aiw-vm106/cleanup.json` records launch intent before dispatch,
+then the returned PID, collection intent and final captured result. A repeated
+call polls that PID or returns its retained result; ambiguous launch/collection
+failures stop for review without redispatch. CLI calls have a 35-second deadline;
+a running guest exceeding 120 seconds is reported, never silently killed/repeated.
+Do not delete the journal to retry. Snapshot rollback does not reset this host
+journal. This operation does not prepare fresh accounts or measure app acceptance.
+
+The CLI's asynchronous PID and exec-status contract is documented in the
+[official Proxmox command synopsis](https://github.com/proxmox/pve-docs/blob/master/generated/qm.1-synopsis.adoc).
+The fixed operation and journal are mock-tested; live guest-agent availability
+and actual cleanup remain unmeasured until the host update and result readback.

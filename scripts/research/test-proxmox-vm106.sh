@@ -11,6 +11,7 @@ export AIW_TEST_ROOT="$work"
 # disposable copy, so mocks cannot influence the production controller.
 sed -e "s|^PATH=/usr/sbin:/usr/bin:/sbin:/bin$|PATH=$work/bin:/usr/bin:/bin|" \
     -e "s|/run/aiw-vm106|$work/run|g" \
+    -e "s|/usr/bin/python3|$work/bin/python3|g" \
     "$repo/scripts/research/proxmox-vm106.sh" > "$work/controller"
 cat > "$work/config" <<'CONFIG'
 agent: 1
@@ -73,6 +74,12 @@ case "$*" in
     *) printf 'Unexpected mock command: %s\n' "$*" >&2; exit 99 ;;
 esac
 MOCK
+cat > "$work/bin/python3" <<'MOCK'
+#!/bin/sh
+if (: >&9) 2>/dev/null; then exit 98; fi
+test "$*" = '/usr/local/libexec/aiw-vm106-cleanup.py'
+printf '%s\n' worker-cleanup >> "$AIW_TEST_ROOT/mutations"
+MOCK
 chmod +x "$work/bin/"*
 passed=0
 run_pass() {
@@ -96,6 +103,10 @@ run_reject() {
 }
 run_pass inspect ''
 run_pass status ''
+run_reject worker-cleanup
+printf '%s\n' running > "$work/state"
+run_pass worker-cleanup worker-cleanup
+printf '%s\n' stopped > "$work/state"
 touch "$work/lock-busy"
 run_reject start
 grep -Fx 'VM 106 helper lock is busy; no operation performed' "$work/out" >/dev/null

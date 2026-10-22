@@ -14,8 +14,11 @@ Host installation, strict-key SSH inspection and unsupported-command rejection p
 First isolated boot exposed inherited lock descriptors in swtpm/kvm; the reviewed
 fix and one-time graceful-shutdown recovery are documented there. Host update and
 the post-fix SSH start/running-readback/shutdown/stopped-readback cycle passed.
-Worker is stopped and disconnected. Next arrange Proxmox-console Windows setup,
-fresh worker accounts/access and the driver rebind; no application acceptance is claimed.
+Worker is now running at the labadmin desktop, still disconnected. Tailscale was
+uninstalled; only the copied labadmin Tailscale directory remains per operator
+readback. A fixed, journaled guest-agent cleanup is being prepared to replace
+repeated console copying; see the controller document. Fresh worker accounts/access
+and the driver rebind remain open; no application acceptance is claimed.
 Keep the original PASSKEYS VM as controller.
 
 Branch: `codex/new-vm-handoff-20261021`, based on the complete development history
