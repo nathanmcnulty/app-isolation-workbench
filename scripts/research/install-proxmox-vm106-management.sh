@@ -27,14 +27,14 @@ cleanup() {
     if test -n "$replacement"; then rm -f -- "$replacement"; fi
 }
 trap cleanup EXIT HUP INT TERM
-base=https://raw.githubusercontent.com/nathanmcnulty/app-isolation-workbench/a851873eb0ac1b5cee58508abc84bff7ba4dfad3/scripts/research
+base=https://raw.githubusercontent.com/nathanmcnulty/app-isolation-workbench/a579d6907ca9bc6b7961e1fa6503a2ef67936e47/scripts/research
 curl -fsSL "$base/proxmox-vm106.sh" -o "$work/helper"
 curl -fsSL "$base/proxmox-vm106-management.py" -o "$work/runner"
 curl -fsSL "$base/Enable-Worker106Management.ps1" -o "$work/payload"
 printf '%s  %s\n' \
     e964245d88171c408b0a82afea6760f6c81c614e082a51c94e89cdeca842bfef "$work/helper" \
-    351134ff901f4dcdbc06d9241231b920ebde58168e5fe7c50bdf6476a011526d "$work/runner" \
-    9a1db78000dade58ef1173eddcdead5a7da487f6a3b9a2c3f8c5f912a424da98 "$work/payload" | sha256sum -c -
+    7cad96afdfce0b23236304cb1efc1fb042fdd12fe1bcd1d0f2cc1d545d0487c9 "$work/runner" \
+    70030f37f84de9b45c1aeecf1917bd470d406c7eafca771b800d33d45266213a "$work/payload" | sha256sum -c -
 sh -n "$work/helper"
 /usr/bin/python3 -c 'import ast,sys; ast.parse(open(sys.argv[1], encoding="utf-8").read())' "$work/runner"
 SSH_ORIGINAL_COMMAND=inspect /usr/local/sbin/aiw-vm106
@@ -68,5 +68,19 @@ replacement=''
 flock -u 9
 exec 9>&-
 printf '%s\n' 'Management helper installed; launching fixed firewall guard. Controller will finish and verify HTTPS access.'
-SSH_ORIGINAL_COMMAND=worker-access /usr/local/sbin/aiw-vm106
+# Complete the fixed bootstrap without another Windows or host paste. Each call
+# resumes recorded custody, never repeats an ambiguously launched guest process.
+deadline=$(($(date +%s) + 240))
+ready=0
+while test "$(date +%s)" -lt "$deadline"; do
+    result=$(SSH_ORIGINAL_COMMAND=worker-access /usr/local/sbin/aiw-vm106)
+    printf '%s\n' "$result"
+    if printf '%s\n' "$result" | /usr/bin/python3 -c 'import json,sys; r=json.load(sys.stdin); sys.exit(0 if r.get("operation") == "Bind" and r.get("phase") == "finished" and r["result"]["exitcode"] == 0 else 1)'; then
+        ready=1
+        break
+    fi
+    sleep 2
+done
+test "$ready" = 1 || { printf '%s\n' 'Bootstrap deadline reached; preserve journals, do not reinstall' >&2; exit 1; }
+printf '%s\n' 'VM 106 HTTPS management configured. Codex can now verify remote access from the controller.'
 sha256sum /usr/local/sbin/aiw-vm106
