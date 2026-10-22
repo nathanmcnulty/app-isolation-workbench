@@ -6,6 +6,13 @@ or a run receipt.
 
 ## Resume here
 
+New Proxmox worker: VM 106 `passkeys-worker`, cloned with new MAC, network
+disconnected and powered off. Tooling preparation and the native research-driver
+build passed on the controller. The reviewed forced-command helper and exact
+operator installation step are in [PROXMOX-VM106-CONTROLLER.md](PROXMOX-VM106-CONTROLLER.md).
+Host installation and live read-only inspection remain pending; no new-worker
+application acceptance is claimed. Keep the original PASSKEYS VM as controller.
+
 Branch: `codex/new-vm-handoff-20261021`, based on the complete development history
 at `5688db4eb681fdc9a7e3987bb091b89de941d1bd` (`codex/msix-worker-lifecycle`).
 Use [RESUME-ON-NEW-VM.md](RESUME-ON-NEW-VM.md) for exact download/verification
