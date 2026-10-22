@@ -538,7 +538,7 @@ After authentication works, first use `invoke-worker107-msix.ps1 -Operation Conn
 and retain exact UUID/operator evidence. Only then Stage with this concrete call:
 
 ```powershell
-& C:\aiw\app-isolation-workbench\scripts\research\invoke-worker107-msix.ps1 -Operation Stage -PayloadDirectory C:\AIW-Resume-20261021\worker107-msix-payload-r1 -ApprovedSourceCommit db2d9c37ec232f272982089a502a0d754d49b0b6 -ApprovedManifestSha256 70b2276e2341324cffe94a745ca5d0207152daa0c80f73360e821b2b97bcb2ef
+& C:\aiw\app-isolation-workbench\scripts\research\invoke-worker107-msix.ps1 -Operation Stage -PayloadDirectory C:\AIW-Resume-20261021\worker107-msix-payload-r2 -ApprovedSourceCommit c46836185d398075a654fe2864c8f15001ed8998 -ApprovedManifestSha256 bc81724bfdf3f13d3a1f35b215499275dd2feccf53520236dbbf51248230f9a4
 ```
 
 Inspect typed Status before advancing. Enroll creates the actual run-owned
@@ -590,3 +590,10 @@ empty native output. It flushes an external task/failure preimage before removin
 only the two inactive outer tasks and preserving all five preparation directories
 under `C:\AIW-Worker107-PreparationFailure-r1`. This is a fresh preparation after
 a proven pre-creation validation failure, not a retry of an account or installer.
+
+Early-failure recovery completed with no account/application creation. Updated
+source `c46836185d398075a654fe2864c8f15001ed8998` was committed/pushed and sealed
+into `C:\AIW-Resume-20261021\worker107-msix-payload-r2`, manifest SHA-256
+`bc81724bfdf3f13d3a1f35b215499275dd2feccf53520236dbbf51248230f9a4`.
+Native image and three signed inputs remain unchanged. The concrete Stage call
+above now names r2; retain r1 and both failure archives as historical evidence.

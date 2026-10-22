@@ -94,13 +94,13 @@ repo/evidence. Connection evidence: `C:\AIW-Resume-20261021\worker107-connection
 VM203 remains development; do not touch VM106. AiwWorkerAdmin's reported106
 origin remains unverified; none of this session's trial account code has run.
 
-Closed WinRM harness `db2d9c3` and sealed payload passed independent source and
-artifact review. PS5.1/7 parse/render/native compilation/development-token checks
-passed. Payload: `C:\AIW-Resume-20261021\worker107-msix-payload-r1`, source
-`db2d9c37ec232f272982089a502a0d754d49b0b6`, manifest SHA-256
-`70b2276e2341324cffe94a745ca5d0207152daa0c80f73360e821b2b97bcb2ef`.
-Next connect and verify UUID/operator, Stage with those independently approved
-identities, inspect Stage result, then Enroll/restart/Prepare/Control before Trial.
+Updated harness `c468361` passed independent source review and bothPowerShell
+controls, including the actual account API description bound. Fresh payload:
+`C:\AIW-Resume-20261021\worker107-msix-payload-r2`, source
+`c46836185d398075a654fe2864c8f15001ed8998`, manifest SHA-256
+`bc81724bfdf3f13d3a1f35b215499275dd2feccf53520236dbbf51248230f9a4`.
+Independent artifact review precedes fresh Stage, then Enroll/restart/Prepare/
+Control before Trial. Initial r1 payload/failures are preserved.
 Stage passed after resolving Scheduler's `SYSTEM` name to its exact SID and
 preserving the initial never-run task/intake. Enroll then failed parameter
 validation before creating any account: its61-character Description exceeds
