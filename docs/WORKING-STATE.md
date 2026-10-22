@@ -6,38 +6,35 @@ VM203. This file is a pointer, not an execution receipt.
 
 ## Current app-work slice
 
-Production VM MSIX execution is now being integrated in the desktop, **not yet
-live validated**. See [MSIX-EXECUTION.md](MSIX-EXECUTION.md) for scope and acceptance.
-The new fixed VM107 provider, nonce lease, native agent, protected preparation,
-approval/Start, WinRM transport, console editing instructions, collection, cold
-recovery and shared retained assessment reader are implemented in this checkout.
-Recovery never repeats application operations. New `msixVm` assessment selections
-use original-host protected evidence; historical `msixResearch` pins remain intact.
+Production VM MSIX execution is integrated in the desktop and shared assessment
+reader, **not yet lifecycle verified**. See [MSIX-EXECUTION.md](MSIX-EXECUTION.md).
+The fixed107-only Proxmox wrapper is deployed. Normal HTTPS WinRM validates the
+operator-approved public certificate BC14DCC4E37F83161EBB55AF8624E36A79E19256.
+No CA bypass is used by production transport. Credentials remain DPAPI-private.
 
-VM107's public certificate is now trusted after operator approval; normal HTTPS
-WinRM identity validation passed. The production107-only wrapper is deployed and
-its SHA matches the app preparation. Clean-source package d78ec1a was built and
-its six-file inventory verified.
+Live desktop failures are retained outside the repo under the default Evidence:
+- msix-1792693343407226300 failed before staging on PowerShell verbatim paths.
+  Its exact lease was recovered through the corrected desktop; cleanup verified.
+- msix-1792697332610735000 staged and enrolled AiwStandardUser successfully, then
+  exhausted the150second post-reboot reconnect window before control/app launch.
+  Raw enrollment receipts were collected; cold cleanup/release and subsequent
+  completed-nonce finalization passed. Both runs have failed terminal results.
 
-The first desktop-approved production attempt msix-1792693343407226300 failed
-before staging: Windows PowerShell5.1 Join-Path rejects the held workspace's
-verbatim path prefix. Initial and final cold restore/reconnect proofs passed;
-the lease remains retained because that same path error blocked clean readback.
-A separate fixed read-only transport call subsequently verified clean inventory
-and normal HTTPS. Do not replay this application attempt. Recover its exact lease
-using the corrected desktop, then prepare a fresh approved run.
+Committed corrections: DOS spelling at the held PowerShell path boundary; reset
+inherited PSModulePath for Windows PowerShell providers; declare/allow the guarded
+GUI recovery command;6minute read-only cold/reboot waits; immediate retained
+execution-error receipt; omit the optional generic evidenceRoot hash until a
+native hash root is defined (folder paths are not hashes). Full37admin and14UI
+checks, real PowerShell path/Certificate regression, Clippy and release builds pass.
+Other native/core/provider/shared report checks passed at the integration baseline.
 
-The correction passes the held path's equivalent DOS spelling only at the
-PowerShell boundary. A real PowerShell FileSystem-provider regression passed.
-Cold-readback wait is6minutes because restored networking can take several
-minutes after reconnect. Full logs and the unsigned package are outside the repo
-under C:\AIW-Resume-20261021\production-msix-*.
-Core/runner, native lifecycle, GUI/UI, provider mocks, Clippy, format and governance
-checks passed before d78ec1a; path-fix admin suite36passed and new regression1passed.
-Production lifecycle acceptance still requires fresh execution and final recovery.
-
-The baseline b039e02 read-only report integration and pinned r5 fixture remain
-historical evidence, not a fresh production execution receipt.
+Active next attempt: msix-1792699084357230000, approved and started through desktop
+package C:\AIW-Resume-20261021\production-msix-desktop-2cd06ef (source2cd06ef).
+Do not replay any dispatch. Monitor its protected workspace output; complete the
+exact console document edit only when control passes and the app prompts. The
+host owns collection and cold recovery. Logs/packages: production-msix-* under
+C:\AIW-Resume-20261021. Remaining acceptance is native control, packaged lifecycle,
+raw host verification, final cold cleanup/release and shared function report.
 
 ## Disposable worker boundary
 
@@ -50,15 +47,15 @@ before cold TLS-clean recovery; final10:40:01UTC identity+clean inventory passed
 That is historical readiness; no fresh VM observation was needed for report work.
 
 TLS-ready snapshot aiw-msix-worker107-tls-clean-r1 includes OS/EFI/TPM/noRAM.
-Use exact107 GUI for it; fixed SSH wrapper targets107 but its rollback restores
-ORIGINAL clean-r1 and requires NIC down. Every fresh live trial requires identity,
-clean inventory, real standard session/cleared one-time sign-in, Prepare and native
-Control before Trial, with Export/Collect before recovery. Keep r2-r4 failures.
-HTTPS5986 Basic/unqualified labadmin works; NTLM clone-identity failure is recorded.
-Console-observed cert BC14DCC4E37F83161EBB55AF8624E36A79E19256 has14-day lifetime.
-Controller prechecks it before credential access; subsequent WSMan SkipCACheck is
-trusted-lab transport, not production channel pinning. Credentials are DPAPI-private
-outside repo/evidence. HTTP listener absent; firewall scoped203 at last readback.
+The deployed forced-command provider restores only this TLS-clean checkpoint;
+never invoke the archived research wrapper's original clean-r1 rollback. The
+production app requires exact identity, clean inventory, standard session,
+cleared temporary sign-in and measured native Control before application Trial.
+It collects before cold recovery and retains exact nonce ownership on failure.
+HTTPS5986 Basic/unqualified labadmin works; NTLM clone-identity failure is historical.
+The pinned certificate has14-day lifetime. Production checks trust/expiry and
+uses normal WSMan chain/name validation. Old research SkipCACheck code is not
+used by the production flow. HTTP listener is absent; firewall is scoped to203.
 
 ## Product pointers
 

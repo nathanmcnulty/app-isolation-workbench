@@ -67,9 +67,10 @@ Current implementation (pending live validation):
   fixed assembly/signing hashes, the native worker SHA compiled into the host, asset inventory and receipt-last development
   package. Other Sandbox recipes require their separate product assets.
 
-Remaining acceptance: finish local checks, build a clean-source package; approve
-VM107's public certificate trust outside the app run; deploy the reviewed fixed
-wrapper; demonstrate live NIC current/pending agreement; drive a fresh approved
-run through the desktop, perform the exact console edit, collect and verify raw
-evidence, cold restore, clean TLS readback and lease release. Keep failures.
+Live readiness now includes clean-source package builds, normal trusted HTTPS,
+the deployed fixed wrapper, cold restore/current-pending agreement, exact lease
+recovery, clean inventory/release, and native account enrollment. Retained failed
+runs and host corrections are summarized in WORKING-STATE.md. Remaining acceptance
+is a fresh approved desktop run through native control, exact console edit,
+raw lifecycle verification, final cold cleanup/release and shared function report.
 Do not describe the production workflow as verified until those checks pass.
