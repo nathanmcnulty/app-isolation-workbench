@@ -496,7 +496,7 @@ pub fn assess_with_gate(
             if transport("Status", &run_id, workspace.root_path()).is_ok() {
                 break;
             }
-            if start.elapsed() > Duration::from_secs(150) {
+            if start.elapsed() > Duration::from_secs(360) {
                 bail!("Worker did not return after reboot")
             };
             std::thread::sleep(Duration::from_secs(5));
@@ -519,6 +519,13 @@ pub fn assess_with_gate(
         wait_operation(&workspace, &run_id, &nonce, "run", 1250)?;
         Ok(())
     })();
+    if let Err(error) = &execution {
+        stage(
+            &workspace,
+            "execution-failed",
+            &json!({"nonce":nonce,"error":error.to_string(),"automaticRetry":false}),
+        )?;
+    }
     gate.progress("Collecting bounded worker evidence before cold recovery.");
     let collected = transport("Collect", &run_id, workspace.root_path())
         .and_then(|value| collect(&workspace, &request, &value));
