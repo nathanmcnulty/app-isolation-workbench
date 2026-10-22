@@ -64,3 +64,22 @@ The CLI's asynchronous PID and exec-status contract is documented in the
 [official Proxmox command synopsis](https://github.com/proxmox/pve-docs/blob/master/generated/qm.1-synopsis.adoc).
 The fixed operation and journal are mock-tested; live guest-agent availability
 and actual cleanup remain unmeasured until the host update and result readback.
+
+Install the one-time host update from commit
+`e914d9a1ad3226e587399844d38c88732b640782`:
+`scripts/research/update-proxmox-vm106-guest-cleanup.sh`, SHA-256
+`b9580ac94739f8009cd391b332a48931f491b3505f41fa8a804ae8c4833bda34`.
+It requires the deployed d51cec1c helper, verifies three immutable input hashes,
+checks full VM identity and a guest-agent ping, establishes root-protected payload
+and journal paths, and activates the helper last. It does not launch guest code.
+On a partial installation failure preserve output/files for review, rather than
+rerunning or deleting state. Expected final line:
+`Fixed VM 106 guest cleanup installed; guest agent responds; no guest operation launched.`
+The resulting helper hash is
+`beb5652a928a06be69c167fc68073a5147af6f0e769db9ee47c0a2233bd507be`.
+
+39 mocked dispatch/identity checks and six journal/process tests passed. Shell and
+PowerShell parsing passed. Independent reviews of the operation and updater found
+no actionable findings. Published source downloads matched all three input hashes.
+The fixed cleanup is published at `48038f402f8d16b78ac65229eccdc606cd94aa87`,
+matching locally reviewed tree `14fc72a7c2e35d3d8a6a8f7b56091ff546b7ebf6`.
