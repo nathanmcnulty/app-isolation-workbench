@@ -12,7 +12,7 @@ test "$(id -u)" = 0
 test "$(hostname -s)" = pve-r630
 test "$#" = 0
 case "${SSH_ORIGINAL_COMMAND-}" in
-    inspect|status|shutdown|start|snapshot|rollback|worker-cleanup) ;;
+    inspect|status|shutdown|start|snapshot|rollback|worker-cleanup|worker-prepare|worker-verify|worker-finalize|worker-preparation-state) ;;
     *) printf '%s\n' 'Unsupported VM 106 operation' >&2; exit 64 ;;
 esac
 
@@ -62,6 +62,16 @@ case "${SSH_ORIGINAL_COMMAND-}" in
     worker-cleanup)
         test "$(qm status 106 9>&-)" = 'status: running'
         /usr/bin/python3 /usr/local/libexec/aiw-vm106-cleanup.py 9>&-
+        ;;
+    worker-prepare|worker-verify|worker-finalize|worker-preparation-state)
+        test "$(qm status 106 9>&-)" = 'status: running'
+        case "$SSH_ORIGINAL_COMMAND" in
+            worker-prepare) operation=Prepare ;;
+            worker-verify) operation=Verify ;;
+            worker-finalize) operation=Finalize ;;
+            worker-preparation-state) operation=State ;;
+        esac
+        /usr/bin/python3 /usr/local/libexec/aiw-vm106-prepare.py "$operation" 9>&-
         ;;
     snapshot)
         test "$(qm status 106 9>&-)" = 'status: stopped'

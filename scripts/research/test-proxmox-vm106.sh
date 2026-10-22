@@ -77,8 +77,15 @@ MOCK
 cat > "$work/bin/python3" <<'MOCK'
 #!/bin/sh
 if (: >&9) 2>/dev/null; then exit 98; fi
-test "$*" = '/usr/local/libexec/aiw-vm106-cleanup.py'
-printf '%s\n' worker-cleanup >> "$AIW_TEST_ROOT/mutations"
+case "$*" in
+    '/usr/local/libexec/aiw-vm106-cleanup.py') operation=worker-cleanup ;;
+    '/usr/local/libexec/aiw-vm106-prepare.py Prepare') operation=worker-prepare ;;
+    '/usr/local/libexec/aiw-vm106-prepare.py Verify') operation=worker-verify ;;
+    '/usr/local/libexec/aiw-vm106-prepare.py Finalize') operation=worker-finalize ;;
+    '/usr/local/libexec/aiw-vm106-prepare.py State') operation=worker-preparation-state ;;
+    *) exit 99 ;;
+esac
+printf '%s\n' "$operation" >> "$AIW_TEST_ROOT/mutations"
 MOCK
 chmod +x "$work/bin/"*
 passed=0
@@ -106,6 +113,12 @@ run_pass status ''
 run_reject worker-cleanup
 printf '%s\n' running > "$work/state"
 run_pass worker-cleanup worker-cleanup
+run_pass worker-prepare worker-prepare
+run_pass worker-verify worker-verify
+run_pass worker-finalize worker-finalize
+run_pass worker-preparation-state worker-preparation-state
+run_reject 'worker-prepare other'
+run_reject 'worker-verify; whoami'
 printf '%s\n' stopped > "$work/state"
 touch "$work/lock-busy"
 run_reject start

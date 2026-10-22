@@ -102,3 +102,35 @@ host journal remains `/var/lib/aiw-vm106/cleanup.json`. No retry, reboot, networ
 change or snapshot was performed. This completes the bounded Tailscale cleanup;
 fresh worker accounts, other copied authentication state, driver rebind and
 application trials remain separate outstanding work.
+
+## Remaining offline preparation contract
+
+The remaining setup uses fixed `worker-prepare`, `worker-verify`,
+`worker-finalize` and read-only `worker-preparation-state` operations, activated by one reviewed host update. All retain
+the existing host/VM/disconnected-network checks and run fixed hash-bound guest
+payloads as SYSTEM. Preparation requires the original computer name and copied
+labadmin SID, no machine domain/Entra join, completed Tailscale cleanup, and no
+existing setup/account. It creates a protected stage before mutation, generates
+a fresh administrator password inside the worker, and stores only its RSA-OAEP
+ciphertext in the stage/host result. The recovery private key remains DPAPI-sealed
+on the controller. No credential is printed or committed.
+
+Preparation creates AiwWorkerAdmin and a new profile, validates its credentials
+with LogonUser, disables the two copied Codex sandbox users, and stages the
+PASSKEYS-WORKER rename. It retains labadmin for recovery. Existing shutdown/start
+operations perform the reboot; post-boot verification measures name, accounts,
+profile, runtime/tool paths, cleanup and device join flags. Tool paths under the
+old profile are reported separately rather than adopted as fresh-user tooling.
+
+The operator still signs into the fresh administrator through the Proxmox console
+using a private controller credential file. Finalization requires that exact
+account at the interactive console before disabling copied labadmin. This is not
+a standard-user application trial. The trial account and timed window remain
+deferred. Windows registration and copied profile/cache deletion remain outside
+this preparation; the disconnected network stays enforced. Create the stopped
+baseline only after finalization and verification pass. On ambiguous dispatch or
+partial setup retain journals, credentials and evidence; never repeat blindly.
+The state operation retrieves the protected setup record, including encrypted
+credential recovery material, even after partial setup. Read-only state and
+verification operations archive completed host observations before measuring
+again. They never relaunch an ambiguously dispatched guest process.
