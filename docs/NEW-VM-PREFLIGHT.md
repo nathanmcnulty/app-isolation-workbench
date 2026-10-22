@@ -62,8 +62,28 @@ This binary retains the old Azure pins and has not been executed. It verifies
 the build environment only. Governance validation and `git diff --check` passed
 for the preflight documentation and session-probe correction.
 
-The user has been asked for QEMU management access or an existing verified
-checkpoint and restore procedure. Do not create the timed trial account or run
-the application before establishing recovery. Native/controller rebinding must
-preserve fixed identity checks, real interactive token/session binding, held
-process custody and exact cleanup. Archived controllers remain unchanged.
+The user identified Proxmox host `pve-r630`, `192.168.1.6`, and VM `203` (`aiw`).
+The host-supplied VM configuration matches this guest's SMBIOS UUID. Its OS, EFI
+and TPM volumes are on `r630-bulk`; no snapshot existed at the supplied readback.
+SSH host Ed25519 fingerprint supplied through the root console and independently
+matched before key authentication:
+`SHA256:J/kc0UwUBil5TFBQbQhwBoRKnDoRlZ8ggXAhmYEpq1E`.
+The dedicated `aiw-codex` Linux account authenticated, but has no privileged
+management access. The user prefers native Proxmox commands without sudo.
+
+`scripts/research/proxmox-vm203.sh` provides a fixed root SSH forced-command
+boundary: `inspect`, `status`, `shutdown`, `start`, `snapshot`, `rollback`.
+Every call checks root, the exact host, VM name and UUID. It accepts no shell text,
+caller-selected VM ID or snapshot name. Snapshot/rollback require a stopped VM
+and use only `aiw-msix-baseline-20261021`. An existing snapshot is not overwritten.
+Install only as root-owned code with a `restrict,command=` public-key entry;
+the ordinary account must not be allowed to modify the wrapper. Installation
+and independent management readback are still pending. No power operation or
+snapshot creation has been dispatched.
+
+Do not create the timed trial account or run the application before establishing
+and verifying recovery. Preserve current code and evidence outside this guest
+before rollback, and arrange host-side restart because shutdown interrupts Codex.
+Native/controller rebinding must preserve fixed identity checks, real interactive
+token/session binding, held process custody and exact cleanup. Archived
+controllers remain unchanged.

@@ -8,10 +8,21 @@ LC_ALL=C
 export LC_ALL
 test "$(id -u)" = 0
 test "$(hostname -s)" = pve-r630
-config=$(qm config 203)
+test "$#" = 0
+case "${SSH_ORIGINAL_COMMAND-}" in
+    inspect|status|shutdown|start|snapshot|rollback) ;;
+    *) printf '%s\n' 'Unsupported AIW operation' >&2; exit 64 ;;
+esac
+# /run is root-controlled. Serialize checks and operations across this key's calls.
+umask 077
+mkdir -p /run/aiw-vm203
+exec 9>/run/aiw-vm203/lock
+flock -x -w 10 9
+config=$(qm config 203 --current 1)
+# Reject pending changes before acting on either the live or next-boot identity.
+test "$config" = "$(qm config 203)"
 printf '%s\n' "$config" | grep -Fx 'name: aiw' >/dev/null
 printf '%s\n' "$config" | grep -Fx 'smbios1: uuid=652a575b-a462-418e-95bb-360b28516925' >/dev/null
-test "$#" = 0
 case "${SSH_ORIGINAL_COMMAND-}" in
     inspect)
         printf '%s\n' "$config"

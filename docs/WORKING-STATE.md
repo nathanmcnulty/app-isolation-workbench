@@ -9,9 +9,10 @@ or a run receipt.
 New VM preflight is recorded in [NEW-VM-PREFLIGHT.md](NEW-VM-PREFLIGHT.md).
 The checkout is now `C:\aiw\app-isolation-workbench` on QEMU machine `AIW`,
 not Azure. The migration archive's exact 60-file inventory and signed MSIX
-verified locally. Both PowerShell session probes passed. Recovery management
-access/checkpoint details are pending from the user; no account or application
-trial has started. Do not use the old Azure binding on this worker.
+verified locally. Both PowerShell session probes passed. Proxmox host
+`pve-r630` (`192.168.1.6`), VM `203`, matches the guest UUID; no snapshots exist.
+Restricted root SSH wrapper installation is pending; no trial account or
+application trial has started. Do not use the old Azure binding on this worker.
 
 Branch: `codex/new-vm-handoff-20261021`, based on the complete development history
 at `5688db4eb681fdc9a7e3987bb091b89de941d1bd` (`codex/msix-worker-lifecycle`).

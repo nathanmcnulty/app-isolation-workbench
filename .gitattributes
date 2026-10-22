@@ -8,6 +8,7 @@
 *.stl text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
+*.sh text eol=lf
 .gitattributes text eol=lf
 .gitignore text eol=lf
 CODEOWNERS text eol=lf
