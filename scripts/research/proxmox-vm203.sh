@@ -39,6 +39,9 @@ case "${SSH_ORIGINAL_COMMAND-}" in
         ;;
     rollback)
         test "$(qm status 203)" = 'status: stopped'
+        snapshot_config=$(qm config 203 --snapshot aiw-msix-baseline-20261021)
+        printf '%s\n' "$snapshot_config" | grep -Fx 'name: aiw' >/dev/null
+        printf '%s\n' "$snapshot_config" | grep -Fx 'smbios1: uuid=652a575b-a462-418e-95bb-360b28516925' >/dev/null
         qm rollback 203 aiw-msix-baseline-20261021
         ;;
     *) printf '%s\n' 'Unsupported AIW operation' >&2; exit 64 ;;
