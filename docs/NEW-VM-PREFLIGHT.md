@@ -428,3 +428,40 @@ r2 completion receipt remains uncollected, and no reset retry is needed.
 VM107 preparation is complete for the offline research boundary. Next work is
 the reviewed QEMU native/controller identity rebind and project-owned WTS control,
 then the real MSIX lifecycle. Keep NIC down; do not use old Azure bindings.
+
+## Native QEMU rebind and network management direction
+
+Native/preparation rebind `adb5c15` replaces Azure IMDS with exact SMBIOS UUID107
+in both privileged parent and standard-user observation. The SID prefix now
+matches the clone; RID1001 operator is explicitly rejected. Synthetic positive
+fixtures use RID2000 and are not live account assignments. PS5.1/7 each passed
+one positive and eleven preparation rejections. Native focused tests first found
+the included lifecycle command over the Windows UTF-16 command limit because
+checkout CRLF conversion inflated it. `4fe39b4` normalizes the embedded command
+to LF and all twelve tests now pass. Initial failure and passing logs retained
+under `C:\AIW-Resume-20261021\worker107-rebind-r1`.
+
+Static-CRT release driver (built, not run):
+`C:\AIW-Build\msix-worker107-r1\x86_64-pc-windows-msvc\release\examples\msix_standard_user_lifecycle.exe`
+SHA-256 `05f2ff8638adb3a156696de60bb1fd23341ee201a497c105359fa926d6d0e812`.
+Independent review accepted the UUID/operator checks and command-length fix.
+No account creation, app control, installation or lifecycle was dispatched.
+
+The user chose to enable VM107's NIC and supplied IP `192.168.1.174`.
+Targeted probes found RDP3389 open and WinRM5985/5986 closed. Development203 is
+`192.168.1.171`. A Windows remoting bootstrap is required before direct staging.
+A client helper outside the repo configures exact-IP TrustedHosts (preserving
+existing entries) and requests the password through Windows' credential prompt.
+Its optional DPAPI-encrypted credential file is under the original operator's
+private profile directory, excluded from all evidence/repository/artifact paths.
+No credential contents are logged. Do not ask for a password in chat.
+The current forced Proxmox entry still rejects a connected NIC; disconnect107
+again before using it for recovery, or separately review a narrow network-state
+update. Do not change development203's NIC or restore it.
+
+Eight unfinished ISO/Scheduler/UI harness draft sources are retained externally
+at `C:\AIW-Resume-20261021\worker107-msix-harness-draft-r1`. A passive draft ISO
+was built and its directory listing inspected, but was not installed or attached.
+The draft ISO's sourceCommit precedes its uncommitted draft harness and is not a
+release/provenance claim. Use the actual source files for subsequent adaptation;
+finish parsing/compilation/guard tests and exact review before executing them.

@@ -75,12 +75,23 @@ standard-user RDP login did not complete before its 30-minute window expired.
 No preparation/native control was dispatched. Credentials were cleared and the
 expired client closed. Preserve those distinctions.
 
-The draft migration release preserves signed inputs, the frozen old native
-executable, exact historical controllers and selected evidence. Both native and
-controller code pins old VM/SIDs and needs a narrow reviewed rebind/rebuild.
-Next prove the fixed native WTS control on the new disposable boundary, then
-complete the real-application lifecycle. Feed observations into assessment.
-
+The native primary driver and preparation producer are now rebound to QEMU107
+at `4fe39b4`, explicitly excluding operator RID1001. Twelve focused native tests
+and both PS5.1/7 preparation controls passed; static-CRT release hash is
+`05f2ff8638adb3a156696de60bb1fd23341ee201a497c105359fa926d6d0e812`.
+This binary has not run on the worker; controls/lifecycle remain unmeasured.
+The user enabled VM107 networking and supplied `192.168.1.174`; RDP3389 is
+reachable, WinRM5985/5986 was not. Dev203 is `192.168.1.171`. Moving to Windows
+remoting instead of the drafted ISO transport. Client trust/credential prompt
+is prepared; worker WinRM bootstrap is pending. No trial account was created.
+Draft harness/controller/UI code is preserved outside the repo at
+`C:\AIW-Resume-20261021\worker107-msix-harness-draft-r1`; it is unfinished,
+not installed, and needs final tests/review before adaptation to WinRM.
+The old restricted Proxmox wrapper still requires link_down=1; it will refuse
+management while the NIC is enabled. The clean snapshot retains NIC down.
+Next establish authenticated WinRM and verify actual107 UUID before staging,
+then finish/review the fixed Scheduler control and actual app lifecycle.
+Historical migration controllers and draft release remain unchanged.
 ## Direction and boundaries
 
 Follow [EXECUTION-PLAN.md](EXECUTION-PLAN.md) and [ROADMAP.md](ROADMAP.md).
