@@ -41,7 +41,7 @@ $packages = @(Get-AppxPackage -AllUsers -Name AIWResearch.NotepadPP |
 $applicationProcesses = @(Get-CimInstance Win32_Process -Filter "Name='notepad++.exe'" |
     Select-Object ProcessId,SessionId,ExecutablePath)
 $tailscaleServices = @(Get-CimInstance Win32_Service -Filter "Name='Tailscale'" |
-    Select-Object Name,State,StartMode,PathName)
+    Select-Object Name,State,StartMode)
 $tailscaleInstallation = @(
     foreach ($registryRoot in @(
         'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',

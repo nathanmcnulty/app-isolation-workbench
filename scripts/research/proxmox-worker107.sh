@@ -80,7 +80,7 @@ case "${SSH_ORIGINAL_COMMAND-}" in
         stage=guest-preflight:source
         test -f /usr/local/lib/aiw-worker107/preflight.ps1
         test ! -L /usr/local/lib/aiw-worker107/preflight.ps1
-        printf '%s\n' '28236bae2d13084cb0dcc554895050a94606a7ddc9c59ca649213589b45adb43  /usr/local/lib/aiw-worker107/preflight.ps1' | sha256sum --status -c -
+        printf '%s\n' 'f4663c141f187e7d6f1b5cc582acd01caf510fe2d7f3c84ee792f4445d654eb9  /usr/local/lib/aiw-worker107/preflight.ps1' | sha256sum --status -c -
         encoded=$(iconv -f UTF-8 -t UTF-16LE /usr/local/lib/aiw-worker107/preflight.ps1 | base64 -w 0)
         test "${#encoded}" -lt 16000
         stage=guest-preflight:execution
