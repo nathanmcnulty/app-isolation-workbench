@@ -4,9 +4,10 @@
 and elevated; Windows preparation is finalized. Use
 [worker106-admin](../scripts/worker106-admin/README.md). The historical bootstrap
 instructions below are retained evidence, not next steps. Do not run them again.
-No baseline snapshot has been taken; Proxmox helper inspection currently refuses
-the changed configuration. Keep the VM running until a verified snapshot path is
-available. Application trials remain gated on that disposable baseline.
+Baseline `aiw-vm106-baseline-20261021` now exists, created with the worker stopped
+and no saved memory. The helper accepts Proxmox's exact canonical enabled NIC
+form. See the repair/baseline receipt at the end; historical pending statements
+below describe the earlier stopping points.
 
 This is a research setup boundary for the Proxmox clone `passkeys-worker`, not application acceptance. The operator confirmed it is stopped, has a new MAC and disconnected network, and has automatic start disabled. Keep the original PASSKEYS VM as the controller.
 
@@ -382,3 +383,42 @@ snapshot or rollback command was submitted after that refusal. No accessible
 authenticated Proxmox browser tab was available for a UI fallback. Thus Windows
 administration preparation is complete, but the verified stopped baseline remains
 pending before application trials. Leave this working VM running.
+
+## Canonical NIC repair and baseline, 2026-10-22 UTC
+
+The operator provided an authenticated Proxmox browser session. Host web-shell
+readback proved the deployed e964245d helper and the exact original UUID, disks,
+name and MAC/bridge. The enabled NIC was serialized as
+`net0: virtio=CC:34:21:7E:FE:59,bridge=vmbr0`, omitting the default link_down=0.
+That exact equivalent form was missing from the helper's allowlist.
+
+Fix source `ff1cb52f37645b465a4df2d75c2fb41230cc3f03` accepts only that third
+representation and retains all other checks. Independent review found no
+actionable findings; all 52 credential-free dispatch/identity checks and
+governance verification passed. The host downloaded the immutable source,
+verified SHA-256 `d9c13825a54dfa4bcc08c2a46450d8e593a534479b57fb20d299f83a8cedc43d`,
+parsed it, and successfully inspected the actual configuration with the candidate.
+Under the existing helper lock, it rechecked the old hash, preserved
+`/usr/local/sbin/aiw-vm106.before-nic-fix-20261021`, and atomically installed the
+root-owned mode-755 replacement. SSH keys were unchanged. Subsequent strict-key
+SSH inspect succeeded.
+
+Graceful shutdown returned 0 and stopped status was read back. At 07:05:23 UTC,
+the fixed snapshot operation returned 0 and created logical-volume snapshots of
+the OS, EFI and TPM disks named `aiw-vm106-baseline-20261021`. Stopped inspection
+listed that baseline; separate host `qm config --snapshot` readback verified UUID,
+MAC/bridge and disk identities with no vmstate entry. Proxmox's snapshots UI also
+showed RAM No. Snapshot restoration was not exercised. The worker was then
+restarted through the fixed helper; postboot administration is checked separately.
+
+Postboot guest-agent readback confirmed the same NIC/IP and showed WinRM stopped
+despite Automatic startup. A UUID-guarded guest-agent command started that existing
+service. Standard encrypted WinRM then reconnected successfully and proved the
+same guest UUID, administrator SID 1006 and elevated token. The reason it was
+stopped after boot was not established; no startup-policy change or baseline
+replacement was performed. The worker is left running and remotely manageable.
+
+Controller evidence: `C:\passkeys\worker106-tools\nic-fix-live-inspect.json`,
+`baseline-shutdown.json`, `baseline-create.json`, `baseline-stopped-inspect.json`,
+`baseline-restart.json`, `baseline-postboot-winrm.json`, and
+`baseline-proxmox.png`. No standard-user application trial began here.

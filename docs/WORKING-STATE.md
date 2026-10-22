@@ -22,10 +22,11 @@ Copied profile caches are retained behind disabled accounts, not claimed erased.
 
 The custom QGA management bootstrap failed at Public-profile remoting setup before
 its firewall/network stages. It is superseded; **do not run old bootstrap/inventory
-updaters again**. Preserve failed records. Current Proxmox helper inspect refuses
-the changed configuration (exit 1/no output), so no baseline snapshot was taken.
-Leave the VM running. Before application trials, obtain a verified hypervisor
-baseline and rebind the research driver. No standard trial account or application
+updaters again**. Preserve failed records. The Proxmox helper was repaired to
+accept the exact canonical enabled NIC form (omitted link_down=0); all identity
+pins remain. Baseline `aiw-vm106-baseline-20261021` was created while stopped,
+covering OS/EFI/TPM disks without saved memory, then configuration was verified.
+Before application trials, rebind the research driver. No standard trial account or application
 acceptance exists yet. Original PASSKEYS remains the controller.
 
 Branch: `codex/new-vm-handoff-20261021`, based on the complete development history
