@@ -13,7 +13,9 @@ operator installation step are in [PROXMOX-VM106-CONTROLLER.md](PROXMOX-VM106-CO
 Host installation, strict-key SSH inspection and unsupported-command rejection passed.
 First isolated boot exposed inherited lock descriptors in swtpm/kvm; the reviewed
 fix and one-time graceful-shutdown recovery are documented there. Host update and
-post-fix live validation remain pending; no application acceptance is claimed.
+the post-fix SSH start/running-readback/shutdown/stopped-readback cycle passed.
+Worker is stopped and disconnected. Next arrange Proxmox-console Windows setup,
+fresh worker accounts/access and the driver rebind; no application acceptance is claimed.
 Keep the original PASSKEYS VM as controller.
 
 Branch: `codex/new-vm-handoff-20261021`, based on the complete development history
