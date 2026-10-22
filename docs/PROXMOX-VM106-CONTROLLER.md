@@ -243,3 +243,73 @@ Shell parsing passed; independent review's initial verify-before-execute orderin
 finding was fixed and confirmed. Preserve partial updates for review. After host
 update, collect a fresh Verify observation without rerunning Prepare; the old
 Prepare hash remains a deliberate refusal if account setup is requested again.
+
+## Standard remote management requested by the human
+
+The human reports AiwWorkerAdmin is signed in at the desktop and explicitly asks
+for remote PowerShell/SSH/RDP to end console work. This authorizes standard remote
+administration; it does not make arbitrary input part of the research controller.
+The older inventory-only correction above is superseded by this management path.
+
+`install-proxmox-vm106-management.sh` at commit
+`9ede7a350b33cb1897da834847192b4bad8c67a7`, SHA-256
+`a6e9b290b0d7d30db667ee67e2021df69cafe6a837751d0fe1535391fad51353`,
+requires the deployed 64651fd9 helper, completed prior guest operations and a
+disconnected NIC. It checks protected paths, immutable inputs and existing helper
+hash before execution; installs new payload/runner then activates the helper last
+under the retained lock. It runs only the fixed bootstrap, polling for up to 240
+seconds. Preserve failures/partial installations; never reinstall to retry.
+
+Bootstrap stages:
+
+1. Guard requires the exact VM/MAC/SYSTEM identity, new administrator SID 1006,
+   and actual fresh-administrator console identity with its loaded profile. It
+   exports the old firewall policy into the protected management stage, configures
+   remoting while offline, disables other endpoints and HTTP listeners, and
+   disables copied labadmin only after that console proof. It enables the needed
+   local-account administrative token policy. All firewall profiles become enabled
+   with default inbound/outbound block; prior local allow rules are disabled.
+   Three exact interface-bound exceptions permit controller 192.168.1.165 to TCP
+   5986 and DHCP service UDP 68/67 only to/from the LAN/broadcast. Effective rule
+   direction, protocol, ports, addresses, interface, service, program, profile and
+   edge policy are checked. DHCP is enabled before link-up and copied manual or
+   controller-address bindings are removed while disconnected.
+2. The host accepts only a just-collected Guard launched within 180 seconds before
+   one-time activation. It journals intent and sets only the pinned NIC link flag
+   to 0. A later disconnection cannot be undone using the cached Guard. Ambiguous
+   guest launch/collection stays blocked; no guest process is silently repeated.
+3. Bind waits for a unique 192.168.1.x/24 address on the pinned NIC, excluding the
+   controller, router and Proxmox host. It creates a non-exportable 3072-bit RSA
+   server certificate with an explicit IP SAN and HTTPS-only listener. DER and
+   thumbprint, never private key/password, are retained through authenticated QGA.
+4. `Connect-Worker106.ps1` validates the QGA record and source hash, imports only
+   that public certificate into controller CurrentUser Root, records its thumbprint
+   and removal path, and uses normal TLS validation. No Skip switches or TrustedHosts
+   are used. The exact same firewall verifier is carried into the authenticated
+   remote proof, together with guest UUID/SID/admin token, MAC/IP, listener binding
+   and service checks. Only a passing proof returns a standard PSSession.
+
+Explicit local credentials use Basic authentication only inside validated HTTPS;
+unencrypted transport, HTTP listeners, CredSSP, Negotiate and Kerberos are disabled
+on this worker. This avoids duplicate-machine-SID NTLM failures documented by
+[Microsoft](https://support.microsoft.com/en-us/servicing/os/windows/docs/2025/10/kerberos-and-ntlm-authentication-failures-due-to-duplicate-sids),
+without weakening that OS protection or changing machine SID. Remote UAC behavior
+and HTTPS workgroup access are documented in
+[Microsoft's remoting troubleshooting guide](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_remote_troubleshooting?view=powershell-5.1).
+
+The new fixed Proxmox helper accepts the same pinned MAC/bridge in exactly link
+states 0 or 1, so it remains usable after activation. New closed verbs are
+`worker-access`, `worker-access-info` and `worker-disconnect`; the last only sets
+that NIC offline. Existing offline-only preparation operations remain historical
+and will fail their guest guards when connected. Final Windows preparation now
+uses the human-authorized standard remote administration channel.
+
+Readiness evidence: 51 mocked helper dispatch/identity checks, 12 management
+transition/journal tests, 11 negative identity cases, 13 firewall-broadening
+rejections, and two accepted firewall address forms passed. An actual Windows
+PowerShell 5.1 certificate control produced the intended IP SAN/server-auth EKU
+and was deleted with its private key. Read-only controller firewall inspection
+found all 254 active allow rules came from PersistentStore; no extra policy-store
+allows were found. Independent review's cached/aged guard and partial-firewall
+findings were fixed; final installer review found no actionable findings.
+These are preparation/control observations, not a live remote connection proof.

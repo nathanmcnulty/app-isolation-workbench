@@ -6,28 +6,25 @@ or a run receipt.
 
 ## Resume here
 
-New Proxmox worker: VM 106 `passkeys-worker`, cloned with new MAC, network
-disconnected and powered off. Tooling preparation and the native research-driver
-build passed on the controller. The reviewed forced-command helper and exact
-operator installation step are in [PROXMOX-VM106-CONTROLLER.md](PROXMOX-VM106-CONTROLLER.md).
-Host installation, strict-key SSH inspection and unsupported-command rejection passed.
-First isolated boot exposed inherited lock descriptors in swtpm/kvm; the reviewed
-fix and one-time graceful-shutdown recovery are documented there. Host update and
-the post-fix SSH start/running-readback/shutdown/stopped-readback cycle passed.
-Worker is running, still disconnected. The reviewed host
-update and fixed guest-agent cleanup completed. The guest receipt confirms no
-Tailscale service and none of the three fixed state directories remain. See the
-controller document for evidence and retained host journals. Offline preparation
-completed: fresh AiwWorkerAdmin SID ending 1006/profile created, credential logon
-validated and recovered into controller DPAPI storage, copied sandbox accounts
-disabled, rename staged. A graceful stopped/readback/start cycle completed.
-Post-boot verification passed name/account/profile checks, then failed an incorrect
-hardcoded MSI-layout PowerShell path. A reviewed Store-layout inventory correction
-is ready for the host; do not repeat account creation. Fresh admin console sign-in,
-corrected verification, finalization, baseline snapshot and driver rebind remain open;
-copied labadmin is retained until console login.
-No application acceptance is claimed.
-Keep the original PASSKEYS VM as controller.
+VM 106 `passkeys-worker` is running as PASSKEYS-WORKER. Offline preparation and
+Tailscale-state removal passed; fresh AiwWorkerAdmin SID ending 1006/profile and
+credential logon were verified. Credential recovery is DPAPI-protected on the
+original controller. The human reports the fresh administrator is now at the
+desktop. No standard trial account or baseline snapshot exists yet.
+
+The human explicitly requested standard remote management to end console work.
+The reviewed one-paste host bootstrap is ready in
+[PROXMOX-VM106-CONTROLLER.md](PROXMOX-VM106-CONTROLLER.md): firewall guard while
+disconnected, controller-only HTTPS WinRM, DHCP, then fixed NIC link-up and IP-SAN
+certificate binding. Controller LAN IP is pinned to 192.168.1.165. General egress
+stays blocked. Host installation and an authenticated elevated remote proof remain
+pending; do not claim access works from source/tests alone. The old inventory-only
+correction is superseded for this path; preserve its failed observation.
+
+After remote access passes, finish guest verification/finalization and the stopped
+baseline through that channel and the fixed Proxmox helper. Original PASSKEYS is
+the controller; no application acceptance is claimed. Driver rebind and a real
+standard-user trial remain separate future work.
 
 Branch: `codex/new-vm-handoff-20261021`, based on the complete development history
 at `5688db4eb681fdc9a7e3987bb091b89de941d1bd` (`codex/msix-worker-lifecycle`).
