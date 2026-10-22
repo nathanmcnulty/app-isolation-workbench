@@ -1,5 +1,5 @@
 #requires -Version 5.1
-# One fixed, explicitly authorized reset of the cloned labadmin profile.
+# One fixed recovery of the failed r1 reset of the cloned labadmin profile.
 # This is preparation, not an application trial or a generic cleanup interface.
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -75,7 +75,19 @@ $sid = 'S-1-5-21-3556347314-2314855617-1438300668-1001'
 $profilePath = 'C:\Users\labadmin'
 Assert-AiwWorker107ProfilePath
 $registryPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\' + $sid
-$evidence = 'C:\AIW-Worker107-Profile-Reset-r1'
+$previousEvidence = 'C:\AIW-Worker107-Profile-Reset-r1'
+$previousFailure = Get-Content -LiteralPath (Join-Path $previousEvidence 'failure.json') -Raw | ConvertFrom-Json
+$previousBefore = Get-Content -LiteralPath (Join-Path $previousEvidence 'before.json') -Raw | ConvertFrom-Json
+if ($previousFailure.stage -cne 'delete-profile' -or
+    $previousFailure.error -notmatch '^The parameter is incorrect\s*$' -or
+    $previousBefore.schemaVersion -cne 'aiw.dev/worker107-profile-reset-before/v1' -or
+    $previousBefore.workerVmId -ne 107 -or $previousBefore.smbiosUuid -cne $uuid.ToLowerInvariant() -or
+    $previousBefore.targetSid -cne $sid -or $previousBefore.targetPath -ine $profilePath -or
+    (Test-Path -LiteralPath (Join-Path $previousEvidence 'deleted.json')) -or
+    (Test-Path -LiteralPath (Join-Path $previousEvidence 'result.json'))) {
+    throw 'Exact failed r1 attempt required; inspect retained evidence before recovery'
+}
+$evidence = 'C:\AIW-Worker107-Profile-Reset-r2'
 if (Test-Path -LiteralPath $evidence) { throw 'Preserve the existing reset attempt; do not retry' }
 $acl = [Security.AccessControl.DirectorySecurity]::new()
 $acl.SetAccessRuleProtection($true, $false)
@@ -108,7 +120,12 @@ using System.Text;
 public static class AiwWorker107Userenv {
     [DllImport(@"C:\Windows\System32\userenv.dll", CharSet=CharSet.Unicode, ExactSpelling=true, SetLastError=true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool DeleteProfileW(string sid, string profilePath, string computer);
+    private static extern bool DeleteProfileW(string sid, string profilePath, string computer);
+    public static bool DeleteLocalProfile(string sid, string profilePath) {
+        // PowerShell coerces $null to an empty string for a string parameter.
+        // Supply the required native NULL inside C# instead.
+        return DeleteProfileW(sid, profilePath, null);
+    }
     [DllImport(@"C:\Windows\System32\userenv.dll", CharSet=CharSet.Unicode, ExactSpelling=true)]
     public static extern int CreateProfile(string sid, string userName, StringBuilder profilePath, uint characters);
 }
@@ -117,7 +134,7 @@ public static class AiwWorker107Userenv {
     Assert-AiwWorker107ProfileContext $identity.User.Value $session $impersonating $uuid @(Get-AiwResetAccounts) @(Get-AiwResetProfiles)
     Assert-AiwWorker107ProfilePath
     $stage = 'delete-profile'
-    if (![AiwWorker107Userenv]::DeleteProfileW($sid, $profilePath, $null)) {
+    if (![AiwWorker107Userenv]::DeleteLocalProfile($sid, $profilePath)) {
         throw [ComponentModel.Win32Exception]::new([Runtime.InteropServices.Marshal]::GetLastWin32Error())
     }
     if ((Test-Path -LiteralPath $profilePath) -or (Test-Path -LiteralPath $registryPath)) {

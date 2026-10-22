@@ -17,6 +17,21 @@ $native = $ast.Find({ param($node)
         $node.Value.Contains('public static class AiwWorker107Userenv')
 }, $true)
 Add-Type -TypeDefinition $native.Value
+# Exercise the actual managed forwarding method with a managed stand-in for
+# the native import. No userenv API is invoked by this regression control.
+$declaration = 'private static extern bool DeleteProfileW(string sid, string profilePath, string computer);'
+if (!$native.Value.Contains($declaration)) { throw 'Expected private native import not found' }
+$controlSource = $native.Value.Replace('AiwWorker107Userenv', 'AiwWorker107NullControl')
+$controlSource = $controlSource.Replace('[DllImport(@"C:\Windows\System32\userenv.dll", CharSet=CharSet.Unicode, ExactSpelling=true, SetLastError=true)]', '')
+$controlSource = $controlSource.Replace('[return: MarshalAs(UnmanagedType.Bool)]', '')
+$controlSource = $controlSource.Replace($declaration, 'private static bool DeleteProfileW(string sid, string profilePath, string computer) { return computer == null && sid == "control-sid" && profilePath == "control-path"; }')
+Add-Type -TypeDefinition $controlSource
+if (![AiwWorker107NullControl]::DeleteLocalProfile('control-sid', 'control-path')) {
+    throw 'Local profile forwarding did not supply native null and exact arguments'
+}
+if ($null -ne [AiwWorker107Userenv].GetMethod('DeleteProfileW')) {
+    throw 'Raw computer-name import must not be public'
+}
 $sid = 'S-1-5-21-3556347314-2314855617-1438300668-1001'
 function New-Context {
     @{
@@ -96,4 +111,5 @@ foreach ($pathCase in $pathCases) {
     powerShellVersion = $PSVersionTable.PSVersion.ToString()
     nativeSourceCompiled = $true; nativeProfileApisInvoked = $false
     pathPositiveCases = 1; pathNegativeCases = 6
+    managedNullForwardingPassed = $true
 } | ConvertTo-Json
