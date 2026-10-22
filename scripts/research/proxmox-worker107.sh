@@ -80,7 +80,7 @@ case "${SSH_ORIGINAL_COMMAND-}" in
         stage=guest-preflight:source
         test -f /usr/local/lib/aiw-worker107/preflight.ps1
         test ! -L /usr/local/lib/aiw-worker107/preflight.ps1
-        printf '%s\n' 'afd4689c20e0152071f9f0102b21ef41f59295fca7b03d11eeb86ad272ef94bc  /usr/local/lib/aiw-worker107/preflight.ps1' | sha256sum --status -c -
+        printf '%s\n' '28236bae2d13084cb0dcc554895050a94606a7ddc9c59ca649213589b45adb43  /usr/local/lib/aiw-worker107/preflight.ps1' | sha256sum --status -c -
         encoded=$(iconv -f UTF-8 -t UTF-16LE /usr/local/lib/aiw-worker107/preflight.ps1 | base64 -w 0)
         test "${#encoded}" -lt 16000
         stage=guest-preflight:execution
@@ -93,7 +93,30 @@ print(json.dumps(r, ensure_ascii=True))
 completed = type(r.get("exited")) in (bool, int) and r["exited"] == 1
 success = type(r.get("exitcode")) is int and r["exitcode"] == 0
 truncated = r.get("out-truncated", False) != False or r.get("err-truncated", False) != False
-sys.exit(0 if completed and success and not truncated else 1)
+payload = None
+if isinstance(r.get("out-data"), str) and r["out-data"].strip():
+    try:
+        payload = json.loads(r["out-data"].lstrip("\ufeff"))
+    except (ValueError, TypeError):
+        pass
+valid = isinstance(payload, dict)
+if valid:
+    valid = (
+        payload.get("schemaVersion") == "aiw.dev/worker107-preflight/v1"
+        and type(payload.get("workerVmId")) is int and payload["workerVmId"] == 107
+        and payload.get("smbiosUuid") == "e5cecc90-35c2-4831-bf9c-424be23f7d4e"
+        and payload.get("observerSid") == "S-1-5-18"
+        and type(payload.get("observerSessionId")) is int and payload["observerSessionId"] == 0
+        and isinstance(payload.get("observedUtc"), str) and bool(payload["observedUtc"])
+        and isinstance(payload.get("computerName"), str) and bool(payload["computerName"])
+        and isinstance(payload.get("os"), dict)
+        and all(isinstance(payload.get(k), list) for k in (
+            "accounts", "profiles", "authenticationPathPresence", "researchPackages",
+            "applicationProcesses", "tailscaleServices", "tailscaleInstallation"))
+        and all(payload.get(k) is False for k in (
+            "applicationExecuted", "credentialsRead", "stateMutated", "recoveryBoundaryVerified"))
+    )
+sys.exit(0 if completed and success and not truncated and valid else 1)
 ' 9>&-
         ;;
     shutdown) run_qm shutdown 107 --timeout 120 ;;

@@ -23,6 +23,9 @@ $authenticationPaths = @(
     'C:\Users\labadmin\.ssh',
     'C:\Users\labadmin\.azure',
     'C:\Users\labadmin\.codex',
+    'C:\ProgramData\Tailscale',
+    'C:\Users\labadmin\AppData\Local\Tailscale',
+    'C:\Windows\System32\config\systemprofile\AppData\Local\Tailscale',
     'C:\Users\labadmin\AppData\Local\Microsoft\Credentials',
     'C:\Users\labadmin\AppData\Roaming\Microsoft\Credentials',
     'C:\Users\labadmin\AppData\Local\Microsoft\Vault',
@@ -37,6 +40,23 @@ $packages = @(Get-AppxPackage -AllUsers -Name AIWResearch.NotepadPP |
     Select-Object PackageFullName,InstallLocation,PackageUserInformation)
 $applicationProcesses = @(Get-CimInstance Win32_Process -Filter "Name='notepad++.exe'" |
     Select-Object ProcessId,SessionId,ExecutablePath)
+$tailscaleServices = @(Get-CimInstance Win32_Service -Filter "Name='Tailscale'" |
+    Select-Object Name,State,StartMode,PathName)
+$tailscaleInstallation = @(
+    foreach ($registryRoot in @(
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
+    )) {
+        if (Test-Path -LiteralPath $registryRoot) {
+            foreach ($key in Get-ChildItem -LiteralPath $registryRoot) {
+                $displayName = $key.GetValue('DisplayName')
+                if ($displayName -is [string] -and $displayName -like 'Tailscale*') {
+                    [ordered]@{ productKey = $key.PSChildName; displayName = $displayName; version = $key.GetValue('DisplayVersion') }
+                }
+            }
+        }
+    }
+)
 [ordered]@{
     schemaVersion = 'aiw.dev/worker107-preflight/v1'
     observedUtc = [DateTime]::UtcNow.ToString('o')
@@ -51,6 +71,8 @@ $applicationProcesses = @(Get-CimInstance Win32_Process -Filter "Name='notepad++
     authenticationPathPresence = @($authenticationPaths)
     researchPackages = $packages
     applicationProcesses = $applicationProcesses
+    tailscaleServices = $tailscaleServices
+    tailscaleInstallation = $tailscaleInstallation
     applicationExecuted = $false
     credentialsRead = $false
     stateMutated = $false
