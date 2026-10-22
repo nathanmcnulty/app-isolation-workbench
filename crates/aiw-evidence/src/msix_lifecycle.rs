@@ -424,7 +424,7 @@ mod fixture_tests {
         let mut assembly = Value::Null;
         for i in 0..archive.len() {
             let mut entry = archive.by_index(i).unwrap();
-            let name = entry.name().to_owned();
+            let name = entry.name().unwrap().into_owned();
             if entry.is_dir() {
                 continue;
             }

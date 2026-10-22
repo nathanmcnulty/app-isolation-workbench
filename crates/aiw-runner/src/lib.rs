@@ -1808,10 +1808,10 @@ fn finalize_attempt(
     } else {
         "cleanup-state-unverified"
     };
-    if state_error.is_none() {
-        if let Err(error) = store.transition(SessionTransactionState::RecoveryRequired, reason) {
-            state_error = Some(error);
-        }
+    if state_error.is_none()
+        && let Err(error) = store.transition(SessionTransactionState::RecoveryRequired, reason)
+    {
+        state_error = Some(error);
     }
     let detail = match (
         operation_error,
@@ -2937,10 +2937,10 @@ mod tests {
             if let Some(action) = self.call_actions.lock().unwrap().remove(&call) {
                 action();
             }
-            if arguments.first().is_some_and(|value| value == "start") {
-                if let Some(action) = self.start_action.lock().unwrap().take() {
-                    action();
-                }
+            if arguments.first().is_some_and(|value| value == "start")
+                && let Some(action) = self.start_action.lock().unwrap().take()
+            {
+                action();
             }
             if arguments.first().is_some_and(|value| value == "connect") {
                 return self

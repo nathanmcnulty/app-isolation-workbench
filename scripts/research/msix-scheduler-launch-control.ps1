@@ -1,13 +1,14 @@
 # Closed disposable-VM research control. No caller-supplied executable or command.
 function Invoke-AiwMsixSchedulerLaunchControl {
     $ErrorActionPreference = 'Stop'
-    if ($env:COMPUTERNAME -cne 'aiwcleanhost' -or
+    if ($env:COMPUTERNAME -cne 'PASSKEYS-WORKER' -or
         [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -cne 'S-1-5-18' -or
         [Diagnostics.Process]::GetCurrentProcess().SessionId -ne 0) {
         throw 'Dedicated SYSTEM session-zero worker required'
     }
-    $meta = Invoke-RestMethod -Headers @{ Metadata = 'true' } -TimeoutSec 3 -Uri 'http://169.254.169.254/metadata/instance/compute?api-version=2021-02-01'
-    if ($meta.vmId -cne 'cb7cc9f0-81f7-4326-8c52-828e42673d11') { throw 'Wrong dedicated VM' }
+    if ((Get-CimInstance Win32_ComputerSystemProduct).UUID -ine '7e686bee-8c05-43c7-9603-a9562ece224c') { throw 'Wrong dedicated VM' }
+    $adapters = @(Get-NetAdapter -Physical)
+    if ($adapters.Count -ne 1 -or $adapters[0].MacAddress -ine 'CC-34-21-7E-FE-59') { throw 'Wrong worker adapter' }
     foreach ($path in @('C:\Windows', 'C:\Windows\System32', 'C:\Windows\System32\cmd.exe')) {
         if (([IO.File]::GetAttributes($path) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Reparse control image path' }
     }
@@ -16,7 +17,7 @@ function Invoke-AiwMsixSchedulerLaunchControl {
     try {
         if ($heldImage.Length -le 0 -or $heldImage.Length -gt 16777216) { throw 'Control image outside bounds' }
         $imageHash = ([BitConverter]::ToString($sha.ComputeHash($heldImage))).Replace('-', '').ToLowerInvariant()
-        if ($imageHash -cne '97ac98b1a92c286054cce55239cfccdfc23a5517bd07fe693072c9ca96c7dabb') { throw 'Frozen OS control image differs' }
+        if ($imageHash -cne '15cd209c995b7d3009c91ca40892d5b8f1fb162f3e5f10716642ea278e8e0d7b') { throw 'Frozen OS control image differs' }
         if ((Get-AuthenticodeSignature -LiteralPath 'C:\Windows\System32\cmd.exe').Status -ne 'Valid') { throw 'Control image signature invalid' }
         Add-Type -TypeDefinition @'
 using System;

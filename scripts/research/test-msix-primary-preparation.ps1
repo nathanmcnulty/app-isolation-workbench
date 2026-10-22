@@ -6,10 +6,10 @@ Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'msix-primary-preparation.ps1')
 $account = [pscustomobject]@{
     schemaVersion = 'aiw.dev/research-primary-account/v1'
-    vmId = 'e5cecc90-35c2-4831-bf9c-424be23f7d4e'
+    vmId = '7e686bee-8c05-43c7-9603-a9562ece224c'
     accountName = 'AiwStandardUser'
     accountCreated = $true
-    userSid = 'S-1-5-21-3556347314-2314855617-1438300668-2000'
+    userSid = 'S-1-5-21-3849540285-1795134874-2442050430-1001'
     runNonce = New-AiwMsixPrimaryNonce
     notBeforeFileTime = [long]100
 }
@@ -24,7 +24,7 @@ foreach ($case in @('shortNonce', 'uppercaseNonce', 'operatorSid', 'wrongVm', 'f
     switch ($case) {
         shortNonce { $candidate.runNonce = '43cd415eb41808ba1396b52a69efec17' }
         uppercaseNonce { $candidate.runNonce = 'B' * 64 }
-        operatorSid { $candidate.userSid = 'S-1-5-21-3556347314-2314855617-1438300668-1001' }
+        operatorSid { $candidate.userSid = 'S-1-5-21-3849540285-1795134874-2442050430-1006' }
         wrongVm { $candidate.vmId = 'other' }
         falseCreated { $candidate.accountCreated = $false }
         stringCreated { $candidate.accountCreated = 'true' }

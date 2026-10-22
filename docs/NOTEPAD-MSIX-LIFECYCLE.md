@@ -6,6 +6,19 @@ and uninstall that exact output on a fresh disposable worker. Research results
 remain separate from production assessment reports until their authority and
 observation contracts are integrated.
 
+## VM 106 research acceptance completed, 2026-10-22
+
+The exact signed 8.9.8 package passed install, verified medium-IL packaged execution
+under a fresh real standard-user session, GUI edit/save/normal exit, exact document
+bytes, per-user configuration, all 220 unchanged payload entries, normal uninstall
+and independent native job/process/Scheduler cleanup. A complete terminal success
+receipt was exported and verified before restoring the disposable baseline.
+See [VM 106 trial record](VM106-MSIX-TRIALS.md#complete-application-acceptance-r5-2026-10-22)
+for exact driver/package/preparation identities, failed attempts, fixes, tests and
+export hashes. Research acceptance is complete for this exact workflow;
+production assessment/approval-contract integration and effective containment
+measurement remain separate work. No public release or broader compatibility
+claim follows from this trial.
 ## Completed dedicated-worker research lifecycle, 2026-10-22
 
 VM107 r5 completed the signed Notepad++ install/launch/edit/save/close/uninstall
@@ -57,6 +70,13 @@ in [REPORT-SETS.md](REPORT-SETS.md): `run report-assessment` projects this exact
 reviewed archive alongside retained Sandbox results through the shared function
 matrix, with provenance and explicit assessment gaps. A production MSIX execution
 adapter and acceptance of arbitrary future archives remain separate work.
+
+## Production execution milestone
+
+The fixed VM107 desktop execution and independently verified shared assessment
+are now accepted; see [MSIX-EXECUTION.md](MSIX-EXECUTION.md). This supersedes
+the research-only next-step statements above for that exact supported recipe.
+Broader compatibility and effective containment remain unmeasured.
 
 ## Closed first recipe
 
@@ -927,9 +947,9 @@ operator is a trial prerequisite failure, not evidence that the application is
 incompatible. Existing assessment standard-user controls remain the implementation
 to reuse; this research does not introduce a separate compatibility verdict.
 
-Installation and activation readiness must also stay separate. The historical Azure worker
+Installation and activation readiness must also stay separate. The latest worker
 proves that successful signed installation and payload verification do not establish
 a usable packaged activation session. Shared assessment should retain this as an
-unverified execution prerequisite for that worker until a matching activation control passes,
+unverified execution prerequisite until a matching activation control passes,
 preserving the successful installation observation without upgrading compatibility
 or isolation claims.

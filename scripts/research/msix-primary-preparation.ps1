@@ -22,15 +22,15 @@ function New-AiwMsixPrimaryPreparation {
     $nonce = [string]$CreatedAccount.runNonce
     if ($nonce -cnotmatch '\A[0-9a-f]{64}\z') { throw 'Primary run nonce must be exactly 64 lowercase hexadecimal characters' }
     if ($CreatedAccount.schemaVersion -cne 'aiw.dev/research-primary-account/v1' -or
-        $CreatedAccount.vmId -cne 'e5cecc90-35c2-4831-bf9c-424be23f7d4e' -or
+        $CreatedAccount.vmId -cne '7e686bee-8c05-43c7-9603-a9562ece224c' -or
         $CreatedAccount.accountName -cne 'AiwStandardUser' -or
         $CreatedAccount.accountCreated -isnot [bool] -or !$CreatedAccount.accountCreated) {
         throw 'Owned account receipt differs'
     }
     $sid = [string]$CreatedAccount.userSid
-    if ($sid -cnotmatch '\AS-1-5-21-3556347314-2314855617-1438300668-([0-9]+)\z' -or
+    if ($sid -cnotmatch '\AS-1-5-21-3849540285-1795134874-2442050430-([0-9]+)\z' -or
         [long]$Matches[1] -lt 1000 -or
-        $sid -ceq 'S-1-5-21-3556347314-2314855617-1438300668-1001' -or $SessionId -eq 0 -or
+        $sid -ceq 'S-1-5-21-3849540285-1795134874-2442050430-1006' -or $SessionId -eq 0 -or
         $SourceImageSha256 -cnotmatch '\A[0-9a-f]{64}\z') { throw 'Primary session or image identity differs' }
     $before = [long]$CreatedAccount.notBeforeFileTime
     if ($before -le 0 -or $before -gt ([long]::MaxValue - 18000000000)) { throw 'Primary account time is invalid' }

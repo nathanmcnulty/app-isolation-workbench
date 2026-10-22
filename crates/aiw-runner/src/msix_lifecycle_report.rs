@@ -152,7 +152,10 @@ fn read_zip(bytes: &[u8]) -> Result<BTreeMap<String, Vec<u8>>, String> {
         let mut entry = zip
             .by_index(index)
             .map_err(|_| "Unreadable MSIX evidence entry")?;
-        let name = entry.name().to_owned();
+        let name = entry
+            .name()
+            .map_err(|_| "Invalid MSIX evidence entry name")?
+            .into_owned();
         if entry.is_dir()
             || entry.size() > MAX_ENTRY
             || name.contains(['\\', ':'])

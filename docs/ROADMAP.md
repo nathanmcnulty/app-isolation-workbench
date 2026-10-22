@@ -94,8 +94,11 @@ acceptance](BAMBU-PUBLIC-ACCEPTANCE.md). This closes the second application bund
 milestone; measured baseline/candidate isolation and arbitrary conversion remain
 open. Review this shared foundation before expanding application coverage.
 
-**Next security milestone:** finish the bounded [signed MSIX lifecycle](NOTEPAD-MSIX-LIFECYCLE.md),
-then prioritize Benchmark 2's real-application baseline/candidate comparison over
+**Signed MSIX research lifecycle completed on VM 106 (2026-10-22):** the exact
+[Notepad++ workflow](NOTEPAD-MSIX-LIFECYCLE.md) passed through normal uninstall and
+independent cleanup. The fixed VM107 production execution, desktop approval and
+shared assessment integration also passed; see [MSIX-EXECUTION.md](MSIX-EXECUTION.md).
+**Next security milestone:** prioritize Benchmark 2's real-application baseline/candidate comparison over
 additional packaging recipes. Complete the real classic AppContainer comparison
 using the existing control foundation. Independently review the exact MXC v1.0.0
 release/SDK without executing it; after its disposable controls pass, evaluate

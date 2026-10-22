@@ -13,7 +13,7 @@ $driverSha='206f439c87a73d7d3bed55dfc90f50834afc5e5ae1442e7b8a6e1732d8d9d4d6'
 if((Get-FileHash -LiteralPath $driver).Hash.ToLowerInvariant() -cne $driverSha){throw 'Reviewed native image differs'}
 New-Item -ItemType Directory -Path $Destination|Out-Null
 foreach($file in @('worker107-msix.ps1','worker107-msix-templates.ps1','worker107-scheduler-controller.ps1.in','worker107-scheduler-worker.ps1.in','msix-primary-preparation.ps1','worker107-editor.ps1','worker107-editor-input.cs')){
-    $source=Join-Path $PSScriptRoot $file
+    $source=Join-Path $PSScriptRoot $(if($file -ceq 'msix-primary-preparation.ps1'){'worker107-primary-preparation.ps1'}else{$file})
     [IO.File]::WriteAllText((Join-Path $Destination $file),[IO.File]::ReadAllText($source).Replace("`r`n","`n"),[Text.UTF8Encoding]::new($false))
 }
 foreach($name in @('research_msix_native.cs','research_msix_interactive.cs')){

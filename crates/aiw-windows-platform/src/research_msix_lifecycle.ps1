@@ -2,7 +2,7 @@ $SignedSha256='2ae3a7c685e811eb34479980bff41d1442b023578074e19f4dca8fc676070437'
 $ProgressPreference='SilentlyContinue'
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
-# Disposable research only.
+# Closed research driver for the dedicated disposable VM, never a production report.
 if($env:USERNAME -cne 'AiwStandardUser'){throw 'Fixed Sandbox standard user required'}
 $session=[Diagnostics.Process]::GetCurrentProcess().SessionId
 $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
@@ -77,20 +77,20 @@ try {
  if($packages.Count -ne 1){throw 'Exact installed registration absent'}
  $installed=$packages[0]
  $installedFullName=$installed.PackageFullName
- $location=$installed.InstallLocation
- if(!$location){throw 'Installed path absent'}
+ $installedLocation=[string]$installed.InstallLocation
+ if([string]::IsNullOrWhiteSpace($installedLocation)){throw 'Installed path absent'}
  if($installed.Version.ToString() -cne '8.9.8.0' -or $installed.Publisher -cne $publisher -or $installed.Architecture.ToString() -ine 'X64'){throw 'Installed package identity differs'}
  $manifest=Get-AppxPackageManifest -Package $installedFullName
  $manifest.Save((Join-Path $evidence 'installed-manifest.xml'))
- $manifestBeforeHash=Hash (Join-Path $location 'AppxManifest.xml')
+ $manifestBeforeHash=Hash (Join-Path $installed.InstallLocation 'AppxManifest.xml')
  Record 'manifest-before' @{sha256=$manifestBeforeHash}
- Record 'installed' ([ordered]@{packageFullName=$installedFullName;packageFamilyName=$installed.PackageFamilyName;installLocation=$location;version=$installed.Version.ToString();publisher=$installed.Publisher;status=$installed.Status.ToString()})
+ Record 'installed' ([ordered]@{packageFullName=$installedFullName;packageFamilyName=$installed.PackageFamilyName;installLocation=$installed.InstallLocation;version=$installed.Version.ToString();publisher=$installed.Publisher;status=$installed.Status.ToString()})
  $family=$installed.PackageFamilyName
  $fullBefore=@(ConfigSnapshot $family)
  Record 'config-installed-before-launch' $fullBefore
  if($fullBefore.Count -ne 0){throw 'Preexisting package configuration refused'}
  $payloadBefore=@()
- foreach($file in $assembly.payloadInventory){$path=Join-Path $location $file.path;if((Hash $path) -cne $file.sha256){throw ('Installed payload differs: '+$file.path)};$payloadBefore += [pscustomobject]@{path=$file.path;sha256=$file.sha256}}
+ foreach($file in $assembly.payloadInventory){$path=Join-Path $installed.InstallLocation $file.path;if((Hash $path) -cne $file.sha256){throw ('Installed payload differs: '+$file.path)};$payloadBefore += [pscustomobject]@{path=$file.path;sha256=$file.sha256}}
  Record 'payload-before' $payloadBefore
  $document=Join-Path $evidence 'document.txt'
  $initial="AIW MSIX package lifecycle`r`n"
@@ -102,7 +102,6 @@ try {
  $suspended=[AiwSuspendedNotepad]::Create()
  $activatedPid=$suspended.Pid
  $ownedProcess=[Diagnostics.Process]::GetProcessById([int]$activatedPid)
- $null=$ownedProcess.Handle
  $heldProcessHandle=$suspended.Handle
  $observation=[AiwMsixNative]::Observe($heldProcessHandle)
  $applicationId=[AiwMsixNative]::ApplicationId($heldProcessHandle)
@@ -113,7 +112,7 @@ try {
  if($expectedImage.Count -ne 1){throw 'Unique fixed executable inventory required'}
  Record 'activation-suspended' ([ordered]@{processId=$activatedPid;sessionId=$ownedProcess.SessionId;startTime=$ownedProcess.StartTime.ToUniversalTime().ToString('o');imagePath=$image;imageSha256=$actualImageHash;packageObservation=$observation;applicationUserModelId=$applicationId;inAnyJob=$applicationInJob;launchMethod='fixedInstalledExecutableSuspended'})
  if($applicationId -cne 'AIWResearch.NotepadPP_q1fhfzcjv9wt6!Notepad'){throw 'Suspended application identity differs'}
- if($actualImageHash -cne $expectedImage[0].sha256 -or $observation.PackageFullName -cne 'AIWResearch.NotepadPP_8.9.8.0_x64__q1fhfzcjv9wt6' -or $observation.PackageFullName -cne $installedFullName -or $observation.UserSid -cne $identity.User.Value -or $observation.IsElevated -or $observation.AdministratorsEnabled -or $observation.IsAppContainer -or $observation.TokenSessionId -ne $session -or $observation.TokenSessionId -ne $ownedProcess.SessionId -or $observation.IntegritySid -cne 'S-1-16-8192' -or $ownedProcess.SessionId -ne $session -or $ownedProcess.StartTime.ToUniversalTime() -lt $activationStarted -or $image -ine (Join-Path $location 'Application\notepad++.exe')){throw 'Actual package identity, image path or medium non-elevated token differs'}
+ if($actualImageHash -cne $expectedImage[0].sha256 -or $observation.PackageFullName -cne 'AIWResearch.NotepadPP_8.9.8.0_x64__q1fhfzcjv9wt6' -or $observation.PackageFullName -cne $installedFullName -or $observation.UserSid -cne $identity.User.Value -or $observation.IsElevated -or $observation.AdministratorsEnabled -or $observation.IsAppContainer -or $observation.TokenSessionId -ne $session -or $observation.TokenSessionId -ne $ownedProcess.SessionId -or $observation.IntegritySid -cne 'S-1-16-8192' -or $ownedProcess.SessionId -ne $session -or $ownedProcess.StartTime.ToUniversalTime() -lt $activationStarted -or $image -ine (Join-Path $installed.InstallLocation 'Application\notepad++.exe')){throw 'Actual package identity, image path or medium non-elevated token differs'}
  Record 'activated' ([ordered]@{processId=$activatedPid;sessionId=$ownedProcess.SessionId;startTime=$ownedProcess.StartTime.ToUniversalTime().ToString('o');imagePath=$image;imageSha256=$actualImageHash;packageObservation=$observation;applicationUserModelId=$applicationId;inAnyJob=$applicationInJob;identityVerifiedBeforeResume=$true;launchMethod='fixedInstalledExecutableSuspended'})
  $suspended.Resume()
  Record 'activation-returned' @{processId=$activatedPid;packageFamilyName=$family;launchMethod='fixedInstalledExecutableSuspended';resumed=$true}
@@ -125,11 +124,9 @@ try {
  $stage='document-workflow'
  Record 'awaiting-edit' @{document=$document;task='Open document.txt in the observed packaged Notepad++, append AIW packaged validation followed by Enter, save and close Notepad++';deadlineSeconds=900}
  Write-Host ('Open '+$document+' in the packaged Notepad++. Append AIW packaged validation, press Enter, save and close the editor.')
- if(!$ownedProcess.WaitForExit(900000)){throw 'Owned editor deadline reached; inspect retained stage before recovery'}
- $code=$ownedProcess.get_ExitCode()
- if($code -isnot [int]){throw 'Held editor exit code absent'}
- Record 'editor-exit' @{processId=$activatedPid;exitCode=$code;closed=$ownedProcess.HasExited}
- if($code -ne 0){throw 'Packaged editor exited unsuccessfully'}
+ $editorExitCode=$suspended.WaitForExitCode(900000)
+ Record 'editor-exit' @{processId=$activatedPid;exitCode=$editorExitCode;closed=$true;heldNativeHandle=$true}
+ if($editorExitCode -ne 0){throw 'Packaged editor exited unsuccessfully'}
  $packageProcesses=Get-AiwPackageProcessInventory
  $packageProcesses|Add-Member -NotePropertyName queryAuthority -NotePropertyValue 'applicationUserDiagnostic'
  $packageProcesses|Add-Member -NotePropertyName globalAbsenceVerified -NotePropertyValue $false
@@ -146,9 +143,9 @@ try {
  for($index=0;$index -lt $afterConfig.Count;$index++){$retained='configuration/'+$index+'-'+[IO.Path]::GetFileName($afterConfig[$index].path);Copy-Item -LiteralPath $afterConfig[$index].path -Destination (Join-Path $evidence $retained);$afterConfig[$index]|Add-Member -NotePropertyName retainedFile -NotePropertyValue $retained}
  Record 'config-after' $afterConfig
  if(@($afterConfig|Where-Object {[IO.Path]::GetFileName($_.path) -ceq 'config.xml'}).Count -eq 0){throw 'Per-user configuration location not observed'}
- foreach($file in $assembly.payloadInventory){if((Hash (Join-Path $location $file.path)) -cne $file.sha256){throw ('Immutable payload changed: '+$file.path)}}
- if((Hash (Join-Path $location 'AppxManifest.xml')) -cne $manifestBeforeHash){throw 'Installed manifest changed'}
- Record 'manifest-after' @{sha256=(Hash (Join-Path $location 'AppxManifest.xml'))}
+ foreach($file in $assembly.payloadInventory){if((Hash (Join-Path $installed.InstallLocation $file.path)) -cne $file.sha256){throw ('Immutable payload changed: '+$file.path)}}
+ if((Hash (Join-Path $installed.InstallLocation 'AppxManifest.xml')) -cne $manifestBeforeHash){throw 'Installed manifest changed'}
+ Record 'manifest-after' @{sha256=(Hash (Join-Path $installed.InstallLocation 'AppxManifest.xml'))}
  Record 'payload-after' @{matchesOriginalInventory=$true;filesChecked=$assembly.payloadInventory.Count}
  $stage='uninstall'
  Record 'uninstall-started' @{packageFullName=$installedFullName;time=[DateTime]::UtcNow.ToString('o')}
@@ -161,7 +158,7 @@ try {
  $packageProcesses|Add-Member -NotePropertyName globalAbsenceVerified -NotePropertyValue $false
  Record 'package-processes-after-uninstall' $packageProcesses
  if($packageProcesses.matches.Count -ne 0 -or @($packageProcesses.queryErrors|Where-Object name -ieq 'notepad++').Count -ne 0){throw 'Application candidate remains after uninstall'}
- Record 'cleanup' @{registrationAbsent=($remaining.Count -eq 0);applicationProcessesAbsent=($processes.Count -eq 0);installLocationPresent=(Test-Path -LiteralPath $location);configurationAfterUninstall=$configAfterUninstall;userDataDeletionClaim='notInferredFromUninstall'}
+ Record 'cleanup' @{registrationAbsent=($remaining.Count -eq 0);applicationProcessesAbsent=($processes.Count -eq 0);installLocationPresent=(Test-Path -LiteralPath $installedLocation);configurationAfterUninstall=$configAfterUninstall;userDataDeletionClaim='notInferredFromUninstall'}
  if($remaining.Count -ne 0 -or $processes.Count -ne 0){throw 'Exact registration/process cleanup not verified'}
  Record 'result' ([ordered]@{completed=$true;researchOnly=$true;signedSha256=$SignedSha256;packageFullName=$installedFullName;packageIdentity='observed';runtime='mediumIlFullTrust';documentWorkflow='exactBytesVerified';configuration='perUserLocationObserved';payloadUnchanged=$true;registrationCleanup='verified';isolation='notMeasured';evidenceRoot=$evidence})
  Write-Host ('Lifecycle completed. Evidence: '+$evidence)
