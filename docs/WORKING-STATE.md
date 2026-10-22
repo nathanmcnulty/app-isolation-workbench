@@ -15,15 +15,14 @@ readback supplied by the user identifies VM `107`, `aiw-worker`, stopped, new MA
 NIC link down, no snapshots, disks on `r630-fast` and UUID
 `e5cecc90-35c2-4831-bf9c-424be23f7d4e`. A fixed offline worker wrapper is prepared;
 installation and initial SSH readback passed, including rejection of VM 203
-commands. Offline `start` returned zero, but post-start `inspect`, `status` and
-`guest-info` each exited 1 without diagnostics. Root-console readback confirms
-running, NIC disconnected and no pending changes. Inherited lock descriptor 9
-was confirmed by root `fuser`: swtpm PID 919856 and kvm PID 919865 hold it. The source
-closes descriptor 9 in Proxmox commands while retaining the parent lock; an
-unprivileged Linux control passed. Diagnostics and 13 identity tests also pass.
-Recovery pending: graceful native shutdown of only 107, verify stopped and lock
-free, install reviewed `3c9dc99` wrapper, then independently inspect/restart.
-Do not delete lock files, kill processes or relax identity checks to recover.
+commands. The inherited-lock defect was confirmed and recovered by graceful
+shutdown; reviewed `3c9dc99` is installed. Fresh offline start, status and inspect
+pass; the guest agent reports Windows 11 build 26300, hostname AIW, no logged-in
+users. NIC remains disconnected. Fixed read-only `guest-preflight` is prepared
+for account/profile/auth-path inventory; installation is pending. The user
+specifically wants Tailscale logged out/uninstalled before any network connection.
+Include its machine-wide and user state in clone-only cleanup. No fresh clean
+snapshot or restoration proof exists yet.
 The previous VM 203
 snapshot/rollback plan is superseded:
 do not power-cycle or restore the development machine for trials. The installed

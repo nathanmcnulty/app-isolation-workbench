@@ -210,6 +210,53 @@ back and verified, SHA-256
 `be175786efc8842112732c9fc735e1fe556d95e7cb7d355b8c8b762f6504db33`.
 Installation and post-recovery independent readback remain pending.
 
+## Recovered offline boot and guest agent
+
+The user ran the exact graceful-shutdown/lock-free/install block and supplied
+successful SHA/readback output. Independent bootstrap evidence is retained at
+`C:\AIW-Resume-20261021\worker107-bootstrap-r2` on development VM 203.
+Fresh `inspect`, `start`, subsequent `status` and post-start `inspect` all passed
+with the descriptor fix. The worker remains running with its exact NIC link down.
+The first guest-agent request reported not running; a later bounded request
+returned Windows 11 x64 build 26300, hostname `AIW` and no logged-in users. This
+was ordinary startup delay, separate from the earlier inherited-lock failure.
+No application trial, account creation, credential cleanup, snapshot or rollback
+has been dispatched. The source VM's QEMU-GA service was independently observed
+running/automatic without changing it.
+
+`worker107-preflight.ps1` and the fixed `guest-preflight` wrapper operation are
+prepared to observe the worker's SYSTEM/session-zero context, exact UUID,
+accounts, profile load states, known authentication path existence, research
+package/process inventory and Tailscale installation/service metadata. It reads
+no credential/state-file contents and performs no setup mutation. The root host
+holds a fixed hash-bound script; only its UTF-16 encoded bytes may be submitted
+to the fixed Windows PowerShell executable through QGA. No caller command/path
+or stdin payload is accepted. QGA process completion, integer exit zero, no
+truncation and a parsed matching observation object are required. A successful
+process exit without guest observations is rejected. Two positive and fifteen
+negative result-gate tests pass; both PowerShell 5.1 and 7 reject execution on
+the ordinary development token before inventory. Guest execution awaits root
+installation of the reviewed extension; ordinary QGA builtin results are not
+application driver-control proof.
+
+## Tailscale cleanup steering
+
+The user explicitly asked to log out or uninstall Tailscale on the clone before
+connecting its NIC. Keep VM 107 offline and prefer complete local removal there.
+The original VM 203 has a running automatic Tailscale service; do not modify it
+or remove its device registration. Tailscale's official Windows uninstall guide
+documents that uninstalling can leave local state at:
+
+- `C:\ProgramData\Tailscale`
+- `C:\Users\labadmin\AppData\Local\Tailscale`
+- `C:\Windows\System32\config\systemprofile\AppData\Local\Tailscale` (older clients)
+
+Source: [Tailscale uninstall guide](https://tailscale.com/docs/features/client/uninstall).
+The read-only probe includes these exact presence checks and service/uninstall
+registry metadata, without reading node keys/logs or invoking Tailscale. No
+Tailscale cleanup has been executed by the agent. Verify clone-only uninstall
+and residual state removal before creating the clean baseline or enabling NIC.
+
 Inspect and remove copied development authentication material from the clone
 before enabling its network or application trials; preserve the originals on 203.
 Then establish clone-specific identity, a fresh clean snapshot and verified
