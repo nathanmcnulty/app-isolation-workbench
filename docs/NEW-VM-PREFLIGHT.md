@@ -167,6 +167,38 @@ function still pass and all negative cases emit a stage diagnostic; local
 results are `new-vm-preflight\worker107-identity-tests-r2\results.json` under
 the migration root. This diagnostic revision is not yet installed on Proxmox.
 
+The user's subsequent root-console readback confirms VM 107 is running, exact
+worker NIC/disks/UUID unchanged, with `qm pending 107` containing only `cur`
+records and no pending changes. This rules out adopting a guessed pending-device
+change as the explanation. It does not yet identify the exact wrapper failure.
+
+## Lock descriptor custody correction
+
+The original wrapper passes its open lock descriptor 9 to `qm start`, allowing
+a long-lived descendant to retain that lock after the request exits. This is a
+source-backed failure hypothesis consistent with later requests timing out.
+Root-console `fuser -v /run/aiw-worker107/lock` has been requested to identify
+the live holder before recovery. Do not unlink the lock file or kill QEMU/swtpm.
+
+The correction invokes every fixed `qm` command through `run_qm`, closing
+descriptor 9 only in the invoked process and explicitly returning its status.
+The wrapper shell retains its descriptor and lock through validation/operation;
+`pvesm` also receives no lock descriptor. No identity predicate or allowed
+operation changed. Linux documents inherited descriptors and recommends closing
+the locking descriptor in descendants that should not retain it:
+[flock manual](https://man7.org/linux/man-pages/man1/flock.1.html).
+
+A bounded control ran via the existing unprivileged `aiw-codex` host account,
+using only a fresh project-owned temporary directory and short `sleep` children.
+It reproduced inherited-child retention, verified child descriptor closure lets
+the lock release after the parent exits, and verified a live waiting parent
+still serializes competitors. Evidence: `worker107-bootstrap-r1\lock-control-r2.sh`
+and `lock-control-r2.stdout.json` under the migration root. The first control
+failure is preserved: its last foreground `sleep` allowed shell tail execution
+to close the intended parent's descriptor; a subsequent no-op kept the waiting
+parent alive in the corrected control. No VM operation was used for that control.
+These controls prove the mechanism, not which live process holds the VM lock.
+
 Inspect and remove copied development authentication material from the clone
 before enabling its network or application trials; preserve the originals on 203.
 Then establish clone-specific identity, a fresh clean snapshot and verified

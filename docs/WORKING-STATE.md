@@ -16,9 +16,12 @@ NIC link down, no snapshots, disks on `r630-fast` and UUID
 `e5cecc90-35c2-4831-bf9c-424be23f7d4e`. A fixed offline worker wrapper is prepared;
 installation and initial SSH readback passed, including rejection of VM 203
 commands. Offline `start` returned zero, but post-start `inspect`, `status` and
-`guest-info` each exited 1 without diagnostics. Root-console status/current
-configuration/pending readback has been requested; do not retry or relax checks
-without it. Stage diagnostics are added and 13 local identity tests pass.
+`guest-info` each exited 1 without diagnostics. Root-console readback confirms
+running, NIC disconnected and no pending changes. Inherited lock descriptor 9
+is now the source-backed hypothesis; root `fuser` readback is pending. The source
+closes descriptor 9 in Proxmox commands while retaining the parent lock; an
+unprivileged Linux control passed. Diagnostics and 13 identity tests also pass.
+Do not delete lock files, kill processes or relax identity checks to recover.
 The previous VM 203
 snapshot/rollback plan is superseded:
 do not power-cycle or restore the development machine for trials. The installed
