@@ -9,8 +9,8 @@ test ! -L /usr/local/sbin/aiw-vm106
 test ! -L /root/.ssh
 file=$(mktemp /tmp/aiw-vm106.XXXXXX)
 trap 'rm -f -- "$file"' EXIT HUP INT TERM
-curl -fsSL 'https://raw.githubusercontent.com/nathanmcnulty/app-isolation-workbench/61a531708633cda4dad9708e5ff1af887072d541/scripts/research/proxmox-vm106.sh' -o "$file"
-printf '%s  %s\n' '7a6454f5478f2a89cfa034e962818a39e8d0a50db80cbb28acfff9ea0c1c006c' "$file" | sha256sum -c -
+curl -fsSL 'https://raw.githubusercontent.com/nathanmcnulty/app-isolation-workbench/184022c052db84e2a31a9eeee7defdfd07066a35/scripts/research/proxmox-vm106.sh' -o "$file"
+printf '%s  %s\n' 'd51cec1cca050118063758a09a43fd8af7e36cac8834e4775fc1273bd3326955' "$file" | sha256sum -c -
 sh -n "$file"
 test "$(qm status 106)" = 'status: stopped'
 # Read-only identity, pending-config, isolation and storage inspection.
