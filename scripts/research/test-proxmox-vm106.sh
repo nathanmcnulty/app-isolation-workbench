@@ -42,14 +42,23 @@ cat > "$work/bin/flock" <<'MOCK'
 #!/bin/sh
 # Dispatch tests only: real flock exclusion needs Linux host validation.
 test "$*" = '-x -w 10 9'
+# The helper must still own an open lock descriptor during acquisition.
+(: >&9) 2>/dev/null || exit 98
+test ! -e "$AIW_TEST_ROOT/lock-busy"
 MOCK
 cat > "$work/bin/pvesm" <<'MOCK'
 #!/bin/sh
+if (: >&9) 2>/dev/null; then
+    printf '%s\n' 'Lock descriptor leaked into storage child' >&2; exit 98
+fi
 test "$*" = 'status --storage r630-fast2'
 MOCK
 cat > "$work/bin/qm" <<'MOCK'
 #!/bin/sh
 set -eu
+if (: >&9) 2>/dev/null; then
+    printf '%s\n' 'Lock descriptor leaked into qm child' >&2; exit 98
+fi
 printf '%s\n' "$*" >> "$AIW_TEST_ROOT/calls"
 case "$*" in
     'config 106 --current 1') cat "$AIW_TEST_ROOT/config" ;;
@@ -87,6 +96,10 @@ run_reject() {
 }
 run_pass inspect ''
 run_pass status ''
+touch "$work/lock-busy"
+run_reject start
+grep -Fx 'VM 106 helper lock is busy; no operation performed' "$work/out" >/dev/null
+rm "$work/lock-busy"
 run_pass start 'start 106'
 run_pass shutdown 'shutdown 106 --timeout 120'
 run_pass snapshot 'snapshot 106 aiw-vm106-baseline-20261021 --vmstate 0'

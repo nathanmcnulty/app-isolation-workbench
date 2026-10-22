@@ -19,7 +19,10 @@ esac
 # /run is root-controlled; this serializes calls through this helper only.
 mkdir -p /run/aiw-vm106
 exec 9>/run/aiw-vm106/lock
-flock -x -w 10 9
+if ! flock -x -w 10 9; then
+    printf '%s\n' 'VM 106 helper lock is busy; no operation performed' >&2
+    exit 75
+fi
 
 verify_config() {
     # Fixed fields observed by the operator on 2026-10-21. Fail closed on drift.
@@ -40,37 +43,42 @@ verify_config() {
     fi
 }
 
-config=$(qm config 106 --current 1)
+# Keep the lock in this shell. qm may daemonize children when starting a VM;
+# those children must never inherit descriptor 9 and retain the helper lock.
+config=$(qm config 106 --current 1 9>&-)
 # Reject pending changes, including fields not explicitly pinned above.
-test "$config" = "$(qm config 106)"
+test "$config" = "$(qm config 106 9>&-)"
 verify_config "$config"
 case "${SSH_ORIGINAL_COMMAND-}" in
     inspect)
         printf '%s\n' "$config"
-        qm status 106
-        qm listsnapshot 106
-        pvesm status --storage r630-fast2
+        qm status 106 9>&-
+        qm listsnapshot 106 9>&-
+        pvesm status --storage r630-fast2 9>&-
         ;;
-    status) qm status 106 ;;
-    shutdown) qm shutdown 106 --timeout 120 ;;
-    start) qm start 106 ;;
+    status) qm status 106 9>&- ;;
+    shutdown) qm shutdown 106 --timeout 120 9>&- ;;
+    start) qm start 106 9>&- ;;
     snapshot)
-        test "$(qm status 106)" = 'status: stopped'
-        if qm config 106 --snapshot aiw-vm106-baseline-20261021 >/dev/null 2>&1; then
+        test "$(qm status 106 9>&-)" = 'status: stopped'
+        if qm config 106 --snapshot aiw-vm106-baseline-20261021 9>&- >/dev/null 2>&1; then
             printf '%s\n' 'Baseline already exists; refusing to replace or adopt it' >&2
             exit 65
         fi
-        qm snapshot 106 aiw-vm106-baseline-20261021 --vmstate 0
+        qm snapshot 106 aiw-vm106-baseline-20261021 --vmstate 0 9>&-
         ;;
     rollback)
-        test "$(qm status 106)" = 'status: stopped'
-        snapshot_config=$(qm config 106 --snapshot aiw-vm106-baseline-20261021)
+        test "$(qm status 106 9>&-)" = 'status: stopped'
+        snapshot_config=$(qm config 106 --snapshot aiw-vm106-baseline-20261021 9>&-)
         verify_config "$snapshot_config"
         if printf '%s\n' "$snapshot_config" | grep -E '^vmstate:' >/dev/null; then
             printf '%s\n' 'Memory-state snapshot is outside this boundary' >&2
             exit 65
         fi
-        qm rollback 106 aiw-vm106-baseline-20261021
+        qm rollback 106 aiw-vm106-baseline-20261021 9>&-
         ;;
     *) exit 64 ;;
 esac
+# Retain a waiting parent shell, rather than tail-executing the last qm command.
+# set -e propagates failures above before reaching this successful no-op.
+:
