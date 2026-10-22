@@ -382,3 +382,49 @@ source both hash to
 Public staging: `/home/aiw-codex/aiw-profile-reset-20e1826/reset.ps1`.
 Encoded command size: 26,424 characters. User root-console execution remains
 pending; no reset success is claimed.
+
+## Independently observed cleanup and offline checkpoint
+
+The user's latest r2 invocation at root staging
+`/root/aiw-profile-reset-r2.HgdXEl` stopped at the existing-r2-journal guard
+(source line 91), before deletion. Do not repeat cleanup or remove that journal.
+The earlier r2 completion receipt has not been retrieved through restricted SSH.
+A fresh fixed SYSTEM preflight at `2026-10-22T05:32:10.0515543Z` independently
+confirms the desired current postconditions: original labadmin SID/profile exists
+unloaded and nonspecial, all seven accounts unchanged, all thirteen enumerated
+authentication path flags false (including copied SSH/Azure/Codex, browser,
+Credentials/Vault/Protect and Tailscale paths), no Tailscale install/service,
+no research package or Notepad++ process. Profile contents were not read.
+This is observed cleanup state, not an inferred r2 completion receipt.
+Evidence: `C:\AIW-Resume-20261021\worker107-profile-reset-r2-existing`.
+
+The already-reviewed fixed management wrapper gracefully stopped 107 and created
+cold checkpoint `aiw-msix-worker107-clean-r1` on `r630-fast` for the OS, EFI and
+TPM disks. Inspection confirms the expected UUID/disks and disconnected NIC.
+Recovery evidence is retained outside the disposable worker at
+`C:\AIW-Resume-20261021\worker107-recovery-proof-r1`. No account/application
+trial is part of this preparation slice.
+
+The first proof-cycle shutdown, dispatched soon after startup, timed out; its
+stdout/stderr/result remain under `restore-shutdown.*`. Guest health then
+returned the expected Windows/hostname and no logged-in users. The bounded
+second graceful shutdown succeeded (`restore-r2-shutdown.*`); no forced power
+off, process kill, lock deletion, profile reset or application retry was used.
+
+
+Operational recovery verification passed. The fixed rollback returned success,
+then Windows booted and the full fixed SYSTEM preflight at
+`2026-10-22T05:39:43.4616751Z` confirmed the same worker UUID, original unloaded
+labadmin profile, unchanged seven-account inventory, all checked copied auth
+paths absent, no Tailscale install/service and no research package/process.
+Final Proxmox inspection confirms running VM107, expected disks, NIC down and
+checkpoint present. Typed summary: `worker107-recovery-proof-r1\result.json`;
+full guest observation: `post-restore-observation.json`. Startup probes and
+partial guest-health failures are preserved alongside successful evidence.
+This proves snapshot/rollback operations, restored Windows boot and observed
+cleanup state; no deliberate byte-marker restore test was performed. The earlier
+r2 completion receipt remains uncollected, and no reset retry is needed.
+
+VM107 preparation is complete for the offline research boundary. Next work is
+the reviewed QEMU native/controller identity rebind and project-owned WTS control,
+then the real MSIX lifecycle. Keep NIC down; do not use old Azure bindings.

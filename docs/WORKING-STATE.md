@@ -22,14 +22,17 @@ users at boot. NIC remains disconnected. Reviewed `813d3b4` probe is now install
 and passed as SYSTEM/session zero on exact UUID 107. Tailscale uninstall and all
 three documented state-path absences are verified, including the untouched legacy
 system-profile path. Seven local accounts remain; no research registration or
-Notepad++ process. User-authorized profile reset r1 failed at DeleteProfileW
-with ERROR_INVALID_PARAMETER: PowerShell converted its string `$null` argument
-to an empty string. Post-failure SYSTEM probe confirms the original unloaded
-profile and copied auth paths remain, with unchanged seven-account inventory.
-Recovery r2 supplies native NULL inside C#, preserves r1 evidence, and uses a
-fresh non-overwriting journal. Recovery is prepared; it has not executed.
+Notepad++ process. Profile cleanup postconditions are independently observed:
+labadmin profile exists unloaded, all enumerated copied authentication paths
+absent, and seven accounts unchanged. Latest r2 invocation refused an existing
+journal before mutation; do not repeat profile reset or delete its evidence.
+The earlier r2 completion receipt has not been retrieved. Clean disk/EFI/TPM
+checkpoint `aiw-msix-worker107-clean-r1` was created and restored successfully.
+Post-restore SYSTEM preflight verified Windows boot, unchanged accounts and
+all checked copied authentication paths absent. VM 107 is running, NIC down. Evidence is external to the worker under
+`C:\AIW-Resume-20261021\worker107-recovery-proof-r1`.
 VM 106 folder concerns were resolved by the user as a separate Codex session;
-do not touch that VM. No fresh clean snapshot or restoration proof exists yet.
+do not touch that VM.
 The previous VM 203
 snapshot/rollback plan is superseded:
 do not power-cycle or restore the development machine for trials. The installed
