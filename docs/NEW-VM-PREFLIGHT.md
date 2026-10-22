@@ -324,7 +324,7 @@ and confirmed knowing the account password. Preserve the SAM account/password,
 original 203 profile and all special profiles. An offline reboot completed;
 SYSTEM preflight at `2026-10-22T05:08:19.6220778Z` confirms the exact profile is
 unloaded. Evidence: `C:\AIW-Resume-20261021\worker107-profile-reset-preparation-r1\pre-reset-qga-r1.json`.
-No reset has run yet. Fixed `worker107-reset-profile.ps1` checks SYSTEM/session
+Before r1 execution, fixed `worker107-reset-profile.ps1` checked SYSTEM/session
 zero, worker UUID, exact enabled account and unloaded nonspecial profile, then
 rechecks regular directory identities and ProfileList path immediately before
 native DeleteProfileW. CreateProfile retains the account and creates a fresh
@@ -374,3 +374,11 @@ method without native calls; PS5.1/7 context/path/null regression controls pass.
 The helper requires the matching r1 before/failure records with no deleted/result
 receipt and uses new `C:\AIW-Worker107-Profile-Reset-r2`, preserving the entire
 r1 journal. No recovery execution or clean recovery boundary is claimed yet.
+
+Independent exact-source review of recovery commit 20e1826 found no remaining
+source/recovery-gate blocker. Downloaded GitHub LF source and staged Proxmox
+source both hash to
+`a51746a9fe20a8b47939ce0cc5d4e3d03ef8a2c4ca3a274785d3637b9f0e2140`.
+Public staging: `/home/aiw-codex/aiw-profile-reset-20e1826/reset.ps1`.
+Encoded command size: 26,424 characters. User root-console execution remains
+pending; no reset success is claimed.
