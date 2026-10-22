@@ -15,3 +15,4 @@ CODEOWNERS text eol=lf
 *.ps1 text eol=crlf
 *.psd1 text eol=crlf
 *.psm1 text eol=crlf
+*.sh text eol=lf
