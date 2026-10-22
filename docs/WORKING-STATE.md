@@ -28,11 +28,16 @@ native hash root is defined (folder paths are not hashes). Full37admin and14UI
 checks, real PowerShell path/Certificate regression, Clippy and release builds pass.
 Other native/core/provider/shared report checks passed at the integration baseline.
 
-Active next attempt: msix-1792699084357230000, approved and started through desktop
-package C:\AIW-Resume-20261021\production-msix-desktop-2cd06ef (source2cd06ef).
-Do not replay any dispatch. Monitor its protected workspace output; complete the
-exact console document edit only when control passes and the app prompts. The
-host owns collection and cold recovery. Logs/packages: production-msix-* under
+Attempt msix-1792699084357230000 (desktop2cd06ef) passed reconnect, cleared
+temporary sign-in and established the standard session. Control failed before
+app launch because application intake rejected Windows cmd.exe servicing hardlinks.
+Raw receipts, final cold clean/release and failed terminal result were retained;
+completed20:15:02UTC. Do not replay its dispatch. The native correction uses a
+separate OS-only held opener with the same pinned digest, non-reparse checks and
+write/delete denial through control cleanup. Application single-link intake is
+unchanged. Focused hardlink/write-denial/hash/junction checks and independent review
+pass. Build a fresh pinned agent/desktop and approve a new run for live proof.
+Logs/packages: production-msix-* under
 C:\AIW-Resume-20261021. Remaining acceptance is native control, packaged lifecycle,
 raw host verification, final cold cleanup/release and shared function report.
 

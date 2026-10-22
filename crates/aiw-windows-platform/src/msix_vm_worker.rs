@@ -9,8 +9,9 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
-    fs::{self, OpenOptions},
-    io::Write,
+    fs::{self, File, OpenOptions},
+    io::{Read, Write},
+    os::windows::fs::{MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -19,6 +20,48 @@ use windows::core::BOOL;
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 const POWERSHELL: &str = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe";
 const BASE: &str = r"C:\ProgramData\AIW\MsixWorker";
+const CONTROL_SHA256: &str = "15cd209c995b7d3009c91ca40892d5b8f1fb162f3e5f10716642ea278e8e0d7b";
+
+// Windows servicing hardlinks OS images. Keep the application intake's single-link
+// policy separate: this private opener is used only for the fixed OS control.
+fn hold_os_control(path: &Path, expected_sha256: &str) -> Result<(File, File)> {
+    let directory = OpenOptions::new()
+        .read(true)
+        .share_mode(3)
+        .custom_flags(0x02200000)
+        .open(path.parent().ok_or("OS control parent absent")?)?;
+    let metadata = directory.metadata()?;
+    if !metadata.is_dir() || metadata.file_attributes() & 0x400 != 0 {
+        return Err("Non-reparse OS control directory required".into());
+    }
+    // FILE_SHARE_READ denies replacement and writes through every hardlink while
+    // both handles remain live through the suspended launch and job cleanup.
+    let mut image = OpenOptions::new()
+        .read(true)
+        .share_mode(1)
+        .custom_flags(0x00200000)
+        .open(path)?;
+    let metadata = image.metadata()?;
+    if !metadata.is_file()
+        || metadata.file_attributes() & 0x400 != 0
+        || metadata.len() > 16 * 1024 * 1024
+    {
+        return Err("Bounded non-reparse OS control image required".into());
+    }
+    let mut digest = Sha256::new();
+    let mut buffer = [0u8; 65536];
+    loop {
+        let count = image.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    if hex::encode(digest.finalize()) != expected_sha256 {
+        return Err("Pinned OS control image differs".into());
+    }
+    Ok((directory, image))
+}
 fn now() -> Result<i64> {
     Ok(i64::try_from(
         std::time::SystemTime::now()
@@ -295,12 +338,8 @@ pub fn run() -> Result<()> {
             "control-started.json",
             &json!({"requestSha256":request.hash()?,"nonce":request.nonce}),
         )?;
-        let cmd = HeldApplicationFile::open(Path::new(r"C:\Windows\System32\cmd.exe"))?;
-        if cmd.observation().sha256
-            != "15cd209c995b7d3009c91ca40892d5b8f1fb162f3e5f10716642ea278e8e0d7b"
-        {
-            return Err("Pinned project control image differs".into());
-        }
+        let _control_image =
+            hold_os_control(Path::new(r"C:\Windows\System32\cmd.exe"), CONTROL_SHA256)?;
         let child = GuestProcess::start_msix_driver_control(&user)?;
         let pid = child.process_id();
         let owned = child.is_in_owned_job()?;
@@ -397,6 +436,43 @@ pub fn run() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn os_control_accepts_servicing_hardlinks_without_weakening_application_intake() {
+        let root = std::env::temp_dir().join(format!(
+            "aiw-os-control-{}-{}",
+            std::process::id(),
+            now().unwrap()
+        ));
+        fs::create_dir(&root).unwrap();
+        let image = root.join("control.exe");
+        let alias = root.join("servicing-link.exe");
+        fs::write(&image, b"fixed control fixture").unwrap();
+        fs::hard_link(&image, &alias).unwrap();
+        assert!(HeldApplicationFile::open(&image).is_err());
+        let held = hold_os_control(&image, &sha(b"fixed control fixture")).unwrap();
+        assert!(OpenOptions::new().write(true).open(&alias).is_err());
+        drop(held);
+        assert!(hold_os_control(&image, &sha(b"different image")).is_err());
+        assert!(hold_os_control(&root, &sha(b"fixed control fixture")).is_err());
+        // A junction is a reparse point and must fail before image hashing.
+        let junction = root.join("redirected");
+        let status = std::process::Command::new(r"C:\Windows\System32\cmd.exe")
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&root)
+            .output()
+            .unwrap();
+        assert!(status.status.success());
+        assert!(
+            hold_os_control(
+                &junction.join("control.exe"),
+                &sha(b"fixed control fixture")
+            )
+            .is_err()
+        );
+        fs::remove_dir(&junction).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+    }
     #[test]
     fn application_wait_never_extends_the_approved_deadline() {
         assert_eq!(bounded_wait(50_000_000, 0, 20), Duration::from_secs(5));
