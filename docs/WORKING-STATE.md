@@ -22,40 +22,45 @@ The subsequent WSMan channel uses SkipCACheck on the operator-trusted lab networ
 this is not production channel pinning. Authenticated UUID107 and elevated SID1001
 passed. HTTP listener absent, unencrypted WinRM disabled, TLS firewall scoped203.
 
-R2 Stage/Enroll/Prepare passed with a real standard-user console sign-in and
-measured clearing of temporary automatic-sign-in values. Control failed AFTER
-registering its fixed task but BEFORE RunEx/native launch because Scheduler
-normalized PT260S to PT4M20S. Independent readback found Ready/noinstances,
-never-run result267011, no start-request/native output/package/process. No native
-control or application executed. The failure archive is safely external:
-`C:\AIW-Resume-20261021\worker107-control-failure-r2\evidence.zip`, SHA256
-`ed14f6b5751e84713517794252b21643d97f78a1c3fd99a80efc1a2e8b6d53bb`.
-It explicitly claims failure-cold-recovery, never cleanup success.
+R3 passed Stage/Enroll/Prepare and actual native launch control at09:10:56UTC:
+standard-user child exit42, empty job, held action/native exit, task/instance
+absence. Independent09:12:25UTC readback found no control processes/task/package.
+The signed MSIX installed, all220payload entries verified and packaged Notepad++
+launched suspended with exact image/package/SID1006/session1/medium non-elevated
+identity verified before resume. This is not AppContainer isolation.
 
-The corrected controller compares parsed durations at exact260/1500seconds and
-shares parent-owned native process custody across function/scriptblock scope.
-PS5.1/7 real in-memory Scheduler XML round trips, wrong-duration rejections and
-strict child-scope controls pass without registering/running tasks. Verification
-of the actual failed registered definition also passed read-only.
+The keyboard helper failed foreground acquisition before input and was not retried.
+Console-driven editing saved the exact53expected bytes and closed the owned editor.
+Native validation then failed because the attached managed Process.ExitCode yielded
+null; later document-output/configuration/payload/uninstall checks did not run.
+Controller cleanup failed closed on Stop of an already-ended instance. Preserve
+these limits; do not claim lifecycle success from this run.
 
-Cold OS/EFI/TPM rollback to aiw-msix-worker107-clean-r1 completed. SYSTEM preflight
-at08:46:14UTC verified original seven accounts, absent copied authentication paths
-and Tailscale, no research package/process. HTTPS-only setup is working again;
-clean readback at08:52:17UTC confirms no trial roots/account/package/process or
-automatic-sign-in password. Evidence: `C:\AIW-Resume-20261021\worker107-connection-r3`.
-Cold TLS-ready checkpoint aiw-msix-worker107-tls-clean-r1 was created and restored
-successfully; postrestore Connect and clean inventory passed at09:02:44UTC. Fixed SSH wrapper only restores the ORIGINAL clean-r1;
-use exact107 Proxmox GUI for the new TLS checkpoint. Wrapper requires NIC down.
+Verified export: C:\AIW-Resume-20261021\worker107-trial-failure-r3\evidence.zip,
+SHA2569ab90949bca654e643b363f3b4b24902134dbbe5711b8bae15cdf9f9eb754609,
+107files/89948bytes, outcome failure-cold-recovery and no inferred cleanup claim.
+Historical r2 failed before RunEx, with evidence at worker107-control-failure-r2.
+Both failures and sealed payloads remain external to107.
 
-Native static-CRT binary remains
-`05f2ff8638adb3a156696de60bb1fd23341ee201a497c105359fa926d6d0e812`.
-Frozen signed MSIX/assembly/signing inputs are unchanged. R1/r2 payloads and failure
-evidence are historical. Reviewed r3 source1ac58259e5a5a2c908985af78f4ee370959d7e19,
-manifest e58acf7b52cfe26d46565cd29075218695f43ce374bdec5aae21932bac4f1bc1,
-is sealed at C:\AIW-Resume-20261021\worker107-msix-payload-r3.
-Control must pass measured exit42/job-empty/exact cleanup before Trial. Then use
-fixed Edit, Export and Collect; do not infer compatibility/isolation from setup.
+Cold TLS-ready checkpoint aiw-msix-worker107-tls-clean-r1 was created/restored and
+postrestore identity/clean inventory passed. It includes OS/EFI/TPM and no RAM.
+After r3 export, it was restored again; fresh boot/Connect/clean inventory must
+pass before r4 Stage. Fixed SSH wrapper only restores ORIGINAL clean-r1; use
+exact107 Proxmox GUI for TLS-clean recovery. Wrapper requires NIC down. Evidence
+and public controls: C:\AIW-Resume-20261021\worker107-connection-r3.
 
+Focused reviewed fix opens the managed Process.Handle before resume, calls
+get_ExitCode once after WaitForExit, requires an actual int and uses that value
+for receipt/predicate. PS5.1 attached-process controls on107 proved typed0/42;
+twelve focused native tests passed, including PS5.1 parse/compile and strict
+Win32 command length. New staticCRT native SHA256:
+c551938fb6c6f8f8d6a5311850e8713d020f4c888f0b3f67b88babc1d6a0dad5.
+Build/Stage pins change together; frozen signed MSIX/assembly/signing unchanged.
+Seal fresh r4 from reviewed committed sources and independently review artifact.
+Control must pass before Trial. Prefer console-driven edit if Windows refuses
+helper foreground; never repeat a helper after uncertain input. Export/Collect
+and preserve evidence before restoring worker after use. Compatibility/isolation
+remain bounded by actual native receipts. The catch Stop refinement is deferred.
 ## Product and migration pointers
 
 Bambu Studio and both Notepad++ recipes passed public-entry Sandbox packaging,

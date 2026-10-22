@@ -647,3 +647,40 @@ C:\AIW-Resume-20261021\worker107-msix-payload-r3, manifestSHA256
 Independent review matched all13file hashes/lengths, nine normalized sources and
 unchanged native/signed inputs. Stage was dispatched only after restore+Connect
 and clean inventory gates passed. Observe typed Status before advancing.
+
+## R3 real control and application observations
+
+R3 source1ac5825 passed Stage, Enroll, Prepare and the actual native launch control
+at09:10:56UTC. The standard-user child returned42, jobEmpty=true; held native/action
+exit and task/instance absence were confirmed. Independent09:12:25UTC readback
+found no control processes/task or research package. Trial then installed and
+verified the signed payload, launched the fixed packaged Notepad++ suspended,
+verified its exactimage/package/SID1006/session1/medium non-elevated token, resumed
+it and observed the owned visible window. This is not AppContainer isolation.
+
+The fixed keyboard helper refused foreground acquisition before sending input.
+Its ui-edit-failure.json is preserved and was never retried. Console-driven
+Open/append/Enter/save/close operated on the existing owned editor; its status
+showed53bytes after saving. Native validation then failed because the attached
+managed Process.ExitCode property yielded null after WaitForExit, although a
+separate native process handle remained held. No document-output/config-after/
+payload-after/uninstall success is claimed for r3. The controller catch also
+failed closed when Stop found an already-ended instance; cold recovery remained
+required. The latter catch-path refinement is deferred.
+
+Export/Collect verified failure-cold-recovery archive
+`C:\AIW-Resume-20261021\worker107-trial-failure-r3\evidence.zip`, SHA256
+`9ab90949bca654e643b363f3b4b24902134dbbe5711b8bae15cdf9f9eb754609`,
+89948bytes/107files. No cleanup is inferred from that archive. The TLS-clean
+checkpoint was restored after export; all signed input identities are unchanged.
+
+The focused fix opens the managed handle immediately after GetProcessById and
+before resume, then calls get_ExitCode once and requires an actual int without
+casting null to zero. The same observed value feeds receipt and success check.
+Actual PS5.1 fixed attached-process controls on107 returned typed0/42 and exited;
+no application executed in those controls. Twelve focused native tests passed,
+including PS5.1 parse/compile and the strict Win32 command-length bound. StaticCRT
+release SHA256 is now
+`c551938fb6c6f8f8d6a5311850e8713d020f4c888f0b3f67b88babc1d6a0dad5`.
+Build/Stage native pins change together. Old binaries remain in sealedr1-r3;
+reused build target path now contains the new image. Fresh reviewedr4 is required.

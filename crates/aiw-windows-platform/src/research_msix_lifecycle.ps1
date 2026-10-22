@@ -2,7 +2,7 @@ $SignedSha256='2ae3a7c685e811eb34479980bff41d1442b023578074e19f4dca8fc676070437'
 $ProgressPreference='SilentlyContinue'
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
-# Closed research driver for the dedicated disposable VM, never a production report.
+# Disposable research only.
 if($env:USERNAME -cne 'AiwStandardUser'){throw 'Fixed Sandbox standard user required'}
 $session=[Diagnostics.Process]::GetCurrentProcess().SessionId
 $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
@@ -100,6 +100,7 @@ try {
  $suspended=[AiwSuspendedNotepad]::Create()
  $activatedPid=$suspended.Pid
  $ownedProcess=[Diagnostics.Process]::GetProcessById([int]$activatedPid)
+ $null=$ownedProcess.Handle
  $heldProcessHandle=$suspended.Handle
  $observation=[AiwMsixNative]::Observe($heldProcessHandle)
  $applicationId=[AiwMsixNative]::ApplicationId($heldProcessHandle)
@@ -123,8 +124,10 @@ try {
  Record 'awaiting-edit' @{document=$document;task='Open document.txt in the observed packaged Notepad++, append AIW packaged validation followed by Enter, save and close Notepad++';deadlineSeconds=900}
  Write-Host ('Open '+$document+' in the packaged Notepad++. Append AIW packaged validation, press Enter, save and close the editor.')
  if(!$ownedProcess.WaitForExit(900000)){throw 'Owned editor deadline reached; inspect retained stage before recovery'}
- Record 'editor-exit' @{processId=$activatedPid;exitCode=$ownedProcess.ExitCode;closed=$ownedProcess.HasExited}
- if($ownedProcess.ExitCode -ne 0){throw 'Packaged editor exited unsuccessfully'}
+ $code=$ownedProcess.get_ExitCode()
+ if($code -isnot [int]){throw 'Held editor exit code absent'}
+ Record 'editor-exit' @{processId=$activatedPid;exitCode=$code;closed=$ownedProcess.HasExited}
+ if($code -ne 0){throw 'Packaged editor exited unsuccessfully'}
  $packageProcesses=Get-AiwPackageProcessInventory
  $packageProcesses|Add-Member -NotePropertyName queryAuthority -NotePropertyValue 'applicationUserDiagnostic'
  $packageProcesses|Add-Member -NotePropertyName globalAbsenceVerified -NotePropertyValue $false
