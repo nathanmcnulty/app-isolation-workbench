@@ -1,5 +1,13 @@
 # VM 106 isolated worker controller
 
+**Current operational path:** standard WinRM at 192.168.1.173 is authenticated
+and elevated; Windows preparation is finalized. Use
+[worker106-admin](../scripts/worker106-admin/README.md). The historical bootstrap
+instructions below are retained evidence, not next steps. Do not run them again.
+No baseline snapshot has been taken; Proxmox helper inspection currently refuses
+the changed configuration. Keep the VM running until a verified snapshot path is
+available. Application trials remain gated on that disposable baseline.
+
 This is a research setup boundary for the Proxmox clone `passkeys-worker`, not application acceptance. The operator confirmed it is stopped, has a new MAC and disconnected network, and has automatic start disabled. Keep the original PASSKEYS VM as the controller.
 
 ## Source and authority
@@ -313,3 +321,64 @@ found all 254 active allow rules came from PersistentStore; no extra policy-stor
 allows were found. Independent review's cached/aged guard and partial-firewall
 findings were fixed; final installer review found no actionable findings.
 These are preparation/control observations, not a live remote connection proof.
+
+## Actual standard remote administration and finalization
+
+The management Guard PID 7164 failed at `Enable-PSRemoting` with the WinRM
+Public-profile firewall exception error, despite SkipNetworkProfileCheck. Its
+finished exit-1 journal and controller readback
+`management-bootstrap-error-readback.json` are preserved. Failure occurred before
+custom firewall restrictions, copied-labadmin disablement, DHCP changes or link
+activation; do not describe those planned restrictions as active configuration.
+The human then enabled the NIC and PSRemoting directly, reported address
+192.168.1.173, signed into the fresh administrator, and explicitly authorized
+normal administration/software installation on this dedicated VM.
+
+TCP 5985 and 3389 were reachable; 5986 and 22 were closed. Native New-PSSession
+failed a workgroup authentication check. Standard pywinrm 0.5.0 with NTLM and
+`message_encryption='always'` authenticated successfully without modifying
+controller TrustedHosts or enabling unencrypted/Basic transport. The actual
+remote result identified PASSKEYS-WORKER, UUID
+`7e686bee-8c05-43c7-9603-a9562ece224c`, user AiwWorkerAdmin SID
+`S-1-5-21-3849540285-1795134874-2442050430-1006`, and an elevated token. The
+committed client additionally checks UUID/SID before every script. Source and
+exact dependency versions are in `scripts/worker106-admin`. Its credential is
+read from the protected controller DPAPI file and passed only through a local
+stdin pipe. RDP reachability is not a tested authenticated RDP session.
+
+Actual guest inventory verified Ethernet MAC CC-34-21-7E-FE-59 / address
+192.168.1.173/24, loaded fresh profile C:\Users\AiwWorkerAdmin, all four fresh-user
+join flags NO, Tailscale service and all three fixed state paths absent, .NET
+Core/ASP.NET/Desktop 10.0.13, Node 24.20.0, Git 2.55.0.windows.5, VS installer and
+Windows SDK 26100 MakeAppx/SignTool paths present. Store PowerShell 7.6.7 existed
+but fresh-account execution failed Access Denied; file existence alone was not
+readiness.
+
+The official [PowerShell 7.6.7 release](https://github.com/PowerShell/PowerShell/releases/tag/v7.6.7)
+MSI was downloaded inside VM 106, matched independently supplied SHA-256
+`EC575CEF9EC56FCD905DE0D5EEAC9CB7F81A0A65ABB87BB5CD0E87FDFE2B8CC0`, and had a
+Valid Microsoft Corporation Authenticode signature. Silent machine-wide install
+returned 0; `C:\Program Files\PowerShell\7\pwsh.exe` then actually returned 7.6.7
+as AiwWorkerAdmin. Log/intent/receipt remain under guest
+`C:\AIW-Worker-Setup\PowerShell-7.6.7-system`; the controller retained
+`standard-winrm-powershell7-install.json`.
+
+Finalization through the authenticated elevated session rechecked UUID/SID and
+the real loaded fresh-administrator console profile, disabled copied labadmin and
+both sandbox users with readback, and preserved before-state copies before marking
+the guest setup Finalized / standardRemoteAdministrationReady. Failed custom
+management metadata was marked Superseded, with its original state copy retained.
+No copied-profile/cache deletion or cloud logout occurred. No standard timed trial
+account was created. Finalization receipt:
+`C:\passkeys\worker106-tools\standard-winrm-finalization-summary.json`; detailed
+inventory is `standard-winrm-preparation-inventory.json`. A fresh connection using
+the committed checked client again proved elevated target identity.
+
+Hypervisor `inspect` returned exit 1 with no output at 06:19:52 UTC after the
+human's network/configuration changes. Its exact cause was not measured; do not
+guess or loosen identity pins. Evidence is
+`C:\passkeys\worker106-tools\standard-management-proxmox-inspect.json`. No power,
+snapshot or rollback command was submitted after that refusal. No accessible
+authenticated Proxmox browser tab was available for a UI fallback. Thus Windows
+administration preparation is complete, but the verified stopped baseline remains
+pending before application trials. Leave this working VM running.

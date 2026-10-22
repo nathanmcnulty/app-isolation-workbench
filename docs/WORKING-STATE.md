@@ -6,25 +6,27 @@ or a run receipt.
 
 ## Resume here
 
-VM 106 `passkeys-worker` is running as PASSKEYS-WORKER. Offline preparation and
-Tailscale-state removal passed; fresh AiwWorkerAdmin SID ending 1006/profile and
-credential logon were verified. Credential recovery is DPAPI-protected on the
-original controller. The human reports the fresh administrator is now at the
-desktop. No standard trial account or baseline snapshot exists yet.
+VM 106 `passkeys-worker` / PASSKEYS-WORKER is running at **192.168.1.173**.
+The human enabled networking and PSRemoting. Standard encrypted WinRM now actually
+works as elevated AiwWorkerAdmin (SID ending 1006), with exact guest UUID verified.
+Use [scripts/worker106-admin/README.md](../scripts/worker106-admin/README.md);
+credentials remain controller-user DPAPI-protected, never in Git. The human gives
+permission to administer/install needed software on this dedicated testing VM.
 
-The human explicitly requested standard remote management to end console work.
-The reviewed one-paste host bootstrap is ready in
-[PROXMOX-VM106-CONTROLLER.md](PROXMOX-VM106-CONTROLLER.md): firewall guard while
-disconnected, controller-only HTTPS WinRM, DHCP, then fixed NIC link-up and IP-SAN
-certificate binding. Controller LAN IP is pinned to 192.168.1.165. General egress
-stays blocked. Host installation and an authenticated elevated remote proof remain
-pending; do not claim access works from source/tests alone. The old inventory-only
-correction is superseded for this path; preserve its failed observation.
+Windows preparation is finalized: fresh console profile validated, copied
+labadmin and sandbox users disabled, Tailscale/service/state absent, fresh-account
+device join flags all NO, system .NET/SDK/Git/Node present. Official machine-wide
+PowerShell 7.6.7 MSI was hash/signature verified and installed successfully; it
+actually executes as the fresh administrator. Old Store PowerShell could not.
+Copied profile caches are retained behind disabled accounts, not claimed erased.
 
-After remote access passes, finish guest verification/finalization and the stopped
-baseline through that channel and the fixed Proxmox helper. Original PASSKEYS is
-the controller; no application acceptance is claimed. Driver rebind and a real
-standard-user trial remain separate future work.
+The custom QGA management bootstrap failed at Public-profile remoting setup before
+its firewall/network stages. It is superseded; **do not run old bootstrap/inventory
+updaters again**. Preserve failed records. Current Proxmox helper inspect refuses
+the changed configuration (exit 1/no output), so no baseline snapshot was taken.
+Leave the VM running. Before application trials, obtain a verified hypervisor
+baseline and rebind the research driver. No standard trial account or application
+acceptance exists yet. Original PASSKEYS remains the controller.
 
 Branch: `codex/new-vm-handoff-20261021`, based on the complete development history
 at `5688db4eb681fdc9a7e3987bb091b89de941d1bd` (`codex/msix-worker-lifecycle`).
