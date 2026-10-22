@@ -22,39 +22,40 @@ The subsequent WSMan channel uses SkipCACheck on the operator-trusted lab networ
 this is not production channel pinning. Authenticated UUID107 and elevated SID1001
 passed. HTTP listener absent, unencrypted WinRM disabled, TLS firewall scoped203.
 
-R4 passed Stage/Enroll/Prepare/native launch control. Packaged Notepad++ launched
-as standardSID1006/session1/medium non-elevated fulltrust, with identity/image
-verified before suspended resume. Console-driven edit completed without invoking
-the foreground helper: editor exit0, exact53saved bytes SHA256
-91b82efd755bd5a46b47f6277bd050954b9fb3e78e56f9f086129d04da4dbd42,
-six retained per-user configuration XMLs and all220payload entries unchanged.
-Uninstall completed, but cleanup reporting reread the now-null live package
-InstallLocation and failed. No native terminal lifecycle success is claimed.
+R5 completed the exact signed Notepad++ research lifecycle on107 at10:30:49UTC:
+standardSID1006/session1/medium non-elevated fulltrust, package/image identity
+verified before resume, console-driven open/edit/save/close, editor exit0,
+exact53saved bytes, six per-user configuration XMLs, all220payload entries and
+manifest unchanged, exact uninstall and native/controller/process/job/task cleanup.
+Isolation and broader compatibility remain unmeasured. This is a research result,
+not yet a production assessment adapter. Next: integrate measured observations
+into shared assessment contracts in NOTEPAD-MSIX-LIFECYCLE.md.
 
-Independent elevated10:05:03UTC readback confirms packageAllUsers0, provisioned0,
-native/editor processes0 and the retained fixed install path absent. Verified
-external r4 archive: C:\AIW-Resume-20261021\worker107-trial-failure-r4\evidence.zip,
-SHA256492f1337acc92183fd21fe77f6d6f4c38a0804e9d064197eb722bfd95ebf62b9,
-116files/284257bytes. Keep r2/r3 failures and all sealed payloads historical.
+Reviewed source16ba49bfa399e38d29dfd468b90439deb6a9f4eb; native SHA256
+206f439c87a73d7d3bed55dfc90f50834afc5e5ae1442e7b8a6e1732d8d9d4d6;
+sealed bundle105f17f381730592a03414f923d7b17a988d5365398a7a225d61faaf6d193f4c.
+Verified external C:\AIW-Resume-20261021\worker107-msix-lifecycle-r5\evidence.zip:
+SHA256768e9ade771bbc3345067c82745c15f2d7c0ed31c4c8e281d437d14a27c321b3,
+285340bytes/118files. Independent review found no inconsistency. Separate elevated
+10:33:46UTC readback confirmed no matching registration/provisioning/install
+path/native/editor processes/primary trial tasks. Keep r2/r3/r4 failed evidence
+and sealed payloads historical. Console method and connection observations are
+in sibling worker107-connection-r5. No foreground helper invocation in r5.
 
-The managed-handle/typed-exit fix in429c428 is proven by r4's exit0 and exact file
-receipt. The next reviewed fix captures a nonempty install-location string before
-uninstall, using it for all payload/image/manifest/receipt/cleanup checks. Twelve
-focused native tests pass; new staticCRT SHA256:
-206f439c87a73d7d3bed55dfc90f50834afc5e5ae1442e7b8a6e1732d8d9d4d6.
-Build/Stage pins agree; signed MSIX/assembly/signing remain unchanged. Seal fresh
-r5 from reviewed committed sources, review artifact and confirm complete lifecycle.
+TLS-ready cold snapshot aiw-msix-worker107-tls-clean-r1 includes OS/EFI/TPM/no RAM.
+R5 evidence was exported before restoring107 again. Use exact107 GUI for TLS-clean
+rollback. Final10:40:01UTC Connect/clean inventory passed: seven original accounts,
+four trial roots absent, package/process/research tasks0, automatic sign-in values
+absent/disabled, sole pinned HTTPS listener and HTTP listen count0. Worker107 is
+running with NIC connected at192.168.1.174, ready for the next authorized test.
+The fixed SSH wrapper only restores ORIGINAL clean-r1 and requires NIC down.
+Every fresh trial requires postrestore Connect+clean inventory, real standard
+session/cleared sign-in values, Prepare and measured nativeControl before Trial.
+Export/Collect before recovery. The certificate has a14-day lifetime; preserve
+identity verification when renewing. Failed-action catch's Stop error after an
+ended instance still fails closed; refinement deferred. Twelve focused native
+tests and staticCRT build passed for the source sealed into r5.
 
-TLS-ready cold snapshot aiw-msix-worker107-tls-clean-r1 includes OS/EFI/TPM/no RAM;
-creation/restore/postrestore identity/clean inventory have passed. R4 exported
-before another recovery. Use exact107 GUI for TLS-clean rollback; fixed SSH wrapper
-only restores ORIGINAL clean-r1 and requires NIC down. Every fresh run requires
-postrestore Connect+clean inventory, real standard session/cleared sign-in values,
-Prepare and measured nativeControl beforeTrial. Use console-driven editing;
-known helper foreground failure is preserved in r3 and helper is not retried.
-Export/Collect before restoring worker after use. Evidence/controls are under
-C:\AIW-Resume-20261021\worker107-connection-r3 and worker107-connection-r4.
-Current catch's Stop error after an ended instance fails closed; refinement deferred.
 ## Product and migration pointers
 
 Bambu Studio and both Notepad++ recipes passed public-entry Sandbox packaging,

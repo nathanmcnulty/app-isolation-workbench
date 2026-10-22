@@ -711,3 +711,40 @@ uninstall. Twelve focused tests pass and staticCRT rebuild SHA256 is
 206f439c87a73d7d3bed55dfc90f50834afc5e5ae1442e7b8a6e1732d8d9d4d6;
 build/Stage pins agree. Independent review cleared the source and exact native
 image. Fresh r5 requires another cold TLS-clean restore and artifact review.
+
+## R5 terminal lifecycle success
+
+Source16ba49bfa399e38d29dfd468b90439deb6a9f4eb and sealed bundle
+105f17f381730592a03414f923d7b17a988d5365398a7a225d61faaf6d193f4c
+passed independent artifact review, fresh TLS-clean restore, Stage/Enroll/Prepare
+and real nativeControl. SID1006/session1 and cleared one-time sign-in values were
+verified before execution. Trial completed at10:30:49UTC with native passed=true,
+wrapper/child exit0, empty owned job and error-free native cleanup, and exact
+controller task/instance/action/native cleanup. No editor helper was invoked;
+Computer Use drove open/append/save/close through the107 Proxmox console.
+
+Document53bytes SHA25691b82efd755bd5a46b47f6277bd050954b9fb3e78e56f9f086129d04da4dbd42,
+all220payload entries and manifest unchanged, six retained per-user configuration
+XMLs, exact package uninstall and absent registration/process/install path were
+verified. SYSTEM parent-after and separate elevated10:33:46UTC readback confirm
+packageAllUsers0/provisioned0/native-editor processes0/primary trial tasks0.
+Native terminal success now proves the r4 install-location reporting fix.
+
+External C:\AIW-Resume-20261021\worker107-msix-lifecycle-r5\evidence.zip:
+SHA256768e9ade771bbc3345067c82745c15f2d7c0ed31c4c8e281d437d14a27c321b3,
+285340bytes/118files, outcome native-lifecycle-passed, no failure receipts.
+Independent review verified archive/input/source/nonce identity, exact document
+bytes, payload/configuration hashes and terminal cleanup evidence. Connection,
+console-method and separate readback records are in worker107-connection-r5.
+See [NOTEPAD-MSIX-LIFECYCLE.md](NOTEPAD-MSIX-LIFECYCLE.md) for the measured
+research result and limits. Broader compatibility/isolation/user-data deletion
+remain unmeasured. Preserve prior failures; no retrospective success for them.
+After export,107 was cold-restored to TLS-clean-r1 and booted again for a final
+connection/clean-inventory check. No106 or203 recovery action was performed.
+The GUI task history records rollback10:35:28-31UTC and start10:36:01-03UTC, both
+OK. Authenticated Connect and independent clean inventory passed at10:40:01UTC:
+UUID107/operatorSID1001, seven original accounts, four trial roots absent,
+package/process/research tasks0, automatic sign-in password/count absent and
+disabled, sole pinned HTTPS listener and HTTP listen count0. Worker107 remains
+running/NIC connected at192.168.1.174. Retained final-restored-identity.json and
+final-restored-clean-inventory.json are outside107 in worker107-connection-r5.

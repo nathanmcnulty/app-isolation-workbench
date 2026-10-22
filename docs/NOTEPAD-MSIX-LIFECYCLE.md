@@ -6,6 +6,55 @@ and uninstall that exact output on a fresh disposable worker. Research results
 remain separate from production assessment reports until their authority and
 observation contracts are integrated.
 
+## Completed dedicated-worker research lifecycle, 2026-10-22
+
+VM107 r5 completed the signed Notepad++ install/launch/edit/save/close/uninstall
+research lifecycle at 10:30:49 UTC. Source commit
+`16ba49bfa399e38d29dfd468b90439deb6a9f4eb`, sealed bundle SHA-256
+`105f17f381730592a03414f923d7b17a988d5365398a7a225d61faaf6d193f4c`,
+native executable SHA-256
+`206f439c87a73d7d3bed55dfc90f50834afc5e5ae1442e7b8a6e1732d8d9d4d6`.
+The unchanged signed MSIX SHA-256 is
+`2ae3a7c685e811eb34479980bff41d1442b023578074e19f4dca8fc676070437`.
+
+The fresh standard-user session was SID ending1006/session1, bound to nonce
+`72f841670a4a6596636cffa2cd427cb1a765dcdc391a664a634ef22c130781e2`.
+Before Trial, the real native control returned the expected42 with an empty job
+and verified task/action/native cleanup. The application process PID8700 had the
+expected package identity, image and medium non-elevated full-trust token before
+its suspended launch resumed; it was not an AppContainer process.
+
+The document was opened, appended, saved and closed through the Proxmox console
+using the Computer Use skill. The foreground editor helper was not invoked.
+Native readback verified exit0 and exactly53 UTF-8 bytes:
+`AIW MSIX package lifecycle\r\nAIW packaged validation\r\n`, SHA-256
+`91b82efd755bd5a46b47f6277bd050954b9fb3e78e56f9f086129d04da4dbd42`.
+Six configuration XMLs were observed and retained from the package's per-user
+LocalCache/Roaming/Notepad++ location; all220 installed payload entries and the
+manifest remained unchanged. After exact uninstall, registration, application
+processes and the retained installation path were absent. The native terminal
+receipt passed, owned-job count was0 without cleanup/readback errors, and the
+controller verified action/native exit plus task/instance absence. SYSTEM
+parent-after inventories and a separate elevated10:33:46 UTC readback confirmed
+no matching package/provisioned package/native or editor process/primary task.
+The after-uninstall configuration inventory was empty; this does not establish
+general user-data deletion behavior.
+
+Verified external evidence is
+`C:\AIW-Resume-20261021\worker107-msix-lifecycle-r5\evidence.zip`, SHA-256
+`768e9ade771bbc3345067c82745c15f2d7c0ed31c4c8e281d437d14a27c321b3`,
+285340bytes/118files, outcome `native-lifecycle-passed`. Independent archive review
+checked source/input identity, exact document bytes, payload/configuration hashes
+and native/controller terminal receipts; no inconsistency was found. Connection,
+console-method and independent-readback observations remain in sibling
+`worker107-connection-r5`. Earlier failed trials remain preserved; see
+[NEW-VM-PREFLIGHT.md](NEW-VM-PREFLIGHT.md) for their driver fixes and recovery.
+
+This establishes the measured workflow for this exact package and worker.
+Broader application compatibility and isolation remain unmeasured, and this is
+not yet a production assessment adapter. The next app-work slice is to integrate
+these retained observations into the shared assessment contracts described below.
+
 ## Closed first recipe
 
 - Input: official Notepad++ 8.9.8 x64 portable ZIP, 8,232,940 bytes, SHA-256
@@ -875,9 +924,9 @@ operator is a trial prerequisite failure, not evidence that the application is
 incompatible. Existing assessment standard-user controls remain the implementation
 to reuse; this research does not introduce a separate compatibility verdict.
 
-Installation and activation readiness must also stay separate. The latest worker
+Installation and activation readiness must also stay separate. The historical Azure worker
 proves that successful signed installation and payload verification do not establish
 a usable packaged activation session. Shared assessment should retain this as an
-unverified execution prerequisite until a matching activation control passes,
+unverified execution prerequisite for that worker until a matching activation control passes,
 preserving the successful installation observation without upgrading compatibility
 or isolation claims.
