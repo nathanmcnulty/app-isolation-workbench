@@ -14,7 +14,7 @@ test "$(hostname -s)" = pve-r630
 stage=request
 test "$#" = 0
 case "${SSH_ORIGINAL_COMMAND-}" in
-    inspect|status|guest-info|shutdown|start|snapshot|rollback) ;;
+    inspect|status|guest-info|guest-preflight|shutdown|start|snapshot|rollback) ;;
     *) printf '%s\n' 'Unsupported AIW operation' >&2; exit 64 ;;
 esac
 umask 077
@@ -74,6 +74,27 @@ case "${SSH_ORIGINAL_COMMAND-}" in
         run_qm guest cmd 107 get-osinfo
         run_qm guest cmd 107 get-host-name
         run_qm guest cmd 107 get-users
+        ;;
+    guest-preflight)
+        test "$(run_qm status 107)" = 'status: running'
+        stage=guest-preflight:source
+        test -f /usr/local/lib/aiw-worker107/preflight.ps1
+        test ! -L /usr/local/lib/aiw-worker107/preflight.ps1
+        printf '%s\n' 'afd4689c20e0152071f9f0102b21ef41f59295fca7b03d11eeb86ad272ef94bc  /usr/local/lib/aiw-worker107/preflight.ps1' | sha256sum --status -c -
+        encoded=$(iconv -f UTF-8 -t UTF-16LE /usr/local/lib/aiw-worker107/preflight.ps1 | base64 -w 0)
+        test "${#encoded}" -lt 16000
+        stage=guest-preflight:execution
+        result=$(run_qm guest exec 107 --timeout 30 -- 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -NoProfile -NonInteractive -EncodedCommand "$encoded")
+        stage=guest-preflight:result
+        printf '%s\n' "$result" | /usr/bin/python3 -c '
+import json, sys
+r = json.load(sys.stdin)
+print(json.dumps(r, ensure_ascii=True))
+completed = type(r.get("exited")) in (bool, int) and r["exited"] == 1
+success = type(r.get("exitcode")) is int and r["exitcode"] == 0
+truncated = r.get("out-truncated", False) != False or r.get("err-truncated", False) != False
+sys.exit(0 if completed and success and not truncated else 1)
+' 9>&-
         ;;
     shutdown) run_qm shutdown 107 --timeout 120 ;;
     start) run_qm start 107 ;;
