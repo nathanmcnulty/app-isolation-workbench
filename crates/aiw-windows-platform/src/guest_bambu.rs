@@ -285,7 +285,9 @@ fn decode_setup_log_tail(tail: &[u8]) -> String {
     let odd_zeros = tail.iter().skip(1).step_by(2).filter(|&&b| b == 0).count();
     if pairs >= 8 && odd_zeros * 2 >= pairs {
         let units = tail
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
             .collect::<Vec<_>>();
         String::from_utf16_lossy(&units)

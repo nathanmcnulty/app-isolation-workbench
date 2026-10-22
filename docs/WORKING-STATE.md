@@ -1,69 +1,75 @@
 # Working state
 
-Updated 2026-10-07. Verify this checkout with `scripts/work-status.ps1`.
-This handoff is a pointer, not execution authority or a run receipt.
+Updated 2026-10-22. Start with `scripts/work-status.ps1`; this pointer is not a run
+receipt or execution authority. Active branch:
+`codex/proxmox-vm106-controller-20261021`.
 
-## Completed milestone
+## Completed current slice
 
-PR #93 integrated Bambu Studio reusable Sandbox packaging at `4e39c787e63a43cbeb07976117288d059be9818e`.
-Independent final review approved `0815cbb`; all three required PR checks passed
-(`37693018289`). Main has the identical tree and passed CI `37694385449`.
-Signed release run `37695560530` published `desktop-alpha-4e39c787e63a`.
-Fresh host and dedicated-VM downloads verified asset identities, attestations on
-host, publisher signatures, closed inventory and receipt. Native GUI analysis,
-assembly, fresh approval and replay passed for Bambu and both Notepad++ recipes.
-Independent canonical checks verified every exact package/import/run association;
-both MSI associations also passed separate signed CLI reporting.
-Interactive edit/save/export and overwrite refusal passed with independently
-verified bytes. All three trials recorded cleanup; the provider list is empty.
-Broader isolation remains `insufficientEvidence`. Detailed identities, corrections
-and limits: [signed acceptance](BAMBU-PUBLIC-ACCEPTANCE.md).
+The exact signed Notepad++ 8.9.8 MSIX research lifecycle passed on VM 106: actual
+non-elevated packaged process in a fresh standard-user console session, GUI
+edit/save/normal exit, exact 53 document bytes, per-user configuration, all 220
+unchanged payload entries, normal uninstall and independent native/job/task cleanup.
+The complete native terminal receipt passed. See [VM106-MSIX-TRIALS.md](VM106-MSIX-TRIALS.md)
+for exact hashes, failed attempts, driver fixes, tests and verified evidence export.
+[NOTEPAD-MSIX-LIFECYCLE.md](NOTEPAD-MSIX-LIFECYCLE.md) records bounded acceptance;
+production assessment/approval-contract integration remains open. Effective isolation
+is `notMeasured`, not inferred from delivery or function success.
 
-Acceptance documentation and tested-download update merged in PR #94 at `922d0a7`.
-Independent review approved `08a44c5`; all three required checks passed in CI
-`37704549006`, and merged main passed `37705606165`. The release binaries remain
-built from exact `4e39c78`, not the acceptance documentation head.
+All 12 native tests passed. Actual held-handle exit and retained uninstall-path
+regressions passed under PowerShell 5.1 and 7. Independent consequential reviews
+found no remaining findings; governance passed. GitHub CLI authentication and
+source pushes work. The unchanged private 60-file migration archive was downloaded
+and verified; historical assets/controllers remain unchanged.
 
-## Next bounded work
+Integration PR #99 is open as a draft. Full local verification passed before a
+dependency audit identified ZIP 2.4.2 advisories. The dependency is now ZIP 9.0.5
+in both lockfiles, with its required Rust 1.88 core minimum aligned across CI,
+local checks and current instructions. Eighty provider tests, both lockfile audits,
+stable workspace Clippy, actual Rust 1.88 all-target compilation and governance
+pass after the update. Independent review cleared the API adaptation and
+MSRV-enabled mechanical style changes. Existing nonfatal dependency-maintenance
+warnings remain visible; no advisory was suppressed. Final hosted CI is required.
 
-Active branch: `codex/msix-worker-lifecycle`. The [first MSIX lifecycle contract](NOTEPAD-MSIX-LIFECYCLE.md)
-targets a real signed Notepad++ package: fresh-worker install, package-identity/token
-observation, document edit/save, per-user configuration and exact uninstall.
-PR #95's closed research assembler/signing workflow merged at `9c25780` after
-independent review and all three exact-head required checks passed (`37709435055`).
-Signing run `37710593027` stopped before assembly/signing on hosted SDK drift.
-The current fix supplies the identical approved tool from a byte-pinned Microsoft
-NuGet archive; local archive/negative checks pass with that tool. Unsigned byte
-hashes differ; semantic payload/manifest equivalence passes. Signing and final
-runtime lifecycle remain open; do not claim an unsigned package is accepted.
-Generic conversion, broader isolation and Studio authoring remain open.
-PR #92's shared held-file observations already inform assessment and packaging;
-see [shared observations](ADMIN-PACKAGING.md#shared-assessment-observations).
+## Worker and remote operation
 
-## Environment and evidence
+VM 106 `passkeys-worker` / PASSKEYS-WORKER has UUID
+`7e686bee-8c05-43c7-9603-a9562ece224c`, MAC CC-34-21-7E-FE-59, guest IP 192.168.1.173.
+Proxmox `pve-r630` is 192.168.1.6. Final successful evidence was exported, hash-checked
+and independently read back before a graceful shutdown and exact baseline rollback.
+The baseline `aiw-vm106-baseline-20261021` was never replaced. The worker was
+subsequently started for native passkey-provider preparation: candidate signatures,
+runtime/API preflight and predeployment rejection checks passed; no provider is
+installed. Its private intake is retained for the separate provider acceptance work.
+OS/EFI/TPM restore has now passed repeatedly. Controller PASSKEYS was not rolled back.
 
-Dedicated VM: `aiw-clean-host-0921`, resource group `RG-AIW-CLEAN-HOST-20260921`,
-subscription `43babb60-9e73-4dc8-b769-4401c01aad73`; aiwoperator RDP session 2.
-The VM is running. Sandbox workers close after trial completion; that does not
-shut down the VM. The actual host operator token is administrator; guest standard
-user execution is separately verified. RDP computer use/file transfer and terminal
-use are authorized. Drive redirection is unavailable; do not grant Azure roles
-merely for development transfer. Use cached authentication; never device code.
+The repaired closed Proxmox SSH helper supports fixed inspect/status/start/shutdown/
+snapshot/rollback operations and retains exact VM/disk/MAC/pending-config checks.
+Integration review found that extra disks were not excluded. The reviewed source
+now allows only the three pinned writable devices and the observed empty CD drive,
+and rejects host VirtIOFS shares. That guard is deployed; strict-key SSH inspection
+passed with the unchanged three disks and original baseline still present.
+Use [PROXMOX-VM106-CONTROLLER.md](PROXMOX-VM106-CONTROLLER.md). Encrypted NTLM WinRM
+and verified PSRP transfer work as AiwWorkerAdmin (SID ending 1006); credentials
+remain controller-user DPAPI protected outside Git. See
+[scripts/worker106-admin/README.md](../scripts/worker106-admin/README.md).
+After boot, wait for QGA readiness and start WinRM remotely if needed; do not ask
+the operator to copy commands into Windows. The superseded QGA management bootstrap
+is not needed and must not be rerun. No copied Tailscale identity is in the baseline.
 
-Current host proof pointer: `%TEMP%\aiw-bambu-public-proof-root.txt`.
-Development proof pointer: `%TEMP%\aiw-bambu-package-proof-root.txt`.
-Earlier signed milestones: [Notepad packaging](PUBLIC-PACKAGING-ACCEPTANCE.md)
-and [public alpha](PUBLIC-ALPHA-ACCEPTANCE.md). Historical human editing and failures
-remain in [interactive evidence](INTERACTIVE-SANDBOX.md) and retained directories.
-Automatic policy review previously rejected cleanup of two host handoffs; do not
-bypass or retry those deletions. Preserve evidence after diagnosed failures.
+Final controller evidence is `C:\passkeys\worker106-tools\primary-vm106-r5`.
+The private evidence ZIP hash and original signed-input archive hashes are recorded
+in the trial document. The original migration guide remains
+[RESUME-ON-NEW-VM.md](RESUME-ON-NEW-VM.md); old Azure infrastructure is not a dependency.
 
-One build owner per target. Core cache: `%LOCALAPPDATA%\Temp\aiw-os-validation-20260919`;
-desktop cache: `%LOCALAPPDATA%\Temp\aiw-desktop-validation-20261002`.
-Use explicit Windows target and target-scoped static CRT for packages.
+## Product milestones and next work
 
-## Boundaries
-
-No host installer execution, generic execution interface, implicit approval,
-automatic export/overwrite or unrelated Sandbox recovery. Commit/push milestones;
-merge only after required exact-head CI and review, then verify merged main tree.
+Bambu Studio and both Notepad++ recipes previously passed signed public-entry
+Sandbox packaging acceptance (PRs #93/#94); see
+[BAMBU-PUBLIC-ACCEPTANCE.md](BAMBU-PUBLIC-ACCEPTANCE.md).
+Follow [EXECUTION-PLAN.md](EXECUTION-PLAN.md) and [ROADMAP.md](ROADMAP.md).
+Integrate research observations through approved production evidence contracts,
+then complete the real classic AppContainer baseline/candidate comparison using
+the existing controls. MXC requires its own exact-source review/disposable controls.
+Keep delivery, function success and measured containment separate. Leave migration
+releases draft; do not merge or launch CI merely to check this working branch.

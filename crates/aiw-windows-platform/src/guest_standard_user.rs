@@ -573,7 +573,7 @@ fn random_password() -> Result<Vec<u16>, GuestMsiExecutionError> {
     Ok(password)
 }
 
-fn user_profile_directory(token: HANDLE) -> Result<String, GuestMsiExecutionError> {
+pub(crate) fn user_profile_directory(token: HANDLE) -> Result<String, GuestMsiExecutionError> {
     let mut size = 0_u32;
     // SAFETY: documented size-query call.
     let _ = unsafe { GetUserProfileDirectoryW(token, PWSTR::null(), &mut size) };
@@ -597,7 +597,7 @@ fn user_profile_directory(token: HANDLE) -> Result<String, GuestMsiExecutionErro
     })
 }
 
-fn environment_paths(
+pub(crate) fn environment_paths(
     environment: *mut c_void,
 ) -> Result<(String, String, String), GuestMsiExecutionError> {
     if environment.is_null() {
@@ -684,7 +684,7 @@ fn set_environment_path(
     Ok(())
 }
 
-fn validate_standard_token(token: HANDLE) -> Result<String, GuestMsiExecutionError> {
+pub(crate) fn validate_standard_token(token: HANDLE) -> Result<String, GuestMsiExecutionError> {
     let token_type: TOKEN_TYPE = query_fixed(token, TokenTypeClass, "TokenType")?;
     if token_type != TokenPrimary {
         return Err(GuestMsiExecutionError::Process(

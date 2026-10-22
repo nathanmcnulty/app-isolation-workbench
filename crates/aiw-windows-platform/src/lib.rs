@@ -2,6 +2,18 @@
 
 use aiw_probe::WindowsSandboxReadiness;
 
+#[cfg(all(windows, feature = "research-msix-control"))]
+mod research_msix_control;
+#[cfg(all(windows, feature = "research-msix-control"))]
+pub use research_msix_control::run as run_msix_standard_user_research_control;
+
+#[cfg(all(windows, feature = "research-msix-lifecycle"))]
+mod research_msix_lifecycle;
+#[cfg(all(windows, feature = "research-msix-lifecycle"))]
+mod research_msix_primary_user;
+#[cfg(all(windows, feature = "research-msix-lifecycle"))]
+pub use research_msix_lifecycle::run as run_msix_standard_user_research_lifecycle;
+
 #[cfg(windows)]
 pub use windows_platform::{
     CanonicalSandboxId, WindowsSandboxExecutionLease, WindowsSandboxInvocationError,

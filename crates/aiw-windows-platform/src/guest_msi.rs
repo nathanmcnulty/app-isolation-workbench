@@ -67,6 +67,12 @@ unsafe extern "system" {
     ) -> BOOL;
 }
 
+#[cfg(feature = "research-msix-lifecycle")]
+#[link(name = "Kernel32")]
+unsafe extern "system" {
+    fn ProcessIdToSessionId(pid: u32, session: *mut u32) -> i32;
+}
+
 #[link(name = "User32")]
 unsafe extern "system" {
     fn GetThreadDesktop(thread_id: u32) -> HANDLE;
@@ -376,14 +382,14 @@ pub fn execute_fixed_notepad_plus_plus_msi_attempt_with_observations(
     scenario: &CompiledMsiScenario,
     required: Option<aiw_provider_wsb::MsiRequiredObservations>,
 ) -> GuestMsiAttempt {
-    if let Some(required) = required {
-        if let Err(error) = required.validate_for(scenario) {
-            return GuestMsiAttempt {
-                result: Err(GuestMsiExecutionError::Scenario(error)),
-                stages: Vec::new(),
-                failed_snapshots: None,
-            };
-        }
+    if let Some(required) = required
+        && let Err(error) = required.validate_for(scenario)
+    {
+        return GuestMsiAttempt {
+            result: Err(GuestMsiExecutionError::Scenario(error)),
+            stages: Vec::new(),
+            failed_snapshots: None,
+        };
     }
     if let Err(error) = scenario.validate() {
         return GuestMsiAttempt {
@@ -1291,10 +1297,9 @@ fn wait_for_document_sha256(
             .document
             .observe_expected()
             .map_err(GuestMsiExecutionError::Process)?
+            && observed_sha256 == plan.expected_sha256
         {
-            if observed_sha256 == plan.expected_sha256 {
-                return Ok(observed_sha256);
-            }
+            return Ok(observed_sha256);
         }
         if Instant::now() >= deadline {
             return Err(GuestMsiExecutionError::Process(format!(
@@ -1339,7 +1344,7 @@ fn validate_fixed_document_contract(
     Ok(expected_sha256)
 }
 
-fn complete_process_operation<T>(
+pub(crate) fn complete_process_operation<T>(
     operation: Result<T, GuestMsiExecutionError>,
     cleanup: Result<(), GuestMsiExecutionError>,
 ) -> Result<T, GuestMsiExecutionError> {
@@ -1360,6 +1365,11 @@ pub(crate) struct GuestProcess {
     initial_thread_id: u32,
     initial_thread: OwnedHandle,
 }
+
+#[cfg(feature = "research-msix-lifecycle")]
+const PRIMARY_CONTROL_IMAGE: &str = r"C:\Windows\System32\cmd.exe";
+#[cfg(feature = "research-msix-lifecycle")]
+const PRIMARY_CONTROL_ARGUMENTS: [&str; 3] = ["/d", "/c", "exit 42"];
 
 /// The installer writes locally inside the disposable worker. Publish a bounded
 /// raw tail only after process/job cleanup, with no compatibility claims.
@@ -1394,6 +1404,142 @@ fn retain_interactive_install_log() -> Result<(), String> {
 }
 
 impl GuestProcess {
+    #[cfg(feature = "research-msix-lifecycle")]
+    pub(crate) fn start_primary_interactive(
+        user: &crate::research_msix_primary_user::PrimaryInteractiveUser,
+    ) -> Result<Self, GuestMsiExecutionError> {
+        Self::start_primary_fixed(user, false)
+    }
+    #[cfg(feature = "research-msix-lifecycle")]
+    pub(crate) fn start_primary_launch_control(
+        user: &crate::research_msix_primary_user::PrimaryInteractiveUser,
+    ) -> Result<Self, GuestMsiExecutionError> {
+        Self::start_primary_fixed(user, true)
+    }
+    #[cfg(feature = "research-msix-lifecycle")]
+    fn start_primary_fixed(
+        user: &crate::research_msix_primary_user::PrimaryInteractiveUser,
+        control: bool,
+    ) -> Result<Self, GuestMsiExecutionError> {
+        use windows::Win32::System::Threading::CreateProcessAsUserW;
+        // Both commands are compiled in. The control cannot run application
+        // code, change launch flags, or escape inherited job restrictions.
+        let (path, arguments): (&str, &[&str]) = if control {
+            (PRIMARY_CONTROL_IMAGE, &PRIMARY_CONTROL_ARGUMENTS)
+        } else {
+            (
+                r"C:\AIW-Msix-Lifecycle-Input\msix_standard_user_lifecycle.exe",
+                &["vm-lifecycle-child"],
+            )
+        };
+        let application = wide(path)?;
+        let directory = wide(r"C:\AIW-Msix-Lifecycle-Input")?;
+        let mut command = wide(&aiw_windows_command_line::join_arguments(
+            std::iter::once(path).chain(arguments.iter().copied()),
+        ))?;
+        let mut desktop = wide(r"winsta0\default")?;
+        let startup = STARTUPINFOW {
+            cb: std::mem::size_of::<STARTUPINFOW>() as u32,
+            lpDesktop: PWSTR(desktop.as_mut_ptr()),
+            ..Default::default()
+        };
+        let mut information = PROCESS_INFORMATION::default();
+        let job = ScenarioJob::create()?;
+        let privilege = crate::guest_standard_user::ScopedPrivileges::enable(&[
+            "SeIncreaseQuotaPrivilege",
+            "SeAssignPrimaryTokenPrivilege",
+        ])?;
+        // SAFETY: held WTS primary token/environment, fixed writable command and
+        // default interactive desktop. No handles inherited across sessions.
+        let created = unsafe {
+            CreateProcessAsUserW(
+                Some(user.token()),
+                PCWSTR(application.as_ptr()),
+                Some(PWSTR(command.as_mut_ptr())),
+                None,
+                None,
+                false,
+                CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
+                Some(user.environment().cast_const()),
+                PCWSTR(directory.as_ptr()),
+                &startup,
+                &mut information,
+            )
+        };
+        created
+            .map_err(|e| GuestMsiExecutionError::Process(format!("CreateProcessAsUserW: {e}")))?;
+        // SAFETY: successful creation transferred these two real handles.
+        let process = unsafe { OwnedHandle::from_raw_handle(information.hProcess.0) };
+        let thread = unsafe { OwnedHandle::from_raw_handle(information.hThread.0) };
+        let checked = (|| {
+            user.validate_child(&process)?;
+            let mut physical_session = 0;
+            // SAFETY: exact held suspended child PID, writable session output.
+            if unsafe { ProcessIdToSessionId(information.dwProcessId, &mut physical_session) } == 0
+            {
+                return Err(GuestMsiExecutionError::Process(
+                    windows::core::Error::from_thread().to_string(),
+                ));
+            }
+            let mut image = [0u16; 32768];
+            let mut image_length = image.len() as u32;
+            // SAFETY: exact held process and bounded writable image buffer.
+            unsafe {
+                QueryFullProcessImageNameW(
+                    raw_handle(&process),
+                    PROCESS_NAME_WIN32,
+                    PWSTR(image.as_mut_ptr()),
+                    &mut image_length,
+                )
+            }
+            .map_err(|e| GuestMsiExecutionError::Process(e.to_string()))?;
+            let image_path = String::from_utf16(&image[..image_length as usize])
+                .map_err(|e| GuestMsiExecutionError::Process(e.to_string()))?;
+            if physical_session != user.session || !image_path.eq_ignore_ascii_case(path) {
+                return Err(GuestMsiExecutionError::Process(
+                    "Suspended primary child image/session differs".into(),
+                ));
+            }
+            // SAFETY: exact held suspended process and owned job.
+            unsafe { AssignProcessToJobObject(job.raw(), raw_handle(&process)) }.map_err(|e| {
+                GuestMsiExecutionError::Process(format!("Primary owned job assignment: {e}"))
+            })?;
+            let mut assigned = BOOL(0);
+            // SAFETY: exact owned job and still-suspended process handles.
+            unsafe { IsProcessInJob(raw_handle(&process), Some(job.raw()), &mut assigned) }
+                .map_err(|e| GuestMsiExecutionError::Process(e.to_string()))?;
+            if !assigned.as_bool() {
+                return Err(GuestMsiExecutionError::Process(
+                    "Suspended primary child absent from exact job".into(),
+                ));
+            }
+            Ok::<_, GuestMsiExecutionError>(())
+        })();
+        if let Err(error) = checked {
+            let cleanup = terminate_unassigned_process(&process);
+            return Err(GuestMsiExecutionError::Process(format!(
+                "{error}; suspendedCleanup={cleanup:?}"
+            )));
+        }
+        // Restoration can abort on failure. Establish kill-on-close ownership
+        // first so process teardown cannot strand the suspended child.
+        drop(privilege);
+        // SAFETY: retained initial thread is still suspended exactly once.
+        let previous = unsafe { ResumeThread(raw_handle(&thread)) };
+        if previous != 1 {
+            let cleanup = job.terminate_and_verify_empty();
+            return Err(GuestMsiExecutionError::Process(format!(
+                "Primary resume count {previous}; cleanup={cleanup:?}"
+            )));
+        }
+        Ok(Self {
+            job,
+            process,
+            process_id: information.dwProcessId,
+            initial_thread_id: information.dwThreadId,
+            initial_thread: thread,
+        })
+    }
     fn impersonate_token<T>(
         &self,
         expected: &TokenEvidence,
@@ -1423,6 +1569,23 @@ impl GuestProcess {
     }
     pub(crate) fn process_id(&self) -> u32 {
         self.process_id
+    }
+
+    #[cfg(feature = "research-msix-lifecycle")]
+    pub(crate) fn is_in_owned_job(&self) -> Result<bool, GuestMsiExecutionError> {
+        let mut assigned = BOOL(0);
+        // SAFETY: exact retained process and job handles remain live.
+        unsafe {
+            IsProcessInJob(
+                raw_handle(&self.process),
+                Some(self.job.raw()),
+                &mut assigned,
+            )
+        }
+        .map_err(|error| {
+            GuestMsiExecutionError::Process(format!("Owned job membership: {error}"))
+        })?;
+        Ok(assigned.as_bool())
     }
 
     pub(crate) fn active_processes(&self) -> Result<u32, GuestMsiExecutionError> {
@@ -1456,6 +1619,7 @@ impl GuestProcess {
         let executable_wide = wide(path)?;
         let parent_wide = wide_os(parent.as_os_str())?;
         let mut command_line_wide = wide(&command_line)?;
+        validate_standard_user_command_line(&command_line_wide)?;
         let job = ScenarioJob::create()?;
         let startup = STARTUPINFOW {
             cb: std::mem::size_of::<STARTUPINFOW>() as u32,
@@ -1651,7 +1815,10 @@ impl GuestProcess {
         }
     }
 
-    fn wait_for_window(&self, timeout: Duration) -> Result<HWND, GuestMsiExecutionError> {
+    pub(crate) fn wait_for_window(
+        &self,
+        timeout: Duration,
+    ) -> Result<HWND, GuestMsiExecutionError> {
         let deadline = Instant::now().checked_add(timeout).ok_or_else(|| {
             GuestMsiExecutionError::Process(
                 "window observation timeout overflowed monotonic clock".to_owned(),
@@ -1973,6 +2140,22 @@ fn wide(value: &str) -> Result<Vec<u16>, GuestMsiExecutionError> {
     Ok(OsStr::new(value).encode_wide().chain(Some(0)).collect())
 }
 
+// CreateProcessWithLogonW has a smaller limit than CreateProcessW. Include the
+// terminator conservatively and check before consuming credentials or granting
+// desktop access. Count the actual UTF-16 buffer, not UTF-8 bytes or Rust chars.
+pub(crate) const MAX_STANDARD_USER_COMMAND_LINE_UNITS: usize = 1024;
+
+fn validate_standard_user_command_line(value: &[u16]) -> Result<(), GuestMsiExecutionError> {
+    if value.len() > MAX_STANDARD_USER_COMMAND_LINE_UNITS {
+        return Err(GuestMsiExecutionError::Process(format!(
+            "standard-user command line exceeds the CreateProcessWithLogonW limit: {} UTF-16 units including terminator; maximum {}",
+            value.len(),
+            MAX_STANDARD_USER_COMMAND_LINE_UNITS
+        )));
+    }
+    Ok(())
+}
+
 fn wide_os(value: &OsStr) -> Result<Vec<u16>, GuestMsiExecutionError> {
     let encoded: Vec<u16> = value.encode_wide().collect();
     if encoded.contains(&0) {
@@ -1986,6 +2169,49 @@ fn wide_os(value: &OsStr) -> Result<Vec<u16>, GuestMsiExecutionError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_process_operation_preserves_unconfirmed_containment_cleanup() {
+        let error = complete_process_operation::<()>(
+            Err(GuestMsiExecutionError::Process(
+                "control deadline exceeded".into(),
+            )),
+            Err(GuestMsiExecutionError::Process(
+                "owned job still active".into(),
+            )),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("control deadline exceeded"));
+        assert!(error.contains("containment cleanup also failed"));
+        assert!(error.contains("owned job still active"));
+    }
+
+    #[test]
+    #[cfg(feature = "research-msix-lifecycle")]
+    fn primary_control_command_exits_42_and_leaves_its_owned_job_empty() {
+        let arguments = PRIMARY_CONTROL_ARGUMENTS.map(str::to_owned);
+        let child = GuestProcess::start(PRIMARY_CONTROL_IMAGE, &arguments).unwrap();
+        let operation = (|| {
+            let exit = child.wait_for_exit(Duration::from_secs(10))?;
+            child.verify_empty_after_success()?;
+            Ok(exit)
+        })();
+        let cleanup = child.cleanup();
+        assert_eq!(complete_process_operation(operation, cleanup).unwrap(), 42);
+    }
+
+    #[test]
+    fn standard_user_command_line_checks_native_utf16_boundary() {
+        assert!(validate_standard_user_command_line(&wide(&"a".repeat(1023)).unwrap()).is_ok());
+        assert!(validate_standard_user_command_line(&wide(&"a".repeat(1024)).unwrap()).is_err());
+        assert!(
+            validate_standard_user_command_line(&wide(&"\u{1f600}".repeat(511)).unwrap()).is_ok()
+        );
+        assert!(
+            validate_standard_user_command_line(&wide(&"\u{1f600}".repeat(512)).unwrap()).is_err()
+        );
+    }
 
     #[test]
     fn bounded_job_diagnostic_reads_an_empty_job() {

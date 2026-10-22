@@ -6,7 +6,7 @@ rust-version = "1.90"
 license = "Apache-2.0"
 description = "Local administrator surface for verified Windows Sandbox workflows"
 
-# Keep desktop dependencies separate from the core workspace's Rust 1.85 contract.
+# Keep desktop dependencies separate from the core workspace's Rust 1.88 contract.
 [workspace]
 
 [features]

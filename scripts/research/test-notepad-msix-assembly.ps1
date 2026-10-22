@@ -12,11 +12,28 @@ function Assert-Rejected([scriptblock]$Action, [string]$Expected) {
     try { & $Action | Out-Null } catch { if ($_.Exception.Message -notlike "*$Expected*") { throw }; $rejected = $true }
     if (!$rejected) { throw "Expected rejection: $Expected" }
 }
-$first = & $builder -MakeAppxPath $MakeAppxPath -PortableArchive $PortableArchive -OutputDirectory (Join-Path $EvidenceDirectory 'first') | ConvertFrom-Json
-$second = & $builder -MakeAppxPath $MakeAppxPath -PortableArchive $PortableArchive -OutputDirectory (Join-Path $EvidenceDirectory 'second') | ConvertFrom-Json
+# Exercise the producer from both real checkout newline formats, including its asset.
+$source = [IO.File]::ReadAllText($builder).Replace("`r`n", "`n")
+$variants = @()
+foreach ($format in @('lf', 'crlf')) {
+    $root = Join-Path $EvidenceDirectory "source-$format"
+    $scriptRoot = Join-Path $root 'scripts/research'
+    $iconRoot = Join-Path $root 'gui/icons'
+    [IO.Directory]::CreateDirectory($scriptRoot) | Out-Null
+    [IO.Directory]::CreateDirectory($iconRoot) | Out-Null
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot '../../gui/icons/icon.png') -Destination (Join-Path $iconRoot 'icon.png')
+    $variant = Join-Path $scriptRoot 'build-notepad-msix.ps1'
+    $text = if ($format -eq 'crlf') { $source.Replace("`n", "`r`n") } else { $source }
+    [IO.File]::WriteAllText($variant, $text, [Text.UTF8Encoding]::new($false))
+    $variants += $variant
+}
+$first = & $variants[0] -MakeAppxPath $MakeAppxPath -PortableArchive $PortableArchive -OutputDirectory (Join-Path $EvidenceDirectory 'first') | ConvertFrom-Json
+$second = & $variants[1] -MakeAppxPath $MakeAppxPath -PortableArchive $PortableArchive -OutputDirectory (Join-Path $EvidenceDirectory 'second') | ConvertFrom-Json
 $a = Get-Content (Join-Path $EvidenceDirectory 'first\assembly.json') -Raw | ConvertFrom-Json
 $b = Get-Content (Join-Path $EvidenceDirectory 'second\assembly.json') -Raw | ConvertFrom-Json
 if (($a.payloadInventory | ConvertTo-Json -Depth 8 -Compress) -cne ($b.payloadInventory | ConvertTo-Json -Depth 8 -Compress)) { throw 'Semantic payload reproducibility failed' }
+$manifestBytes = [IO.File]::ReadAllBytes((Join-Path $EvidenceDirectory 'first/layout/AppxManifest.xml'))
+if ($manifestBytes -contains 13) { throw 'Manifest contains checkout-dependent CR bytes' }
 # Verify actual archive payload, rather than trusting the producer's inventory.
 foreach ($candidate in @($first, $second)) {
     $zip = [IO.Compression.ZipFile]::OpenRead($candidate.package)

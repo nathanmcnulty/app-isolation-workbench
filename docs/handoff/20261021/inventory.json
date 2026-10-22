@@ -1,0 +1,360 @@
+{
+  "schemaVersion": "aiw.dev/migration-inventory/v1",
+  "codeHead": "5688db4eb681fdc9a7e3987bb091b89de941d1bd",
+  "files": [
+    {
+      "path": "README.md",
+      "sizeBytes": 1570,
+      "sha256": "848c4ed1b6eeb773be34c598679f6f3f64f150927c2463bb755c28454a89ffc3",
+      "sourceName": "generated handoff README"
+    },
+    {
+      "path": "evidence/interactive-session-ps51-r4.log",
+      "sizeBytes": 2550,
+      "sha256": "2d85d28cd35894b86d036aafcf4085b47ac4f6e4e69b14de509277db7dbdd415",
+      "sourceName": "interactive-session-ps51-r4.log"
+    },
+    {
+      "path": "evidence/interactive-session-ps7-r1.log",
+      "sizeBytes": 216,
+      "sha256": "52ef723122027599c5454315c65775e7134db7d57822d4a83f1eec9a0bc40fa9",
+      "sourceName": "interactive-session-ps7-r1.log"
+    },
+    {
+      "path": "evidence/lifecycle-parser-current-r5.json",
+      "sizeBytes": 1353,
+      "sha256": "2854d6307f83c29786269b05b8f3a858738999f89f6053f28f8af3c00b271816",
+      "sourceName": "lifecycle-parser-current-r5.json"
+    },
+    {
+      "path": "evidence/managed-primary-auth-r6-observed-408f2c48c7c6.json",
+      "sizeBytes": 214,
+      "sha256": "a47e7a271478333afd38df69f4b457d8dc6b5563c246ecc630ee0990f2811dca",
+      "sourceName": "managed-primary-auth-r6-observed-408f2c48c7c6.json"
+    },
+    {
+      "path": "evidence/managed-primary-auth-r6-observed-b0c6790ddfe9.json",
+      "sizeBytes": 860,
+      "sha256": "0c63d1cca8e96a4a1be11772001448c06c48e992b31594fdb848be40bfe65ace",
+      "sourceName": "managed-primary-auth-r6-observed-b0c6790ddfe9.json"
+    },
+    {
+      "path": "evidence/managed-primary-auth-r6-state-r1.json",
+      "sizeBytes": 283,
+      "sha256": "42849838b3e853d75012b9647eaadf62ea1d1718556ba7ea6e58f1d8412925a5",
+      "sourceName": "managed-primary-auth-r6-state-r1.json"
+    },
+    {
+      "path": "evidence/managed-primary-auth-r6-verified.json",
+      "sizeBytes": 701,
+      "sha256": "32de171b94968579c1a9710cd39ab4b544483836732fcaa10e0d559157a9d39d",
+      "sourceName": "managed-primary-auth-r6-verified.json"
+    },
+    {
+      "path": "evidence/managed-primary-baseline-r6-observed-ea6c74154b5a.json",
+      "sizeBytes": 1538,
+      "sha256": "8b0f5f6d2239d9383c6a92e6e75e4a3b29270414be13907d643be665804a2d32",
+      "sourceName": "managed-primary-baseline-r6-observed-ea6c74154b5a.json"
+    },
+    {
+      "path": "evidence/managed-primary-baseline-r6-state-r1.json",
+      "sizeBytes": 287,
+      "sha256": "15e570cb09fecb15d787f98fd25177f04c526d245545084b6cf065a82081cd9a",
+      "sourceName": "managed-primary-baseline-r6-state-r1.json"
+    },
+    {
+      "path": "evidence/managed-primary-baseline-r6-verified.json",
+      "sizeBytes": 1572,
+      "sha256": "3e4c024ca45f9f978811bfcd92548e8572ad2edbc059316f481f4f8bdac465f9",
+      "sourceName": "managed-primary-baseline-r6-verified.json"
+    },
+    {
+      "path": "evidence/managed-primary-control-context-r5-observed-7e9921858fd2.json",
+      "sizeBytes": 3172,
+      "sha256": "00f99395a66debf2d777df59ac30b0fb9b3b109690f583ba5dd3a4689240ff0e",
+      "sourceName": "managed-primary-control-context-r5-observed-7e9921858fd2.json"
+    },
+    {
+      "path": "evidence/managed-primary-control-context-r5-observed-f9ff9e9868be.json",
+      "sizeBytes": 225,
+      "sha256": "33175d7265b02bc8640ab5593f29a676901407e8a87496a587a6a5854e68264a",
+      "sourceName": "managed-primary-control-context-r5-observed-f9ff9e9868be.json"
+    },
+    {
+      "path": "evidence/managed-primary-control-context-r5-state-r1.json",
+      "sizeBytes": 294,
+      "sha256": "07f0f2bc2b1097608fea00dded263bfa4823b04eb97c7c4aa6980f0d502f7d1b",
+      "sourceName": "managed-primary-control-context-r5-state-r1.json"
+    },
+    {
+      "path": "evidence/managed-primary-control-readback-r5-observed-a60ab5777bdd.json",
+      "sizeBytes": 2007,
+      "sha256": "7b3f021aec4a70594bec237c6f789082e90427ce1b05d47c737ef52cda61ea37",
+      "sourceName": "managed-primary-control-readback-r5-observed-a60ab5777bdd.json"
+    },
+    {
+      "path": "evidence/managed-primary-control-readback-r5-state-r1.json",
+      "sizeBytes": 295,
+      "sha256": "74da5d6a0d552d31be1255d2750695e3a3584d59f39d0add90483cdc3f47b907",
+      "sourceName": "managed-primary-control-readback-r5-state-r1.json"
+    },
+    {
+      "path": "evidence/managed-primary-preparation-r5b-observed-d55699cb478e.json",
+      "sizeBytes": 1060,
+      "sha256": "75b4862f301950546d763413bb5a14a34b2b3c8cb8641bc46254fe0f4a636423",
+      "sourceName": "managed-primary-preparation-r5b-observed-d55699cb478e.json"
+    },
+    {
+      "path": "evidence/managed-primary-preparation-r5b-state-r1.json",
+      "sizeBytes": 291,
+      "sha256": "de8b9d0a371e3c5bffdb42743928b0da9c703058da4cc9fa01428d492f393b89",
+      "sourceName": "managed-primary-preparation-r5b-state-r1.json"
+    },
+    {
+      "path": "evidence/managed-primary-staging-r6-observed-8cf7c4e7e8e0.json",
+      "sizeBytes": 709,
+      "sha256": "71b315bbb90da7f193dd798961d46b8486af43e48396298e9eeea1b88c64f4e7",
+      "sourceName": "managed-primary-staging-r6-observed-8cf7c4e7e8e0.json"
+    },
+    {
+      "path": "evidence/managed-primary-staging-r6-state-r1.json",
+      "sizeBytes": 286,
+      "sha256": "c3d8e9b58a71c473a0d7e27eb86f2a25dc501005f9a48df75fabe6be6fb78404",
+      "sourceName": "managed-primary-staging-r6-state-r1.json"
+    },
+    {
+      "path": "evidence/managed-scheduler-cmd-r2-observed-1f62c03fa23c.json",
+      "sizeBytes": 223,
+      "sha256": "b554a187dbfdad19dbbe4d714ce900fc0c1c44ea6ad99b165b7ef800480c6b2d",
+      "sourceName": "managed-scheduler-cmd-r2-observed-1f62c03fa23c.json"
+    },
+    {
+      "path": "evidence/managed-scheduler-cmd-r2-observed-2785663db47d.json",
+      "sizeBytes": 3321,
+      "sha256": "d18eb459ce7d9dca8dfa66e5d0842e5a304e06ea362a480e0162ba4b812a19dd",
+      "sourceName": "managed-scheduler-cmd-r2-observed-2785663db47d.json"
+    },
+    {
+      "path": "evidence/managed-scheduler-cmd-r2-state-r1.json",
+      "sizeBytes": 613,
+      "sha256": "299886884de5c1386233a8d6f885996f2de29fe1a10d5a46295e83215703f88d",
+      "sourceName": "managed-scheduler-cmd-r2-state-r1.json"
+    },
+    {
+      "path": "evidence/managed-scheduler-cmd-readback-r1-observed-ad413f28c344.json",
+      "sizeBytes": 2976,
+      "sha256": "beb88738d0db0bbe34df4efd9f3ca16863e72b9599bdd23675b51255f72636b2",
+      "sourceName": "managed-scheduler-cmd-readback-r1-observed-ad413f28c344.json"
+    },
+    {
+      "path": "evidence/managed-scheduler-cmd-readback-r1-state-r1.json",
+      "sizeBytes": 291,
+      "sha256": "9a9f26f2bc692079ab21b37138a6d08077ab8c5394362bcc56f5266911e0b7cc",
+      "sourceName": "managed-scheduler-cmd-readback-r1-state-r1.json"
+    },
+    {
+      "path": "evidence/managed-task-context-r4-observed-c735ca11d032.json",
+      "sizeBytes": 2502,
+      "sha256": "fb74868739a33cf204d9f1ab1c340ecbe5bd278554d91862b0cb9989c78d7c7e",
+      "sourceName": "managed-task-context-r4-observed-c735ca11d032.json"
+    },
+    {
+      "path": "evidence/managed-task-context-r4-state-r1.json",
+      "sizeBytes": 612,
+      "sha256": "2c38a236c7531f08ecc6c7d6f9f4f36d7be3312714537ec185feb86b6a844143",
+      "sourceName": "managed-task-context-r4-state-r1.json"
+    },
+    {
+      "path": "evidence/managed-task-context-readback-r1-observed-2a5601154da8.json",
+      "sizeBytes": 2060,
+      "sha256": "acede8224120bc93cd1c023c073830739dc86c36a19ee3a341454e2cdebe52b0",
+      "sourceName": "managed-task-context-readback-r1-observed-2a5601154da8.json"
+    },
+    {
+      "path": "evidence/managed-task-context-readback-r1-state-r1.json",
+      "sizeBytes": 292,
+      "sha256": "09b8949974b785f777aa53984b3df88f10b1cd300b716efbe5a75f70288fb25c",
+      "sourceName": "managed-task-context-readback-r1-state-r1.json"
+    },
+    {
+      "path": "evidence/primary-r6-clone-verified.json",
+      "sizeBytes": 1566,
+      "sha256": "b47611c5db92c95e8a476cf51b6ba70fc4d44b0ea580b5c8474dee7efcddac9e",
+      "sourceName": "primary-r6-clone-verified.json"
+    },
+    {
+      "path": "evidence/primary-r6-expired-0686e40bebd044ca9c6bce010e0972c3.json",
+      "sizeBytes": 532,
+      "sha256": "a0fcaaf1ad3eab509072d170b2f4002c2a2e82115ef6a21e10fa3e6d49c5c792",
+      "sourceName": "primary-r6-expired-0686e40bebd044ca9c6bce010e0972c3.json"
+    },
+    {
+      "path": "evidence/primary-r6-rdp-observation-3ce34975170243dab8e13d901aecf20b.json",
+      "sizeBytes": 491,
+      "sha256": "37f923e8e29afb1f5ff70cb3d033eddabdda4d0e7278ac6d821ff12e4a389451",
+      "sourceName": "primary-r6-rdp-observation-3ce34975170243dab8e13d901aecf20b.json"
+    },
+    {
+      "path": "evidence/primary-user-clippy-final-r1.log",
+      "sizeBytes": 180,
+      "sha256": "e3f94bce5aa7614c6ff7a6b4df09a0edc2fd430a528f46d0bd22b37b157b24f2",
+      "sourceName": "primary-user-clippy-final-r1.log"
+    },
+    {
+      "path": "evidence/primary-user-release-final-r1.log",
+      "sizeBytes": 171,
+      "sha256": "a7297dabc4c03c8f2dbed94877b0f7ffd8e190739cb371b6603b3a4940693782",
+      "sourceName": "primary-user-release-final-r1.log"
+    },
+    {
+      "path": "evidence/primary-user-tests-final-r1.log",
+      "sizeBytes": 1413,
+      "sha256": "9c88a4665c087f80ba908eff72c9d8047ae0a9ad5b5f81d845c1adf496b8750b",
+      "sourceName": "primary-user-tests-final-r1.log"
+    },
+    {
+      "path": "evidence/vm-lifecycle-final-readback-r3.json",
+      "sizeBytes": 2035,
+      "sha256": "1b2206395765cfe82db5b797d6696bcb8db9f889c93a45950bf28b4ddccc45e7",
+      "sourceName": "vm-lifecycle-final-readback-r3.json"
+    },
+    {
+      "path": "evidence/vm-lifecycle-install-detail-r3.json",
+      "sizeBytes": 4581,
+      "sha256": "ed193bb2b2709c1b48abab3bc608da286d36c7190e094cd23d65145d00c1ac03",
+      "sourceName": "vm-lifecycle-install-detail-r3.json"
+    },
+    {
+      "path": "evidence/vm-lifecycle-payload-readback-r4.json",
+      "sizeBytes": 795,
+      "sha256": "ad5bc57a3c41aaae3655f12cf1128dedcfdd7f7b4c47ba34b9b32267486aebc9",
+      "sourceName": "vm-lifecycle-payload-readback-r4.json"
+    },
+    {
+      "path": "evidence/vm-lifecycle-suspended-final-r1.json",
+      "sizeBytes": 1927,
+      "sha256": "4c112c00defcaa2bc41331cec7358f590fcc9a8695d702d11e27d8565413d7a9",
+      "sourceName": "vm-lifecycle-suspended-final-r1.json"
+    },
+    {
+      "path": "evidence/vm-lifecycle-suspended-stage-r2.json",
+      "sizeBytes": 1234,
+      "sha256": "ce54347735d9f1d89c82fc3988914773a08803e8471dc52684a8f90693648c39",
+      "sourceName": "vm-lifecycle-suspended-stage-r2.json"
+    },
+    {
+      "path": "inputs/application.msix",
+      "sizeBytes": 8641353,
+      "sha256": "2ae3a7c685e811eb34479980bff41d1442b023578074e19f4dca8fc676070437",
+      "sourceName": "application.msix"
+    },
+    {
+      "path": "inputs/assembly.json",
+      "sizeBytes": 80279,
+      "sha256": "d7eca3af76598534d29e411b4d4775d61e6ffe11174aa5a171b44bfe2a080c38",
+      "sourceName": "assembly.json"
+    },
+    {
+      "path": "inputs/msix_standard_user_lifecycle.exe",
+      "sizeBytes": 905728,
+      "sha256": "b6ba89f8890383ad430fd7efe6ba68887c04ea52aceeb8c01f20f41aa6c6a01c",
+      "sourceName": "msix_standard_user_lifecycle.exe"
+    },
+    {
+      "path": "inputs/signing.json",
+      "sizeBytes": 317,
+      "sha256": "670e6f9e44211848c305c61261aa2ed6e2c94fac229214ec843cd4c9afab9e80",
+      "sourceName": "signing.json"
+    },
+    {
+      "path": "reference/old-vm/managed-primary-account-r6.py",
+      "sizeBytes": 12071,
+      "sha256": "dffe479f10512f85899fa297780263522e18bf5bcd59250e12ddfdb41ed5c5e4",
+      "sourceName": "managed-primary-account-r6.py"
+    },
+    {
+      "path": "reference/old-vm/managed-primary-baseline-r6.py",
+      "sizeBytes": 8089,
+      "sha256": "81f2609f06f048f98668ba2261b27de11ccc9770d7e64522756dcd7b10663dbd",
+      "sourceName": "managed-primary-baseline-r6.py"
+    },
+    {
+      "path": "reference/old-vm/managed-primary-preparation-r6.py",
+      "sizeBytes": 15228,
+      "sha256": "73f7826ad526ea16b059919dca8d0ef2a82315c93ce75ea2460a9fa20605d0c6",
+      "sourceName": "managed-primary-preparation-r6.py"
+    },
+    {
+      "path": "reference/old-vm/managed-primary-staging-r6.py",
+      "sizeBytes": 5982,
+      "sha256": "e8808e3f328e966bf8398a2e48a4d9df2afe9d0dd42325b488f3b0d2b9d54e1c",
+      "sourceName": "managed-primary-staging-r6.py"
+    },
+    {
+      "path": "reference/old-vm/managed-scheduler-cmd-r2.py",
+      "sizeBytes": 6755,
+      "sha256": "926bc0d4246d5fc54061a3c0e123a5ec6dd5408d40b46112d194da7c9b76176c",
+      "sourceName": "managed-scheduler-cmd-r2.py"
+    },
+    {
+      "path": "reference/old-vm/managed-scheduler-cmd-readback-r1.py",
+      "sizeBytes": 9413,
+      "sha256": "b1afddb64c0fbe97e5a3f08af165eb008bbeea26dd7d4552e7b21ebe314721d1",
+      "sourceName": "managed-scheduler-cmd-readback-r1.py"
+    },
+    {
+      "path": "reference/old-vm/managed-scheduler-primary-r6.py",
+      "sizeBytes": 8618,
+      "sha256": "e515aeffbff211c453232c3d603c3122d42f1a2c1d5a330f453c1deb1c27fe62",
+      "sourceName": "managed-scheduler-primary-r6.py"
+    },
+    {
+      "path": "reference/old-vm/managed-task-context-r4.py",
+      "sizeBytes": 6731,
+      "sha256": "4c3b1df18a18c66b526eafaed4af8dd74f84f526f5e9e0b9687e0008933641fc",
+      "sourceName": "managed-task-context-r4.py"
+    },
+    {
+      "path": "reference/old-vm/managed-task-context-readback-r1.py",
+      "sizeBytes": 8273,
+      "sha256": "d1dc026a39547cda75083bc332027d4ad6ba1d4a928bb18a12437d6fb859ccc5",
+      "sourceName": "managed-task-context-readback-r1.py"
+    },
+    {
+      "path": "reference/old-vm/scheduler-cmd-controller-r2.ps1",
+      "sizeBytes": 15620,
+      "sha256": "580e525959656a1f6c86da76c9a1b5e79667a4746379ca6aca91ccf41417c0de",
+      "sourceName": "scheduler-cmd-controller-r2.ps1"
+    },
+    {
+      "path": "reference/old-vm/scheduler-cmd-worker-r2.ps1",
+      "sizeBytes": 23295,
+      "sha256": "633f109c593798d95fcca657cb4edc2ab381a9cd8b5246332027bede0b46c2eb",
+      "sourceName": "scheduler-cmd-worker-r2.ps1"
+    },
+    {
+      "path": "reference/old-vm/scheduler-primary-controller-r6.ps1",
+      "sizeBytes": 17630,
+      "sha256": "80405853464eb9fc6d0d576f6978ff2e3cb70eb31938d86f7e36ebba8d7756c9",
+      "sourceName": "scheduler-primary-controller-r6.ps1"
+    },
+    {
+      "path": "reference/old-vm/scheduler-primary-worker-r6.ps1",
+      "sizeBytes": 13673,
+      "sha256": "ea1508ef30612e38c8152e8599f5474e110af396a37ce305b70408c1841b8878",
+      "sourceName": "scheduler-primary-worker-r6.ps1"
+    },
+    {
+      "path": "reference/old-vm/task-context-controller-r4.ps1",
+      "sizeBytes": 15112,
+      "sha256": "671bdc3f2fdc677191e6f9c80b901b00cd07c5006e7faca551f26231657fb1d6",
+      "sourceName": "task-context-controller-r4.ps1"
+    },
+    {
+      "path": "reference/old-vm/task-context-worker-r4.ps1",
+      "sizeBytes": 6655,
+      "sha256": "c6df7fc27f9addb17ce1991dc16b122554c5df88b9227f58c1beed76f4bb59ca",
+      "sourceName": "task-context-worker-r4.ps1"
+    }
+  ]
+}

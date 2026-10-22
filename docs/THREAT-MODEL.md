@@ -100,6 +100,16 @@ independent host canary requirements and cannot change `insufficientEvidence`.
 
 AIW fails closed. Unsupported or degraded behavior is not converted into a successful recommendation. A model cannot override deterministic findings; a package cannot inherit a Workbench verdict after mutation; and a launch profile expires or becomes invalid when its application, provider, OS, policy, or evidence binding drifts.
 
+Future MXC integration must also bind the effective containment tier, diagnostic
+mode, OS feature support and external broker coverage. Backend selection cannot
+silently weaken a required policy. Permissive/audit runs are policy research,
+never evidence that denied-access requirements passed. Denial reports and proposed
+grants are untrusted observations/advice, not authority to change policy; missing,
+truncated or undecodable observations remain gaps. Built-in tools, remote services,
+COM/IPC and credential brokers outside the workload boundary require separately
+identified enforcement and tests. Local account/session separation does not prove
+cloud identity attribution. See the [October 7 review gates](MXC-TRAJECTORY-REVIEW-2026-10-07.md#security-and-evidence-gates-to-add-to-benchmark-2).
+
 ## Explicit non-goals
 
 - Automatically declaring an application safe or automatically converting every legacy installer.

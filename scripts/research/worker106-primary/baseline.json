@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "aiw.dev/proxmox-worker-baseline/v1",
+  "vmId": "7e686bee-8c05-43c7-9603-a9562ece224c",
+  "node": "pve-r630",
+  "vmNumber": 106,
+  "name": "passkeys-worker",
+  "snapshotName": "aiw-vm106-baseline-20261021",
+  "snapshotUnixTime": 1792652723,
+  "vmstate": false,
+  "disks": [
+    "r630-fast2:vm-106-disk-0",
+    "r630-fast2:vm-106-disk-1",
+    "r630-fast2:vm-106-disk-2"
+  ],
+  "snapshotReadbackVerified": true,
+  "restoreTested": false
+}
