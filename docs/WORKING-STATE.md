@@ -80,17 +80,26 @@ at `4fe39b4`, explicitly excluding operator RID1001. Twelve focused native tests
 and both PS5.1/7 preparation controls passed; static-CRT release hash is
 `05f2ff8638adb3a156696de60bb1fd23341ee201a497c105359fa926d6d0e812`.
 This binary has not run on the worker; controls/lifecycle remain unmeasured.
-The user enabled VM107 networking and supplied `192.168.1.174`; RDP3389 is
-reachable, WinRM5985/5986 was not. Dev203 is `192.168.1.171`. Moving to Windows
-remoting instead of the drafted ISO transport. Client trust/credential prompt
-is prepared; worker WinRM bootstrap is pending. No trial account was created.
-Draft harness/controller/UI code is preserved outside the repo at
-`C:\AIW-Resume-20261021\worker107-msix-harness-draft-r1`; it is unfinished,
-not installed, and needs final tests/review before adaptation to WinRM.
-The old restricted Proxmox wrapper still requires link_down=1; it will refuse
-management while the NIC is enabled. The clean snapshot retains NIC down.
-Next establish authenticated WinRM and verify actual107 UUID before staging,
-then finish/review the fixed Scheduler control and actual app lifecycle.
+The user enabled VM107 networking at `192.168.1.174` and explicitly authorized
+all validation setup/accounts/software on 107. Its MAC matches the expected
+`CC:34:21:B8:5A:31`; user console output independently confirms UUID107.
+WinRM5985 is now reachable after the worker firewall fix, but authenticated
+`AIW\labadmin` sessions return Access denied. A read-only Security4625 and
+endpoint-permission question is pending; do not repeat login guesses or start
+an account window yet. Credentials are DPAPI-encrypted outside repo/evidence.
+VM203 remains development; do not touch VM106. AiwWorkerAdmin's reported106
+origin remains unverified; none of this session's trial account code has run.
+
+Closed WinRM harness `db2d9c3` and sealed payload passed independent source and
+artifact review. PS5.1/7 parse/render/native compilation/development-token checks
+passed. Payload: `C:\AIW-Resume-20261021\worker107-msix-payload-r1`, source
+`db2d9c37ec232f272982089a502a0d754d49b0b6`, manifest SHA-256
+`70b2276e2341324cffe94a745ca5d0207152daa0c80f73360e821b2b97bcb2ef`.
+Next connect and verify UUID/operator, Stage with those independently approved
+identities, inspect Stage result, then Enroll/restart/Prepare/Control before Trial.
+No remote upload, account creation, native control or installation was dispatched.
+The current Proxmox wrapper requires link_down=1 and refuses an enabled NIC.
+The clean snapshot retains NIC down; preserve exported evidence before recovery.
 Historical migration controllers and draft release remain unchanged.
 ## Direction and boundaries
 

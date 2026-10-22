@@ -465,3 +465,68 @@ was built and its directory listing inspected, but was not installed or attached
 The draft ISO's sourceCommit precedes its uncommitted draft harness and is not a
 release/provenance claim. Use the actual source files for subsequent adaptation;
 finish parsing/compilation/guard tests and exact review before executing them.
+## Reviewed WinRM harness; authentication prerequisite pending
+
+The user explicitly authorized creating accounts and installing needed software
+on validation VM107. Current development UUID203 and original seven accounts
+were read back unchanged. User-reported AiwWorkerAdmin on VM106 has not been
+attributed; no account-creation operation in this session has executed.
+
+The first connection was blocked before authentication: only RDP3389 was
+reachable on `192.168.1.174`; 5985/5986/445/135 were closed. Its MAC was observed
+as `CC-34-21-B8-5A-31`, matching107. The user then supplied console proof of the
+exact UUID107 and a local WinRM listener. TCP5985 became reachable, but two
+`New-PSSession` attempts with the supplied encrypted `AIW\labadmin` credential
+returned Access denied. No password contents were exposed. A scoped read-only
+request for hostname, Microsoft.PowerShell permissions and Security4625
+Status/SubStatus is pending; do not make repeated password guesses.
+This user-selected workgroup HTTP/Negotiate/TrustedHosts route assumes an
+operator-trusted lab network. It does not provide production cryptographic
+server-identity proof before authentication. The later UUID/SID guard remains a
+required operational wrong-target check, not a claim against LAN impersonation.
+
+`0213bf3` adapts the preserved draft into a closed Windows management harness.
+`db2d9c3` adds independently approved manifest/source identities, exact thirteen
+payload file names, post-transfer rehashing before SYSTEM dispatch, and a flushed
+CreateNew restart marker before reboot. One-shot requests prevent repeating
+account/install/input operations after uncertain transport. The normal operator
+may read status; executable worker operations require SYSTEM/session zero without
+impersonation and exact107 UUID. Protected evidence grants SYSTEM/operator full
+control and grants only the actual new trial SID read access where required.
+
+Both PowerShell5.1/7 checks parse eight sources/render both fixed Scheduler modes,
+compile the x64 keyboard INPUT helper and reject four executable operations from
+the normal development token. The initial test harness SizeOf overload failure
+and corrected receipts are preserved at
+`C:\AIW-Resume-20261021\worker107-winrm-validation-r1`. No GUI input or application
+execution occurred during these checks. Independent exact-source/artifact review
+found no remaining source/artifact blocker under the documented lab transport
+assumption. Earlier draft ISO transport is not installed or needed.
+
+Sealed from clean `db2d9c37ec232f272982089a502a0d754d49b0b6`:
+`C:\AIW-Resume-20261021\worker107-msix-payload-r1\bundle.json`, SHA-256
+`70b2276e2341324cffe94a745ca5d0207152daa0c80f73360e821b2b97bcb2ef`.
+All thirteen file hashes/lengths and nine normalized text sources independently
+match. Native image remains `05f2ff8638adb3a156696de60bb1fd23341ee201a497c105359fa926d6d0e812`.
+
+After authentication works, first use `invoke-worker107-msix.ps1 -Operation Connect`
+and retain exact UUID/operator evidence. Only then Stage with this concrete call:
+
+```powershell
+& C:\aiw\app-isolation-workbench\scripts\research\invoke-worker107-msix.ps1 -Operation Stage -PayloadDirectory C:\AIW-Resume-20261021\worker107-msix-payload-r1 -ApprovedSourceCommit db2d9c37ec232f272982089a502a0d754d49b0b6 -ApprovedManifestSha256 70b2276e2341324cffe94a745ca5d0207152daa0c80f73360e821b2b97bcb2ef
+```
+
+Inspect typed Status before advancing. Enroll creates the actual run-owned
+standard account with a 30-minute window and temporary one-time console sign-in;
+ClearLogon deletes that temporary password setting and a measured absence receipt
+is required before Prepare/Control/Trial/Export. Finish staging/review before
+starting that window. Restart is one-shot even if WinRM drops the response.
+Prepare derives session/SID from the real signed-in account; native checks bind
+its actual WTS token and authentication LUID. Control must pass before Trial.
+The fixed Edit task rechecks actual package/image/user/session/held-window identity
+before keyboard open/append/save/close; it never writes the test document itself.
+The native lifecycle independently validates exact saved bytes and cleanup.
+Export requires terminal operation evidence, labels failure/cold-recovery archives
+without success implications, and verifies cleanup receipts for a success claim.
+Collect retains and hashes the exact bounded archive on development203.
+No remote Stage/Enroll/Control/Trial has been dispatched yet.
