@@ -18,15 +18,16 @@ installation and initial SSH readback passed, including rejection of VM 203
 commands. The inherited-lock defect was confirmed and recovered by graceful
 shutdown; reviewed `3c9dc99` is installed. Fresh offline start, status and inspect
 pass; the guest agent reports Windows 11 build 26300, hostname AIW, no logged-in
-users. NIC remains disconnected. Fixed read-only `guest-preflight` is prepared
-for account/profile/auth-path inventory; installation is pending. The user
-specifically wants Tailscale logged out/uninstalled before any network connection.
-The user deleted its ProgramData and labadmin AppData folders and left the legacy
-system-profile path untouched. The reviewed probe sources are staged on Proxmox
-at `/home/aiw-codex/aiw-preflight-813d3b4`; root installation is the next action.
+users at boot. NIC remains disconnected. Reviewed `813d3b4` probe is now installed
+and passed as SYSTEM/session zero on exact UUID 107. Tailscale uninstall and all
+three documented state-path absences are verified, including the untouched legacy
+system-profile path. Seven local accounts remain; no research registration or
+Notepad++ process. The copied labadmin profile is loaded and authentication-path
+directories remain. User choice is pending: fresh clone profile (requires known
+local password and removes clone Desktop/Documents/settings) or targeted cleanup.
+No profile reset or credential cleanup has been executed by the agent.
 VM 106 folder concerns were resolved by the user as a separate Codex session;
-do not touch that VM. No fresh clean
-snapshot or restoration proof exists yet.
+do not touch that VM. No fresh clean snapshot or restoration proof exists yet.
 The previous VM 203
 snapshot/rollback plan is superseded:
 do not power-cycle or restore the development machine for trials. The installed

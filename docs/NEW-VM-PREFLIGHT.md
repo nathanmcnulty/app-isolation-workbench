@@ -295,6 +295,44 @@ retain the raw QGA object and parsed matching observation on VM 203. Do not infe
 Tailscale cleanup, profile freshness or recovery acceptance from an installer
 exit or absent service alone. Choose subsequent cleanup from actual observations.
 
+## Accepted guest preflight and remaining profile decision
+
+The user completed root installation. The restricted `guest-preflight` operation
+passed with a completed guest process, exit zero and matching parsed observation.
+Retained evidence on VM 203:
+`C:\AIW-Resume-20261021\worker107-preflight-r1\qga-result.json`,
+`observation.json`, `result.json` and `stage.json`. Observation SHA-256:
+`792dba98e1bec248672f7b53d8ca1db4b81023b9c0e4d25644bdec0804fcd3b3`.
+Observed at `2026-10-22T04:47:40.5714236Z` (October 21 in Alaska):
+
+- Exact worker UUID, SYSTEM SID `S-1-5-18`, process session zero, Windows 11
+  Enterprise build 26300 and inherited hostname `AIW`.
+- Seven local accounts, with the same cloned SID prefix
+  `S-1-5-21-3556347314-2314855617-1438300668`; labadmin RID 1001 enabled.
+- Only one nonspecial profile: `C:\Users\labadmin`, matching that account and
+  currently loaded. SYSTEM/LocalService/NetworkService profiles are special.
+- No Tailscale service or uninstall entry. All three documented state paths
+  are absent; this agrees with the user's uninstall/cleanup report and required
+  no deletion within the legacy system profile.
+- `.ssh`, `.azure`, `.codex`, Edge User Data and Windows credential/Vault/Protect
+  directories remain under the labadmin profile. Contents and credential validity
+  were not read or inferred. Chrome User Data is absent.
+- No research Notepad++ registration and no Notepad++ process.
+
+The user has been asked to choose between a fresh clone labadmin profile and
+targeted authentication cleanup. A fresh profile would remove the clone's
+Desktop/Documents/settings and cached sign-ins, and requires the known local
+account password for subsequent login; preserve the original profile on 203.
+No deletion is approved by the probe itself. Prepare a concrete scoped action
+after that choice; any full-profile removal must refuse the loaded profile and
+special/system profiles. Do not silently turn this into account deletion.
+
+The native driver and preparation helpers still pin the old Azure VM. The new
+operator has RID 1001, so a later identity rebind must explicitly reject the
+operator SID as the trial SID: the old `RID >= 1000` check implicitly excluded
+the old RID-500 operator but will no longer do so. Preserve that existing
+negative test and bind both parent/child worker UUID checks before live controls.
+
 Inspect and remove copied development authentication material from the clone
 before enabling its network or application trials; preserve the originals on 203.
 Then establish clone-specific identity, a fresh clean snapshot and verified
