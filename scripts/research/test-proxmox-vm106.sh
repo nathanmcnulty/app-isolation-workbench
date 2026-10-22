@@ -71,6 +71,7 @@ case "$*" in
     'listsnapshot 106') printf '%s\n' current ;;
     'shutdown 106 --timeout 120'|'start 106'|'snapshot 106 aiw-vm106-baseline-20261021 --vmstate 0'|'rollback 106 aiw-vm106-baseline-20261021')
         printf '%s\n' "$*" >> "$AIW_TEST_ROOT/mutations" ;;
+    'set 106 --net0 virtio=CC:34:21:7E:FE:59,bridge=vmbr0,link_down=1') printf '%s\n' "$*" >> "$AIW_TEST_ROOT/mutations" ;;
     *) printf 'Unexpected mock command: %s\n' "$*" >&2; exit 99 ;;
 esac
 MOCK
@@ -83,6 +84,8 @@ case "$*" in
     '/usr/local/libexec/aiw-vm106-prepare.py Verify') operation=worker-verify ;;
     '/usr/local/libexec/aiw-vm106-prepare.py Finalize') operation=worker-finalize ;;
     '/usr/local/libexec/aiw-vm106-prepare.py State') operation=worker-preparation-state ;;
+    '/usr/local/libexec/aiw-vm106-management.py Bootstrap') operation=worker-access ;;
+    '/usr/local/libexec/aiw-vm106-management.py Info') operation=worker-access-info ;;
     *) exit 99 ;;
 esac
 printf '%s\n' "$operation" >> "$AIW_TEST_ROOT/mutations"
@@ -117,8 +120,22 @@ run_pass worker-prepare worker-prepare
 run_pass worker-verify worker-verify
 run_pass worker-finalize worker-finalize
 run_pass worker-preparation-state worker-preparation-state
+run_pass worker-access worker-access
+run_pass worker-access-info worker-access-info
+run_pass worker-disconnect 'set 106 --net0 virtio=CC:34:21:7E:FE:59,bridge=vmbr0,link_down=1'
 run_reject 'worker-prepare other'
 run_reject 'worker-verify; whoami'
+run_reject 'worker-access arbitrary-code'
+# Both exact link states preserve identity; other bridges and MACs are rejected.
+sed 's/link_down=1/link_down=0/' "$work/base" > "$work/config"
+cp "$work/config" "$work/pending"
+run_pass inspect ''
+sed 's/bridge=vmbr0/bridge=vmbr9/' "$work/config" > "$work/changed"
+cp "$work/changed" "$work/config"
+cp "$work/config" "$work/pending"
+run_reject inspect
+cp "$work/base" "$work/config"
+cp "$work/base" "$work/pending"
 printf '%s\n' stopped > "$work/state"
 touch "$work/lock-busy"
 run_reject start
