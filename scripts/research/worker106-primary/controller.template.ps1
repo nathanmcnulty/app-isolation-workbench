@@ -37,7 +37,7 @@ $workerBytes=[Convert]::FromBase64String('@@WORKER_B64@@')
 $workerPath=$root+'\worker.ps1'
 $f=[IO.File]::Open($workerPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None);try{$f.Write($workerBytes,0,$workerBytes.Length);$f.Flush($true)}finally{$f.Dispose()}
 $workerHeld=[IO.File]::Open($workerPath,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
-$xmlHeld=$null;$registered=$null;$running=$null;$actionHeld=$null;$clean=$false;$actionVerified=$false;$nativeHeld=$null;$nativeExitConfirmed=$false
+$xmlHeld=$null;$registered=$null;$running=$null;$actionHeld=$null;$clean=$false;$nativeHeld=$null;$nativeExitConfirmed=$false
 $ps='C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
 $arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$workerPath+'"'
 $privileges=@('SeTcbPrivilege','SeAssignPrimaryTokenPrivilege','SeIncreaseQuotaPrivilege','SeImpersonatePrivilege','SeChangeNotifyPrivilege')
@@ -126,7 +126,6 @@ try {
  if($started.nonce -cne $nonce -or $started.sid -cne 'S-1-5-18' -or $started.sessionId -ne 0 -or $started.image -ine $ps){throw 'Action identity differs'}
  $actionHeld=[Diagnostics.Process]::GetProcessById($started.pid);$null=$actionHeld.Handle
  if($actionHeld.StartTime.ToUniversalTime().ToString('o') -cne $started.startedUtc -or $actionHeld.MainModule.FileName -ine $ps -or $actionHeld.SessionId -ne 0){throw 'Action generation differs'}
- $actionVerified=$true
  $instances=$registered.GetInstances(0)
  if($instances.Count -ne 1 -or $instances.Item(1).InstanceGuid -cne $running.InstanceGuid){throw 'Task instance differs'}
  while(!$actionHeld.HasExited -and [DateTime]::UtcNow -lt $deadline){Bind-Native;Start-Sleep -Milliseconds 100;$actionHeld.Refresh()}
