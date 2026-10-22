@@ -888,9 +888,11 @@ operator is a trial prerequisite failure, not evidence that the application is
 incompatible. Existing assessment standard-user controls remain the implementation
 to reuse; this research does not introduce a separate compatibility verdict.
 
-Installation and activation readiness must also stay separate. The latest worker
-proves that successful signed installation and payload verification do not establish
-a usable packaged activation session. Shared assessment should retain this as an
-unverified execution prerequisite until a matching activation control passes,
-preserving the successful installation observation without upgrading compatibility
-or isolation claims.
+Installation and activation readiness must also stay separate. The historical
+secondary-logon attempts above proved that successful signed installation and
+payload verification do not establish a usable packaged activation session. The
+subsequent VM 106 R5 trial passed the exact workflow in a verified primary
+standard-user session; it does not turn those earlier failed execution attempts
+into successes. [Assessment feedback](ASSESSMENT-REPORT.md#msix-research-feedback-and-report-boundary)
+records the measured lessons and the separate production authority gate, preserving
+installation, execution and isolation as distinct observations.

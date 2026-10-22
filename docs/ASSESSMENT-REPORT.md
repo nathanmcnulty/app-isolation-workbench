@@ -1,5 +1,47 @@
 # Retained MSI assessment report
 
+## MSIX research feedback and report boundary
+
+The [VM 106 MSIX trial](VM106-MSIX-TRIALS.md#complete-application-acceptance-r5-2026-10-22)
+completed the fixed signed Notepad++ workflow. It is separate research evidence,
+not an input to `report-wsb-msi` or an approved Windows Sandbox session. Existing
+historical reports retain their original coverage; none acquires these observations.
+
+| Measured lesson | Assessment interpretation |
+| --- | --- |
+| Installation and payload checks passed in earlier attempts while activation failed; R5 passed execution in a verified primary standard-user session. | Retain installation separately from activation readiness. A driver/session prerequisite failure does not establish application incompatibility. |
+| Before resuming R5's held application process, its actual image, package/AUMID, medium non-elevated token and session were checked. | Requested manifest runtime/capabilities and observed application identity are separate facts. A controller or collector token cannot stand in for the target token. |
+| The original portable source, explicit removal of `doLocalConf.xml`, signed delivery package and installed payload inventory have distinct identities. | Keep source, adaptation and delivery commitments separate; do not replace original application identity with the MSIX hash. |
+| The application saved exact document bytes and created observed per-user configuration while all 220 package payload entries remained unchanged. | A passing document function is scoped to those bytes and that workflow. Scoped configuration observations do not establish a complete dependency inventory. |
+| Normal uninstall was followed by registration, process and installation-path readback. | Command success is insufficient cleanup evidence; registration absence does not prove general user-data deletion. |
+| Full-trust packaged execution passed. | Effective isolation remains `notMeasured`. Package identity is not AppContainer, network-denial or outer-host containment proof. |
+
+The current production source intake, preparation, approval, session transaction
+and report reconstruction authorize specific MSI/Bambu Windows Sandbox requests.
+`CandidateConfiguration::Msix` describes candidate intent; it does not authorize
+execution. R5's fixed VM identity, primary WTS session, Scheduler custody and
+baseline restoration cannot be relabeled as that provider's authority. Neither
+`assembly.json` nor a research terminal receipt can be imported as an approved run.
+
+A future bounded production packet must bind a separate signed-delivery artifact,
+signer/package/entrypoint, assembly/adaptation inventory and runtime requirements
+alongside original-source authority. It must resolve a primary-interactive worker
+and exact cleanup/recovery binding before execution. Reuse protected held-file
+intake, preparation/approval binding, session custody, evidence-chain verification
+and receipt-last publication; extend verified observations and existing rendering
+together rather than add another verdict engine. Reject source/package/request/
+session drift, ambiguous launch, contradictory partial progress and unverified
+cleanup. Missing observations remain unmeasured. This is the next authority design
+gate, not an additional execution feature delivered by the research milestone.
+
+Relevant existing services are `HeldApplicationFile` / verified source import,
+`WsbPreparationReceipt`, `ApprovalRecord::for_plan`, `SessionTransaction`,
+`verify_completion_receipt` and `report_windows_sandbox_msi_run_bound`. Their current
+contracts remain unchanged. See [the lifecycle feedback](NOTEPAD-MSIX-LIFECYCLE.md#feedback-into-assessment)
+and [execution-plan boundaries](EXECUTION-PLAN.md).
+
+## Existing supported MSI report
+
 Bambu Studio's separate approved STL-to-3MF export uses `run report-wsb-bambu-run`; see [the Bambu profile](BAMBU-STUDIO-PROFILE.md) for its artifact verifier, retained evidence, and JSON/Markdown commands. Its export result does not inherit MSI editor or file/registry observations. [Mixed application report sets](REPORT-SETS.md) combine both profiles with distinct function columns.
 
 `run report-wsb-msi` rebuilds a deterministic JSON report from a completed Windows Sandbox MSI workspace. It returns the verified scenario, guest root-process token observation, and available functional and filesystem observations, the original project requirements, unmeasured scenarios, and missing assessment evidence. The outcome remains `insufficientEvidence`; successful application function observations do not produce a compatibility recommendation or containment verdict.

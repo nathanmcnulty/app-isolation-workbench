@@ -2,7 +2,7 @@
 
 Updated 2026-10-22. Start with `scripts/work-status.ps1`; this pointer is not a run
 receipt or execution authority. Active branch:
-`codex/proxmox-vm106-controller-20261021`.
+`codex/msix-assessment-feedback-20261022` (documentation after merged PR #99).
 
 ## Completed current slice
 
@@ -13,8 +13,9 @@ unchanged payload entries, normal uninstall and independent native/job/task clea
 The complete native terminal receipt passed. See [VM106-MSIX-TRIALS.md](VM106-MSIX-TRIALS.md)
 for exact hashes, failed attempts, driver fixes, tests and verified evidence export.
 [NOTEPAD-MSIX-LIFECYCLE.md](NOTEPAD-MSIX-LIFECYCLE.md) records bounded acceptance;
-production assessment/approval-contract integration remains open. Effective isolation
-is `notMeasured`, not inferred from delivery or function success.
+the measured lessons are now recorded in the existing assessment documentation.
+Production assessment/approval-contract integration remains a separate authority
+gate. Effective isolation is `notMeasured`, not inferred from delivery or function success.
 
 All 12 native tests passed. Actual held-handle exit and retained uninstall-path
 regressions passed under PowerShell 5.1 and 7. Independent consequential reviews
@@ -22,14 +23,24 @@ found no remaining findings; governance passed. GitHub CLI authentication and
 source pushes work. The unchanged private 60-file migration archive was downloaded
 and verified; historical assets/controllers remain unchanged.
 
-Integration PR #99 is open as a draft. Full local verification passed before a
+Integration PR #99 merged as `40fadd0e625d9bae49e04b332ef5a99114529fc6` after
+all three hosted jobs passed on exact reviewed head `06e513f`: Verify and audit,
+Minimum supported Rust, and Windows desktop (run `39760962776`). Full local verification passed before a
 dependency audit identified ZIP 2.4.2 advisories. The dependency is now ZIP 9.0.5
 in both lockfiles, with its required Rust 1.88 core minimum aligned across CI,
 local checks and current instructions. Eighty provider tests, both lockfile audits,
 stable workspace Clippy, actual Rust 1.88 all-target compilation and governance
 pass after the update. Independent review cleared the API adaptation and
 MSRV-enabled mechanical style changes. Existing nonfatal dependency-maintenance
-warnings remain visible; no advisory was suppressed. Final hosted CI is required.
+warnings remain visible; no advisory was suppressed.
+
+The documentation-only feedback follow-through distinguishes source/adaptation/
+delivery identity, installation from activation readiness, actual target identity
+from requested runtime, uninstall from user-data deletion, and function from
+effective isolation. It also corrects the old secondary-logon paragraph after R5.
+Independent review found no issue. See [ASSESSMENT-REPORT.md](ASSESSMENT-REPORT.md#msix-research-feedback-and-report-boundary).
+No research receipt is accepted as a production run; a future production packet
+must resolve approved primary-session worker/cleanup authority first.
 
 ## Worker and remote operation
 
