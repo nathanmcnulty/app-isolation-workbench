@@ -77,9 +77,29 @@ Every call checks root, the exact host, VM name and UUID. It accepts no shell te
 caller-selected VM ID or snapshot name. Snapshot/rollback require a stopped VM
 and use only `aiw-msix-baseline-20261021`. An existing snapshot is not overwritten.
 Install only as root-owned code with a `restrict,command=` public-key entry;
-the ordinary account must not be allowed to modify the wrapper. Installation
-and independent management readback are still pending. No power operation or
-snapshot creation has been dispatched.
+the ordinary account must not be allowed to modify the wrapper. The user
+installed the independently reviewed wrapper from `d6f293a`. Restricted root SSH
+`inspect` passed and `qm status 204` was rejected with exit 64 before dispatch.
+Readback is retained locally as `new-vm-preflight\proxmox-inspect-r1.txt` and
+`proxmox-rejected-command-r1.txt` under the migration root. `r630-bulk` is active
+LVM-thin: 833392640 KiB total, 129092519 used and 704300120 available. VM 203
+remains running with no snapshots. No power operation or snapshot creation has
+been dispatched.
+
+A flushed baseline marker at `C:\AIW-Recovery-Baseline-20261021\baseline.json`
+records the observed machine, source, operator, seven local account SIDs/enabled
+states and fresh nonce. SHA-256:
+`8fb923e208de8489ee454ccb3f8b533608a13f5104c9b52ff4be926317523434`.
+It is a recovery comparison marker, not privileged application evidence.
+
+Next, from the Proxmox root shell, use the fixed wrapper to inspect, cleanly
+shut down, create `aiw-msix-baseline-20261021`, exercise rollback to that fresh
+snapshot while still stopped, start and inspect. Retain the host transcript at
+`/root/aiw-vm203-baseline-20261021.log` without overwriting it. This must run on
+the host because the worker contains the active Codex session. After boot,
+compare the marker hash, exact accounts, VM identity and host snapshot/rollback
+readback before claiming a verified recovery boundary. No account or application
+trial may start merely because snapshot creation returned zero.
 
 Do not create the timed trial account or run the application before establishing
 and verifying recovery. Preserve current code and evidence outside this guest
