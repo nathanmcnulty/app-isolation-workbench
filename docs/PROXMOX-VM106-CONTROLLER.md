@@ -209,3 +209,37 @@ Local nonsecret evidence: `preparation-first-call.json`, `preparation-result.jso
 `credential-recovery-receipt.json`, `preparation-shutdown.json` and
 `preparation-restart.json`, under `C:\passkeys\worker106-tools`. Post-boot identity,
 tool inventory and human console sign-in still require their own receipts.
+
+Post-boot Verify PID 4472 finished at 05:23 UTC with exitcode 1:
+`Required system tool path missing`. Its completed journal and controller copy
+`preparation-postboot-verify-failed-original-path.json` are retained. Because the
+payload reached that check, its preceding name PASSKEYS-WORKER, account SID/group,
+copied sandbox disablement and fresh profile registration guards passed. It did
+not emit a complete tool inventory, so no missing-worker-tool identity is claimed.
+
+The verifier incorrectly assumed an MSI PowerShell installation. On the controller,
+the installed PS7.6.7 execution alias resolves to PSHOME
+`C:\Program Files\WindowsApps\Microsoft.PowerShell_7.6.7.0_x64__8wekyb3d8bbwe`;
+the MSI path is absent. Corrected payload source at
+`dcef8bef278951514dbdbf278ddb053f8e51ac4f` uses that exact global package binary
+plus Windows PowerShell 5.1, and emits the complete inventory before any missing
+path error. All eight paths exist on the controller; guest presence and fresh-user
+PS7 registration/execution remain unmeasured until their own checks. The seven
+journal tests passed again and independent review found no actionable payload
+finding. A selectable private credential dialog was opened in controller session
+1; no password was printed or automatically copied.
+
+The corrective updater is `scripts/research/update-proxmox-vm106-inventory.sh`
+at `592fcaa8c35f8c73fe83ad0f2ef5fce2075517bc`, SHA-256
+`33d31c8d9c9d0ec6689ed23106a8410d48b06951d7acbc1d1d91bfc02a194864`.
+It verifies the expected helper before executing inspection, holds the existing
+lock, rechecks deployed file hashes, requires all existing preparation-operation
+journals finished and Prepare successful, then replaces only the two fixed
+payload/runner files. It does not change accounts, credentials, journals, helper,
+network or power. The expected new payload/runner hashes are
+`fb561897488440a1cb89859f988e3e4e2e807e7ab4832d4b2cc53b8d60700182` and
+`ac547718637d6518c7acef468c1e5daf9e473660d137941a144e0dd22e937755`.
+Shell parsing passed; independent review's initial verify-before-execute ordering
+finding was fixed and confirmed. Preserve partial updates for review. After host
+update, collect a fresh Verify observation without rerunning Prepare; the old
+Prepare hash remains a deliberate refusal if account setup is requested again.

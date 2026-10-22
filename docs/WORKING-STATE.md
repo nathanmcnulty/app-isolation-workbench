@@ -21,8 +21,11 @@ controller document for evidence and retained host journals. Offline preparation
 completed: fresh AiwWorkerAdmin SID ending 1006/profile created, credential logon
 validated and recovered into controller DPAPI storage, copied sandbox accounts
 disabled, rename staged. A graceful stopped/readback/start cycle completed.
-Post-boot verification, fresh admin console sign-in, finalization, baseline snapshot
-and the driver rebind remain open; copied labadmin is retained until console login.
+Post-boot verification passed name/account/profile checks, then failed an incorrect
+hardcoded MSI-layout PowerShell path. A reviewed Store-layout inventory correction
+is ready for the host; do not repeat account creation. Fresh admin console sign-in,
+corrected verification, finalization, baseline snapshot and driver rebind remain open;
+copied labadmin is retained until console login.
 No application acceptance is claimed.
 Keep the original PASSKEYS VM as controller.
 
