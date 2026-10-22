@@ -1,6 +1,21 @@
 #requires -Version 5.1
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
+# Check the actual Windows account API's description limit without creating users.
+$tokens=$null;$errors=$null
+$workerAst=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'worker107-msix.ps1'),[ref]$tokens,[ref]$errors)
+$createUser=@($workerAst.FindAll({param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'New-LocalUser'},$true))
+if($createUser.Count -ne 1){throw 'One closed account creation command required'}
+$elements=$createUser[0].CommandElements
+$description=$null
+for($index=0;$index -lt $elements.Count-1;$index++){
+    if($elements[$index] -is [Management.Automation.Language.CommandParameterAst] -and $elements[$index].ParameterName -eq 'Description'){
+        if($elements[$index+1] -isnot [Management.Automation.Language.StringConstantExpressionAst]){throw 'Literal trial account description required'}
+        $description=$elements[$index+1].Value
+    }
+}
+$limits=@((Get-Command New-LocalUser).Parameters['Description'].Attributes|Where-Object{$_ -is [Management.Automation.ValidateLengthAttribute]})
+if(!$description -or $limits.Count -ne 1 -or $description.Length -gt $limits[0].MaxLength -or $description.Length -lt $limits[0].MinLength){throw 'Trial account description violates Windows API constraint'}
 . (Join-Path $PSScriptRoot 'worker107-msix-templates.ps1')
 $parsed=0
 foreach($name in @('worker107-msix.ps1','worker107-editor.ps1','invoke-worker107-msix.ps1','build-worker107-msix-payload.ps1')){

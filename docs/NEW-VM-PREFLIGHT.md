@@ -568,3 +568,25 @@ inventory and absence of any started-operation markers twice, retains external
 task XML/SDDL evidence, deletes only the never-run transport task and preserves
 the entire intake at `C:\AIW-Worker107-Intake-before-system-name-fix-r1` before
 a fresh Stage. No installer or account creation is retried.
+
+That bounded recovery completed and fresh Stage passed at2026-10-22T07:53:40Z.
+The worker retained the original signed payload identity and observed no created
+account or application execution. Status initially encountered the remote
+session's default Restricted execution policy; it now launches only the fixed
+read-only Status source through a process-only Bypass invocation, with native
+exit checking. Live Status confirmed Stage success.
+
+Enroll stopped at07:55:25Z before New-LocalUser execution: its literal description
+was61characters, exceeding the Windows cmdlet's48-character ValidateLength bound.
+No account receipt or automatic-sign-in setting was reached. The description is
+now47characters; bothPowerShell test runs extract it via AST and compare it to the
+actual Windows cmdlet metadata without creating an account. The later Edit
+registration guard also resolves account names to SID before exact comparison,
+retaining logon3/runlevel0 and the pinned trial-user SID requirement.
+Early-failure recovery requires exact UUID/operator, terminal inactive task
+definitions, original manifest/content hashes, the exact description failure,
+no trial account/package/process/automatic-sign-in material/later markers and
+empty native output. It flushes an external task/failure preimage before removing
+only the two inactive outer tasks and preserving all five preparation directories
+under `C:\AIW-Worker107-PreparationFailure-r1`. This is a fresh preparation after
+a proven pre-creation validation failure, not a retry of an account or installer.

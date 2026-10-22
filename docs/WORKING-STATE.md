@@ -101,11 +101,14 @@ passed. Payload: `C:\AIW-Resume-20261021\worker107-msix-payload-r1`, source
 `70b2276e2341324cffe94a745ca5d0207152daa0c80f73360e821b2b97bcb2ef`.
 Next connect and verify UUID/operator, Stage with those independently approved
 identities, inspect Stage result, then Enroll/restart/Prepare/Control before Trial.
-The payload uploaded and the Stage SYSTEM task registered, but the controller
-stopped before RunEx because Scheduler normalized its principal to `SYSTEM`.
-Readback proves the exact task never ran; no request or worker root exists.
-The guard now resolves account names to SID before requiring S-1-5-18. A bounded
-recovery preserves the intake and task evidence before fresh Stage; no account,
+Stage passed after resolving Scheduler's `SYSTEM` name to its exact SID and
+preserving the initial never-run task/intake. Enroll then failed parameter
+validation before creating any account: its61-character Description exceeds
+Windows'48-character limit. The source now uses47characters and checks the
+literal against actual Windows cmdlet metadata in bothPowerShell test runs.
+Edit's registered user name is also resolved to SID before exact comparison.
+Status now uses a fixed process-only execution-policy invocation. Preserve the
+early enrollment failure before fresh reviewed staging; no trial account,
 native control or installation has executed.
 The current Proxmox wrapper requires link_down=1 and refuses an enabled NIC.
 The clean snapshot retains NIC down; preserve exported evidence before recovery.

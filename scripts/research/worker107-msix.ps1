@@ -140,7 +140,7 @@ if ($Operation -eq 'Enroll') {
         try { $rng.GetBytes($random); $password = 'Aa9!'+[Convert]::ToBase64String($random) } finally { $rng.Dispose(); [Array]::Clear($random,0,$random.Length) }
         $secure = ConvertTo-SecureString $password -AsPlainText -Force
         $before = [DateTime]::UtcNow.ToFileTimeUtc()
-        $user = New-LocalUser -Name AiwStandardUser -Password $secure -AccountExpires ([DateTime]::UtcNow.AddMinutes(30)) -Description 'Disposable AIW107 MSIX trial; restore checkpoint after export'
+        $user = New-LocalUser -Name AiwStandardUser -Password $secure -AccountExpires ([DateTime]::UtcNow.AddMinutes(30)) -Description 'Disposable AIW107 MSIX trial; restore after use'
         $sid = $user.SID.Value
         if ($sid -ceq $operatorSid -or $sid -cnotmatch '\AS-1-5-21-3556347314-2314855617-1438300668-[0-9]+\z') { throw 'Created account identity differs' }
         Add-LocalGroupMember -SID 'S-1-5-32-545' -Member $user
@@ -255,7 +255,9 @@ if($Operation -eq 'Edit') {
     $action=$task.Actions.Create(0);$action.Path='C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
     $action.Arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\AIW-Worker107-UI-r1\worker107-editor.ps1'
     $registered=$folder.RegisterTaskDefinition(('AIW107-Edit-'+$account.runNonce),$task,0x12,$account.userSid,$null,3,'O:SYG:SYD:P(A;;FA;;;SY)')
-    if($registered.Definition.Principal.UserId -cne $account.userSid -or $registered.Definition.Principal.LogonType -ne 3 -or $registered.Definition.Principal.RunLevel -ne 0){throw 'Interactive edit task principal differs'}
+    $registeredUser=$registered.Definition.Principal.UserId
+    $registeredSid=if($registeredUser -match '\AS-1-'){[Security.Principal.SecurityIdentifier]::new($registeredUser).Value}else{([Security.Principal.NTAccount]::new($registeredUser)).Translate([Security.Principal.SecurityIdentifier]).Value}
+    if($registeredSid -cne $account.userSid -or $registered.Definition.Principal.LogonType -ne 3 -or $registered.Definition.Principal.RunLevel -ne 0){throw 'Interactive edit task principal differs'}
     $instance=$registered.RunEx($null,0,0,$null)
     Write-Record 'Edit.result.json' @{dispatched=$true;completion='see native lifecycle and ui-edit-result';taskPath=$registered.Path;instanceGuid=$instance.InstanceGuid;runNonce=$account.runNonce}
     Read-Record 'Edit.result.json'|ConvertTo-Json

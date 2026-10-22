@@ -88,7 +88,11 @@ try {
                 elseif(Test-Path -LiteralPath (Join-Path $intake ($op+'.request.json'))){$operations[$op]=@{completed=$false;automaticRetry=$false}}
             }
             $worker=$null
-            if(Test-Path -LiteralPath 'C:\AIW-Worker107-Research-r1\Stage.result.json'){$worker=(& 'C:\AIW-Worker107-Research-r1\worker107-msix.ps1' -Operation Status)|ConvertFrom-Json}
+            if(Test-Path -LiteralPath 'C:\AIW-Worker107-Research-r1\Stage.result.json'){
+                $lines=& 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\AIW-Worker107-Research-r1\worker107-msix.ps1' -Operation Status
+                if($LASTEXITCODE -ne 0){throw 'Worker status read failed'}
+                $worker=($lines -join "`n")|ConvertFrom-Json
+            }
             [pscustomobject]@{operations=$operations;worker=$worker}
         }
         $status|ConvertTo-Json -Depth 18
