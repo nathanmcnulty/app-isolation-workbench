@@ -2,10 +2,13 @@
 [CmdletBinding()]
 param(
     [switch]$ObserveCurrent,
-    [string]$SourceRoot = (Join-Path (Split-Path -Parent $PSScriptRoot) 'crates/aiw-windows-platform/src')
+    [string]$SourceRoot
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if (!$SourceRoot) {
+    $SourceRoot = Join-Path (Split-Path -Parent $PSScriptRoot) 'crates/aiw-windows-platform/src'
+}
 Add-Type -Path @((Join-Path $SourceRoot 'research_msix_native.cs'), (Join-Path $SourceRoot 'research_msix_interactive.cs'))
 $sid = 'S-1-5-21-1-2-3-1000'
 function New-Observation {
