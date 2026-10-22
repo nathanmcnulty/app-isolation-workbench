@@ -130,6 +130,10 @@ run_reject 'worker-access arbitrary-code'
 sed 's/link_down=1/link_down=0/' "$work/base" > "$work/config"
 cp "$work/config" "$work/pending"
 run_pass inspect ''
+sed 's/,link_down=0//' "$work/config" > "$work/changed"
+cp "$work/changed" "$work/config"
+cp "$work/config" "$work/pending"
+run_pass inspect ''
 sed 's/bridge=vmbr0/bridge=vmbr9/' "$work/config" > "$work/changed"
 cp "$work/changed" "$work/config"
 cp "$work/config" "$work/pending"

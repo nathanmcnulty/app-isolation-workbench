@@ -37,10 +37,11 @@ verify_config() {
         printf '%s\n' "$1" | grep -Fx "$expected" >/dev/null || return 1
     done
     # The human requested standard remote management after fresh console login.
-    # Only these two exact link states are authorized; MAC/bridge remain pinned.
+    # Proxmox omits link_down=0 when saving an enabled NIC through the UI.
+    # Accept its canonical enabled form too; MAC/bridge remain pinned.
     network=$(printf '%s\n' "$1" | grep '^net0:')
     case "$network" in
-        'net0: virtio=CC:34:21:7E:FE:59,bridge=vmbr0,link_down=1'|'net0: virtio=CC:34:21:7E:FE:59,bridge=vmbr0,link_down=0') ;;
+        'net0: virtio=CC:34:21:7E:FE:59,bridge=vmbr0,link_down=1'|'net0: virtio=CC:34:21:7E:FE:59,bridge=vmbr0,link_down=0'|'net0: virtio=CC:34:21:7E:FE:59,bridge=vmbr0') ;;
         *) return 1 ;;
     esac
     # Alternate network devices and host execution hooks are outside this boundary.
