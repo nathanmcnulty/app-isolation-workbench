@@ -173,7 +173,19 @@ fn provider(
     }
     Ok(value)
 }
+fn powershell_workspace_path(workspace: &Path) -> Result<PathBuf> {
+    // Held workspace paths may carry the Win32 verbatim prefix. PowerShell 5.1's
+    // FileSystem provider cannot Join-Path that form. Keep the held identity and
+    // pass its equivalent local DOS spelling to the fixed transport only.
+    let spelling = workspace
+        .to_str()
+        .context("Unicode workspace path required")?;
+    Ok(PathBuf::from(
+        spelling.strip_prefix(r"\\?\").unwrap_or(spelling),
+    ))
+}
 fn transport(operation: &str, run_id: &str, workspace: &Path) -> Result<Value> {
+    let workspace = powershell_workspace_path(workspace)?;
     command_json(
         Command::new(PS)
             .args([
@@ -185,11 +197,12 @@ fn transport(operation: &str, run_id: &str, workspace: &Path) -> Result<Value> {
             ])
             .arg(workspace.join("tools/transport.ps1"))
             .args(["-Operation", operation, "-RunId", run_id, "-Workspace"])
-            .arg(workspace),
+            .arg(&workspace),
         120,
         32 * 1024 * 1024,
     )
 }
+
 fn write_tools(workspace: &HeldRunWorkspace, name: &str, bytes: &[u8]) -> Result<()> {
     let mut file = workspace.create_tools_file_new(name)?;
     file.as_file_mut().write_all(bytes)?;
@@ -219,7 +232,9 @@ fn read_stage(workspace: &HeldRunWorkspace, name: &str) -> Result<Value> {
 fn wait_clean(workspace: &Path, run_id: &str) -> Result<Value> {
     let start = Instant::now();
     let mut last = String::new();
-    while start.elapsed() < Duration::from_secs(180) {
+    // The cold checkpoint boots with its NIC down. Restored Windows networking
+    // and WinRM have taken several minutes to become ready after hot reconnect.
+    while start.elapsed() < Duration::from_secs(360) {
         match transport("Clean", run_id, workspace) {
             Ok(value) => return Ok(value),
             Err(error) => last = error.to_string(),
@@ -868,4 +883,23 @@ fn finish_recovery(
         summary,
     )?)?;
     read_report(workspace.root_path(), run_id)
+}
+
+#[cfg(test)]
+mod transport_path_tests {
+    use super::*;
+
+    #[test]
+    fn held_canonical_workspace_is_usable_by_powershell_filesystem_provider() {
+        let root = std::env::temp_dir().canonicalize().unwrap();
+        let path = powershell_workspace_path(&root).unwrap();
+        let result = command_json(
+            Command::new(PS)
+                .args(["-NoProfile", "-NonInteractive", "-Command", "$ErrorActionPreference='Stop'; $p=Join-Path $env:AIW_MSIX_PATH_TEST 'tools'; @{ usable=($p -like '*\\tools') -and (Test-Path -LiteralPath $env:AIW_MSIX_PATH_TEST) } | ConvertTo-Json -Compress"])
+                .env("AIW_MSIX_PATH_TEST", &path),
+            30,
+            4096,
+        ).unwrap();
+        assert_eq!(result["usable"], true);
+    }
 }

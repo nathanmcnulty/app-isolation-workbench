@@ -14,27 +14,28 @@ recovery and shared retained assessment reader are implemented in this checkout.
 Recovery never repeats application operations. New `msixVm` assessment selections
 use original-host protected evidence; historical `msixResearch` pins remain intact.
 
-A Windows Security Warning is pending for the console-observed VM107 HTTPS
-certificate BC14DCC4E37F83161EBB55AF8624E36A79E19256. User action was requested
-because computer-use guidance prohibits acting on security permission dialogs.
-Certificate is **not yet trusted**. Do not bypass CA validation. Public certificate
-is C:\AIW-Resume-20261021\worker107-public.cer; no private key was exported.
+VM107's public certificate is now trusted after operator approval; normal HTTPS
+WinRM identity validation passed. The production107-only wrapper is deployed and
+its SHA matches the app preparation. Clean-source package d78ec1a was built and
+its six-file inventory verified.
 
-No new application trial or worker mutation has occurred during this integration.
-The reviewed production Proxmox wrapper is **not deployed**. Its Linux-console
-install text was prepared outside the repo but has become stale after later
-source edits: regenerate from current LF-normalized source and SHA before use.
-Edge is authenticated root@pam on pve-r630, node Shell. Do not paste into Windows
-terminals or act on the overlaid certificate dialog. Current forced SSH wrapper
-still has the earlier research grammar. Never change its key to generic SSH.
+The first desktop-approved production attempt msix-1792693343407226300 failed
+before staging: Windows PowerShell5.1 Join-Path rejects the held workspace's
+verbatim path prefix. Initial and final cold restore/reconnect proofs passed;
+the lease remains retained because that same path error blocked clean readback.
+A separate fixed read-only transport call subsequently verified clean inventory
+and normal HTTPS. Do not replay this application attempt. Recover its exact lease
+using the corrected desktop, then prepare a fresh approved run.
 
-Current checks and logs: production-msix-* under C:\AIW-Resume-20261021.
-Core/runner tests, shared-verifier tests,8 GUI gates,13 UI tests, provider mock,
-2 native provenance tests and the approved-deadline test passed. Broad Windows
-checks had173passes/10ignored and one old job-membership expectation; after
-tightening that expectation all12 focused lifecycle tests passed. Component/GUI
-Clippy, formatting, governance and static-CRT release compilation passed.
-Clean-source package assembly and live deployment/validation remain.
+The correction passes the held path's equivalent DOS spelling only at the
+PowerShell boundary. A real PowerShell FileSystem-provider regression passed.
+Cold-readback wait is6minutes because restored networking can take several
+minutes after reconnect. Full logs and the unsigned package are outside the repo
+under C:\AIW-Resume-20261021\production-msix-*.
+Core/runner, native lifecycle, GUI/UI, provider mocks, Clippy, format and governance
+checks passed before d78ec1a; path-fix admin suite36passed and new regression1passed.
+Production lifecycle acceptance still requires fresh execution and final recovery.
+
 The baseline b039e02 read-only report integration and pinned r5 fixture remain
 historical evidence, not a fresh production execution receipt.
 
