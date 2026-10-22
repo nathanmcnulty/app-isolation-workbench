@@ -1,7 +1,8 @@
+param([ValidatePattern('^C:\\passkeys\\worker106-tools\\primary-vm106-r[0-9]+$')][string]$ReceiptRoot='C:\passkeys\worker106-tools\primary-vm106-r1')
 # Controller-only rendering of the closed archived Scheduler templates.
 $ErrorActionPreference='Stop'
 if((Get-CimInstance Win32_ComputerSystemProduct).UUID -ieq '7e686bee-8c05-43c7-9603-a9562ece224c'){throw 'Render on controller only'}
-$root='C:\passkeys\worker106-tools\primary-vm106-r1'
+$root=$ReceiptRoot
 $account=Get-Content -LiteralPath (Join-Path $root 'created.json') -Raw|ConvertFrom-Json
 $prepared=Get-Content -LiteralPath (Join-Path $root 'preparation.json') -Raw|ConvertFrom-Json
 $nonce=[string]$account.runNonce;$sid=[string]$account.userSid;$hash=[string]$prepared.preparationSha256
