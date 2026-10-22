@@ -1,5 +1,13 @@
 #![forbid(unsafe_code)]
 
+mod msix_worker;
+pub use msix_worker::safe_run_id as valid_msix_run_id;
+pub use msix_worker::{
+    MSIX_ASSEMBLY_SHA256, MSIX_PACKAGE_SHA256, MSIX_SIGNING_SHA256, MSIX_WORKER_CHECKPOINT,
+    MSIX_WORKER_REQUEST_SCHEMA, MSIX_WORKER_UUID, MsixWorkerRequest, VmMsixPhase, VmMsixRecipe,
+    VmMsixWorkerProfile,
+};
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs::{self, File};
@@ -38,6 +46,7 @@ const MAX_RELATIVE_PATH_BYTES: usize = 1_024;
 pub enum ApplicationInspectionKind {
     Msi,
     Exe,
+    Msix,
     PortableDirectory,
 }
 
@@ -1170,14 +1179,17 @@ pub fn inspect_application_source(
         .map_err(|_| ApplicationInspectionError::InvalidSource)?;
     let canonical_path = display_path(&canonical)?;
     match kind {
-        ApplicationInspectionKind::Msi | ApplicationInspectionKind::Exe => {
+        ApplicationInspectionKind::Msi
+        | ApplicationInspectionKind::Exe
+        | ApplicationInspectionKind::Msix => {
             if !metadata.is_file() {
                 return Err(ApplicationInspectionError::InvalidSource);
             }
-            let expected = if kind == ApplicationInspectionKind::Msi {
-                "msi"
-            } else {
-                "exe"
+            let expected = match kind {
+                ApplicationInspectionKind::Msi => "msi",
+                ApplicationInspectionKind::Exe => "exe",
+                ApplicationInspectionKind::Msix => "msix",
+                ApplicationInspectionKind::PortableDirectory => unreachable!(),
             };
             if !canonical
                 .extension()

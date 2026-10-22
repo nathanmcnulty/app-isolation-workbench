@@ -22,7 +22,17 @@ pub struct MsixAssessmentSelection {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct VmMsixAssessmentSelection {
+    pub id: String,
+    pub workspace: PathBuf,
+    pub run_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ApplicationAssessmentInput {
+    #[serde(default)]
+    pub msix_vm: Vec<VmMsixAssessmentSelection>,
     pub schema_version: String,
     #[serde(default)]
     pub msix_research: Vec<MsixAssessmentSelection>,
@@ -32,7 +42,8 @@ pub struct ApplicationAssessmentInput {
 
 impl ApplicationAssessmentInput {
     pub fn validate(&self) -> Result<(), String> {
-        let count = self.msix_research.len()
+        let count = self.msix_vm.len()
+            + self.msix_research.len()
             + self
                 .windows_sandbox
                 .as_ref()
@@ -75,6 +86,24 @@ impl ApplicationAssessmentInput {
                 return Err("MSIX archive requires a bounded absolute path".into());
             }
         }
+        for entry in &self.msix_vm {
+            if entry.id.is_empty()
+                || entry.id.len() > 128
+                || !entry
+                    .id
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b))
+                || !ids.insert(entry.id.to_ascii_lowercase())
+                || !aiw_probe::valid_msix_run_id(&entry.run_id)
+                || !entry.workspace.is_absolute()
+                || entry
+                    .workspace
+                    .to_str()
+                    .is_none_or(|p| p.len() > 32767 || p.chars().any(char::is_control))
+            {
+                return Err("Invalid or duplicate production VM MSIX selection".into());
+            }
+        }
         Ok(())
     }
 }
@@ -82,6 +111,7 @@ impl ApplicationAssessmentInput {
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(tag = "kind", content = "evidence", rename_all = "camelCase")]
 pub enum ApplicationAssessmentSource {
+    VmMsix(Box<crate::VmMsixAssessmentReport>),
     WindowsSandbox(Box<WsbReportSetRow>),
     MsixResearch(Box<MsixLifecycleReport>),
     Unavailable(ReportSetUnavailableReason),
@@ -129,6 +159,34 @@ pub fn report_application_assessment(
         }
     }
     let mut seen_archives = BTreeSet::new();
+    #[cfg(windows)]
+    let mut seen_vm_runs = BTreeSet::new();
+    for selection in &input.msix_vm {
+        #[cfg(windows)]
+        let source = match crate::report_vm_msix_run(&selection.workspace, &selection.run_id) {
+            Ok(report) if seen_vm_runs.insert(report.request_sha256.clone()) => {
+                ApplicationAssessmentSource::VmMsix(Box::new(report))
+            }
+            Ok(_) => {
+                ApplicationAssessmentSource::Unavailable(ReportSetUnavailableReason::DuplicateRun)
+            }
+            Err(_) => ApplicationAssessmentSource::Unavailable(
+                ReportSetUnavailableReason::EvidenceRejected,
+            ),
+        };
+        #[cfg(not(windows))]
+        let source =
+            ApplicationAssessmentSource::Unavailable(ReportSetUnavailableReason::EvidenceRejected);
+        let functions = match &source {
+            ApplicationAssessmentSource::VmMsix(report) => report.functions.clone(),
+            _ => ApplicationReportFunctions::default(),
+        };
+        entries.push(ApplicationAssessmentRow {
+            id: selection.id.clone(),
+            functions,
+            source,
+        });
+    }
     for selection in &input.msix_research {
         let source = match crate::report_msix_lifecycle(&selection.archive, selection.profile) {
             Ok(report) if seen_archives.insert(report.archive_sha256.clone()) => {
@@ -175,9 +233,10 @@ pub fn report_application_assessment(
 
 impl ApplicationAssessmentReport {
     pub fn to_markdown(&self) -> String {
-        let mut out = "# Application assessment observations\n\nOverall assessment: insufficient evidence. General compatibility and isolation: unmeasured. Function results apply only to the retained workflow. Cleanup is historical; no worker was contacted. MSIX entries are reviewed research evidence, not production assessment runs.\n\n| Entry | Evidence | Install | Launch | Open document | Edit/save | Close | Uninstall | STL to 3MF |\n|---|---|---|---|---|---|---|---|---|\n".to_owned();
+        let mut out = "# Application assessment observations\n\nOverall assessment: insufficient evidence. General compatibility and isolation: unmeasured. Function results apply only to the retained workflow. Cleanup is historical; no worker was contacted. Sources distinguish reviewed research from production VM execution.\n\n| Entry | Evidence | Install | Launch | Open document | Edit/save | Close | Uninstall | STL to 3MF |\n|---|---|---|---|---|---|---|---|---|\n".to_owned();
         for row in &self.entries {
             let source = match &row.source {
+                ApplicationAssessmentSource::VmMsix(_) => "Retained VM MSIX execution",
                 ApplicationAssessmentSource::MsixResearch(_) => "Reviewed MSIX research",
                 ApplicationAssessmentSource::WindowsSandbox(_) => "Retained Windows Sandbox",
                 ApplicationAssessmentSource::Unavailable(
@@ -230,6 +289,7 @@ mod tests {
     use super::*;
     fn input() -> ApplicationAssessmentInput {
         ApplicationAssessmentInput {
+            msix_vm: vec![],
             schema_version: APPLICATION_ASSESSMENT_INPUT_SCHEMA.into(),
             windows_sandbox: None,
             msix_research: vec![MsixAssessmentSelection {

@@ -6,39 +6,37 @@ VM203. This file is a pointer, not an execution receipt.
 
 ## Current app-work slice
 
-The verified MSIX lifecycle now feeds shared assessment through
-`aiw run report-assessment --input <manifest> --format json|markdown`.
-[REPORT-SETS.md](REPORT-SETS.md) documents the closed manifest and commands;
-`examples/msix-research-assessment.json` runs directly from this checkout.
-The new report reuses ApplicationReportFunctions, RunOutcome and existing evidence
-gaps, delegating retained Sandbox verification to the existing reader. Legacy
-Sandbox JSON/Markdown remains unchanged. Shared schemas are available through
-`schema application-assessment-input` and `schema application-assessment-report`.
+Production VM MSIX execution is now being integrated in the desktop, **not yet
+live validated**. See [MSIX-EXECUTION.md](MSIX-EXECUTION.md) for scope and acceptance.
+The new fixed VM107 provider, nonce lease, native agent, protected preparation,
+approval/Start, WinRM transport, console editing instructions, collection, cold
+recovery and shared retained assessment reader are implemented in this checkout.
+Recovery never repeats application operations. New `msixVm` assessment selections
+use original-host protected evidence; historical `msixResearch` pins remain intact.
 
-The MSIX reader accepts ONLY the independently reviewed r5 archive digest, before
-ZIP/JSON parsing. New archives cannot supply their own acceptance hash. It projects
-native/controller terminal acceptance and retains source/adaptation, signed package,
-observed token, exact document, per-user configuration, payload and cleanup records.
-It does not launch/install/connect to a worker. Overall outcome stays
-insufficientEvidence; general compatibility/isolation stay notMeasured.
-A production MSIX execution adapter and admission of future trial records remain
-separate work requiring the protected intake/approval/session/receipt contracts.
+A Windows Security Warning is pending for the console-observed VM107 HTTPS
+certificate BC14DCC4E37F83161EBB55AF8624E36A79E19256. User action was requested
+because computer-use guidance prohibits acting on security permission dialogs.
+Certificate is **not yet trusted**. Do not bypass CA validation. Public certificate
+is C:\AIW-Resume-20261021\worker107-public.cer; no private key was exported.
 
-Validation: runner+CLI174passed/0failed/16opt-in ignored, formatting and all-target
-component Clippy with warnings denied passed. Public JSON/Markdown/schema commands,
-locked desktop metadata and governance passed; independent review cleared scope
-and legacy behavior. Full logs and generated reports are outside the repository
-under C:\AIW-Resume-20261021\shared-assessment-* and shared-msix-assessment.*.
+No new application trial or worker mutation has occurred during this integration.
+The reviewed production Proxmox wrapper is **not deployed**. Its Linux-console
+install text was prepared outside the repo but has become stale after later
+source edits: regenerate from current LF-normalized source and SHA before use.
+Edge is authenticated root@pam on pve-r630, node Shell. Do not paste into Windows
+terminals or act on the overlaid certificate dialog. Current forced SSH wrapper
+still has the earlier research grammar. Never change its key to generic SSH.
 
-Reproducible fixture `fixtures/msix-lifecycle/worker107-r5.zip` is the exact
-285340-byte/118-entry archive SHA256
-768e9ade771bbc3345067c82745c15f2d7c0ed31c4c8e281d437d14a27c321b3.
-It contains no MSIX/executable/credential/private key/account password. Fixture
-README records provenance and the retained upstream configuration license.
-The original external archive and connection/readback observations remain under
-C:\AIW-Resume-20261021\worker107-msix-lifecycle-r5 and worker107-connection-r5.
-[NOTEPAD-MSIX-LIFECYCLE.md](NOTEPAD-MSIX-LIFECYCLE.md) retains the measured result;
-[NEW-VM-PREFLIGHT.md](NEW-VM-PREFLIGHT.md) retains setup/failures/recovery.
+Current checks and logs: production-msix-* under C:\AIW-Resume-20261021.
+Core/runner tests, shared-verifier tests,8 GUI gates,13 UI tests, provider mock,
+2 native provenance tests and the approved-deadline test passed. Broad Windows
+checks had173passes/10ignored and one old job-membership expectation; after
+tightening that expectation all12 focused lifecycle tests passed. Component/GUI
+Clippy, formatting, governance and static-CRT release compilation passed.
+Clean-source package assembly and live deployment/validation remain.
+The baseline b039e02 read-only report integration and pinned r5 fixture remain
+historical evidence, not a fresh production execution receipt.
 
 ## Disposable worker boundary
 

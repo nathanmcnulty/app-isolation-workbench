@@ -87,6 +87,7 @@ pub struct Defaults {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
+    pub progress: Option<String>,
     pub phase: Phase,
     pub workflow_id: Option<String>,
     pub review: Option<Review>,
@@ -117,6 +118,7 @@ impl Controller {
     pub fn new(evidence: String) -> Self {
         Self(Arc::new(Mutex::new(Inner {
             snapshot: Snapshot {
+                progress: None,
                 phase: Phase::Idle,
                 workflow_id: None,
                 review: None,
@@ -140,8 +142,19 @@ impl Controller {
             .snapshot
             .clone()
     }
+    pub fn progress(&self, id: &str, message: &str) {
+        if let Ok(mut inner) = self.0.lock()
+            && inner.snapshot.workflow_id.as_deref() == Some(id)
+            && inner.snapshot.phase == Phase::Running
+        {
+            inner.snapshot.progress = Some(message.chars().take(4096).collect());
+        }
+    }
     pub fn begin(&self) -> Result<String, String> {
         self.begin_phase(Phase::Preparing)
+    }
+    pub fn begin_recovery(&self) -> Result<String, String> {
+        self.begin_phase(Phase::Running)
     }
     pub fn begin_analysis(&self) -> Result<String, String> {
         self.begin_phase(Phase::Analyzing)
@@ -155,6 +168,7 @@ impl Controller {
             return Err("Wait for the current workflow to finish.".into());
         }
         let id = Uuid::new_v4().to_string();
+        i.snapshot.progress = None;
         i.package_snapshot =
             matches!(phase, Phase::Analyzing | Phase::Packaging).then(|| i.snapshot.clone());
         i.snapshot.phase = phase;
@@ -537,6 +551,24 @@ mod tests {
         assert_eq!(c.snapshot().phase, Phase::Failed);
         assert!(c.begin().is_err());
         c.finish(&id, Phase::Failed, None, None);
+        assert!(c.request_close());
+    }
+    #[test]
+    fn recovery_is_busy_has_bound_progress_and_cannot_be_cancelled_as_pending_work() {
+        let c = Controller::new("test".into());
+        let id = c.begin_recovery().unwrap();
+        assert_eq!(c.snapshot().phase, Phase::Running);
+        c.progress("other-workflow", "wrong");
+        assert!(c.snapshot().progress.is_none());
+        c.progress(&id, "Verifying cold restore");
+        assert_eq!(
+            c.snapshot().progress.as_deref(),
+            Some("Verifying cold restore")
+        );
+        assert!(c.begin().is_err());
+        assert!(c.cancel(&id).is_err());
+        assert!(!c.request_close());
+        assert!(!c.finish(&id, Phase::Completed, None, None));
         assert!(c.request_close());
     }
 }

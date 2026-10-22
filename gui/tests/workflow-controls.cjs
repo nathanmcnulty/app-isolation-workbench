@@ -5,6 +5,25 @@ const vm = require("node:vm");
 const { clean } = require("../ui/display.js");
 const display = require("../ui/display.js");
 
+test("MSIX selects its own file path and keeps editing and recovery under backend control", async () => {
+  const elements=new Map();
+  const element=id=>{if(!elements.has(id))elements.set(id,{value:"",textContent:"",disabled:false,handlers:{},classList:{toggle(){}},scrollIntoView(){},addEventListener(event,handler){this.handlers[event]=handler;}});return elements.get(id);};
+  const radios=[{value:"msix",handlers:{},addEventListener(event,handler){this.handlers[event]=handler;}}];
+  const calls=[],intervals=[];let snapshot={phase:"idle",workflowId:null};
+  const context={document:{getElementById:element,querySelector:()=>({value:"msix"}),querySelectorAll:()=>radios},window:{AiwDisplay:display,__TAURI__:{core:{invoke:async(name,args)=>{calls.push({name,args});if(name==="choose_input")return "C:\\input\\application.msix";return snapshot;}}}},setInterval:callback=>intervals.push(callback)};
+  vm.runInNewContext(fs.readFileSync(require.resolve("../ui/app.js"),"utf8"),context);
+  await new Promise(setImmediate);radios[0].handlers.change();
+  await element("chooseInstaller").handlers.click();assert.equal(calls.at(-1).args.kind,"msix");
+  element("evidence").value="C:\\evidence";element("operatorIdentity").value="operator";
+  await element("prepare").handlers.click();assert.equal(calls.find(c=>c.name==="prepare_workflow").args.kind,"msix");
+  assert.equal(calls.some(c=>c.name==="start_approved_workflow"),false);
+  snapshot={phase:"running",workflowId:"msix-run",progress:"Open VM107 document; save and close"};
+  await intervals.find(callback=>callback.name==="poll")();
+  assert.equal(element("progressSummary").textContent,snapshot.progress);
+  assert.equal(element("prepare").disabled,true);assert.equal(element("recoverMsix").disabled,true);
+  assert.equal(element("export").disabled,true);
+});
+
 test("verified transfer restores destination selection after a busy action", async () => {
   const elements = new Map();
   const element = (id) => {

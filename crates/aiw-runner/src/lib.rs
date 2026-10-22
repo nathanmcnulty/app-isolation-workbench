@@ -45,12 +45,16 @@ pub use packaging_recipe::{
 mod application_report_set;
 mod msix_lifecycle_report;
 mod shared_assessment;
+mod vm_msix_report;
 pub use msix_lifecycle_report::{MsixLifecycleReport, MsixResearchProfile, report_msix_lifecycle};
 pub use shared_assessment::{
     APPLICATION_ASSESSMENT_INPUT_SCHEMA, APPLICATION_ASSESSMENT_SCHEMA, ApplicationAssessmentInput,
     ApplicationAssessmentReport, ApplicationAssessmentRow, ApplicationAssessmentSource,
-    MsixAssessmentSelection, report_application_assessment,
+    MsixAssessmentSelection, VmMsixAssessmentSelection, report_application_assessment,
 };
+#[cfg(windows)]
+pub use vm_msix_report::report_vm_msix_run;
+pub use vm_msix_report::{VmMsixAssessmentReport, verify_vm_msix_recovery};
 mod assessment_report;
 mod report_set;
 mod settings_comparison;

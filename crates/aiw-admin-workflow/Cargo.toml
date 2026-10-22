@@ -8,6 +8,8 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+aiw-evidence.workspace = true
+base64.workspace = true
 aiw-orchestrator.workspace = true
 aiw-probe.workspace = true
 aiw-provider-wsb.workspace = true

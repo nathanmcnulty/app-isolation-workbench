@@ -159,3 +159,27 @@ Formatting, component all-target Clippy with warnings denied, locked desktop
 metadata and governance passed. Public JSON/Markdown and both schema commands
 were exercised against the retained r5 fixture. Independent source review found
 no material blocker. No application/VM execution was added or repeated.
+
+## Production VM MSIX retained runs (integration pending live validation)
+
+The shared input also accepts `msixVm` selections:
+
+```json
+{
+  "schemaVersion": "aiw.dev/application-assessment-input/v0alpha1",
+  "msixVm": [{
+    "id": "notepad-msix-production",
+    "workspace": "C:\\absolute\\original\\workspace",
+    "runId": "msix-retained-run-id"
+  }]
+}
+```
+
+Use the exact workspace/run emitted by the desktop; this example is a schema
+illustration, not an operator handoff. The original Windows host must reopen
+protected preparation, approval and request, native control, job and privileged
+inventory receipts, the raw lifecycle artifacts and cold recovery proofs. An
+incomplete run retains unmeasured functions. An invalid source becomes unavailable.
+Duplicate request identities never count twice. Historical `msixResearch` archive
+pins remain separate and unchanged. This reader never contacts or recovers a VM.
+See [MSIX-EXECUTION.md](MSIX-EXECUTION.md) for the execution acceptance boundary.

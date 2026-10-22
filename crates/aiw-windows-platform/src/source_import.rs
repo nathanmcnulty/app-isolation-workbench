@@ -408,6 +408,7 @@ fn payload_leaf(kind: ApplicationInspectionKind) -> Result<&'static str, SourceI
     match kind {
         ApplicationInspectionKind::Msi => Ok("payload.msi"),
         ApplicationInspectionKind::Exe => Ok("payload.exe"),
+        ApplicationInspectionKind::Msix => Ok("payload.msix"),
         ApplicationInspectionKind::PortableDirectory => Err(SourceImportError::Contract(
             "portable-directory copying is outside the file-import contract".to_owned(),
         )),
@@ -733,6 +734,7 @@ mod tests {
         let extension = match kind {
             ApplicationInspectionKind::Msi => "msi",
             ApplicationInspectionKind::Exe => "exe",
+            ApplicationInspectionKind::Msix => "msix",
             ApplicationInspectionKind::PortableDirectory => unreachable!(),
         };
         let source_path = root.0.join(format!("setup.{extension}"));
@@ -747,6 +749,7 @@ mod tests {
         for kind in [
             ApplicationInspectionKind::Msi,
             ApplicationInspectionKind::Exe,
+            ApplicationInspectionKind::Msix,
         ] {
             let (_root, receipt) = import_fixture(kind);
             let verified = verify_application_file_import(&receipt).unwrap();

@@ -1,4 +1,4 @@
-//! Research-only access to an already signed-in user. No account creation,
+//! Native access to an already signed-in, run-owned standard user. No account creation,
 //! alternate credentials, profile loading, desktop ACL changes or token export.
 use crate::GuestMsiExecutionError;
 use crate::guest_standard_user::{
@@ -248,6 +248,7 @@ impl PrimaryInteractiveUser {
     pub(crate) fn token(&self) -> HANDLE {
         HANDLE(self.token.as_raw_handle())
     }
+    #[cfg(feature = "research-msix-lifecycle")]
     pub(crate) fn token_handle(&self) -> &OwnedHandle {
         &self.token
     }

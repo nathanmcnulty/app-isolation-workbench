@@ -67,7 +67,6 @@ unsafe extern "system" {
     ) -> BOOL;
 }
 
-#[cfg(feature = "research-msix-lifecycle")]
 #[link(name = "Kernel32")]
 unsafe extern "system" {
     fn ProcessIdToSessionId(pid: u32, session: *mut u32) -> i32;
@@ -1367,9 +1366,7 @@ pub(crate) struct GuestProcess {
     initial_thread: OwnedHandle,
 }
 
-#[cfg(feature = "research-msix-lifecycle")]
 const PRIMARY_CONTROL_IMAGE: &str = r"C:\Windows\System32\cmd.exe";
-#[cfg(feature = "research-msix-lifecycle")]
 const PRIMARY_CONTROL_ARGUMENTS: [&str; 3] = ["/d", "/c", "exit 42"];
 
 /// The installer writes locally inside the disposable worker. Publish a bounded
@@ -1405,24 +1402,46 @@ fn retain_interactive_install_log() -> Result<(), String> {
 }
 
 impl GuestProcess {
+    pub(crate) fn start_msix_worker_child(
+        user: &crate::primary_interactive_user::PrimaryInteractiveUser,
+        run_id: &str,
+    ) -> Result<Self, GuestMsiExecutionError> {
+        if !aiw_probe::valid_msix_run_id(run_id) {
+            return Err(GuestMsiExecutionError::Process(
+                "Invalid fixed MSIX run ID".into(),
+            ));
+        }
+        let directory = format!(r"C:\ProgramData\AIW\MsixWorker\{run_id}");
+        let path = format!(r"{directory}\agent.exe");
+        Self::start_primary_bound(user, &path, &["lifecycle-child", run_id], &directory)
+    }
+    pub(crate) fn start_msix_driver_control(
+        user: &crate::primary_interactive_user::PrimaryInteractiveUser,
+    ) -> Result<Self, GuestMsiExecutionError> {
+        Self::start_primary_bound(
+            user,
+            PRIMARY_CONTROL_IMAGE,
+            &PRIMARY_CONTROL_ARGUMENTS,
+            r"C:\Windows\System32",
+        )
+    }
     #[cfg(feature = "research-msix-lifecycle")]
     pub(crate) fn start_primary_interactive(
-        user: &crate::research_msix_primary_user::PrimaryInteractiveUser,
+        user: &crate::primary_interactive_user::PrimaryInteractiveUser,
     ) -> Result<Self, GuestMsiExecutionError> {
         Self::start_primary_fixed(user, false)
     }
     #[cfg(feature = "research-msix-lifecycle")]
     pub(crate) fn start_primary_launch_control(
-        user: &crate::research_msix_primary_user::PrimaryInteractiveUser,
+        user: &crate::primary_interactive_user::PrimaryInteractiveUser,
     ) -> Result<Self, GuestMsiExecutionError> {
         Self::start_primary_fixed(user, true)
     }
     #[cfg(feature = "research-msix-lifecycle")]
     fn start_primary_fixed(
-        user: &crate::research_msix_primary_user::PrimaryInteractiveUser,
+        user: &crate::primary_interactive_user::PrimaryInteractiveUser,
         control: bool,
     ) -> Result<Self, GuestMsiExecutionError> {
-        use windows::Win32::System::Threading::CreateProcessAsUserW;
         // Both commands are compiled in. The control cannot run application
         // code, change launch flags, or escape inherited job restrictions.
         let (path, arguments): (&str, &[&str]) = if control {
@@ -1433,8 +1452,17 @@ impl GuestProcess {
                 &["vm-lifecycle-child"],
             )
         };
+        Self::start_primary_bound(user, path, arguments, r"C:\AIW-Msix-Lifecycle-Input")
+    }
+    fn start_primary_bound(
+        user: &crate::primary_interactive_user::PrimaryInteractiveUser,
+        path: &str,
+        arguments: &[&str],
+        directory: &str,
+    ) -> Result<Self, GuestMsiExecutionError> {
+        use windows::Win32::System::Threading::CreateProcessAsUserW;
         let application = wide(path)?;
-        let directory = wide(r"C:\AIW-Msix-Lifecycle-Input")?;
+        let directory = wide(directory)?;
         let mut command = wide(&aiw_windows_command_line::join_arguments(
             std::iter::once(path).chain(arguments.iter().copied()),
         ))?;
@@ -1572,7 +1600,6 @@ impl GuestProcess {
         self.process_id
     }
 
-    #[cfg(feature = "research-msix-lifecycle")]
     pub(crate) fn is_in_owned_job(&self) -> Result<bool, GuestMsiExecutionError> {
         let mut assigned = BOOL(0);
         // SAFETY: exact retained process and job handles remain live.

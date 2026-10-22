@@ -9,6 +9,7 @@ members = [
     "crates/aiw-orchestrator",
     "crates/aiw-golden-probe",
     "crates/aiw-guest-agent",
+    "crates/aiw-msix-worker",
     "crates/aiw-probe",
     "crates/aiw-provider-mxc",
     "crates/aiw-provider-wsb",

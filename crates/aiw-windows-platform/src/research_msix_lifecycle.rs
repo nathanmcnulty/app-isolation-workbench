@@ -689,7 +689,7 @@ $user=Get-LocalUser -Name AiwStandardUser;if($user.SID.Value -cne '{sid}'){{thro
             controller_job_observation()?,
         )?;
         parent_inventory(&evidence, InventoryStage::Before)?;
-        let user = crate::research_msix_primary_user::PrimaryInteractiveUser::establish(
+        let user = crate::primary_interactive_user::PrimaryInteractiveUser::establish(
             &prepared.user_sid,
             prepared.session_id,
         )?;
@@ -748,7 +748,7 @@ $user=Get-LocalUser -Name AiwStandardUser;if($user.SID.Value -cne '{sid}'){{thro
 
 fn run_primary_launch_control(
     evidence: &Path,
-    user: &crate::research_msix_primary_user::PrimaryInteractiveUser,
+    user: &crate::primary_interactive_user::PrimaryInteractiveUser,
 ) -> TrialResult<()> {
     let path = Path::new(r"C:\Windows\System32\cmd.exe");
     let _directory = hold_directory(path.parent().ok_or("OS control parent absent")?)?;
@@ -973,6 +973,7 @@ fn require_empty_process_inventory(value: &serde_json::Value) -> TrialResult<()>
     }
     Ok(())
 }
+#[cfg(test)]
 fn require_application_user_process_diagnostics(value: &serde_json::Value) -> TrialResult<()> {
     if value["queryAuthority"] != "applicationUserDiagnostic"
         || value["globalAbsenceVerified"] != false
@@ -1004,6 +1005,7 @@ fn require_application_user_process_diagnostics(value: &serde_json::Value) -> Tr
     observed["queryErrors"] = serde_json::json!([]);
     require_empty_process_inventory(&observed)
 }
+#[cfg(test)]
 const LIFECYCLE_RECEIPTS: &[&str] = &[
     "install-started.json",
     "worker.json",
@@ -1041,276 +1043,52 @@ fn validate_lifecycle(
     sid: &str,
     session: u32,
 ) -> TrialResult<()> {
-    let stages = root.join("msix-lifecycle");
-    for name in LIFECYCLE_RECEIPTS {
-        read_receipt(&stages, name)?;
-    }
-    if std::fs::read(stages.join("installed-manifest.xml"))?.is_empty() {
-        return Err("Installed manifest evidence absent".into());
-    }
-    for name in ["native-child-failure.json", "failure.json"] {
-        if root.join(name).exists() {
-            return Err("Failure evidence precludes terminal success".into());
+    fn collect(
+        root: &Path,
+        directory: &Path,
+        files: &mut std::collections::BTreeMap<String, Vec<u8>>,
+        total: &mut usize,
+        depth: usize,
+    ) -> TrialResult<()> {
+        if depth > 4 || files.len() > 512 {
+            return Err("MSIX evidence tree exceeds bound".into());
         }
-    }
-    if stages.join("failure.json").exists() {
-        return Err("Failed application trial cannot publish success".into());
-    }
-    let get = |name: &str| read_receipt(&stages, name);
-    let worker = get("worker.json")?;
-    let worker_token = &worker["operatorToken"];
-    if worker["operatorSid"] != sid
-        || worker["sessionId"] != session
-        || worker["inInheritedJob"] != true
-        || worker_token["UserSid"] != sid
-        || worker_token["TokenSessionId"] != session
-        || worker_token["IsElevated"] != false
-        || worker_token["AdministratorsEnabled"] != false
-        || worker_token["IsAppContainer"] != false
-        || worker_token["IntegritySid"] != "S-1-16-8192"
-    {
-        return Err("Standard supervisor observations differ".into());
-    }
-    for name in ["config-before.json", "config-installed-before-launch.json"] {
-        if !get(name)?.as_array().is_some_and(Vec::is_empty) {
-            return Err("Configuration preflight not empty".into());
-        }
-    }
-    let preflight = get("preflight-inventory.json")?;
-    for key in ["packages", "processes"] {
-        if !preflight[key].as_array().is_some_and(Vec::is_empty) {
-            return Err("Application preflight not empty".into());
-        }
-    }
-    let control = get("driver-control/control.json")?;
-    let modes = control["controls"]
-        .as_array()
-        .ok_or("Driver controls are not an array")?;
-    if control["passed"] != true || control["sessionId"] != session || modes.len() != 3 {
-        return Err("Closed driver controls incomplete".into());
-    }
-    let mut pids = std::collections::BTreeSet::new();
-    for (index, mode) in ["success", "failure", "deadline"].into_iter().enumerate() {
-        let record = &modes[index];
-        if record["mode"] != mode
-            || record["heldHandle"] != true
-            || record["inInheritedJob"] != true
-            || record["exited"] != true
-            || record["imagePath"].as_str() != Some(POWERSHELL)
-            || !record["pid"].as_u64().is_some_and(|pid| {
-                pid > 0
-                    && record["startTime"]
-                        .as_str()
-                        .is_some_and(|time| !time.is_empty() && pids.insert((pid, time.to_owned())))
-            })
-            || record["deadlineHit"] != (mode == "deadline")
-            || (mode == "success" && record["exitCode"] != 0)
-            || (mode == "failure" && record["exitCode"] != 42)
-            || (mode == "deadline" && !record["exitCode"].as_i64().is_some_and(|code| code != 0))
-        {
-            return Err(format!("Closed {mode} control differs").into());
-        }
-        for (stream, expected) in [
-            ("stdout", "aiw-owned-control-out"),
-            ("stderr", "aiw-owned-control-error"),
-        ] {
-            let bytes = std::fs::read(stages.join(format!("driver-control/{mode}.{stream}.log")))?;
-            if bytes.len() > 1024 || std::str::from_utf8(&bytes)?.trim() != expected {
-                return Err("Control stream identity differs".into());
+        for entry in std::fs::read_dir(directory)? {
+            let entry = entry?;
+            let metadata = std::fs::symlink_metadata(entry.path())?;
+            if metadata.file_attributes() & 0x400 != 0 {
+                return Err("MSIX evidence reparse entry refused".into());
+            }
+            if metadata.is_dir() {
+                collect(root, &entry.path(), files, total, depth + 1)?;
+            } else if metadata.is_file() {
+                if metadata.len() > 4 * 1024 * 1024 {
+                    return Err("MSIX evidence file exceeds bound".into());
+                }
+                let bytes = std::fs::read(entry.path())?;
+                *total += bytes.len();
+                if *total > 16 * 1024 * 1024 {
+                    return Err("MSIX evidence aggregate exceeds bound".into());
+                }
+                files.insert(
+                    entry
+                        .path()
+                        .strip_prefix(root)?
+                        .to_string_lossy()
+                        .replace('\\', "/"),
+                    bytes,
+                );
+            } else {
+                return Err("Ordinary MSIX evidence required".into());
             }
         }
+        Ok(())
     }
-    if get("driver-controls-completed.json")?["controlsPassed"] != true {
-        return Err("Pre-install control checkpoint missing".into());
-    }
-    let input = get("package-input.json")?;
-    if input["signedSha256"] != INPUTS[0].1
-        || input["publisher"] != "CN=Nathan McNulty, O=Nathan McNulty, L=Soldotna, S=Alaska, C=US"
-        || input["sourceSha256"]
-            != "b269383239464a945d17cfabfccf53935b83d80d907922310fdfd50d80274c66"
-        || input["sizeBytes"] != 8641353
-        || input["signatureStatus"] != "Valid"
-        || input["signerThumbprint"] != "AD05F224A248CE998FEF1EF6EA75CBF72747EE38"
-        || !input["timestampThumbprint"]
-            .as_str()
-            .is_some_and(|s| !s.is_empty())
-    {
-        return Err("Retained signed input binding differs".into());
-    }
-    let inventory = assembly["payloadInventory"]
-        .as_array()
-        .ok_or("Assembly inventory missing")?;
-    let before = get("payload-before.json")?;
-    let before = before.as_array().ok_or("Payload observation missing")?;
-    if inventory.len() != 220 || before.len() != 220 {
-        return Err("Complete 220-entry payload required".into());
-    }
-    for (expected, observed) in inventory.iter().zip(before) {
-        if expected["path"] != observed["path"] || expected["sha256"] != observed["sha256"] {
-            return Err("Installed payload differs from pinned inventory".into());
-        }
-    }
-    let after = get("payload-after.json")?;
-    if after["matchesOriginalInventory"] != true || after["filesChecked"] != 220 {
-        return Err("Post-workflow payload check missing".into());
-    }
-    let expected_manifest = inventory
-        .iter()
-        .find(|entry| entry["path"] == "AppxManifest.xml")
-        .ok_or("Manifest inventory missing")?;
-    if get("manifest-before.json")?["sha256"] != expected_manifest["sha256"]
-        || get("manifest-after.json")?["sha256"] != expected_manifest["sha256"]
-    {
-        return Err("Raw installed manifest identity differs".into());
-    }
-    let installed = get("installed.json")?;
-    if installed["packageFullName"] != "AIWResearch.NotepadPP_8.9.8.0_x64__q1fhfzcjv9wt6"
-        || installed["packageFamilyName"] != "AIWResearch.NotepadPP_q1fhfzcjv9wt6"
-    {
-        return Err("Installed identity differs".into());
-    }
-    let post_install = get("post-install-inventory.json")?;
-    if !post_install.as_array().is_some_and(|items| {
-        items.len() == 1 && items[0]["PackageFullName"] == installed["packageFullName"]
-    }) {
-        return Err("Exact registration readback missing".into());
-    }
-    let activated = get("activated.json")?;
-    let suspended = get("activation-suspended.json")?;
-    for key in [
-        "processId",
-        "sessionId",
-        "startTime",
-        "imagePath",
-        "imageSha256",
-        "packageObservation",
-        "applicationUserModelId",
-        "inAnyJob",
-        "launchMethod",
-    ] {
-        if suspended[key] != activated[key] {
-            return Err("Suspended application observation differs".into());
-        }
-    }
-    let observation = &activated["packageObservation"];
-    let expected_image = inventory
-        .iter()
-        .find(|entry| entry["path"] == "Application/notepad++.exe")
-        .ok_or("Image inventory missing")?;
-    let pid = activated["processId"]
-        .as_u64()
-        .filter(|pid| *pid > 0)
-        .ok_or("Activated process PID missing")?;
-    let image_path = installed["installLocation"]
-        .as_str()
-        .ok_or("Installed location missing")?
-        .to_owned()
-        + r"\Application\notepad++.exe";
-    if activated["applicationUserModelId"] != "AIWResearch.NotepadPP_q1fhfzcjv9wt6!Notepad"
-        || !activated["inAnyJob"].is_boolean()
-        || activated["identityVerifiedBeforeResume"] != true
-        || activated["launchMethod"] != "fixedInstalledExecutableSuspended"
-        || activated["sessionId"] != session
-        || activated["imageSha256"] != expected_image["sha256"]
-        || !activated["imagePath"]
-            .as_str()
-            .is_some_and(|path| path.eq_ignore_ascii_case(&image_path))
-        || observation["PackageFullName"] != installed["packageFullName"]
-        || observation["UserSid"] != sid
-        || observation["TokenSessionId"] != session
-        || observation["IntegritySid"] != "S-1-16-8192"
-        || observation["IsElevated"] != false
-        || observation["IsAppContainer"] != false
-        || observation["AdministratorsEnabled"] != false
-    {
-        return Err("Actual application token/image identity differs".into());
-    }
-    let returned = get("activation-returned.json")?;
-    let window = get("application-window.json")?;
-    let exit = get("editor-exit.json")?;
-    if returned["processId"] != pid
-        || returned["resumed"] != true
-        || returned["launchMethod"] != "fixedInstalledExecutableSuspended"
-        || window["processId"] != pid
-        || window["visible"] != true
-        || window["ownedProcessHandle"] != true
-        || !window["window"].as_u64().is_some_and(|handle| handle > 0)
-        || exit["processId"] != pid
-        || exit["closed"] != true
-        || exit["exitCode"] != 0
-    {
-        return Err("Held application window/exit observations differ".into());
-    }
-    const INITIAL: &[u8] = b"AIW MSIX package lifecycle\r\n";
-    const EXPECTED: &[u8] = b"AIW MSIX package lifecycle\r\nAIW packaged validation\r\n";
-    let saved = std::fs::read(stages.join("document.txt"))?;
-    let document_input = get("document-input.json")?;
-    let document_output = get("document-output.json")?;
-    if saved != EXPECTED
-        || document_input["sha256"] != hex::encode(Sha256::digest(INITIAL))
-        || document_input["sizeBytes"] != INITIAL.len()
-        || document_output["sha256"] != hex::encode(Sha256::digest(&saved))
-        || document_output["sizeBytes"] != saved.len()
-        || document_output["exactExpectedBytes"] != true
-    {
-        return Err("Exact document input/output binding differs".into());
-    }
-    let configurations = get("config-after.json")?;
-    let configurations = configurations
-        .as_array()
-        .ok_or("Configuration observation missing")?;
-    if configurations.is_empty()
-        || configurations.len() > 16
-        || !configurations.iter().any(|file| {
-            file["path"]
-                .as_str()
-                .is_some_and(|path| path.ends_with(r"\config.xml"))
-        })
-    {
-        return Err("Per-user configuration not observed".into());
-    }
-    for (index, file) in configurations.iter().enumerate() {
-        let retained = file["retainedFile"]
-            .as_str()
-            .ok_or("Configuration retained file missing")?;
-        let original = file["path"]
-            .as_str()
-            .ok_or("Configuration source path missing")?;
-        let filename = original
-            .rsplit('\\')
-            .next()
-            .ok_or("Configuration filename missing")?;
-        if retained != format!("configuration/{index}-{filename}")
-            || filename.contains(['/', ':'])
-            || !original.starts_with(r"C:\Users\AiwStandardUser\AppData\")
-        {
-            return Err("Configuration export path differs".into());
-        }
-        let bytes = std::fs::read(stages.join(retained))?;
-        if bytes.len() > 4 * 1024 * 1024
-            || file["sizeBytes"] != bytes.len()
-            || file["sha256"] != hex::encode(Sha256::digest(&bytes))
-        {
-            return Err("Configuration export identity differs".into());
-        }
-    }
-    for name in [
-        "package-processes-before.json",
-        "package-processes-after-close.json",
-        "package-processes-after-uninstall.json",
-    ] {
-        require_application_user_process_diagnostics(&get(name)?)?;
-    }
-    let cleanup = get("cleanup.json")?;
-    if cleanup["registrationAbsent"] != true
-        || cleanup["applicationProcessesAbsent"] != true
-        || get("uninstall-started.json")?["packageFullName"] != installed["packageFullName"]
-    {
-        return Err("Exact registration/process cleanup missing".into());
-    }
-    Ok(())
+    let mut files = std::collections::BTreeMap::new();
+    let mut total = 0;
+    collect(root, root, &mut files, &mut total, 0)?;
+    aiw_evidence::verify_notepad_msix_lifecycle(&files, assembly, sid, session).map_err(Into::into)
 }
-
 fn export(source: &Path, target: &Path) -> TrialResult<()> {
     fn copy(source: &Path, target: &Path, count: &mut usize, depth: usize) -> TrialResult<()> {
         if depth > 3 {
@@ -1690,13 +1468,17 @@ mod tests {
             super::record(&stages, "activation-suspended.json", changed_suspended).unwrap();
             assert!(fixture.validate().is_err(), "Must reject {key}");
         }
-        let mut diagnostic = original;
-        let mut diagnostic_suspended = suspended;
+        let mut diagnostic = original.clone();
+        let mut diagnostic_suspended = suspended.clone();
         diagnostic["inAnyJob"] = serde_json::json!(false);
         diagnostic_suspended["inAnyJob"] = serde_json::json!(false);
         super::record(&stages, "activated.json", diagnostic).unwrap();
         super::record(&stages, "activation-suspended.json", diagnostic_suspended).unwrap();
-        // Any-job membership does not establish project-job ownership or identity.
+        // Application membership is required; the native parent separately proves
+        // ownership of the ancestor job. Historical r5 observed both conditions.
+        assert!(fixture.validate().is_err());
+        super::record(&stages, "activated.json", original).unwrap();
+        super::record(&stages, "activation-suspended.json", suspended).unwrap();
         fixture.validate().unwrap();
         let mut returned = super::read_receipt(&stages, "activation-returned.json").unwrap();
         returned["resumed"] = serde_json::json!(false);

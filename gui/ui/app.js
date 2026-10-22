@@ -40,11 +40,12 @@
 
   function renderMode() {
     const bambu = kind() === "bambu";
+    const msix = kind() === "msix";
     show("documentField", kind() === "interactive");
-    text("installerLabel", bambu ? "Supported Bambu Studio installer" : "Supported Notepad++ installer");
-    text("chooseInstaller", bambu ? "Choose EXE" : "Choose MSI");
-    $("installer").placeholder = bambu ? "Choose the exact supported EXE" : "Choose the exact supported MSI";
-    text("setupHint", bambu
+    text("installerLabel", msix ? "Supported signed Notepad++ MSIX" : bambu ? "Supported Bambu Studio installer" : "Supported Notepad++ installer");
+    text("chooseInstaller", msix ? "Choose MSIX" : bambu ? "Choose EXE" : "Choose MSI");
+    $("installer").placeholder = msix ? "Choose the exact signed Notepad++ 8.9.8 MSIX" : bambu ? "Choose the exact supported EXE" : "Choose the exact supported MSI";
+    text("setupHint", msix ? "Uses enrolled VM107 with lab-network access. Creates a temporary standard session, requires console editing, then collects evidence and cold restores. Broader isolation remains unmeasured." : bambu
       ? "Select the exact supported Bambu Studio EXE and identify the operator before preparing. The fixed STL input is package supplied."
       : "Select the exact supported MSI and identify the operator before preparing.");
     $("installer").value = "";
@@ -74,6 +75,7 @@
     ["chooseInstaller", "chooseDocument", "chooseEvidence", "operatorIdentity", "prepare"].forEach((id) => { $(id).disabled = locked || !editable; });
     $("chooseWorkspace").disabled = !!busy;
     $("loadRetained").disabled = !!busy;
+    $("recoverMsix").disabled = locked || !editable || value("retainedKind") !== "msix";
     document.querySelectorAll("input[name=workflowKind]").forEach((radio) => { radio.disabled = locked || !editable; });
     $("approve").disabled = busy || phase !== "review";
     $("start").disabled = busy || phase !== "approved";
@@ -174,7 +176,7 @@
     if (!result) return;
     const verified = result.outcome === "verified";
     text("resultEyebrow", verified ? "Verified workflow result" : "Retained workflow state");
-    text("result-title", verified ? "Supported workflow verified" : result.outcome === "notRun" ? "Sandbox was not started" : "Workflow not fully verified");
+    text("result-title", verified ? "Supported workflow verified" : result.outcome === "notRun" ? "Worker was not started" : "Workflow not fully verified");
     text("resultBadge", verified ? "Verified" : result.outcome === "notRun" ? "Not run" : "Needs review");
     $("resultBadge").classList.toggle("success", verified);
     text("resultRun", result.runId); text("resultWorkspace", result.workspace); text("resultEvidence", result.evidenceRoot); text("resultSummary", result.summary); text("reportMarkdown", result.reportMarkdown || "(report not included in this state)");
@@ -192,8 +194,8 @@
     const active = ["preparing", "review", "approved", "running", "exporting"].includes(snapshot.phase);
     show("progressCard", active || ["completed", "cancelled", "failed"].includes(snapshot.phase));
     show("progressTrack", ["preparing", "running", "exporting"].includes(snapshot.phase));
-    const messages = { preparing: "Preparing or recording the reviewed plan. No Sandbox has started.", review: "Review the exact plan and type the literal confirmation.", approved: "Approval recorded. Sandbox has not started; press Start when ready.", running: "Start accepted. The backend is validating and executing the workflow. Wait for the retained result and cleanup.", exporting: "Exporting the last verified document to the selected new file.", completed: "The workflow finished; inspect its retained result below.", cancelled: "The workflow was cancelled; inspect the retained state before retrying.", failed: "The workflow failed; inspect the retained diagnostic and remediation." };
-    text("progressSummary", messages[snapshot.phase] || "Ready.");
+    const messages = { preparing: "Preparing or recording the reviewed plan.", review: "Review the exact plan and type the literal confirmation.", approved: "Approval recorded. Worker execution has not started; press Start when ready.", running: "Start accepted. The backend is validating and executing the workflow. Wait for the retained result and cleanup.", exporting: "Exporting the last verified document to the selected new file.", completed: "The workflow finished; inspect its retained result below.", cancelled: "The workflow was cancelled; inspect the retained state before retrying.", failed: "The workflow failed; inspect the retained diagnostic and remediation." };
+    text("progressSummary", (snapshot.phase === "running" && snapshot.progress) || messages[snapshot.phase] || "Ready.");
     const editing = snapshot.phase === "running" && snapshot.review && snapshot.review.workflowName === "Interactive Notepad++ document transfer";
     show("editingInstructions", editing);
     const running = snapshot.phase === "running";
@@ -235,7 +237,7 @@
 
   function elapsed() { if (state.startedAt) { const seconds = Math.floor((Date.now() - state.startedAt) / 1000); text("elapsed", "Elapsed " + String(Math.floor(seconds / 60)).padStart(2, "0") + ":" + String(seconds % 60).padStart(2, "0")); } }
 
-  $("chooseInstaller").addEventListener("click", () => choose(kind() === "bambu" ? "bambu-installer" : "installer", "installer"));
+  $("chooseInstaller").addEventListener("click", () => choose(kind() === "msix" ? "msix" : kind() === "bambu" ? "bambu-installer" : "installer", "installer"));
   $("chooseDocument").addEventListener("click", () => choose("document", "documentInput"));
   $("chooseEvidence").addEventListener("click", () => choose("evidence", "evidence"));
   $("chooseDestination").addEventListener("click", () => choose("destination", "destination"));
@@ -245,6 +247,7 @@
   $("start").addEventListener("click", () => { const snapshot = state.current; if (snapshot) action("start_approved_workflow", { workflowId: snapshot.workflowId, challengeId: snapshot.startChallengeId }); });
   $("cancel").addEventListener("click", () => { const snapshot = state.current; if (snapshot && ["preparing", "review", "approved"].includes(snapshot.phase)) action("cancel_pending", { workflowId: snapshot.workflowId }); });
   $("export").addEventListener("click", () => action("export_document", { destination: value("destination") }));
+  $("recoverMsix").addEventListener("click", () => action("recover_msix_worker", { workspace: value("retainedWorkspace"), runId: value("retainedRunId") }));
   $("loadRetained").addEventListener("click", () => action("load_retained_report", { kind: value("retainedKind"), workspace: value("retainedWorkspace"), runId: value("retainedRunId") }));
   $("choosePackageInstaller").addEventListener("click", () => choose(value("packageProduct") === "bambu" ? "bambu-installer" : "installer", "packageInstaller"));
   $("packageProduct").addEventListener("change", () => {
