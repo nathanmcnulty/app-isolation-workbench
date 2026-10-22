@@ -1,9 +1,9 @@
 # Production VM MSIX execution
 
-Work in progress, 2026-10-22. User requested the production desktop execution
-flow and live validation on VM107 after the archived research-report integration.
-Do not mark this complete until the app drives a fresh approved run and evidence
-collection/cold restore/identity readback on107 succeed.
+Validated 2026-10-22: the production desktop drove a fresh approved run on VM107,
+collected native lifecycle evidence and completed cold restore/clean readback.
+The original-host desktop and shared assessment reader reverified the retained
+run. This acceptance covers the exact supported recipe below.
 
 The first supported recipe is the exact signed Notepad++8.9.8.0 MSIX already
 measured in r5. It uses a dedicated QEMU worker107 on pve-r630, not local execution
@@ -39,7 +39,7 @@ Host-owned execution requirements:
   challenge and separate Start, editing/restoring/recovery states, and retained
   report. The measured function workflow never upgrades broader isolation.
 
-Current implementation (pending live validation):
+Current implementation:
 - aiw-probe/msix_worker: fixed profile, request, deadline and phase contracts.
 - aiw-orchestrator/vm_msix_plan: v0alpha6 plan and held preparation provenance.
 - aiw-msix-worker + windows-platform/msix_vm_worker: native SYSTEM controller,
@@ -67,13 +67,11 @@ Current implementation (pending live validation):
   fixed assembly/signing hashes, the native worker SHA compiled into the host, asset inventory and receipt-last development
   package. Other Sandbox recipes require their separate product assets.
 
-Live readiness now includes clean-source package builds, normal trusted HTTPS,
+Live acceptance includes clean-source package builds, normal trusted HTTPS,
 the deployed fixed wrapper, cold restore/current-pending agreement, exact lease
-recovery, clean inventory/release, and native account enrollment. Retained failed
-runs and host corrections are recorded below. Remaining acceptance
-is a fresh approved desktop run through native control, exact console edit,
-raw lifecycle verification, final cold cleanup/release and shared function report.
-Do not describe the production workflow as verified until those checks pass.
+recovery, clean inventory/release, native account enrollment/control, packaged
+editing/uninstall and original-host raw verification. Retained failures and their
+corrections are recorded below; they are not substituted for the successful run.
 
 Live corrections and retained failures (2026-10-22):
 - msix-1792693343407226300 failed before staging on Windows PowerShell verbatim
@@ -125,3 +123,29 @@ alias assumption on host output; it now uses the bounded held evidence API with
 bytes read directly from retained handles, hashed and revalidated. This exposes
 no portable-import or exact-disposal authority. Re-read this run for report proof;
 never repeat its application dispatch or recovery.
+
+Final acceptance and readback:
+- Execution: msix-1792704525359564000, desktop source34369c9, worker SHA
+  cf2ef6402ca33c51dd8a7d85cff42132a163f396e92c67b852d93852e5c3a7c9.
+  Native Control42 and the same standard-user logon preceded application work.
+- Final clean readback21:52:05UTC confirmed UUID107, the seven baseline accounts,
+  no trial artifacts and disabled automatic sign-in. Release/terminal receipt
+  completed21:52:19UTC. The provider reports leasePresent=false for this nonce.
+- Reader correction2dab30b exposes only bounded read-only evidence bytes, with
+  no portable-import or disposal authority.16platform checks, the runner recovery
+  gate check, Clippy and clean-source static-CRT builds passed. Independent review
+  verified44/44native inventory hashes, exact document,220payloads,6retained
+  configuration files, process/session/control and uninstall/job correlations.
+- Shared assessment command on original VM203:
+  `target/debug/aiw.exe run report-assessment --input C:\AIW-Resume-20261021\production-msix-capture-assessment-input.json --format json`.
+  Output C:\AIW-Resume-20261021\production-msix-verified-assessment.json SHA
+  a77d20d064d991f708160938b2b7c6c38d0add4a642230bd5805393ca24fc0ab.
+  Install, launch, openDocument, editSaveDocument, close and uninstall are true;
+  workflowVerified and cleanupComplete are true. The overall assessment remains
+  insufficientEvidence, with compatibility/isolation notMeasured.
+- Desktop readback: production-msix-desktop-reportfix, source2dab30b, receipt SHA
+  6ee705592eb2c7795b0d6a1dfbe8ca05cde26af987682e735b61219ea40e93c4,
+  inventory6files verified. Its read-only retained MSIX screen displayed
+  **Supported workflow verified** and the six functions/cold-recovery summary.
+  No guest dispatch or recovery was repeated for reader validation. This package
+  is an unsigned development desktop; leave the migration release draft.
