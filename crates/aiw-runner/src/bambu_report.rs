@@ -101,10 +101,10 @@ pub(crate) fn report_windows_sandbox_bambu_run_bound(
         .ok_or(RunnerError::ApprovalBinding)?;
     // Match the full fresh intake identity, not merely identical application bytes.
     // This comparison stays inside the held, validated preparation boundary.
-    if let Some((receipt, scenario)) = expected_import {
-        if receipt != &bambu.import_receipt || scenario != &bambu.scenario {
-            return Err(RunnerError::ApprovalBinding);
-        }
+    if let Some((receipt, scenario)) = expected_import
+        && (receipt != &bambu.import_receipt || scenario != &bambu.scenario)
+    {
+        return Err(RunnerError::ApprovalBinding);
     }
     if aiw_provider_wsb::compile_bambu_studio_export_scenario(project, &bambu.scenario.scenario_id)
         .map_err(|e| RunnerError::Preparation(e.to_string()))?

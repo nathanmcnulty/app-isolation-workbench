@@ -281,12 +281,11 @@ fn execute_imported_msi_request(request: &ImportedMsiGuestRequest) -> Result<()>
     result.validate_for_request(request).map_err(|error| {
         anyhow::anyhow!("guest produced an invalid imported-MSI result: {error}")
     })?;
-    if let Some((transfer, output_bytes)) = document_transfer.as_ref() {
-        if transfer.output_size_bytes != output_bytes.len() as u64
-            || transfer.output_sha256 != hex::encode(Sha256::digest(output_bytes))
-        {
-            bail!("guest document result does not match the output bytes")
-        }
+    if let Some((transfer, output_bytes)) = document_transfer.as_ref()
+        && (transfer.output_size_bytes != output_bytes.len() as u64
+            || transfer.output_sha256 != hex::encode(Sha256::digest(output_bytes)))
+    {
+        bail!("guest document result does not match the output bytes")
     }
     let mut evidence = EvidenceLog::new();
     evidence.append(EvidenceEvent {

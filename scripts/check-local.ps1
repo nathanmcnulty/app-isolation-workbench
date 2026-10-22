@@ -30,7 +30,7 @@ try {
             Platform { @('test', '-p', 'aiw-windows-platform', '--locked', '--offline') }
             Workspace { @('test', '--workspace', '--locked', '--offline') }
             Clippy { @('clippy', '--workspace', '--all-targets', '--locked', '--offline', '--', '-D', 'warnings') }
-            Msrv { @('+1.85.0', 'check', '--workspace', '--all-targets', '--locked', '--offline') }
+            Msrv { @('+1.88.0', 'check', '--workspace', '--all-targets', '--locked', '--offline') }
             Governance {
                 $program = 'pwsh'
                 @('-NoProfile', '-NonInteractive', '-File', (Join-Path $PSScriptRoot 'verify.ps1'), '-GovernanceOnly')

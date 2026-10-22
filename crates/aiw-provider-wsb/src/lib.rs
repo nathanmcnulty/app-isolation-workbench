@@ -634,12 +634,11 @@ pub fn validate_plan(plan: &WindowsSandboxPlan) -> Result<(), WindowsSandboxPlan
     if !is_path_below(&plan.probe.executable, &tools[0].sandbox_folder) {
         return Err(WindowsSandboxPlanError::ProbeOutsideTools);
     }
-    if let Some(request) = &plan.probe.request {
-        if !is_path_below(request, &tools[0].sandbox_folder)
+    if plan.probe.request.as_ref().is_some_and(|request| {
+        !is_path_below(request, &tools[0].sandbox_folder)
             || !request.to_ascii_lowercase().ends_with(".json")
-        {
-            return Err(WindowsSandboxPlanError::ProbeOutsideTools);
-        }
+    }) {
+        return Err(WindowsSandboxPlanError::ProbeOutsideTools);
     }
     if !is_path_below(&plan.probe.output, &outputs[0].sandbox_folder) {
         return Err(WindowsSandboxPlanError::OutputOutsideMapping);

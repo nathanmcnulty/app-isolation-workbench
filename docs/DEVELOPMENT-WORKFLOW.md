@@ -17,7 +17,7 @@ Choose a concrete slice and the checks relevant to its changes. Run selected che
 ./scripts/check-local.ps1 -Check Governance
 ```
 
-PowerShell 7 is required. The helper runs from its own checkout, deduplicates checks, runs them sequentially, and stops on the first failure with exit 1. Cargo checks use locked offline dependencies; missing cached dependencies are a setup failure, not an instruction to download or alter the lockfile automatically. `Msrv` uses the repository's current Rust 1.85.0 minimum; keep it aligned with `Cargo.toml` and CI when that minimum changes.
+PowerShell 7 is required. The helper runs from its own checkout, deduplicates checks, runs them sequentially, and stops on the first failure with exit 1. Cargo checks use locked offline dependencies; missing cached dependencies are a setup failure, not an instruction to download or alter the lockfile automatically. `Msrv` uses the repository's current Rust 1.88.0 minimum, required by the patched ZIP dependency; keep it aligned with `Cargo.toml` and CI when that minimum changes.
 
 Each invocation writes a fresh `%TEMP%\aiw-local-checks-<uuid>` directory containing full stdout/stderr files, incremental `checks.json`, and final `summary.json`. The console contains a short JSON result and bounded excerpts on failure. Inspect the relevant log if the excerpt is insufficient. Logs are not uploaded, automatically deleted, or reused to skip checks. HEAD and before/after status are diagnostic context, not a hash of uncommitted contents or proof that another process left files untouched. An interrupted invocation can retain partial logs without a final summary; do not count it as passed.
 

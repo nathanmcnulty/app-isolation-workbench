@@ -382,14 +382,14 @@ pub fn execute_fixed_notepad_plus_plus_msi_attempt_with_observations(
     scenario: &CompiledMsiScenario,
     required: Option<aiw_provider_wsb::MsiRequiredObservations>,
 ) -> GuestMsiAttempt {
-    if let Some(required) = required {
-        if let Err(error) = required.validate_for(scenario) {
-            return GuestMsiAttempt {
-                result: Err(GuestMsiExecutionError::Scenario(error)),
-                stages: Vec::new(),
-                failed_snapshots: None,
-            };
-        }
+    if let Some(required) = required
+        && let Err(error) = required.validate_for(scenario)
+    {
+        return GuestMsiAttempt {
+            result: Err(GuestMsiExecutionError::Scenario(error)),
+            stages: Vec::new(),
+            failed_snapshots: None,
+        };
     }
     if let Err(error) = scenario.validate() {
         return GuestMsiAttempt {
@@ -1297,10 +1297,9 @@ fn wait_for_document_sha256(
             .document
             .observe_expected()
             .map_err(GuestMsiExecutionError::Process)?
+            && observed_sha256 == plan.expected_sha256
         {
-            if observed_sha256 == plan.expected_sha256 {
-                return Ok(observed_sha256);
-            }
+            return Ok(observed_sha256);
         }
         if Instant::now() >= deadline {
             return Err(GuestMsiExecutionError::Process(format!(

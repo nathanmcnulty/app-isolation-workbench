@@ -172,10 +172,10 @@ pub fn report_windows_sandbox_set(input: &WsbReportSetInput) -> Result<WsbReport
             }
         };
         // A rejected selector cannot reserve the identity of a later valid entry.
-        if let Some((run_id, request)) = result.identity() {
-            if !seen.insert((run_id.to_owned(), request.to_owned())) {
-                result = WsbReportSetResult::Unavailable(ReportSetUnavailableReason::DuplicateRun);
-            }
+        if let Some((run_id, request)) = result.identity()
+            && !seen.insert((run_id.to_owned(), request.to_owned()))
+        {
+            result = WsbReportSetResult::Unavailable(ReportSetUnavailableReason::DuplicateRun);
         }
         entries.push(WsbReportSetRow {
             guest_agent_sha256: run.guest_agent_sha256.clone(),

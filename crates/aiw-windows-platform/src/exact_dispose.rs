@@ -2032,7 +2032,7 @@ fn parse_extended_attributes_with_policy(
     let mut entries = Vec::new();
     let mut offset = 0_usize;
     loop {
-        if offset % 4 != 0
+        if !offset.is_multiple_of(4)
             || offset
                 .checked_add(size_of::<FILE_FULL_EA_INFORMATION>())
                 .is_none_or(|end| end > bytes.len())
@@ -2095,7 +2095,7 @@ fn parse_extended_attributes_with_policy(
             .and_then(|length| length.checked_add(3))
             .map(|length| length & !3)
             .ok_or_else(|| ExactDisposeError::Rejected("EA next offset overflowed".into()))?;
-        if next % 4 != 0
+        if !next.is_multiple_of(4)
             || next < minimum_next
             || offset
                 .checked_add(next)
@@ -2263,13 +2263,15 @@ fn read_unaligned_struct<T: Copy>(
 }
 
 fn decode_utf16_bytes(bytes: &[u8], kind: &str) -> Result<String, ExactDisposeError> {
-    if bytes.len() % size_of::<u16>() != 0 {
+    if !bytes.len().is_multiple_of(size_of::<u16>()) {
         return Err(ExactDisposeError::Rejected(format!(
             "{kind} has an odd UTF-16 byte length"
         )));
     }
     let units: Vec<_> = bytes
-        .chunks_exact(size_of::<u16>())
+        .as_chunks::<{ size_of::<u16>() }>()
+        .0
+        .iter()
         .map(|chunk| u16::from_ne_bytes([chunk[0], chunk[1]]))
         .collect();
     String::from_utf16(&units)
@@ -2371,7 +2373,7 @@ fn parse_streams(bytes: &[u8]) -> Result<Vec<(String, u64)>, ExactDisposeError> 
     let mut streams = Vec::new();
     let mut offset = 0_usize;
     loop {
-        if offset % 8 != 0
+        if !offset.is_multiple_of(8)
             || offset
                 .checked_add(size_of::<FILE_STREAM_INFO>())
                 .is_none_or(|end| end > bytes.len())
@@ -2382,7 +2384,7 @@ fn parse_streams(bytes: &[u8]) -> Result<Vec<(String, u64)>, ExactDisposeError> 
         }
         let info: FILE_STREAM_INFO = read_unaligned_struct(bytes, offset, "stream")?;
         let name_len = info.StreamNameLength as usize;
-        if name_len % 2 != 0
+        if !name_len.is_multiple_of(2)
             || offset
                 .checked_add(header)
                 .and_then(|start| start.checked_add(name_len))
@@ -2403,7 +2405,7 @@ fn parse_streams(bytes: &[u8]) -> Result<Vec<(String, u64)>, ExactDisposeError> 
         if next == 0 {
             break;
         }
-        if next % 8 != 0 || next < header + name_len {
+        if !next.is_multiple_of(8) || next < header + name_len {
             return Err(ExactDisposeError::Rejected(
                 "stream information next offset is invalid".into(),
             ));
@@ -2557,7 +2559,7 @@ fn parse_extended_directory_buffer(
     let header = offset_of!(FILE_ID_EXTD_DIR_INFO, FileName);
     let mut offset = 0_usize;
     loop {
-        if offset % 8 != 0
+        if !offset.is_multiple_of(8)
             || offset
                 .checked_add(size_of::<FILE_ID_EXTD_DIR_INFO>())
                 .is_none_or(|end| end > bytes.len())
@@ -2569,7 +2571,7 @@ fn parse_extended_directory_buffer(
         let info: FILE_ID_EXTD_DIR_INFO =
             read_unaligned_struct(bytes, offset, "extended directory")?;
         let name_len = info.FileNameLength as usize;
-        if name_len % 2 != 0
+        if !name_len.is_multiple_of(2)
             || offset
                 .checked_add(header)
                 .and_then(|start| start.checked_add(name_len))
@@ -2597,7 +2599,7 @@ fn parse_extended_directory_buffer(
         if next == 0 {
             break;
         }
-        if next % 8 != 0 || next < header + name_len {
+        if !next.is_multiple_of(8) || next < header + name_len {
             return Err(ExactDisposeError::Rejected(
                 "extended directory information next offset is invalid".into(),
             ));
@@ -2665,7 +2667,7 @@ fn parse_alias_directory_buffer(
     let header = offset_of!(FILE_ID_BOTH_DIR_INFO, FileName);
     let mut offset = 0_usize;
     loop {
-        if offset % 8 != 0
+        if !offset.is_multiple_of(8)
             || offset
                 .checked_add(size_of::<FILE_ID_BOTH_DIR_INFO>())
                 .is_none_or(|end| end > bytes.len())
@@ -2679,7 +2681,7 @@ fn parse_alias_directory_buffer(
         let short_len = usize::try_from(info.ShortNameLength).map_err(|_| {
             ExactDisposeError::Rejected("directory short-name length is negative".into())
         })?;
-        if name_len % 2 != 0
+        if !name_len.is_multiple_of(2)
             || short_len > size_of_val(&info.ShortName)
             || short_len % 2 != 0
             || offset
@@ -2716,7 +2718,7 @@ fn parse_alias_directory_buffer(
         if next == 0 {
             break;
         }
-        if next % 8 != 0 || next < header + name_len {
+        if !next.is_multiple_of(8) || next < header + name_len {
             return Err(ExactDisposeError::Rejected(
                 "directory information next offset is invalid".into(),
             ));

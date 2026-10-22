@@ -147,7 +147,7 @@ trial, account window or approval can be adopted here.
    mutation. Keep the historical archive unchanged.
 3. Rebuild the rebound native driver and update preparation/template hashes.
    Required feature: `research-msix-lifecycle` (the separate `research-msix-control`
-   builds a different example). With Rust >=1.85, x64 MSVC target, MSVC C++ build
+   builds a different example). With Rust >=1.88, x64 MSVC target, MSVC C++ build
    tools/Windows SDK and PowerShell 7, the build shape from the checkout root is:
 
    ```powershell

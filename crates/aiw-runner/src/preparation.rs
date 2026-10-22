@@ -460,15 +460,14 @@ impl WsbPreparationReceipt {
         require_pinned_protocol(&self.provider_protocol)?;
         if let Some(msi) = &self.msi {
             msi.validate(&self.workspace)?;
-            if let Some(profile) = &msi.launch_profile {
-                if self.host_os_version.is_none()
+            if let Some(profile) = &msi.launch_profile
+                && (self.host_os_version.is_none()
                     || profile.profile.project_revision_sha256 != self.project_revision_sha256
-                    || profile.profile.guest_agent_sha256 != self.guest_agent.sha256
-                {
-                    return Err(WsbPreparationError::Contract(
-                        "launch profile project or agent binding differs from preparation".into(),
-                    ));
-                }
+                    || profile.profile.guest_agent_sha256 != self.guest_agent.sha256)
+            {
+                return Err(WsbPreparationError::Contract(
+                    "launch profile project or agent binding differs from preparation".into(),
+                ));
             }
         }
         if let Some(bambu) = &self.bambu {

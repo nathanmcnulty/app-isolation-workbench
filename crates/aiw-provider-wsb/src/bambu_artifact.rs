@@ -70,7 +70,10 @@ fn read_zip_entries(bytes: &[u8]) -> Result<BTreeMap<String, Vec<u8>>, String> {
         let mut entry = archive
             .by_index(index)
             .map_err(|error| format!("invalid ZIP entry: {error}"))?;
-        let name = canonical_zip_path(entry.name())?;
+        let entry_name = entry
+            .name()
+            .map_err(|error| format!("invalid ZIP entry name: {error}"))?;
+        let name = canonical_zip_path(&entry_name)?;
         if !names.insert(name.to_ascii_lowercase()) {
             return Err("3MF ZIP has duplicate or case-ambiguous entry paths".to_owned());
         }
@@ -326,7 +329,7 @@ where
                         .to_owned(),
                 );
             }
-            Event::Text(text) if text.as_ref().contains(&b'&') => {
+            Event::Text(text) if text.contains(&b'&') => {
                 return Err("3MF XML must not contain entity references".to_owned());
             }
             Event::Eof => break,
@@ -393,7 +396,7 @@ fn parse_model_xml(bytes: &[u8]) -> Result<Vec<ModelElement>, String> {
                         .to_owned(),
                 );
             }
-            Event::Text(text) if text.as_ref().contains(&b'&') => {
+            Event::Text(text) if text.contains(&b'&') => {
                 return Err("3MF XML must not contain entity references".to_owned());
             }
             Event::Eof => break,

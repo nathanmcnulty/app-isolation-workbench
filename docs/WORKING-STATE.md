@@ -22,6 +22,15 @@ found no remaining findings; governance passed. GitHub CLI authentication and
 source pushes work. The unchanged private 60-file migration archive was downloaded
 and verified; historical assets/controllers remain unchanged.
 
+Integration PR #99 is open as a draft. Full local verification passed before a
+dependency audit identified ZIP 2.4.2 advisories. The dependency is now ZIP 9.0.5
+in both lockfiles, with its required Rust 1.88 core minimum aligned across CI,
+local checks and current instructions. Eighty provider tests, both lockfile audits,
+stable workspace Clippy, actual Rust 1.88 all-target compilation and governance
+pass after the update. Independent review cleared the API adaptation and
+MSRV-enabled mechanical style changes. Existing nonfatal dependency-maintenance
+warnings remain visible; no advisory was suppressed. Final hosted CI is required.
+
 ## Worker and remote operation
 
 VM 106 `passkeys-worker` / PASSKEYS-WORKER has UUID
