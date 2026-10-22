@@ -3,6 +3,7 @@ import importlib.util
 import json
 from pathlib import Path
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -25,7 +26,7 @@ class ManagementTests(unittest.TestCase):
         for context in contexts:
             context.start()
             self.addCleanup(context.stop)
-        self.guard = {'phase': 'finished', 'freshly_collected': True, 'result': {'out-data': json.dumps({
+        self.guard = {'phase': 'finished', 'started': time.time(), 'freshly_collected': True, 'result': {'out-data': json.dumps({
             'Phase': 'Guarded', 'Result': 'firewallGuardedBeforeNetwork',
             'VmUuid': '7e686bee-8c05-43c7-9603-a9562ece224c', 'Controller': '192.168.1.165',
             'AdminSid': 'S-1-5-21-3849540285-1795134874-2442050430-1006'})}}
@@ -76,6 +77,13 @@ class ManagementTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 module.enable_network(self.guard)
             self.assertEqual(qm.call_count, 1)
+
+    def test_delayed_guard_collection_cannot_activate_network(self):
+        self.guard['started'] = time.time() - 3600
+        with patch.object(module, 'qm') as qm:
+            with self.assertRaises(RuntimeError):
+                module.enable_network(self.guard)
+            qm.assert_not_called()
 
     def test_launch_failure_not_repeated(self):
         with patch.object(module, 'qm', side_effect=RuntimeError('transport')) as qm:

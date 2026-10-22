@@ -97,6 +97,9 @@ try {
         New-NetFirewallRule -Name $ruleNames[1] -DisplayName 'VM106 DHCP replies only' -Direction Inbound -Action Allow -Profile Any -Protocol UDP -LocalPort 68 -RemotePort 67 -RemoteAddress '192.168.1.0/24' -Service Dhcp -InterfaceAlias $adapters[0].Name|Out-Null
         New-NetFirewallRule -Name $ruleNames[2] -DisplayName 'VM106 DHCP requests only' -Direction Outbound -Action Allow -Profile Any -Protocol UDP -LocalPort 68 -RemotePort 67 -RemoteAddress @('255.255.255.255','192.168.1.0/24') -Service Dhcp -InterfaceAlias $adapters[0].Name|Out-Null
         Assert-Firewall
+        # Use DHCP on the cloned NIC; never adopt the controller's static address.
+        Get-NetIPAddress -InterfaceIndex $adapters[0].InterfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue|Where-Object {$_.PrefixOrigin -eq 'Manual' -or $_.IPAddress -eq $controller}|Remove-NetIPAddress -Confirm:$false
+        Set-NetIPInterface -InterfaceIndex $adapters[0].InterfaceIndex -AddressFamily IPv4 -Dhcp Enabled
         $state.Result='firewallGuardedBeforeNetwork'
         Save-Management Guarded
     } else {

@@ -15,7 +15,7 @@ import time
 
 ROOT = Path('/var/lib/aiw-vm106')
 PAYLOAD = Path('/usr/local/libexec/aiw-vm106-management.ps1')
-PAYLOAD_HASH = '9a1db78000dade58ef1173eddcdead5a7da487f6a3b9a2c3f8c5f912a424da98'
+PAYLOAD_HASH = '70030f37f84de9b45c1aeecf1917bd470d406c7eafca771b800d33d45266213a'
 OFFLINE_NET = 'virtio=CC:34:21:7E:FE:59,bridge=vmbr0,link_down=1'
 MANAGEMENT_NET = 'virtio=CC:34:21:7E:FE:59,bridge=vmbr0,link_down=0'
 
@@ -97,7 +97,8 @@ def enable_network(guard_record):
         raise RuntimeError('Network guard receipt not verified')
     path = ROOT / 'management-network.json'
     if not path.exists():
-        if guard_record.get('freshly_collected') is not True:
+        age = time.time() - guard_record.get('started', 0)
+        if guard_record.get('freshly_collected') is not True or not 0 <= age <= 180:
             raise RuntimeError('Fresh guard completion required for one-time NIC activation')
         save(path, {'phase': 'intent', 'payload': PAYLOAD_HASH, 'started': time.time()})
         new_intent = True
