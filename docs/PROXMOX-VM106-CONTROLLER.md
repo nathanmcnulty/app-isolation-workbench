@@ -185,3 +185,27 @@ creation, CreateProfile/LogonUser execution, reboot or fresh-console finalizatio
 retain those observations separately when performed. Copied-profile Rust/user
 toolchains are not adopted; builds remain on the controller, while verification
 checks system-installed runtimes/SDK tools on the worker.
+
+### Live preparation, 2026-10-22 UTC
+
+Operator installation returned the expected 64651fd9 helper hash. Strict-key SSH
+`worker-prepare` launched PID 280 at 05:20 UTC; collection returned exited 1,
+exitcode 0, no output truncation, Phase PreparedAwaitingReboot. The fixed guest
+receipt records new administrator SID `S-1-5-21-3849540285-1795134874-2442050430-1006`,
+profile `C:\Users\AiwWorkerAdmin`, and successful credential LogonUser validation.
+The two copied sandbox users were disabled and rename staged. Labadmin remained
+enabled; no standard trial user was created. The stderr CLIXML contains progress
+and the expected rename/restart warning, not an execution failure.
+
+Controller credential recovery succeeded into DPAPI CurrentUser storage without
+printing plaintext. The private key and credential remain only in the protected
+controller recovery directory; do not put them in Git or the worker. Graceful
+shutdown returned success at 05:20:54 UTC; stopped readback passed and start
+returned success at 05:21:16 UTC. `swtpm_setup: Not overwriting existing state file`
+was retained as start output. No snapshot or network change occurred.
+
+Local nonsecret evidence: `preparation-first-call.json`, `preparation-result.json`
+(contains only encrypted credential material), `preparation-verified-summary.json`,
+`credential-recovery-receipt.json`, `preparation-shutdown.json` and
+`preparation-restart.json`, under `C:\passkeys\worker106-tools`. Post-boot identity,
+tool inventory and human console sign-in still require their own receipts.

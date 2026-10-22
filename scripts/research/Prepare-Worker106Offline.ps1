@@ -142,10 +142,15 @@ public static class Worker106Native {
         Assert-PlainDirectory "C:\Users\$adminName"
         $registeredProfile=Get-CimInstance Win32_UserProfile | Where-Object SID -CEQ $admin.SID.Value
         if (@($registeredProfile).Count -ne 1 -or $registeredProfile.LocalPath -cne "C:\Users\$adminName") { throw 'Fresh profile registration mismatch' }
-        $tools=@(foreach($path in @('C:\Program Files\PowerShell\7\pwsh.exe','C:\Program Files\dotnet\dotnet.exe','C:\Program Files\nodejs\node.exe','C:\Program Files\Git\cmd\git.exe','C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe','C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\makeappx.exe','C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe')) {
+        $tools=@(foreach($path in @('C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe','C:\Program Files\WindowsApps\Microsoft.PowerShell_7.6.7.0_x64__8wekyb3d8bbwe\pwsh.exe','C:\Program Files\dotnet\dotnet.exe','C:\Program Files\nodejs\node.exe','C:\Program Files\Git\cmd\git.exe','C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe','C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\makeappx.exe','C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe')) {
             [pscustomobject]@{Path=$path;Exists=Test-Path -LiteralPath $path -PathType Leaf;FileVersion=if(Test-Path -LiteralPath $path -PathType Leaf){(Get-Item -LiteralPath $path).VersionInfo.FileVersion}else{$null}}
         })
-        if (@($tools | Where-Object {-not $_.Exists}).Count) {throw 'Required system tool path missing'}
+        if (@($tools | Where-Object {-not $_.Exists}).Count) {
+            # Retain the full observation before failing; never hide the missing
+            # path behind an opaque terminal error or claim it was installed.
+            [ordered]@{Failure='RequiredSystemToolMissing';Computer=$env:COMPUTERNAME;VmUuid=$vm.UUID;Tools=$tools} | ConvertTo-Json -Depth 5 -Compress
+            throw 'Required system tool path missing; see captured inventory'
+        }
         $interactive=$computer.UserName
         if ($Operation -eq 'Finalize') {
             if ($interactive -ine "PASSKEYS-WORKER\$adminName" -or -not $registeredProfile.Loaded) { throw 'Fresh administrator must be signed in at interactive console before finalization' }

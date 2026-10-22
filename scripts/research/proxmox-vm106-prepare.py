@@ -14,7 +14,7 @@ import sys
 import time
 
 PAYLOAD = Path('/usr/local/libexec/aiw-vm106-prepare.ps1')
-PAYLOAD_HASH = 'c4ea40b8393c17e41aaa3589ad0c3c45b28a640ba897d13bafe258b769793f05'
+PAYLOAD_HASH = 'fb561897488440a1cb89859f988e3e4e2e807e7ab4832d4b2cc53b8d60700182'
 STATE = None
 STATE_ROOT = Path('/var/lib/aiw-vm106')
 

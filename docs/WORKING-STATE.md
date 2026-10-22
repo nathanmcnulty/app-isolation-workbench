@@ -14,14 +14,16 @@ Host installation, strict-key SSH inspection and unsupported-command rejection p
 First isolated boot exposed inherited lock descriptors in swtpm/kvm; the reviewed
 fix and one-time graceful-shutdown recovery are documented there. Host update and
 the post-fix SSH start/running-readback/shutdown/stopped-readback cycle passed.
-Worker is running at the labadmin desktop, still disconnected. The reviewed host
+Worker is running, still disconnected. The reviewed host
 update and fixed guest-agent cleanup completed. The guest receipt confirms no
 Tailscale service and none of the three fixed state directories remain. See the
-controller document for evidence and the retained host journal. A reviewed offline
-preparation bundle is ready for one host update, enabling fixed account setup,
-post-boot verification, encrypted credential recovery and console-gated finalization.
-It has not executed on the worker. Account setup, fresh console sign-in, baseline
-snapshot and the driver rebind remain open; no application acceptance is claimed.
+controller document for evidence and retained host journals. Offline preparation
+completed: fresh AiwWorkerAdmin SID ending 1006/profile created, credential logon
+validated and recovered into controller DPAPI storage, copied sandbox accounts
+disabled, rename staged. A graceful stopped/readback/start cycle completed.
+Post-boot verification, fresh admin console sign-in, finalization, baseline snapshot
+and the driver rebind remain open; copied labadmin is retained until console login.
+No application acceptance is claimed.
 Keep the original PASSKEYS VM as controller.
 
 Branch: `codex/new-vm-handoff-20261021`, based on the complete development history
