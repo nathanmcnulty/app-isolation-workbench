@@ -155,3 +155,21 @@ Final static-CRT x64 driver SHA-256:
 All current closed template/input pins use those bytes. The r4 input bundle was
 transferred, expanded and all eleven files verified on the restored worker.
 The fresh application acceptance rerun remains pending; r3 is partial evidence.
+## Application attempt r4 and retained uninstall path
+
+The held-handle fix worked live: editor exit 0, heldNativeHandle true, exact 53-byte
+saved document (SHA-256 `91b82efd755bd5a46b47f6277bd050954b9fb3e78e56f9f086129d04da4dbd42`),
+per-user config.xml and all 220 immutable payload hashes passed. Remove-AppxPackage
+completed; independent parent package/process inventory was empty. Reporting then
+failed because the live package object's InstallLocation property became null
+after removal. No complete result was published for this attempt. Export ZIP:
+`476d47f1d97ab8ea3f1898707c1e6c7d3d8856c499b8a025294a71650db84b1b`.
+After verified export, cold baseline restore/restart passed again.
+
+The driver now snapshots a nonempty installed-location string before uninstall
+and queries that retained path afterward. Independent review and actual-source
+AST regression checks passed under PowerShell 5.1/7: null/empty/whitespace refusal,
+source-property invalidation, and real directory present/absent observations.
+All 12 native tests passed, including the actual compacted-script parse/C# compile
+and the command-length limit. Final r5 executable SHA-256:
+`d4bc21662221bd681e0ec89e691a89ff9e4f1902358fdf04975cf438aed147ee`.

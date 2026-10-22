@@ -77,6 +77,8 @@ try {
  if($packages.Count -ne 1){throw 'Exact installed registration absent'}
  $installed=$packages[0]
  $installedFullName=$installed.PackageFullName
+ $installedLocation=[string]$installed.InstallLocation
+ if([string]::IsNullOrWhiteSpace($installedLocation)){throw 'Installed path absent'}
  if($installed.Version.ToString() -cne '8.9.8.0' -or $installed.Publisher -cne $publisher -or $installed.Architecture.ToString() -ine 'X64'){throw 'Installed package identity differs'}
  $manifest=Get-AppxPackageManifest -Package $installedFullName
  $manifest.Save((Join-Path $evidence 'installed-manifest.xml'))
@@ -156,7 +158,7 @@ try {
  $packageProcesses|Add-Member -NotePropertyName globalAbsenceVerified -NotePropertyValue $false
  Record 'package-processes-after-uninstall' $packageProcesses
  if($packageProcesses.matches.Count -ne 0 -or @($packageProcesses.queryErrors|Where-Object name -ieq 'notepad++').Count -ne 0){throw 'Application candidate remains after uninstall'}
- Record 'cleanup' @{registrationAbsent=($remaining.Count -eq 0);applicationProcessesAbsent=($processes.Count -eq 0);installLocationPresent=(Test-Path -LiteralPath $installed.InstallLocation);configurationAfterUninstall=$configAfterUninstall;userDataDeletionClaim='notInferredFromUninstall'}
+ Record 'cleanup' @{registrationAbsent=($remaining.Count -eq 0);applicationProcessesAbsent=($processes.Count -eq 0);installLocationPresent=(Test-Path -LiteralPath $installedLocation);configurationAfterUninstall=$configAfterUninstall;userDataDeletionClaim='notInferredFromUninstall'}
  if($remaining.Count -ne 0 -or $processes.Count -ne 0){throw 'Exact registration/process cleanup not verified'}
  Record 'result' ([ordered]@{completed=$true;researchOnly=$true;signedSha256=$SignedSha256;packageFullName=$installedFullName;packageIdentity='observed';runtime='mediumIlFullTrust';documentWorkflow='exactBytesVerified';configuration='perUserLocationObserved';payloadUnchanged=$true;registrationCleanup='verified';isolation='notMeasured';evidenceRoot=$evidence})
  Write-Host ('Lifecycle completed. Evidence: '+$evidence)

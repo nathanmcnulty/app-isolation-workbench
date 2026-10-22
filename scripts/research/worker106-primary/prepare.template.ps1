@@ -18,7 +18,7 @@ $input='C:\AIW-Msix-Lifecycle-Input';$output='C:\AIW-Msix-Lifecycle-Output';$pre
 foreach($dir in @($input,$output)){$item=Get-Item -LiteralPath $dir -Force;if(!$item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Fixed directory identity differs'}}
 if(Test-Path $prep){throw 'Refuse existing preparation'}
 if(@(Get-ChildItem -LiteralPath $output -Force).Count -ne 0){throw 'Output not fresh'}
-$expected=@{'application.msix'='2ae3a7c685e811eb34479980bff41d1442b023578074e19f4dca8fc676070437';'assembly.json'='d7eca3af76598534d29e411b4d4775d61e6ffe11174aa5a171b44bfe2a080c38';'signing.json'='670e6f9e44211848c305c61261aa2ed6e2c94fac229214ec843cd4c9afab9e80';'msix_standard_user_lifecycle.exe'='442265d9c40fefade23ccbe9db90d10058d0969643d52eb8854aa65fb921b1ca'}
+$expected=@{'application.msix'='2ae3a7c685e811eb34479980bff41d1442b023578074e19f4dca8fc676070437';'assembly.json'='d7eca3af76598534d29e411b4d4775d61e6ffe11174aa5a171b44bfe2a080c38';'signing.json'='670e6f9e44211848c305c61261aa2ed6e2c94fac229214ec843cd4c9afab9e80';'msix_standard_user_lifecycle.exe'='d4bc21662221bd681e0ec89e691a89ff9e4f1902358fdf04975cf438aed147ee'}
 $files=@(Get-ChildItem -LiteralPath $input -Force);if($files.Count -ne 4){throw 'Input inventory differs'}
 foreach($file in $files){if($file.PSIsContainer -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -or !$expected.ContainsKey($file.Name) -or (Get-FileHash -LiteralPath $file.FullName).Hash.ToLowerInvariant() -cne $expected[$file.Name]){throw 'Input bytes differ'}}
 foreach($dir in @($input,$output)){
