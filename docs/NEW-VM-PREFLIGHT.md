@@ -177,8 +177,14 @@ change as the explanation. It does not yet identify the exact wrapper failure.
 The original wrapper passes its open lock descriptor 9 to `qm start`, allowing
 a long-lived descendant to retain that lock after the request exits. This is a
 source-backed failure hypothesis consistent with later requests timing out.
-Root-console `fuser -v /run/aiw-worker107/lock` has been requested to identify
-the live holder before recovery. Do not unlink the lock file or kill QEMU/swtpm.
+Root-console `fuser -v /run/aiw-worker107/lock` subsequently confirmed two root
+holders: PID 919856 `swtpm` and PID 919865 `kvm`, both with `F....` access.
+Typed user-supplied readback is retained as
+`worker107-bootstrap-r1\root-lock-holders-r1.json` under the migration root.
+This confirms the live descendant retention. Do not unlink the lock file or
+kill QEMU/swtpm. Recovery must gracefully shut down only VM 107, verify it is
+stopped and the existing lock can be acquired, then install the corrected bytes.
+No development VM power change is needed.
 
 The correction invokes every fixed `qm` command through `run_qm`, closing
 descriptor 9 only in the invoked process and explicitly returning its status.
@@ -197,7 +203,12 @@ and `lock-control-r2.stdout.json` under the migration root. The first control
 failure is preserved: its last foreground `sleep` allowed shell tail execution
 to close the intended parent's descriptor; a subsequent no-op kept the waiting
 parent alive in the corrected control. No VM operation was used for that control.
-These controls prove the mechanism, not which live process holds the VM lock.
+The controls prove the mechanism; the later root readback identifies the live
+holders. Independent review found no actionable issue in the descriptor fix at
+`3c9dc996b6263102e19c7a057aba76735a17be5e`. Its published script was downloaded
+back and verified, SHA-256
+`be175786efc8842112732c9fc735e1fe556d95e7cb7d355b8c8b762f6504db33`.
+Installation and post-recovery independent readback remain pending.
 
 Inspect and remove copied development authentication material from the clone
 before enabling its network or application trials; preserve the originals on 203.

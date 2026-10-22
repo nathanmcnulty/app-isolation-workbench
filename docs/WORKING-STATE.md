@@ -18,9 +18,11 @@ installation and initial SSH readback passed, including rejection of VM 203
 commands. Offline `start` returned zero, but post-start `inspect`, `status` and
 `guest-info` each exited 1 without diagnostics. Root-console readback confirms
 running, NIC disconnected and no pending changes. Inherited lock descriptor 9
-is now the source-backed hypothesis; root `fuser` readback is pending. The source
+was confirmed by root `fuser`: swtpm PID 919856 and kvm PID 919865 hold it. The source
 closes descriptor 9 in Proxmox commands while retaining the parent lock; an
 unprivileged Linux control passed. Diagnostics and 13 identity tests also pass.
+Recovery pending: graceful native shutdown of only 107, verify stopped and lock
+free, install reviewed `3c9dc99` wrapper, then independently inspect/restart.
 Do not delete lock files, kill processes or relax identity checks to recover.
 The previous VM 203
 snapshot/rollback plan is superseded:
