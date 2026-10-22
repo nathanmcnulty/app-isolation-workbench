@@ -28,11 +28,17 @@ VM 106 `passkeys-worker` / PASSKEYS-WORKER has UUID
 `7e686bee-8c05-43c7-9603-a9562ece224c`, MAC CC-34-21-7E-FE-59, guest IP 192.168.1.173.
 Proxmox `pve-r630` is 192.168.1.6. Final successful evidence was exported, hash-checked
 and independently read back before a graceful shutdown and exact baseline rollback.
-**Worker is stopped on `aiw-vm106-baseline-20261021`; the baseline was never replaced.**
+The baseline `aiw-vm106-baseline-20261021` was never replaced. The worker was
+subsequently started for native passkey-provider preparation: candidate signatures,
+runtime/API preflight and predeployment rejection checks passed; no provider is
+installed. Its private intake is retained for the separate provider acceptance work.
 OS/EFI/TPM restore has now passed repeatedly. Controller PASSKEYS was not rolled back.
 
 The repaired closed Proxmox SSH helper supports fixed inspect/status/start/shutdown/
 snapshot/rollback operations and retains exact VM/disk/MAC/pending-config checks.
+Integration review found that extra disks were not excluded. The reviewed source
+now allows only the three pinned writable devices and the observed empty CD drive,
+and rejects host VirtIOFS shares. Live deployment of that guard is pending.
 Use [PROXMOX-VM106-CONTROLLER.md](PROXMOX-VM106-CONTROLLER.md). Encrypted NTLM WinRM
 and verified PSRP transfer work as AiwWorkerAdmin (SID ending 1006); credentials
 remain controller-user DPAPI protected outside Git. See

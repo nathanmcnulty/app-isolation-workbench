@@ -44,8 +44,19 @@ verify_config() {
         'net0: virtio=CC:34:21:7E:FE:59,bridge=vmbr0,link_down=1'|'net0: virtio=CC:34:21:7E:FE:59,bridge=vmbr0,link_down=0'|'net0: virtio=CC:34:21:7E:FE:59,bridge=vmbr0') ;;
         *) return 1 ;;
     esac
-    # Alternate network devices and host execution hooks are outside this boundary.
-    if printf '%s\n' "$1" | grep -E '^(net[1-9][0-9]*|args|hostpci[0-9]+|usb[0-9]+|hookscript):' >/dev/null; then
+    # Snapshot/rollback cover the complete VM, so require the complete storage
+    # inventory, not merely the presence of our three pinned writable devices.
+    # The only additional device observed on this worker is an empty CD drive.
+    storage=$(printf '%s\n' "$1" | grep -E '^(ide|sata|scsi|virtio|efidisk|tpmstate|unused)[0-9]+:' || :)
+    if printf '%s\n' "$storage" | grep -Fvx \
+        -e 'efidisk0: r630-fast2:vm-106-disk-0,efitype=4m,ms-cert=2023k,pre-enrolled-keys=1,size=4M' \
+        -e 'scsi0: r630-fast2:vm-106-disk-1,discard=on,iothread=1,size=100G,ssd=1' \
+        -e 'tpmstate0: r630-fast2:vm-106-disk-2,size=4M,version=v2.0' \
+        -e 'ide2: none,media=cdrom' >/dev/null; then
+        return 1
+    fi
+    # Alternate network devices, host shares and execution hooks are outside this boundary.
+    if printf '%s\n' "$1" | grep -E '^(net[1-9][0-9]*|args|hostpci[0-9]+|usb[0-9]+|virtiofs[0-9]+|hookscript):' >/dev/null; then
         return 1
     fi
 }

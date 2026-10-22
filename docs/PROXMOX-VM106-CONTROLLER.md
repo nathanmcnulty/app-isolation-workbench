@@ -422,3 +422,21 @@ Controller evidence: `C:\passkeys\worker106-tools\nic-fix-live-inspect.json`,
 `baseline-shutdown.json`, `baseline-create.json`, `baseline-stopped-inspect.json`,
 `baseline-restart.json`, `baseline-postboot-winrm.json`, and
 `baseline-proxmox.png`. No standard-user application trial began here.
+
+## Integration storage-scope review, 2026-10-22
+
+After the successful MSIX trial documented in VM106-MSIX-TRIALS.md, independent
+integration review found that requiring the three pinned disks did not exclude
+additional writable devices. Proxmox snapshots and rollback cover the full VM,
+so an accidentally attached foreign volume would extend the operation's scope.
+
+The shared current/snapshot configuration check now allowlists the exact OS, EFI
+and TPM device lines plus only `ide2: none,media=cdrom`. It rejects any additional
+IDE/SATA/SCSI/VirtIO/EFI/TPM/unused storage entry, occupied optical media, or
+VirtIOFS host share. Negative dispatch controls cover both current/start and
+snapshot/rollback configurations; all 70 dispatch/identity checks passed with
+mock commands and no actual VM mutation. Independent review
+of the narrow fix found no remaining issue. Source SHA-256:
+`aafc3146148e2fb03f8f9cd62770cf2f0e8055f67b0222b62431b31a28e0e4e1`.
+Live installation of this additional guard is pending; the existing baseline is
+preserved and must not be replaced.

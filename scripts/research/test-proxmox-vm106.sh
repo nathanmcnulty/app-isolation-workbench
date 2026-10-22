@@ -15,6 +15,7 @@ sed -e "s|^PATH=/usr/sbin:/usr/bin:/sbin:/bin$|PATH=$work/bin:/usr/bin:/bin|" \
     "$repo/scripts/research/proxmox-vm106.sh" > "$work/controller"
 cat > "$work/config" <<'CONFIG'
 agent: 1
+ide2: none,media=cdrom
 name: passkeys-worker
 onboot: 0
 smbios1: uuid=7e686bee-8c05-43c7-9603-a9562ece224c
@@ -190,7 +191,16 @@ for extra in \
     'args: -netdev user,id=extra -device e1000,netdev=extra' \
     'hostpci0: 0000:01:00.0' \
     'usb0: host=1234:5678' \
-    'hookscript: local:snippets/unreviewed.pl'; do
+    'hookscript: local:snippets/unreviewed.pl' \
+    'scsi1: r630-fast2:vm-100-disk-0,size=100G' \
+    'sata0: r630-fast2:vm-100-disk-0,size=100G' \
+    'ide0: r630-fast2:vm-100-disk-0,size=100G' \
+    'virtio0: r630-fast2:vm-100-disk-0,size=100G' \
+    'efidisk1: r630-fast2:vm-100-disk-0,size=4M' \
+    'tpmstate1: r630-fast2:vm-100-disk-0,size=4M' \
+    'unused0: r630-fast2:vm-100-disk-0' \
+    'ide2: local:iso/unreviewed.iso,media=cdrom' \
+    'virtiofs0: dirid=host-share'; do
     cp "$work/base" "$work/config"
     printf '%s\n' "$extra" >> "$work/config"
     cp "$work/config" "$work/pending"
