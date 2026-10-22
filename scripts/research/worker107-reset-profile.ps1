@@ -29,6 +29,20 @@ function Assert-AiwWorker107ProfileContext {
     }
 }
 
+function Assert-AiwWorker107ProfilePath {
+foreach ($path in @('C:\Users', 'C:\Users\labadmin')) {
+    $item = Get-Item -LiteralPath $path -Force
+    if (!$item.PSIsContainer -or $item.FullName -ine $path -or
+        (Resolve-Path -LiteralPath $path).ProviderPath -ine $path -or
+        ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw 'Fixed regular profile path required'
+    }
+}
+if ((Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\S-1-5-21-3556347314-2314855617-1438300668-1001' -Name ProfileImagePath).ProfileImagePath -ine 'C:\Users\labadmin') {
+    throw 'Profile registry path differs'
+}
+}
+
 function Get-AiwResetAccounts {
     @(Get-CimInstance Win32_UserAccount -Filter 'LocalAccount=True' |
         Sort-Object SID | Select-Object Name,SID,Disabled)
@@ -59,18 +73,8 @@ $profilesBefore = @(Get-AiwResetProfiles)
 Assert-AiwWorker107ProfileContext $identity.User.Value $session $impersonating $uuid $accountsBefore $profilesBefore
 $sid = 'S-1-5-21-3556347314-2314855617-1438300668-1001'
 $profilePath = 'C:\Users\labadmin'
-foreach ($path in @('C:\Users', $profilePath)) {
-    $item = Get-Item -LiteralPath $path -Force
-    if (!$item.PSIsContainer -or $item.FullName -ine $path -or
-        (Resolve-Path -LiteralPath $path).ProviderPath -ine $path -or
-        ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-        throw 'Fixed regular profile path required'
-    }
-}
+Assert-AiwWorker107ProfilePath
 $registryPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\' + $sid
-if ((Get-ItemProperty -LiteralPath $registryPath -Name ProfileImagePath).ProfileImagePath -ine $profilePath) {
-    throw 'Profile registry path differs'
-}
 $evidence = 'C:\AIW-Worker107-Profile-Reset-r1'
 if (Test-Path -LiteralPath $evidence) { throw 'Preserve the existing reset attempt; do not retry' }
 $acl = [Security.AccessControl.DirectorySecurity]::new()
@@ -111,6 +115,7 @@ public static class AiwWorker107Userenv {
 '@
     # Recheck immediately before the only destructive native call.
     Assert-AiwWorker107ProfileContext $identity.User.Value $session $impersonating $uuid @(Get-AiwResetAccounts) @(Get-AiwResetProfiles)
+    Assert-AiwWorker107ProfilePath
     $stage = 'delete-profile'
     if (![AiwWorker107Userenv]::DeleteProfileW($sid, $profilePath, $null)) {
         throw [ComponentModel.Win32Exception]::new([Runtime.InteropServices.Marshal]::GetLastWin32Error())

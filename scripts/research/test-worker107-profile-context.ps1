@@ -56,8 +56,44 @@ foreach ($case in $cases) {
     try { Assert-AiwWorker107ProfileContext @context } catch { $rejected = $true }
     if (!$rejected) { throw "Profile guard accepted invalid context: $case" }
 }
+$pathFunction = $ast.Find({ param($node)
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -ceq 'Assert-AiwWorker107ProfilePath'
+}, $true)
+if ($null -eq $pathFunction) { throw 'Profile path guard not found' }
+$pathCases = @('valid', 'parentReparse', 'profileReparse', 'notDirectory', 'differentFullName', 'differentResolvedPath', 'differentRegistryPath')
+foreach ($pathCase in $pathCases) {
+    & {
+        . ([scriptblock]::Create($pathFunction.Extent.Text))
+        function Get-Item {
+            param($LiteralPath, [switch]$Force)
+            $reparse = ($pathCase -eq 'parentReparse' -and $LiteralPath -eq 'C:\Users') -or
+                ($pathCase -eq 'profileReparse' -and $LiteralPath -eq 'C:\Users\labadmin')
+            [pscustomobject]@{
+                PSIsContainer = ($pathCase -ne 'notDirectory')
+                FullName = $(if ($pathCase -eq 'differentFullName') { 'C:\elsewhere' } else { $LiteralPath })
+                Attributes = $(if ($reparse) { [IO.FileAttributes]::ReparsePoint } else { [IO.FileAttributes]::Directory })
+            }
+        }
+        function Resolve-Path {
+            param($LiteralPath)
+            [pscustomobject]@{ ProviderPath = $(if ($pathCase -eq 'differentResolvedPath') { 'C:\elsewhere' } else { $LiteralPath }) }
+        }
+        function Get-ItemProperty {
+            param($LiteralPath, $Name)
+            if ($LiteralPath -cne ('HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\' + $sid) -or $Name -cne 'ProfileImagePath') {
+                throw 'Unexpected registry query'
+            }
+            [pscustomobject]@{ ProfileImagePath = $(if ($pathCase -eq 'differentRegistryPath') { 'C:\elsewhere' } else { 'C:\Users\labadmin' }) }
+        }
+        $rejected = $false
+        try { Assert-AiwWorker107ProfilePath } catch { $rejected = $true }
+        if ($rejected -ne ($pathCase -ne 'valid')) { throw "Unexpected path guard result: $pathCase" }
+    }
+}
 [ordered]@{
     passed = $true; positiveCases = 1; negativeCases = $cases.Count
     powerShellVersion = $PSVersionTable.PSVersion.ToString()
     nativeSourceCompiled = $true; nativeProfileApisInvoked = $false
+    pathPositiveCases = 1; pathNegativeCases = 6
 } | ConvertTo-Json
