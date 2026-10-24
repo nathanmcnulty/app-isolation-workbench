@@ -23,6 +23,9 @@ const PRODUCT: &str = "notepad-plus-plus-msix-vm107";
 // its bytes into this host binary. A manifest beside the app cannot enroll code.
 const EXPECTED_AGENT_SHA256: Option<&str> = option_env!("AIW_MSIX_WORKER_SHA256");
 
+#[cfg(test)]
+mod bounded_windows_acceptance;
+
 fn hash(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
