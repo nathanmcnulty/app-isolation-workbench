@@ -6,7 +6,7 @@ Set-StrictMode -Version Latest
 $ProgressPreference='SilentlyContinue'
 $root=$PSScriptRoot
 $request=Get-Content -LiteralPath (Join-Path $root 'request.json') -Raw|ConvertFrom-Json
-if(!$request.powerShellRuntime -or ((ConvertTo-Json -InputObject $AiwPowerShellRuntime -Compress -Depth 8) -cne (ConvertTo-Json -InputObject $request.powerShellRuntime.worker -Compress -Depth 8))){throw 'Approved PowerShell worker identity differs'}
+Assert-AiwWorkerRuntimeIdentity $AiwPowerShellRuntime $request.powerShellRuntime
 $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
 $uuid=(Get-CimInstance Win32_ComputerSystemProduct).UUID
 if($identity.User.Value -cne 'S-1-5-18' -or [Diagnostics.Process]::GetCurrentProcess().SessionId -ne 0 -or $uuid -ine 'e5cecc90-35c2-4831-bf9c-424be23f7d4e' -or $uuid -ine $request.workerUuid){throw 'Exact disposable VM107 LocalSystem required'}

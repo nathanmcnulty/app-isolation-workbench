@@ -8,6 +8,13 @@ $runtimeProof = {
  $ErrorActionPreference='Stop';$global:PSModuleAutoLoadingPreference='None'
  $fixedHome='C:\Program Files\PowerShell\7'
  $caps=@('Add-Type','Get-CimInstance','Get-AppxPackage','Get-AppxPackageManifest','Add-AppxPackage','Remove-AppxPackage','Get-AppxProvisionedPackage','Get-LocalUser','New-LocalUser','Disable-LocalUser','Add-LocalGroupMember','Get-LocalGroupMember','Get-AuthenticodeSignature','Get-ScheduledTask','New-PSSession')
+ function New-AiwRuntimeCommonIdentity($Edition,$Version,$Architecture,$RuntimeHome,$Engine,$Capabilities,$CompatibilityCount) {
+  return [ordered]@{edition=$Edition;version=$Version;prerelease='';architecture=$Architecture;psHome=$RuntimeHome;engine=$Engine;capabilities=$Capabilities;compatibilitySessionCount=$CompatibilityCount}
+ }
+ function New-AiwDirectRuntimeIdentity($Common,$Executable,$ExecutableSha256) {
+  $direct=[ordered]@{};foreach($key in $Common.Keys){$direct[$key]=$Common[$key]};$direct.executable=$Executable;$direct.executableSha256=$ExecutableSha256
+  return $direct
+ }
  function Assert-AiwRuntimeObservation {
   param($Observation,[ValidateSet('Direct','WSMan')][string]$Kind='Direct')
   $expectedHome='C:\Program Files\PowerShell\7'
@@ -86,10 +93,10 @@ $runtimeProof = {
    if($command.CommandType -notin @('Cmdlet','Function') -or !$command.Module -or $command.Module.Path -notlike ($fixedHome+'\Modules\*') -and $command.Module.Path -notlike 'C:\Windows\System32\WindowsPowerShell\v1.0\Modules\*'){throw ('Native capability unavailable: '+$name)}
    if($command.CommandType -eq 'Function' -and $command.ModuleName -cne 'ScheduledTasks'){throw ('Unexpected remoting proxy capability: '+$name)}
   }
-  $common=[ordered]@{edition=$PSVersionTable.PSEdition;version=$PSVersionTable.PSVersion.ToString();prerelease='';architecture=[Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString();psHome=$PSHOME;engine=$engine;capabilities=$caps;compatibilitySessionCount=$compat.Count}
+  $common=New-AiwRuntimeCommonIdentity $PSVersionTable.PSEdition $PSVersionTable.PSVersion.ToString() ([Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString()) $PSHOME $engine $caps $compat.Count
 
   if($Kind -ceq 'Direct'){
-   $direct=[ordered]@{};foreach($key in $common.Keys){$direct[$key]=$common[$key]};$direct.executable=$exe;$direct.executableSha256=Get-AiwProofHash $exeStream
+   $direct=New-AiwDirectRuntimeIdentity $common $exe (Get-AiwProofHash $exeStream)
    Assert-AiwRuntimeObservation $direct Direct
    return $direct
   }

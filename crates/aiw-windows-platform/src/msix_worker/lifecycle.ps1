@@ -11,7 +11,7 @@ $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
 if($session -eq 0 -or $identity.Name -notmatch '\\AiwStandardUser$'){throw 'Interactive standard-user session required'}
 $root=Join-Path $PSScriptRoot 'input'
 $request=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'request.json') -Raw|ConvertFrom-Json
-if(!$request.powerShellRuntime -or ((ConvertTo-Json -InputObject $AiwPowerShellRuntime -Compress -Depth 8) -cne (ConvertTo-Json -InputObject $request.powerShellRuntime.worker -Compress -Depth 8))){throw 'Approved PowerShell worker identity differs'}
+Assert-AiwWorkerRuntimeIdentity $AiwPowerShellRuntime $request.powerShellRuntime
 $account=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'account.json') -Raw|ConvertFrom-Json
 if($request.workerUuid -cne 'e5cecc90-35c2-4831-bf9c-424be23f7d4e' -or (Get-CimInstance Win32_ComputerSystemProduct).UUID -ine $request.workerUuid -or $identity.User.Value -cne $account.userSid -or $account.runNonce -cne $request.nonce -or [DateTime]::UtcNow.ToFileTimeUtc() -ge $request.notAfterFileTime){throw 'Approved worker/account/request interval differs'}
 $evidence=Join-Path $env:LOCALAPPDATA ('AIW\msix-'+$request.nonce+'\msix-lifecycle')

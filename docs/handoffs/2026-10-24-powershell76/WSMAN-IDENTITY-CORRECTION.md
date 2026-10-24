@@ -1,5 +1,10 @@
 # WSMan host and loaded-engine identity correction
 
+Follow-up: [JSON identity guard correction](JSON-IDENTITY-GUARD-CORRECTION.md)
+addresses the embedded SYSTEM/lifecycle consumer failure found by Dot at
+`96b5a12`. The source review below missed that JSON text equality mismatch;
+its clear result and prior green CI do not establish embedded guard acceptance.
+
 Source baseline: owning PR #103 branch `codex/new-vm-handoff-20261021` at
 `73a9fd6dedcaa9b9fa977088ff59609147cccbca`. This corrects the P1 in
 [Dot's independent review at 7cd7bf3](https://github.com/nathanmcnulty/app-isolation-workbench/blob/7cd7bf3b4e35f02354ebea56b662cfa8c327ec51/docs/handoffs/2026-10-24-powershell76/INDEPENDENT-MIGRATION-REVIEW.md).

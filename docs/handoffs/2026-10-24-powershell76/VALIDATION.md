@@ -1,5 +1,15 @@
 # PowerShell 7.6 offline migration validation
 
+## Subsequent embedded identity guard correction
+
+The [JSON identity guard correction](JSON-IDENTITY-GUARD-CORRECTION.md) addresses
+Dot's follow-up review at `96b5a12`. Both generated worker scripts now compare
+closed, typed worker identities independently of object property order. Earlier
+WSMan source review and green CI did not exercise these exact consumers and did
+not establish that matching embedded identities would pass. Their evidence
+remains historical. Fresh checks, package provenance and CI are separate.
+Stages A–D and merge remain blocked.
+
 ## Subsequent WSMan identity correction
 
 The [WSMan correction record](WSMAN-IDENTITY-CORRECTION.md) supersedes the

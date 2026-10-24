@@ -120,7 +120,14 @@ fn system_source() -> String {
     let at = script.find(anchor).expect("fixed inventory source anchor");
     crate::powershell::compiled_script_entry(&format!(
         "#Requires -Version 7.6\n#Requires -PSEdition Core\n{}\nAdd-Type -TypeDefinition @'\n{}\n'@\n{}\n{}",
-        script[..at].replacen("$ErrorActionPreference='Stop'", POWERSHELL_RUNTIME_GUARD, 1),
+        script[..at].replacen(
+            "$ErrorActionPreference='Stop'",
+            &format!(
+                "{POWERSHELL_RUNTIME_GUARD}\n{}",
+                include_str!("msix_worker/runtime-identity.ps1")
+            ),
+            1,
+        ),
         include_str!("research_msix_native.cs"),
         include_str!("research_msix_inventory.ps1"),
         &script[at..]
@@ -128,7 +135,8 @@ fn system_source() -> String {
 }
 fn lifecycle_source() -> String {
     crate::powershell::compiled_script_entry(&format!(
-        "#Requires -Version 7.6\n#Requires -PSEdition Core\n{POWERSHELL_RUNTIME_GUARD}\nAdd-Type -TypeDefinition @'\n{}\n'@\n{}\nfunction Invoke-AiwDriverControl {{\nparam([string]$EvidenceDirectory)\n{}\n}}\n{}",
+        "#Requires -Version 7.6\n#Requires -PSEdition Core\n{POWERSHELL_RUNTIME_GUARD}\n{}\nAdd-Type -TypeDefinition @'\n{}\n'@\n{}\nfunction Invoke-AiwDriverControl {{\nparam([string]$EvidenceDirectory)\n{}\n}}\n{}",
+        include_str!("msix_worker/runtime-identity.ps1"),
         include_str!("research_msix_native.cs"),
         include_str!("research_msix_inventory.ps1"),
         include_str!("research_msix_driver_control.ps1"),
@@ -450,6 +458,109 @@ pub fn run() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn generated_system_and_lifecycle_guards_compare_typed_identity_not_json_order() {
+        use aiw_probe::powershell::{
+            POWERSHELL_CAPABILITIES, POWERSHELL_ENGINE, POWERSHELL_PSHOME,
+            POWERSHELL_REMOTING_ENDPOINT, PowerShellEngineIdentity, PowerShellExecutionBinding,
+            PowerShellRuntimeIdentity, WSMAN_HOST, WsmanEndpointIdentity,
+        };
+        let engine = PowerShellEngineIdentity {
+            assembly_path: POWERSHELL_ENGINE.into(),
+            assembly_sha256: "b".repeat(64),
+            assembly_version: "7.6.0.500".into(),
+            module_version_id: "22222222-2222-2222-2222-222222222222".into(),
+        };
+        let worker = PowerShellRuntimeIdentity {
+            edition: "Core".into(),
+            version: "7.6.7".into(),
+            prerelease: String::new(),
+            architecture: "X64".into(),
+            executable: POWERSHELL.into(),
+            ps_home: POWERSHELL_PSHOME.into(),
+            executable_sha256: "a".repeat(64),
+            capabilities: POWERSHELL_CAPABILITIES
+                .iter()
+                .map(|s| (*s).into())
+                .collect(),
+            compatibility_session_count: 0,
+            engine: Some(engine.clone()),
+        };
+        let binding = PowerShellExecutionBinding {
+            host: worker.clone(),
+            worker: worker.clone(),
+            endpoint: POWERSHELL_REMOTING_ENDPOINT.into(),
+            wsman: Some(WsmanEndpointIdentity {
+                configuration_name: POWERSHELL_REMOTING_ENDPOINT.into(),
+                host_kind: "WSMan".into(),
+                host_executable: WSMAN_HOST.into(),
+                host_executable_sha256: "c".repeat(64),
+                edition: worker.edition,
+                version: worker.version,
+                prerelease: worker.prerelease,
+                architecture: worker.architecture,
+                ps_home: worker.ps_home,
+                engine,
+                capabilities: worker.capabilities,
+                compatibility_session_count: 0,
+                plugin_path: format!(r"{POWERSHELL_PSHOME}\pwrshplugin.dll"),
+                plugin_sha256: "d".repeat(64),
+                configuration_sha256: "e".repeat(64),
+                startup_config_sha256: "f".repeat(64),
+                resource_uri: "http://schemas.microsoft.com/powershell/PowerShell.7.6".into(),
+                configuration_ps_home: POWERSHELL_PSHOME.into(),
+                configuration_coreclr_dir: POWERSHELL_PSHOME.into(),
+            }),
+        };
+        let request: MsixWorkerRequest = serde_json::from_value(json!({
+            "schemaVersion":aiw_probe::MSIX_WORKER_REQUEST_SCHEMA,"runId":"guard-regression",
+            "nonce":"a".repeat(64),"recipe":"notepad898MediumFullTrust",
+            "planSha256":"b".repeat(64),"workerProfileSha256":"c".repeat(64),
+            "agentSha256":"d".repeat(64),"packageSha256":aiw_probe::MSIX_PACKAGE_SHA256,
+            "assemblySha256":aiw_probe::MSIX_ASSEMBLY_SHA256,"signingSha256":aiw_probe::MSIX_SIGNING_SHA256,
+            "workerUuid":aiw_probe::MSIX_WORKER_UUID,"powerShellRuntime":binding,
+            "notBeforeFileTime":1,"notAfterFileTime":18_000_000_001i64,
+        })).unwrap();
+        request.execution_runtime().unwrap();
+        // Preserve the production writer's struct order. Serializing a JSON
+        // Value map here would conceal the original order-sensitive failure.
+        let bytes = serde_json::to_vec(&request).unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "aiw-worker-identity-{}-{}",
+            std::process::id(),
+            now().unwrap()
+        ));
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("system.ps1"), system_source()).unwrap();
+        fs::write(root.join("lifecycle.ps1"), lifecycle_source()).unwrap();
+        fs::write(root.join("request.json"), &bytes).unwrap();
+        fs::write(
+            root.join("guard-regression.ps1"),
+            include_str!("msix_worker/tests/runtime-identity.ps1"),
+        )
+        .unwrap();
+        let output = crate::powershell::inert_test_output(
+            std::process::Command::new(crate::powershell::test_executable())
+                .args(["-NoProfile", "-NonInteractive", "-File"])
+                .arg(root.join("guard-regression.ps1"))
+                .env_remove("PSModulePath"),
+        )
+        .unwrap();
+        assert_eq!(fs::read(root.join("request.json")).unwrap(), bytes);
+        fs::remove_dir_all(&root).unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(result["passed"], true);
+        assert_eq!(result["consumers"], 2);
+        assert_eq!(result["accepted"], 10);
+        assert!(result["rejected"].as_u64().unwrap() >= 280);
+        println!("Embedded guard regressions: {result}");
+    }
     #[test]
     fn generated_worker_scripts_parse_with_driver_control_scoped_to_its_function() {
         for source in [system_source(), lifecycle_source()] {
