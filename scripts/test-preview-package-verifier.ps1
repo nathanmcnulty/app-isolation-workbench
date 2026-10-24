@@ -1,6 +1,14 @@
+#Requires -Version 7.6
+#Requires -PSEdition Core
 [CmdletBinding()]
 param()
 
+# AIW runtime contract: stable PowerShell Core >=7.6; no compatibility session.
+if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion -lt [version]'7.6' -or $PSVersionTable.PSVersion.PreReleaseLabel -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -ne 'X64') { throw 'AIW requires stable x64 PowerShell Core 7.6 or later' }
+foreach ($aiwNativeModule in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security','Microsoft.PowerShell.Archive')) { Import-Module (Join-Path $PSHOME ('Modules\'+$aiwNativeModule+'\'+$aiwNativeModule+'.psd1')) -SkipEditionCheck -ErrorAction Stop }
+$PSModuleAutoLoadingPreference = 'None'
+if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'AIW prohibits PowerShell Core compatibility sessions' }
+$PSNativeCommandUseErrorActionPreference = $false
 $ErrorActionPreference = 'Stop'
 $verifier = Join-Path $PSScriptRoot 'verify-preview-package.ps1'
 $root = Join-Path ([IO.Path]::GetTempPath()) "aiw-preview-verifier-$([guid]::NewGuid().ToString('N'))"
@@ -112,31 +120,31 @@ try {
     finally {
         Pop-Location
     }
-    $windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $windowsPowerShell = Join-Path $PSHOME 'pwsh.exe'
     if (-not (Test-Path -LiteralPath $windowsPowerShell -PathType Leaf)) {
-        throw 'Windows PowerShell is required for the clean-host verifier compatibility check'
+        throw 'PowerShell Core is required for the clean-host verifier compatibility check'
     }
     $windowsVerificationText = & $windowsPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass `
         -File $verifier -PackageRoot $root -ReceiptSha256 $receiptSha256 | Out-String
-    if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell preview package verification failed' }
+    if ($LASTEXITCODE -ne 0) { throw 'PowerShell Core preview package verification failed' }
     $windowsVerification = $windowsVerificationText | ConvertFrom-Json
     if ($windowsVerification.exactInventory -ne $true -or $windowsVerification.filesVerified -ne 4) {
-        throw 'Windows PowerShell did not confirm the valid preview package fixture'
+        throw 'PowerShell Core did not confirm the valid preview package fixture'
     }
     $staleExitCommand = "& `$env:ComSpec /d /c 'exit 17'; `$verified = & '$($verifier.Replace("'", "''"))' -PackageRoot '$($root.Replace("'", "''"))' -ReceiptSha256 '$receiptSha256' | ConvertFrom-Json; if (`$verified.exactInventory -ne `$true -or `$LASTEXITCODE -ne 17) { throw 'Stale native exit code affected verification' }; Remove-Variable LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue; `$verified = & '$($verifier.Replace("'", "''"))' -PackageRoot '$($root.Replace("'", "''"))' -ReceiptSha256 '$receiptSha256' | ConvertFrom-Json; if (`$verified.exactInventory -ne `$true -or `$null -ne `$LASTEXITCODE) { throw 'Unset native exit code affected verification' }; `$verified | ConvertTo-Json -Compress; exit 0"
     $staleExitEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($staleExitCommand))
     $staleExitText = & $windowsPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $staleExitEncoded | Out-String
     if ($LASTEXITCODE -ne 0 -or ($staleExitText | ConvertFrom-Json).exactInventory -ne $true) {
-        throw 'Windows PowerShell stale-exit-code verification control failed'
+        throw 'PowerShell Core stale-exit-code verification control failed'
     }
     $windowsRelativeCommand = "Set-Location -LiteralPath '$($root.Replace("'", "''"))'; & '$($verifier.Replace("'", "''"))' -PackageRoot . -ReceiptSha256 '$receiptSha256'"
     $windowsRelativeEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($windowsRelativeCommand))
     $windowsRelativeText = & $windowsPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass `
         -EncodedCommand $windowsRelativeEncoded | Out-String
-    if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell relative-root preview package verification failed' }
+    if ($LASTEXITCODE -ne 0) { throw 'PowerShell Core relative-root preview package verification failed' }
     $windowsRelativeVerification = $windowsRelativeText | ConvertFrom-Json
     if ($windowsRelativeVerification.exactInventory -ne $true -or $windowsRelativeVerification.filesVerified -ne 4) {
-        throw 'Windows PowerShell did not resolve a relative package root from its PowerShell location'
+        throw 'PowerShell Core did not resolve a relative package root from its PowerShell location'
     }
 
     $receiptPath = Join-Path $root 'receipt.json'

@@ -1,11 +1,13 @@
 #![forbid(unsafe_code)]
 
+pub mod powershell;
+
 mod msix_worker;
 pub use msix_worker::safe_run_id as valid_msix_run_id;
 pub use msix_worker::{
-    MSIX_ASSEMBLY_SHA256, MSIX_PACKAGE_SHA256, MSIX_SIGNING_SHA256, MSIX_WORKER_CHECKPOINT,
-    MSIX_WORKER_REQUEST_SCHEMA, MSIX_WORKER_UUID, MsixWorkerRequest, VmMsixPhase, VmMsixRecipe,
-    VmMsixWorkerProfile,
+    MSIX_ASSEMBLY_SHA256, MSIX_CORE_WORKER_CHECKPOINT, MSIX_PACKAGE_SHA256, MSIX_SIGNING_SHA256,
+    MSIX_WORKER_CHECKPOINT, MSIX_WORKER_REQUEST_SCHEMA, MSIX_WORKER_UUID, MsixWorkerRequest,
+    VmMsixPhase, VmMsixRecipe, VmMsixWorkerProfile,
 };
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -1083,7 +1085,14 @@ pub fn probe_host() -> HostProbe {
         .map(|name| {
             (
                 name.trim_end_matches(".exe").to_owned(),
-                find_command(name).map(|path| path.to_string_lossy().into_owned()),
+                if *name == "pwsh.exe" {
+                    let machine = PathBuf::from(powershell::POWERSHELL_EXECUTABLE);
+                    machine
+                        .is_file()
+                        .then(|| machine.to_string_lossy().into_owned())
+                } else {
+                    find_command(name).map(|path| path.to_string_lossy().into_owned())
+                },
             )
         })
         .collect();
@@ -1098,6 +1107,7 @@ pub fn probe_host() -> HostProbe {
         limitations: vec![
             "This bootstrap probe discovers paths only; it does not verify Windows features, exports, versions, tokens, or effective isolation backends."
                 .to_owned(),
+            "PowerShell discovery reports only the fixed machine candidate; held Core/version/PSHOME/hash/native-capability proof is required separately before execution.".into(),
         ],
     }
 }

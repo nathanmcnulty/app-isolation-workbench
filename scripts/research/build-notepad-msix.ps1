@@ -1,4 +1,5 @@
-#requires -Version 7.0
+#Requires -Version 7.6
+#Requires -PSEdition Core
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$PortableArchive,
@@ -7,6 +8,11 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if ([Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() -cne 'X64' -or $PSVersionTable.PSVersion.ToString() -match '-' -or ($PSVersionTable.ContainsKey('GitCommitId') -and $PSVersionTable.GitCommitId -match 'preview|rc')) { throw 'Stable x64 PowerShell Core >=7.6 required; prerelease runtime refused' }
+$PSModuleAutoLoadingPreference = 'None'
+foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security')) { Import-Module $module -SkipEditionCheck -ErrorAction Stop }
+if (@(Get-PSSession -ErrorAction SilentlyContinue | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'Windows compatibility session forbidden' }
+
 Set-StrictMode -Version Latest
 # Research-only closed recipe. Never installs or executes the application.
 $sourceHash = 'b269383239464a945d17cfabfccf53935b83d80d907922310fdfd50d80274c66'

@@ -18,7 +18,7 @@ use std::{
 use windows::Win32::System::{JobObjects::IsProcessInJob, Threading::GetCurrentProcess};
 use windows::core::BOOL;
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
-const POWERSHELL: &str = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe";
+use aiw_probe::powershell::{POWERSHELL_EXECUTABLE as POWERSHELL, POWERSHELL_RUNTIME_GUARD};
 const BASE: &str = r"C:\ProgramData\AIW\MsixWorker";
 const CONTROL_SHA256: &str = "15cd209c995b7d3009c91ca40892d5b8f1fb162f3e5f10716642ea278e8e0d7b";
 
@@ -118,24 +118,25 @@ fn system_source() -> String {
     // inserted only before the two inventory operations, after their UUID guard.
     let anchor = "# C# process observer and inventory function are inserted from fixed compiled";
     let at = script.find(anchor).expect("fixed inventory source anchor");
-    format!(
-        "{}\nAdd-Type -TypeDefinition @'\n{}\n'@\n{}\n{}",
-        &script[..at],
+    crate::powershell::compiled_script_entry(&format!(
+        "#Requires -Version 7.6\n#Requires -PSEdition Core\n{}\nAdd-Type -TypeDefinition @'\n{}\n'@\n{}\n{}",
+        script[..at].replacen("$ErrorActionPreference='Stop'", POWERSHELL_RUNTIME_GUARD, 1),
         include_str!("research_msix_native.cs"),
         include_str!("research_msix_inventory.ps1"),
         &script[at..]
-    )
+    ))
 }
 fn lifecycle_source() -> String {
-    format!(
-        "Add-Type -TypeDefinition @'\n{}\n'@\n{}\nfunction Invoke-AiwDriverControl {{\nparam([string]$EvidenceDirectory)\n{}\n}}\n{}",
+    crate::powershell::compiled_script_entry(&format!(
+        "#Requires -Version 7.6\n#Requires -PSEdition Core\n{POWERSHELL_RUNTIME_GUARD}\nAdd-Type -TypeDefinition @'\n{}\n'@\n{}\nfunction Invoke-AiwDriverControl {{\nparam([string]$EvidenceDirectory)\n{}\n}}\n{}",
         include_str!("research_msix_native.cs"),
         include_str!("research_msix_inventory.ps1"),
         include_str!("research_msix_driver_control.ps1"),
         include_str!("msix_worker/lifecycle.ps1")
-    )
+    ))
 }
 fn execute_ps(arguments: &[String], timeout: u64) -> Result<()> {
+    let runtime = crate::powershell::HeldPowerShell::observe()?;
     let process = GuestProcess::start(POWERSHELL, arguments)?;
     let operation = process.wait_for_exit(Duration::from_secs(timeout));
     let normal = if operation.as_ref().is_ok_and(|code| *code == 0) {
@@ -148,6 +149,7 @@ fn execute_ps(arguments: &[String], timeout: u64) -> Result<()> {
     let code = operation?;
     normal?;
     cleanup?;
+    runtime.revalidate()?;
     if code != 0 || empty? != 0 {
         return Err(format!("Fixed worker PowerShell exit={code}; inspect retained stage").into());
     }
@@ -239,6 +241,15 @@ pub fn run() -> Result<()> {
     let request_file = HeldApplicationFile::open_bounded(&root.join("request.json"), 65536)?;
     let request: MsixWorkerRequest = serde_json::from_slice(&request_file.read_bounded(65536)?)?;
     request.validate()?;
+    let runtime = crate::powershell::HeldPowerShell::observe()?;
+    let approved_runtime = request
+        .power_shell_runtime
+        .as_ref()
+        .ok_or("Legacy preparation is evidence-only; new approved runtime preparation required")?;
+    approved_runtime.validate()?;
+    if runtime.identity != approved_runtime.worker {
+        return Err("Approved worker PowerShell runtime identity differs".into());
+    }
     if request.run_id != *run_id || image.observation().sha256 != request.agent_sha256 {
         return Err("Request/agent image identity differs".into());
     }
@@ -286,7 +297,7 @@ pub fn run() -> Result<()> {
         publish(
             &output,
             "child-started.json",
-            &json!({"runId":run_id,"nonce":request.nonce,"planSha256":request.plan_sha256,"agentSha256":request.agent_sha256,"userSid":token.user_sid,"pid":std::process::id()}),
+            &json!({"runId":run_id,"nonce":request.nonce,"planSha256":request.plan_sha256,"agentSha256":request.agent_sha256,"userSid":token.user_sid,"pid":std::process::id(),"powerShellRuntime":runtime.identity}),
         )?;
         let outcome = ps_file(&workflow, None, 1100);
         held.revalidate()?;
@@ -333,7 +344,7 @@ pub fn run() -> Result<()> {
         publish(
             &root,
             "control-started.json",
-            &json!({"requestSha256":request.hash()?,"nonce":request.nonce}),
+            &json!({"requestSha256":request.hash()?,"nonce":request.nonce,"powerShellRuntime":runtime.identity}),
         )?;
         let _control_image =
             hold_os_control(Path::new(r"C:\Windows\System32\cmd.exe"), CONTROL_SHA256)?;
@@ -350,7 +361,7 @@ pub fn run() -> Result<()> {
         publish(
             &root,
             "control-result.json",
-            &json!({"passed":true,"expectedExitCode":42,"observedExitCode":42,"jobEmpty":true,"heldProcessId":pid,"userSid":sid,"sessionId":session_id,"authenticationId":user.authentication_id,"requestSha256":request.hash()?,"nonce":request.nonce}),
+            &json!({"passed":true,"expectedExitCode":42,"observedExitCode":42,"jobEmpty":true,"heldProcessId":pid,"userSid":sid,"sessionId":session_id,"authenticationId":user.authentication_id,"requestSha256":request.hash()?,"nonce":request.nonce,"powerShellRuntime":runtime.identity}),
         )?;
         return Ok(());
     }
@@ -396,6 +407,12 @@ pub fn run() -> Result<()> {
         let files = collect(&source, &root.join("evidence"))?;
         let assembly: Value = serde_json::from_slice(&inputs[1].read_bounded(16 * 1024 * 1024)?)?;
         aiw_evidence::verify_notepad_msix_lifecycle(&files, &assembly, sid, session_id)?;
+        let worker_runtime = read_json(&root.join("evidence/msix-lifecycle/worker.json"))?;
+        if worker_runtime["powerShellRuntime"] != serde_json::to_value(&runtime.identity)? {
+            return Err(
+                "Standard-user runtime receipt differs from approved SYSTEM runtime".into(),
+            );
+        }
         let lifecycle = read_json(&root.join("evidence/msix-lifecycle/result.json"))?;
         if lifecycle["completed"] != true
             || lifecycle["researchOnly"] != false
@@ -408,7 +425,7 @@ pub fn run() -> Result<()> {
         publish(
             &root,
             "result.json",
-            &json!({"schemaVersion":"aiw.dev/msix-worker-result/v0alpha1","requestSha256":request.hash()?,"planSha256":request.plan_sha256,"nonce":request.nonce,"workerUuid":request.worker_uuid,"agentSha256":request.agent_sha256,"userSid":sid,"sessionId":session_id,"authenticationId":user.authentication_id,"lifecyclePassed":true,"jobEmpty":true,"privilegedPackageProcessAbsenceVerified":true,"files":artifacts,"isolation":"notMeasured","researchOnly":false}),
+            &json!({"schemaVersion":"aiw.dev/msix-worker-result/v0alpha1","requestSha256":request.hash()?,"planSha256":request.plan_sha256,"nonce":request.nonce,"workerUuid":request.worker_uuid,"agentSha256":request.agent_sha256,"userSid":sid,"sessionId":session_id,"authenticationId":user.authentication_id,"lifecyclePassed":true,"jobEmpty":true,"privilegedPackageProcessAbsenceVerified":true,"files":artifacts,"isolation":"notMeasured","researchOnly":false,"powerShellRuntime":runtime.identity}),
         )?;
         Ok(())
     })();
@@ -435,6 +452,23 @@ mod tests {
     use super::*;
     #[test]
     fn generated_worker_scripts_parse_with_driver_control_scoped_to_its_function() {
+        for source in [system_source(), lifecycle_source()] {
+            assert_eq!(
+                source
+                    .lines()
+                    .filter(|line| line.eq_ignore_ascii_case("#Requires -PSEdition Core"))
+                    .count(),
+                1
+            );
+            assert_eq!(
+                source
+                    .lines()
+                    .filter(|line| line.eq_ignore_ascii_case("#Requires -Version 7.6"))
+                    .count(),
+                1
+            );
+            assert!(source.contains("Stable x64 PowerShell Core >=7.6 required"));
+        }
         let root = std::env::temp_dir().join(format!(
             "aiw-script-structure-{}-{}",
             std::process::id(),
@@ -446,7 +480,7 @@ mod tests {
         // Parse the exact generated scripts without executing application or
         // enrollment operations. An unwrapped driver body passed syntax checks
         // but ran before its EvidenceDirectory parameter existed in the guest.
-        let output = std::process::Command::new(POWERSHELL)
+        let output = crate::powershell::inert_test_output(std::process::Command::new(crate::powershell::test_executable())
             .args(["-NoProfile", "-NonInteractive", "-Command", r#"
 $ErrorActionPreference='Stop'
 foreach($name in @('system.ps1','workflow.ps1')) {
@@ -469,7 +503,7 @@ foreach($name in @('system.ps1','workflow.ps1')) {
 "#])
             .env("AIW_TEST_SCRIPT_ROOT", &root)
             .env_remove("PSModulePath")
-            .output().unwrap();
+            ).unwrap();
         fs::remove_dir_all(&root).unwrap();
         assert!(
             output.status.success(),

@@ -3,6 +3,11 @@
 use aiw_probe::WindowsSandboxReadiness;
 
 #[cfg(windows)]
+mod powershell;
+#[cfg(windows)]
+pub use powershell::{HeldPowerShell, observe_machine_powershell};
+
+#[cfg(windows)]
 mod msix_vm_worker;
 #[cfg(windows)]
 pub use msix_vm_worker::run as run_msix_vm_worker;

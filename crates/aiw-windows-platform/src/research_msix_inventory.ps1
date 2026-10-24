@@ -1,3 +1,5 @@
+#Requires -Version 7.6
+#Requires -PSEdition Core
 function Get-AiwPackageProcessInventory {
  $all=@(Get-Process)
  if($all.Count -gt 512){throw 'Research process inventory bound exceeded'}

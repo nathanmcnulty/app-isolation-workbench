@@ -1,4 +1,5 @@
-#requires -Version 7.0
+#Requires -Version 7.6
+#Requires -PSEdition Core
 [CmdletBinding()]
 param(
  [Parameter(Mandatory)][ValidatePattern('\A[0-9a-f]{40}\z')][string]$SourceRevision,
@@ -6,6 +7,12 @@ param(
  [Parameter(Mandatory)][string]$Signing,
  [Parameter(Mandatory)][string]$OutputDirectory
 )
+# AIW runtime contract: stable PowerShell Core >=7.6; no compatibility session.
+if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion -lt [version]'7.6' -or $PSVersionTable.PSVersion.PreReleaseLabel -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -ne 'X64') { throw 'AIW requires stable x64 PowerShell Core 7.6 or later' }
+foreach ($aiwNativeModule in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security','Microsoft.PowerShell.Archive')) { Import-Module (Join-Path $PSHOME ('Modules\'+$aiwNativeModule+'\'+$aiwNativeModule+'.psd1')) -SkipEditionCheck -ErrorAction Stop }
+$PSModuleAutoLoadingPreference = 'None'
+if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'AIW prohibits Windows PowerShell compatibility sessions' }
+$PSNativeCommandUseErrorActionPreference = $false
 $ErrorActionPreference='Stop';Set-StrictMode -Version Latest
 $repo=Split-Path -Parent $PSScriptRoot
 function Assert-Source {
@@ -44,7 +51,7 @@ try {
  }
  Copy-Item -LiteralPath (Join-Path $repo 'gui\target\x86_64-pc-windows-msvc\release\aiw-desktop.exe') -Destination (Join-Path $output 'aiw-desktop.exe')
  Copy-Item -LiteralPath (Join-Path $repo 'LICENSE') -Destination $output
- $readme="Unsigned development desktop with the fixed VM107 MSIX recipe. Other Sandbox recipes require their separate product assets. Select the exact signed Notepad++8.9.8 MSIX, review the VM recovery/network/account disclosure, approve the exact plan, then Start separately. Complete the console edit when prompted. The backend collects evidence, cold restores VM107 and verifies clean TLS readback before releasing its durable lease. Broader compatibility and isolation remain unmeasured. If recovery needs attention, select the original workspace/run in retained MSIX reports and use Recover VM107 retained lease. This never repeats application execution. Source: $SourceRevision."
+ $readme="Unsigned development desktop with the fixed VM107 MSIX recipe. Production execution requires stable x64 PowerShell Core 7.6+ at C:\Program Files\PowerShell\7\pwsh.exe on controller and worker, the PowerShell.7.6 HTTPS endpoint and a separately approved clean baseline containing both. Consult docs/handoffs/2026-10-24-powershell76/SETUP-AND-ACCEPTANCE.md before setup or native acceptance. Other Sandbox recipes require their separate product assets. Select the exact signed Notepad++8.9.8 MSIX, review the VM recovery/network/account disclosure, approve the exact plan, then Start separately. Complete the console edit when prompted. The backend collects evidence, cold restores VM107 and verifies clean TLS readback before releasing its durable lease. Broader compatibility and isolation remain unmeasured. If recovery needs attention, select the original workspace/run in retained MSIX reports and use Recover VM107 retained lease. This never repeats application execution. Source: $SourceRevision."
  [IO.File]::WriteAllText((Join-Path $output 'README.txt'),$readme,[Text.UTF8Encoding]::new($false))
  $files=@(Get-ChildItem -LiteralPath $output -File -Recurse|ForEach-Object{@{path=[IO.Path]::GetRelativePath($output,$_.FullName).Replace('\','/');bytes=$_.Length;sha256=(Get-FileHash -LiteralPath $_.FullName).Hash.ToLowerInvariant()}}|Sort-Object path)
  $receipt=@{schemaVersion='aiw.dev/msix-desktop-package/v0alpha1';sourceRevision=$SourceRevision;workerSha256=$workerSha;files=$files;receiptLast=$true;unsigned=$true}

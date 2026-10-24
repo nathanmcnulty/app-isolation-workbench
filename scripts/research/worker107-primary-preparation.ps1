@@ -1,4 +1,9 @@
-#requires -Version 5.1
+#Requires -Version 7.6
+#Requires -PSEdition Core
+if ([Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() -cne 'X64' -or $PSVersionTable.PSVersion.ToString() -match '-' -or ($PSVersionTable.ContainsKey('GitCommitId') -and $PSVersionTable.GitCommitId -match 'preview|rc')) { throw 'Stable x64 PowerShell Core >=7.6 required; prerelease runtime refused' }
+$PSModuleAutoLoadingPreference = 'None'
+foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security')) { Import-Module $module -SkipEditionCheck -ErrorAction Stop }
+if (@(Get-PSSession -ErrorAction SilentlyContinue | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'Windows compatibility session forbidden' }
 # Pure research record helpers. These do not create accounts, publish preparation,
 # authenticate, launch a process, or establish a worker/session identity.
 function New-AiwMsixPrimaryNonce {
@@ -19,6 +24,7 @@ function New-AiwMsixPrimaryPreparation {
         [Parameter(Mandatory)][long]$NowFileTime
     )
     $ErrorActionPreference = 'Stop'
+
     $nonce = [string]$CreatedAccount.runNonce
     if ($nonce -cnotmatch '\A[0-9a-f]{64}\z') { throw 'Primary run nonce must be exactly 64 lowercase hexadecimal characters' }
     if ($CreatedAccount.schemaVersion -cne 'aiw.dev/research-primary-account/v1' -or

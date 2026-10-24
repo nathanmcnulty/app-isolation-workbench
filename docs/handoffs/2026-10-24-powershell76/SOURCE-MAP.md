@@ -1,6 +1,6 @@
 # AIW PowerShell 7.6 migration: exact-source map
 
-**Status: proposed for Nathan to adopt, supporting the migration goal.** This is documentation-only review material. Publishing it does not itself authorize implementation, runtime installation, remoting/security changes, baseline changes or fresh native execution. Explicit adoption of the companion goal includes bounded offline migration/tests and one final sanitized source checkpoint push to the existing public PR103 branch, subject to its head/overlap, existing-authentication/signing and no-force/no-merge boundaries.
+**Status: historical source map used for the adopted migration.** Links below describe the inspected `7bb40d6` source, including routes now explicitly retired. See [current validation](VALIDATION.md) for the implemented offline migration and [the consolidated setup plan](SETUP-AND-ACCEPTANCE.md) for separately gated runtime installation, remoting/security, baseline changes and fresh native execution. The adopted goal authorizes one sanitized source checkpoint push to the existing public PR103 branch using existing authentication/signing, without force push or merge.
 
 Verified owning branch: `nathanmcnulty/app-isolation-workbench:codex/new-vm-handoff-20261021`; head `7bb40d6a9f3d2ea54774631826cedeadd623e644`, rechecked 2026-10-24 at 06:00 UTC. Recheck before implementation or publication; this is not a lock on the branch.
 

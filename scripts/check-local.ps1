@@ -1,4 +1,5 @@
-#requires -Version 7.0
+#Requires -Version 7.6
+#Requires -PSEdition Core
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
@@ -6,6 +7,13 @@ param(
     [string[]]$Check
 )
 
+# AIW runtime contract: stable PowerShell Core >=7.6; no compatibility session.
+if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion -lt [version]'7.6' -or $PSVersionTable.PSVersion.PreReleaseLabel -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -ne 'X64') { throw 'AIW requires stable x64 PowerShell Core 7.6 or later' }
+foreach ($aiwNativeModule in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security','Microsoft.PowerShell.Archive')) { Import-Module (Join-Path $PSHOME ('Modules\'+$aiwNativeModule+'\'+$aiwNativeModule+'.psd1')) -SkipEditionCheck -ErrorAction Stop }
+$PSModuleAutoLoadingPreference = 'None'
+if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'AIW prohibits Windows PowerShell compatibility sessions' }
+$PSNativeCommandUseErrorActionPreference = $false
+$env:AIW_TEST_PWSH = Join-Path $PSHOME 'pwsh.exe'
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $logRoot = Join-Path ([IO.Path]::GetTempPath()) ('aiw-local-checks-' + [guid]::NewGuid())
@@ -32,7 +40,7 @@ try {
             Clippy { @('clippy', '--workspace', '--all-targets', '--locked', '--offline', '--', '-D', 'warnings') }
             Msrv { @('+1.88.0', 'check', '--workspace', '--all-targets', '--locked', '--offline') }
             Governance {
-                $program = 'pwsh'
+                $program = Join-Path $PSHOME 'pwsh.exe'
                 @('-NoProfile', '-NonInteractive', '-File', (Join-Path $PSScriptRoot 'verify.ps1'), '-GovernanceOnly')
             }
         }

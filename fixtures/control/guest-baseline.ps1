@@ -1,4 +1,12 @@
+#Requires -Version 7.6
+#Requires -PSEdition Core
 # Fixed disposable-worker driver. Not a production guest-agent request or assessment receipt.
+# AIW runtime contract: stable PowerShell Core >=7.6; no compatibility session.
+if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion -lt [version]'7.6' -or $PSVersionTable.PSVersion.PreReleaseLabel -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -ne 'X64') { throw 'AIW requires stable x64 PowerShell Core 7.6 or later' }
+foreach ($aiwNativeModule in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security','Microsoft.PowerShell.Archive')) { Import-Module (Join-Path $PSHOME ('Modules\'+$aiwNativeModule+'\'+$aiwNativeModule+'.psd1')) -SkipEditionCheck -ErrorAction Stop }
+$PSModuleAutoLoadingPreference = 'None'
+if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'AIW prohibits Windows PowerShell compatibility sessions' }
+$PSNativeCommandUseErrorActionPreference = $false
 $ErrorActionPreference = 'Stop'
 if ($env:USERNAME -ne 'WDAGUtilityAccount' -or !(Test-Path 'C:\AIW\Input\aiw-control-fixture.exe')) { throw 'Disposable guest required' }
 $result = [ordered]@{schemaVersion='aiw.dev/research/control-baseline/v0alpha1'; productionEvidence=$false; stage='setup'; cases=@(); error=$null; windowsBuild=[Environment]::OSVersion.Version.ToString()}

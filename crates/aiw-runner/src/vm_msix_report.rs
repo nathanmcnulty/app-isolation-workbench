@@ -13,6 +13,8 @@ pub struct VmMsixAssessmentReport {
     pub plan_sha256: String,
     pub request_sha256: String,
     pub nonce: String,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "powerShellRuntime")]
+    pub power_shell_runtime: Option<aiw_probe::powershell::PowerShellExecutionBinding>,
     pub workflow_verified: bool,
     pub cleanup_complete: bool,
     pub functions: ApplicationReportFunctions,
@@ -141,6 +143,7 @@ pub fn report_vm_msix_run(
     if request.run_id != run_id
         || request.plan_sha256 != plan_hash
         || request.worker_profile_sha256 != held.preparation.worker.hash()?
+        || request.power_shell_runtime != held.preparation.power_shell_runtime
         || report["schemaVersion"] != "aiw.dev/vm-msix-assessment/v0alpha1"
         || report["runId"] != run_id
         || report["planSha256"] != plan_hash
@@ -167,6 +170,12 @@ pub fn report_vm_msix_run(
         serde_json::json!({"nonce":request.nonce,"restore":json("final-restore.json")?,"connect":json("final-connect.json")?,"clean":json("final-clean.json")?,"release":json("lease-released.json")?})
     };
     verify_vm_msix_recovery(&held.preparation.worker, &request.nonce, &proofs)?;
+    if let Some(runtime) = &request.power_shell_runtime
+        && proofs["clean"]["powerShellRuntime"]
+            != serde_json::to_value(&runtime.worker).map_err(|e| error(&e))?
+    {
+        return Err("Restored runtime differs from approved runtime baseline".into());
+    }
     let verified = report["workflowVerified"] == true && recovered.is_none();
     if (verified && result.outcome != RunOutcome::InsufficientEvidence)
         || (!verified && result.outcome != RunOutcome::Failed)
@@ -188,6 +197,10 @@ pub fn report_vm_msix_run(
         let terminal = receipt("result.json")?;
         let control = receipt("control-result.json")?;
         let job = receipt("job-cleanup.json")?;
+        if let Some(runtime) = &request.power_shell_runtime {
+            let lifecycle_worker = receipt("evidence/msix-lifecycle/worker.json")?;
+            runtime.verify_worker_receipts(&[&terminal, &control, &lifecycle_worker])?;
+        }
         if terminal["schemaVersion"] != "aiw.dev/msix-worker-result/v0alpha1"
             || terminal["requestSha256"] != request_hash
             || terminal["nonce"] != request.nonce
@@ -322,6 +335,7 @@ pub fn report_vm_msix_run(
         plan_sha256: plan_hash,
         request_sha256: request_hash,
         nonce: request.nonce,
+        power_shell_runtime: request.power_shell_runtime,
         workflow_verified: verified,
         cleanup_complete: true,
         functions,

@@ -1,6 +1,6 @@
 # Finish AIW's PowerShell 7.6+ migration
 
-**Status: proposed for Nathan to adopt.** Publishing this documentation is not itself adoption or permission to implement the migration. The source-work and checkpoint-push scope below becomes active only when Nathan explicitly adopts this goal.
+**Status: adopted by Nathan, 2026-10-24.** The owning session is implementing the complete offline source/test package and one final sanitized checkpoint push. Runtime installation, remoting/security/baseline changes and fresh native acceptance remain separately gated by the provisioning boundary below. See [the consolidated setup/acceptance plan](SETUP-AND-ACCEPTANCE.md) and [validation record](VALIDATION.md).
 
 ## Outcome and ownership
 

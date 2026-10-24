@@ -30,6 +30,10 @@ unsafe extern "system" {
     fn GetUserNameW(buffer: *mut u16, length: *mut u32) -> i32;
 }
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
+    if !research_execution_supported() {
+        return Err("Retired Sandbox MSIX research control: approved machine Core runtime bootstrap is unavailable; no account or child was created".into());
+    }
+    let _runtime = crate::powershell::HeldPowerShell::observe()?;
     if std::env::args_os().count() != 1 {
         return Err("Closed control accepts no commands or paths".into());
     }
@@ -60,7 +64,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     result
 }
+fn research_execution_supported() -> bool {
+    false
+}
 fn run_child(evidence: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let runtime = crate::powershell::HeldPowerShell::observe()?;
     let standard = StandardUserSession::establish()?;
     std::fs::write(
         evidence.join("context.json"),
@@ -71,8 +79,13 @@ fn run_child(evidence: &Path) -> Result<(), Box<dyn std::error::Error>> {
             .map_err(|e| crate::GuestMsiExecutionError::Process(e.to_string()))
     })?;
 
-    let executable = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe";
-    let arguments = ["-NoProfile", "-Command", CONTROL_SCRIPT].map(str::to_owned);
+    let executable = r"C:\Program Files\PowerShell\7\pwsh.exe";
+    let guarded = format!(
+        "{}\n{}",
+        aiw_probe::powershell::POWERSHELL_RUNTIME_GUARD,
+        CONTROL_SCRIPT
+    );
+    let arguments = ["-NoProfile", "-Command", &guarded].map(str::to_owned);
     // Actual production launcher: one-use secret, validated suspended child,
     // exact-SID desktop grant/access preflight, held handles and owned kill job.
     let child = GuestProcess::start_standard_user(executable, &arguments, &standard)?;
@@ -106,6 +119,7 @@ fn run_child(evidence: &Path) -> Result<(), Box<dyn std::error::Error>> {
             return Err("Control result identity differs".into());
         }
         std::fs::write(evidence.join("child-result.json"), bytes)?;
+        runtime.revalidate()?;
         Ok(exit)
     })();
     // Retain the useful inventory before either success verification or cleanup
@@ -154,9 +168,19 @@ fn run_child(evidence: &Path) -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn retired_control_stops_before_runtime_or_account_changes() {
+        assert!(!super::research_execution_supported());
+        assert!(
+            super::run()
+                .unwrap_err()
+                .to_string()
+                .contains("Retired Sandbox")
+        );
+    }
+    #[test]
     fn fixed_control_command_line_fits_after_windows_argument_quoting() {
         let command = aiw_windows_command_line::join_arguments([
-            r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+            aiw_probe::powershell::POWERSHELL_EXECUTABLE,
             "-NoProfile",
             "-Command",
             super::CONTROL_SCRIPT,

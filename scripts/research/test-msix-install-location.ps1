@@ -1,7 +1,13 @@
-#requires -Version 5.1
+#Requires -Version 7.6
+#Requires -PSEdition Core
 # Extract only the captured-path assignment, guard and cleanup Test-Path expression.
 # No application registration, installation or lifecycle body is executed.
 $ErrorActionPreference = 'Stop'
+if ([Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() -cne 'X64' -or $PSVersionTable.PSVersion.ToString() -match '-' -or ($PSVersionTable.ContainsKey('GitCommitId') -and $PSVersionTable.GitCommitId -match 'preview|rc')) { throw 'Stable x64 PowerShell Core >=7.6 required; prerelease runtime refused' }
+$PSModuleAutoLoadingPreference = 'None'
+foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security')) { Import-Module $module -SkipEditionCheck -ErrorAction Stop }
+if (@(Get-PSSession -ErrorAction SilentlyContinue | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'Windows compatibility session forbidden' }
+
 Set-StrictMode -Version Latest
 $source = Join-Path $PSScriptRoot '../../crates/aiw-windows-platform/src/research_msix_lifecycle.ps1'
 $tokens = $null; $errors = $null

@@ -105,6 +105,22 @@ unmeasured or separate work.
 
 ## Local validation
 
+AIW's supported scripting baseline is **stable x64 PowerShell Core 7.6 or later**;
+preview/prerelease builds and implicit Windows PowerShell compatibility are
+rejected. Recommend the current reviewed stable patch, **7.6.7**. The offline
+development checks also exercise the existing bundled **7.6.5**; a numeric minimum
+does not mean every future patch/version has been validated. Privileged execution
+selects `C:\Program Files\PowerShell\7\pwsh.exe` explicitly, verifies its held
+image/PSHOME and native capabilities, and binds its observed identity into new
+MSIX approvals and receipts. VM107 requires the explicitly approved
+`PowerShell.7.6` HTTPS endpoint and a new runtime-equipped cold baseline.
+Installation and endpoint setup are never implicit preflight repairs; see the
+[setup/acceptance boundary](docs/handoffs/2026-10-24-powershell76/SETUP-AND-ACCEPTANCE.md).
+Historical reports remain readable without executing their former runtime.
+The old PowerShell Sandbox control bootstrap and historical research execution
+entry points are explicitly unsupported; native Rust Sandbox profiles remain
+separate. Fresh MSIX native acceptance is pending approved setup.
+
 For focused development, start with `scripts/work-status.ps1` and the [short handoff](docs/WORKING-STATE.md). Use `scripts/check-local.ps1 -Check Format,Provider` for selected local checks with concise results and full logs on disk. See the [development workflow](docs/DEVELOPMENT-WORKFLOW.md); the full verification entry point remains below.
 
 ```powershell

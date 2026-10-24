@@ -21,6 +21,12 @@ pub struct VmMsixPreparation {
     pub schema_version: String,
     pub run_id: String,
     pub worker: VmMsixWorkerProfile,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "powerShellRuntime"
+    )]
+    pub power_shell_runtime: Option<aiw_probe::powershell::PowerShellExecutionBinding>,
     pub workspace: WorkspaceBindingEvidence,
     pub package_import: ApplicationFileImportReceipt,
     pub files: Vec<VmMsixPreparedFile>,
@@ -28,6 +34,15 @@ pub struct VmMsixPreparation {
 impl VmMsixPreparation {
     pub fn validate(&self) -> Result<(), String> {
         self.worker.validate()?;
+        if let Some(runtime) = &self.power_shell_runtime {
+            runtime.validate()?;
+            if self.worker.checkpoint != aiw_probe::MSIX_CORE_WORKER_CHECKPOINT {
+                return Err(
+                    "Core runtime requires the independently approved runtime-equipped checkpoint"
+                        .into(),
+                );
+            }
+        }
         self.workspace.validate()?;
         if self.schema_version != VM_MSIX_PREPARATION_SCHEMA
             || !aiw_probe::valid_msix_run_id(&self.run_id)

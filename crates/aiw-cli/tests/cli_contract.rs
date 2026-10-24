@@ -1418,7 +1418,17 @@ fn powershell_preserves_structured_stderr_envelope() {
     let script =
         repo_path("powershell/AppIsolationWorkbench/AppIsolationWorkbench.Integration.Tests.ps1");
     let module = repo_path("powershell/AppIsolationWorkbench/AppIsolationWorkbench.psd1");
-    let output = Command::new("pwsh")
+    // Test-only explicit image; privileged production selection never reads it.
+    let runtime = std::env::var_os("AIW_TEST_PWSH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(aiw_probe::powershell::POWERSHELL_EXECUTABLE));
+    assert!(
+        runtime.is_absolute()
+            && runtime
+                .file_name()
+                .is_some_and(|n| n.eq_ignore_ascii_case("pwsh.exe"))
+    );
+    let output = Command::new(runtime)
         .args(["-NoLogo", "-NoProfile", "-File"])
         .arg(script)
         .arg("-ModulePath")

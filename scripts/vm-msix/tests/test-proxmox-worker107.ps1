@@ -1,6 +1,9 @@
+#Requires -Version 7.6
+#Requires -PSEdition Core
 # Isolated state-machine regression for the production forced-command wrapper.
 # Rewrites only fixed host paths/authority checks in a temporary copy; qm is mocked.
 $ErrorActionPreference = 'Stop'
+if([Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() -cne 'X64' -or $PSVersionTable.PSVersion.ToString() -match '-' -or $PSVersionTable.GitCommitId -match 'preview|rc'){throw 'Stable PowerShell required'}
 Set-StrictMode -Version Latest
 $PSNativeCommandUseErrorActionPreference = $false
 

@@ -1,7 +1,9 @@
-#requires -Version 5.1
+#Requires -Version 7.6
+#Requires -PSEdition Core
 # Execute the production Collect remoting body against an isolated, ordinary
 # temporary profile tree. No WinRM session, worker, application or account is used.
 $ErrorActionPreference = 'Stop'
+if([Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() -cne 'X64' -or $PSVersionTable.PSVersion.ToString() -match '-' -or $PSVersionTable.GitCommitId -match 'preview|rc'){throw 'Stable PowerShell required'}
 Set-StrictMode -Version Latest
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path

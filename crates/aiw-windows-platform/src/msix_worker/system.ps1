@@ -1,9 +1,12 @@
+#Requires -Version 7.6
+#Requires -PSEdition Core
 param([Parameter(Mandatory)][ValidateSet('enroll','clear-logon','prepare','before','after')][string]$Operation)
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $ProgressPreference='SilentlyContinue'
 $root=$PSScriptRoot
 $request=Get-Content -LiteralPath (Join-Path $root 'request.json') -Raw|ConvertFrom-Json
+if(!$request.powerShellRuntime -or ((ConvertTo-Json -InputObject $AiwPowerShellRuntime -Compress -Depth 8) -cne (ConvertTo-Json -InputObject $request.powerShellRuntime.worker -Compress -Depth 8))){throw 'Approved PowerShell worker identity differs'}
 $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
 $uuid=(Get-CimInstance Win32_ComputerSystemProduct).UUID
 if($identity.User.Value -cne 'S-1-5-18' -or [Diagnostics.Process]::GetCurrentProcess().SessionId -ne 0 -or $uuid -ine 'e5cecc90-35c2-4831-bf9c-424be23f7d4e' -or $uuid -ine $request.workerUuid){throw 'Exact disposable VM107 LocalSystem required'}
@@ -24,6 +27,7 @@ foreach($rule in $acl.GetAccessRules($true,$true,[Security.Principal.SecurityIde
  }
 }
 function Record([string]$Name,$Value){
+ $Value['powerShellRuntime']=$AiwPowerShellRuntime
  $bytes=[Text.UTF8Encoding]::new($false).GetBytes((ConvertTo-Json -InputObject $Value -Depth 16))
  $path=Join-Path $root ($Name+'.json');$pending=$path+'.pending'
  $file=[IO.File]::Open($pending,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::Read)

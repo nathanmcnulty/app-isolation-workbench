@@ -4,7 +4,9 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 const MSIX_PACKAGE_SHA256: &str =
     "2ae3a7c685e811eb34479980bff41d1442b023578074e19f4dca8fc676070437";
-const POWERSHELL: &str = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe";
+// Historical read-only receipts retain their original supervisor identity.
+const LEGACY_POWERSHELL: &str = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe";
+const POWERSHELL: &str = r"C:\Program Files\PowerShell\7\pwsh.exe";
 
 fn read<'a>(
     files: &'a std::collections::BTreeMap<String, Vec<u8>>,
@@ -147,6 +149,38 @@ pub fn verify_notepad_msix_lifecycle(
     }
     let get = |name: &str| read_receipt(files, &format!("{stages}/{name}"));
     let worker = get("worker.json")?;
+    let expected_supervisor = if worker.get("powerShellRuntime").is_some() {
+        let runtime = &worker["powerShellRuntime"];
+        let version = runtime["version"]
+            .as_str()
+            .ok_or("Runtime version missing")?
+            .split('.')
+            .map(str::parse::<u32>)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| "Stable numeric runtime required")?;
+        if version.len() < 3
+            || version.len() > 4
+            || version[0] < 7
+            || (version[0] == 7 && version[1] < 6)
+            || runtime["edition"] != "Core"
+            || runtime["prerelease"] != ""
+            || runtime["architecture"] != "X64"
+            || runtime["executable"] != POWERSHELL
+            || runtime["psHome"] != r"C:\Program Files\PowerShell\7"
+            || runtime["compatibilitySessionCount"] != 0
+            || runtime["executableSha256"].as_str().is_none_or(|hash| {
+                hash.len() != 64
+                    || !hash
+                        .bytes()
+                        .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+            })
+        {
+            return Err("Current lifecycle runtime proof invalid".into());
+        }
+        POWERSHELL
+    } else {
+        LEGACY_POWERSHELL
+    };
     let worker_token = &worker["operatorToken"];
     if worker["operatorSid"] != sid
         || worker["sessionId"] != session
@@ -185,7 +219,7 @@ pub fn verify_notepad_msix_lifecycle(
             || record["heldHandle"] != true
             || record["inInheritedJob"] != true
             || record["exited"] != true
-            || record["imagePath"].as_str() != Some(POWERSHELL)
+            || record["imagePath"].as_str() != Some(expected_supervisor)
             || !record["pid"].as_u64().is_some_and(|pid| {
                 pid > 0
                     && record["startTime"]
@@ -451,6 +485,40 @@ mod fixture_tests {
     fn archived_native_lifecycle_still_verifies_through_shared_verifier() {
         let (files, assembly, sid, session) = fixture();
         verify_notepad_msix_lifecycle(&files, &assembly, &sid, session).unwrap();
+    }
+    #[test]
+    fn current_runtime_receipt_rejects_preview_wrong_image_and_compatibility() {
+        let (mut files, assembly, sid, session) = fixture();
+        let mut worker = read_receipt(&files, "msix-lifecycle/worker.json").unwrap();
+        let runtime = serde_json::json!({"edition":"Core","version":"7.6.5","prerelease":"","architecture":"X64","executable":POWERSHELL,"psHome":r"C:\Program Files\PowerShell\7","executableSha256":"a".repeat(64),"compatibilitySessionCount":0});
+        let mut control =
+            read_receipt(&files, "msix-lifecycle/driver-control/control.json").unwrap();
+        for mode in control["controls"].as_array_mut().unwrap() {
+            mode["imagePath"] = POWERSHELL.into();
+        }
+        files.insert(
+            "msix-lifecycle/driver-control/control.json".into(),
+            serde_json::to_vec(&control).unwrap(),
+        );
+        worker["powerShellRuntime"] = runtime.clone();
+        files.insert(
+            "msix-lifecycle/worker.json".into(),
+            serde_json::to_vec(&worker).unwrap(),
+        );
+        verify_notepad_msix_lifecycle(&files, &assembly, &sid, session).unwrap();
+        for (key, value) in [
+            ("version", serde_json::json!("7.6.0-preview.1")),
+            ("executable", serde_json::json!(LEGACY_POWERSHELL)),
+            ("compatibilitySessionCount", serde_json::json!(1)),
+        ] {
+            worker["powerShellRuntime"] = runtime.clone();
+            worker["powerShellRuntime"][key] = value;
+            files.insert(
+                "msix-lifecycle/worker.json".into(),
+                serde_json::to_vec(&worker).unwrap(),
+            );
+            assert!(verify_notepad_msix_lifecycle(&files, &assembly, &sid, session).is_err());
+        }
     }
     #[test]
     fn shared_verifier_rejects_missing_receipt_document_drift_and_wrong_session() {

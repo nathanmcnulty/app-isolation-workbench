@@ -14,17 +14,37 @@ use std::collections::BTreeMap;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-const PS: &str = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe";
+const PS: &str = aiw_probe::powershell::POWERSHELL_EXECUTABLE;
 const SSH: &str = r"C:\Windows\System32\OpenSSH\ssh.exe";
 const TRANSPORT: &str = include_str!("../../../scripts/vm-msix/transport.ps1");
+const RUNTIME_OBSERVER: &str = include_str!("../../../scripts/vm-msix/observe-runtime.ps1");
 const PROVIDER: &str = include_str!("../../../scripts/vm-msix/proxmox-worker107.sh");
 const PRODUCT: &str = "notepad-plus-plus-msix-vm107";
 // The clean-source package builder compiles the native worker first, then pins
 // its bytes into this host binary. A manifest beside the app cannot enroll code.
 const EXPECTED_AGENT_SHA256: Option<&str> = option_env!("AIW_MSIX_WORKER_SHA256");
 
+// The October24 bounded harness is historical source at abd17ea. Its completed
+// nonce must never be replayed through this migrated execution baseline.
+
+fn ps_executable() -> PathBuf {
+    #[cfg(test)]
+    if let Some(path) = std::env::var_os("AIW_TEST_PWSH") {
+        let path = PathBuf::from(path);
+        assert!(
+            path.is_absolute()
+                && path
+                    .file_name()
+                    .is_some_and(|n| n.eq_ignore_ascii_case("pwsh.exe")),
+            "Explicit absolute inert-test pwsh image required"
+        );
+        return path;
+    }
+    PathBuf::from(PS)
+}
+
 #[cfg(test)]
-mod bounded_windows_acceptance;
+static POWERSHELL_TEST_PROCESS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn hash(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
@@ -40,6 +60,27 @@ fn filetime() -> Result<i64> {
 }
 fn command_json(command: &mut Command, seconds: u64, bound: usize) -> Result<Value> {
     use std::os::windows::process::CommandExt;
+    #[cfg(test)]
+    let _test_process = if command.get_program() == ps_executable().as_os_str() {
+        Some(
+            POWERSHELL_TEST_PROCESS
+                .lock()
+                .unwrap_or_else(|p| p.into_inner()),
+        )
+    } else {
+        None
+    };
+    #[cfg(not(test))]
+    let runtime = if command.get_program() == std::ffi::OsStr::new(PS) {
+        Some(
+            aiw_windows_platform::observe_machine_powershell().map_err(|e| {
+                anyhow!("Approved machine runtime unavailable before dispatch: {e}")
+            })?,
+        )
+    } else {
+        None
+    };
+    let program = command.get_program().to_string_lossy().into_owned();
     command
         .creation_flags(0x08000000)
         .stdin(Stdio::null())
@@ -48,32 +89,55 @@ fn command_json(command: &mut Command, seconds: u64, bound: usize) -> Result<Val
     let mut child = command.spawn()?;
     let stdout = child.stdout.take().context("Missing transport stdout")?;
     let stderr = child.stderr.take().context("Missing transport stderr")?;
-    let out = std::thread::spawn(move || {
-        let mut b = Vec::new();
-        stdout.take(bound as u64 + 1).read_to_end(&mut b).map(|_| b)
+    let (out_tx, out_rx) = std::sync::mpsc::channel();
+    let (err_tx, err_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let result = stdout
+            .take(bound as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map(|_| bytes);
+        let _ = out_tx.send(result);
     });
-    let err = std::thread::spawn(move || {
-        let mut b = Vec::new();
-        stderr.take(65537).read_to_end(&mut b).map(|_| b)
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let result = stderr.take(65537).read_to_end(&mut bytes).map(|_| bytes);
+        let _ = err_tx.send(result);
     });
     let start = Instant::now();
+    let deadline = Duration::from_secs(seconds);
     let status = loop {
         if let Some(status) = child.try_wait()? {
             break status;
         }
-        if start.elapsed() > Duration::from_secs(seconds) {
+        if start.elapsed() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
-            bail!("Transport deadline exceeded; dispatch is uncertain, never replay")
+            let errors = err_rx
+                .try_recv()
+                .ok()
+                .and_then(Result::ok)
+                .unwrap_or_default();
+            bail!(
+                "Transport deadline exceeded after {seconds}s in {program}; dispatch is uncertain, never replay. Diagnostics: {}",
+                String::from_utf8_lossy(&errors)
+                    .chars()
+                    .take(3000)
+                    .collect::<String>()
+            );
         }
-        std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(25));
     };
-    let bytes = out
-        .join()
-        .map_err(|_| anyhow!("Transport output reader failed"))??;
-    let errors = err
-        .join()
-        .map_err(|_| anyhow!("Transport diagnostic reader failed"))??;
+    let bytes = out_rx.recv_timeout(deadline.saturating_sub(start.elapsed()))
+        .map_err(|_| anyhow!("Transport stdout pipe remained open at {seconds}s deadline in {program}; dispatch is uncertain, never replay"))??;
+    let errors = err_rx.recv_timeout(deadline.saturating_sub(start.elapsed()))
+        .map_err(|_| anyhow!("Transport stderr pipe remained open at {seconds}s deadline in {program}; dispatch is uncertain, never replay"))??;
+    #[cfg(not(test))]
+    if let Some(runtime) = runtime {
+        runtime
+            .revalidate()
+            .map_err(|e| anyhow!("Held runtime changed: {e}"))?;
+    }
     if !status.success() || bytes.len() > bound || errors.len() > 65536 {
         bail!(
             "Fixed transport failed: {}",
@@ -158,7 +222,12 @@ fn provider(
         || value["workerUuid"] != aiw_probe::MSIX_WORKER_UUID
         || value["operation"] != operation
         || value["providerSha256"] != provider_hash()
-        || value["checkpoint"] != aiw_probe::MSIX_WORKER_CHECKPOINT
+        || !value["checkpoint"].as_str().is_some_and(|v| {
+            matches!(
+                v,
+                aiw_probe::MSIX_WORKER_CHECKPOINT | aiw_probe::MSIX_CORE_WORKER_CHECKPOINT
+            )
+        })
     {
         bail!("Exact reviewed VM107 provider response required")
     }
@@ -176,7 +245,7 @@ fn provider(
     Ok(value)
 }
 fn powershell_workspace_path(workspace: &Path) -> Result<PathBuf> {
-    // Held workspace paths may carry the Win32 verbatim prefix. PowerShell 5.1's
+    // Held workspace paths may carry the Win32 verbatim prefix. PowerShell's
     // FileSystem provider cannot Join-Path that form. Keep the held identity and
     // pass its equivalent local DOS spelling to the fixed transport only.
     let spelling = workspace
@@ -197,9 +266,9 @@ fn transport(operation: &str, run_id: &str, workspace: &Path) -> Result<Value> {
 }
 fn transport_file(script: &Path, operation: &str, run_id: &str, workspace: &Path) -> Result<Value> {
     command_json(
-        Command::new(PS)
+        Command::new(ps_executable())
             // A desktop launched by PowerShell7 can inherit its module path.
-            // Let Windows PowerShell initialize its own providers/modules.
+            // Let the selected Core runtime initialize its own native providers/modules.
             .env_remove("PSModulePath")
             .args([
                 "-NoProfile",
@@ -258,6 +327,45 @@ fn recovery_transport(
     let value = transport_file(&path, operation, &request.run_id, &root)?;
     script.revalidate()?;
     Ok(value)
+}
+
+fn observe_runtime_binding(
+    workspace: &HeldRunWorkspace,
+) -> Result<aiw_probe::powershell::PowerShellExecutionBinding> {
+    let leaf = format!("runtime-observer-{}.ps1", hash(RUNTIME_OBSERVER.as_bytes()));
+    let mut created = workspace.create_output_file_new(&leaf)?;
+    created
+        .as_file_mut()
+        .write_all(RUNTIME_OBSERVER.as_bytes())?;
+    created.as_file_mut().sync_all()?;
+    created.revalidate()?;
+    drop(created);
+    let script = workspace.reopen_output_file_readonly(&leaf)?;
+    let value = command_json(
+        Command::new(ps_executable())
+            .env_remove("PSModulePath")
+            .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-File"])
+            .arg(powershell_workspace_path(script.final_path())?),
+        120,
+        65536,
+    )?;
+    script.revalidate()?;
+    if value["workerUuid"]
+        .as_str()
+        .is_none_or(|v| !v.eq_ignore_ascii_case(aiw_probe::MSIX_WORKER_UUID))
+    {
+        bail!("Runtime observation worker identity differs")
+    }
+    let binding = aiw_probe::powershell::PowerShellExecutionBinding {
+        host: serde_json::from_value(value["host"].clone())?,
+        worker: serde_json::from_value(value["worker"].clone())?,
+        endpoint: value["endpoint"]
+            .as_str()
+            .context("Explicit runtime endpoint missing")?
+            .into(),
+    };
+    binding.validate().map_err(anyhow::Error::msg)?;
+    Ok(binding)
 }
 
 fn write_tools(workspace: &HeldRunWorkspace, name: &str, bytes: &[u8]) -> Result<()> {
@@ -574,6 +682,7 @@ fn cold_recover(
     expected_release["phase"] = json!("none");
     expected_release["leasePresent"] = json!(false);
     checked["release"] = expected_release;
+    verify_recovery_runtime(request, &checked)?;
     aiw_runner::verify_vm_msix_recovery(worker, &request.nonce, &checked)
         .map_err(anyhow::Error::msg)?;
     let released = io.provider(
@@ -586,6 +695,16 @@ fn cold_recover(
     aiw_runner::verify_vm_msix_recovery(worker, &request.nonce, &proofs)
         .map_err(anyhow::Error::msg)?;
     Ok(proofs)
+}
+
+fn verify_recovery_runtime(request: &MsixWorkerRequest, proofs: &Value) -> Result<()> {
+    if let Some(runtime) = &request.power_shell_runtime {
+        runtime.validate().map_err(anyhow::Error::msg)?;
+        if proofs["clean"]["powerShellRuntime"] != serde_json::to_value(&runtime.worker)? {
+            bail!("Restored Core runtime identity differs from the approved baseline; retain lease")
+        }
+    }
+    Ok(())
 }
 
 /// Uses packaged fixed assets; the caller selects only the exact supported MSIX.
@@ -602,6 +721,9 @@ pub fn assess_with_gate(
     if identity.trim().is_empty() {
         bail!("Operator identity required")
     }
+    let host_runtime = aiw_windows_platform::observe_machine_powershell().map_err(|e| {
+        anyhow!("Stable machine PowerShell Core >=7.6 setup is required before acquisition: {e}")
+    })?;
     let run_id = format!("msix-{}", super::nonce());
     let evidence_root = create_evidence_root(evidence_parent, &run_id)?;
     let workspace = HeldRunWorkspace::create(&evidence_root, "workspace")?;
@@ -638,12 +760,24 @@ pub fn assess_with_gate(
     if proof["leasePresent"] != false {
         bail!("VM107 already leased; preserve prior run and recover its exact nonce")
     }
+    if proof["checkpoint"] != aiw_probe::MSIX_CORE_WORKER_CHECKPOINT {
+        bail!(
+            "PowerShell 7.6 migration requires separately approved VM107 runtime/endpoint provisioning and a newly pinned runtime-equipped cold baseline; the historical baseline cannot be acquired for migrated execution"
+        )
+    }
+    let runtime_binding = observe_runtime_binding(&workspace)?;
+    if runtime_binding.host != host_runtime.identity {
+        bail!("Host runtime differs from the held preflight identity")
+    }
+    host_runtime
+        .revalidate()
+        .map_err(|e| anyhow!("Host runtime changed: {e}"))?;
     let worker = VmMsixWorkerProfile {
         schema_version: "aiw.dev/vm-msix-worker-profile/v0alpha1".into(),
         vm_id: 107,
         worker_uuid: aiw_probe::MSIX_WORKER_UUID.into(),
         worker_mac: "CC:34:21:B8:5A:31".into(),
-        checkpoint: aiw_probe::MSIX_WORKER_CHECKPOINT.into(),
+        checkpoint: aiw_probe::MSIX_CORE_WORKER_CHECKPOINT.into(),
         checkpoint_config_sha256: proof["checkpointConfigSha256"]
             .as_str()
             .context("Checkpoint proof missing")?
@@ -672,6 +806,7 @@ pub fn assess_with_gate(
         schema_version: VM_MSIX_PREPARATION_SCHEMA.into(),
         run_id: run_id.clone(),
         worker: worker.clone(),
+        power_shell_runtime: Some(runtime_binding.clone()),
         workspace: workspace.evidence().clone(),
         package_import,
         files,
@@ -721,7 +856,7 @@ pub fn assess_with_gate(
         bail!("Approved plan drift before Start")
     }
     // Cryptographic nonce from the platform CSPRNG; not a clock-derived run ID.
-    let nonce_value=command_json(Command::new(PS).args(["-NoProfile","-NonInteractive","-Command","$r=[byte[]]::new(32);$g=[Security.Cryptography.RandomNumberGenerator]::Create();try{$g.GetBytes($r);ConvertTo-Json ([BitConverter]::ToString($r).Replace('-','').ToLowerInvariant())}finally{$g.Dispose()}"]),15,1024)?;
+    let nonce_value=command_json(Command::new(ps_executable()).args(["-NoProfile","-NonInteractive","-Command",&format!("{}\n{}", aiw_probe::powershell::POWERSHELL_RUNTIME_GUARD, "$r=[byte[]]::new(32);$g=[Security.Cryptography.RandomNumberGenerator]::Create();try{$g.GetBytes($r);ConvertTo-Json ([BitConverter]::ToString($r).Replace('-','').ToLowerInvariant())}finally{$g.Dispose()}")]),15,1024)?;
     let nonce = nonce_value
         .as_str()
         .context("Random nonce missing")?
@@ -745,6 +880,7 @@ pub fn assess_with_gate(
         assembly_sha256: aiw_probe::MSIX_ASSEMBLY_SHA256.into(),
         signing_sha256: aiw_probe::MSIX_SIGNING_SHA256.into(),
         worker_uuid: aiw_probe::MSIX_WORKER_UUID.into(),
+        power_shell_runtime: Some(runtime_binding.clone()),
         not_before_file_time: before,
         not_after_file_time: before + 18_000_000_000,
     };
@@ -758,6 +894,9 @@ pub fn assess_with_gate(
     )?;
     // From acquire intent onward, failure always retains explicit recovery state.
     let execution = (|| -> Result<()> {
+        host_runtime
+            .revalidate()
+            .map_err(|e| anyhow!("Held approved host runtime differs before acquisition: {e}"))?;
         gate.progress("Acquiring VM107 and restoring its approved clean checkpoint.");
         stage(&workspace, "acquire-intent", &json!({"nonce":nonce}))?;
         let lease = provider("acquire", Some(&nonce), Some(&worker))?;
@@ -1107,6 +1246,12 @@ fn collect(workspace: &HeldRunWorkspace, request: &MsixWorkerRequest, value: &Va
     {
         bail!("Native terminal bindings incomplete")
     }
+    if let Some(runtime) = &request.power_shell_runtime {
+        let lifecycle_worker = receipt("evidence/msix-lifecycle/worker.json")?;
+        runtime
+            .verify_worker_receipts(&[&terminal, &control, &lifecycle_worker])
+            .map_err(anyhow::Error::msg)?;
+    }
     for entry in terminal["files"]
         .as_array()
         .context("Native evidence inventory missing")?
@@ -1167,6 +1312,9 @@ pub fn recover(workspace_path: &Path, run_id: &str, gate: &dyn ApprovalGate) -> 
     request_file.as_file().take(65537).read_to_end(&mut bytes)?;
     let request: MsixWorkerRequest = serde_json::from_slice(&bytes)?;
     request.validate().map_err(anyhow::Error::msg)?;
+    if request.power_shell_runtime != held.preparation.power_shell_runtime {
+        bail!("Original preparation/request runtime bindings differ")
+    }
     if request.run_id != run_id
         || request.plan_sha256 != plan.hash()?
         || request.worker_profile_sha256
@@ -1183,6 +1331,14 @@ pub fn recover(workspace_path: &Path, run_id: &str, gate: &dyn ApprovalGate) -> 
         .exists()
     {
         return finish_recovery(&layout, &held.workspace, &request, worker);
+    }
+    if !held
+        .workspace
+        .output_path()
+        .join("recovery-release-intent.json")
+        .exists()
+    {
+        request.execution_runtime().map_err(|e| anyhow!("Incompatible outstanding legacy preparation; original inputs and lease are preserved. Obtain an explicit recovery/setup plan: {e}"))?;
     }
     gate.progress("Collecting retained evidence and recovering the exact VM107 lease without application replay.");
     let proofs = cold_recover(&held.workspace, &request, worker, &mut RecoveryVm)?;
@@ -1236,28 +1392,52 @@ fn persist_recovery_result(
 #[cfg(test)]
 mod transport_path_tests {
     use super::*;
+    #[test]
+    fn exited_transport_with_descendant_held_pipe_respects_original_deadline() {
+        // Fixed inert child: no AIW/worker dispatch, and its descendants exit
+        // after three local loopback pings even if this assertion fails.
+        let start = Instant::now();
+        let error = command_json(
+            Command::new(r"C:\Windows\System32\cmd.exe").args([
+                "/d",
+                "/c",
+                "start /b cmd.exe /d /c ping.exe -n 4 127.0.0.1 ^>nul & exit /b 0",
+            ]),
+            1,
+            4096,
+        )
+        .unwrap_err();
+        assert!(
+            start.elapsed() < Duration::from_secs(3),
+            "Pipe observer exceeded the fixed deadline: {error:#}"
+        );
+        assert!(
+            error.to_string().contains("pipe remained open"),
+            "{error:#}"
+        );
+    }
 
     #[test]
-    fn authoritative_export_regressions_execute_actual_ps51_collector() {
+    fn authoritative_export_regressions_execute_actual_core_collector() {
         let script = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../scripts/vm-msix/tests/test-authoritative-export.ps1");
-        let value = command_json(Command::new(PS).env_remove("PSModulePath")
+        let value = command_json(Command::new(ps_executable()).env_remove("PSModulePath")
             .env("AIW_EXPORT_REGRESSION",script)
             .args(["-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-Command","$ErrorActionPreference='Stop'; & $env:AIW_EXPORT_REGRESSION | Out-Null; @{passed=$true;applicationExecuted=$false}|ConvertTo-Json -Compress"]),120,4096).unwrap();
         assert_eq!(value["passed"], true);
     }
 
     #[test]
-    fn collect_transport_does_not_suppress_enumeration_failure_in_ps51() {
-        let value = command_json(Command::new(PS).env_remove("PSModulePath")
+    fn collect_transport_does_not_suppress_enumeration_failure_in_core() {
+        let value = command_json(Command::new(ps_executable()).env_remove("PSModulePath")
             .env("AIW_COLLECTION_TEST_SOURCE", TRANSPORT)
             .args(["-NoProfile", "-NonInteractive", "-Command", r#"$ErrorActionPreference='Stop';$t=$null;$e=$null;$a=[Management.Automation.Language.Parser]::ParseInput($env:AIW_COLLECTION_TEST_SOURCE,[ref]$t,[ref]$e);if($e.Count){throw ($e|Out-String)};$b=@($a.FindAll({param($n)$n -is [Management.Automation.Language.ScriptBlockExpressionAst] -and $n.ScriptBlock.ParamBlock -and $n.ScriptBlock.ParamBlock.Parameters.Count -eq 2 -and $n.Extent.Text.Contains('enumerationComplete')},$true));if($b.Count -ne 1){throw 'One fixed export block required'};function Get-ScheduledTask {};function Get-Process {};function Test-Path {param($LiteralPath) $LiteralPath -ceq 'C:\AIWTest'};function Get-Item {[pscustomobject]@{Attributes=[IO.FileAttributes]::Directory}};function Get-ChildItem {throw 'injected export enumeration failure'};$block=$b[0].ScriptBlock.GetScriptBlock();try{$null=& $block 'C:\AIWTest' ('a'*64);throw 'Enumeration error swallowed'}catch{if($_.Exception.Message -cne 'injected export enumeration failure'){throw};@{rejected=$true;applicationExecuted=$false}|ConvertTo-Json -Compress}"#]),30,4096).unwrap();
         assert_eq!(value["rejected"], true);
     }
 
     #[test]
-    fn readiness_transport_parses_and_readonly_wts_observer_compiles_in_ps51() {
-        let value = command_json(Command::new(PS).env_remove("PSModulePath")
+    fn readiness_transport_parses_and_readonly_wts_observer_compiles_in_core() {
+        let value = command_json(Command::new(ps_executable()).env_remove("PSModulePath")
             .env("AIW_READINESS_TEST_SOURCE", TRANSPORT)
             .args(["-NoProfile", "-NonInteractive", "-Command", r#"$ErrorActionPreference='Stop';$t=$null;$e=$null;$a=[Management.Automation.Language.Parser]::ParseInput($env:AIW_READINESS_TEST_SOURCE,[ref]$t,[ref]$e);if($e.Count){throw ($e|Out-String)};$c=@($a.FindAll({param($n)$n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Add-Type'},$true));if($c.Count -ne 2){throw 'One fixed native observer required'};$s=@($c[0].CommandElements|Where-Object{$_ -is [Management.Automation.Language.StringConstantExpressionAst]})[-1].Value;Add-Type -TypeDefinition $s;@{compiled=([AiwReadiness].GetMethod('Active') -ne $null);applicationExecuted=$false}|ConvertTo-Json -Compress"#]),30,4096).unwrap();
         assert_eq!(value["compiled"], true);
@@ -1269,7 +1449,7 @@ mod transport_path_tests {
         let root = std::env::temp_dir().canonicalize().unwrap();
         let path = powershell_workspace_path(&root).unwrap();
         let result = command_json(
-            Command::new(PS)
+            Command::new(ps_executable())
                 .env_remove("PSModulePath")
                 .args(["-NoProfile", "-NonInteractive", "-Command", "$ErrorActionPreference='Stop'; $p=Join-Path $env:AIW_MSIX_PATH_TEST 'tools'; $cert=Get-Item Cert:\\CurrentUser; @{ usable=($p -like '*\\tools') -and (Test-Path -LiteralPath $env:AIW_MSIX_PATH_TEST); certificateProvider=$cert.PSProvider.Name } | ConvertTo-Json -Compress"])
                 .env("AIW_MSIX_PATH_TEST", &path),
@@ -1331,6 +1511,7 @@ mod failure_sequence_tests {
             assembly_sha256: aiw_probe::MSIX_ASSEMBLY_SHA256.into(),
             signing_sha256: aiw_probe::MSIX_SIGNING_SHA256.into(),
             worker_uuid: aiw_probe::MSIX_WORKER_UUID.into(),
+            power_shell_runtime: None,
             not_before_file_time: 100,
             not_after_file_time: 18_000_000_100,
         };
@@ -1545,10 +1726,10 @@ mod failure_sequence_tests {
         assert!(read_export(&workspace, &request).is_ok());
     }
     #[test]
-    fn held_recovery_helper_is_readable_by_windows_powershell_without_releasing_identity() {
+    fn held_recovery_helper_is_readable_by_supported_core_without_releasing_identity() {
         let (workspace, _, _, _) = fixture();
         let helper = recovery_script(&workspace).unwrap();
-        let value=command_json(Command::new(PS).env_remove("PSModulePath")
+        let value=command_json(Command::new(ps_executable()).env_remove("PSModulePath")
             .env("AIW_HELD_RECOVERY_SCRIPT",powershell_workspace_path(helper.final_path()).unwrap())
             .args(["-NoProfile","-NonInteractive","-Command","$ErrorActionPreference='Stop';$s=[IO.File]::ReadAllText($env:AIW_HELD_RECOVERY_SCRIPT);$null=[ScriptBlock]::Create($s);@{parsed=$true}|ConvertTo-Json -Compress"]),30,4096).unwrap();
         assert_eq!(value["parsed"], true);

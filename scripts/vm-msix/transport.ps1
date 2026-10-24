@@ -1,4 +1,5 @@
-#requires -Version 5.1
+#Requires -Version 7.6
+#Requires -PSEdition Core
 # Fixed production transport. The approved native worker owns application execution.
 param(
  [Parameter(Mandatory)][ValidateSet('Clean','Stage','Enroll','Restart','Ready','Control','Run','Status','Collect')][string]$Operation,
@@ -7,18 +8,61 @@ param(
 )
 $ErrorActionPreference='Stop';Set-StrictMode -Version Latest
 $ProgressPreference='SilentlyContinue'
+# Runtime proof is fixed source, reused locally and on the explicit endpoint.
+$runtimeProof = {
+ $ErrorActionPreference='Stop';$global:PSModuleAutoLoadingPreference='None'
+ if($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion -lt [version]'7.6' -or $PSVersionTable.PSVersion.ToString() -match '-' -or ($PSVersionTable.ContainsKey('GitCommitId') -and $PSVersionTable.GitCommitId -match 'preview|rc') -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() -cne 'X64'){throw 'Stable x64 PowerShell Core >=7.6 required'}
+ $exe=[Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+ if($exe -ine 'C:\Program Files\PowerShell\7\pwsh.exe' -or $PSHOME -ine 'C:\Program Files\PowerShell\7'){throw 'Exact machine PowerShell executable and PSHOME required'}
+ $env:PSModulePath=($PSHOME+'\Modules;'+$env:WINDIR+'\System32\WindowsPowerShell\v1.0\Modules')
+ foreach($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Security','Microsoft.PowerShell.Utility','Microsoft.WSMan.Management','CimCmdlets','Appx','Dism','Microsoft.PowerShell.LocalAccounts','ScheduledTasks')){Import-Module $module -SkipEditionCheck -Global -ErrorAction Stop}
+ $compat=@(Get-PSSession|Where-Object Name -eq 'WinPSCompatSession')
+ if($compat.Count -ne 0){throw 'Windows compatibility session forbidden'}
+ $caps=@('Add-Type','Get-CimInstance','Get-AppxPackage','Get-AppxPackageManifest','Add-AppxPackage','Remove-AppxPackage','Get-AppxProvisionedPackage','Get-LocalUser','New-LocalUser','Disable-LocalUser','Add-LocalGroupMember','Get-LocalGroupMember','Get-AuthenticodeSignature','Get-ScheduledTask','New-PSSession')
+ foreach($name in $caps){
+  $command=Get-Command $name -ErrorAction Stop
+  if($name -ceq 'New-PSSession'){if($command.CommandType -ne 'Cmdlet' -or $command.ImplementingType.Assembly.Location -ine ($PSHOME+'\System.Management.Automation.dll')){throw 'Native remoting cmdlet required'};continue}
+  if($command.CommandType -notin @('Cmdlet','Function') -or !$command.Module -or $command.Module.Path -notlike ($PSHOME+'\Modules\*') -and $command.Module.Path -notlike ($env:WINDIR+'\System32\WindowsPowerShell\v1.0\Modules\*')){throw ('Native capability unavailable: '+$name)}
+  if($command.CommandType -eq 'Function' -and $command.ModuleName -cne 'ScheduledTasks'){throw ('Unexpected remoting proxy capability: '+$name)}
+ }
+ [ordered]@{edition=$PSVersionTable.PSEdition;version=$PSVersionTable.PSVersion.ToString();prerelease='';architecture=[Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString();executable=$exe;psHome=$PSHOME;executableSha256=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant();capabilities=$caps;compatibilitySessionCount=$compat.Count}
+}
+function Assert-AiwRuntimeBinding($Observed,$Expected) {
+ if($null -eq $Expected){throw 'Missing approved PowerShell runtime identity; new setup/baseline approval required'}
+ foreach($field in @('edition','version','prerelease','architecture','executable','psHome','executableSha256','compatibilitySessionCount')){if([string]$Observed.$field -cne [string]$Expected.$field){throw ('Approved PowerShell runtime differs: '+$field)}}
+ if(($Observed.capabilities -join '|') -cne ($Expected.capabilities -join '|')){throw 'Approved native runtime capabilities differ'}
+}
+function Select-AiwRuntimeIdentity($Runtime) {
+ [ordered]@{edition=$Runtime.edition;version=$Runtime.version;prerelease=$Runtime.prerelease;architecture=$Runtime.architecture;executable=$Runtime.executable;psHome=$Runtime.psHome;executableSha256=$Runtime.executableSha256;capabilities=@($Runtime.capabilities);compatibilitySessionCount=[int]$Runtime.compatibilitySessionCount}
+}
+$hostRuntime=& $runtimeProof
+
+function Write-AiwTransportReceipt {
+ param([Parameter(ValueFromPipeline,Mandatory)]$Record)
+ process {
+  $Record | Add-Member -NotePropertyName powerShellRuntime -NotePropertyValue $workerRuntime -Force
+  $Record | ConvertTo-Json -Depth 16 -Compress
+ }
+}
 $session=$null;$credential=$null
 try {
  $tools=Join-Path $Workspace 'tools'
  $prepared=Get-Content -LiteralPath (Join-Path $tools 'msix-preparation.json') -Raw|ConvertFrom-Json
  $request=Get-Content -LiteralPath (Join-Path $tools 'request.json') -Raw|ConvertFrom-Json
  if($prepared.runId -cne $RunId -or $request.runId -cne $RunId -or $request.workerUuid -cne 'e5cecc90-35c2-4831-bf9c-424be23f7d4e'){throw 'Prepared run identity differs'}
+ if(!$prepared.PSObject.Properties['powerShellRuntime'] -or !$request.PSObject.Properties['powerShellRuntime'] -or !$prepared.powerShellRuntime -or !$request.powerShellRuntime){throw 'Legacy prepared workspace has no approved PowerShell 7.6 binding; preserve evidence and obtain a fresh baseline approval'}
+ if($prepared.powerShellRuntime.endpoint -cne 'PowerShell.7.6' -or $request.powerShellRuntime.endpoint -cne 'PowerShell.7.6'){throw 'Approved PowerShell.7.6 endpoint required'}
+ Assert-AiwRuntimeBinding $hostRuntime $prepared.powerShellRuntime.host
+ Assert-AiwRuntimeBinding $hostRuntime $request.powerShellRuntime.host
  $trusted=Get-Item -LiteralPath 'Cert:\CurrentUser\Root\BC14DCC4E37F83161EBB55AF8624E36A79E19256'
  if($trusted.Thumbprint -cne $prepared.worker.httpsCertificateSha1 -or $trusted.NotAfter.ToUniversalTime() -le [DateTime]::UtcNow){throw 'Enrolled worker certificate expired or differs'}
  $stored=Import-Clixml -LiteralPath (Join-Path $env:USERPROFILE '.aiw-private\worker107-winrm.xml')
  $credential=[pscredential]::new('labadmin',$stored.Password);$stored=$null
  # The actual credential-bearing channel validates chain, name and expiry normally.
- $session=New-PSSession -ComputerName '192.168.1.174' -UseSSL -Authentication Basic -Credential $credential -ConfigurationName Microsoft.PowerShell -SessionOption (New-PSSessionOption -OpenTimeout 15000 -OperationTimeout 60000)
+ $session=New-PSSession -ComputerName '192.168.1.174' -UseSSL -Authentication Basic -Credential $credential -ConfigurationName PowerShell.7.6 -SessionOption (New-PSSessionOption -OpenTimeout 15000 -OperationTimeout 60000)
+ $workerRuntime=Select-AiwRuntimeIdentity (Invoke-Command -Session $session -ScriptBlock $runtimeProof)
+ Assert-AiwRuntimeBinding $workerRuntime $prepared.powerShellRuntime.worker
+ Assert-AiwRuntimeBinding $workerRuntime $request.powerShellRuntime.worker
  $root='C:\ProgramData\AIW\MsixWorker\'+$RunId
  $identity=Invoke-Command -Session $session -ScriptBlock {
   $ErrorActionPreference='Stop'
@@ -28,7 +72,7 @@ try {
   @{workerUuid=$uuid;actorSid=$actor.User.Value;rejected=$false}
  }
  if($identity.rejected){
-  if($Operation -eq 'Ready'){@{fatal=$true;reason='Exact elevated VM107 operator required'}|ConvertTo-Json -Compress;return}
+  if($Operation -eq 'Ready'){@{fatal=$true;reason='Exact elevated VM107 operator required'}|Write-AiwTransportReceipt;return}
   throw 'Exact elevated VM107 operator required'
  }
  if($Operation -eq 'Ready'){
@@ -67,7 +111,7 @@ public static class AiwReadiness {
     $result.ready=($result.active -and $result.profileLoaded)
     $result
    }catch{@{fatal=$true;nonce=$nonce;workerUuid=$uuid;reason=$_.Exception.Message}}
-  }|ConvertTo-Json -Depth 6 -Compress;return
+  }|Write-AiwTransportReceipt;return
  }
  if($Operation -eq 'Clean'){
   $clean=Invoke-Command -Session $session -ScriptBlock {
@@ -85,23 +129,32 @@ public static class AiwReadiness {
    if(($settings|Where-Object Name -EQ Transport).Value -cne 'HTTPS' -or ($settings|Where-Object Name -EQ CertificateThumbprint).Value -cne 'BC14DCC4E37F83161EBB55AF8624E36A79E19256'){throw 'Listener differs'}
    @{clean=$true;workerUuid=(Get-CimInstance Win32_ComputerSystemProduct).UUID;accounts=$expected;trialArtifactsAbsent=$true;automaticSignInDisabled=$true}
   }
-  $clean|ConvertTo-Json -Depth 6 -Compress;return
+  $clean|Write-AiwTransportReceipt;return
  }
  if($Operation -eq 'Stage'){
   Invoke-Command -Session $session -ArgumentList $root -ScriptBlock {
    param($root)
    $ErrorActionPreference='Stop'
+   function New-AiwProtectedDirectory([string]$Path,[Security.AccessControl.DirectorySecurity]$Acl) {
+    if(Test-Path -LiteralPath $Path){throw 'Fresh protected directory required'}
+    # ACL is supplied at creation; there is no inherited-ACL exposure window.
+    $null=[IO.FileSystemAclExtensions]::CreateDirectory($Acl,$Path)
+    $item=Get-Item -LiteralPath $Path -Force
+    $actual=Get-Acl -LiteralPath $Path
+    if(!$item.PSIsContainer -or $item.Attributes -band [IO.FileAttributes]::ReparsePoint -or !$actual.AreAccessRulesProtected -or $actual.GetSecurityDescriptorSddlForm('Access,Owner') -cne $Acl.GetSecurityDescriptorSddlForm('Access,Owner')){throw 'Created protected directory identity or ACL differs'}
+   }
    $base='C:\ProgramData\AIW\MsixWorker'
    if(Test-Path -LiteralPath $base){throw 'Existing worker intake refused; cold recovery required'}
    $acl=[Security.AccessControl.DirectorySecurity]::new();$acl.SetAccessRuleProtection($true,$false);$acl.SetOwner([Security.Principal.SecurityIdentifier]::new('S-1-5-21-3556347314-2314855617-1438300668-1001'))
    foreach($sid in @('S-1-5-18','S-1-5-21-3556347314-2314855617-1438300668-1001')){$acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sid),'FullControl','ContainerInherit,ObjectInherit','None','Allow'))}
    $parent='C:\ProgramData\AIW'
-   if(!(Test-Path -LiteralPath $parent)){$null=[IO.Directory]::CreateDirectory($parent,$acl)}
+   if(!(Test-Path -LiteralPath $parent)){New-AiwProtectedDirectory $parent $acl}
    $parentItem=Get-Item -LiteralPath $parent
    $parentAcl=Get-Acl -LiteralPath $parent
    if($parentItem.Attributes -band [IO.FileAttributes]::ReparsePoint -or !$parentAcl.AreAccessRulesProtected){throw 'Protected ordinary worker parent required'}
    foreach($rule in $parentAcl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])){if($rule.AccessControlType -ne 'Allow' -or $rule.IdentityReference.Value -notin @('S-1-5-18','S-1-5-21-3556347314-2314855617-1438300668-1001')){throw 'Worker parent ACL differs'}}
-   $null=[IO.Directory]::CreateDirectory($base,$acl);$null=[IO.Directory]::CreateDirectory($root,$acl);$null=[IO.Directory]::CreateDirectory(($root+'\input'))
+   if(Test-Path -LiteralPath $root){throw 'Existing run intake refused'}
+   New-AiwProtectedDirectory $base $acl;New-AiwProtectedDirectory $root $acl;New-AiwProtectedDirectory ($root+'\input') $acl
   }
   Copy-Item -LiteralPath (Join-Path $tools 'agent.exe') -Destination ($root+'\agent.exe') -ToSession $session
   Copy-Item -LiteralPath (Join-Path $tools 'request.json') -Destination ($root+'\request.json') -ToSession $session
@@ -112,7 +165,7 @@ public static class AiwReadiness {
    $ErrorActionPreference='Stop'
    foreach($entry in @(@('agent.exe',$request.agentSha256),@('input\application.msix',$request.packageSha256),@('input\assembly.json',$request.assemblySha256),@('input\signing.json',$request.signingSha256))){if((Get-FileHash -LiteralPath (Join-Path $root $entry[0])).Hash.ToLowerInvariant() -cne $entry[1]){throw 'Transferred approved bytes differ'}}
    @{staged=$true;nonce=$request.nonce}
-  }|ConvertTo-Json -Compress;return
+  }|Write-AiwTransportReceipt;return
  }
  if($Operation -eq 'Restart'){
   Invoke-Command -Session $session -ArgumentList $root,$request.nonce -ScriptBlock {
@@ -124,7 +177,7 @@ public static class AiwReadiness {
    & C:\Windows\System32\shutdown.exe /r /t 5 /f | Out-Null
    if($LASTEXITCODE -ne 0){throw 'Restart dispatch failed'}
    @{restartDispatched=$true;nonce=$nonce}
-  }|ConvertTo-Json -Compress;return
+  }|Write-AiwTransportReceipt;return
  }
  if($Operation -in @('Enroll','Control','Run')){
   $op=$Operation.ToLowerInvariant()
@@ -135,9 +188,15 @@ public static class AiwReadiness {
    if(Test-Path -LiteralPath $marker){throw 'Operation already dispatched; inspect status, never replay'}
    if((Get-FileHash -LiteralPath ($root+'\agent.exe')).Hash.ToLowerInvariant() -cne $agentSha){throw 'Approved agent differs'}
    $source=@'
+#Requires -Version 7.6
+#Requires -PSEdition Core
 $ErrorActionPreference='Stop'
+$PSModuleAutoLoadingPreference='None'
+foreach($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security','CimCmdlets')){Import-Module $module -SkipEditionCheck -ErrorAction Stop}
+if($PSVersionTable.PSVersion.ToString() -match '-' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Program Files\PowerShell\7\pwsh.exe' -or $PSHOME -ine 'C:\Program Files\PowerShell\7'){throw 'Exact stable machine PowerShell runtime required'}
 $root=$PSScriptRoot
 $request=Get-Content -LiteralPath ($root+'\request.json') -Raw|ConvertFrom-Json
+if(!$request.PSObject.Properties['powerShellRuntime'] -or !$request.powerShellRuntime -or $request.powerShellRuntime.worker.version -cne $PSVersionTable.PSVersion.ToString() -or $request.powerShellRuntime.worker.executableSha256 -cne (Get-FileHash -LiteralPath 'C:\Program Files\PowerShell\7\pwsh.exe').Hash.ToLowerInvariant()){throw 'SYSTEM runtime differs from approved request'}
 if((Get-CimInstance Win32_ComputerSystemProduct).UUID -ine $request.workerUuid -or [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -cne 'S-1-5-18'){throw 'Exact SYSTEM worker required'}
 if((Get-FileHash -LiteralPath ($root+'\agent.exe')).Hash.ToLowerInvariant() -cne $request.agentSha256){throw 'Agent differs'}
 $p=[Diagnostics.Process]::new();$p.StartInfo=[Diagnostics.ProcessStartInfo]::new(($root+'\agent.exe'),'@@OP@@ '+$request.runId)
@@ -161,13 +220,13 @@ try {
    if(@($folder.GetTasks(1)|Where-Object Name -CEQ $name).Count -ne 0){throw 'Fresh task required'}
    $task=$service.NewTask(0);$task.Principal.UserId='S-1-5-18';$task.Principal.LogonType=5;$task.Principal.RunLevel=1;$task.Settings.ExecutionTimeLimit='PT24M'
    $task.Settings.DisallowStartIfOnBatteries=$false;$task.Settings.StopIfGoingOnBatteries=$false
-   $action=$task.Actions.Create(0);$action.Path='C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe';$action.Arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File '+$path
+   $action=$task.Actions.Create(0);$action.Path='C:\Program Files\PowerShell\7\pwsh.exe';$action.Arguments='-NoLogo -NoProfile -NonInteractive -File "'+$path+'"'
    $registered=$folder.RegisterTaskDefinition($name,$task,0x12,'S-1-5-18',$null,5,'O:SYG:SYD:P(A;;FA;;;SY)(A;;FA;;;S-1-5-21-3556347314-2314855617-1438300668-1001)')
    $bytes=[Text.UTF8Encoding]::new($false).GetBytes((@{nonce=$nonce;operation=$op}|ConvertTo-Json -Compress));$f=[IO.File]::Open($marker,[IO.FileMode]::CreateNew)
    try{$f.Write($bytes,0,$bytes.Length);$f.Flush($true)}finally{$f.Dispose()}
    $null=$registered.RunEx($null,0,0,$null)
    @{dispatched=$true;nonce=$nonce;operation=$op}
-  }|ConvertTo-Json -Compress;return
+  }|Write-AiwTransportReceipt;return
  }
  if($Operation -eq 'Status'){
   Invoke-Command -Session $session -ArgumentList $root,$request.nonce -ScriptBlock {
@@ -177,7 +236,7 @@ try {
     $path=$root+'\'+$name+'.json';if(Test-Path -LiteralPath $path){if((Get-Item -LiteralPath $path).Length -gt 262144){throw 'Status bound exceeded'};$records[$name]=Get-Content -LiteralPath $path -Raw|ConvertFrom-Json}
    }
    @{nonce=$nonce;records=$records}
-  }|ConvertTo-Json -Depth 16 -Compress;return
+  }|Write-AiwTransportReceipt;return
  }
  if($Operation -eq 'Collect'){
   Invoke-Command -Session $session -ArgumentList $root,$request.nonce -ScriptBlock {
@@ -285,7 +344,7 @@ public sealed class AiwRawTree : IDisposable {
     $files+=@{path=$name;sha256=$sha;bytes=$bytes.Length;base64=[Convert]::ToBase64String($bytes)}
    }
    @{nonce=$nonce;files=$files;quiescent=$true;enumerationComplete=$true;rawEvidence=$rawEvidence}
-  }|ConvertTo-Json -Depth 6 -Compress;return
+  }|Write-AiwTransportReceipt;return
  }
  throw 'Unsupported closed transport operation'
 }finally{if($session){Remove-PSSession $session};$credential=$null}

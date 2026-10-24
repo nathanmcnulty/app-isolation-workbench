@@ -1,5 +1,11 @@
 # Dedicated QEMU VM preflight
 
+Historical setup ledger for the former runtime. Its commands and PowerShell5.1
+success observations are not current setup instructions or Core migration proof.
+Use the [adopted runtime migration and approval plan](handoffs/2026-10-24-powershell76/GOAL.md)
+for new work; old research execution entry points are retired. Original evidence
+below remains tied to its recorded dates/source and must not be replayed.
+
 Observed October 21, 2026 (America/Anchorage), starting from clean
 `9f92cfdae0a5ef56b2e90f280b252387fe8d62a9` on
 `codex/new-vm-handoff-20261021`. Checkout: `C:\aiw\app-isolation-workbench`.

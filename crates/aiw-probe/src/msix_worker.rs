@@ -13,6 +13,9 @@ pub const MSIX_SIGNING_SHA256: &str =
     "670e6f9e44211848c305c61261aa2ed6e2c94fac229214ec843cd4c9afab9e80";
 pub const MSIX_WORKER_UUID: &str = "e5cecc90-35c2-4831-bf9c-424be23f7d4e";
 pub const MSIX_WORKER_CHECKPOINT: &str = "aiw-msix-worker107-tls-clean-r1";
+/// Planned runtime-equipped baseline. Provisioning and its config pin need
+/// explicit approval; the historical checkpoint must never be relabeled.
+pub const MSIX_CORE_WORKER_CHECKPOINT: &str = "aiw-msix-worker107-pwsh76-clean-r1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -41,7 +44,10 @@ impl VmMsixWorkerProfile {
             || self.vm_id != 107
             || self.worker_uuid != MSIX_WORKER_UUID
             || self.worker_mac != "CC:34:21:B8:5A:31"
-            || self.checkpoint != MSIX_WORKER_CHECKPOINT
+            || !matches!(
+                self.checkpoint.as_str(),
+                MSIX_WORKER_CHECKPOINT | MSIX_CORE_WORKER_CHECKPOINT
+            )
             || !lower_hash(&self.checkpoint_config_sha256)
             || !lower_hash(&self.provider_sha256)
             || self.hypervisor_address != "192.168.1.6"
@@ -78,11 +84,21 @@ pub struct MsixWorkerRequest {
     pub assembly_sha256: String,
     pub signing_sha256: String,
     pub worker_uuid: String,
+    /// Absent only in historical records, which remain readable without execution.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "powerShellRuntime"
+    )]
+    pub power_shell_runtime: Option<crate::powershell::PowerShellExecutionBinding>,
     pub not_before_file_time: i64,
     pub not_after_file_time: i64,
 }
 impl MsixWorkerRequest {
     pub fn validate(&self) -> Result<(), String> {
+        if let Some(runtime) = &self.power_shell_runtime {
+            runtime.validate()?;
+        }
         if self.schema_version != MSIX_WORKER_REQUEST_SCHEMA
             || !safe_run_id(&self.run_id)
             || !lower_hash(&self.nonce)
@@ -111,6 +127,16 @@ impl MsixWorkerRequest {
             return Err("MSIX request is outside its approved 30-minute interval".into());
         }
         Ok(())
+    }
+    pub fn execution_runtime(
+        &self,
+    ) -> Result<&crate::powershell::PowerShellExecutionBinding, String> {
+        self.validate()?;
+        let runtime = self.power_shell_runtime.as_ref().ok_or(
+            "Historical MSIX request has no approved Core runtime; do not execute or rewrite it",
+        )?;
+        runtime.validate()?;
+        Ok(runtime)
     }
     pub fn hash(&self) -> Result<String, String> {
         self.validate()?;
@@ -172,6 +198,7 @@ mod tests {
             assembly_sha256: MSIX_ASSEMBLY_SHA256.into(),
             signing_sha256: MSIX_SIGNING_SHA256.into(),
             worker_uuid: MSIX_WORKER_UUID.into(),
+            power_shell_runtime: None,
             not_before_file_time: 134371378919507943,
             not_after_file_time: 134371396919507943,
         }
@@ -203,5 +230,15 @@ mod tests {
         let mut changed = r.clone();
         changed.nonce = "e".repeat(64);
         assert_ne!(r.hash().unwrap(), changed.hash().unwrap());
+    }
+    #[test]
+    fn historical_request_roundtrips_without_runtime_or_hash_rewrite_but_cannot_execute() {
+        let original = request();
+        let value = serde_json::to_value(&original).unwrap();
+        assert!(value.get("powerShellRuntime").is_none());
+        let retained: MsixWorkerRequest = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(retained.hash().unwrap(), original.hash().unwrap());
+        assert_eq!(serde_json::to_value(&retained).unwrap(), value);
+        assert!(retained.execution_runtime().is_err());
     }
 }

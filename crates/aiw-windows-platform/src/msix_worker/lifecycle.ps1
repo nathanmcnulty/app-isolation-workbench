@@ -1,3 +1,5 @@
+#Requires -Version 7.6
+#Requires -PSEdition Core
 $SignedSha256='2ae3a7c685e811eb34479980bff41d1442b023578074e19f4dca8fc676070437'
 $ProgressPreference='SilentlyContinue'
 $ErrorActionPreference='Stop'
@@ -9,6 +11,7 @@ $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
 if($session -eq 0 -or $identity.Name -notmatch '\\AiwStandardUser$'){throw 'Interactive standard-user session required'}
 $root=Join-Path $PSScriptRoot 'input'
 $request=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'request.json') -Raw|ConvertFrom-Json
+if(!$request.powerShellRuntime -or ((ConvertTo-Json -InputObject $AiwPowerShellRuntime -Compress -Depth 8) -cne (ConvertTo-Json -InputObject $request.powerShellRuntime.worker -Compress -Depth 8))){throw 'Approved PowerShell worker identity differs'}
 $account=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'account.json') -Raw|ConvertFrom-Json
 if($request.workerUuid -cne 'e5cecc90-35c2-4831-bf9c-424be23f7d4e' -or (Get-CimInstance Win32_ComputerSystemProduct).UUID -ine $request.workerUuid -or $identity.User.Value -cne $account.userSid -or $account.runNonce -cne $request.nonce -or [DateTime]::UtcNow.ToFileTimeUtc() -ge $request.notAfterFileTime){throw 'Approved worker/account/request interval differs'}
 $evidence=Join-Path $env:LOCALAPPDATA ('AIW\msix-'+$request.nonce+'\msix-lifecycle')
@@ -37,9 +40,9 @@ try {
 
  $current=[Diagnostics.Process]::GetCurrentProcess()
  try {$operatorToken=[AiwMsixNative]::Observe($current.Handle);$supervisorInJob=[AiwMsixNative]::InJob($current.Handle);$supervisorImage=$current.MainModule.FileName;$supervisorStart=$current.StartTime.ToUniversalTime().ToString('o')}finally{$current.Dispose()}
- if(!$supervisorInJob -or $supervisorImage -ine 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'){throw 'Fixed PowerShell supervisor job/image mismatch'}
+ if(!$supervisorInJob -or $supervisorImage -ine 'C:\Program Files\PowerShell\7\pwsh.exe'){throw 'Fixed PowerShell supervisor job/image mismatch'}
  if($operatorToken.IsElevated -or $operatorToken.AdministratorsEnabled -or $operatorToken.IsAppContainer -or $operatorToken.TokenSessionId -ne $session -or $operatorToken.IntegritySid -cne 'S-1-16-8192' -or $operatorToken.UserSid -cne $identity.User.Value -or $env:USERPROFILE -cne 'C:\Users\AiwStandardUser'){throw 'Non-elevated standard-user context required'}
- Record 'worker' ([ordered]@{computer=$env:COMPUTERNAME;supervisorPid=$PID;supervisorImage=$supervisorImage;supervisorStart=$supervisorStart;inInheritedJob=$supervisorInJob;sessionId=$session;operator=$identity.Name;operatorSid=$identity.User.Value;operatorToken=$operatorToken;windowsBuild=[Environment]::OSVersion.Version.ToString();time=[DateTime]::UtcNow.ToString('o');researchOnly=$false})
+ Record 'worker' ([ordered]@{computer=$env:COMPUTERNAME;powerShellRuntime=$AiwPowerShellRuntime;supervisorPid=$PID;supervisorImage=$supervisorImage;supervisorStart=$supervisorStart;inInheritedJob=$supervisorInJob;sessionId=$session;operator=$identity.Name;operatorSid=$identity.User.Value;operatorToken=$operatorToken;windowsBuild=[Environment]::OSVersion.Version.ToString();time=[DateTime]::UtcNow.ToString('o');researchOnly=$false})
  $preexistingPackages=@(Get-AppxPackage -Name AIWResearch.NotepadPP|Select-Object Name,PackageFullName,PackageFamilyName,Version,Publisher,InstallLocation,PackageUserInformation)
  $preexistingProcesses=@(Get-Process -Name 'notepad++' -ErrorAction SilentlyContinue|ForEach-Object {
   $imagePath=$null;$startTime=$null;$queryError=$null
