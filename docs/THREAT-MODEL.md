@@ -110,6 +110,16 @@ COM/IPC and credential brokers outside the workload boundary require separately
 identified enforcement and tests. Local account/session separation does not prove
 cloud identity attribution. See the [October 7 review gates](MXC-TRAJECTORY-REVIEW-2026-10-07.md#security-and-evidence-gates-to-add-to-benchmark-2).
 
+## MSIX recovery export authority
+
+MSIX recovery must retain the authoritative run-owned profile evidence before
+destructive rollback; controller copies may be missing or partial. A bounded,
+held raw source and complete path/byte/hash manifest are required, and queued or
+running work prevents export. For old preparations, a current compiled recovery
+helper has only read-only Collect/Clean authority; it does not replace approved
+tools or relax their provenance checks. Neither this export nor a guest receipt
+is tamper-proof telemetry or evidence of effective application isolation.
+
 ## Explicit non-goals
 
 - Automatically declaring an application safe or automatically converting every legacy installer.

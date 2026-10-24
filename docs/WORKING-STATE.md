@@ -11,6 +11,12 @@ Recovery now requires durable raw export before rollback, retains pre-release pr
 for completed-nonce finalization, and polls actual interactive readiness. Retained
 reporting never repairs an incomplete journal. Do not replay the completed trial.
 
+The next review checkpoint exports the authoritative profile raw tree independently
+of missing/partial controller copies and blocks queued tasks. Older preparations
+keep their approved tool bytes; recovery uses a separate compiled read-only helper
+and requires the new authoritative export receipt. See MSIX-EXECUTION.md for the
+crash/copy-failure/old-format/queued-task regressions and validation limits.
+
 ## Completed app-work slice
 
 The exact supported signed-MSIX production execution flow is integrated and

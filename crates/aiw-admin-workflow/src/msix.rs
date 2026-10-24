@@ -185,6 +185,14 @@ fn powershell_workspace_path(workspace: &Path) -> Result<PathBuf> {
 }
 fn transport(operation: &str, run_id: &str, workspace: &Path) -> Result<Value> {
     let workspace = powershell_workspace_path(workspace)?;
+    transport_file(
+        &workspace.join("tools/transport.ps1"),
+        operation,
+        run_id,
+        &workspace,
+    )
+}
+fn transport_file(script: &Path, operation: &str, run_id: &str, workspace: &Path) -> Result<Value> {
     command_json(
         Command::new(PS)
             // A desktop launched by PowerShell7 can inherit its module path.
@@ -197,12 +205,56 @@ fn transport(operation: &str, run_id: &str, workspace: &Path) -> Result<Value> {
                 "Bypass",
                 "-File",
             ])
-            .arg(workspace.join("tools/transport.ps1"))
+            .arg(script)
             .args(["-Operation", operation, "-RunId", run_id, "-Workspace"])
-            .arg(&workspace),
+            .arg(workspace),
         120,
         32 * 1024 * 1024,
     )
+}
+
+fn recovery_script(
+    workspace: &HeldRunWorkspace,
+) -> Result<aiw_windows_platform::BoundWorkspaceFile> {
+    let name = format!("recovery-transport-{}.ps1", hash(TRANSPORT.as_bytes()));
+    if !workspace.output_path().join(&name).exists() {
+        let mut file = workspace
+            .create_output_file_new(&format!("recovery-helper-{}.pending", super::nonce()))?;
+        file.as_file_mut().write_all(TRANSPORT.as_bytes())?;
+        file.as_file_mut().sync_all()?;
+        let output = workspace.reopen_root_directory(
+            "output",
+            aiw_windows_platform::WorkspaceAclPolicy::Protected,
+        )?;
+        let mut file = file.publish_into_bound(&output, &name)?;
+        file.as_file_mut().sync_all()?;
+    }
+    let file = workspace.reopen_output_file(&name)?;
+    let mut bytes = Vec::new();
+    file.as_file()
+        .take(TRANSPORT.len() as u64 + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes != TRANSPORT.as_bytes() {
+        bail!("Compiled recovery collector identity differs")
+    }
+    std::io::Seek::rewind(&mut file.as_file())?;
+    file.revalidate()?;
+    Ok(file)
+}
+fn recovery_transport(
+    operation: &str,
+    request: &MsixWorkerRequest,
+    workspace: &HeldRunWorkspace,
+) -> Result<Value> {
+    if !matches!(operation, "Collect" | "Clean") {
+        bail!("Recovery helper permits read-only collection/clean inspection only")
+    }
+    let script = recovery_script(workspace)?;
+    let path = powershell_workspace_path(script.final_path())?;
+    let root = powershell_workspace_path(workspace.root_path())?;
+    let value = transport_file(&path, operation, &request.run_id, &root)?;
+    script.revalidate()?;
+    Ok(value)
 }
 
 fn write_tools(workspace: &HeldRunWorkspace, name: &str, bytes: &[u8]) -> Result<()> {
@@ -307,6 +359,41 @@ trait VmOperations {
     }
 }
 struct RealVm;
+struct RecoveryVm;
+impl VmOperations for RecoveryVm {
+    fn provider(
+        &mut self,
+        op: &str,
+        request: &MsixWorkerRequest,
+        worker: &VmMsixWorkerProfile,
+    ) -> Result<Value> {
+        provider(op, Some(&request.nonce), Some(worker))
+    }
+    fn transport(
+        &mut self,
+        op: &str,
+        request: &MsixWorkerRequest,
+        workspace: &HeldRunWorkspace,
+    ) -> Result<Value> {
+        recovery_transport(op, request, workspace)
+    }
+    fn clean(
+        &mut self,
+        request: &MsixWorkerRequest,
+        workspace: &HeldRunWorkspace,
+    ) -> Result<Value> {
+        let start = Instant::now();
+        loop {
+            if let Ok(value) = recovery_transport("Clean", request, workspace) {
+                return Ok(value);
+            }
+            if start.elapsed() >= Duration::from_secs(360) {
+                bail!("Restored clean inspection deadline exceeded")
+            }
+            self.pause();
+        }
+    }
+}
 impl VmOperations for RealVm {
     fn provider(
         &mut self,
@@ -387,7 +474,7 @@ fn ready_then_control(
 }
 
 fn read_export(workspace: &HeldRunWorkspace, request: &MsixWorkerRequest) -> Result<Value> {
-    let marker = read_stage(workspace, "collection-complete.json")?;
+    let marker = read_stage(workspace, "collection-authoritative-complete.json")?;
     if marker["nonce"] != request.nonce
         || marker["requestSha256"] != request.hash().map_err(anyhow::Error::msg)?
     {
@@ -405,7 +492,16 @@ fn read_export(workspace: &HeldRunWorkspace, request: &MsixWorkerRequest) -> Res
     file.revalidate()?;
     let value = serde_json::from_slice(&bytes)?;
     decode_collection(request, &value)?;
+    require_dispatched_raw_source(workspace, &value)?;
     Ok(value)
+}
+fn require_dispatched_raw_source(workspace: &HeldRunWorkspace, value: &Value) -> Result<()> {
+    if workspace.output_path().join("run-intent.json").exists()
+        && value["rawEvidence"]["present"] != true
+    {
+        bail!("Host application dispatch intent requires authoritative raw source; preserve lease")
+    }
+    Ok(())
 }
 fn retain_export(
     workspace: &HeldRunWorkspace,
@@ -414,19 +510,20 @@ fn retain_export(
 ) -> Result<Value> {
     if workspace
         .output_path()
-        .join("collection-complete.json")
+        .join("collection-authoritative-complete.json")
         .exists()
     {
         return read_export(workspace, request);
     }
     let value = io.transport("Collect", request, workspace)?;
     decode_collection(request, &value)?;
+    require_dispatched_raw_source(workspace, &value)?;
     let name = format!("collection-{}", super::nonce());
     stage(workspace, &name, &value)?;
     // Receipt last. A partial export never grants permission to erase the guest.
     stage(
         workspace,
-        "collection-complete",
+        "collection-authoritative-complete",
         &json!({"nonce":request.nonce,"requestSha256":request.hash().map_err(anyhow::Error::msg)?,"export":format!("{name}.json"),"sha256":hash(&serde_json::to_vec_pretty(&value)?)}),
     )?;
     read_export(workspace, request)
@@ -875,6 +972,55 @@ fn decode_collection(
             bail!("Evidence hash/length/count rejected")
         }
     }
+    let raw = &value["rawEvidence"];
+    if raw["complete"] != true
+        || raw["source"] != "runOwnedProfile"
+        || raw["nonce"] != request.nonce
+    {
+        bail!("Authoritative raw source completeness proof required")
+    }
+    let inventory = raw["files"]
+        .as_array()
+        .context("Raw evidence inventory missing")?;
+    let mut names = std::collections::BTreeSet::new();
+    for entry in inventory {
+        let name = entry["path"].as_str().context("Raw evidence path absent")?;
+        let bytes = files.get(name).context("Authoritative raw file absent")?;
+        if !name.starts_with("raw/")
+            || !names.insert(name.to_owned())
+            || entry["sha256"] != hash(bytes)
+            || entry["bytes"] != bytes.len() as u64
+        {
+            bail!("Authoritative raw evidence inventory differs")
+        }
+    }
+    if names
+        != files
+            .keys()
+            .filter(|name| name.starts_with("raw/"))
+            .cloned()
+            .collect()
+    {
+        bail!("Authoritative raw evidence file set differs")
+    }
+    if raw["present"] == true {
+        let sid = raw["userSid"]
+            .as_str()
+            .context("Raw evidence SID missing")?;
+        if !sid.starts_with("S-1-5-21-3556347314-2314855617-1438300668-")
+            || sid == "S-1-5-21-3556347314-2314855617-1438300668-1001"
+            || names.is_empty()
+        {
+            bail!("Authoritative raw evidence identity/files missing")
+        }
+    } else if raw["present"] != false
+        || !names.is_empty()
+        || ["run-dispatch.json", "run-started.json", "result.json"]
+            .iter()
+            .any(|name| files.contains_key(*name))
+    {
+        bail!("Dispatched application raw evidence missing")
+    }
     Ok(files)
 }
 fn collect(workspace: &HeldRunWorkspace, request: &MsixWorkerRequest, value: &Value) -> Result<()> {
@@ -1036,7 +1182,7 @@ pub fn recover(workspace_path: &Path, run_id: &str, gate: &dyn ApprovalGate) -> 
         return finish_recovery(&layout, &held.workspace, &request, worker);
     }
     gate.progress("Collecting retained evidence and recovering the exact VM107 lease without application replay.");
-    let proofs = cold_recover(&held.workspace, &request, worker, &mut RealVm)?;
+    let proofs = cold_recover(&held.workspace, &request, worker, &mut RecoveryVm)?;
     stage(&held.workspace, "recovery-complete", &proofs)?;
     finish_recovery(&layout, &held.workspace, &request, worker)
 }
@@ -1089,10 +1235,20 @@ mod transport_path_tests {
     use super::*;
 
     #[test]
+    fn authoritative_export_regressions_execute_actual_ps51_collector() {
+        let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scripts/vm-msix/tests/test-authoritative-export.ps1");
+        let value = command_json(Command::new(PS).env_remove("PSModulePath")
+            .env("AIW_EXPORT_REGRESSION",script)
+            .args(["-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-Command","$ErrorActionPreference='Stop'; & $env:AIW_EXPORT_REGRESSION | Out-Null; @{passed=$true;applicationExecuted=$false}|ConvertTo-Json -Compress"]),120,4096).unwrap();
+        assert_eq!(value["passed"], true);
+    }
+
+    #[test]
     fn collect_transport_does_not_suppress_enumeration_failure_in_ps51() {
         let value = command_json(Command::new(PS).env_remove("PSModulePath")
             .env("AIW_COLLECTION_TEST_SOURCE", TRANSPORT)
-            .args(["-NoProfile", "-NonInteractive", "-Command", r#"$ErrorActionPreference='Stop';$t=$null;$e=$null;$a=[Management.Automation.Language.Parser]::ParseInput($env:AIW_COLLECTION_TEST_SOURCE,[ref]$t,[ref]$e);if($e.Count){throw ($e|Out-String)};$b=@($a.FindAll({param($n)$n -is [Management.Automation.Language.ScriptBlockExpressionAst] -and $n.ScriptBlock.ParamBlock -and $n.ScriptBlock.ParamBlock.Parameters.Count -eq 2 -and $n.Extent.Text.Contains('enumerationComplete')},$true));if($b.Count -ne 1){throw 'One fixed export block required'};function Get-ScheduledTask {};function Get-Process {};function Test-Path {$true};function Get-Item {[pscustomobject]@{Attributes=[IO.FileAttributes]::Directory}};function Get-ChildItem {throw 'injected export enumeration failure'};$block=$b[0].ScriptBlock.GetScriptBlock();try{$null=& $block 'C:\AIWTest' ('a'*64);throw 'Enumeration error swallowed'}catch{if($_.Exception.Message -cne 'injected export enumeration failure'){throw};@{rejected=$true;applicationExecuted=$false}|ConvertTo-Json -Compress}"#]),30,4096).unwrap();
+            .args(["-NoProfile", "-NonInteractive", "-Command", r#"$ErrorActionPreference='Stop';$t=$null;$e=$null;$a=[Management.Automation.Language.Parser]::ParseInput($env:AIW_COLLECTION_TEST_SOURCE,[ref]$t,[ref]$e);if($e.Count){throw ($e|Out-String)};$b=@($a.FindAll({param($n)$n -is [Management.Automation.Language.ScriptBlockExpressionAst] -and $n.ScriptBlock.ParamBlock -and $n.ScriptBlock.ParamBlock.Parameters.Count -eq 2 -and $n.Extent.Text.Contains('enumerationComplete')},$true));if($b.Count -ne 1){throw 'One fixed export block required'};function Get-ScheduledTask {};function Get-Process {};function Test-Path {param($LiteralPath) $LiteralPath -ceq 'C:\AIWTest'};function Get-Item {[pscustomobject]@{Attributes=[IO.FileAttributes]::Directory}};function Get-ChildItem {throw 'injected export enumeration failure'};$block=$b[0].ScriptBlock.GetScriptBlock();try{$null=& $block 'C:\AIWTest' ('a'*64);throw 'Enumeration error swallowed'}catch{if($_.Exception.Message -cne 'injected export enumeration failure'){throw};@{rejected=$true;applicationExecuted=$false}|ConvertTo-Json -Compress}"#]),30,4096).unwrap();
         assert_eq!(value["rejected"], true);
     }
 
@@ -1100,7 +1256,7 @@ mod transport_path_tests {
     fn readiness_transport_parses_and_readonly_wts_observer_compiles_in_ps51() {
         let value = command_json(Command::new(PS).env_remove("PSModulePath")
             .env("AIW_READINESS_TEST_SOURCE", TRANSPORT)
-            .args(["-NoProfile", "-NonInteractive", "-Command", r#"$ErrorActionPreference='Stop';$t=$null;$e=$null;$a=[Management.Automation.Language.Parser]::ParseInput($env:AIW_READINESS_TEST_SOURCE,[ref]$t,[ref]$e);if($e.Count){throw ($e|Out-String)};$c=@($a.FindAll({param($n)$n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Add-Type'},$true));if($c.Count -ne 1){throw 'One fixed native observer required'};$s=@($c[0].CommandElements|Where-Object{$_ -is [Management.Automation.Language.StringConstantExpressionAst]})[-1].Value;Add-Type -TypeDefinition $s;@{compiled=([AiwReadiness].GetMethod('Active') -ne $null);applicationExecuted=$false}|ConvertTo-Json -Compress"#]),30,4096).unwrap();
+            .args(["-NoProfile", "-NonInteractive", "-Command", r#"$ErrorActionPreference='Stop';$t=$null;$e=$null;$a=[Management.Automation.Language.Parser]::ParseInput($env:AIW_READINESS_TEST_SOURCE,[ref]$t,[ref]$e);if($e.Count){throw ($e|Out-String)};$c=@($a.FindAll({param($n)$n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Add-Type'},$true));if($c.Count -ne 2){throw 'One fixed native observer required'};$s=@($c[0].CommandElements|Where-Object{$_ -is [Management.Automation.Language.StringConstantExpressionAst]})[-1].Value;Add-Type -TypeDefinition $s;@{compiled=([AiwReadiness].GetMethod('Active') -ne $null);applicationExecuted=$false}|ConvertTo-Json -Compress"#]),30,4096).unwrap();
         assert_eq!(value["compiled"], true);
         assert_eq!(value["applicationExecuted"], false);
     }
@@ -1226,7 +1382,7 @@ mod failure_sequence_tests {
                 "Collect" => {
                     let bytes = b"retained failure diagnostics";
                     Ok(
-                        json!({"nonce":request.nonce,"quiescent":true,"enumerationComplete":!self.incomplete_collection,"files":[{"path":"failure.txt","sha256":hash(bytes),"bytes":bytes.len(),"base64":base64::engine::general_purpose::STANDARD.encode(bytes)}]}),
+                        json!({"nonce":request.nonce,"quiescent":true,"enumerationComplete":!self.incomplete_collection,"rawEvidence":{"complete":true,"source":"runOwnedProfile","nonce":request.nonce,"present":true,"userSid":"S-1-5-21-3556347314-2314855617-1438300668-1006","files":[{"path":"raw/failure.txt","sha256":hash(bytes),"bytes":bytes.len()}]},"files":[{"path":"raw/failure.txt","sha256":hash(bytes),"bytes":bytes.len(),"base64":base64::engine::general_purpose::STANDARD.encode(bytes)}]}),
                     )
                 }
                 "Ready" => self
@@ -1329,10 +1485,91 @@ mod failure_sequence_tests {
         assert!(
             !workspace
                 .output_path()
-                .join("collection-complete.json")
+                .join("collection-authoritative-complete.json")
                 .exists()
         );
         assert!(!io.released);
+    }
+    #[test]
+    fn old_prepared_inputs_stay_unchanged_while_current_readonly_helper_recovers() {
+        let (workspace, _, request, worker) = fixture();
+        let old = b"param($Operation) # original transport: no authoritative export protocol";
+        write_tools(&workspace, "transport.ps1", old).unwrap();
+        for leaf in ["agent.exe", "request.json", "assembly.json", "signing.json"] {
+            write_tools(&workspace, leaf, b"approved input bytes").unwrap();
+        }
+        stage(
+            &workspace,
+            "collection-complete",
+            &json!({"nonce":request.nonce,"legacy":true}),
+        )
+        .unwrap();
+        let old_hold = workspace
+            .reopen_tools_file_readonly("transport.ps1")
+            .unwrap();
+        let helper = recovery_script(&workspace).unwrap();
+        assert_ne!(helper.final_path(), old_hold.final_path());
+        let mut helper_bytes = Vec::new();
+        helper.as_file().read_to_end(&mut helper_bytes).unwrap();
+        assert_eq!(helper_bytes, TRANSPORT.as_bytes());
+        assert!(recovery_transport("Run", &request, &workspace).is_err());
+        let mut io = MockVm::default();
+        cold_recover(&workspace, &request, &worker, &mut io).unwrap();
+        assert!(io.calls.contains(&"Collect".into()));
+        for leaf in [
+            "transport.ps1",
+            "agent.exe",
+            "request.json",
+            "assembly.json",
+            "signing.json",
+        ] {
+            let file = workspace.reopen_tools_file_readonly(leaf).unwrap();
+            let mut bytes = Vec::new();
+            file.as_file().read_to_end(&mut bytes).unwrap();
+            assert_eq!(
+                bytes,
+                if leaf == "transport.ps1" {
+                    old.as_slice()
+                } else {
+                    b"approved input bytes".as_slice()
+                }
+            );
+        }
+        assert_eq!(
+            read_stage(&workspace, "collection-complete.json").unwrap()["legacy"],
+            true
+        );
+        assert!(read_export(&workspace, &request).is_ok());
+    }
+    #[test]
+    fn old_format_export_never_bypasses_authoritative_completeness() {
+        let (workspace, _, request, worker) = fixture();
+        stage(
+            &workspace,
+            "collection-complete",
+            &json!({"nonce":request.nonce,"legacy":true}),
+        )
+        .unwrap();
+        let mut io = MockVm {
+            fail_collection: true,
+            ..Default::default()
+        };
+        assert!(cold_recover(&workspace, &request, &worker, &mut io).is_err());
+        assert_eq!(io.calls, vec!["inspect", "Collect"]);
+        io.fail_collection = false;
+        let mut value = io.transport("Collect", &request, &workspace).unwrap();
+        value.as_object_mut().unwrap().remove("rawEvidence");
+        assert!(decode_collection(&request, &value).is_err());
+        value["rawEvidence"] = json!({"complete":true,"source":"runOwnedProfile","nonce":request.nonce,"present":true,"userSid":"S-1-5-21-3556347314-2314855617-1438300668-1006","files":[]});
+        assert!(decode_collection(&request, &value).is_err());
+    }
+    #[test]
+    fn host_dispatch_intent_rejects_absent_source_even_when_guest_markers_are_missing() {
+        let (workspace, _, request, _) = fixture();
+        stage(&workspace, "run-intent", &json!({"nonce":request.nonce})).unwrap();
+        let value = json!({"nonce":request.nonce,"quiescent":true,"enumerationComplete":true,"files":[],"rawEvidence":{"complete":true,"source":"runOwnedProfile","nonce":request.nonce,"present":false,"files":[]}});
+        assert!(decode_collection(&request, &value).is_ok());
+        assert!(require_dispatched_raw_source(&workspace, &value).is_err());
     }
     #[test]
     fn crash_before_collection_exports_before_rollback_and_failed_lifecycle_can_clean() {

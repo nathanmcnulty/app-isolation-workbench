@@ -198,3 +198,44 @@ hash unchanged. Logs and readback are outside Git under
 `pr103-live-readonly-readiness.log` and `pr103-retained-report-readback.json`.
 Full checkpoint verification/audit/desktop checks are supplied by the PR's fresh
 hosted CI run; earlier green CI at23b3c52 does not attest to these changes.
+
+## Authoritative export and old preparation recovery checkpoint
+
+The collector now captures the nonce-scoped original under the run-owned SID's
+local profile, independently of the native controller's `evidence` or
+`failed-evidence` copies. Directory ancestors and source files remain held while
+the raw tree is read and revalidated; reparse entries, hardlinks, named streams,
+changed entry sets and existing size/count/depth violations fail closed. The
+export binds every `raw/` file's path, bytes and hash to a separate raw manifest.
+Host or guest application-dispatch evidence requires that original source to be
+present. Missing or partial controller copies cannot stand in for it. Running
+or queued tasks prevent collection/rollback.
+
+Recovery of older approved preparations still verifies and holds their original
+plan, approval, agent, request, transport, signing metadata and imported package.
+It runs a separately held helper from the current host's compiled source under
+`output`, restricted by the backend to read-only Collect/Clean. It never replaces
+approved tool bytes or enrolls a new agent. A legacy `collection-complete.json`
+remains retained but cannot authorize rollback: the current collector must publish
+the independently checked `collection-authoritative-complete.json` first.
+Existing pre-release cold proofs can still finalize an already restored/released
+nonce without repeating rollback or application execution.
+
+The actual PS5.1 Collect body is exercised in CI by
+`scripts/vm-msix/tests/test-authoritative-export.ps1`: crash before controller copy,
+old-format and partial caches, queued/running tasks, missing dispatched source,
+profile enumeration failure, exclusive-lock read failure and successful read-only
+retry. Host regressions check unchanged old prepared inputs, separate compiled
+helper identity, rejection of mutating helper verbs, legacy-marker rejection and
+authoritative inventory completeness. Tests use isolated local fixtures; they do
+not repeat the historical full desktop/application trial.
+
+Checkpoint validation: all14 MSIX host/transport regressions, workspace/all-target
+Clippy with warnings denied and governance checks passed. A normal-TLS read-only
+Collect against cold-clean VM107 returned complete enumeration with an explicitly
+absent raw source; every file hash under the old approved tools directory stayed
+unchanged. That absence would not satisfy a host-recorded application dispatch.
+No application or rollback was dispatched. Logs:
+`C:\AIW-Resume-20261021\pr103-authoritative-final-*` and
+`pr103-authoritative-live-readonly.json`. Hosted checkpoint CI remains separate
+from these focused tests and the historical full application acceptance.

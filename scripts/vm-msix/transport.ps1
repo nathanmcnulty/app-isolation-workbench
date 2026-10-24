@@ -184,7 +184,83 @@ try {
    param($root,$nonce)
    $ErrorActionPreference='Stop';$files=@();$total=0
    # Read-only retry is safe only after native/controller work has stopped.
-   if(@(Get-ScheduledTask|Where-Object {$_.TaskName -like 'AIW-Msix-*' -and $_.State -eq 'Running'}).Count -ne 0 -or @(Get-Process -Name 'notepad++','agent' -ErrorAction SilentlyContinue).Count -ne 0){throw 'Worker still running; preserve its lease and evidence'}
+   if(@(Get-ScheduledTask|Where-Object {$_.TaskName -like 'AIW-Msix-*' -and $_.State -in @('Running','Queued')}).Count -ne 0 -or @(Get-Process -Name 'notepad++','agent' -ErrorAction SilentlyContinue).Count -ne 0){throw 'Worker running or queued; preserve its lease and evidence'}
+   # Source custody is independent of the controller's optional/partial copies.
+   if(-not ('AiwRawTree' -as [type])){Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+public sealed class AiwRawTree : IDisposable {
+ [StructLayout(LayoutKind.Sequential)] struct Info {public uint attr;public System.Runtime.InteropServices.ComTypes.FILETIME c,a,w;public uint volume,high,low,links,indexHigh,indexLow;}
+ [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern SafeFileHandle CreateFileW(string path,uint access,uint share,IntPtr security,uint creation,uint flags,IntPtr template);
+ [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetFileInformationByHandle(SafeFileHandle file,out Info info);
+ readonly List<IDisposable> held=new List<IDisposable>();
+ readonly Dictionary<string,string[]> directories=new Dictionary<string,string[]>();
+ readonly Dictionary<string,FileStream> files=new Dictionary<string,FileStream>();
+ readonly string root;
+ public AiwRawTree(string path) {
+  root=Path.GetFullPath(path);
+  try { var parents=new Stack<string>();for(var p=root;p!=null;p=Path.GetDirectoryName(p))parents.Push(p);while(parents.Count!=0)HoldDirectory(parents.Pop());Walk(root,0); }catch{Dispose();throw;}
+ }
+ void HoldDirectory(string path) {
+  var h=CreateFileW(path,0x80,3,IntPtr.Zero,3,0x02200000,IntPtr.Zero);
+  held.Add(h);Info i;if(h.IsInvalid || !GetFileInformationByHandle(h,out i) || (i.attr&0x410)!=0x10)throw new IOException("Ordinary held evidence directory required");
+ }
+ static string[] Entries(string path) {return Directory.GetFileSystemEntries(path).OrderBy(p=>p,StringComparer.Ordinal).ToArray();}
+ void Walk(string path,int depth) {
+  if(depth>16 || directories.Count+files.Count>=512)throw new IOException("Raw evidence tree bound exceeded");
+  var entries=Entries(path);directories.Add(path,entries);
+  foreach(var entry in entries) {
+   if(directories.Count+files.Count>=512)throw new IOException("Raw evidence entry count exceeded");
+   var attr=File.GetAttributes(entry);if((attr&FileAttributes.ReparsePoint)!=0)throw new IOException("Raw evidence reparse entry refused");
+   if((attr&FileAttributes.Directory)!=0){HoldDirectory(entry);Walk(entry,depth+1);continue;}
+   var f=new FileStream(entry,FileMode.Open,FileAccess.Read,FileShare.Read);held.Add(f);
+   Info i;if(!GetFileInformationByHandle(f.SafeFileHandle,out i) || i.links!=1 || (i.attr&0x410)!=0 || f.Length>4194304)throw new IOException("Raw evidence file identity/bound rejected");
+   files.Add(entry.Substring(root.Length+1).Replace('\\','/'),f);
+  }
+ }
+ public string[] Names {get{return files.Keys.OrderBy(p=>p,StringComparer.Ordinal).ToArray();}}
+ public byte[] Read(string name) {
+  var f=files[name];var data=new byte[checked((int)f.Length)];f.Position=0;int offset=0;
+  while(offset<data.Length){int n=f.Read(data,offset,data.Length-offset);if(n==0)throw new EndOfStreamException();offset+=n;}return data;
+ }
+ public void Verify() {foreach(var d in directories)if(!d.Value.SequenceEqual(Entries(d.Key)))throw new IOException("Raw evidence entries changed during export");}
+ public void Dispose() {for(int i=held.Count-1;i>=0;i--)held[i].Dispose();held.Clear();}
+}
+'@
+   }
+   $rawEvidence=@{complete=$true;source='runOwnedProfile';nonce=$nonce;present=$false;userSid=$null;files=@()}
+   $accountPath=Join-Path $root 'account.json'
+   if(Test-Path -LiteralPath $accountPath){
+    $account=Get-Content -LiteralPath $accountPath -Raw|ConvertFrom-Json
+    if($account.runNonce -cne $nonce -or $account.workerUuid -cne 'e5cecc90-35c2-4831-bf9c-424be23f7d4e' -or $account.userSid -cnotmatch '\AS-1-5-21-3556347314-2314855617-1438300668-[0-9]+\z' -or $account.userSid -ceq 'S-1-5-21-3556347314-2314855617-1438300668-1001'){throw 'Raw evidence account binding differs'}
+    $rawEvidence.userSid=$account.userSid
+    $profiles=@(Get-CimInstance Win32_UserProfile|Where-Object SID -CEQ $account.userSid)
+    if($profiles.Count -gt 1){throw 'Ambiguous raw evidence profile'}
+    if($profiles.Count -eq 1){
+     if(([IO.Path]::GetFullPath($profiles[0].LocalPath)) -cnotmatch '\A[A-Za-z]:\\'){throw 'Local worker profile required'}
+     $source=Join-Path $profiles[0].LocalPath ('AppData\Local\AIW\msix-'+$nonce)
+     if(Test-Path -LiteralPath $source){
+      $rawEvidence.present=$true;$raw=[AiwRawTree]::new($source)
+      try {
+       foreach($name in $raw.Names){
+        if(@(Get-Item -LiteralPath (Join-Path $source $name) -Stream '*' -ErrorAction Stop|Where-Object Stream -CNE ':$DATA').Count -ne 0){throw 'Named raw evidence stream refused'}
+        $bytes=$raw.Read($name);$hash=[Security.Cryptography.SHA256]::Create()
+        try{$sha=([BitConverter]::ToString($hash.ComputeHash($bytes))).Replace('-','').ToLowerInvariant()}finally{$hash.Dispose()}
+        $total+=$bytes.Length;if($total -gt 16MB -or $files.Count -ge 512){throw 'Evidence export bound exceeded'}
+        $entry=@{path=('raw/'+$name);sha256=$sha;bytes=$bytes.Length}
+        $rawEvidence.files+=$entry
+        $files+=@{path=$entry.path;sha256=$sha;bytes=$bytes.Length;base64=[Convert]::ToBase64String($bytes)}
+       }
+       $raw.Verify()
+      }finally{$raw.Dispose()}
+     }
+    }
+   }
+   if(!$rawEvidence.present -and (@('run-dispatch.json','run-started.json','result.json')|Where-Object {Test-Path -LiteralPath (Join-Path $root $_)})){throw 'Dispatched application authoritative raw evidence absent; preserve lease'}
    # Only receipts, raw evidence and bounded diagnostic logs; never inputs/account secrets.
    $exportFiles=@()
    if(Test-Path -LiteralPath $root){
@@ -201,14 +277,14 @@ try {
    }
    foreach($file in $exportFiles){
     $name=$file.FullName.Substring($root.Length+1).Replace('\','/')
-    if($name -notmatch '\A(?:evidence/|failed-evidence/|[^/]+\.(?:json|txt)\z)' -or $name -eq 'request.json'){continue}
+    if($name -notmatch '\A(?:evidence/|failed-evidence/|[^/]+\.(?:json|txt)\z)' -or $name -in @('request.json','account.json')){continue}
     if($file.Attributes -band [IO.FileAttributes]::ReparsePoint -or $file.Length -gt 4MB){throw 'Evidence file bound/type rejected'}
     $total+=$file.Length;if($total -gt 16MB -or $files.Count -ge 512){throw 'Evidence export bound exceeded'}
     $bytes=[IO.File]::ReadAllBytes($file.FullName);$hash=[Security.Cryptography.SHA256]::Create()
     try{$sha=([BitConverter]::ToString($hash.ComputeHash($bytes))).Replace('-','').ToLowerInvariant()}finally{$hash.Dispose()}
     $files+=@{path=$name;sha256=$sha;bytes=$bytes.Length;base64=[Convert]::ToBase64String($bytes)}
    }
-   @{nonce=$nonce;files=$files;quiescent=$true;enumerationComplete=$true}
+   @{nonce=$nonce;files=$files;quiescent=$true;enumerationComplete=$true;rawEvidence=$rawEvidence}
   }|ConvertTo-Json -Depth 6 -Compress;return
  }
  throw 'Unsupported closed transport operation'
