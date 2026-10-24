@@ -1,7 +1,7 @@
 #requires -Version 5.1
 # Fixed production transport. The approved native worker owns application execution.
 param(
- [Parameter(Mandatory)][ValidateSet('Clean','Stage','Enroll','Restart','Control','Run','Status','Collect')][string]$Operation,
+ [Parameter(Mandatory)][ValidateSet('Clean','Stage','Enroll','Restart','Ready','Control','Run','Status','Collect')][string]$Operation,
  [Parameter(Mandatory)][ValidatePattern('\A[a-zA-Z0-9-]{1,96}\z')][string]$RunId,
  [Parameter(Mandatory)][string]$Workspace
 )
@@ -24,8 +24,50 @@ try {
   $ErrorActionPreference='Stop'
   $uuid=(Get-CimInstance Win32_ComputerSystemProduct).UUID
   $actor=[Security.Principal.WindowsIdentity]::GetCurrent()
-  if($uuid -ine 'e5cecc90-35c2-4831-bf9c-424be23f7d4e' -or $actor.User.Value -cne 'S-1-5-21-3556347314-2314855617-1438300668-1001' -or !([Security.Principal.WindowsPrincipal]::new($actor)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){throw 'Exact elevated VM107 operator required'}
-  @{workerUuid=$uuid;actorSid=$actor.User.Value}
+  if($uuid -ine 'e5cecc90-35c2-4831-bf9c-424be23f7d4e' -or $actor.User.Value -cne 'S-1-5-21-3556347314-2314855617-1438300668-1001' -or !([Security.Principal.WindowsPrincipal]::new($actor)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){return @{rejected=$true}}
+  @{workerUuid=$uuid;actorSid=$actor.User.Value;rejected=$false}
+ }
+ if($identity.rejected){
+  if($Operation -eq 'Ready'){@{fatal=$true;reason='Exact elevated VM107 operator required'}|ConvertTo-Json -Compress;return}
+  throw 'Exact elevated VM107 operator required'
+ }
+ if($Operation -eq 'Ready'){
+  Invoke-Command -Session $session -ArgumentList $root,$request.nonce,$request.workerUuid -ScriptBlock {
+   param($root,$nonce,$uuid)
+   $ErrorActionPreference='Stop';Set-StrictMode -Version Latest
+   try {
+    $account=Get-Content -LiteralPath ($root+'\account.json') -Raw|ConvertFrom-Json
+    $user=Get-LocalUser -Name AiwStandardUser
+    if($account.runNonce -cne $nonce -or $account.workerUuid -cne $uuid -or !$account.created -or $user.SID.Value -cne $account.userSid -or $user.SID.Value -ceq 'S-1-5-21-3556347314-2314855617-1438300668-1001'){throw 'Run-owned account differs'}
+    $result=@{nonce=$nonce;workerUuid=$uuid;userSid=$account.userSid;accountBound=$true;ready=$false;active=$false;profileLoaded=$false;sessionId=0}
+    $sessions=@(Get-CimInstance Win32_Process -Filter "Name='explorer.exe'"|Where-Object {
+     $owner=Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid
+     if($owner.ReturnValue -ne 0){throw 'Explorer owner query failed'}
+     $owner.Sid -ceq $account.userSid
+    }|Select-Object -ExpandProperty SessionId -Unique)
+    if($sessions.Count -gt 1 -or ($sessions.Count -eq 1 -and $sessions[0] -le 0)){throw 'Contradictory standard-user session'}
+    if($sessions.Count -eq 0){return $result}
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class AiwReadiness {
+ [DllImport("wtsapi32.dll",SetLastError=true)] static extern bool WTSQuerySessionInformationW(IntPtr server,int session,int kind,out IntPtr value,out int bytes);
+ [DllImport("wtsapi32.dll")] static extern void WTSFreeMemory(IntPtr value);
+ public static bool Active(int session) {
+  IntPtr value;int bytes;
+  if(!WTSQuerySessionInformationW(IntPtr.Zero,session,8,out value,out bytes))throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+  try{if(bytes!=4 || value==IntPtr.Zero)throw new InvalidOperationException("Session state buffer differs");return Marshal.ReadInt32(value)==0;}finally{WTSFreeMemory(value);}
+ }
+}
+'@
+    $profile=@(Get-CimInstance Win32_UserProfile|Where-Object SID -CEQ $account.userSid)
+    if($profile.Count -gt 1){throw 'Ambiguous loaded profile'}
+    $result.sessionId=[int]$sessions[0];$result.active=[AiwReadiness]::Active($result.sessionId)
+    $result.profileLoaded=($profile.Count -eq 1 -and $profile[0].Loaded)
+    $result.ready=($result.active -and $result.profileLoaded)
+    $result
+   }catch{@{fatal=$true;nonce=$nonce;workerUuid=$uuid;reason=$_.Exception.Message}}
+  }|ConvertTo-Json -Depth 6 -Compress;return
  }
  if($Operation -eq 'Clean'){
   $clean=Invoke-Command -Session $session -ScriptBlock {
@@ -141,8 +183,23 @@ try {
   Invoke-Command -Session $session -ArgumentList $root,$request.nonce -ScriptBlock {
    param($root,$nonce)
    $ErrorActionPreference='Stop';$files=@();$total=0
+   # Read-only retry is safe only after native/controller work has stopped.
+   if(@(Get-ScheduledTask|Where-Object {$_.TaskName -like 'AIW-Msix-*' -and $_.State -eq 'Running'}).Count -ne 0 -or @(Get-Process -Name 'notepad++','agent' -ErrorAction SilentlyContinue).Count -ne 0){throw 'Worker still running; preserve its lease and evidence'}
    # Only receipts, raw evidence and bounded diagnostic logs; never inputs/account secrets.
-   foreach($file in @(Get-ChildItem -LiteralPath $root -File)+@(Get-ChildItem -LiteralPath ($root+'\evidence') -File -Recurse -ErrorAction SilentlyContinue)+@(Get-ChildItem -LiteralPath ($root+'\failed-evidence') -File -Recurse -ErrorAction SilentlyContinue)){
+   $exportFiles=@()
+   if(Test-Path -LiteralPath $root){
+    if((Get-Item -LiteralPath $root -Force).Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Reparse evidence root refused'}
+    $exportFiles+=@(Get-ChildItem -LiteralPath $root -File -Force -ErrorAction Stop)
+    foreach($directory in @(($root+'\evidence'),($root+'\failed-evidence'))){
+     if(Test-Path -LiteralPath $directory){
+      if((Get-Item -LiteralPath $directory -Force).Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Reparse evidence directory refused'}
+      $tree=@(Get-ChildItem -LiteralPath $directory -Recurse -Force -ErrorAction Stop)
+      if(@($tree|Where-Object {$_.Attributes -band [IO.FileAttributes]::ReparsePoint}).Count -ne 0){throw 'Reparse evidence entry refused'}
+      $exportFiles+=@($tree|Where-Object {!$_.PSIsContainer})
+     }
+    }
+   }
+   foreach($file in $exportFiles){
     $name=$file.FullName.Substring($root.Length+1).Replace('\','/')
     if($name -notmatch '\A(?:evidence/|failed-evidence/|[^/]+\.(?:json|txt)\z)' -or $name -eq 'request.json'){continue}
     if($file.Attributes -band [IO.FileAttributes]::ReparsePoint -or $file.Length -gt 4MB){throw 'Evidence file bound/type rejected'}
@@ -151,7 +208,7 @@ try {
     try{$sha=([BitConverter]::ToString($hash.ComputeHash($bytes))).Replace('-','').ToLowerInvariant()}finally{$hash.Dispose()}
     $files+=@{path=$name;sha256=$sha;bytes=$bytes.Length;base64=[Convert]::ToBase64String($bytes)}
    }
-   @{nonce=$nonce;files=$files}
+   @{nonce=$nonce;files=$files;quiescent=$true;enumerationComplete=$true}
   }|ConvertTo-Json -Depth 6 -Compress;return
  }
  throw 'Unsupported closed transport operation'

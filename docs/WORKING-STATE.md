@@ -1,8 +1,15 @@
 # Working state
 
-Updated 2026-10-22. Start with `scripts/work-status.ps1`. Branch
+Updated 2026-10-23. Start with `scripts/work-status.ps1`. Branch
 `codex/new-vm-handoff-20261021`, checkout `C:\aiw\app-isolation-workbench` on VM203.
 This file is a pointer, not an execution receipt.
+
+PR103 is open and unmerged. Its independent review's four P2 corrections and
+failure-sequence regressions are documented in MSIX-EXECUTION.md. The new checkpoint
+is for re-review; full October22 app acceptance remains tied to its original source.
+Recovery now requires durable raw export before rollback, retains pre-release proof
+for completed-nonce finalization, and polls actual interactive readiness. Retained
+reporting never repairs an incomplete journal. Do not replay the completed trial.
 
 ## Completed app-work slice
 

@@ -213,11 +213,19 @@ fn write_tools(workspace: &HeldRunWorkspace, name: &str, bytes: &[u8]) -> Result
     Ok(())
 }
 fn stage(workspace: &HeldRunWorkspace, name: &str, value: &impl Serialize) -> Result<()> {
-    let mut file = workspace.create_output_file_new(&format!("{name}.json"))?;
+    // A crash may leave a uniquely named pending file, never a published proof.
+    let mut file = workspace.create_output_file_new(&format!("pending-{}.json", super::nonce()))?;
     file.as_file_mut()
         .write_all(&serde_json::to_vec_pretty(value)?)?;
     file.as_file_mut().sync_all()?;
     file.revalidate()?;
+    let output = workspace.reopen_root_directory(
+        "output",
+        aiw_windows_platform::WorkspaceAclPolicy::Protected,
+    )?;
+    let mut published = file.publish_into_bound(&output, &format!("{name}.json"))?;
+    published.as_file_mut().sync_all()?;
+    published.revalidate()?;
     Ok(())
 }
 fn read_stage(workspace: &HeldRunWorkspace, name: &str) -> Result<Value> {
@@ -275,6 +283,209 @@ fn wait_operation(
         std::thread::sleep(Duration::from_secs(3));
     }
     bail!("Native {operation} deadline exceeded; never replay")
+}
+
+// The same state machine is exercised by failure-injection tests. The real
+// implementation exposes only the fixed provider/transport verbs above.
+trait VmOperations {
+    fn provider(
+        &mut self,
+        op: &str,
+        request: &MsixWorkerRequest,
+        worker: &VmMsixWorkerProfile,
+    ) -> Result<Value>;
+    fn transport(
+        &mut self,
+        op: &str,
+        request: &MsixWorkerRequest,
+        workspace: &HeldRunWorkspace,
+    ) -> Result<Value>;
+    fn clean(&mut self, request: &MsixWorkerRequest, workspace: &HeldRunWorkspace)
+    -> Result<Value>;
+    fn pause(&mut self) {
+        std::thread::sleep(Duration::from_secs(5));
+    }
+}
+struct RealVm;
+impl VmOperations for RealVm {
+    fn provider(
+        &mut self,
+        op: &str,
+        request: &MsixWorkerRequest,
+        worker: &VmMsixWorkerProfile,
+    ) -> Result<Value> {
+        provider(op, Some(&request.nonce), Some(worker))
+    }
+    fn transport(
+        &mut self,
+        op: &str,
+        request: &MsixWorkerRequest,
+        workspace: &HeldRunWorkspace,
+    ) -> Result<Value> {
+        transport(op, &request.run_id, workspace.root_path())
+    }
+    fn clean(
+        &mut self,
+        request: &MsixWorkerRequest,
+        workspace: &HeldRunWorkspace,
+    ) -> Result<Value> {
+        wait_clean(workspace.root_path(), &request.run_id)
+    }
+}
+fn ready_then_control(
+    workspace: &HeldRunWorkspace,
+    request: &MsixWorkerRequest,
+    io: &mut impl VmOperations,
+    deadline: Duration,
+) -> Result<()> {
+    let enrollment = read_stage(workspace, "enroll-status.json")?;
+    let account = &enrollment["records"]["enroll-result"];
+    let sid = account["userSid"]
+        .as_str()
+        .context("Enrolled SID missing")?;
+    if account["runNonce"] != request.nonce {
+        bail!("Enrollment nonce differs")
+    }
+    let start = Instant::now();
+    loop {
+        if let Ok(value) = io.transport("Ready", request, workspace) {
+            if value["fatal"] == true
+                || value["nonce"] != request.nonce
+                || value["workerUuid"] != request.worker_uuid
+                || value["userSid"] != sid
+                || !sid.starts_with("S-1-5-21-3556347314-2314855617-1438300668-")
+                || sid == "S-1-5-21-3556347314-2314855617-1438300668-1001"
+            {
+                bail!("Contradictory interactive readiness identity: {value}")
+            }
+            if value["ready"] == true {
+                if value["sessionId"].as_u64().is_none_or(|id| id == 0)
+                    || value["profileLoaded"] != true
+                    || value["active"] != true
+                    || value["accountBound"] != true
+                {
+                    bail!("Incomplete interactive readiness proof")
+                }
+                stage(workspace, "interactive-ready", &value)?;
+                break;
+            }
+            if value["ready"] != false {
+                bail!("Missing readiness state")
+            }
+        } // Only connection/read-only readiness may retry.
+        if start.elapsed() >= deadline {
+            bail!("Run-owned interactive session readiness deadline exceeded")
+        }
+        io.pause();
+    }
+    stage(workspace, "control-intent", &json!({"nonce":request.nonce}))?;
+    stage(
+        workspace,
+        "control-dispatch",
+        &io.transport("Control", request, workspace)?,
+    )
+}
+
+fn read_export(workspace: &HeldRunWorkspace, request: &MsixWorkerRequest) -> Result<Value> {
+    let marker = read_stage(workspace, "collection-complete.json")?;
+    if marker["nonce"] != request.nonce
+        || marker["requestSha256"] != request.hash().map_err(anyhow::Error::msg)?
+    {
+        bail!("Export marker binding differs")
+    }
+    let leaf = marker["export"].as_str().context("Export name missing")?;
+    let file = workspace.reopen_output_file(leaf)?;
+    let mut bytes = Vec::new();
+    file.as_file()
+        .take(32 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > 32 * 1024 * 1024 || marker["sha256"] != hash(&bytes) {
+        bail!("Durable export differs")
+    }
+    file.revalidate()?;
+    let value = serde_json::from_slice(&bytes)?;
+    decode_collection(request, &value)?;
+    Ok(value)
+}
+fn retain_export(
+    workspace: &HeldRunWorkspace,
+    request: &MsixWorkerRequest,
+    io: &mut impl VmOperations,
+) -> Result<Value> {
+    if workspace
+        .output_path()
+        .join("collection-complete.json")
+        .exists()
+    {
+        return read_export(workspace, request);
+    }
+    let value = io.transport("Collect", request, workspace)?;
+    decode_collection(request, &value)?;
+    let name = format!("collection-{}", super::nonce());
+    stage(workspace, &name, &value)?;
+    // Receipt last. A partial export never grants permission to erase the guest.
+    stage(
+        workspace,
+        "collection-complete",
+        &json!({"nonce":request.nonce,"requestSha256":request.hash().map_err(anyhow::Error::msg)?,"export":format!("{name}.json"),"sha256":hash(&serde_json::to_vec_pretty(&value)?)}),
+    )?;
+    read_export(workspace, request)
+}
+
+fn cold_recover(
+    workspace: &HeldRunWorkspace,
+    request: &MsixWorkerRequest,
+    worker: &VmMsixWorkerProfile,
+    io: &mut impl VmOperations,
+) -> Result<Value> {
+    let intent_path = workspace.output_path().join("recovery-release-intent.json");
+    let active = io.provider("inspect", request, worker).is_ok();
+    let proofs = if intent_path.exists() {
+        let value = read_stage(workspace, "recovery-release-intent.json")?;
+        if value["nonce"] != request.nonce
+            || value["requestSha256"] != request.hash().map_err(anyhow::Error::msg)?
+        {
+            bail!("Recovery attempt binding differs")
+        }
+        value
+    } else if active {
+        // A crash can precede collection entirely. Never erase the only copy.
+        if workspace.output_path().join("stage-intent.json").exists() {
+            retain_export(workspace, request, io).context(
+                "Evidence collection required; original lease retained, rollback not dispatched",
+            )?;
+        }
+        let restored = io.provider("restore", request, worker)?;
+        let connected = io.provider("connect", request, worker)?;
+        let clean = io.clean(request, workspace)?;
+        let value = json!({"nonce":request.nonce,"requestSha256":request.hash().map_err(anyhow::Error::msg)?,"restore":restored,"connect":connected,"clean":clean});
+        stage(workspace, "recovery-release-intent", &value)?;
+        value
+    } else {
+        // Compatibility with an original-path release made before this fix.
+        let value = json!({"nonce":request.nonce,"requestSha256":request.hash().map_err(anyhow::Error::msg)?,"restore":read_stage(workspace,"final-restore.json")?,"connect":read_stage(workspace,"final-connect.json")?,"clean":read_stage(workspace,"final-clean.json")?});
+        stage(workspace, "recovery-release-intent", &value)?;
+        value
+    };
+    // Validate the retained pre-release attempt before any release mutation.
+    let mut checked = proofs.clone();
+    let mut expected_release = checked["connect"].clone();
+    expected_release["operation"] = json!("release");
+    expected_release["phase"] = json!("none");
+    expected_release["leasePresent"] = json!(false);
+    checked["release"] = expected_release;
+    aiw_runner::verify_vm_msix_recovery(worker, &request.nonce, &checked)
+        .map_err(anyhow::Error::msg)?;
+    let released = io.provider(
+        if active { "release" } else { "completed" },
+        request,
+        worker,
+    )?;
+    let mut proofs = proofs;
+    proofs["release"] = released;
+    aiw_runner::verify_vm_msix_recovery(worker, &request.nonce, &proofs)
+        .map_err(anyhow::Error::msg)?;
+    Ok(proofs)
 }
 
 /// Uses packaged fixed assets; the caller selects only the exact supported MSIX.
@@ -489,24 +700,8 @@ pub fn assess_with_gate(
             &transport("Restart", &run_id, workspace.root_path())?,
         )?;
         std::thread::sleep(Duration::from_secs(25));
-        // Only read-only status reconnects may repeat; no mutation dispatch repeats.
-        let start = Instant::now();
-        loop {
-            if transport("Status", &run_id, workspace.root_path()).is_ok() {
-                break;
-            }
-            if start.elapsed() > Duration::from_secs(360) {
-                bail!("Worker did not return after reboot")
-            };
-            std::thread::sleep(Duration::from_secs(5));
-        }
         gate.progress("Verifying the native process control in the fresh standard-user session.");
-        stage(&workspace, "control-intent", &json!({"nonce":nonce}))?;
-        stage(
-            &workspace,
-            "control-dispatch",
-            &transport("Control", &run_id, workspace.root_path())?,
-        )?;
+        ready_then_control(&workspace, &request, &mut RealVm, Duration::from_secs(360))?;
         wait_operation(&workspace, &run_id, &nonce, "control", 150)?;
         stage(&workspace, "run-intent", &json!({"nonce":nonce}))?;
         stage(
@@ -526,8 +721,18 @@ pub fn assess_with_gate(
         )?;
     }
     gate.progress("Collecting bounded worker evidence before cold recovery.");
-    let collected = transport("Collect", &run_id, workspace.root_path())
-        .and_then(|value| collect(&workspace, &request, &value));
+    let exported = if workspace.output_path().join("stage-intent.json").exists() {
+        retain_export(&workspace, &request, &mut RealVm).map(Some)
+    } else {
+        // No Stage dispatch was possible; do not query an unrelated guest run
+        // after a failed/uncertain acquire. Recovery still requires exact proof.
+        Ok(None)
+    };
+    let collected = exported
+        .as_ref()
+        .map_err(|e| anyhow!(e.to_string()))
+        .and_then(|value| value.as_ref().context("No guest intake was dispatched"))
+        .and_then(|value| collect(&workspace, &request, value));
     if let Err(error) = &collected {
         let _ = stage(
             &workspace,
@@ -535,29 +740,24 @@ pub fn assess_with_gate(
             &json!({"error":error.to_string()}),
         );
     }
+    if let Err(error) = exported {
+        bail!(
+            "Evidence collection required; VM107 and its original lease are preserved. Retry explicit recovery to collect without replaying application execution. {}: {error}",
+            workspace.root_path().display()
+        )
+    }
     gate.progress("Restoring VM107 and verifying its clean identity, accounts, package state and TLS connection.");
     let recovery = (|| -> Result<()> {
         stage(&workspace, "recovery-intent", &json!({"nonce":nonce}))?;
-        stage(
-            &workspace,
-            "final-restore",
-            &provider("restore", Some(&nonce), Some(&worker))?,
-        )?;
-        stage(
-            &workspace,
-            "final-connect",
-            &provider("connect", Some(&nonce), Some(&worker))?,
-        )?;
-        stage(
-            &workspace,
-            "final-clean",
-            &wait_clean(workspace.root_path(), &run_id)?,
-        )?;
-        stage(
-            &workspace,
-            "lease-released",
-            &provider("release", Some(&nonce), Some(&worker))?,
-        )?;
+        let proofs = cold_recover(&workspace, &request, &worker, &mut RealVm)?;
+        for (name, field) in [
+            ("final-restore", "restore"),
+            ("final-connect", "connect"),
+            ("final-clean", "clean"),
+            ("lease-released", "release"),
+        ] {
+            stage(&workspace, name, &proofs[field])?;
+        }
         aiw_runner::verify_vm_msix_recovery(&worker,&nonce,&json!({"nonce":nonce,"restore":read_stage(&workspace,"final-restore.json")?,"connect":read_stage(&workspace,"final-connect.json")?,"clean":read_stage(&workspace,"final-clean.json")?,"release":read_stage(&workspace,"lease-released.json")?})).map_err(anyhow::Error::msg)?;
         Ok(())
     })();
@@ -627,9 +827,18 @@ pub fn assess_with_gate(
     })
 }
 
-fn collect(workspace: &HeldRunWorkspace, request: &MsixWorkerRequest, value: &Value) -> Result<()> {
+fn decode_collection(
+    request: &MsixWorkerRequest,
+    value: &Value,
+) -> Result<BTreeMap<String, Vec<u8>>> {
     if value["nonce"] != request.nonce {
         bail!("Collected nonce differs")
+    }
+    if value["quiescent"] != true {
+        bail!("Worker is still running; retain lease and evidence")
+    }
+    if value["enumerationComplete"] != true {
+        bail!("Incomplete evidence enumeration; retain lease and evidence")
     }
     let entries = value["files"]
         .as_array()
@@ -639,7 +848,6 @@ fn collect(workspace: &HeldRunWorkspace, request: &MsixWorkerRequest, value: &Va
     }
     let mut files = BTreeMap::new();
     let mut total = 0;
-    let destination = workspace.create_output_directory_new("guest")?;
     // Reject duplicate/path tricks before materializing any untrusted names.
     for entry in entries {
         let name = entry["path"].as_str().context("Evidence path missing")?;
@@ -667,6 +875,11 @@ fn collect(workspace: &HeldRunWorkspace, request: &MsixWorkerRequest, value: &Va
             bail!("Evidence hash/length/count rejected")
         }
     }
+    Ok(files)
+}
+fn collect(workspace: &HeldRunWorkspace, request: &MsixWorkerRequest, value: &Value) -> Result<()> {
+    let files = decode_collection(request, value)?;
+    let destination = workspace.create_output_directory_new("guest")?;
     for (name, bytes) in &files {
         let path = destination.final_path().join(name);
         if let Some(parent) = path.parent() {
@@ -822,44 +1035,9 @@ pub fn recover(workspace_path: &Path, run_id: &str, gate: &dyn ApprovalGate) -> 
     {
         return finish_recovery(&layout, &held.workspace, &request, worker);
     }
-    let state = provider("inspect", Some(&request.nonce), Some(worker));
-    stage(
-        &held.workspace,
-        &format!("recovery-resume-intent-{}", super::nonce()),
-        &json!({"nonce":request.nonce,"leaseObserved":state.is_ok()}),
-    )?;
-    gate.progress(
-        "Recovering the retained VM107 lease. No application operation will be repeated.",
-    );
-    let (restored, connected, clean, released) = if state.is_ok() {
-        let restored = provider("restore", Some(&request.nonce), Some(worker))?;
-        let connected = provider("connect", Some(&request.nonce), Some(worker))?;
-        let clean = wait_clean(workspace_path, run_id)?;
-        let released = provider("release", Some(&request.nonce), Some(worker))?;
-        (restored, connected, clean, released)
-    } else {
-        // A lost release response is resolved from the durable completed nonce,
-        // never by adopting another lease or repeating application execution.
-        let released = provider("completed", Some(&request.nonce), Some(worker))?;
-        if released["leasePresent"] != false {
-            bail!("Another run owns VM107; original completion remains retained")
-        }
-        let read = |name: &str| -> Result<Value> {
-            let f = held.workspace.reopen_output_file(name)?;
-            let mut b = Vec::new();
-            f.as_file().take(65537).read_to_end(&mut b)?;
-            Ok(serde_json::from_slice(&b)?)
-        };
-        let restored = read("final-restore.json")?;
-        let connected = read("final-connect.json")?;
-        let clean = wait_clean(workspace_path, run_id)?;
-        (restored, connected, clean, released)
-    };
-    stage(
-        &held.workspace,
-        "recovery-complete",
-        &json!({"nonce":request.nonce,"restore":restored,"connect":connected,"clean":clean,"release":released}),
-    )?;
+    gate.progress("Collecting retained evidence and recovering the exact VM107 lease without application replay.");
+    let proofs = cold_recover(&held.workspace, &request, worker, &mut RealVm)?;
+    stage(&held.workspace, "recovery-complete", &proofs)?;
     finish_recovery(&layout, &held.workspace, &request, worker)
 }
 fn finish_recovery(
@@ -868,6 +1046,15 @@ fn finish_recovery(
     request: &MsixWorkerRequest,
     worker: &VmMsixWorkerProfile,
 ) -> Result<Value> {
+    persist_recovery_result(layout, workspace, request, worker)?;
+    read_report(workspace.root_path(), &request.run_id)
+}
+fn persist_recovery_result(
+    layout: &RunLayout,
+    workspace: &HeldRunWorkspace,
+    request: &MsixWorkerRequest,
+    worker: &VmMsixWorkerProfile,
+) -> Result<()> {
     let marker = workspace.reopen_output_file("recovery-complete.json")?;
     let mut bytes = Vec::new();
     marker.as_file().take(262145).read_to_end(&mut bytes)?;
@@ -894,12 +1081,29 @@ fn finish_recovery(
         true,
         summary,
     )?)?;
-    read_report(workspace.root_path(), run_id)
+    Ok(())
 }
 
 #[cfg(test)]
 mod transport_path_tests {
     use super::*;
+
+    #[test]
+    fn collect_transport_does_not_suppress_enumeration_failure_in_ps51() {
+        let value = command_json(Command::new(PS).env_remove("PSModulePath")
+            .env("AIW_COLLECTION_TEST_SOURCE", TRANSPORT)
+            .args(["-NoProfile", "-NonInteractive", "-Command", r#"$ErrorActionPreference='Stop';$t=$null;$e=$null;$a=[Management.Automation.Language.Parser]::ParseInput($env:AIW_COLLECTION_TEST_SOURCE,[ref]$t,[ref]$e);if($e.Count){throw ($e|Out-String)};$b=@($a.FindAll({param($n)$n -is [Management.Automation.Language.ScriptBlockExpressionAst] -and $n.ScriptBlock.ParamBlock -and $n.ScriptBlock.ParamBlock.Parameters.Count -eq 2 -and $n.Extent.Text.Contains('enumerationComplete')},$true));if($b.Count -ne 1){throw 'One fixed export block required'};function Get-ScheduledTask {};function Get-Process {};function Test-Path {$true};function Get-Item {[pscustomobject]@{Attributes=[IO.FileAttributes]::Directory}};function Get-ChildItem {throw 'injected export enumeration failure'};$block=$b[0].ScriptBlock.GetScriptBlock();try{$null=& $block 'C:\AIWTest' ('a'*64);throw 'Enumeration error swallowed'}catch{if($_.Exception.Message -cne 'injected export enumeration failure'){throw};@{rejected=$true;applicationExecuted=$false}|ConvertTo-Json -Compress}"#]),30,4096).unwrap();
+        assert_eq!(value["rejected"], true);
+    }
+
+    #[test]
+    fn readiness_transport_parses_and_readonly_wts_observer_compiles_in_ps51() {
+        let value = command_json(Command::new(PS).env_remove("PSModulePath")
+            .env("AIW_READINESS_TEST_SOURCE", TRANSPORT)
+            .args(["-NoProfile", "-NonInteractive", "-Command", r#"$ErrorActionPreference='Stop';$t=$null;$e=$null;$a=[Management.Automation.Language.Parser]::ParseInput($env:AIW_READINESS_TEST_SOURCE,[ref]$t,[ref]$e);if($e.Count){throw ($e|Out-String)};$c=@($a.FindAll({param($n)$n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Add-Type'},$true));if($c.Count -ne 1){throw 'One fixed native observer required'};$s=@($c[0].CommandElements|Where-Object{$_ -is [Management.Automation.Language.StringConstantExpressionAst]})[-1].Value;Add-Type -TypeDefinition $s;@{compiled=([AiwReadiness].GetMethod('Active') -ne $null);applicationExecuted=$false}|ConvertTo-Json -Compress"#]),30,4096).unwrap();
+        assert_eq!(value["compiled"], true);
+        assert_eq!(value["applicationExecuted"], false);
+    }
 
     #[test]
     fn held_canonical_workspace_is_usable_by_powershell_filesystem_provider() {
@@ -915,5 +1119,279 @@ mod transport_path_tests {
         ).unwrap();
         assert_eq!(result["usable"], true);
         assert_eq!(result["certificateProvider"], "Certificate");
+    }
+}
+
+#[cfg(test)]
+mod failure_sequence_tests {
+    use super::*;
+    use std::collections::VecDeque;
+
+    fn fixture() -> (
+        HeldRunWorkspace,
+        RunLayout,
+        MsixWorkerRequest,
+        VmMsixWorkerProfile,
+    ) {
+        let parent = std::env::temp_dir().join(format!("mw-{}", super::super::nonce()));
+        std::fs::create_dir(&parent).unwrap();
+        let root = create_evidence_root(&parent, "msix-review-test").unwrap();
+        let workspace = HeldRunWorkspace::create(&root, "workspace").unwrap();
+        let worker: VmMsixWorkerProfile = serde_json::from_value(json!({"schemaVersion":"aiw.dev/vm-msix-worker-profile/v0alpha1","vmId":107,"workerUuid":aiw_probe::MSIX_WORKER_UUID,"workerMac":"CC:34:21:B8:5A:31","checkpoint":aiw_probe::MSIX_WORKER_CHECKPOINT,"checkpointConfigSha256":"c".repeat(64),"providerSha256":"d".repeat(64),"hypervisorAddress":"192.168.1.6","hypervisorHostKeySha256":"SHA256:J/kc0UwUBil5TFBQbQhwBoRKnDoRlZ8ggXAhmYEpq1E","httpsAddress":"192.168.1.174","httpsCertificateSha1":"BC14DCC4E37F83161EBB55AF8624E36A79E19256"})).unwrap();
+        let plan = RunPlan::new(
+            "msix-review-test",
+            PRODUCT,
+            "e".repeat(64),
+            RunLifecycleKind::Assessment,
+            "2026-10-23T00:00:00Z",
+            vec![
+                PlannedAction::AssessHost,
+                PlannedAction::ExecuteScenario {
+                    scenario_id: "install".into(),
+                },
+            ],
+            vec![],
+        )
+        .unwrap();
+        let layout = RunLayout::new(workspace.root_path(), &plan.run_id).unwrap();
+        layout.create(&plan).unwrap();
+        layout
+            .write_approval(
+                &ApprovalRecord::for_plan(&plan, "reviewer", "2026-10-23T00:00:01Z").unwrap(),
+            )
+            .unwrap();
+        let request = MsixWorkerRequest {
+            schema_version: aiw_probe::MSIX_WORKER_REQUEST_SCHEMA.into(),
+            run_id: plan.run_id.clone(),
+            nonce: "a".repeat(64),
+            recipe: VmMsixRecipe::Notepad898MediumFullTrust,
+            plan_sha256: plan.hash().unwrap(),
+            worker_profile_sha256: worker.hash().unwrap(),
+            agent_sha256: "b".repeat(64),
+            package_sha256: aiw_probe::MSIX_PACKAGE_SHA256.into(),
+            assembly_sha256: aiw_probe::MSIX_ASSEMBLY_SHA256.into(),
+            signing_sha256: aiw_probe::MSIX_SIGNING_SHA256.into(),
+            worker_uuid: aiw_probe::MSIX_WORKER_UUID.into(),
+            not_before_file_time: 100,
+            not_after_file_time: 18_000_000_100,
+        };
+        stage(&workspace, "stage-intent", &json!({"nonce":request.nonce})).unwrap();
+        stage(&workspace,"enroll-status",&json!({"records":{"enroll-result":{"runNonce":request.nonce,"userSid":"S-1-5-21-3556347314-2314855617-1438300668-1006"}}})).unwrap();
+        (workspace, layout, request, worker)
+    }
+    #[derive(Default)]
+    struct MockVm {
+        calls: Vec<String>,
+        released: bool,
+        lose_release_reply: bool,
+        fail_collection: bool,
+        incomplete_collection: bool,
+        ready: VecDeque<Value>,
+    }
+    impl VmOperations for MockVm {
+        fn provider(
+            &mut self,
+            op: &str,
+            request: &MsixWorkerRequest,
+            worker: &VmMsixWorkerProfile,
+        ) -> Result<Value> {
+            self.calls.push(op.into());
+            if op == "inspect" && self.released {
+                bail!("No active lease")
+            }
+            if op == "release" {
+                self.released = true;
+                if self.lose_release_reply {
+                    bail!("Reply lost after remote release")
+                }
+            }
+            let phase = match op {
+                "restore" => "restored",
+                "release" => "none",
+                _ => "online-clean",
+            };
+            Ok(
+                json!({"schemaVersion":"aiw.dev/vm-msix-hypervisor/v0alpha1","operation":op,"phase":phase,"leasePresent":!self.released,"vmId":107,"workerUuid":worker.worker_uuid,"nonce":request.nonce,"checkpoint":worker.checkpoint,"checkpointConfigSha256":worker.checkpoint_config_sha256,"providerSha256":worker.provider_sha256,"running":true}),
+            )
+        }
+        fn transport(
+            &mut self,
+            op: &str,
+            request: &MsixWorkerRequest,
+            _: &HeldRunWorkspace,
+        ) -> Result<Value> {
+            self.calls.push(op.into());
+            match op {
+                "Collect" if self.fail_collection => bail!("Temporary WinRM export failure"),
+                "Collect" => {
+                    let bytes = b"retained failure diagnostics";
+                    Ok(
+                        json!({"nonce":request.nonce,"quiescent":true,"enumerationComplete":!self.incomplete_collection,"files":[{"path":"failure.txt","sha256":hash(bytes),"bytes":bytes.len(),"base64":base64::engine::general_purpose::STANDARD.encode(bytes)}]}),
+                    )
+                }
+                "Ready" => self
+                    .ready
+                    .pop_front()
+                    .context("Readiness transport unavailable"),
+                "Control" => Ok(json!({"dispatched":true,"nonce":request.nonce})),
+                _ => panic!("Unexpected operation: {op}"),
+            }
+        }
+        fn clean(&mut self, request: &MsixWorkerRequest, _: &HeldRunWorkspace) -> Result<Value> {
+            self.calls.push("Clean".into());
+            Ok(
+                json!({"clean":true,"workerUuid":request.worker_uuid,"trialArtifactsAbsent":true,"automaticSignInDisabled":true}),
+            )
+        }
+        fn pause(&mut self) {}
+    }
+    fn terminal(
+        workspace: &HeldRunWorkspace,
+        layout: &RunLayout,
+        request: &MsixWorkerRequest,
+        worker: &VmMsixWorkerProfile,
+        proofs: &Value,
+    ) {
+        stage(workspace, "recovery-complete", proofs).unwrap();
+        persist_recovery_result(layout, workspace, request, worker).unwrap();
+        let snapshot = layout.completed_snapshot().unwrap();
+        assert!(snapshot.result.cleanup_complete);
+        assert_eq!(snapshot.result.outcome, RunOutcome::Failed);
+    }
+    #[test]
+    fn resumed_recovery_finalizes_after_lost_release_reply_without_original_final_files() {
+        let (workspace, layout, request, worker) = fixture();
+        let mut io = MockVm {
+            lose_release_reply: true,
+            ..Default::default()
+        };
+        assert!(cold_recover(&workspace, &request, &worker, &mut io).is_err());
+        assert!(
+            workspace
+                .output_path()
+                .join("recovery-release-intent.json")
+                .exists()
+        );
+        assert!(!workspace.output_path().join("final-restore.json").exists());
+        io.calls.clear();
+        let proofs = cold_recover(&workspace, &request, &worker, &mut io).unwrap();
+        terminal(&workspace, &layout, &request, &worker, &proofs);
+        assert_eq!(io.calls, vec!["inspect", "completed"]);
+    }
+    #[test]
+    fn resumed_recovery_finalizes_after_interruption_immediately_after_release() {
+        let (workspace, layout, request, worker) = fixture();
+        let mut io = MockVm::default();
+        let _lost = cold_recover(&workspace, &request, &worker, &mut io).unwrap();
+        assert!(
+            !workspace
+                .output_path()
+                .join("recovery-complete.json")
+                .exists()
+        );
+        io.calls.clear();
+        let proofs = cold_recover(&workspace, &request, &worker, &mut io).unwrap();
+        terminal(&workspace, &layout, &request, &worker, &proofs);
+        assert_eq!(io.calls, vec!["inspect", "completed"]);
+    }
+    #[test]
+    fn failed_collection_retains_lease_and_guest_until_readonly_retry_exports_bytes() {
+        let (workspace, _, request, worker) = fixture();
+        let mut io = MockVm {
+            fail_collection: true,
+            ..Default::default()
+        };
+        assert!(cold_recover(&workspace, &request, &worker, &mut io).is_err());
+        assert_eq!(io.calls, vec!["inspect", "Collect"]);
+        assert!(!io.released);
+        io.fail_collection = false;
+        cold_recover(&workspace, &request, &worker, &mut io).unwrap();
+        assert!(read_export(&workspace, &request).is_ok());
+        assert!(
+            io.calls.iter().position(|c| c == "restore").unwrap()
+                > io.calls.iter().rposition(|c| c == "Collect").unwrap()
+        );
+        assert!(
+            !io.calls
+                .iter()
+                .any(|c| matches!(c.as_str(), "acquire" | "Run" | "Control" | "Enroll"))
+        );
+    }
+    #[test]
+    fn incomplete_enumeration_cannot_publish_export_marker_or_dispatch_rollback() {
+        let (workspace, _, request, worker) = fixture();
+        let mut io = MockVm {
+            incomplete_collection: true,
+            ..Default::default()
+        };
+        assert!(cold_recover(&workspace, &request, &worker, &mut io).is_err());
+        assert_eq!(io.calls, vec!["inspect", "Collect"]);
+        assert!(
+            !workspace
+                .output_path()
+                .join("collection-complete.json")
+                .exists()
+        );
+        assert!(!io.released);
+    }
+    #[test]
+    fn crash_before_collection_exports_before_rollback_and_failed_lifecycle_can_clean() {
+        let (workspace, _, request, worker) = fixture();
+        let mut io = MockVm::default();
+        let exported = retain_export(&workspace, &request, &mut io).unwrap();
+        // The complete raw export survives even though its lifecycle is failed.
+        assert!(collect(&workspace, &request, &exported).is_err());
+        assert!(read_export(&workspace, &request).is_ok());
+        cold_recover(&workspace, &request, &worker, &mut io).unwrap();
+        assert_eq!(
+            io.calls
+                .iter()
+                .filter(|op| op.as_str() == "Collect")
+                .count(),
+            1
+        );
+        assert!(io.released);
+    }
+    fn readiness(request: &MsixWorkerRequest, ready: bool) -> Value {
+        json!({"nonce":request.nonce,"workerUuid":request.worker_uuid,"userSid":"S-1-5-21-3556347314-2314855617-1438300668-1006","ready":ready,"active":ready,"profileLoaded":ready,"accountBound":true,"sessionId":if ready {1} else {0}})
+    }
+    #[test]
+    fn reachable_winrm_waits_for_interactive_readiness_before_one_control_dispatch() {
+        let (workspace, _, request, _) = fixture();
+        let mut io = MockVm {
+            ready: VecDeque::from([
+                readiness(&request, false),
+                readiness(&request, false),
+                readiness(&request, true),
+            ]),
+            ..Default::default()
+        };
+        ready_then_control(&workspace, &request, &mut io, Duration::from_secs(5)).unwrap();
+        assert_eq!(io.calls, vec!["Ready", "Ready", "Ready", "Control"]);
+    }
+    #[test]
+    fn readiness_timeout_or_wrong_user_session_never_dispatches_control() {
+        for mutation in ["timeout", "userSid", "sessionId", "profileLoaded", "nonce"] {
+            let (workspace, _, request, _) = fixture();
+            let mut value = readiness(&request, mutation != "timeout");
+            match mutation {
+                "userSid" => {
+                    value["userSid"] = json!("S-1-5-21-3556347314-2314855617-1438300668-1007")
+                }
+                "sessionId" => value["sessionId"] = json!(0),
+                "profileLoaded" => value["profileLoaded"] = json!(false),
+                "nonce" => value["nonce"] = json!("b".repeat(64)),
+                _ => {}
+            }
+            let mut io = MockVm {
+                ready: VecDeque::from([value]),
+                ..Default::default()
+            };
+            assert!(
+                ready_then_control(&workspace, &request, &mut io, Duration::ZERO).is_err(),
+                "{mutation}"
+            );
+            assert_eq!(io.calls, vec!["Ready"]);
+        }
     }
 }

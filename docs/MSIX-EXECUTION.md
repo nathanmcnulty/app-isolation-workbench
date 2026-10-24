@@ -149,3 +149,52 @@ Final acceptance and readback:
   **Supported workflow verified** and the six functions/cold-recovery summary.
   No guest dispatch or recovery was repeated for reader validation. This package
   is an unsigned development desktop; leave the migration release draft.
+
+## PR103 independent review corrections, 2026-10-23
+
+The four P2 findings against23b3c52 are addressed for a new review checkpoint:
+
+- Both ordinary and resumed recovery atomically publish a request/nonce-bound
+  `recovery-release-intent.json` with restore, connect and clean proofs before
+  releasing the external lease. A lost release reply or interruption after release
+  is finalized using that exact attempt and the provider's completed nonce.
+- Collection first validates a bounded, quiescent, completely enumerated export,
+  flushes its original bytes, and atomically publishes a hash-bound completion
+  receipt. Materialization and lifecycle verification are separate. A failed
+  lifecycle can clean up after its raw export is retained; an export failure keeps
+  the guest and exact lease for explicit read-only collection/recovery retry.
+  Explicit recovery also collects before rollback after a host crash. Native work
+  still running, enumeration errors, partial export or missing export proof prevent
+  rollback. No application dispatch retry or automatic evidence discard is added.
+- Retained MSIX reporting uses the non-repairing committed terminal snapshot.
+  Torn journal tails, missing heads and pending terminal publication are rejected
+  without repairing files, creating entries or committing pending mutations.
+- After reboot, read-only `Ready` checks the enrolled SID/nonce, actual Explorer
+  session, WTS Active state and loaded SID profile before the one-shot Control.
+  Temporary session/profile absence is polled within the bounded deadline;
+  contradictory identity/session state fails without Control dispatch.
+
+Failure-injection regressions exercise the actual host recovery/export/readiness
+helpers with fixed mock operations, including lost release replies, interruption
+after release, failed collection followed by read-only retry, incomplete export,
+failed lifecycle with retained raw diagnostics, delayed logon, timeout and wrong
+SID/session. Report regressions compare every file's bytes and directory entry
+before and after malformed-journal reads. PowerShell5.1 parses the fixed transport
+and compiles its read-only WTS observer during tests. These are mock/source tests,
+not fresh live application acceptance.
+
+A normal-TLS read-only `Ready` probe against cold-clean VM107 correctly rejected
+the absent run-owned account on the exact worker UUID. No Control, application or
+recovery operation was dispatched. The October22 complete lifecycle remains
+historical evidence at its recorded source revisions; this checkpoint does not
+claim a repeat of that full desktop/application trial.
+
+Checkpoint validation:10 MSIX administrator regressions and5 retained-report
+checks passed; workspace/all-target Clippy with warnings denied and governance
+checks passed. The rebuilt CLI read the original successful run with
+workflowVerified/cleanupComplete true and every retained directory entry/file
+hash unchanged. Logs and readback are outside Git under
+`C:\AIW-Resume-20261021\pr103-final-*`, `pr103-fixes-report-regressions.log`,
+`pr103-live-readonly-readiness.log` and `pr103-retained-report-readback.json`.
+Full checkpoint verification/audit/desktop checks are supplied by the PR's fresh
+hosted CI run; earlier green CI at23b3c52 does not attest to these changes.

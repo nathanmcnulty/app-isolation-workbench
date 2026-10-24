@@ -89,10 +89,17 @@ pub fn report_vm_msix_run(
     use std::{collections::BTreeSet, io::Read};
     let error = |e: &dyn std::fmt::Display| e.to_string();
     let layout = RunLayout::new(workspace, run_id).map_err(|e| error(&e))?;
-    let plan = layout.read_plan().map_err(|e| error(&e))?;
+    // A report must never repair an incomplete journal or publish a pending
+    // terminal artifact. Observe the committed run before opening preparation.
+    let snapshot = layout.completed_snapshot().map_err(|e| {
+        format!(
+            "Retained VM MSIX report requires a committed terminal run; inspect state and use explicit recovery if pending: {e}"
+        )
+    })?;
+    let plan = snapshot.plan;
+    let approval = snapshot.approval;
+    let result = snapshot.result;
     let held = open_vm_msix_preparation(&plan).map_err(|e| error(&e))?;
-    let approval = layout.read_approval().map_err(|e| error(&e))?;
-    let result = layout.read_result().map_err(|e| error(&e))?;
     let plan_hash = plan.hash().map_err(|e| error(&e))?;
     if approval.plan_hash != plan_hash || !result.cleanup_complete {
         return Err("Approved terminal run and cleanup required".into());
@@ -332,6 +339,167 @@ pub fn report_vm_msix_run(
 mod tests {
     use super::*;
     use serde_json::json;
+    #[cfg(windows)]
+    use std::{
+        fs,
+        io::Write,
+        path::{Path, PathBuf},
+        sync::atomic::{AtomicU64, Ordering},
+    };
+
+    #[cfg(windows)]
+    static NEXT_REPORT_RUN: AtomicU64 = AtomicU64::new(1);
+
+    #[cfg(windows)]
+    fn committed_run() -> (PathBuf, aiw_orchestrator::RunLayout) {
+        use aiw_orchestrator::{
+            ApprovalRecord, PlannedAction, RunLifecycleKind, RunOutcome, RunPlan, RunResult,
+        };
+        let root = std::env::temp_dir().join(format!(
+            "aiw-vm-msix-report-readonly-{}-{}",
+            std::process::id(),
+            NEXT_REPORT_RUN.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&root).unwrap();
+        let root = root.canonicalize().unwrap();
+        let run_id = "report-test";
+        let layout = aiw_orchestrator::RunLayout::new(&root, run_id).unwrap();
+        let plan = RunPlan::new(
+            run_id,
+            "project.one",
+            "f".repeat(64),
+            RunLifecycleKind::Assessment,
+            "2026-10-23T00:00:00Z",
+            vec![
+                PlannedAction::AssessHost,
+                PlannedAction::ExecuteScenario {
+                    scenario_id: "install".into(),
+                },
+            ],
+            vec!["test-only assessment".into()],
+        )
+        .unwrap();
+        layout.create(&plan).unwrap();
+        layout
+            .write_approval(
+                &ApprovalRecord::for_plan(&plan, "reviewer", "2026-10-23T00:01:00Z").unwrap(),
+            )
+            .unwrap();
+        layout
+            .write_result(
+                &RunResult::new(
+                    run_id,
+                    RunOutcome::InsufficientEvidence,
+                    "2026-10-23T00:02:00Z",
+                    None,
+                    true,
+                    "test-only terminal run",
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        (root, layout)
+    }
+
+    #[cfg(windows)]
+    fn tree_bytes(path: &Path, root: &Path) -> Vec<(PathBuf, Option<Vec<u8>>)> {
+        let mut entries = fs::read_dir(path)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect::<Vec<_>>();
+        entries.sort();
+        let mut snapshot = Vec::new();
+        for entry in entries {
+            let relative = entry.strip_prefix(root).unwrap().to_path_buf();
+            if entry.is_dir() {
+                snapshot.push((relative, None));
+                snapshot.extend(tree_bytes(&entry, root));
+            } else {
+                snapshot.push((relative, Some(fs::read(&entry).unwrap())));
+            }
+        }
+        snapshot
+    }
+
+    #[cfg(windows)]
+    fn assert_report_rejects_without_repair(root: &Path, layout: &aiw_orchestrator::RunLayout) {
+        let before = tree_bytes(root, root);
+        let error = report_vm_msix_run(root, layout.run_id()).unwrap_err();
+        assert!(
+            error.contains("committed terminal run") && error.contains("explicit recovery"),
+            "unexpected report error: {error}"
+        );
+        assert_eq!(tree_bytes(root, root), before);
+    }
+
+    #[cfg(windows)]
+    fn remove_latest_head(layout: &aiw_orchestrator::RunLayout) {
+        let heads = layout.run_dir().join("journal-heads");
+        let latest = fs::read_dir(heads)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .max()
+            .unwrap();
+        fs::remove_file(latest).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn retained_vm_msix_report_rejects_torn_journal_tail_without_repair() {
+        let (root, layout) = committed_run();
+        let mut journal = fs::OpenOptions::new()
+            .append(true)
+            .open(layout.journal_path())
+            .unwrap();
+        journal.write_all(b"partial-terminal-record").unwrap();
+        drop(journal);
+        assert_report_rejects_without_repair(&root, &layout);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn retained_vm_msix_report_rejects_missing_journal_head_without_repair() {
+        let (root, layout) = committed_run();
+        remove_latest_head(&layout);
+        assert_report_rejects_without_repair(&root, &layout);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn retained_vm_msix_report_does_not_publish_pending_terminal_artifact() {
+        let (root, layout) = committed_run();
+        let journal = layout.journal_path();
+        let bytes = fs::read(&journal).unwrap();
+        let mut records = bytes
+            .split_inclusive(|byte| *byte == b'\n')
+            .collect::<Vec<_>>();
+        let terminal: Value = serde_json::from_slice(records.pop().unwrap()).unwrap();
+        assert_eq!(terminal["event"]["kind"], "terminalRecorded");
+        fs::write(&journal, records.concat()).unwrap();
+        remove_latest_head(&layout);
+        assert!(layout.run_dir().join("result.json").exists());
+        assert_report_rejects_without_repair(&root, &layout);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn retained_vm_msix_report_accepts_committed_terminal_snapshot() {
+        let (root, layout) = committed_run();
+        let before = tree_bytes(&root, &root);
+        let snapshot = layout.completed_snapshot().unwrap();
+        assert_eq!(snapshot.result.run_id, layout.run_id());
+        assert_eq!(tree_bytes(&root, &root), before);
+        // This minimal journal fixture deliberately has no VM preparation. The
+        // report must pass its terminal gate and fail later at that binding.
+        let error = report_vm_msix_run(&root, layout.run_id()).unwrap_err();
+        assert!(!error.contains("committed terminal run"), "{error}");
+        assert_eq!(tree_bytes(&root, &root), before);
+        fs::remove_dir_all(root).unwrap();
+    }
+
     fn profile() -> aiw_probe::VmMsixWorkerProfile {
         serde_json::from_value(json!({"schemaVersion":"aiw.dev/vm-msix-worker-profile/v0alpha1","vmId":107,"workerUuid":aiw_probe::MSIX_WORKER_UUID,"workerMac":"CC:34:21:B8:5A:31","checkpoint":aiw_probe::MSIX_WORKER_CHECKPOINT,"checkpointConfigSha256":"c".repeat(64),"providerSha256":"d".repeat(64),"hypervisorAddress":"192.168.1.6","hypervisorHostKeySha256":"SHA256:J/kc0UwUBil5TFBQbQhwBoRKnDoRlZ8ggXAhmYEpq1E","httpsAddress":"192.168.1.174","httpsCertificateSha1":"BC14DCC4E37F83161EBB55AF8624E36A79E19256"})).unwrap()
     }
