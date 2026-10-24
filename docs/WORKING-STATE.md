@@ -1,6 +1,6 @@
 # Working state
 
-Updated 2026-10-23. Start with `scripts/work-status.ps1`. Branch
+Updated 2026-10-24. Start with `scripts/work-status.ps1`. Branch
 `codex/new-vm-handoff-20261021`, checkout `C:\aiw\app-isolation-workbench` on VM203.
 This file is a pointer, not an execution receipt.
 
@@ -11,11 +11,15 @@ Recovery now requires durable raw export before rollback, retains pre-release pr
 for completed-nonce finalization, and polls actual interactive readiness. Retained
 reporting never repairs an incomplete journal. Do not replay the completed trial.
 
-The next review checkpoint exports the authoritative profile raw tree independently
-of missing/partial controller copies and blocks queued tasks. Older preparations
-keep their approved tool bytes; recovery uses a separate compiled read-only helper
-and requires the new authoritative export receipt. See MSIX-EXECUTION.md for the
-crash/copy-failure/old-format/queued-task regressions and validation limits.
+Bounded Windows acceptance after f30c80e passed on VM107 at abd17ea: authoritative
+raw originals survived missing/partial controller copies, blocked export retained
+the dirty lease, older approved tools remained unchanged, and actual delayed
+interactive readiness preceded one native Control42. No application Run occurred.
+Production fix1879c77 holds the compiled recovery helper read-only for PS5.1 sharing.
+Run msix-bounded-1792816990610240800 cold-clean/released2026-10-24T05:12:46Z.
+Lease released: never replay/recover that nonce. Initial/runtime and harness-only
+interruptions are preserved. See MSIX-EXECUTION.md for separate bounded receipts
+and historical full application acceptance. PR103 remains unmerged for validation.
 
 ## Completed app-work slice
 

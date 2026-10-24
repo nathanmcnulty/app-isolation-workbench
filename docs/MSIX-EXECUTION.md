@@ -239,3 +239,69 @@ No application or rollback was dispatched. Logs:
 `C:\AIW-Resume-20261021\pr103-authoritative-final-*` and
 `pr103-authoritative-live-readonly.json`. Hosted checkpoint CI remains separate
 from these focused tests and the historical full application acceptance.
+
+## Bounded Windows acceptance after f30c80e, 2026-10-24
+
+Run `msix-bounded-1792816990610240800` is separate from the October22 full
+application trial. The ignored, explicitly opted-in acceptance harness exercises
+VM107 using a fresh approved preparation with the older transport from23b3c52
+(SHA006c069a056c81ff8cd3232f1ceb33dc808f070edb070725e7854fb057e62813)
+and retained native agent (SHA8ce377e1b1e826e4a9115f949b3e4dd85e28c32b3f1541887ffb93a01e55a472).
+It runs only enrollment, fixed native Control42, inert raw-file fixtures,
+read-only collection and exact cold recovery; it cannot dispatch application Run.
+
+Unmodified f30c80e did not pass the initial live clean inspection. The separately
+compiled recovery helper was held with write/delete authority, which prevents
+ordinary PowerShell readers from sharing it. Production correction1879c77 holds
+the exact output child read-only, verifies compiled bytes and retains identity
+through execution. Its PS5.1 regression reads/parses the held helper while a
+mutating reopen is rejected. The same lease resumed before enrollment; acquire,
+restore and connect were not repeated. Native readiness/Control completed there.
+Two subsequent harness-only interruptions (uppercase evidence leaf, and .NET's
+ADS path rejection) are preserved. Explicit, exact-stage resumes skipped all
+previous mutations and completed only the missing fixture setup. The fixture
+now uses PS5.1's stream API. Final fixture/recovery source is abd17ea; the runtime
+correction is unchanged from1879c77. No account or Control dispatch was replayed.
+
+Live observations:
+- Delayed readiness passed: WinRM reachable but active=false/profileLoaded=false,
+  session0 for the exact run-owned SID. Control dispatch count remained0. After
+  one planned restart, Ready observed active=true/profileLoaded=true/session1;
+  exactly one native Control returned42 with jobEmpty=true. Application dispatch0.
+- Authoritative recovery passed both missing-controller-copy and partial-cache
+  collection cases using three inert raw originals. The original document is
+  37bytes, SHA256 `29c90859da9049e6386470143ea5bf0c2ccc00b82978a3d0ca6dc5bb860ee108`.
+  The partial cache deliberately contains different text. Public recovery's
+  retained export includes both, independently bound to the raw manifest.
+- An injected named stream made Collect fail closed before rollback. Provider
+  inspect retained the exact nonce in phase dirty with leasePresent=true and no
+  release intent. Removing only that test stream allowed fresh collection.
+- Public recovery of the older approved tool set uses the separate current
+  compiled helper. The authoritative completion receipt binds the full export
+  SHA256 `1e780c6c6b83495fbfe9e0422a9714f1f3f9e4c8980afb6893e93848d90fe011`;
+  enumerationComplete/quiescent are true, with three raw originals and no Run
+  markers. Original approved inputs remain subject to the held preparation and
+  final byte/hash equality checks.
+
+Terminal acceptance passed at source abd17ea. All three acceptance booleans,
+approvedInputsUnchanged and cleanupComplete are true. Cold clean inspection
+confirmed UUID107, all seven baseline accounts, no trial artifacts and automatic
+sign-in disabled. Release completed2026-10-24T05:12:46Z with leasePresent=false.
+This nonce is completed: never replay or recover it. The terminal application
+report correctly remains workflowVerified=false with unmeasured functions,
+compatibility and isolation because no application trial occurred. The ignored
+live test passed (1/1). Initial failures remain retained, not recast as successes.
+
+Final focused validation:15 MSIX administrator/PS5.1 regressions passed, including
+crash-before-copy, partial/old-cache, queued/running-task, export/readiness and
+held-helper sharing checks. The ignored live test was run separately and passed.
+Clippy for the affected administrator/platform targets passed with warnings denied;
+format and governance checks passed. Hosted CI for the pushed checkpoint remains
+separate from this live evidence and from the historical application trial.
+
+Full private evidence and all interrupted-attempt logs remain under
+`C:\AIW-Resume-20261021\bounded-windows-f30c80e`, with the protected run workspace
+beneath its run ID. No credentials/private keys are included in Git. These inert
+fixtures and native Control do not constitute a new install/open/edit/save/close/
+uninstall acceptance. The historical full trial remains tied to34369c9/2dab30b;
+compatibility and effective isolation remain unmeasured. PR103 remains unmerged.
