@@ -22,12 +22,56 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Select stable Rust
+      - name: Stage trusted hosted Core bootstrap away from the installation
+        # Bootstrap exception: this step only copies the trusted runner runtime.
+        # Its original machine-runtime process exits before the MSI step starts.
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          if ($PSVersionTable.PSEdition -cne 'Core' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Program Files\PowerShell\7\pwsh.exe' -or $PSHOME -ine 'C:\Program Files\PowerShell\7') { throw 'Unexpected hosted bootstrap runtime' }
+          $bootstrap = Join-Path $env:RUNNER_TEMP 'aiw-core-bootstrap'
+          if (Test-Path -LiteralPath $bootstrap) { throw 'Bootstrap destination must be fresh' }
+          $originalHash = (Get-FileHash -LiteralPath (Join-Path $PSHOME 'pwsh.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+          Copy-Item -LiteralPath $PSHOME -Destination $bootstrap -Recurse -ErrorAction Stop
+          if ((Get-FileHash -LiteralPath (Join-Path $bootstrap 'pwsh.exe') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $originalHash) { throw 'Copied bootstrap image hash differs' }
+          "AIW_CI_BOOTSTRAP_SHA256=$originalHash" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Provision stable PowerShell 7.6.7 (hosted runner only)
+        # Run from the copy after the original machine-runtime process has exited.
+        # No AIW operation executes until the exact stable runtime is selected.
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "%RUNNER_TEMP%\aiw-core-bootstrap\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bootstrap = [IO.Path]::Combine($env:RUNNER_TEMP, 'aiw-core-bootstrap')
+          $env:PSModulePath = [IO.Path]::Combine($PSHOME, 'Modules')
+          foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility')) { Import-Module ([IO.Path]::Combine($PSHOME, 'Modules', $module, ($module+'.psd1'))) -SkipEditionCheck -ErrorAction Stop }
+          $PSModuleAutoLoadingPreference = 'None'
+          if ([Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine (Join-Path $bootstrap 'pwsh.exe') -or $PSHOME -ine $bootstrap -or (Get-FileHash -LiteralPath (Join-Path $bootstrap 'pwsh.exe') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $env:AIW_CI_BOOTSTRAP_SHA256) { throw 'Staged bootstrap runtime identity differs' }
+          $msi = Join-Path $env:RUNNER_TEMP 'PowerShell-7.6.7-win-x64.msi'
+          Invoke-WebRequest -Uri 'https://github.com/PowerShell/PowerShell/releases/download/v7.6.7/PowerShell-7.6.7-win-x64.msi' -OutFile $msi
+          if ((Get-FileHash -LiteralPath $msi -Algorithm SHA256).Hash.ToLowerInvariant() -cne 'ec575cef9ec56fcd905de0d5eeac9cb7f81a0a65abb87bb5cd0e87fdfe2b8cc0') { throw 'PowerShell MSI hash differs from the reviewed release' }
+          $install = Start-Process msiexec.exe -ArgumentList @('/i', $msi, '/quiet', '/norestart', 'ENABLE_PSREMOTING=0', 'REGISTER_MANIFEST=0', 'ADD_PATH=1') -Wait -PassThru
+          if ($install.ExitCode -notin @(0,3010)) { throw 'PowerShell runtime provisioning failed' }
+          $runtime = 'C:\Program Files\PowerShell\7\pwsh.exe'
+          & $runtime -NoProfile -NonInteractive -Command '$env:PSModulePath = [IO.Path]::Combine($PSHOME, ''Modules''); Import-Module ([IO.Path]::Combine($PSHOME, ''Modules'', ''Microsoft.PowerShell.Utility'', ''Microsoft.PowerShell.Utility.psd1'')) -SkipEditionCheck -ErrorAction Stop; if ($PSVersionTable.PSEdition -cne ''Core'' -or $PSVersionTable.PSVersion.ToString() -cne ''7.6.7'' -or $PSVersionTable.PSVersion.PreReleaseLabel) { throw ''Unexpected provisioned runtime'' }; $PSVersionTable | ConvertTo-Json -Depth 3'
+          if ($LASTEXITCODE -ne 0) { throw 'PowerShell runtime proof failed' }
+          'C:\Program Files\PowerShell\7' | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          'AIW_TEST_PWSH=C:\Program Files\PowerShell\7\pwsh.exe' | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Select stable Rust
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # AIW inline runtime assertion: independent of repository checkout.
+          if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion.ToString() -cne '7.6.7' -or $PSVersionTable.PSVersion.PreReleaseLabel -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() -cne 'X64' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Program Files\PowerShell\7\pwsh.exe' -or $PSHOME -ine 'C:\Program Files\PowerShell\7') { throw 'Expected exact stable machine PowerShell 7.6.7 x64' }
+          foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security','Microsoft.PowerShell.Archive')) { Import-Module (Join-Path $PSHOME ('Modules\'+$module+'\'+$module+'.psd1')) -SkipEditionCheck -ErrorAction Stop }
+          $PSModuleAutoLoadingPreference = 'None'
+          if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'Compatibility session is prohibited' }
+          $PSVersionTable | ConvertTo-Json -Depth 3 | Write-Host
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy --no-self-update
           if ($LASTEXITCODE -ne 0) { throw 'Stable Rust installation failed' }
           rustup default stable
+          if ($LASTEXITCODE -ne 0) { throw 'Native tool invocation failed' }
 
       - name: Restore cargo-audit
         id: cargo-audit-cache
@@ -37,21 +81,54 @@ jobs:
           key: cargo-audit-${{ runner.os }}-${{ runner.arch }}-0.22.2
 
       - name: Run repository verification
-        shell: pwsh
-        run: .\scripts\verify.ps1
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # AIW inline runtime assertion: independent of repository checkout.
+          if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion.ToString() -cne '7.6.7' -or $PSVersionTable.PSVersion.PreReleaseLabel -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() -cne 'X64' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Program Files\PowerShell\7\pwsh.exe' -or $PSHOME -ine 'C:\Program Files\PowerShell\7') { throw 'Expected exact stable machine PowerShell 7.6.7 x64' }
+          foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security','Microsoft.PowerShell.Archive')) { Import-Module (Join-Path $PSHOME ('Modules\'+$module+'\'+$module+'.psd1')) -SkipEditionCheck -ErrorAction Stop }
+          $PSModuleAutoLoadingPreference = 'None'
+          if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'Compatibility session is prohibited' }
+          $PSVersionTable | ConvertTo-Json -Depth 3 | Write-Host
+          .\scripts\verify.ps1
 
       - name: Install cargo-audit
         if: steps.cargo-audit-cache.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: cargo install cargo-audit --version 0.22.2 --locked
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # AIW inline runtime assertion: independent of repository checkout.
+          if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion.ToString() -cne '7.6.7' -or $PSVersionTable.PSVersion.PreReleaseLabel -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() -cne 'X64' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Program Files\PowerShell\7\pwsh.exe' -or $PSHOME -ine 'C:\Program Files\PowerShell\7') { throw 'Expected exact stable machine PowerShell 7.6.7 x64' }
+          foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security','Microsoft.PowerShell.Archive')) { Import-Module (Join-Path $PSHOME ('Modules\'+$module+'\'+$module+'.psd1')) -SkipEditionCheck -ErrorAction Stop }
+          $PSModuleAutoLoadingPreference = 'None'
+          if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'Compatibility session is prohibited' }
+          $PSVersionTable | ConvertTo-Json -Depth 3 | Write-Host
+          cargo install cargo-audit --version 0.22.2 --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Native tool invocation failed' }
 
       - name: Audit dependencies
-        shell: pwsh
-        run: .\scripts\audit-dependencies.ps1
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # AIW inline runtime assertion: independent of repository checkout.
+          if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion.ToString() -cne '7.6.7' -or $PSVersionTable.PSVersion.PreReleaseLabel -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() -cne 'X64' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Program Files\PowerShell\7\pwsh.exe' -or $PSHOME -ine 'C:\Program Files\PowerShell\7') { throw 'Expected exact stable machine PowerShell 7.6.7 x64' }
+          foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security','Microsoft.PowerShell.Archive')) { Import-Module (Join-Path $PSHOME ('Modules\'+$module+'\'+$module+'.psd1')) -SkipEditionCheck -ErrorAction Stop }
+          $PSModuleAutoLoadingPreference = 'None'
+          if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'Compatibility session is prohibited' }
+          $PSVersionTable | ConvertTo-Json -Depth 3 | Write-Host
+          .\scripts\audit-dependencies.ps1
 
       - name: Validate repository governance files
-        shell: pwsh
-        run: .\scripts\verify.ps1 -GovernanceOnly
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # AIW inline runtime assertion: independent of repository checkout.
+          if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion.ToString() -cne '7.6.7' -or $PSVersionTable.PSVersion.PreReleaseLabel -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() -cne 'X64' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Program Files\PowerShell\7\pwsh.exe' -or $PSHOME -ine 'C:\Program Files\PowerShell\7') { throw 'Expected exact stable machine PowerShell 7.6.7 x64' }
+          foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security','Microsoft.PowerShell.Archive')) { Import-Module (Join-Path $PSHOME ('Modules\'+$module+'\'+$module+'.psd1')) -SkipEditionCheck -ErrorAction Stop }
+          $PSModuleAutoLoadingPreference = 'None'
+          if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'Compatibility session is prohibited' }
+          $PSVersionTable | ConvertTo-Json -Depth 3 | Write-Host
+          .\scripts\verify.ps1 -GovernanceOnly
 
   msrv:
     name: Minimum supported Rust
@@ -61,16 +138,67 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Check all targets with Rust 1.88
+      - name: Stage trusted hosted Core bootstrap away from the installation
+        # Bootstrap exception: this step only copies the trusted runner runtime.
+        # Its original machine-runtime process exits before the MSI step starts.
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          if ($PSVersionTable.PSEdition -cne 'Core' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Program Files\PowerShell\7\pwsh.exe' -or $PSHOME -ine 'C:\Program Files\PowerShell\7') { throw 'Unexpected hosted bootstrap runtime' }
+          $bootstrap = Join-Path $env:RUNNER_TEMP 'aiw-core-bootstrap'
+          if (Test-Path -LiteralPath $bootstrap) { throw 'Bootstrap destination must be fresh' }
+          $originalHash = (Get-FileHash -LiteralPath (Join-Path $PSHOME 'pwsh.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+          Copy-Item -LiteralPath $PSHOME -Destination $bootstrap -Recurse -ErrorAction Stop
+          if ((Get-FileHash -LiteralPath (Join-Path $bootstrap 'pwsh.exe') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $originalHash) { throw 'Copied bootstrap image hash differs' }
+          "AIW_CI_BOOTSTRAP_SHA256=$originalHash" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Provision stable PowerShell 7.6.7 (hosted runner only)
+        # Run from the copy after the original machine-runtime process has exited.
+        # No AIW operation executes until the exact stable runtime is selected.
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "%RUNNER_TEMP%\aiw-core-bootstrap\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bootstrap = [IO.Path]::Combine($env:RUNNER_TEMP, 'aiw-core-bootstrap')
+          $env:PSModulePath = [IO.Path]::Combine($PSHOME, 'Modules')
+          foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility')) { Import-Module ([IO.Path]::Combine($PSHOME, 'Modules', $module, ($module+'.psd1'))) -SkipEditionCheck -ErrorAction Stop }
+          $PSModuleAutoLoadingPreference = 'None'
+          if ([Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine (Join-Path $bootstrap 'pwsh.exe') -or $PSHOME -ine $bootstrap -or (Get-FileHash -LiteralPath (Join-Path $bootstrap 'pwsh.exe') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $env:AIW_CI_BOOTSTRAP_SHA256) { throw 'Staged bootstrap runtime identity differs' }
+          $msi = Join-Path $env:RUNNER_TEMP 'PowerShell-7.6.7-win-x64.msi'
+          Invoke-WebRequest -Uri 'https://github.com/PowerShell/PowerShell/releases/download/v7.6.7/PowerShell-7.6.7-win-x64.msi' -OutFile $msi
+          if ((Get-FileHash -LiteralPath $msi -Algorithm SHA256).Hash.ToLowerInvariant() -cne 'ec575cef9ec56fcd905de0d5eeac9cb7f81a0a65abb87bb5cd0e87fdfe2b8cc0') { throw 'PowerShell MSI hash differs from the reviewed release' }
+          $install = Start-Process msiexec.exe -ArgumentList @('/i', $msi, '/quiet', '/norestart', 'ENABLE_PSREMOTING=0', 'REGISTER_MANIFEST=0', 'ADD_PATH=1') -Wait -PassThru
+          if ($install.ExitCode -notin @(0,3010)) { throw 'PowerShell runtime provisioning failed' }
+          $runtime = 'C:\Program Files\PowerShell\7\pwsh.exe'
+          & $runtime -NoProfile -NonInteractive -Command '$env:PSModulePath = [IO.Path]::Combine($PSHOME, ''Modules''); Import-Module ([IO.Path]::Combine($PSHOME, ''Modules'', ''Microsoft.PowerShell.Utility'', ''Microsoft.PowerShell.Utility.psd1'')) -SkipEditionCheck -ErrorAction Stop; if ($PSVersionTable.PSEdition -cne ''Core'' -or $PSVersionTable.PSVersion.ToString() -cne ''7.6.7'' -or $PSVersionTable.PSVersion.PreReleaseLabel) { throw ''Unexpected provisioned runtime'' }; $PSVersionTable | ConvertTo-Json -Depth 3'
+          if ($LASTEXITCODE -ne 0) { throw 'PowerShell runtime proof failed' }
+          'C:\Program Files\PowerShell\7' | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          'AIW_TEST_PWSH=C:\Program Files\PowerShell\7\pwsh.exe' | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Check all targets with Rust 1.88
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # AIW inline runtime assertion: independent of repository checkout.
+          if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion.ToString() -cne '7.6.7' -or $PSVersionTable.PSVersion.PreReleaseLabel -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() -cne 'X64' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Program Files\PowerShell\7\pwsh.exe' -or $PSHOME -ine 'C:\Program Files\PowerShell\7') { throw 'Expected exact stable machine PowerShell 7.6.7 x64' }
+          foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security','Microsoft.PowerShell.Archive')) { Import-Module (Join-Path $PSHOME ('Modules\'+$module+'\'+$module+'.psd1')) -SkipEditionCheck -ErrorAction Stop }
+          $PSModuleAutoLoadingPreference = 'None'
+          if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'Compatibility session is prohibited' }
+          $PSVersionTable | ConvertTo-Json -Depth 3 | Write-Host
           rustup toolchain install 1.88.0 --profile minimal --no-self-update
           if ($LASTEXITCODE -ne 0) { throw 'Rust 1.88 installation failed' }
           cargo +1.88.0 check --workspace --all-targets --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Native tool invocation failed' }
 
       - name: Check desktop targets with Rust 1.90
-        shell: pwsh
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         run: |
+          $ErrorActionPreference = 'Stop'
+          # AIW inline runtime assertion: independent of repository checkout.
+          if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion.ToString() -cne '7.6.7' -or $PSVersionTable.PSVersion.PreReleaseLabel -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() -cne 'X64' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Program Files\PowerShell\7\pwsh.exe' -or $PSHOME -ine 'C:\Program Files\PowerShell\7') { throw 'Expected exact stable machine PowerShell 7.6.7 x64' }
+          foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security','Microsoft.PowerShell.Archive')) { Import-Module (Join-Path $PSHOME ('Modules\'+$module+'\'+$module+'.psd1')) -SkipEditionCheck -ErrorAction Stop }
+          $PSModuleAutoLoadingPreference = 'None'
+          if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'Compatibility session is prohibited' }
+          $PSVersionTable | ConvertTo-Json -Depth 3 | Write-Host
           rustup toolchain install 1.90.0 --profile minimal --no-self-update
           if ($LASTEXITCODE -ne 0) { throw 'Rust 1.90 installation failed' }
           cargo +1.90.0 check --manifest-path gui/Cargo.toml --locked --all-targets --release
@@ -83,14 +211,64 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Select stable Rust
+
+      - name: Stage trusted hosted Core bootstrap away from the installation
+        # Bootstrap exception: this step only copies the trusted runner runtime.
+        # Its original machine-runtime process exits before the MSI step starts.
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          if ($PSVersionTable.PSEdition -cne 'Core' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Program Files\PowerShell\7\pwsh.exe' -or $PSHOME -ine 'C:\Program Files\PowerShell\7') { throw 'Unexpected hosted bootstrap runtime' }
+          $bootstrap = Join-Path $env:RUNNER_TEMP 'aiw-core-bootstrap'
+          if (Test-Path -LiteralPath $bootstrap) { throw 'Bootstrap destination must be fresh' }
+          $originalHash = (Get-FileHash -LiteralPath (Join-Path $PSHOME 'pwsh.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+          Copy-Item -LiteralPath $PSHOME -Destination $bootstrap -Recurse -ErrorAction Stop
+          if ((Get-FileHash -LiteralPath (Join-Path $bootstrap 'pwsh.exe') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $originalHash) { throw 'Copied bootstrap image hash differs' }
+          "AIW_CI_BOOTSTRAP_SHA256=$originalHash" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Provision stable PowerShell 7.6.7 (hosted runner only)
+        # Run from the copy after the original machine-runtime process has exited.
+        # No AIW operation executes until the exact stable runtime is selected.
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "%RUNNER_TEMP%\aiw-core-bootstrap\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bootstrap = [IO.Path]::Combine($env:RUNNER_TEMP, 'aiw-core-bootstrap')
+          $env:PSModulePath = [IO.Path]::Combine($PSHOME, 'Modules')
+          foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility')) { Import-Module ([IO.Path]::Combine($PSHOME, 'Modules', $module, ($module+'.psd1'))) -SkipEditionCheck -ErrorAction Stop }
+          $PSModuleAutoLoadingPreference = 'None'
+          if ([Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine (Join-Path $bootstrap 'pwsh.exe') -or $PSHOME -ine $bootstrap -or (Get-FileHash -LiteralPath (Join-Path $bootstrap 'pwsh.exe') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $env:AIW_CI_BOOTSTRAP_SHA256) { throw 'Staged bootstrap runtime identity differs' }
+          $msi = Join-Path $env:RUNNER_TEMP 'PowerShell-7.6.7-win-x64.msi'
+          Invoke-WebRequest -Uri 'https://github.com/PowerShell/PowerShell/releases/download/v7.6.7/PowerShell-7.6.7-win-x64.msi' -OutFile $msi
+          if ((Get-FileHash -LiteralPath $msi -Algorithm SHA256).Hash.ToLowerInvariant() -cne 'ec575cef9ec56fcd905de0d5eeac9cb7f81a0a65abb87bb5cd0e87fdfe2b8cc0') { throw 'PowerShell MSI hash differs from the reviewed release' }
+          $install = Start-Process msiexec.exe -ArgumentList @('/i', $msi, '/quiet', '/norestart', 'ENABLE_PSREMOTING=0', 'REGISTER_MANIFEST=0', 'ADD_PATH=1') -Wait -PassThru
+          if ($install.ExitCode -notin @(0,3010)) { throw 'PowerShell runtime provisioning failed' }
+          $runtime = 'C:\Program Files\PowerShell\7\pwsh.exe'
+          & $runtime -NoProfile -NonInteractive -Command '$env:PSModulePath = [IO.Path]::Combine($PSHOME, ''Modules''); Import-Module ([IO.Path]::Combine($PSHOME, ''Modules'', ''Microsoft.PowerShell.Utility'', ''Microsoft.PowerShell.Utility.psd1'')) -SkipEditionCheck -ErrorAction Stop; if ($PSVersionTable.PSEdition -cne ''Core'' -or $PSVersionTable.PSVersion.ToString() -cne ''7.6.7'' -or $PSVersionTable.PSVersion.PreReleaseLabel) { throw ''Unexpected provisioned runtime'' }; $PSVersionTable | ConvertTo-Json -Depth 3'
+          if ($LASTEXITCODE -ne 0) { throw 'PowerShell runtime proof failed' }
+          'C:\Program Files\PowerShell\7' | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          'AIW_TEST_PWSH=C:\Program Files\PowerShell\7\pwsh.exe' | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Select stable Rust
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # AIW inline runtime assertion: independent of repository checkout.
+          if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion.ToString() -cne '7.6.7' -or $PSVersionTable.PSVersion.PreReleaseLabel -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() -cne 'X64' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Program Files\PowerShell\7\pwsh.exe' -or $PSHOME -ine 'C:\Program Files\PowerShell\7') { throw 'Expected exact stable machine PowerShell 7.6.7 x64' }
+          foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security','Microsoft.PowerShell.Archive')) { Import-Module (Join-Path $PSHOME ('Modules\'+$module+'\'+$module+'.psd1')) -SkipEditionCheck -ErrorAction Stop }
+          $PSModuleAutoLoadingPreference = 'None'
+          if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'Compatibility session is prohibited' }
+          $PSVersionTable | ConvertTo-Json -Depth 3 | Write-Host
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy --no-self-update
           if ($LASTEXITCODE -ne 0) { throw 'Stable Rust installation failed' }
       - name: Verify desktop source and gates
-        shell: pwsh
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         run: |
+          $ErrorActionPreference = 'Stop'
+          # AIW inline runtime assertion: independent of repository checkout.
+          if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion.ToString() -cne '7.6.7' -or $PSVersionTable.PSVersion.PreReleaseLabel -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() -cne 'X64' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Program Files\PowerShell\7\pwsh.exe' -or $PSHOME -ine 'C:\Program Files\PowerShell\7') { throw 'Expected exact stable machine PowerShell 7.6.7 x64' }
+          foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security','Microsoft.PowerShell.Archive')) { Import-Module (Join-Path $PSHOME ('Modules\'+$module+'\'+$module+'.psd1')) -SkipEditionCheck -ErrorAction Stop }
+          $PSModuleAutoLoadingPreference = 'None'
+          if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'Compatibility session is prohibited' }
+          $PSVersionTable | ConvertTo-Json -Depth 3 | Write-Host
           cargo +stable fmt --manifest-path gui/Cargo.toml --check
           if ($LASTEXITCODE -ne 0) { throw 'Desktop formatting failed' }
           cargo +stable clippy --manifest-path gui/Cargo.toml --all-targets --locked -- -D warnings
@@ -110,12 +288,26 @@ jobs:
           key: cargo-audit-${{ runner.os }}-${{ runner.arch }}-0.22.2
       - name: Install cargo-audit
         if: steps.desktop-cargo-audit-cache.outputs.cache-hit != 'true'
-        shell: pwsh
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         run: |
+          $ErrorActionPreference = 'Stop'
+          # AIW inline runtime assertion: independent of repository checkout.
+          if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion.ToString() -cne '7.6.7' -or $PSVersionTable.PSVersion.PreReleaseLabel -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() -cne 'X64' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Program Files\PowerShell\7\pwsh.exe' -or $PSHOME -ine 'C:\Program Files\PowerShell\7') { throw 'Expected exact stable machine PowerShell 7.6.7 x64' }
+          foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security','Microsoft.PowerShell.Archive')) { Import-Module (Join-Path $PSHOME ('Modules\'+$module+'\'+$module+'.psd1')) -SkipEditionCheck -ErrorAction Stop }
+          $PSModuleAutoLoadingPreference = 'None'
+          if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'Compatibility session is prohibited' }
+          $PSVersionTable | ConvertTo-Json -Depth 3 | Write-Host
           cargo +stable install cargo-audit --version 0.22.2 --locked
           if ($LASTEXITCODE -ne 0) { throw 'cargo-audit installation failed' }
       - name: Audit desktop dependencies
-        shell: pwsh
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         run: |
+          $ErrorActionPreference = 'Stop'
+          # AIW inline runtime assertion: independent of repository checkout.
+          if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion.ToString() -cne '7.6.7' -or $PSVersionTable.PSVersion.PreReleaseLabel -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() -cne 'X64' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Program Files\PowerShell\7\pwsh.exe' -or $PSHOME -ine 'C:\Program Files\PowerShell\7') { throw 'Expected exact stable machine PowerShell 7.6.7 x64' }
+          foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security','Microsoft.PowerShell.Archive')) { Import-Module (Join-Path $PSHOME ('Modules\'+$module+'\'+$module+'.psd1')) -SkipEditionCheck -ErrorAction Stop }
+          $PSModuleAutoLoadingPreference = 'None'
+          if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'Compatibility session is prohibited' }
+          $PSVersionTable | ConvertTo-Json -Depth 3 | Write-Host
           cargo +stable audit --file gui/Cargo.lock
           if ($LASTEXITCODE -ne 0) { throw 'Desktop dependency audit failed' }

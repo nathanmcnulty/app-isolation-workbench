@@ -1,4 +1,5 @@
-#requires -Version 5.1
+#Requires -Version 7.6
+#Requires -PSEdition Core
 <#
 Runs approved disposable Sandbox trials: baseline, fixed local-settings
 adaptation, and relocated-bundle replay. An already completed baseline may be
@@ -19,6 +20,12 @@ param(
     [Parameter(Mandatory)][string]$ApprovedBy,
     [Parameter(Mandatory)][switch]$Approve
 )
+# AIW runtime contract: stable PowerShell Core >=7.6; no compatibility session.
+if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion -lt [version]'7.6' -or $PSVersionTable.PSVersion.PreReleaseLabel -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -ne 'X64') { throw 'AIW requires stable x64 PowerShell Core 7.6 or later' }
+foreach ($aiwNativeModule in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security','Microsoft.PowerShell.Archive')) { Import-Module (Join-Path $PSHOME ('Modules\'+$aiwNativeModule+'\'+$aiwNativeModule+'.psd1')) -SkipEditionCheck -ErrorAction Stop }
+$PSModuleAutoLoadingPreference = 'None'
+if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'AIW prohibits Windows PowerShell compatibility sessions' }
+$PSNativeCommandUseErrorActionPreference = $false
 $ErrorActionPreference = 'Stop'
 if (!$Approve -or [string]::IsNullOrWhiteSpace($ApprovedBy)) { throw 'Explicit approval for all three fixed Sandbox trials is required' }
 $repo = Split-Path -Parent $PSScriptRoot
@@ -39,19 +46,14 @@ New-Item -ItemType Directory -Path $evidenceRoot | Out-Null
 Write-Host "Retaining trial evidence at $evidenceRoot"
 foreach ($leaf in @('bundles', 'intakes', 'runs')) { New-Item -ItemType Directory -Path (Join-Path $evidenceRoot $leaf) | Out-Null }
 function Invoke-Aiw([string]$name, [string[]]$arguments) {
-    # Windows PowerShell 5.1 promotes native stderr to a terminating error when
-    # ErrorActionPreference is Stop, even if the process will exit successfully.
-    # The CLI writes a provider diagnostics path to stderr while starting a run.
-    $previousErrorActionPreference = $ErrorActionPreference
+    # Core captures native stderr separately; this exact process exit decides success.
     $previousConsoleEncoding = [Console]::OutputEncoding
     try {
-        $ErrorActionPreference = 'Continue'
         [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
         $outputLines = @(& $aiw @arguments 2> (Join-Path $evidenceRoot "$name.stderr.log"))
         $exitCode = $LASTEXITCODE
     } finally {
         [Console]::OutputEncoding = $previousConsoleEncoding
-        $ErrorActionPreference = $previousErrorActionPreference
     }
     [IO.File]::WriteAllText((Join-Path $evidenceRoot "$name.json"), ($outputLines -join [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
     if ($exitCode -ne 0) { throw "AIW failed at $name (exit $exitCode); inspect $evidenceRoot\$name.stderr.log and retained run status before retrying" }

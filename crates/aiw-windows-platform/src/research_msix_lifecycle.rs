@@ -14,7 +14,7 @@ use std::time::Duration;
 const INPUT: &str = r"C:\AIW-Msix-Lifecycle-Input";
 const EXE: &str = r"C:\AIW-Msix-Lifecycle-Input\msix_standard_user_lifecycle.exe";
 const OUTPUT: &str = r"C:\AIW-Msix-Lifecycle-Output";
-const POWERSHELL: &str = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe";
+const POWERSHELL: &str = r"C:\Program Files\PowerShell\7\pwsh.exe";
 const INPUTS: [(&str, &str); 3] = [
     (
         "application.msix",
@@ -159,11 +159,12 @@ impl InventoryStage {
     }
 }
 fn native_prefix() -> String {
-    format!(
-        "$ErrorActionPreference='Stop'\nAdd-Type -TypeDefinition @'\n{}\n'@\n{}\n",
+    crate::powershell::compiled_script_entry(&format!(
+        "{}\nAdd-Type -TypeDefinition @'\n{}\n'@\n{}\n",
+        aiw_probe::powershell::POWERSHELL_RUNTIME_GUARD,
         include_str!("research_msix_native.cs"),
         include_str!("research_msix_inventory.ps1")
-    )
+    ))
 }
 fn parent_inventory(evidence: &Path, stage: InventoryStage) -> TrialResult<()> {
     // The destination is selected only from this closed enum, never caller text.
@@ -210,7 +211,7 @@ fn require_global_inventory(value: &serde_json::Value) -> TrialResult<()> {
 }
 
 fn script() -> String {
-    format!(
+    crate::powershell::compiled_script_entry(&format!(
         "{}\nfunction Invoke-AiwDriverControl {{\nparam([string]$EvidenceDirectory)\n{}\n}}\n{}",
         native_prefix(),
         include_str!("research_msix_driver_control.ps1"),
@@ -225,10 +226,17 @@ fn script() -> String {
     .map(str::trim_start)
     .filter(|line| !line.starts_with("//") && !line.starts_with('#'))
     .collect::<Vec<_>>()
-    .join("\n")
+    .join("\n"))
 }
 
 pub fn run() -> TrialResult<()> {
+    // The old Sandbox mapping does not supply the approved machine runtime or
+    // endpoint and its inline source exceeds the native command line limit.
+    // Keep this closed route retired; source/receipt regression readers remain.
+    if !research_execution_supported() {
+        return Err("Retired Sandbox MSIX research execution: use the approved Core VM production flow; no account, runtime or application was changed".into());
+    }
+    let _runtime = crate::powershell::HeldPowerShell::observe()?;
     if !std::env::current_exe()?
         .to_string_lossy()
         .eq_ignore_ascii_case(EXE)
@@ -344,6 +352,9 @@ pub fn run() -> TrialResult<()> {
         )?;
     }
     attempt
+}
+fn research_execution_supported() -> bool {
+    false
 }
 
 fn run_parent(evidence: &Path) -> TrialResult<()> {
@@ -591,6 +602,11 @@ fn validate_preparation(value: &PrimaryPreparation, image_hash: &str, now: i64) 
     Ok(())
 }
 fn run_fixed_powershell(command: String, deadline: u64) -> TrialResult<()> {
+    let runtime = crate::powershell::HeldPowerShell::observe()?;
+    let command = crate::powershell::compiled_script_entry(&format!(
+        "{}\n{command}",
+        aiw_probe::powershell::POWERSHELL_RUNTIME_GUARD
+    ));
     let child = GuestProcess::start(
         POWERSHELL,
         &[
@@ -611,6 +627,7 @@ fn run_fixed_powershell(command: String, deadline: u64) -> TrialResult<()> {
     })();
     let cleanup = child.cleanup();
     crate::guest_msi::complete_process_operation(operation, cleanup)?;
+    runtime.revalidate()?;
     Ok(())
 }
 fn run_vm_parent(image_hash: &str, launch_control: bool) -> TrialResult<()> {
@@ -698,7 +715,7 @@ $user=Get-LocalUser -Name AiwStandardUser;if($user.SID.Value -cne '{sid}'){{thro
             controller_job_observation()?,
         )?;
         parent_inventory(&evidence, InventoryStage::Before)?;
-        let user = crate::research_msix_primary_user::PrimaryInteractiveUser::establish(
+        let user = crate::primary_interactive_user::PrimaryInteractiveUser::establish(
             &prepared.user_sid,
             prepared.session_id,
         )?;
@@ -757,7 +774,7 @@ $user=Get-LocalUser -Name AiwStandardUser;if($user.SID.Value -cne '{sid}'){{thro
 
 fn run_primary_launch_control(
     evidence: &Path,
-    user: &crate::research_msix_primary_user::PrimaryInteractiveUser,
+    user: &crate::primary_interactive_user::PrimaryInteractiveUser,
 ) -> TrialResult<()> {
     let path = Path::new(r"C:\Windows\System32\cmd.exe");
     let _directory = hold_directory(path.parent().ok_or("OS control parent absent")?)?;
@@ -1416,18 +1433,19 @@ mod tests {
     fn powershell_producer_matches_native_primary_preparation() {
         let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../scripts/research/test-msix-primary-preparation.ps1");
-        let output = std::process::Command::new(super::POWERSHELL)
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-            ])
-            .arg(script)
-            .arg("-EmitNativeFixture")
-            .output()
-            .unwrap();
+        let output = crate::powershell::inert_test_output(
+            std::process::Command::new(crate::powershell::test_executable())
+                .args([
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                ])
+                .arg(script)
+                .arg("-EmitNativeFixture"),
+        )
+        .unwrap();
         assert!(
             output.status.success(),
             "{}",
@@ -1437,7 +1455,7 @@ mod tests {
         super::validate_preparation(&value, &"a".repeat(64), 200).unwrap();
     }
     #[test]
-    fn primary_script_parses_and_native_source_compiles_in_ps51() {
+    fn primary_script_parses_and_native_source_compiles_in_core76() {
         let root = std::env::temp_dir().join(format!(
             "aiw-primary-source-{}-{}",
             std::process::id(),
@@ -1456,15 +1474,20 @@ mod tests {
             script.to_string_lossy().replace('\'', "''"),
             native.to_string_lossy().replace('\'', "''")
         );
-        let output = std::process::Command::new(super::POWERSHELL)
-            .args(["-NoProfile", "-NonInteractive", "-Command", &command])
-            .output()
-            .unwrap();
+        let output = crate::powershell::inert_test_output(
+            std::process::Command::new(crate::powershell::test_executable()).args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                &command,
+            ]),
+        )
+        .unwrap();
         std::fs::write(root.join("stdout.log"), &output.stdout).unwrap();
         std::fs::write(root.join("stderr.log"), &output.stderr).unwrap();
         assert!(
             output.status.success(),
-            "PS5.1 parse/compile failed; retained {}",
+            "Core7.6 parse/compile failed; retained {}",
             root.display()
         );
         let quoted = aiw_windows_command_line::join_arguments([
@@ -1477,7 +1500,14 @@ mod tests {
         assert!(quoted.encode_utf16().count() < 32767);
     }
     #[test]
-    fn compacted_lifecycle_script_parses_and_literal_native_compiles_in_ps51() {
+    fn compacted_lifecycle_script_parses_and_literal_native_compiles_in_core76() {
+        assert_eq!(
+            super::script()
+                .lines()
+                .filter(|line| line.eq_ignore_ascii_case("#Requires -PSEdition Core"))
+                .count(),
+            1
+        );
         use std::os::windows::process::CommandExt;
         let root = std::env::temp_dir().join(format!(
             "aiw-msix-compacted-source-{}-{}",
@@ -1506,31 +1536,17 @@ Add-Type -TypeDefinition $native.Value
 @{parsed=$true;nativeCompiled=$true;applicationExecuted=$false}|ConvertTo-Json -Compress
 "#
         .replace("@@SOURCE@@", &source.to_string_lossy().replace('\'', "''"));
-        let mut child = std::process::Command::new(super::POWERSHELL)
-            .args(["-NoProfile", "-NonInteractive", "-Command", &command])
-            .creation_flags(0x08000000)
-            .stdout(std::fs::File::create(root.join("stdout.log")).unwrap())
-            .stderr(std::fs::File::create(root.join("stderr.log")).unwrap())
-            .spawn()
-            .unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        let status = loop {
-            if let Some(status) = child.try_wait().unwrap() {
-                break status;
-            }
-            if std::time::Instant::now() >= deadline {
-                child.kill().unwrap();
-                child.wait().unwrap();
-                panic!(
-                    "PS5.1 compacted-source check timed out; retained {}",
-                    root.display()
-                );
-            }
-            std::thread::sleep(std::time::Duration::from_millis(25));
-        };
+        let output = crate::powershell::inert_test_output(
+            std::process::Command::new(crate::powershell::test_executable())
+                .args(["-NoProfile", "-NonInteractive", "-Command", &command])
+                .creation_flags(0x08000000),
+        )
+        .unwrap();
+        std::fs::write(root.join("stdout.log"), &output.stdout).unwrap();
+        std::fs::write(root.join("stderr.log"), &output.stderr).unwrap();
         assert!(
-            status.success(),
-            "PS5.1 compacted-source parse/compile failed; retained {}: {}",
+            output.status.success(),
+            "Core7.6 compacted-source parse/compile failed; retained {}: {}",
             root.display(),
             String::from_utf8_lossy(&std::fs::read(root.join("stderr.log")).unwrap())
         );
@@ -1856,11 +1872,11 @@ Add-Type -TypeDefinition $native.Value
         assert!(
             error
                 .to_string()
-                .contains("Fixed mapped executable required")
+                .contains("Retired Sandbox MSIX research execution")
         );
     }
     #[test]
-    fn closed_launches_fit_their_distinct_native_limits() {
+    fn retired_inline_research_launch_cannot_bypass_production_file_authority() {
         let logon = aiw_windows_command_line::join_arguments([super::EXE, "lifecycle-child"]);
         assert!(
             logon.encode_utf16().count() < crate::guest_msi::MAX_STANDARD_USER_COMMAND_LINE_UNITS
@@ -1872,10 +1888,13 @@ Add-Type -TypeDefinition $native.Value
             "-Command",
             &super::script(),
         ]);
+        assert!(command.encode_utf16().count() >= 32767);
+        assert!(!super::research_execution_supported());
         assert!(
-            command.encode_utf16().count() < 32767,
-            "Fixed lifecycle command has {} UTF-16 units",
-            command.encode_utf16().count()
+            super::run()
+                .unwrap_err()
+                .to_string()
+                .contains("Retired Sandbox")
         );
     }
 }

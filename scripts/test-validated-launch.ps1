@@ -1,4 +1,5 @@
-#requires -Version 5.1
+#Requires -Version 7.6
+#Requires -PSEdition Core
 <# One explicitly approved, fixed Sandbox replay with durable stage diagnostics.
 The CLI verifies all execution authority and owns exact cleanup/recovery. #>
 [CmdletBinding()]
@@ -15,6 +16,12 @@ param(
     [Parameter(Mandatory)][string]$ApprovedBy,
     [Parameter(Mandatory)][switch]$Approve
 )
+# AIW runtime contract: stable PowerShell Core >=7.6; no compatibility session.
+if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion -lt [version]'7.6' -or $PSVersionTable.PSVersion.PreReleaseLabel -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -ne 'X64') { throw 'AIW requires stable x64 PowerShell Core 7.6 or later' }
+foreach ($aiwNativeModule in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security','Microsoft.PowerShell.Archive')) { Import-Module (Join-Path $PSHOME ('Modules\'+$aiwNativeModule+'\'+$aiwNativeModule+'.psd1')) -SkipEditionCheck -ErrorAction Stop }
+$PSModuleAutoLoadingPreference = 'None'
+if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'AIW prohibits Windows PowerShell compatibility sessions' }
+$PSNativeCommandUseErrorActionPreference = $false
 $ErrorActionPreference = 'Stop'
 if (!$Approve -or [string]::IsNullOrWhiteSpace($ApprovedBy)) { throw 'Explicit approval for this fixed Sandbox trial is required' }
 $Project = (Resolve-Path -LiteralPath $Project).ProviderPath
@@ -35,16 +42,13 @@ function Save-Json([string]$path, $value) {
     [IO.File]::WriteAllText($path, (ConvertTo-Json -InputObject $value -Depth 64), [Text.UTF8Encoding]::new($false))
 }
 function Invoke-Aiw([string]$name, [string[]]$arguments) {
-    $previousErrorActionPreference = $ErrorActionPreference
     $previousConsoleEncoding = [Console]::OutputEncoding
     try {
-        $ErrorActionPreference = 'Continue'
         [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
         $outputLines = @(& $aiw @arguments 2> (Join-Path $evidenceRoot "$name.stderr.log"))
         $exitCode = $LASTEXITCODE
     } finally {
         [Console]::OutputEncoding = $previousConsoleEncoding
-        $ErrorActionPreference = $previousErrorActionPreference
     }
     [IO.File]::WriteAllText((Join-Path $evidenceRoot "$name.json"), ($outputLines -join [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
     if ($exitCode -ne 0) { throw "AIW failed at $name (exit $exitCode); inspect $evidenceRoot\$name.stderr.log and retained run status before retrying" }

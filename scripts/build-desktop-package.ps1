@@ -1,3 +1,5 @@
+#Requires -Version 7.6
+#Requires -PSEdition Core
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [ValidateNotNullOrEmpty()] [string]$OutputDirectory,
@@ -7,6 +9,12 @@ param(
     [switch]$KeepFailedBuild
 )
 
+# AIW runtime contract: stable PowerShell Core >=7.6; no compatibility session.
+if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion -lt [version]'7.6' -or $PSVersionTable.PSVersion.PreReleaseLabel -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -ne 'X64') { throw 'AIW requires stable x64 PowerShell Core 7.6 or later' }
+foreach ($aiwNativeModule in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security','Microsoft.PowerShell.Archive')) { Import-Module (Join-Path $PSHOME ('Modules\'+$aiwNativeModule+'\'+$aiwNativeModule+'.psd1')) -SkipEditionCheck -ErrorAction Stop }
+$PSModuleAutoLoadingPreference = 'None'
+if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'AIW prohibits Windows PowerShell compatibility sessions' }
+$PSNativeCommandUseErrorActionPreference = $false
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $previewBuilder = Join-Path $PSScriptRoot 'build-preview-package.ps1'
@@ -164,6 +172,11 @@ try {
     $cliHash = (Get-FileHash -LiteralPath (Join-Path $output 'aiw.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
     if ((Get-FileHash -LiteralPath (Join-Path $output 'aiw-desktop.exe') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $desktopHash) { throw 'Copied desktop executable changed during assembly' }
     $readme = @"
+Runtime prerequisite: stable x64 PowerShell Core >=7.6 (recommended CI pin 7.6.7).
+Open the verified machine runtime explicitly for PowerShell command handoffs:
+  & 'C:\Program Files\PowerShell\7\pwsh.exe' -NoProfile
+No runtime installation or Windows PowerShell compatibility fallback is performed.
+
 Application Isolation Workbench — unsigned development GUI
 
 Launch directly from this folder with:

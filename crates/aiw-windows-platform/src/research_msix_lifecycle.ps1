@@ -1,3 +1,5 @@
+#Requires -Version 7.6
+#Requires -PSEdition Core
 $SignedSha256='2ae3a7c685e811eb34479980bff41d1442b023578074e19f4dca8fc676070437'
 $ProgressPreference='SilentlyContinue'
 $ErrorActionPreference='Stop'
@@ -34,9 +36,9 @@ try {
 
  $current=[Diagnostics.Process]::GetCurrentProcess()
  try {$operatorToken=[AiwMsixNative]::Observe($current.Handle);$supervisorInJob=[AiwMsixNative]::InJob($current.Handle);$supervisorImage=$current.MainModule.FileName;$supervisorStart=$current.StartTime.ToUniversalTime().ToString('o')}finally{$current.Dispose()}
- if(!$supervisorInJob -or $supervisorImage -ine 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'){throw 'Fixed PowerShell supervisor job/image mismatch'}
+ if(!$supervisorInJob -or $supervisorImage -ine 'C:\Program Files\PowerShell\7\pwsh.exe'){throw 'Fixed PowerShell supervisor job/image mismatch'}
  if($operatorToken.IsElevated -or $operatorToken.AdministratorsEnabled -or $operatorToken.IsAppContainer -or $operatorToken.TokenSessionId -ne $session -or $operatorToken.IntegritySid -cne 'S-1-16-8192' -or $operatorToken.UserSid -cne $identity.User.Value -or $env:USERPROFILE -cne 'C:\Users\AiwStandardUser'){throw 'Non-elevated standard-user context required'}
- Record 'worker' ([ordered]@{computer=$env:COMPUTERNAME;supervisorPid=$PID;supervisorImage=$supervisorImage;supervisorStart=$supervisorStart;inInheritedJob=$supervisorInJob;sessionId=$session;operator=$identity.Name;operatorSid=$identity.User.Value;operatorToken=$operatorToken;windowsBuild=[Environment]::OSVersion.Version.ToString();time=[DateTime]::UtcNow.ToString('o');researchOnly=$true})
+ Record 'worker' ([ordered]@{computer=$env:COMPUTERNAME;powerShellRuntime=$AiwPowerShellRuntime;supervisorPid=$PID;supervisorImage=$supervisorImage;supervisorStart=$supervisorStart;inInheritedJob=$supervisorInJob;sessionId=$session;operator=$identity.Name;operatorSid=$identity.User.Value;operatorToken=$operatorToken;windowsBuild=[Environment]::OSVersion.Version.ToString();time=[DateTime]::UtcNow.ToString('o');researchOnly=$true})
  $preexistingPackages=@(Get-AppxPackage -Name AIWResearch.NotepadPP|Select-Object Name,PackageFullName,PackageFamilyName,Version,Publisher,InstallLocation,PackageUserInformation)
  $preexistingProcesses=@(Get-Process -Name 'notepad++' -ErrorAction SilentlyContinue|ForEach-Object {
   $imagePath=$null;$startTime=$null;$queryError=$null

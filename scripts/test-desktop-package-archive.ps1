@@ -1,9 +1,17 @@
+#Requires -Version 7.6
+#Requires -PSEdition Core
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [string]$PackageRoot,
     [Parameter(Mandatory)] [string]$ReceiptSha256,
     [Parameter(Mandatory)] [string]$SourceRevision
 )
+# AIW runtime contract: stable PowerShell Core >=7.6; no compatibility session.
+if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion -lt [version]'7.6' -or $PSVersionTable.PSVersion.PreReleaseLabel -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -ne 'X64') { throw 'AIW requires stable x64 PowerShell Core 7.6 or later' }
+foreach ($aiwNativeModule in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security','Microsoft.PowerShell.Archive')) { Import-Module (Join-Path $PSHOME ('Modules\'+$aiwNativeModule+'\'+$aiwNativeModule+'.psd1')) -SkipEditionCheck -ErrorAction Stop }
+$PSModuleAutoLoadingPreference = 'None'
+if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'AIW prohibits Windows PowerShell compatibility sessions' }
+$PSNativeCommandUseErrorActionPreference = $false
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression
 $handoff = Join-Path $PSScriptRoot 'desktop-package-archive.ps1'
@@ -27,6 +35,13 @@ try {
     $expanded = Join-Path $root 'expanded'
     $expand = & (Join-Path $exportRoot 'desktop-package-archive.ps1') -ArchivePath $archive -ArchiveSha256 $export.archiveSha256 -OutputDirectory $expanded @identity | ConvertFrom-Json
     if ($expand.exactInventory -ne $true -or (Get-FileHash -LiteralPath (Join-Path $expanded 'receipt.json')).Hash -cne (Get-FileHash -LiteralPath (Join-Path $PackageRoot 'receipt.json')).Hash) { throw 'Archive round trip changed the receipt' }
+    Push-Location -LiteralPath $root
+    try {
+        $global:LASTEXITCODE = 19
+        $relative = & $handoff -ArchivePath '.\distribution\aiw-desktop.zip' -ArchiveSha256 $export.archiveSha256 -OutputDirectory '.\relative-expanded' @identity | ConvertFrom-Json
+        if ($relative.exactInventory -ne $true -or $LASTEXITCODE -ne 19) { throw 'Archive handoff failed relative-path or stale-native-exit control' }
+    }
+    finally { Pop-Location }
     $preserved = [IO.File]::ReadAllBytes((Join-Path $expanded 'aiw.exe'))
     try { & $handoff -ArchivePath $archive -ArchiveSha256 $export.archiveSha256 -OutputDirectory $expanded @identity | Out-Null; throw 'Existing destination was accepted' }
     catch { if (-not $_.Exception.Message.Contains('Output already exists')) { throw } }
@@ -69,8 +84,8 @@ try {
     }
     finally { if (Test-Path -LiteralPath $junction) { Remove-Item -LiteralPath $junction -Force } }
     if ($PSVersionTable.PSVersion.Major -ge 7) {
-        $output51 = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $handoff -ArchivePath $archive -ArchiveSha256 $export.archiveSha256 -OutputDirectory (Join-Path $root 'powershell51') -ReceiptSha256 $ReceiptSha256 -SourceRevision $SourceRevision | Out-String
-        if ($LASTEXITCODE -ne 0 -or ($output51 | ConvertFrom-Json).exactInventory -ne $true) { throw 'Windows PowerShell 5.1 archive handoff failed' }
+        $coreOutput = & (Join-Path $PSHOME 'pwsh.exe') -NoProfile -ExecutionPolicy Bypass -File $handoff -ArchivePath $archive -ArchiveSha256 $export.archiveSha256 -OutputDirectory (Join-Path $root 'powerShellCore') -ReceiptSha256 $ReceiptSha256 -SourceRevision $SourceRevision | Out-String
+        if ($LASTEXITCODE -ne 0 -or ($coreOutput | ConvertFrom-Json).exactInventory -ne $true) { throw 'PowerShell Core archive handoff failed' }
     }
     Write-Host 'Desktop archive round trip and refusal controls passed.' -ForegroundColor Green
 }

@@ -6,7 +6,8 @@
     CompanyName = 'Community'
     Copyright = '(c) 2026 Nathan McNulty. All rights reserved.'
     Description = 'Thin PowerShell administration surface for the App Isolation Workbench CLI.'
-    PowerShellVersion = '7.4'
+    PowerShellVersion = '7.6'
+    CompatiblePSEditions = @('Core')
     FunctionsToExport = @(
         'Approve-AiwRunPlan',
         'Convert-AiwProject',

@@ -1004,6 +1004,15 @@ impl HeldRunWorkspace {
         reopen_bound_file(&self.output, leaf, &self.evidence.owner_sid)
     }
 
+    /// Read-only held output authority, compatible with external script readers.
+    pub fn reopen_output_file_readonly(
+        &self,
+        leaf: &str,
+    ) -> Result<BoundWorkspaceFile, WorkspaceError> {
+        self.revalidate()?;
+        reopen_bound_file_readonly(&self.output, leaf, &self.evidence.owner_sid)
+    }
+
     pub fn evidence(&self) -> &WorkspaceBindingEvidence {
         &self.evidence
     }

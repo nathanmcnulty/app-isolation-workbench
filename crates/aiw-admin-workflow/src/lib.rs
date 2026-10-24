@@ -14,6 +14,8 @@ mod admin_progress;
 pub mod approval_review;
 #[cfg(windows)]
 mod installer_inspection;
+#[cfg(windows)]
+pub mod msix;
 pub mod packaging;
 
 const MAX_CONFIG_BYTES: u64 = 16 * 1024 * 1024;
@@ -78,6 +80,7 @@ pub struct ApprovalReview {
 }
 
 pub trait ApprovalGate {
+    fn progress(&self, _message: &str) {}
     /// Return the literal operator response. The service requires exactly
     /// `approve <displayed plan hash>`; `None` is cancellation.
     fn review(&self, review: &ApprovalReview) -> Result<Option<String>>;

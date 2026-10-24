@@ -6,6 +6,7 @@ version = 4
 name = "aiw-admin-workflow"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "aiw-evidence",
  "aiw-orchestrator",
  "aiw-probe",
  "aiw-provider-wsb",
@@ -13,6 +14,7 @@ dependencies = [
  "aiw-schema",
  "aiw-windows-platform",
  "anyhow",
+ "base64",
  "hex",
  "serde",
  "serde_json",
@@ -90,6 +92,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "thiserror",
+ "zip",
 ]
 
 [[package]]
@@ -117,6 +120,13 @@ dependencies = [
  "serde_json",
  "sha2",
  "windows",
+]
+
+[[package]]
+name = "aiw-msix-worker"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "aiw-windows-platform",
 ]
 
 [[package]]
@@ -197,6 +207,7 @@ dependencies = [
  "serde_yaml_ng",
  "sha2",
  "thiserror",
+ "zip",
 ]
 
 [[package]]
@@ -226,6 +237,7 @@ version = "0.1.0-alpha.1"
 name = "aiw-windows-platform"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "aiw-evidence",
  "aiw-probe",
  "aiw-provider-wsb",
  "aiw-token",

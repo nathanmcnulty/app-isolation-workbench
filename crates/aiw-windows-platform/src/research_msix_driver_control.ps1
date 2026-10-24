@@ -1,3 +1,5 @@
+#Requires -Version 7.6
+#Requires -PSEdition Core
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 if(Test-Path -LiteralPath $EvidenceDirectory){throw 'Fresh control evidence required'}
@@ -5,13 +7,13 @@ New-Item -ItemType Directory -Path $EvidenceDirectory|Out-Null
 $controls=@()
 foreach($mode in @('success','failure','deadline')) {
  $info=New-Object Diagnostics.ProcessStartInfo
- $info.FileName=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+ $info.FileName='C:\Program Files\PowerShell\7\pwsh.exe'
  $fixed= switch($mode){
   success {"[Console]::Out.WriteLine('aiw-owned-control-out'); [Console]::Error.WriteLine('aiw-owned-control-error'); exit 0"}
   failure {"[Console]::Out.WriteLine('aiw-owned-control-out'); [Console]::Error.WriteLine('aiw-owned-control-error'); exit 42"}
   deadline {"[Console]::Out.WriteLine('aiw-owned-control-out'); [Console]::Error.WriteLine('aiw-owned-control-error'); Start-Sleep -Seconds 30; exit 0"}
  }
- $fixed = '$ProgressPreference=''SilentlyContinue''; ' + $fixed
+ $fixed = 'if($PSVersionTable.PSEdition -cne ''Core'' -or $PSVersionTable.PSVersion -lt [version]''7.6'' -or $PSVersionTable.PSVersion.ToString() -match ''-''){throw ''Stable Core 7.6+ required''}; $ProgressPreference=''SilentlyContinue''; ' + $fixed
  $info.Arguments='-NoProfile -NonInteractive -EncodedCommand '+[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($fixed))
  $info.UseShellExecute=$false; $info.CreateNoWindow=$true
  $info.RedirectStandardOutput=$true; $info.RedirectStandardError=$true

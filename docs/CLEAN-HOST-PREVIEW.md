@@ -1,5 +1,7 @@
 # Clean-host preview handoff
 
+Current source requires stable x64 PowerShell Core 7.6 or later at the machine-wide path. Use the [runtime setup and acceptance plan](handoffs/2026-10-24-powershell76/SETUP-AND-ACCEPTANCE.md) before creating a new VM107 baseline or running a migrated trial. Prior preview observations below retain their original runtime provenance.
+
 This is the release-candidate handoff for the first supported administrator
 preview. It prepares one immutable, verifiable archive for a second operator on
 a separate supported host. It does not itself close the clean-host gate.

@@ -1,3 +1,8 @@
+Runtime prerequisite: stable x64 PowerShell Core 7.6 or later (recommended CI pin: 7.6.7; native acceptance pending).
+Open the machine installation explicitly before using these PowerShell commands:
+  & 'C:\Program Files\PowerShell\7\pwsh.exe' -NoProfile
+Preview/Store/PATH aliases and Windows PowerShell are unsupported. No runtime installation is performed by this package.
+
 App Isolation Workbench {{VERSION}} interactive document preview
 =============================================================
 

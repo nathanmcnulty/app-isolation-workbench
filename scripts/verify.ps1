@@ -1,8 +1,17 @@
+#Requires -Version 7.6
+#Requires -PSEdition Core
 [CmdletBinding()]
 param(
     [switch]$GovernanceOnly
 )
 
+# AIW runtime contract: stable PowerShell Core >=7.6; no compatibility session.
+if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion -lt [version]'7.6' -or $PSVersionTable.PSVersion.PreReleaseLabel -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -ne 'X64') { throw 'AIW requires stable x64 PowerShell Core 7.6 or later' }
+foreach ($aiwNativeModule in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security','Microsoft.PowerShell.Archive')) { Import-Module (Join-Path $PSHOME ('Modules\'+$aiwNativeModule+'\'+$aiwNativeModule+'.psd1')) -SkipEditionCheck -ErrorAction Stop }
+$PSModuleAutoLoadingPreference = 'None'
+if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'AIW prohibits Windows PowerShell compatibility sessions' }
+$PSNativeCommandUseErrorActionPreference = $false
+$env:AIW_TEST_PWSH = Join-Path $PSHOME 'pwsh.exe'
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Push-Location -LiteralPath $repoRoot
@@ -56,10 +65,15 @@ try {
         throw 'Repository workflows do not declare a pinned action'
     }
 
+    & (Join-Path $PSScriptRoot 'test-powershell-runtime-policy.ps1') | ConvertFrom-Json | Out-Null
+    & (Join-Path $PSScriptRoot 'vm-msix/tests/test-powershell-runtime.ps1') | ConvertFrom-Json | Out-Null
+
     if ($GovernanceOnly) {
         Write-Host 'AIW governance-file verification passed.' -ForegroundColor Green
         return
     }
+
+    & (Join-Path $PSScriptRoot 'test-hosted-bootstrap-shell.ps1') | ConvertFrom-Json | Out-Null
 
     cargo fmt --all --check
     if ($LASTEXITCODE -ne 0) { throw 'cargo fmt failed' }
@@ -68,7 +82,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'cargo clippy failed' }
 
     & (Join-Path $PSScriptRoot 'check-local.ps1') -Check Workspace
-    if ($LASTEXITCODE -ne 0) { throw 'cargo test failed' }
+    # check-local is an in-process script: its terminating error is authoritative.
 
     & (Join-Path $PSScriptRoot 'test-preview-package-verifier.ps1')
 

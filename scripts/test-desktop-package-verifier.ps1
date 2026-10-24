@@ -1,6 +1,14 @@
+#Requires -Version 7.6
+#Requires -PSEdition Core
 [CmdletBinding()]
 param([switch]$CheckSignedAssembly)
 
+# AIW runtime contract: stable PowerShell Core >=7.6; no compatibility session.
+if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion -lt [version]'7.6' -or $PSVersionTable.PSVersion.PreReleaseLabel -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -ne 'X64') { throw 'AIW requires stable x64 PowerShell Core 7.6 or later' }
+foreach ($aiwNativeModule in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security','Microsoft.PowerShell.Archive')) { Import-Module (Join-Path $PSHOME ('Modules\'+$aiwNativeModule+'\'+$aiwNativeModule+'.psd1')) -SkipEditionCheck -ErrorAction Stop }
+$PSModuleAutoLoadingPreference = 'None'
+if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'AIW prohibits Windows PowerShell compatibility sessions' }
+$PSNativeCommandUseErrorActionPreference = $false
 $ErrorActionPreference = 'Stop'
 $verifier = Join-Path $PSScriptRoot 'verify-desktop-package.ps1'
 $root = Join-Path ([IO.Path]::GetTempPath()) "aiw-desktop-verifier-$([guid]::NewGuid().ToString('N'))"
@@ -163,11 +171,11 @@ try {
     $written = Write-Receipt 'aiw.dev/desktop-package/v0alpha2' @('notepad-plus-plus', 'notepad-plus-plus-interactive', 'bambu-studio') $guestHash
     $receiptHash = $written.hash; $records = $written.records; $core = $written.core
     if (($env:OS -eq 'Windows_NT' -or $IsWindows) -and $PSVersionTable.PSVersion.Major -ge 7) {
-        $powershell51Output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $verifier -PackageRoot $root -ReceiptSha256 $receiptHash -SourceRevision $sourceRevision | Out-String
-        $powershell51Exit = $LASTEXITCODE
-        if ($powershell51Exit -ne 0) { throw "Windows PowerShell 5.1 verifier failed with native exit code $powershell51Exit" }
-        $powershell51Result = $powershell51Output | ConvertFrom-Json
-        if ($powershell51Result.exactInventory -ne $true -or [string]$powershell51Result.receiptSha256 -cne $receiptHash) { throw 'Windows PowerShell 5.1 verifier result differed from the PowerShell 7 result' }
+        $powerShellCoreOutput = & (Join-Path $PSHOME 'pwsh.exe') -NoProfile -ExecutionPolicy Bypass -File $verifier -PackageRoot $root -ReceiptSha256 $receiptHash -SourceRevision $sourceRevision | Out-String
+        $powerShellCoreExit = $LASTEXITCODE
+        if ($powerShellCoreExit -ne 0) { throw "PowerShell Core verifier failed with native exit code $powerShellCoreExit" }
+        $powerShellCoreResult = $powerShellCoreOutput | ConvertFrom-Json
+        if ($powerShellCoreResult.exactInventory -ne $true -or [string]$powerShellCoreResult.receiptSha256 -cne $receiptHash) { throw 'PowerShell Core verifier result differed from the PowerShell 7 result' }
     }
     & $env:ComSpec /d /c 'exit 19' | Out-Null
     $stale = & $verifier -PackageRoot $root -ReceiptSha256 $receiptHash -SourceRevision $sourceRevision | ConvertFrom-Json

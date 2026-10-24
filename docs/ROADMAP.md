@@ -96,7 +96,8 @@ open. Review this shared foundation before expanding application coverage.
 
 **Signed MSIX research lifecycle completed on VM 106 (2026-10-22):** the exact
 [Notepad++ workflow](NOTEPAD-MSIX-LIFECYCLE.md) passed through normal uninstall and
-independent cleanup. Production evidence-contract integration remains open.
+independent cleanup. The fixed VM107 production execution, desktop approval and
+shared assessment integration also passed; see [MSIX-EXECUTION.md](MSIX-EXECUTION.md).
 **Next security milestone:** prioritize Benchmark 2's real-application baseline/candidate comparison over
 additional packaging recipes. Complete the real classic AppContainer comparison
 using the existing control foundation. Independently review the exact MXC v1.0.0

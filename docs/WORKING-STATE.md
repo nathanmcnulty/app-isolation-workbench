@@ -1,75 +1,54 @@
 # Working state
 
-Updated 2026-10-22. Start with `scripts/work-status.ps1`; this pointer is not a run
-receipt or execution authority. Active branch:
-`codex/proxmox-vm106-controller-20261021`.
+Updated 2026-10-24. Owning branch `codex/new-vm-handoff-20261021`, checkout
+`C:\aiw\app-isolation-workbench` on VM203. Start with `scripts/work-status.ps1`.
+PR #103 remains open and unmerged. This file is a pointer, not execution authority.
 
-## Completed current slice
+## Current adopted slice
 
-The exact signed Notepad++ 8.9.8 MSIX research lifecycle passed on VM 106: actual
-non-elevated packaged process in a fresh standard-user console session, GUI
-edit/save/normal exit, exact 53 document bytes, per-user configuration, all 220
-unchanged payload entries, normal uninstall and independent native/job/task cleanup.
-The complete native terminal receipt passed. See [VM106-MSIX-TRIALS.md](VM106-MSIX-TRIALS.md)
-for exact hashes, failed attempts, driver fixes, tests and verified evidence export.
-[NOTEPAD-MSIX-LIFECYCLE.md](NOTEPAD-MSIX-LIFECYCLE.md) records bounded acceptance;
-production assessment/approval-contract integration remains open. Effective isolation
-is `notMeasured`, not inferred from delivery or function success.
+The JSON-order guard correction requested from Dot's review at `96b5a12` is
+implemented on this owning PR checkout, based on `e7ac987`. Read
+`docs/handoffs/2026-10-24-powershell76/JSON-IDENTITY-GUARD-CORRECTION.md` for
+both embedded guards, exact-consumer regressions and independent source review.
+Stages A–D and merge remain blocked; no VM or runtime/security change is included.
 
-All 12 native tests passed. Actual held-handle exit and retained uninstall-path
-regressions passed under PowerShell 5.1 and 7. Independent consequential reviews
-found no remaining findings; governance passed. GitHub CLI authentication and
-source pushes work. The unchanged private 60-file migration archive was downloaded
-and verified; historical assets/controllers remain unchanged.
+Nathan adopted `docs/handoffs/2026-10-24-powershell76/GOAL.md` for the complete
+offline PowerShell migration, validation and one sanitized source checkpoint push.
+Read its VALIDATION.md and SETUP-AND-ACCEPTANCE.md for coverage and the single
+bundled provisioning/native-acceptance boundary. Source migration uses stable
+x64 Core >=7.6, a fixed machine executable, explicit PowerShell.7.6 HTTPS endpoint,
+held runtime identities and bound preparation/request/SYSTEM/user receipts.
+Legacy evidence remains readable. Incompatible outstanding preparations fail
+before fresh runtime/helper execution; approved tools are never rewritten.
 
-Integration PR #99 is open as a draft. Full local verification passed before a
-dependency audit identified ZIP 2.4.2 advisories. The dependency is now ZIP 9.0.5
-in both lockfiles, with its required Rust 1.88 core minimum aligned across CI,
-local checks and current instructions. Eighty provider tests, both lockfile audits,
-stable workspace Clippy, actual Rust 1.88 all-target compilation and governance
-pass after the update. Independent review cleared the API adaptation and
-MSRV-enabled mechanical style changes. Existing nonfatal dependency-maintenance
-warnings remain visible; no advisory was suppressed. Final hosted CI is required.
+Existing bundled Core 7.6.5 / Windows 10.0.26300.9711 is used only for inert offline tests.
+Recommended/CI pinned patch 7.6.7. No machine runtime installation, endpoint,
+WinRM/firewall/security change, VM107 provisioning/new baseline or native application trial
+is authorized by adoption. The historical provider pins remain deployed; new
+execution refuses that old baseline. Native acceptance is pending bundled approval.
+Historical research execution and the unbootstrapped offline PowerShell Sandbox
+control are explicitly retired; native Rust Sandbox profiles remain separate.
 
-## Worker and remote operation
+## Historical completed acceptance (do not replay)
 
-VM 106 `passkeys-worker` / PASSKEYS-WORKER has UUID
-`7e686bee-8c05-43c7-9603-a9562ece224c`, MAC CC-34-21-7E-FE-59, guest IP 192.168.1.173.
-Proxmox `pve-r630` is 192.168.1.6. Final successful evidence was exported, hash-checked
-and independently read back before a graceful shutdown and exact baseline rollback.
-The baseline `aiw-vm106-baseline-20261021` was never replaced. The worker was
-subsequently started for native passkey-provider preparation: candidate signatures,
-runtime/API preflight and predeployment rejection checks passed; no provider is
-installed. Its private intake is retained for the separate provider acceptance work.
-OS/EFI/TPM restore has now passed repeatedly. Controller PASSKEYS was not rolled back.
+Full app run `msix-1792704525359564000`: execution34369c9, reader2dab30b;
+Control 42, install/open/edit-save-close/uninstall, 53 document bytes, 220 unchanged
+payloads, 6 configs, 44 inventoried files. Cold-clean/released 2026-10-22T21:52:19Z.
+Bounded run `msix-bounded-1792816990610240800`: corrected runtime 1879c77,
+final harness abd17ea; originals survived missing/partial copies, export failure
+retained dirty lease, older inputs unchanged, delayed readiness preceded one
+Control 42. No application Run. Cold-clean/released 2026-10-24T05:12:46Z.
+Both used the former runtime; neither proves migrated Core native acceptance.
+Their leases are released; never recover/replay these completed nonces.
+See docs/MSIX-EXECUTION.md for exact receipts and retained evidence locations.
 
-The repaired closed Proxmox SSH helper supports fixed inspect/status/start/shutdown/
-snapshot/rollback operations and retains exact VM/disk/MAC/pending-config checks.
-Integration review found that extra disks were not excluded. The reviewed source
-now allows only the three pinned writable devices and the observed empty CD drive,
-and rejects host VirtIOFS shares. That guard is deployed; strict-key SSH inspection
-passed with the unchanged three disks and original baseline still present.
-Use [PROXMOX-VM106-CONTROLLER.md](PROXMOX-VM106-CONTROLLER.md). Encrypted NTLM WinRM
-and verified PSRP transfer work as AiwWorkerAdmin (SID ending 1006); credentials
-remain controller-user DPAPI protected outside Git. See
-[scripts/worker106-admin/README.md](../scripts/worker106-admin/README.md).
-After boot, wait for QGA readiness and start WinRM remotely if needed; do not ask
-the operator to copy commands into Windows. The superseded QGA management bootstrap
-is not needed and must not be rerun. No copied Tailscale identity is in the baseline.
+## Worker/recovery boundary
 
-Final controller evidence is `C:\passkeys\worker106-tools\primary-vm106-r5`.
-The private evidence ZIP hash and original signed-input archive hashes are recorded
-in the trial document. The original migration guide remains
-[RESUME-ON-NEW-VM.md](RESUME-ON-NEW-VM.md); old Azure infrastructure is not a dependency.
-
-## Product milestones and next work
-
-Bambu Studio and both Notepad++ recipes previously passed signed public-entry
-Sandbox packaging acceptance (PRs #93/#94); see
-[BAMBU-PUBLIC-ACCEPTANCE.md](BAMBU-PUBLIC-ACCEPTANCE.md).
-Follow [EXECUTION-PLAN.md](EXECUTION-PLAN.md) and [ROADMAP.md](ROADMAP.md).
-Integrate research observations through approved production evidence contracts,
-then complete the real classic AppContainer baseline/candidate comparison using
-the existing controls. MXC requires its own exact-source review/disposable controls.
-Keep delivery, function success and measured containment separate. Leave migration
-releases draft; do not merge or launch CI merely to check this working branch.
+Only VM107: UUID e5cecc90-35c2-4831-bf9c-424be23f7d4e,
+MAC CC:34:21:B8:5A:31, IP 192.168.1.174. Never touch VM106/passkeys-worker or restore VM203.
+Historical snapshot `aiw-msix-worker107-tls-clean-r1` covers OS/EFI/TPM/no RAM.
+The runtime-equipped `aiw-msix-worker107-pwsh76-clean-r1` is planned, not created;
+its actual config/provider/runtime pins require approved provisioning/observation.
+Normal HTTPS certificate BC14DCC4E37F83161EBB55AF8624E36A79E19256 remains required;
+no TLS bypass, default legacy endpoint fallback, credential/key reconfiguration,
+foreign lease adoption or automatic dispatch retry. Keep migration release draft.
