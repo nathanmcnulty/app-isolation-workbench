@@ -135,7 +135,7 @@ impl MsixWorkerRequest {
         let runtime = self.power_shell_runtime.as_ref().ok_or(
             "Historical MSIX request has no approved Core runtime; do not execute or rewrite it",
         )?;
-        runtime.validate()?;
+        runtime.validate_execution()?;
         Ok(runtime)
     }
     pub fn hash(&self) -> Result<String, String> {
@@ -239,6 +239,31 @@ mod tests {
         let retained: MsixWorkerRequest = serde_json::from_value(value.clone()).unwrap();
         assert_eq!(retained.hash().unwrap(), original.hash().unwrap());
         assert_eq!(serde_json::to_value(&retained).unwrap(), value);
+        assert!(retained.execution_runtime().is_err());
+    }
+    #[test]
+    fn pre_wsman_core_request_keeps_original_bytes_and_hash_but_cannot_execute() {
+        let runtime = serde_json::json!({
+            "edition": "Core", "version": "7.6.7", "prerelease": "", "architecture": "X64",
+            "executable": crate::powershell::POWERSHELL_EXECUTABLE,
+            "psHome": crate::powershell::POWERSHELL_PSHOME,
+            "executableSha256": "a".repeat(64),
+            "capabilities": crate::powershell::POWERSHELL_CAPABILITIES,
+            "compatibilitySessionCount": 0,
+        });
+        let mut value = serde_json::to_value(request()).unwrap();
+        value["powerShellRuntime"] = serde_json::json!({
+            "host": runtime, "worker": runtime,
+            "endpoint": crate::powershell::POWERSHELL_REMOTING_ENDPOINT,
+        });
+        let bytes = serde_json::to_vec(&value).unwrap();
+        let retained: MsixWorkerRequest = serde_json::from_slice(&bytes).unwrap();
+        retained.validate().unwrap();
+        assert_eq!(
+            serde_json::to_vec(&serde_json::to_value(&retained).unwrap()).unwrap(),
+            bytes
+        );
+        assert_eq!(retained.hash().unwrap(), hex::encode(Sha256::digest(bytes)));
         assert!(retained.execution_runtime().is_err());
     }
 }

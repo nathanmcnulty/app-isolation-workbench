@@ -246,7 +246,7 @@ pub fn run() -> Result<()> {
         .power_shell_runtime
         .as_ref()
         .ok_or("Legacy preparation is evidence-only; new approved runtime preparation required")?;
-    approved_runtime.validate()?;
+    approved_runtime.validate_execution()?;
     if runtime.identity != approved_runtime.worker {
         return Err("Approved worker PowerShell runtime identity differs".into());
     }
@@ -467,7 +467,7 @@ mod tests {
                     .count(),
                 1
             );
-            assert!(source.contains("Stable x64 PowerShell Core >=7.6 required"));
+            assert!(source.contains("Stable machine x64 PowerShell Core >=7.6 required"));
         }
         let root = std::env::temp_dir().join(format!(
             "aiw-script-structure-{}-{}",

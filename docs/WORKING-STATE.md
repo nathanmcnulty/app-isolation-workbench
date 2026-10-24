@@ -6,6 +6,12 @@ PR #103 remains open and unmerged. This file is a pointer, not execution authori
 
 ## Current adopted slice
 
+The WSMan host/engine correction requested from Dot's review at `7cd7bf3` is
+implemented on this owning PR checkout, based on `73a9fd6`. Read
+`docs/handoffs/2026-10-24-powershell76/WSMAN-IDENTITY-CORRECTION.md` for the
+distinct endpoint/worker bindings, regressions and independent source review.
+Stages A–D and merge remain blocked; no VM or runtime/security change is included.
+
 Nathan adopted `docs/handoffs/2026-10-24-powershell76/GOAL.md` for the complete
 offline PowerShell migration, validation and one sanitized source checkpoint push.
 Read its VALIDATION.md and SETUP-AND-ACCEPTANCE.md for coverage and the single

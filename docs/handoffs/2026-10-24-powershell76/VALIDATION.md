@@ -1,5 +1,15 @@
 # PowerShell 7.6 offline migration validation
 
+## Subsequent WSMan identity correction
+
+The [WSMan correction record](WSMAN-IDENTITY-CORRECTION.md) supersedes the
+original endpoint identity model below. It separates the actual wsmprovhost.exe
+host and loaded Core engine from the independently observed worker pwsh.exe.
+The original migration's test counts, package worker hash and hosted run remain
+historical evidence for their identified source; they are not new correction
+results. Fresh correction checks and independent review are recorded separately.
+Stages A–D and merge remain blocked.
+
 This record distinguishes source/inert checks from separately gated installation,
 remoting, baseline provisioning and native application acceptance. The adopted
 goal covers the offline source package and one sanitized checkpoint push only.

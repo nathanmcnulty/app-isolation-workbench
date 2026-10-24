@@ -176,6 +176,15 @@ pub fn report_vm_msix_run(
     {
         return Err("Restored runtime differs from approved runtime baseline".into());
     }
+    if let Some(wsman) = request
+        .power_shell_runtime
+        .as_ref()
+        .and_then(|runtime| runtime.wsman.as_ref())
+        && proofs["clean"]["powerShellEndpoint"]
+            != serde_json::to_value(wsman).map_err(|e| error(&e))?
+    {
+        return Err("Restored WSMan endpoint differs from approved endpoint baseline".into());
+    }
     let verified = report["workflowVerified"] == true && recovered.is_none();
     if (verified && result.outcome != RunOutcome::InsufficientEvidence)
         || (!verified && result.outcome != RunOutcome::Failed)

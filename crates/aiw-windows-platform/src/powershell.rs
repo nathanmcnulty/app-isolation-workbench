@@ -15,6 +15,7 @@ use std::{
 pub struct HeldPowerShell {
     _directory: File,
     image: HeldApplicationFile,
+    engine: HeldApplicationFile,
     pub identity: PowerShellRuntimeIdentity,
 }
 impl HeldPowerShell {
@@ -91,7 +92,25 @@ impl HeldPowerShell {
             .into());
         }
         let identity: PowerShellRuntimeIdentity = serde_json::from_slice(&bytes)?;
-        identity.validate()?;
+        identity.validate_execution()?;
+        let engine = HeldApplicationFile::open_bounded(
+            std::path::Path::new(aiw_probe::powershell::POWERSHELL_ENGINE),
+            128 * 1024 * 1024,
+        )?;
+        if !engine
+            .observation()
+            .canonical_path
+            .trim_start_matches(r"\\?\")
+            .eq_ignore_ascii_case(aiw_probe::powershell::POWERSHELL_ENGINE)
+            || engine.observation().sha256
+                != identity
+                    .engine
+                    .as_ref()
+                    .ok_or("Engine identity missing")?
+                    .assembly_sha256
+        {
+            return Err("Observed loaded engine differs from held machine engine".into());
+        }
         image.revalidate()?;
         if image.observation().sha256 != identity.executable_sha256 {
             return Err("Observed PowerShell image differs from held image".into());
@@ -99,11 +118,13 @@ impl HeldPowerShell {
         Ok(Self {
             _directory: directory,
             image,
+            engine,
             identity,
         })
     }
     pub fn revalidate(&self) -> Result<(), Box<dyn std::error::Error>> {
         self.image.revalidate()?;
+        self.engine.revalidate()?;
         Ok(())
     }
 }
@@ -287,7 +308,7 @@ mod tests {
                 .count(),
             1
         );
-        assert!(source.contains("Stable x64 PowerShell Core >=7.6 required"));
+        assert!(source.contains("Stable machine x64 PowerShell Core >=7.6 required"));
         assert!(source.contains("throw 'guard retained'"));
         assert!(POWERSHELL_RUNTIME_GUARD.contains("#Requires -PSEdition Core"));
     }

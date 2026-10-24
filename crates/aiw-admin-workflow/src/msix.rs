@@ -359,12 +359,13 @@ fn observe_runtime_binding(
     let binding = aiw_probe::powershell::PowerShellExecutionBinding {
         host: serde_json::from_value(value["host"].clone())?,
         worker: serde_json::from_value(value["worker"].clone())?,
+        wsman: Some(serde_json::from_value(value["wsman"].clone())?),
         endpoint: value["endpoint"]
             .as_str()
             .context("Explicit runtime endpoint missing")?
             .into(),
     };
-    binding.validate().map_err(anyhow::Error::msg)?;
+    binding.validate_execution().map_err(anyhow::Error::msg)?;
     Ok(binding)
 }
 
@@ -702,6 +703,11 @@ fn verify_recovery_runtime(request: &MsixWorkerRequest, proofs: &Value) -> Resul
         runtime.validate().map_err(anyhow::Error::msg)?;
         if proofs["clean"]["powerShellRuntime"] != serde_json::to_value(&runtime.worker)? {
             bail!("Restored Core runtime identity differs from the approved baseline; retain lease")
+        }
+        if let Some(wsman) = &runtime.wsman
+            && proofs["clean"]["powerShellEndpoint"] != serde_json::to_value(wsman)?
+        {
+            bail!("Restored WSMan endpoint differs from the approved baseline; retain lease")
         }
     }
     Ok(())

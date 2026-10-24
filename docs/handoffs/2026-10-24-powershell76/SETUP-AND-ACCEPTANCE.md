@@ -57,9 +57,16 @@ invoke a legacy PowerShell bootstrap or infer the guest runtime from the caller.
 ## Stage B: register the endpoint without broadening access
 
 Use the installed Core executable after its in-guest runtime and UUID proof.
-Prepare a fixed full-language session configuration for the required closed AIW
-transport, register only `PowerShell.7.6` with its Core plugin/PSHOME and retain the
-prior endpoint/listener/ACL inventory. Endpoint access is restricted to the exact
+Retain the prior endpoint/listener/ACL inventory. Register only `PowerShell.7.6`
+using basic `Register-PSSessionConfiguration -Name PowerShell.7.6` registration,
+explicit `-ProcessorArchitecture amd64`, `-UseSharedProcess:$false` and
+`-NoServiceRestart`, with the restricted security descriptor below. Do not use
+`-Path`, a PSSC/ConfigFilePath, RunAs, startup script or custom initialization.
+The closed proof requires the sole initialization parameter `PSVersion=7.6`,
+not the generic install script's `7.0`. Verify the actual Registry64 ConfigXML,
+resource URI, Resource SupportsOptions, registered plugin and adjacent
+RemotePowerShellConfig.txt redirects to the fixed PSHOME/CORECLRDIR. Endpoint
+access is restricted to the exact
 labadmin SID above and SYSTEM, with owner/group Administrators; no Everyone,
 Authenticated Users, anonymous or general Remote Management Users grant.
 
@@ -67,8 +74,11 @@ Registration and any required **WinRM restart** are part of this approval stage.
 Use no-service-restart registration followed by an explicit recorded restart.
 Retain the existing sole HTTPS listener and controller-only firewall rules;
 do not call broad `Enable-PSRemoting`, change TrustedHosts, or enable HTTP.
-Prove endpoint Core/version/image/PSHOME/hash and native modules through both
-Invoke-Command and the same session used by Copy-Item. Only after this proof may
+Prove the actual wsmprovhost.exe host, loaded Core assembly path/hash/version/MVID,
+registered configuration/plugin, PSHOME and native modules through Invoke-Command
+in the same session used by Copy-Item. Independently launch and prove the fixed
+worker pwsh.exe and bind both distinct identities; an endpoint name or installed
+file alone is insufficient. Only after this proof may
 the superseded `Microsoft.PowerShell` management endpoint be disabled; record that
 security change and verify normal HTTPS access again. On failure preserve state
 and use the approved Proxmox recovery route, without enabling fallback endpoints.
