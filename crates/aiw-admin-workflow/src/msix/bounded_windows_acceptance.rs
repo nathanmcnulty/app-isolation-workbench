@@ -95,7 +95,7 @@ impl VmOperations for DelayedControl {
 fn fixture(mode: &str, workspace: &HeldRunWorkspace, request: &MsixWorkerRequest) -> Result<Value> {
     stage(
         workspace,
-        &format!("acceptance-fixture-intent-{mode}"),
+        &format!("acceptance-fixture-intent-{}", mode.to_ascii_lowercase()),
         &json!({"nonce":request.nonce,"mode":mode,"automaticRetry":false}),
     )?;
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -298,7 +298,7 @@ fn vm107_bounded_windows_acceptance() -> Result<()> {
         "BOUND WORKSPACE: {} RUN: {run_id} NONCE: {nonce}",
         workspace.root_path().display()
     );
-    execute_bounded(workspace, prepared, request, held, false)
+    execute_bounded(workspace, prepared, request, held, false, false)
 }
 fn execute_bounded(
     workspace: HeldRunWorkspace,
@@ -306,6 +306,7 @@ fn execute_bounded(
     request: MsixWorkerRequest,
     held: aiw_orchestrator::HeldVmMsixPreparation,
     resume: bool,
+    post_control: bool,
 ) -> Result<()> {
     let run_id = request.run_id.clone();
     let nonce = request.nonce.clone();
@@ -334,46 +335,48 @@ fn execute_bounded(
                 &provider("connect", Some(&nonce), Some(&worker))?,
             )?;
         }
-        stage(
-            &workspace,
-            "initial-clean",
-            &RecoveryVm.clean(&request, &workspace)?,
-        )?;
-        stage(
-            &workspace,
-            "begin",
-            &provider("begin", Some(&nonce), Some(&worker))?,
-        )?;
-        stage(&workspace, "stage-intent", &json!({"nonce":nonce}))?;
-        stage(
-            &workspace,
-            "guest-staged",
-            &transport("Stage", &run_id, workspace.root_path())?,
-        )?;
-        stage(&workspace, "enroll-intent", &json!({"nonce":nonce}))?;
-        stage(
-            &workspace,
-            "enroll-dispatch",
-            &transport("Enroll", &run_id, workspace.root_path())?,
-        )?;
-        wait_operation(&workspace, &run_id, &nonce, "enroll", 120)?;
-        let mut delayed = DelayedControl {
-            pending: 0,
-            ready: 0,
-            controls: 0,
-            restarted: false,
-        };
-        eprintln!("Polling actual delayed interactive readiness before native Control.");
-        ready_then_control(&workspace, &request, &mut delayed, Duration::from_secs(360))?;
-        wait_operation(&workspace, &run_id, &nonce, "control", 150)?;
-        if delayed.pending == 0 || delayed.ready == 0 || delayed.controls != 1 {
-            bail!("Bounded delayed Control counts differ")
+        if !post_control {
+            stage(
+                &workspace,
+                "initial-clean",
+                &RecoveryVm.clean(&request, &workspace)?,
+            )?;
+            stage(
+                &workspace,
+                "begin",
+                &provider("begin", Some(&nonce), Some(&worker))?,
+            )?;
+            stage(&workspace, "stage-intent", &json!({"nonce":nonce}))?;
+            stage(
+                &workspace,
+                "guest-staged",
+                &transport("Stage", &run_id, workspace.root_path())?,
+            )?;
+            stage(&workspace, "enroll-intent", &json!({"nonce":nonce}))?;
+            stage(
+                &workspace,
+                "enroll-dispatch",
+                &transport("Enroll", &run_id, workspace.root_path())?,
+            )?;
+            wait_operation(&workspace, &run_id, &nonce, "enroll", 120)?;
+            let mut delayed = DelayedControl {
+                pending: 0,
+                ready: 0,
+                controls: 0,
+                restarted: false,
+            };
+            eprintln!("Polling actual delayed interactive readiness before native Control.");
+            ready_then_control(&workspace, &request, &mut delayed, Duration::from_secs(360))?;
+            wait_operation(&workspace, &run_id, &nonce, "control", 150)?;
+            if delayed.pending == 0 || delayed.ready == 0 || delayed.controls != 1 {
+                bail!("Bounded delayed Control counts differ")
+            }
+            stage(
+                &workspace,
+                "acceptance-delayed-readiness",
+                &json!({"pendingObservations":delayed.pending,"readyObservations":delayed.ready,"controlDispatches":delayed.controls,"runDispatches":0,"passed":true}),
+            )?;
         }
-        stage(
-            &workspace,
-            "acceptance-delayed-readiness",
-            &json!({"pendingObservations":delayed.pending,"readyObservations":delayed.ready,"controlDispatches":delayed.controls,"runDispatches":0,"passed":true}),
-        )?;
         eprintln!(
             "Creating inert authoritative fixtures with a deliberate export-blocking stream."
         );
@@ -479,7 +482,9 @@ fn execute_bounded(
 
 fn resume_initial_checkpoint() -> Result<()> {
     const RUN: &str = "msix-bounded-1792816990610240800";
-    if std::env::var("AIW_VM107_BOUNDED_RESUME").as_deref() != Ok(RUN) {
+    let post_control = std::env::var("AIW_VM107_BOUNDED_RESUME").as_deref()
+        == Ok("msix-bounded-1792816990610240800:post-control");
+    if !post_control && std::env::var("AIW_VM107_BOUNDED_RESUME").as_deref() != Ok(RUN) {
         bail!("Only this retained pre-enrollment acceptance may resume")
     }
     let path = Path::new(ROOT).join(RUN).join("workspace");
@@ -491,16 +496,18 @@ fn resume_initial_checkpoint() -> Result<()> {
     let held = aiw_orchestrator::open_vm_msix_preparation(&plan)?;
     let prepared = held.preparation.clone();
     let workspace = HeldRunWorkspace::reopen_bound(&prepared.workspace)?;
-    for name in [
-        "initial-clean.json",
-        "begin.json",
-        "stage-intent.json",
-        "enroll-intent.json",
-        "control-intent.json",
-        "run-intent.json",
-    ] {
-        if workspace.output_path().join(name).exists() {
-            bail!("Resume is restricted to the unchanged pre-enrollment checkpoint: {name}")
+    if !post_control {
+        for name in [
+            "initial-clean.json",
+            "begin.json",
+            "stage-intent.json",
+            "enroll-intent.json",
+            "control-intent.json",
+            "run-intent.json",
+        ] {
+            if workspace.output_path().join(name).exists() {
+                bail!("Resume is restricted to the unchanged pre-enrollment checkpoint: {name}")
+            }
         }
     }
     let file = workspace.reopen_tools_file_readonly("request.json")?;
@@ -518,16 +525,49 @@ fn resume_initial_checkpoint() -> Result<()> {
         bail!("Retained acceptance request differs")
     }
     let state = provider("inspect", Some(&request.nonce), Some(&prepared.worker))?;
-    if state["phase"] != "online-clean" || state["leasePresent"] != true {
+    let expected_phase = if post_control {
+        "dirty"
+    } else {
+        "online-clean"
+    };
+    if state["phase"] != expected_phase || state["leasePresent"] != true {
         bail!("Pre-enrollment lease phase differs")
+    }
+    if post_control {
+        for name in [
+            "acceptance-fixture-created.json",
+            "acceptance-fixture-intent-createrawwithnamedstream.json",
+            "run-intent.json",
+            "collection-authoritative-complete.json",
+            "recovery-restore.json",
+        ] {
+            if workspace.output_path().join(name).exists() {
+                bail!("Post-Control resume requires no fixture/recovery dispatch: {name}")
+            }
+        }
+        let readiness = read_stage(&workspace, "acceptance-delayed-readiness.json")?;
+        let control = read_stage(&workspace, "control-status.json")?;
+        let result = &control["records"]["control-result"];
+        if readiness["passed"] != true
+            || readiness["controlDispatches"] != 1
+            || readiness["runDispatches"] != 0
+            || result["nonce"] != request.nonce
+            || result["requestSha256"] != request.hash().map_err(anyhow::Error::msg)?
+            || result["passed"] != true
+            || result["observedExitCode"] != 42
+            || result["jobEmpty"] != true
+        {
+            bail!("Exact terminal delayed-Control proof required")
+        }
+        assert_tools(&workspace, &prepared, &request)?;
     }
     stage(
         &workspace,
-        &format!("acceptance-pre-enrollment-resume-{}", super::super::nonce()),
-        &json!({"nonce":request.nonce,"retainedState":state,"runtimeCorrection":"read-only helper authority","noMutatingDispatchRepeated":true}),
+        &format!("acceptance-resume-{}", super::super::nonce()),
+        &json!({"nonce":request.nonce,"retainedState":state,"runtimeCorrection":"read-only helper authority","noMutatingDispatchRepeated":true,"postControl":post_control}),
     )?;
     eprintln!(
-        "Resuming the exact retained lease before enrollment; no acquire/restore/connect is repeated."
+        "Resuming the exact recorded acceptance checkpoint; no prior mutating dispatch is repeated."
     );
-    execute_bounded(workspace, prepared, request, held, true)
+    execute_bounded(workspace, prepared, request, held, true, post_control)
 }
