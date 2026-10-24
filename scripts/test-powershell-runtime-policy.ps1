@@ -51,7 +51,16 @@ foreach ($workflow in Get-ChildItem (Join-Path $repo '.github/workflows') -Filte
         $provision = $jobSource.IndexOf('Provision stable PowerShell 7.6.7')
         $firstOperation = $jobSource.IndexOf('AIW inline runtime assertion')
         if ($provision -lt 0 -or $firstOperation -lt 0 -or $provision -gt $firstOperation) { throw "Job lacks runtime provisioning before its first operation: $($workflow.Name)/$($job.Groups[1].Value)" }
-        if ($stage -lt 0 -or $stage -gt $provision -or $jobSource -notmatch 'shell: ''"\$\{\{ runner.temp \}\}\\aiw-core-bootstrap\\pwsh.exe"') { throw "MSI provisioning must run from a staged copy after the original runtime exits: $($workflow.Name)/$($job.Groups[1].Value)" }
+        $shellTemplate = 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "{IMAGE}" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
+        $bootstrapShell = 'shell: ''' + $shellTemplate.Replace('{IMAGE}', '%RUNNER_TEMP%\aiw-core-bootstrap\pwsh.exe') + ''''
+        $machineShell = 'shell: ''' + $shellTemplate.Replace('{IMAGE}', 'C:\Program Files\PowerShell\7\pwsh.exe') + ''''
+        if ($stage -lt 0 -or $stage -gt $provision -or -not $jobSource.Contains($bootstrapShell)) { throw "MSI provisioning must run from a staged copy after the original runtime exits: $($workflow.Name)/$($job.Groups[1].Value)" }
+        $shellLines = [regex]::Matches($jobSource, '(?m)^\s+shell: [^\r\n]+')
+        if (@($shellLines | Where-Object { $_.Value.Trim() -ceq 'shell: pwsh' }).Count -ne 1) { throw 'Only the trusted runtime-copy step may use the hosted pwsh shell' }
+        foreach ($shellLine in $shellLines) {
+            $shell = $shellLine.Value.Trim()
+            if ($shell -cne 'shell: pwsh' -and $shell -cne $bootstrapShell -and $shell -cne $machineShell) { throw "Unexpected workflow shell/context/runner parsing: $($workflow.Name)" }
+        }
         if ([regex]::Matches($jobSource,'name: Stage trusted hosted Core bootstrap').Count -ne 1 -or [regex]::Matches($jobSource,'name: Provision stable PowerShell').Count -ne 1) { throw 'Each job must stage and provision its runtime exactly once' }
         if ($jobSource -notmatch "\`$env:PSModulePath = \[IO.Path\]::Combine\(\`$PSHOME, 'Modules'\)" -or $jobSource -notmatch 'Staged bootstrap runtime identity differs') { throw 'The copied bootstrap must isolate module loading from the machine runtime being upgraded' }
         if ($jobSource -match 'scripts/powershell-runtime.ps1') { throw 'Inline hosted assertions must not depend on checkout files' }

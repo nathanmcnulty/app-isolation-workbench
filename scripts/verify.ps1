@@ -73,6 +73,8 @@ try {
         return
     }
 
+    & (Join-Path $PSScriptRoot 'test-hosted-bootstrap-shell.ps1') | ConvertFrom-Json | Out-Null
+
     cargo fmt --all --check
     if ($LASTEXITCODE -ne 0) { throw 'cargo fmt failed' }
 

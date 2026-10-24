@@ -44,7 +44,7 @@ jobs:
       - name: Provision stable PowerShell 7.6.7 (hosted runner only)
         # Run from the copy after the original machine-runtime process has exited.
         # No AIW operation executes until the exact stable runtime is selected.
-        shell: '"${{ runner.temp }}\aiw-core-bootstrap\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File {0}'
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "%RUNNER_TEMP%\aiw-core-bootstrap\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         run: |
           $ErrorActionPreference = 'Stop'
           $bootstrap = [IO.Path]::Combine($env:RUNNER_TEMP, 'aiw-core-bootstrap')
@@ -63,7 +63,7 @@ jobs:
           'C:\Program Files\PowerShell\7' | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
           'AIW_TEST_PWSH=C:\Program Files\PowerShell\7\pwsh.exe' | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Check source
-        shell: '"C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File {0}'
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         run: |
           $ErrorActionPreference = 'Stop'
           # AIW inline runtime assertion: independent of repository checkout.
@@ -75,7 +75,7 @@ jobs:
           if ((git rev-parse HEAD).Trim() -cne $env:SOURCE_REVISION) { throw 'Signing source differs from the dispatched commit' }
           New-Item -ItemType Directory -Path out | Out-Null
       - name: Build project-owned CLI control
-        shell: '"C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File {0}'
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         run: |
           $ErrorActionPreference = 'Stop'
           # AIW inline runtime assertion: independent of repository checkout.
@@ -125,7 +125,7 @@ jobs:
       - name: Provision stable PowerShell 7.6.7 (hosted runner only)
         # Run from the copy after the original machine-runtime process has exited.
         # No AIW operation executes until the exact stable runtime is selected.
-        shell: '"${{ runner.temp }}\aiw-core-bootstrap\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File {0}'
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "%RUNNER_TEMP%\aiw-core-bootstrap\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         run: |
           $ErrorActionPreference = 'Stop'
           $bootstrap = [IO.Path]::Combine($env:RUNNER_TEMP, 'aiw-core-bootstrap')
@@ -150,7 +150,7 @@ jobs:
           name: aiw-unsigned-control-${{ github.sha }}
           path: out
       - name: Check transferred source and bytes before acquiring authority
-        shell: '"C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File {0}'
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         env:
           SOURCE_REVISION: ${{ github.sha }}
           CLIENT_ID: ${{ vars.AIW_SIGNING_CLIENT_ID }}
@@ -233,7 +233,7 @@ jobs:
       - name: Provision stable PowerShell 7.6.7 (hosted runner only)
         # Run from the copy after the original machine-runtime process has exited.
         # No AIW operation executes until the exact stable runtime is selected.
-        shell: '"${{ runner.temp }}\aiw-core-bootstrap\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File {0}'
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "%RUNNER_TEMP%\aiw-core-bootstrap\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         run: |
           $ErrorActionPreference = 'Stop'
           $bootstrap = [IO.Path]::Combine($env:RUNNER_TEMP, 'aiw-core-bootstrap')
@@ -257,7 +257,7 @@ jobs:
           name: aiw-signed-control-${{ github.sha }}
           path: out
       - name: Verify publisher, timestamp, and signed bytes
-        shell: '"C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File {0}'
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         env:
           SOURCE_REVISION: ${{ github.sha }}
         run: |

@@ -45,7 +45,7 @@ jobs:
       - name: Provision stable PowerShell 7.6.7 (hosted runner only)
         # Run from the copy after the original machine-runtime process has exited.
         # No AIW operation executes until the exact stable runtime is selected.
-        shell: '"${{ runner.temp }}\aiw-core-bootstrap\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File {0}'
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "%RUNNER_TEMP%\aiw-core-bootstrap\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         run: |
           $ErrorActionPreference = 'Stop'
           $bootstrap = [IO.Path]::Combine($env:RUNNER_TEMP, 'aiw-core-bootstrap')
@@ -66,7 +66,7 @@ jobs:
 
       - name: Build unsigned desktop inputs without signing authority
         id: build
-        shell: '"C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File {0}'
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         env:
           SOURCE_REVISION: ${{ github.sha }}
           PUBLISH_REQUESTED: ${{ inputs.publish }}
@@ -140,7 +140,7 @@ jobs:
       - name: Provision stable PowerShell 7.6.7 (hosted runner only)
         # Run from the copy after the original machine-runtime process has exited.
         # No AIW operation executes until the exact stable runtime is selected.
-        shell: '"${{ runner.temp }}\aiw-core-bootstrap\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File {0}'
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "%RUNNER_TEMP%\aiw-core-bootstrap\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         run: |
           $ErrorActionPreference = 'Stop'
           $bootstrap = [IO.Path]::Combine($env:RUNNER_TEMP, 'aiw-core-bootstrap')
@@ -164,7 +164,7 @@ jobs:
           name: aiw-desktop-signing-inputs-${{ github.sha }}
           path: inputs
       - name: Check exact transferred inventory before Azure login
-        shell: '"C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File {0}'
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         env:
           SOURCE_REVISION: ${{ github.sha }}
           RECEIPT: ${{ needs.build.outputs.receipt }}
@@ -254,7 +254,7 @@ jobs:
       - name: Provision stable PowerShell 7.6.7 (hosted runner only)
         # Run from the copy after the original machine-runtime process has exited.
         # No AIW operation executes until the exact stable runtime is selected.
-        shell: '"${{ runner.temp }}\aiw-core-bootstrap\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File {0}'
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "%RUNNER_TEMP%\aiw-core-bootstrap\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         run: |
           $ErrorActionPreference = 'Stop'
           $bootstrap = [IO.Path]::Combine($env:RUNNER_TEMP, 'aiw-core-bootstrap')
@@ -283,7 +283,7 @@ jobs:
           path: ${{ runner.temp }}\signed-inputs
       - name: Assemble and round-trip exact signed bytes without executing applications
         id: assemble
-        shell: '"C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File {0}'
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         env:
           SOURCE_REVISION: ${{ github.sha }}
           RECEIPT: ${{ needs.build.outputs.receipt }}
@@ -405,7 +405,7 @@ jobs:
       - name: Provision stable PowerShell 7.6.7 (hosted runner only)
         # Run from the copy after the original machine-runtime process has exited.
         # No AIW operation executes until the exact stable runtime is selected.
-        shell: '"${{ runner.temp }}\aiw-core-bootstrap\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File {0}'
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "%RUNNER_TEMP%\aiw-core-bootstrap\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         run: |
           $ErrorActionPreference = 'Stop'
           $bootstrap = [IO.Path]::Combine($env:RUNNER_TEMP, 'aiw-core-bootstrap')
@@ -430,7 +430,7 @@ jobs:
           name: aiw-desktop-candidate-${{ github.sha }}
           path: release
       - name: Verify transferred handoff without executing payload or scripts
-        shell: '"C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File {0}'
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         env:
           SOURCE_REVISION: ${{ github.sha }}
           INVENTORY: ${{ needs.assemble.outputs.handoff-inventory }}
@@ -460,7 +460,7 @@ jobs:
         with:
           subject-path: ${{ github.workspace }}\release\*
       - name: Publish only the verified alpha assets and independent hashes
-        shell: '"C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File {0}'
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_REVISION: ${{ github.sha }}

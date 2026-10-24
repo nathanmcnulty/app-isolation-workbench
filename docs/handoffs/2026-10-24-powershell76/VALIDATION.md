@@ -103,6 +103,21 @@ checkpoint checks both minimums and Core 7.6.7. Its terminal results and the exa
 clean-source package receipt/worker hash belong to the consolidated checkpoint
 report, distinct from these local source checks and from native acceptance.
 
+The first published source checkpoint, `e7ab0a6`, was rejected by GitHub before
+jobs started: `runner.temp` is unavailable in `steps.shell`. The corrected
+workflows use a fixed native cmd wrapper to select the staged or machine Core
+image. It also handles the runner's first-space shell parsing and extensionless
+script files by copying original bytes to a fresh `.ps1` before `-File`. No
+Windows PowerShell process is involved. Six bounded local regressions passed
+using an existing-runtime copy: both routes, extensionless input, spaced paths,
+exit42 propagation and preexisting-file refusal/preservation. Machine paths are
+substituted only in that inert fixture; no machine runtime was installed.
+All 35 custom shell declarations and all 12 job gates are checked, with only
+the initial trusted runtime-copy step allowed to use the hosted `pwsh` selector.
+The new regression is part of full verification; corrected governance passed.
+The replacement checkpoint's CI result is reported separately from the initial
+workflow-definition failure, which is not relabeled or rerun unchanged.
+
 Logs and build products are retained outside Git under
 `C:\AIW-Resume-20261021\powershell76-*`. Only source, tests and sanitized
 documentation enter the final checkpoint. Historical full application acceptance

@@ -38,7 +38,7 @@ jobs:
       - name: Provision stable PowerShell 7.6.7 (hosted runner only)
         # Run from the copy after the original machine-runtime process has exited.
         # No AIW operation executes until the exact stable runtime is selected.
-        shell: '"${{ runner.temp }}\aiw-core-bootstrap\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File {0}'
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "%RUNNER_TEMP%\aiw-core-bootstrap\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         run: |
           $ErrorActionPreference = 'Stop'
           $bootstrap = [IO.Path]::Combine($env:RUNNER_TEMP, 'aiw-core-bootstrap')
@@ -58,7 +58,7 @@ jobs:
           'AIW_TEST_PWSH=C:\Program Files\PowerShell\7\pwsh.exe' | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Assemble only the pinned portable recipe without execution
-        shell: '"C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File {0}'
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         env:
           SOURCE_REVISION: ${{ github.sha }}
         run: |
@@ -126,7 +126,7 @@ jobs:
       - name: Provision stable PowerShell 7.6.7 (hosted runner only)
         # Run from the copy after the original machine-runtime process has exited.
         # No AIW operation executes until the exact stable runtime is selected.
-        shell: '"${{ runner.temp }}\aiw-core-bootstrap\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File {0}'
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "%RUNNER_TEMP%\aiw-core-bootstrap\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         run: |
           $ErrorActionPreference = 'Stop'
           $bootstrap = [IO.Path]::Combine($env:RUNNER_TEMP, 'aiw-core-bootstrap')
@@ -150,7 +150,7 @@ jobs:
           name: aiw-msix-unsigned-${{ github.sha }}
           path: transfer
       - name: Check the exact unsigned transfer before authentication
-        shell: '"C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File {0}'
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         env:
           SOURCE_REVISION: ${{ github.sha }}
         run: |
@@ -193,7 +193,7 @@ jobs:
           exclude-azure-developer-cli-credential: true
           exclude-interactive-browser-credential: true
       - name: Verify the signed publisher and retain the final byte identity
-        shell: '"C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File {0}'
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         env:
           SOURCE_REVISION: ${{ github.sha }}
         run: |
