@@ -78,8 +78,20 @@ Completed local source checks:
   ACL-at-creation/existing-ACL preservation and all 61 retired-entry checks.
 - Preview, desktop verifier and archive controls passed for current and historical
   receipt formats, with relative-path, stale-exit, structured-error and refusal
-  coverage. The additional clean-source signed-assembly control is attested in
-  the final checkpoint report; its earlier dirty-tree refusal is not a pass.
+  coverage. The additional `-CheckSignedAssembly` control passed on clean source
+  `7e43cda778446fce6926a5797e6bfaf5cd364b18`, including real unsigned-signature
+  and altered-build-record refusal. Its earlier dirty-tree refusal is not a pass.
+
+The clean-source static-CRT worker/desktop build passed, and all six package
+payload files were independently size/hash checked. The desktop contains the
+same worker SHA256 that its receipt records:
+`03c2ff4e289b4ffbc5f8327488853d830f273aead8fe9733a74c783f04b5aeda`.
+The exact final source revision and receipt hash are emitted by the fresh package
+build after the final documentation commit and retained outside Git. Neither
+binary was launched as an application trial. The assembly/signing metadata and
+historical deployed provider pins remain unchanged; no future baseline pin is
+fabricated. This is an unsigned development desktop package, not a newly signed
+application or native acceptance receipt.
 
 The first full workspace attempt found duplicate PSEdition requirements in an
 assembled worker script. The assembler now emits one requirement block while

@@ -8,6 +8,8 @@ back to Windows PowerShell, weakening HTTPS, or broad Enable-PSRemoting.
 ## Exact scope and inputs
 
 - Development/controller: existing VM203, `C:\aiw\app-isolation-workbench`.
+  Verified controller UUID `652a575b-a462-418e-95bb-360b28516925`;
+  recheck before installation, independently of the worker identity below.
 - Disposable worker: **VM107 only**, `aiw-worker`, UUID
   `e5cecc90-35c2-4831-bf9c-424be23f7d4e`, MAC `CC:34:21:B8:5A:31`,
   `192.168.1.174`. Proxmox `pve-r630`, `192.168.1.6`.
