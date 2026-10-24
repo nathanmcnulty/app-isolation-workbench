@@ -383,7 +383,17 @@ fn execute_bounded(
         stage(
             &workspace,
             "acceptance-fixture-created",
-            &fixture("CreateRawWithNamedStream", &workspace, &request)?,
+            &fixture(
+                if std::env::var("AIW_VM107_BOUNDED_RESUME").as_deref()
+                    == Ok("msix-bounded-1792816990610240800:raw-created")
+                {
+                    "AddNamedStream"
+                } else {
+                    "CreateRawWithNamedStream"
+                },
+                &workspace,
+                &request,
+            )?,
         )?;
         let blocked = cold_recover(&workspace, &request, &worker, &mut RecoveryVm)
             .context("Expected collection to block before rollback");
@@ -482,8 +492,11 @@ fn execute_bounded(
 
 fn resume_initial_checkpoint() -> Result<()> {
     const RUN: &str = "msix-bounded-1792816990610240800";
-    let post_control = std::env::var("AIW_VM107_BOUNDED_RESUME").as_deref()
-        == Ok("msix-bounded-1792816990610240800:post-control");
+    let raw_created = std::env::var("AIW_VM107_BOUNDED_RESUME").as_deref()
+        == Ok("msix-bounded-1792816990610240800:raw-created");
+    let post_control = raw_created
+        || std::env::var("AIW_VM107_BOUNDED_RESUME").as_deref()
+            == Ok("msix-bounded-1792816990610240800:post-control");
     if !post_control && std::env::var("AIW_VM107_BOUNDED_RESUME").as_deref() != Ok(RUN) {
         bail!("Only this retained pre-enrollment acceptance may resume")
     }
@@ -536,7 +549,7 @@ fn resume_initial_checkpoint() -> Result<()> {
     if post_control {
         for name in [
             "acceptance-fixture-created.json",
-            "acceptance-fixture-intent-createrawwithnamedstream.json",
+            "acceptance-fixture-intent-addnamedstream.json",
             "run-intent.json",
             "collection-authoritative-complete.json",
             "recovery-restore.json",
@@ -544,6 +557,26 @@ fn resume_initial_checkpoint() -> Result<()> {
             if workspace.output_path().join(name).exists() {
                 bail!("Post-Control resume requires no fixture/recovery dispatch: {name}")
             }
+        }
+        if raw_created {
+            let failure = read_stage(&workspace, "acceptance-failed-1792818301110335900.json")?;
+            if failure["nonce"] != request.nonce
+                || !failure["error"].as_str().is_some_and(|s| {
+                    s.contains("WriteAllText") && s.contains("format is not supported")
+                })
+                || !workspace
+                    .output_path()
+                    .join("acceptance-fixture-intent-createrawwithnamedstream.json")
+                    .exists()
+            {
+                bail!("Only the recorded missing-stream fixture checkpoint may resume")
+            }
+        } else if workspace
+            .output_path()
+            .join("acceptance-fixture-intent-createrawwithnamedstream.json")
+            .exists()
+        {
+            bail!("Fixture dispatch already attempted")
         }
         let readiness = read_stage(&workspace, "acceptance-delayed-readiness.json")?;
         let control = read_stage(&workspace, "control-status.json")?;

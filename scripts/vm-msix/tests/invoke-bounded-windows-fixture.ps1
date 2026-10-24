@@ -1,7 +1,7 @@
 #requires -Version 5.1
 # Explicit opt-in live VM107 acceptance fixtures; never application execution.
 param(
- [Parameter(Mandatory)][ValidateSet('CreateRawWithNamedStream','ClearNamedStream','AddPartialCache')][string]$Mode,
+ [Parameter(Mandatory)][ValidateSet('CreateRawWithNamedStream','AddNamedStream','ClearNamedStream','AddPartialCache')][string]$Mode,
  [Parameter(Mandatory)][string]$Workspace,
  [Parameter(Mandatory)][ValidatePattern('\A[0-9a-f]{64}\z')][string]$RequestSha256,
  [Parameter(Mandatory)][ValidatePattern('\A[0-9a-f]{64}\z')][string]$RequestFileSha256
@@ -43,7 +43,11 @@ try {
    Write-New (Join-Path $source 'child-started.json') $utf8.GetBytes((@{acceptanceFixture=$true;nonce=$nonce;applicationExecuted=$false}|ConvertTo-Json -Compress))
    Write-New $document $utf8.GetBytes("AIW bounded raw evidence acceptance`r`n")
    Write-New (Join-Path $source 'msix-lifecycle\probe.json') $utf8.GetBytes('{"acceptanceFixture":true,"applicationExecuted":false}')
-   [IO.File]::WriteAllText(($document+':AIWAcceptance'),'bounded export failure injection',$utf8)
+   Set-Content -LiteralPath $document -Stream AIWAcceptance -Value 'bounded export failure injection' -Encoding ASCII
+  } elseif($mode -eq 'AddNamedStream'){
+   if((Test-Path -LiteralPath (Join-Path $root 'evidence')) -or @(Get-ChildItem -LiteralPath $source -File -Recurse).Count -ne 3 -or [IO.File]::ReadAllText($document) -cne "AIW bounded raw evidence acceptance`r`n" -or [IO.File]::ReadAllText((Join-Path $source 'msix-lifecycle\probe.json')) -cne '{"acceptanceFixture":true,"applicationExecuted":false}' -or (Get-Content -LiteralPath (Join-Path $source 'child-started.json') -Raw|ConvertFrom-Json).nonce -cne $nonce){throw 'Exact partial fixture required'}
+   if(@(Get-Item -LiteralPath $document -Stream *|Where-Object Stream -CNE ':$DATA').Count -ne 0){throw 'Fixture stream already exists'}
+   Set-Content -LiteralPath $document -Stream AIWAcceptance -Value 'bounded export failure injection' -Encoding ASCII
   } elseif($mode -eq 'ClearNamedStream'){
    if(!(Test-Path -LiteralPath $document)){throw 'Retained fixture missing'}
    Remove-Item -LiteralPath $document -Stream AIWAcceptance
