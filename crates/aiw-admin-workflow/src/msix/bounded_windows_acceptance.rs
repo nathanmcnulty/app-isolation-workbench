@@ -176,6 +176,9 @@ fn vm107_bounded_windows_acceptance() -> Result<()> {
     if std::env::var("AIW_VM107_BOUNDED_ACCEPTANCE").as_deref() != Ok(REVIEWED) {
         bail!("Exact reviewed-revision live opt-in required")
     }
+    if std::env::var("AIW_VM107_BOUNDED_RESUME").is_ok() {
+        return resume_initial_checkpoint();
+    }
     let probe = provider("probe", None, None)?;
     if probe["leasePresent"] != false {
         bail!("Existing lease: do not adopt or replay")
@@ -295,28 +298,42 @@ fn vm107_bounded_windows_acceptance() -> Result<()> {
         "BOUND WORKSPACE: {} RUN: {run_id} NONCE: {nonce}",
         workspace.root_path().display()
     );
+    execute_bounded(workspace, prepared, request, held, false)
+}
+fn execute_bounded(
+    workspace: HeldRunWorkspace,
+    prepared: VmMsixPreparation,
+    request: MsixWorkerRequest,
+    held: aiw_orchestrator::HeldVmMsixPreparation,
+    resume: bool,
+) -> Result<()> {
+    let run_id = request.run_id.clone();
+    let nonce = request.nonce.clone();
+    let worker = prepared.worker.clone();
     let result = (|| -> Result<()> {
-        stage(
-            &workspace,
-            "acquire-intent",
-            &json!({"nonce":nonce,"boundedAcceptance":true}),
-        )?;
-        stage(
-            &workspace,
-            "lease-acquired",
-            &provider("acquire", Some(&nonce), Some(&worker))?,
-        )?;
-        eprintln!("Restoring the exact cold checkpoint.");
-        stage(
-            &workspace,
-            "initial-restore",
-            &provider("restore", Some(&nonce), Some(&worker))?,
-        )?;
-        stage(
-            &workspace,
-            "initial-connect",
-            &provider("connect", Some(&nonce), Some(&worker))?,
-        )?;
+        if !resume {
+            stage(
+                &workspace,
+                "acquire-intent",
+                &json!({"nonce":nonce,"boundedAcceptance":true}),
+            )?;
+            stage(
+                &workspace,
+                "lease-acquired",
+                &provider("acquire", Some(&nonce), Some(&worker))?,
+            )?;
+            eprintln!("Restoring the exact cold checkpoint.");
+            stage(
+                &workspace,
+                "initial-restore",
+                &provider("restore", Some(&nonce), Some(&worker))?,
+            )?;
+            stage(
+                &workspace,
+                "initial-connect",
+                &provider("connect", Some(&nonce), Some(&worker))?,
+            )?;
+        }
         stage(
             &workspace,
             "initial-clean",
@@ -373,7 +390,7 @@ fn vm107_bounded_windows_acceptance() -> Result<()> {
         stage(
             &workspace,
             "acceptance-export-blocked",
-            &json!({"error":error.to_string(),"expected":true}),
+            &json!({"error":format!("{error:#}"),"expected":true}),
         )?;
         let dirty = provider("inspect", Some(&nonce), Some(&worker))?;
         if dirty["phase"] != "dirty"
@@ -446,16 +463,71 @@ fn vm107_bounded_windows_acceptance() -> Result<()> {
         stage(
             &workspace,
             "acceptance-result",
-            &json!({"sourceRevision":REVIEWED,"scope":"boundedWindowsAcceptance","rawEvidenceRecovery":true,"oldPreparedWorkspace":true,"delayedInteractiveReadiness":true,"approvedInputsUnchanged":true,"applicationRunDispatches":0,"fullApplicationTrial":false,"cleanupComplete":true,"report":report}),
+            &json!({"reviewedBase":REVIEWED,"runtimeCorrection":"held read-only output authority for PowerShell helper","resumedBeforeEnrollment":resume,"scope":"boundedWindowsAcceptance","rawEvidenceRecovery":true,"oldPreparedWorkspace":true,"delayedInteractiveReadiness":true,"approvedInputsUnchanged":true,"applicationRunDispatches":0,"fullApplicationTrial":false,"cleanupComplete":true,"report":report}),
         )?;
         Ok(())
     })();
     if let Err(error) = &result {
         let _ = stage(
             &workspace,
-            "acceptance-failed",
+            &format!("acceptance-failed-{}", super::super::nonce()),
             &json!({"error":format!("{error:#}"),"nonce":nonce,"workspace":workspace.root_path(),"automaticRetry":false}),
         );
     }
     result
+}
+
+fn resume_initial_checkpoint() -> Result<()> {
+    const RUN: &str = "msix-bounded-1792816990610240800";
+    if std::env::var("AIW_VM107_BOUNDED_RESUME").as_deref() != Ok(RUN) {
+        bail!("Only this retained pre-enrollment acceptance may resume")
+    }
+    let path = Path::new(ROOT).join(RUN).join("workspace");
+    let layout = RunLayout::new(&path, RUN)?;
+    let plan = layout.read_plan()?;
+    if layout.read_approval()?.plan_hash != plan.hash()? {
+        bail!("Retained original approval differs")
+    }
+    let held = aiw_orchestrator::open_vm_msix_preparation(&plan)?;
+    let prepared = held.preparation.clone();
+    let workspace = HeldRunWorkspace::reopen_bound(&prepared.workspace)?;
+    for name in [
+        "initial-clean.json",
+        "begin.json",
+        "stage-intent.json",
+        "enroll-intent.json",
+        "control-intent.json",
+        "run-intent.json",
+    ] {
+        if workspace.output_path().join(name).exists() {
+            bail!("Resume is restricted to the unchanged pre-enrollment checkpoint: {name}")
+        }
+    }
+    let file = workspace.reopen_tools_file_readonly("request.json")?;
+    let mut bytes = Vec::new();
+    file.as_file().take(65537).read_to_end(&mut bytes)?;
+    let request: MsixWorkerRequest = serde_json::from_slice(&bytes)?;
+    request
+        .validate_at(filetime()?)
+        .map_err(anyhow::Error::msg)?;
+    if request.run_id != RUN
+        || request.plan_sha256 != plan.hash()?
+        || request.worker_profile_sha256 != prepared.worker.hash().map_err(anyhow::Error::msg)?
+        || request.agent_sha256 != OLD_AGENT_SHA
+    {
+        bail!("Retained acceptance request differs")
+    }
+    let state = provider("inspect", Some(&request.nonce), Some(&prepared.worker))?;
+    if state["phase"] != "online-clean" || state["leasePresent"] != true {
+        bail!("Pre-enrollment lease phase differs")
+    }
+    stage(
+        &workspace,
+        &format!("acceptance-pre-enrollment-resume-{}", super::super::nonce()),
+        &json!({"nonce":request.nonce,"retainedState":state,"runtimeCorrection":"read-only helper authority","noMutatingDispatchRepeated":true}),
+    )?;
+    eprintln!(
+        "Resuming the exact retained lease before enrollment; no acquire/restore/connect is repeated."
+    );
+    execute_bounded(workspace, prepared, request, held, true)
 }

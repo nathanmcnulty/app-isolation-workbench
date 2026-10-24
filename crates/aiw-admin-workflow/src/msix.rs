@@ -232,7 +232,7 @@ fn recovery_script(
         let mut file = file.publish_into_bound(&output, &name)?;
         file.as_file_mut().sync_all()?;
     }
-    let file = workspace.reopen_output_file(&name)?;
+    let file = workspace.reopen_output_file_readonly(&name)?;
     let mut bytes = Vec::new();
     file.as_file()
         .take(TRANSPORT.len() as u64 + 1)
@@ -1543,6 +1543,21 @@ mod failure_sequence_tests {
             true
         );
         assert!(read_export(&workspace, &request).is_ok());
+    }
+    #[test]
+    fn held_recovery_helper_is_readable_by_windows_powershell_without_releasing_identity() {
+        let (workspace, _, _, _) = fixture();
+        let helper = recovery_script(&workspace).unwrap();
+        let value=command_json(Command::new(PS).env_remove("PSModulePath")
+            .env("AIW_HELD_RECOVERY_SCRIPT",powershell_workspace_path(helper.final_path()).unwrap())
+            .args(["-NoProfile","-NonInteractive","-Command","$ErrorActionPreference='Stop';$s=[IO.File]::ReadAllText($env:AIW_HELD_RECOVERY_SCRIPT);$null=[ScriptBlock]::Create($s);@{parsed=$true}|ConvertTo-Json -Compress"]),30,4096).unwrap();
+        assert_eq!(value["parsed"], true);
+        helper.revalidate().unwrap();
+        assert!(
+            workspace
+                .reopen_output_file(helper.final_path().file_name().unwrap().to_str().unwrap())
+                .is_err()
+        );
     }
     #[test]
     fn old_format_export_never_bypasses_authoritative_completeness() {
