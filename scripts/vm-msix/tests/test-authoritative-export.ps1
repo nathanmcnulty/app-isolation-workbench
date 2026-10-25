@@ -61,6 +61,39 @@ function Get-CimInstance {
     }
 }
 
+# Exercise the actual native acceptance assertion as well as Collect itself.
+# An ambient active process must not rescue a broken queued-task assertion.
+$fixtureTokens=$null;$fixtureErrors=$null
+$fixtureAst=[Management.Automation.Language.Parser]::ParseFile(
+    (Join-Path $PSScriptRoot 'invoke-core76-bounded-fixture.ps1'),[ref]$fixtureTokens,[ref]$fixtureErrors)
+if($fixtureErrors.Count){throw 'Native bounded fixture does not parse'}
+$queuedClauses=@(foreach($node in $fixtureAst.FindAll({param($n) $n -is [Management.Automation.Language.IfStatementAst]},$true)){
+    foreach($candidate in $node.Clauses){if($candidate.Item1.Extent.Text -ceq '$mode -ceq ''QueuedConsumerRegression'''){$candidate}}
+})
+if($queuedClauses.Count -ne 1){throw 'One exact native queued assertion required'}
+$queuedLiteral=$queuedClauses[0].Item2.Extent.Text
+$queuedAssertion=[scriptblock]::Create($queuedLiteral.Substring(1,$queuedLiteral.Length-2))
+function Invoke-NativeQueuedAssertion([string]$CandidateSource){
+    $collectSource=$CandidateSource;$mode='QueuedConsumerRegression';$nonce=$script:nonce
+    $root=Join-Path ([IO.Path]::GetTempPath()) ('aiw-queued-no-source-'+[guid]::NewGuid().ToString('N'))
+    $uuid='e5cecc90-35c2-4831-bf9c-424be23f7d4e'
+    function Get-Process {
+        param([string[]]$Name,$ErrorAction)
+        $script:ambientProcessReads++
+        [pscustomobject]@{ProcessName='agent';Id=12345}
+    }
+    & $queuedAssertion
+}
+$script:ambientProcessReads=0
+$queuedProof=Invoke-NativeQueuedAssertion $collect.ToString()
+if(!$queuedProof.queuedRejected -or !$queuedProof.processObservationInjectedEmpty -or $queuedProof.nativeSchedulerQueueObserved -or $script:ambientProcessReads -ne 0){throw 'Native queued assertion was not isolated'}
+$queuedNeedle='$_.State -in @(''Running'',''Queued'')'
+if([regex]::Matches($collect.ToString(),[regex]::Escape($queuedNeedle)).Count -ne 1){throw 'One exact Collect queued guard required'}
+$withoutQueued=$collect.ToString().Replace($queuedNeedle,'$_.State -in @(''Running'')')
+$mutationFailure=$null
+try{$null=Invoke-NativeQueuedAssertion $withoutQueued}catch{$mutationFailure=$_.Exception.Message}
+if($mutationFailure -cne 'Production Collect accepted queued work or failed for another reason' -or $script:ambientProcessReads -ne 0){throw 'Native queued assertion falsely passed with its queued guard removed and an ambient process present'}
+
 function Invoke-Collect {
     $output = @(& $collect $script:root $script:nonce)
     if ($output.Count -ne 1) { throw "Collect returned $($output.Count) objects" }

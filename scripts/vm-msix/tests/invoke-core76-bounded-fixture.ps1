@@ -75,13 +75,15 @@ try {
   $control=Get-Content -LiteralPath (Join-Path $root 'control-result.json') -Raw|ConvertFrom-Json
   if($account.runNonce -cne $nonce -or $control.nonce -cne $nonce -or $control.requestSha256 -cne $requestSha -or !$control.passed -or $control.observedExitCode -ne 42 -or $control.userSid -cne $account.userSid){throw 'Same-run native control required before fixture setup'}
   if($mode -ceq 'QueuedConsumerRegression'){
-   # Only this task observation is injected. The production body rejects it
-   # before profile/filesystem inspection. No task is registered or dispatched.
+   # Isolate the task branch of the production OR guard. An unrelated real
+   # agent/editor process must not make a broken Queued assertion pass.
+   # No task is registered or dispatched; no process is started or stopped.
    function Get-ScheduledTask { [pscustomobject]@{TaskName='AIW-Msix-acceptance-queued';State='Queued'} }
+   function Get-Process { param([string[]]$Name,$ErrorAction) @() }
    $errorText=$null
    try {$null=& ([scriptblock]::Create($collectSource)) $root $nonce}catch{$errorText=$_.Exception.Message}
    if($errorText -cne 'Worker running or queued; preserve its lease and evidence'){throw 'Production Collect accepted queued work or failed for another reason'}
-   return @{mode=$mode;nonce=$nonce;queuedRejected=$true;nativeSchedulerQueueObserved=$false;applicationExecuted=$false;workerUuid=$uuid}
+   return @{mode=$mode;nonce=$nonce;queuedRejected=$true;processObservationInjectedEmpty=$true;nativeSchedulerQueueObserved=$false;applicationExecuted=$false;workerUuid=$uuid}
   }
   $user=Get-LocalUser -Name AiwStandardUser
   $profiles=@(Get-CimInstance Win32_UserProfile|Where-Object SID -CEQ $account.userSid)

@@ -22,15 +22,20 @@ EFI and TPM, no RAM and NIC down. Its observed configuration SHA256 is
 `4d0e51d5c13d8ad77c200c5c7a7981cabb96611b761ff1770895b0221037dbb8`.
 Historical snapshots remain intact. Cold rollback/start of all three volumes and
 post-restore Core HTTPS, disabled legacy endpoint and production clean proof
-passed. The fixed provider source now selects the new snapshot. Exact provider
-deployment, a fresh verified package and separate full-app/bounded acceptance
-remain required before A–D completion.
+passed. Exact reviewed provider bytes are deployed and their new snapshot/config
+hashes verified by the existing restricted SSH probe, with no lease. A fresh
+verified package and separate full-app/bounded acceptance remain required.
 Read NATIVE-SETUP-PROGRESS.md for observations and limitations.
 
 The current source fixes an async proof success-stream leak and adds its exact
 child-observer regression. Fresh bounded acceptance is an ignored opt-in native
-harness, never a claim of completed execution. Independent source review is
-clear; automated checks, package evidence and native acceptance remain separate.
+harness, never a claim of completed execution. Astra's review of9dbf4d8 found a
+queued-test false-positive: an ambient process could produce the shared rejection.
+The repair injects an empty process observation and an exact-consumer mutation
+regression. It failed before the fix and passes afterward. The old package queue
+was cancelled before publication; native acceptance waits for exact-source Astra
+re-review and a fresh verified package. CI for9dbf4d8 passed, which does not prove
+the repaired candidate. Automated checks and native acceptance remain separate.
 
 ## Coordinated dependency finding
 

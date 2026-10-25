@@ -776,7 +776,10 @@ fn execute_bounded(
             bail!("Recovery must collect the partial-cache state itself")
         }
         let queued = fixture("QueuedConsumerRegression", &workspace, &request)?;
-        if queued["queuedRejected"] != true || queued["nativeSchedulerQueueObserved"] != false {
+        if queued["queuedRejected"] != true
+            || queued["processObservationInjectedEmpty"] != true
+            || queued["nativeSchedulerQueueObserved"] != false
+        {
             bail!("Exact-consumer queued-state regression receipt differs")
         }
         stage(&workspace, "acceptance-queued-consumer-regression", &queued)?;

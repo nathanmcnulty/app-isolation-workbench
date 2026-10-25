@@ -115,7 +115,11 @@ then started the guest with its exact MAC connected. The first read-only HTTPS
 probe failed during startup; a later normal HTTPS production observer and exact
 production Clean block passed on Core7.6.7, including disabled default legacy
 endpoint and absent setup directory. Both attempts remain private evidence.
-No restore or application dispatch was retried. Exact provider deployment remains.
+No restore or application dispatch was retried. Exact reviewed provider bytes
+were subsequently downloaded from immutable source9dbf4d8, hash-verified and
+atomically deployed without changing root-only mode or the forced SSH key verbs.
+Existing-key probe confirms the new snapshot/config/provider hashes, running
+state and no active lease. This source-test repair does not change those bytes.
 
 The new ignored native harness covers fresh authoritative raw evidence with
 missing/partial caches, blocked collection retaining a dirty lease, compatible
@@ -125,8 +129,28 @@ an injected exact-consumer regression, not a native scheduler queue observation.
 It never dispatches application Run or replays a historical preparation.
 Compilation/source review do not establish native acceptance.
 
-Build a fresh verified package from the coherent clean checkpoint only after
-provider deployment. Report full application lifecycle
+## Astra review and queued assertion repair
+
+Astra reviewed exact source9dbf4d8 and found one P2 in the native fixture's queued
+assertion. Its injected task observation shared an OR guard/error with real
+agent/editor processes, so such a process could hide loss of Queued rejection.
+The repair injects an empty process result only within that test assertion and
+records that isolation in its receipt. It changes no production Collect guard.
+The offline regression extracts the actual native assertion and actual Collect
+body, supplies an ambient agent, then removes only Queued from the task guard.
+The former assertion falsely passed that mutant; the repaired assertion rejects
+it. Both original raw-evidence export controls and the new regression pass on Core.
+Queued coverage remains injected, never a native queued-task observation.
+
+The9dbf4d8 CI passed all three jobs. Its queued package driver was cancelled
+before publication after the Astra finding. Local source validation retains the
+initial one-second deadline assertion failure under parallel load and the passing
+unchanged focused test. A serial workspace/check pipeline is still in progress;
+do not relabel it complete. Neither the new full trial nor bounded native fixture
+has run. Exact-source Astra re-review and repaired-checkpoint CI remain gates.
+
+Build a fresh verified package from the repaired coherent clean checkpoint only
+after source-review/validation gates. Report full application lifecycle
 and bounded fixture execution separately, then export originals before cold
 recovery and release. Historical packages/runs remain historical. No trial
 account or app execution is claimed here. PR103 remains unmerged; preserve all
