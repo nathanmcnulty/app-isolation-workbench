@@ -27,6 +27,9 @@ const EXPECTED_AGENT_SHA256: Option<&str> = option_env!("AIW_MSIX_WORKER_SHA256"
 // The October24 bounded harness is historical source at abd17ea. Its completed
 // nonce must never be replayed through this migrated execution baseline.
 
+#[cfg(test)]
+mod core76_bounded_acceptance;
+
 fn ps_executable() -> PathBuf {
     #[cfg(test)]
     if let Some(path) = std::env::var_os("AIW_TEST_PWSH") {

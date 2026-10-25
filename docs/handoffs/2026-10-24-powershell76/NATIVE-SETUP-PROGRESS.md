@@ -45,19 +45,89 @@ Runtime policy passed five rejection cases across 99 launch-graph files.
 An independent read-only source review found no actionable findings; it performed
 no VM execution. Full logs remain outside Git as `native-cim-*.log`.
 
-## Remaining approved work
+## Worker bootstrap and endpoint observations, 25 October 2026
 
-VM107 has not received the prepared bootstrap. Refresh its exact source URL/hash
-to this correction before operator use; do not run the old 9ce03fa bootstrap.
-The existing restricted SSH key permits provider verbs, not a bootstrap shell.
-The human operator must run the fixed native QEMU guest-exec bootstrap once in
-the existing pve-r630 root console. Preserve partial attempts; never replay an
-installer blindly. No credentials or management access are expanded.
+Nathan subsequently approved a one-time Windows PowerShell5.1 remoting bootstrap
+exception for the existing operator credential. It installed the exact verified
+MSI once on VM107 (exit0) and launched the installed Core executable for endpoint
+setup. The exception is complete; subsequent validation and management use only
+Core7.6.7 through normal HTTPS. No credentials, key permissions, listener,
+TrustedHosts or firewall scope were expanded. VM106 was not contacted.
 
-Stages B–D remain uncompleted: normal HTTPS same-session endpoint/worker/copy
-proof, legacy endpoint retirement after proof, observed clean baseline and
-coherent pins, then a new verified package and fresh acceptance runs. The
-9ce03fa package remains historical and must not be presented as this corrected
-source or used for migrated acceptance. No new snapshot/provider pins, trial
-account or application execution is claimed. VM106 remains excluded; VM203 must
-never be restored; historical completed nonces must never be replayed.
+VM107's direct executable and loaded SMA identities match the controller hashes
+above. Actual PowerShell.7.6 WSMan proof observes wsmprovhost.exe, its loaded Core
+assembly and the independently launched worker executable. ConfigXML SHA256:
+`fa2df1cdacc7487cffe18c45dab3829423112885f410f13cac0643664aea6647`.
+The sole initialization parameter is PSVersion7.6. Native Core registration must
+omit the PSVersion setter, which throws on Core; its default creates the required
+major.minor value. Endpoint SDDL remains
+`O:BAG:BAD:P(A;;GA;;;SY)(A;;GA;;;S-1-5-21-3556347314-2314855617-1438300668-1001)`.
+
+The plugin staging directory needed existing WinRM NetworkService read/execute
+on its exact parent/child directory and inherited files. Protected ACLs retain
+SYSTEM/Administrators full control and operator/NetworkService read/execute;
+the order-independent comparator rejects six unsafe ACL variants. This changes
+service file access, not endpoint authentication. Partial setup failures were
+retained, inspected and continued only at the missing fixed stage; the MSI was
+not replayed. Active HTTPS firewall auditing retains package-bound/inactive rows
+without treating them as unbound network grants; six negative controls pass.
+
+The actual asynchronous observer exposed an additional success-stream object
+from Task<VoidTaskResult>. All three production observers now suppress only the
+awaiter return with `[void]`, retaining exceptions and cleanup. The extracted
+real-child regression fails against the former code and passes after correction.
+The corrected native proof has exactly one runtime record and same-session copies
+in both directions. Proof SHA256:
+`f05f23f5bd2614bbad3ac305ef5159f4f62898869ab766184369a39ac2577d11`.
+An independent source review found no actionable findings. The initial noisy
+proof remains failure evidence, not accepted producer evidence.
+
+After the Core proof, the default Microsoft.PowerShell endpoint was disabled.
+Core's Get-PSSessionConfiguration did not enumerate that legacy plugin, so its
+failed retirement task made no change. A separately recorded continuation set
+only its native WSMan Enabled leaf to false and restarted WinRM. This is the
+[documented underlying disable operation](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/disable-pssessionconfiguration?view=powershell-7.6).
+The continuation result and a fresh production observer confirm disabled legacy
+state and normal Core HTTPS access. No fallback session was used.
+
+Private setup evidence remains under
+`C:\AIW-Resume-20261021\powershell76-remoting-92b1ab7-20261025`.
+All49 guest setup files were accounted for:48 copied and hash/length-verified;
+the duplicate MSI is retained as the exact approved controller input. Export
+inventory SHA256 is
+`64bd78c79fd81d9c0f9361b6293879720a5d2fcd679873f25eefd74474fde0ff`.
+All seven terminal setup tasks and only the exact verified setup directory were
+removed after export. The production Clean block then passed baseline accounts,
+no trial package/process/tasks/raw artifacts, disabled automatic sign-in and the
+sole pinned HTTPS listener. These are setup observations, not app acceptance.
+
+## Observed new baseline and remaining acceptance
+
+With no active lease, VM107 was shut down, its exact MAC retained and NIC put
+down. Cold snapshot `aiw-msix-worker107-pwsh76-clean-r1` covers OS/EFI/TPM with
+no RAM. Both historical snapshots remain intact. Actual reopened snapshot config
+SHA256 is `4d0e51d5c13d8ad77c200c5c7a7981cabb96611b761ff1770895b0221037dbb8`.
+Provider source selects this name; normalized wrapper SHA256 is
+`5d04868891b253b0cf9592ae76f72224813fc0c6c8aa8302e982d2dd8ecd782d`.
+Runtime snapshot/config pins are populated from actual provider observation,
+not a guessed hash. A subsequent cold rollback recreated all three107 volumes,
+then started the guest with its exact MAC connected. The first read-only HTTPS
+probe failed during startup; a later normal HTTPS production observer and exact
+production Clean block passed on Core7.6.7, including disabled default legacy
+endpoint and absent setup directory. Both attempts remain private evidence.
+No restore or application dispatch was retried. Exact provider deployment remains.
+
+The new ignored native harness covers fresh authoritative raw evidence with
+missing/partial caches, blocked collection retaining a dirty lease, compatible
+older preparation inputs, pre-dispatch incompatible preparation rejection and
+delayed interactive readiness before exactly one Control42. Its Queued case is
+an injected exact-consumer regression, not a native scheduler queue observation.
+It never dispatches application Run or replays a historical preparation.
+Compilation/source review do not establish native acceptance.
+
+Build a fresh verified package from the coherent clean checkpoint only after
+provider deployment. Report full application lifecycle
+and bounded fixture execution separately, then export originals before cold
+recovery and release. Historical packages/runs remain historical. No trial
+account or app execution is claimed here. PR103 remains unmerged; preserve all
+exclusions and the remaining stageC/D gates.

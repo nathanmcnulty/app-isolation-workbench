@@ -27,7 +27,7 @@ base=/var/lib/aiw-msix-worker107
 lease=$base/lease
 active_lease=$lease
 test "$operation" != completed || lease=$base/completed-$nonce
-snapshot=aiw-msix-worker107-tls-clean-r1
+snapshot=aiw-msix-worker107-pwsh76-clean-r1
 mkdir -p "$base" /run/aiw-worker107
 test ! -L "$base"
 test "$(stat -c '%u:%a' "$base")" = '0:700'

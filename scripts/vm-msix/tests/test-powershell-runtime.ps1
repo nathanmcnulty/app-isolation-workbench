@@ -143,6 +143,18 @@ try {
  if($engine.assemblyPath -ine ([PSObject].Assembly.Location) -or $engine.moduleVersionId -cne ([PSObject].Assembly.ManifestModule.ModuleVersionId.ToString())){throw 'Actual loaded engine capture differs'}
  $fixedHome='C:\Unexpected';Assert-Rejected {. ([scriptblock]::Create($capture))}
 }finally{foreach($stream in $held){$stream.Dispose()}}
+# Execute the actual asynchronous child observer with an inert Core child. The
+# observer must assign its JSON internally without leaking VoidTaskResult into
+# the WSMan identity success stream (which strict consumers treat as one record).
+$infoAst=Get-OneAst $nativeGuard 'info' ([Management.Automation.Language.AssignmentStatementAst])
+$observerEnd=$nativeGuard.Extent.Text.IndexOf('  Assert-AiwRuntimeObservation $worker Direct',$infoAst.Extent.StartOffset,[StringComparison]::Ordinal)
+if($observerEnd -lt 0){throw 'Actual async observer boundary absent'}
+$asyncSource=$nativeGuard.Extent.Text.Substring($infoAst.Extent.StartOffset,$observerEnd-$infoAst.Extent.StartOffset)
+$fixedHome=$PSHOME
+$DirectProofSource='param($Kind) [ordered]@{control="AIW async observer";kind=$Kind;applicationExecuted=$false}'
+$leaked=@(. ([scriptblock]::Create($asyncSource)))
+if($leaked.Count -ne 0){throw 'Async observer leaked output before its identity record'}
+if($worker.control -cne 'AIW async observer' -or $worker.kind -cne 'Direct' -or $worker.applicationExecuted -ne $false){throw 'Async observer child JSON differs'}
 # A linked parent must be rejected by the real file opener, without releasing a
 # normal held image's read/write/delete boundary.
 $fixture=Join-Path ([IO.Path]::GetTempPath()) ('aiw-engine-proof-'+[guid]::NewGuid().ToString('N'))
@@ -186,4 +198,4 @@ foreach($match in $paths){
   if(@($ast.FindAll({param($node) $node -is [Management.Automation.Language.ThrowStatementAst]},$true)).Count -ne 1 -or @($ast.FindAll({param($node) $node -is [Management.Automation.Language.CommandAst]},$true)).Count -ne 0){throw "Retired PowerShell route became active: $path"}
  }elseif($path.EndsWith('.py')){if($text -notmatch 'raise SystemExit' -or $text -match '(?m)^import |(?m)^from '){throw "Retired Python route became active: $path"}}
 }
-[pscustomobject]@{passed=$true;runtimeVersion=$runtime.version;nativeCimAccepted=$true;nativeCimRejections=$cimRejections;runtimeBindingRejections=$rejected;wsmanHostRejections=$hostRejections;endpointOrWorkerDriftRejections=$bindingRejections;configurationRejections=($badConfigs.Count+3);implicitProxyRejected=$true;loadedEngineCapture=$true;linkedImageRejected=$true;aclAtCreation=$true;existingAclPreserved=$true;retiredEntryPoints=$paths.Count;vmContacted=$false;applicationExecuted=$false}|ConvertTo-Json -Compress
+[pscustomobject]@{passed=$true;runtimeVersion=$runtime.version;asyncObserverNoLeakedOutput=$true;nativeCimAccepted=$true;nativeCimRejections=$cimRejections;runtimeBindingRejections=$rejected;wsmanHostRejections=$hostRejections;endpointOrWorkerDriftRejections=$bindingRejections;configurationRejections=($badConfigs.Count+3);implicitProxyRejected=$true;loadedEngineCapture=$true;linkedImageRejected=$true;aclAtCreation=$true;existingAclPreserved=$true;retiredEntryPoints=$paths.Count;vmContacted=$false;applicationExecuted=$false}|ConvertTo-Json -Compress

@@ -1,60 +1,56 @@
 # Working state
 
-Updated 2026-10-24. Owning branch `codex/new-vm-handoff-20261021`, checkout
-`C:\aiw\app-isolation-workbench` on VM203. Start with `scripts/work-status.ps1`.
-PR #103 remains open and unmerged. This file is a pointer, not execution authority.
+Updated 2026-10-25. Owning checkout `C:\aiw\app-isolation-workbench`, branch
+`codex/new-vm-handoff-20261021`, PR103 open and unmerged. Start with
+`scripts/work-status.ps1`. This file is a pointer, not execution authority.
 
-## Current adopted slice
+## Current milestone
 
-The JSON-order guard correction requested from Dot's review at `96b5a12` is
-implemented on this owning PR checkout, based on `e7ac987`. Read
-`docs/handoffs/2026-10-24-powershell76/JSON-IDENTITY-GUARD-CORRECTION.md` for
-both embedded guards, exact-consumer regressions and independent source review.
-Nathan subsequently approved the exact A–D scope in SETUP-AND-ACCEPTANCE.md.
-Stage A is in progress: the approved Microsoft PowerShell 7.6.7 MSI installed on
-VM203 with exit0. Its actual native capability proof exposed the CIM binary
-layout correction described in NATIVE-SETUP-PROGRESS.md; that correction passes
-the controller proof and exact-consumer regressions. VM107 bootstrap, endpoint
-proof, new baseline and native acceptance remain pending. Merge stays blocked.
+Nathan approved the exact A–D scope in
+`docs/handoffs/2026-10-24-powershell76/SETUP-AND-ACCEPTANCE.md`, followed by a
+one-time Windows PowerShell 5.1 remoting bootstrap exception. That bootstrap is
+complete. All subsequent observation, setup and validation use Core7.6.7 only.
+Both VM203 and VM107 have the verified Microsoft machine runtime. VM107's
+restricted PowerShell.7.6 endpoint passes actual WSMan host/loaded engine,
+independent worker and same-session copy proof over normal HTTPS. The default
+Microsoft.PowerShell endpoint is disabled. Native setup evidence was exported
+before removing all seven temporary setup tasks and the exact setup directory.
+The production clean check passes; no application trial has run in this milestone.
 
-Nathan adopted `docs/handoffs/2026-10-24-powershell76/GOAL.md` for the complete
-offline PowerShell migration, validation and one sanitized source checkpoint push.
-Read its VALIDATION.md and SETUP-AND-ACCEPTANCE.md for coverage and the single
-bundled provisioning/native-acceptance boundary. Source migration uses stable
-x64 Core >=7.6, a fixed machine executable, explicit PowerShell.7.6 HTTPS endpoint,
-held runtime identities and bound preparation/request/SYSTEM/user receipts.
-Legacy evidence remains readable. Incompatible outstanding preparations fail
-before fresh runtime/helper execution; approved tools are never rewritten.
+The new cold snapshot `aiw-msix-worker107-pwsh76-clean-r1` now exists, with OS,
+EFI and TPM, no RAM and NIC down. Its observed configuration SHA256 is
+`4d0e51d5c13d8ad77c200c5c7a7981cabb96611b761ff1770895b0221037dbb8`.
+Historical snapshots remain intact. Cold rollback/start of all three volumes and
+post-restore Core HTTPS, disabled legacy endpoint and production clean proof
+passed. The fixed provider source now selects the new snapshot. Exact provider
+deployment, a fresh verified package and separate full-app/bounded acceptance
+remain required before A–D completion.
+Read NATIVE-SETUP-PROGRESS.md for observations and limitations.
 
-Existing bundled Core 7.6.5 remains available for inert offline tests; the approved
-machine runtime on VM203 is now 7.6.7. Adoption alone did not authorize native
-changes; Nathan's later explicit A–D approval does. The historical provider pins
-remain deployed; new execution refuses that old baseline. VM107 requires the
-bounded operator bootstrap through the existing Proxmox root console. Preserve
-all completed runs, credentials and exclusions in SETUP-AND-ACCEPTANCE.md.
-Historical research execution and the unbootstrapped offline PowerShell Sandbox
-control are explicitly retired; native Rust Sandbox profiles remain separate.
+The current source fixes an async proof success-stream leak and adds its exact
+child-observer regression. Fresh bounded acceptance is an ignored opt-in native
+harness, never a claim of completed execution. Independent source review is
+clear; automated checks, package evidence and native acceptance remain separate.
 
-## Historical completed acceptance (do not replay)
+## Coordinated dependency finding
 
-Full app run `msix-1792704525359564000`: execution34369c9, reader2dab30b;
-Control 42, install/open/edit-save-close/uninstall, 53 document bytes, 220 unchanged
-payloads, 6 configs, 44 inventoried files. Cold-clean/released 2026-10-22T21:52:19Z.
-Bounded run `msix-bounded-1792816990610240800`: corrected runtime 1879c77,
-final harness abd17ea; originals survived missing/partial copies, export failure
-retained dirty lease, older inputs unchanged, delayed readiness preceded one
-Control 42. No application Run. Cold-clean/released 2026-10-24T05:12:46Z.
-Both used the former runtime; neither proves migrated Core native acceptance.
-Their leases are released; never recover/replay these completed nonces.
-See docs/MSIX-EXECUTION.md for exact receipts and retained evidence locations.
+Read the coordination index at `61b0536e4090b58fe610e04dcfe3aa6b83fc5b30` and
+AIW task at `431b9ba8e60c22ecca5bed0beb341b346c80420a` in private
+`nathanmcnulty/agent-coordination`. Pinned goal SHA256 matches
+`aabdd288e968fb689dfdd351ab4ee385551fe81d16343ec6803c491e4dd673bf`.
+The same owning checkout was reconciled at92b1ab7 with the in-progress changes.
+No active Python dependency cleanup blocker was established. Keep Rust, Tauri,
+the Core7.6+ contract and fail-closed retired stubs. No dependencies were added.
+The packet adds no native authority or acceptance clearance.
 
-## Worker/recovery boundary
+## Preserved boundaries
 
-Only VM107: UUID e5cecc90-35c2-4831-bf9c-424be23f7d4e,
-MAC CC:34:21:B8:5A:31, IP 192.168.1.174. Never touch VM106/passkeys-worker or restore VM203.
-Historical snapshot `aiw-msix-worker107-tls-clean-r1` covers OS/EFI/TPM/no RAM.
-The runtime-equipped `aiw-msix-worker107-pwsh76-clean-r1` is planned, not created;
-its actual config/provider/runtime pins require approved provisioning/observation.
-Normal HTTPS certificate BC14DCC4E37F83161EBB55AF8624E36A79E19256 remains required;
-no TLS bypass, default legacy endpoint fallback, credential/key reconfiguration,
-foreign lease adoption or automatic dispatch retry. Keep migration release draft.
+VM107 only: UUID `e5cecc90-35c2-4831-bf9c-424be23f7d4e`, MAC
+`CC:34:21:B8:5A:31`, IP192.168.1.174. Never touch VM106 or restore VM203.
+Normal HTTPS certificate `BC14DCC4E37F83161EBB55AF8624E36A79E19256` remains
+required. No TLS bypass, legacy fallback, credential/key expansion, foreign lease
+adoption, automatic dispatch retry or merge. Keep migration release draft.
+
+Never replay/recover completed historical runs `msix-1792704525359564000` or
+`msix-bounded-1792816990610240800`. Their former-runtime evidence does not prove
+migrated acceptance. See docs/MSIX-EXECUTION.md for those retained records.

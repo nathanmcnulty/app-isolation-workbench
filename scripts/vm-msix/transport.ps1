@@ -151,7 +151,7 @@ $runtimeProof = {
    $watch=[Diagnostics.Stopwatch]::StartNew();$inputClosed=$false
    while(!$child.HasExited -or !$outDone -or !$errDone -or !$inputClosed){
     if($watch.ElapsedMilliseconds -ge 45000){try{$child.Kill($true)}catch{};throw 'Direct engine observer timed out'}
-    if(!$inputClosed -and $inputWrite.IsCompleted){$inputWrite.GetAwaiter().GetResult();$child.StandardInput.Close();$inputClosed=$true}
+    if(!$inputClosed -and $inputWrite.IsCompleted){[void]$inputWrite.GetAwaiter().GetResult();$child.StandardInput.Close();$inputClosed=$true}
     if(!$outDone -and $stdout.IsCompleted){$count=$stdout.GetAwaiter().GetResult();if($count -eq 0){$outDone=$true}else{[void]$outText.Append($outBuffer,0,$count);if($outText.Length -gt 1048576){try{$child.Kill($true)}catch{};throw 'Direct engine observer output exceeded bound'};$stdout=$child.StandardOutput.ReadAsync($outBuffer,0,$outBuffer.Length)}}
     if(!$errDone -and $stderr.IsCompleted){$count=$stderr.GetAwaiter().GetResult();if($count -eq 0){$errDone=$true}else{[void]$errText.Append($errBuffer,0,$count);if($errText.Length -gt 65536){try{$child.Kill($true)}catch{};throw 'Direct engine observer error output exceeded bound'};$stderr=$child.StandardError.ReadAsync($errBuffer,0,$errBuffer.Length)}}
     [Threading.Thread]::Sleep(10)
