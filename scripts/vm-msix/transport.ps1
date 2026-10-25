@@ -96,6 +96,13 @@ $runtimeProof = {
   foreach($name in $caps){
    $command=Get-Command $name -ErrorAction Stop
    if($name -ceq 'New-PSSession'){if($command.CommandType -ne 'Cmdlet' -or $command.ImplementingType.Assembly.Location -ine ($fixedHome+'\System.Management.Automation.dll')){throw 'Native remoting cmdlet required'};continue}
+   # Core exposes CimCmdlets from its binary in PSHOME, outside Modules.
+   # Accept that exact native command image, not arbitrary PSHOME modules/proxies.
+   if($name -ceq 'Get-CimInstance'){
+    $cimImage=$fixedHome+'\Microsoft.Management.Infrastructure.CimCmdlets.dll'
+    if($command.CommandType -ne 'Cmdlet' -or !$command.Module -or $command.ModuleName -cne 'CimCmdlets' -or $command.Module.Path -ine $cimImage -or $command.ImplementingType.Assembly.Location -ine $cimImage){throw 'Exact native CIM cmdlet required'}
+    continue
+   }
    if($command.CommandType -notin @('Cmdlet','Function') -or !$command.Module -or $command.Module.Path -notlike ($fixedHome+'\Modules\*') -and $command.Module.Path -notlike 'C:\Windows\System32\WindowsPowerShell\v1.0\Modules\*'){throw ('Native capability unavailable: '+$name)}
    if($command.CommandType -eq 'Function' -and $command.ModuleName -cne 'ScheduledTasks'){throw ('Unexpected remoting proxy capability: '+$name)}
   }

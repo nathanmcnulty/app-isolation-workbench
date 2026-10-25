@@ -10,7 +10,12 @@ The JSON-order guard correction requested from Dot's review at `96b5a12` is
 implemented on this owning PR checkout, based on `e7ac987`. Read
 `docs/handoffs/2026-10-24-powershell76/JSON-IDENTITY-GUARD-CORRECTION.md` for
 both embedded guards, exact-consumer regressions and independent source review.
-Stages A–D and merge remain blocked; no VM or runtime/security change is included.
+Nathan subsequently approved the exact A–D scope in SETUP-AND-ACCEPTANCE.md.
+Stage A is in progress: the approved Microsoft PowerShell 7.6.7 MSI installed on
+VM203 with exit0. Its actual native capability proof exposed the CIM binary
+layout correction described in NATIVE-SETUP-PROGRESS.md; that correction passes
+the controller proof and exact-consumer regressions. VM107 bootstrap, endpoint
+proof, new baseline and native acceptance remain pending. Merge stays blocked.
 
 Nathan adopted `docs/handoffs/2026-10-24-powershell76/GOAL.md` for the complete
 offline PowerShell migration, validation and one sanitized source checkpoint push.
@@ -21,11 +26,12 @@ held runtime identities and bound preparation/request/SYSTEM/user receipts.
 Legacy evidence remains readable. Incompatible outstanding preparations fail
 before fresh runtime/helper execution; approved tools are never rewritten.
 
-Existing bundled Core 7.6.5 / Windows 10.0.26300.9711 is used only for inert offline tests.
-Recommended/CI pinned patch 7.6.7. No machine runtime installation, endpoint,
-WinRM/firewall/security change, VM107 provisioning/new baseline or native application trial
-is authorized by adoption. The historical provider pins remain deployed; new
-execution refuses that old baseline. Native acceptance is pending bundled approval.
+Existing bundled Core 7.6.5 remains available for inert offline tests; the approved
+machine runtime on VM203 is now 7.6.7. Adoption alone did not authorize native
+changes; Nathan's later explicit A–D approval does. The historical provider pins
+remain deployed; new execution refuses that old baseline. VM107 requires the
+bounded operator bootstrap through the existing Proxmox root console. Preserve
+all completed runs, credentials and exclusions in SETUP-AND-ACCEPTANCE.md.
 Historical research execution and the unbootstrapped offline PowerShell Sandbox
 control are explicitly retired; native Rust Sandbox profiles remain separate.
 

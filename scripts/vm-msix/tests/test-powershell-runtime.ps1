@@ -110,6 +110,29 @@ try{
  $caps=@('Get-AppxPackage');$fixedHome='C:\Program Files\PowerShell\7'
  Assert-Rejected {& ([scriptblock]::Create($nativeCheck[0].Extent.Text))}
 }finally{Remove-Item -LiteralPath Function:Get-Command}
+# Exercise the exact consumer loop for the native PSHOME CIM binary layout.
+$cimImage='C:\Program Files\PowerShell\7\Microsoft.Management.Infrastructure.CimCmdlets.dll'
+$cimCommand=[pscustomobject]@{CommandType='Cmdlet';ModuleName='CimCmdlets';Module=[pscustomobject]@{Path=$cimImage};ImplementingType=[pscustomobject]@{Assembly=[pscustomobject]@{Location=$cimImage}}}
+$cimRejections=0
+try{
+ function Get-Command { [CmdletBinding()]param($Name) $cimCommand }
+ $caps=@('Get-CimInstance');$fixedHome='C:\Program Files\PowerShell\7'
+ & ([scriptblock]::Create($nativeCheck[0].Extent.Text))
+ $goodCim=$cimCommand|ConvertTo-Json -Depth 8
+ foreach($change in @('Function','Alias','WrongModule','ModuleInOtherHome','ModuleUnderModules','AssemblyInOtherHome','MissingModule')){
+  $cimCommand=$goodCim|ConvertFrom-Json
+  switch($change){
+   'Function' {$cimCommand.CommandType='Function'}
+   'Alias' {$cimCommand.CommandType='Alias'}
+   'WrongModule' {$cimCommand.ModuleName='ImplicitRemoting'}
+   'ModuleInOtherHome' {$cimCommand.Module.Path='C:\Other\Microsoft.Management.Infrastructure.CimCmdlets.dll'}
+   'ModuleUnderModules' {$cimCommand.Module.Path='C:\Program Files\PowerShell\7\Modules\Proxy\Proxy.psm1'}
+   'AssemblyInOtherHome' {$cimCommand.ImplementingType.Assembly.Location='C:\Other\Microsoft.Management.Infrastructure.CimCmdlets.dll'}
+   'MissingModule' {$cimCommand.Module=$null}
+  }
+  Assert-Rejected {& ([scriptblock]::Create($nativeCheck[0].Extent.Text))};$cimRejections++
+ }
+}finally{Remove-Item -LiteralPath Function:Get-Command}
 # Execute the actual loaded-engine capture statements on the existing test Core.
 $assemblyAst=Get-OneAst $nativeGuard 'assembly' ([Management.Automation.Language.AssignmentStatementAst])
 $engineAst=Get-OneAst $nativeGuard 'engine' ([Management.Automation.Language.AssignmentStatementAst])
@@ -163,4 +186,4 @@ foreach($match in $paths){
   if(@($ast.FindAll({param($node) $node -is [Management.Automation.Language.ThrowStatementAst]},$true)).Count -ne 1 -or @($ast.FindAll({param($node) $node -is [Management.Automation.Language.CommandAst]},$true)).Count -ne 0){throw "Retired PowerShell route became active: $path"}
  }elseif($path.EndsWith('.py')){if($text -notmatch 'raise SystemExit' -or $text -match '(?m)^import |(?m)^from '){throw "Retired Python route became active: $path"}}
 }
-[pscustomobject]@{passed=$true;runtimeVersion=$runtime.version;runtimeBindingRejections=$rejected;wsmanHostRejections=$hostRejections;endpointOrWorkerDriftRejections=$bindingRejections;configurationRejections=($badConfigs.Count+3);implicitProxyRejected=$true;loadedEngineCapture=$true;linkedImageRejected=$true;aclAtCreation=$true;existingAclPreserved=$true;retiredEntryPoints=$paths.Count;vmContacted=$false;applicationExecuted=$false}|ConvertTo-Json -Compress
+[pscustomobject]@{passed=$true;runtimeVersion=$runtime.version;nativeCimAccepted=$true;nativeCimRejections=$cimRejections;runtimeBindingRejections=$rejected;wsmanHostRejections=$hostRejections;endpointOrWorkerDriftRejections=$bindingRejections;configurationRejections=($badConfigs.Count+3);implicitProxyRejected=$true;loadedEngineCapture=$true;linkedImageRejected=$true;aclAtCreation=$true;existingAclPreserved=$true;retiredEntryPoints=$paths.Count;vmContacted=$false;applicationExecuted=$false}|ConvertTo-Json -Compress
