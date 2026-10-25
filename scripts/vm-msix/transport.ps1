@@ -437,7 +437,7 @@ public sealed class AiwRawTree : IDisposable {
   try { var parents=new Stack<string>();for(var p=root;p!=null;p=Path.GetDirectoryName(p))parents.Push(p);while(parents.Count!=0)HoldDirectory(parents.Pop());Walk(root,0); }catch{Dispose();throw;}
  }
  void HoldDirectory(string path) {
-  var h=CreateFileW(path,0x80,3,IntPtr.Zero,3,0x02200000,IntPtr.Zero);
+  var h=CreateFileW(@"\\?\"+Path.GetFullPath(path),0x80,3,IntPtr.Zero,3,0x02200000,IntPtr.Zero);
   held.Add(h);Info i;if(h.IsInvalid || !GetFileInformationByHandle(h,out i) || (i.attr&0x410)!=0x10)throw new IOException("Ordinary held evidence directory required");
  }
  static string[] Entries(string path) {return Directory.GetFileSystemEntries(path).OrderBy(p=>p,StringComparer.Ordinal).ToArray();}
@@ -478,7 +478,10 @@ public sealed class AiwRawTree : IDisposable {
       $rawEvidence.present=$true;$raw=[AiwRawTree]::new($source)
       try {
        foreach($name in $raw.Names){
-        if(@(Get-Item -LiteralPath (Join-Path $source $name) -Stream '*' -ErrorAction Stop|Where-Object Stream -CNE ':$DATA').Count -ne 0){throw 'Named raw evidence stream refused'}
+        # The stream API needs an extended, canonical Win32 path even when
+        # ordinary Core/.NET file reads already support the same long path.
+        $streamPath='\\?\'+[IO.Path]::GetFullPath((Join-Path $source $name))
+        if(@(Get-Item -LiteralPath $streamPath -Stream '*' -ErrorAction Stop|Where-Object Stream -CNE ':$DATA').Count -ne 0){throw 'Named raw evidence stream refused'}
         $bytes=$raw.Read($name);$hash=[Security.Cryptography.SHA256]::Create()
         try{$sha=([BitConverter]::ToString($hash.ComputeHash($bytes))).Replace('-','').ToLowerInvariant()}finally{$hash.Dispose()}
         $total+=$bytes.Length;if($total -gt 16MB -or $files.Count -ge 512){throw 'Evidence export bound exceeded'}

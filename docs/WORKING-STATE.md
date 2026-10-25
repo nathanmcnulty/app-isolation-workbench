@@ -27,15 +27,19 @@ hashes verified by the existing restricted SSH probe, with no lease. A fresh
 verified package and separate full-app/bounded acceptance remain required.
 Read NATIVE-SETUP-PROGRESS.md for observations and limitations.
 
-The current source fixes an async proof success-stream leak and adds its exact
-child-observer regression. Fresh bounded acceptance is an ignored opt-in native
-harness, never a claim of completed execution. Astra's review of9dbf4d8 found a
-queued-test false-positive: an ambient process could produce the shared rejection.
-The repair injects an empty process observation and an exact-consumer mutation
-regression. It failed before the fix and passes afterward. The old package queue
-was cancelled before publication; native acceptance waits for exact-source Astra
-re-review and a fresh verified package. CI for9dbf4d8 passed, which does not prove
-the repaired candidate. Automated checks and native acceptance remain separate.
+The current source retains the async proof success-stream and isolated queued-task
+regressions. Objective0007 repairs raw collection's Win32 path spelling for held
+directory opens and stream enumeration. An inert Core7.6.7 probe observed an
+existing 270-character file fail stream enumeration without an extended prefix
+and succeed with it. The actual collector's focused offline regression passed
+after independent Astra review, including a forced long path, exact named-stream
+rejection/removal, byte/hash export and the existing source/custody negatives.
+Detailed evidence and preserved failed attempts remain private; consult the AIW
+worker checkpoint for objective0007 in the coordination ledger.
+Use separate rebuilt-source qualification and fresh package verification receipts
+bound to the final commit; the focused disk-input test and historical hosted CI
+do not establish either. Objective0007 grants no native/live execution authority.
+The opt-in native harness remains unexecuted in this offline milestone.
 
 ## Coordinated dependency finding
 

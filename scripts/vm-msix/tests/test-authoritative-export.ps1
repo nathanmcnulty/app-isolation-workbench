@@ -165,12 +165,19 @@ try {
     $source = Authoritative-Path
     $one = [Text.Encoding]::UTF8.GetBytes('authoritative-first')
     $two = [Text.Encoding]::UTF8.GetBytes('authoritative-second')
+    $three = [Text.Encoding]::UTF8.GetBytes('authoritative-long-path')
     Write-Bytes (Join-Path $source 'msix-lifecycle\result.json') $one
     Write-Bytes (Join-Path $source 'configuration\config.xml') $two
+    # Keep stream enumeration beyond MAX_PATH regardless of a short test TEMP.
+    $longRelative = ('long-' + ('x' * 120)) + '/evidence.txt'
+    $longPath = [IO.Path]::GetFullPath((Join-Path $source $longRelative))
+    if ($longPath.Length -le 260) { throw 'Long-path stream regression requires more than 260 characters' }
+    Write-Bytes $longPath $three
     $expected = @{
         'raw/msix-lifecycle/result.json' = $one
         'raw/configuration/config.xml' = $two
     }
+    $expected['raw/' + $longRelative] = $three
 
     # An old prepared workspace can have no cached evidence directory at all.
     Assert-RawExport (Invoke-Collect) $expected
@@ -180,8 +187,17 @@ try {
     Assert-RawExport (Invoke-Collect) $expected
 
     # Neither an incomplete cache nor stale bytes can substitute for the
-    # run-owned profile tree. The authoritative source still has both files.
+    # run-owned profile tree. The authoritative source still has all files.
     Write-Bytes (Join-Path $script:root 'raw\msix-lifecycle\result.json') ([Text.Encoding]::UTF8.GetBytes('stale-partial-copy'))
+    Assert-RawExport (Invoke-Collect) $expected
+
+    # The long-path fix must still enumerate and reject real named streams,
+    # rather than treating an enumeration error or an empty result as success.
+    $streamPath = '\\?\' + $longPath
+    Set-Content -LiteralPath $streamPath -Stream AIWRegression -Value 'inert named stream' -Encoding ASCII -NoNewline
+    if (@(Get-Item -LiteralPath $streamPath -Stream AIWRegression -ErrorAction Stop).Count -ne 1) { throw 'Named-stream fixture absent' }
+    Expect-Rejection 'long-path named stream' '\ANamed raw evidence stream refused\z'
+    Remove-Item -LiteralPath $streamPath -Stream AIWRegression -ErrorAction Stop
     Assert-RawExport (Invoke-Collect) $expected
 
     # Once application dispatch exists, losing the authoritative source may
