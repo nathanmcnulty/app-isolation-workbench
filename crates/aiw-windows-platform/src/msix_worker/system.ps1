@@ -92,7 +92,9 @@ function Set-AiwRunInputReadAccess([string]$RunRoot,$Request,[string]$UserSid) {
  # Stage deliberately protects input separately. Root inheritance cannot cross
  # that boundary, so grant only this fresh account read access to exact input.
  Assert-AiwRunInputAccess $RunRoot $Request $UserSid -Staged
- Set-Acl -LiteralPath (Join-Path $RunRoot 'input') -AclObject (New-AiwInputReadSecurity $UserSid)
+ # Persist only the factory's modified Owner and Access sections. Set-Acl
+ # copies Audit too, which is outside this read-access transition.
+ [IO.FileSystemAclExtensions]::SetAccessControl([IO.DirectoryInfo]::new((Join-Path $RunRoot 'input')),(New-AiwInputReadSecurity $UserSid))
  Assert-AiwRunInputAccess $RunRoot $Request $UserSid
 }
 function Clear-AiwLogon {
