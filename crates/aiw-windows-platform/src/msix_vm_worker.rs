@@ -562,6 +562,43 @@ mod tests {
         println!("Embedded guard regressions: {result}");
     }
     #[test]
+    fn protected_input_read_access_rejects_acl_and_layout_drift() {
+        let root = std::env::temp_dir().join(format!(
+            "aiw-input-access-{}-{}",
+            std::process::id(),
+            now().unwrap()
+        ));
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("system.ps1"), system_source()).unwrap();
+        fs::write(
+            root.join("input-access.ps1"),
+            include_str!("msix_worker/tests/input-access.ps1"),
+        )
+        .unwrap();
+        let output = crate::powershell::inert_test_output(
+            std::process::Command::new(crate::powershell::test_executable())
+                .args(["-NoProfile", "-NonInteractive", "-File"])
+                .arg(root.join("input-access.ps1"))
+                .env_remove("PSModulePath"),
+        )
+        .unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(result["passed"], true);
+        assert_eq!(result["accepted"], 13);
+        assert!(result["rejected"].as_u64().unwrap() >= 20);
+        assert_eq!(result["realInheritanceTransition"], true);
+        assert_eq!(result["systemOwnershipChanged"], false);
+        assert_eq!(result["enrollmentExecuted"], false);
+        assert_eq!(result["applicationExecuted"], false);
+    }
+    #[test]
     fn generated_worker_scripts_parse_with_driver_control_scoped_to_its_function() {
         for source in [system_source(), lifecycle_source()] {
             assert_eq!(

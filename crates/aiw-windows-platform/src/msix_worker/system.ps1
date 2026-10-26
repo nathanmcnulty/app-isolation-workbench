@@ -34,6 +34,67 @@ function Record([string]$Name,$Value){
  try{$file.Write($bytes,0,$bytes.Length);$file.Flush($true)}finally{$file.Dispose()}
  [IO.File]::Move($pending,$path)
 }
+function New-AiwInputReadSecurity([string]$UserSid,[switch]$Staged) {
+ if($UserSid -cnotmatch '\AS-1-5-21-3556347314-2314855617-1438300668-[0-9]+\z' -or $UserSid -ceq $operatorSid){throw 'Exact fresh application SID required'}
+ $security=[Security.AccessControl.DirectorySecurity]::new()
+ $security.SetAccessRuleProtection($true,$false)
+ $owner=if($Staged){$operatorSid}else{'S-1-5-18'}
+ $security.SetOwner([Security.Principal.SecurityIdentifier]::new($owner))
+ foreach($principal in @('S-1-5-18',$operatorSid)){$security.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($principal),'FullControl','ContainerInherit,ObjectInherit','None','Allow'))}
+ if(!$Staged){$security.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($UserSid),'ReadAndExecute','ContainerInherit,ObjectInherit','None','Allow'))}
+ return $security
+}
+function Assert-AiwInputSecurity($Security,[string]$UserSid,[switch]$File,[switch]$Staged) {
+ $expected=New-AiwInputReadSecurity $UserSid -Staged:$Staged
+ if(!$File){
+  # Windows may retain SE_DACL_AUTO_INHERITED on a protected directory after
+  # its parent changes. Check owner and every ACE, not that bookkeeping flag.
+  if(!$Security.AreAccessRulesProtected -or $Security.GetOwner([Security.Principal.SecurityIdentifier]).Value -cne $expected.GetOwner([Security.Principal.SecurityIdentifier]).Value){throw 'Closed protected input directory owner or protection differs'}
+ }else{
+  if($Security.AreAccessRulesProtected -or $Security.GetOwner([Security.Principal.SecurityIdentifier]).Value -notin @('S-1-5-18','S-1-5-32-544',$operatorSid)){throw 'Input file owner or inheritance differs'}
+ }
+ $principals=@('S-1-5-18',$operatorSid);if(!$Staged){$principals+=@($UserSid)}
+ $rules=@($Security.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]))
+ if($rules.Count -ne $principals.Count){throw 'Input file ACL principal count differs'}
+ foreach($principal in $principals){
+  $matching=@($rules|Where-Object {$_.IdentityReference.Value -ceq $principal})
+  if($matching.Count -ne 1){throw 'Input file ACL principal differs'}
+  $rule=$matching[0]
+  $rights=if($principal -ceq $UserSid){[int64][Security.AccessControl.FileSystemRights]::ReadAndExecute -bor [int64][Security.AccessControl.FileSystemRights]::Synchronize}else{[int64][Security.AccessControl.FileSystemRights]::FullControl}
+  $inheritance=if($File){[Security.AccessControl.InheritanceFlags]::None}else{[Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit'}
+  if($rule.IsInherited -ne $File.IsPresent -or $rule.AccessControlType -ne 'Allow' -or $rule.InheritanceFlags -ne $inheritance -or $rule.PropagationFlags -ne 'None' -or [int64]$rule.FileSystemRights -ne $rights){throw 'Input ACL rights or form differs'}
+ }
+}
+function Assert-AiwInputLayout([string]$RunRoot) {
+ $input=Join-Path $RunRoot 'input'
+ $directory=Get-Item -LiteralPath $input -Force
+ if(!$directory.PSIsContainer -or $directory.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Ordinary exact input directory required'}
+ $items=@(Get-ChildItem -LiteralPath $input -Force -ErrorAction Stop)
+ $names=@('application.msix','assembly.json','signing.json')
+ if($items.Count -ne 3 -or @(Compare-Object -ReferenceObject $names -DifferenceObject @($items.Name) -CaseSensitive).Count){throw 'Exactly three approved input files required'}
+ foreach($name in $names){
+  $path=Join-Path $input $name;$item=Get-Item -LiteralPath $path -Force
+  if($item.PSIsContainer -or $item.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Ordinary input file required'}
+ }
+}
+function Assert-AiwRunInputAccess([string]$RunRoot,$Request,[string]$UserSid,[switch]$Staged) {
+ Assert-AiwInputLayout $RunRoot
+ $input=Join-Path $RunRoot 'input'
+ Assert-AiwInputSecurity (Get-Acl -LiteralPath $input) $UserSid -Staged:$Staged
+ foreach($name in @('application.msix','assembly.json','signing.json')){
+  $path=Join-Path $input $name
+  Assert-AiwInputSecurity (Get-Acl -LiteralPath $path) $UserSid -File -Staged:$Staged
+  $hash=switch($name){'application.msix'{$Request.packageSha256}'assembly.json'{$Request.assemblySha256}'signing.json'{$Request.signingSha256}}
+  if((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $hash){throw 'Approved input bytes differ'}
+ }
+}
+function Set-AiwRunInputReadAccess([string]$RunRoot,$Request,[string]$UserSid) {
+ # Stage deliberately protects input separately. Root inheritance cannot cross
+ # that boundary, so grant only this fresh account read access to exact input.
+ Assert-AiwRunInputAccess $RunRoot $Request $UserSid -Staged
+ Set-Acl -LiteralPath (Join-Path $RunRoot 'input') -AclObject (New-AiwInputReadSecurity $UserSid)
+ Assert-AiwRunInputAccess $RunRoot $Request $UserSid
+}
 function Clear-AiwLogon {
  if(!$account){throw 'Run-owned account required'}
  $user=Get-LocalUser -Name AiwStandardUser
@@ -71,6 +132,7 @@ if($Operation -eq 'enroll'){
   foreach($principal in @('S-1-5-18',$operatorSid)){$owned.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($principal),'FullControl','ContainerInherit,ObjectInherit','None','Allow'))}
   $owned.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sid),'ReadAndExecute','ContainerInherit,ObjectInherit','None','Allow'))
   Set-Acl -LiteralPath $root -AclObject $owned
+  Set-AiwRunInputReadAccess $root $request $sid
   $service=New-Object -ComObject Schedule.Service;$service.Connect();$folder=$service.GetFolder('\')
   $task=$service.NewTask(0);$task.Principal.UserId='S-1-5-18';$task.Principal.LogonType=5;$task.Principal.RunLevel=1
   $task.Settings.ExecutionTimeLimit='PT1M';$task.Settings.DisallowStartIfOnBatteries=$false;$task.Settings.StopIfGoingOnBatteries=$false
@@ -85,6 +147,8 @@ if($Operation -eq 'enroll'){
  return
 }
 if($Operation -eq 'clear-logon'){Clear-AiwLogon;return}
+if(!$account){throw 'Run-owned application account required'}
+Assert-AiwRunInputAccess $root $request $account.userSid
 if($Operation -eq 'prepare'){
  Clear-AiwLogon
  $sessions=@(Get-CimInstance Win32_Process -Filter "Name='explorer.exe'"|Where-Object{(Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid).Sid -ceq $account.userSid}|Select-Object -ExpandProperty SessionId -Unique)

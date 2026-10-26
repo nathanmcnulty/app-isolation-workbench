@@ -1,45 +1,39 @@
 # Working state
 
-Updated 2026-10-25. Owning checkout `C:\aiw\app-isolation-workbench`, branch
+Updated 2026-10-26. Owning checkout `C:\aiw\app-isolation-workbench`, branch
 `codex/new-vm-handoff-20261021`, PR103 open and unmerged. Start with
 `scripts/work-status.ps1`. This file is a pointer, not execution authority.
 
 ## Current milestone
 
-Nathan approved the exact A–D scope in
-`docs/handoffs/2026-10-24-powershell76/SETUP-AND-ACCEPTANCE.md`, followed by a
-one-time Windows PowerShell 5.1 remoting bootstrap exception. That bootstrap is
-complete. All subsequent observation, setup and validation use Core7.6.7 only.
-Both VM203 and VM107 have the verified Microsoft machine runtime. VM107's
-restricted PowerShell.7.6 endpoint passes actual WSMan host/loaded engine,
-independent worker and same-session copy proof over normal HTTPS. The default
-Microsoft.PowerShell endpoint is disabled. Native setup evidence was exported
-before removing all seven temporary setup tasks and the exact setup directory.
-The production clean check passes; no application trial has run in this milestone.
+The approved Core7.6.7 runtime, restricted HTTPS endpoint and existing cold
+VM107 baseline were revalidated. The separate bounded native acceptance passed
+and its final cold clean/release evidence received independent review. Its queued
+case remains an injected consumer regression, not a real scheduler observation.
 
-The new cold snapshot `aiw-msix-worker107-pwsh76-clean-r1` now exists, with OS,
-EFI and TPM, no RAM and NIC down. Its observed configuration SHA256 is
-`4d0e51d5c13d8ad77c200c5c7a7981cabb96611b761ff1770895b0221037dbb8`.
-Historical snapshots remain intact. Cold rollback/start of all three volumes and
-post-restore Core HTTPS, disabled legacy endpoint and production clean proof
-passed. Exact reviewed provider bytes are deployed and their new snapshot/config
-hashes verified by the existing restricted SSH probe, with no lease. A fresh
-verified package and separate full-app/bounded acceptance remain required.
-Read NATIVE-SETUP-PROGRESS.md for observations and limitations.
+The fresh full application trial failed before the editor appeared. Preserved
+original stderr reports a source-observation access denial. Actual protected
+input ACLs omitted the fresh standard user's read permission, although the run
+root granted it. No application lifecycle success is established. Later runtime
+drift to7.6.9 was observed separately; its cause remains unestablished.
 
-The current source retains the async proof success-stream and isolated queued-task
-regressions. Objective0007 repairs raw collection's Win32 path spelling for held
-directory opens and stream enumeration. An inert Core7.6.7 probe observed an
-existing 270-character file fail stream enumeration without an extended prefix
-and succeed with it. The actual collector's focused offline regression passed
-after independent Astra review, including a forced long path, exact named-stream
-rejection/removal, byte/hash export and the existing source/custody negatives.
-Detailed evidence and preserved failed attempts remain private; consult the AIW
-worker checkpoint for objective0007 in the coordination ledger.
-Use separate rebuilt-source qualification and fresh package verification receipts
-bound to the final commit; the focused disk-input test and historical hosted CI
-do not establish either. Objective0007 grants no native/live execution authority.
-The opt-in native harness remains unexecuted in this offline milestone.
+Thirty original records and four immutable payload links were independently
+verified before Nathan expressly approved exceptional cold recovery despite
+missing authoritative application raw evidence. The existing VM107 baseline was
+restored, exact7.6.7/production Clean reverified, and the same lease released.
+That recovery preserves the full trial as failed; it does not satisfy the missing
+raw-evidence gate or create application acceptance. Detailed evidence stays private.
+
+The local repair grants only the exact fresh run SID read access to the separately
+protected input directory. It verifies closed directory/file ACLs, ownership,
+inheritance, three ordinary payloads and hashes before/after enrollment and before
+later execution stages. Ancestor permissions and application write authority are
+unchanged. Focused inert coverage includes actual Windows inheritance propagation
+and negative ACL/layout/reparse cases without enrollment or application execution.
+Independent source review, required qualification, a new coherent package and a
+fresh full application trial are required before claiming acceptance. Earlier
+source/package/CI receipts apply only to their recorded bytes. No public push or
+merge is authorized by this repair.
 
 ## Coordinated dependency finding
 
