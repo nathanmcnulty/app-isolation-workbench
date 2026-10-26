@@ -30,8 +30,13 @@ inheritance, three ordinary payloads and hashes before/after enrollment and befo
 later execution stages. Ancestor permissions and application write authority are
 unchanged. Focused inert coverage includes actual Windows inheritance propagation
 and negative ACL/layout/reparse cases without enrollment or application execution.
-Independent source review, required qualification, a new coherent package and a
-fresh full application trial are required before claiming acceptance. Earlier
+Independent source review and all five source qualification checks passed at
+local commit c7ccb9d. The user subsequently clarified that stable Core7.6+ is
+approved, including7.6.9; exact patch equality between controller and worker is
+not required. Production keeps each run bound to its observed runtime bytes and
+requires coherent worker/WSMan identities. The acceptance harness now uses that
+same contract and records each observed version separately. A new coherent
+package and fresh native trials remain required before claiming acceptance. Earlier
 source/package/CI receipts apply only to their recorded bytes. No public push or
 merge is authorized by this repair.
 

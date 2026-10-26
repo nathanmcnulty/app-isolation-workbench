@@ -333,6 +333,22 @@ mod tests {
         }
     }
     #[test]
+    fn mixed_controller_and_worker_patches_keep_endpoint_coherence() {
+        let mut binding = executable_binding();
+        binding.host.version = "7.6.9".into();
+        binding.host.executable_sha256 = "9".repeat(64);
+        binding.host.engine.as_mut().unwrap().assembly_sha256 = "8".repeat(64);
+        binding.validate_execution().unwrap();
+        let mut stale = binding.clone();
+        stale.wsman.as_mut().unwrap().version = "7.6.9".into();
+        assert!(stale.validate_execution().is_err());
+        for version in ["7.5.9", "7.6.9-preview.1"] {
+            let mut invalid = binding.clone();
+            invalid.host.version = version.into();
+            assert!(invalid.validate_execution().is_err());
+        }
+    }
+    #[test]
     fn wsman_host_is_distinct_from_direct_worker_but_engine_is_shared() {
         let mut binding = executable_binding();
         binding.validate_execution().unwrap();

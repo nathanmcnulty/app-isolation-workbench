@@ -10,7 +10,7 @@ param(
  [Parameter(Mandatory)][ValidatePattern('\A[0-9a-f]{64}\z')][string]$TransportSha256
 )
 $ErrorActionPreference='Stop';Set-StrictMode -Version Latest;$ProgressPreference='SilentlyContinue'
-if($PSVersionTable.PSVersion.ToString() -cne '7.6.7' -or $PSHOME -ine 'C:\Program Files\PowerShell\7' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Program Files\PowerShell\7\pwsh.exe'){throw 'Installed Core 7.6.7 host required'}
+if($PSVersionTable.PSVersion -lt [version]'7.6' -or $PSHOME -ine 'C:\Program Files\PowerShell\7' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Program Files\PowerShell\7\pwsh.exe'){throw 'Installed stable Core 7.6+ host required'}
 $normalized=[IO.Path]::GetFullPath($Workspace)
 if($normalized -cnotmatch '\AC:\\AIW-Resume-20261021\\powershell76-native-[0-9]+\\workspace\z'){throw 'Fresh Core native evidence root required'}
 $transportHold=$null;$requestHold=$null;$session=$null;$credential=$null
@@ -53,7 +53,7 @@ try {
  if([Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($requestHold)).ToLowerInvariant() -cne $RequestFileSha256){throw 'Bounded fixture host request differs'}
  $request=Get-Content -LiteralPath $requestPath -Raw|ConvertFrom-Json
  if($request.runId -cnotmatch '\Amsix-core76-bounded-[0-9]+\z' -or $request.workerUuid -cne 'e5cecc90-35c2-4831-bf9c-424be23f7d4e'){throw 'Fresh bounded VM107 request required'}
- if(!$request.powerShellRuntime -or $request.powerShellRuntime.endpoint -cne 'PowerShell.7.6' -or $request.powerShellRuntime.host.version -cne '7.6.7' -or $request.powerShellRuntime.worker.version -cne '7.6.7' -or $request.powerShellRuntime.wsman.version -cne '7.6.7'){throw 'Exact approved Core runtime binding required'}
+ if(!$request.powerShellRuntime -or $request.powerShellRuntime.endpoint -cne 'PowerShell.7.6' -or !$request.powerShellRuntime.host -or !$request.powerShellRuntime.worker -or !$request.powerShellRuntime.wsman){throw 'Exact approved Core runtime binding required'}
  Assert-AiwRuntimeBinding $hostRuntime $request.powerShellRuntime.host
  $stored=Import-Clixml -LiteralPath (Join-Path $env:USERPROFILE '.aiw-private\worker107-winrm.xml')
  $credential=[pscredential]::new('labadmin',$stored.Password);$stored=$null
@@ -64,7 +64,7 @@ try {
  Invoke-Command -Session $session -ArgumentList $Mode,$request.runId,$request.nonce,$RequestSha256,$RequestFileSha256,$collectSource -ScriptBlock {
   param($mode,$runId,$nonce,$requestSha,$requestFileSha,$collectSource)
   $ErrorActionPreference='Stop';Set-StrictMode -Version Latest
-  if($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion.ToString() -cne '7.6.7' -or $PSHOME -ine 'C:\Program Files\PowerShell\7' -or $PSSenderInfo.ConfigurationName -cne 'PowerShell.7.6' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Windows\System32\wsmprovhost.exe'){throw 'Exact approved Core WSMan host required'}
+  if($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion -lt [version]'7.6' -or $PSHOME -ine 'C:\Program Files\PowerShell\7' -or $PSSenderInfo.ConfigurationName -cne 'PowerShell.7.6' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Windows\System32\wsmprovhost.exe'){throw 'Exact approved Core WSMan host required'}
   $actor=[Security.Principal.WindowsIdentity]::GetCurrent()
   $uuid=(Get-CimInstance Win32_ComputerSystemProduct).UUID
   if($uuid -ine 'e5cecc90-35c2-4831-bf9c-424be23f7d4e' -or $actor.User.Value -cne 'S-1-5-21-3556347314-2314855617-1438300668-1001' -or !([Security.Principal.WindowsPrincipal]::new($actor)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){throw 'Exact elevated VM107 operator required'}

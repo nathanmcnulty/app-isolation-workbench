@@ -1,4 +1,4 @@
-//! Fresh, explicitly opted-in Core 7.6.7 VM107 control/fixture acceptance.
+//! Fresh, explicitly opted-in Core 7.6+ VM107 control/fixture acceptance.
 //! This test never dispatches Run and cannot resume a previous native trial.
 use super::*;
 
@@ -448,9 +448,10 @@ fn vm107_core76_bounded_windows_acceptance() -> Result<()> {
         verify_fresh_package(&package_root, &source_revision, &receipt_sha, &agent_sha)?;
     let host_runtime = aiw_windows_platform::observe_machine_powershell()
         .map_err(|e| anyhow!("Installed Core runtime required: {e}"))?;
-    if host_runtime.identity.version != "7.6.7" {
-        bail!("This native acceptance is approved only for Core 7.6.7")
-    }
+    host_runtime
+        .identity
+        .validate_execution()
+        .map_err(anyhow::Error::msg)?;
     let probe = provider("probe", None, None)?;
     if probe["leasePresent"] != false
         || probe["checkpoint"] != aiw_probe::MSIX_CORE_WORKER_CHECKPOINT
@@ -468,11 +469,8 @@ fn vm107_core76_bounded_windows_acceptance() -> Result<()> {
     )?;
     worker.validate().map_err(anyhow::Error::msg)?;
     let runtime_binding = observe_runtime_binding(&workspace)?;
-    if runtime_binding.host != host_runtime.identity
-        || runtime_binding.worker.version != "7.6.7"
-        || runtime_binding.wsman.as_ref().map(|w| w.version.as_str()) != Some("7.6.7")
-    {
-        bail!("Exact independently observed host/worker/WSMan 7.6.7 binding required")
+    if runtime_binding.host != host_runtime.identity {
+        bail!("Exact independently observed controller runtime binding required")
     }
     host_runtime
         .revalidate()
@@ -542,7 +540,7 @@ fn vm107_core76_bounded_windows_acceptance() -> Result<()> {
         package_sha256: aiw_probe::MSIX_PACKAGE_SHA256.into(),
         workspace: Box::new(workspace.evidence().clone()),
     };
-    let plan=RunPlan::new(&run_id,PRODUCT,prepared.hash().map_err(anyhow::Error::msg)?,RunLifecycleKind::Assessment,now_rfc3339(),vec![PlannedAction::ExecuteVmMsix{binding:Box::new(binding)}],vec!["User-authorized fresh Core 7.6.7 bounded acceptance: VM107 only, retained Core preparation with legacy cache layout, delayed sign-in, native exit42 Control and inert raw fixtures, final cold recovery. Application Run is forbidden; queued-state injection is an exact-consumer regression, not a native scheduler observation.".into()])?;
+    let plan=RunPlan::new(&run_id,PRODUCT,prepared.hash().map_err(anyhow::Error::msg)?,RunLifecycleKind::Assessment,now_rfc3339(),vec![PlannedAction::ExecuteVmMsix{binding:Box::new(binding)}],vec!["User-authorized fresh Core 7.6+ bounded acceptance: VM107 only, retained Core preparation with legacy cache layout, delayed sign-in, native exit42 Control and inert raw fixtures, final cold recovery. Application Run is forbidden; queued-state injection is an exact-consumer regression, not a native scheduler observation.".into()])?;
     let layout = RunLayout::new(workspace.root_path(), &run_id)?;
     layout.create(&plan)?;
     layout.write_approval(&ApprovalRecord::for_plan(
@@ -807,7 +805,7 @@ fn execute_bounded(
         stage(
             &workspace,
             "acceptance-result",
-            &json!({"scope":"core76BoundedWindowsAcceptance","powerShellVersion":"7.6.7","rawEvidenceRecovery":true,"legacyPartialCacheLayout":true,"retainedCorePreparation":true,"legacyMissingRuntimeRecoveryRejectedBeforeHelper":true,"historical5_1PreparationExecuted":false,"queuedConsumerRegression":true,"nativeSchedulerQueueObserved":false,"delayedInteractiveReadiness":true,"approvedInputsUnchanged":true,"applicationRunDispatches":0,"fullApplicationTrial":false,"cleanupComplete":true,"report":report}),
+            &json!({"scope":"core76BoundedWindowsAcceptance","powerShellRuntime":request.power_shell_runtime,"rawEvidenceRecovery":true,"legacyPartialCacheLayout":true,"retainedCorePreparation":true,"legacyMissingRuntimeRecoveryRejectedBeforeHelper":true,"historical5_1PreparationExecuted":false,"queuedConsumerRegression":true,"nativeSchedulerQueueObserved":false,"delayedInteractiveReadiness":true,"approvedInputsUnchanged":true,"applicationRunDispatches":0,"fullApplicationTrial":false,"cleanupComplete":true,"report":report}),
         )?;
         Ok(())
     })();
