@@ -20,14 +20,24 @@ canonical installed plugin, preserving security/listener/firewall/authentication
 and update policy. Fresh unchanged production Direct/WSMan proof passes7.6.9.
 No WinRM/guest restart was needed for that proof.
 
-The new checkpoint selector is aiw-msix-worker107-core76plus-clean-r2. Snapshot
-creation and matching provider deployment remain pending; never infer the future
-snapshot configuration hash. Preserve all old snapshots and completed leases.
-Native acceptance must wait for actual reviewed deployment, cold restore and
-Clean proof, a newly qualified coherent package, then fresh GUI typed IDs,
-approval/Start and console document edit/save/close. Authoritative original export
-and completeness precede final cold rollback/Clean release and independent review.
-Application acceptance remains unestablished. Detailed evidence is private.
+The approved aiw-msix-worker107-core76plus-clean-r2 cold snapshot and matching
+provider deployment are complete. A fresh baseline-only cold restore/Clean proof
+passed independent review on signed Core7.6.9 with the canonical endpoint.
+Preserve all old snapshots and completed leases.
+
+Local source `35fde35` and its coherent package passed qualification and independent
+package review. Fresh native GUI run `msix-1793226013277315400` used separate typed
+approval and Start, then actual console document open/edit/save/close. The retained
+report verifies the fixed signed MSIX install/launch/document/payload/configuration/
+uninstall lifecycle. All 111 exported payloads, including 44 raw originals, were
+hash-verified before the final cold restore. Production Clean confirms automatic
+sign-in disabled and trial artifacts absent; the host lease is released. The GUI
+shows Supported workflow verified. A separately reviewed, fixed read-only
+post-release observation confirms legacy PowerShell disabled and same-session
+canonical registration unchanged. Full independent evidence review passed with
+no findings, bound to source `35fde35` and its exact package.
+Broader compatibility and isolation remain unmeasured. Detailed evidence is private;
+this documentation update does not change the tested source/package identities.
 
 The original failed full trial and exceptional recovery remain completed history;
 its missing raw evidence is not repaired by later tests. Never replay completed
