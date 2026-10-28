@@ -15,7 +15,7 @@ pub const MSIX_WORKER_UUID: &str = "e5cecc90-35c2-4831-bf9c-424be23f7d4e";
 pub const MSIX_WORKER_CHECKPOINT: &str = "aiw-msix-worker107-tls-clean-r1";
 /// Planned runtime-equipped baseline. Provisioning and its config pin need
 /// explicit approval; the historical checkpoint must never be relabeled.
-pub const MSIX_CORE_WORKER_CHECKPOINT: &str = "aiw-msix-worker107-pwsh76-clean-r1";
+pub const MSIX_CORE_WORKER_CHECKPOINT: &str = "aiw-msix-worker107-core76plus-clean-r2";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]

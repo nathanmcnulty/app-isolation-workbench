@@ -41,7 +41,7 @@ case "$op" in
     uuid=$(cat "$state/uuid")
     nic=$(cat "$state/nic")
     if test "${3-}" = --snapshot; then
-      test "${4-}" = aiw-msix-worker107-pwsh76-clean-r1 || exit 92
+      test "${4-}" = aiw-msix-worker107-core76plus-clean-r2 || exit 92
       nic=down
       name=aiw-worker
       uuid=e5cecc90-35c2-4831-bf9c-424be23f7d4e
@@ -75,7 +75,7 @@ case "$op" in
     ;;
   shutdown|stop) printf 'stopped\n' > "$state/status" ;;
   rollback)
-    test "${3-}" = aiw-msix-worker107-pwsh76-clean-r1 || exit 96
+    test "${3-}" = aiw-msix-worker107-core76plus-clean-r2 || exit 96
     test ! -f "$state/fail-rollback" || exit 97
     printf 'down\n' > "$state/nic"
     printf 'rollback\n' >> "$state/rollbacks"

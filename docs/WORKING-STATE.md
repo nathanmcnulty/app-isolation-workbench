@@ -1,44 +1,37 @@
 # Working state
 
-Updated 2026-10-26. Owning checkout `C:\aiw\app-isolation-workbench`, branch
+Updated 2026-10-28. Owning checkout `C:\aiw\app-isolation-workbench`, branch
 `codex/new-vm-handoff-20261021`, PR103 open and unmerged. Start with
 `scripts/work-status.ps1`. This file is a pointer, not execution authority.
 
 ## Current milestone
 
-The approved Core7.6.7 runtime, restricted HTTPS endpoint and existing cold
-VM107 baseline were revalidated. The separate bounded native acceptance passed
-and its final cold clean/release evidence received independent review. Its queued
-case remains an injected consumer regression, not a real scheduler observation.
+The fresh input-ACL repair and stable Core7.6+ acceptance contract are retained
+from local2449. Its source/package/bounded native receipts apply to those exact
+bytes and the prior baseline. The bounded case passed; its queued condition was
+an injected regression rather than a native scheduler observation.
 
-The fresh full application trial failed before the editor appeared. Preserved
-original stderr reports a source-observation access denial. Actual protected
-input ACLs omitted the fresh standard user's read permission, although the run
-root granted it. No application lifecycle success is established. Later runtime
-drift to7.6.9 was observed separately; its cause remains unestablished.
+Two later full-GUI preparations stopped before approval, Start, lease acquisition
+or application dispatch. Windows Update installed signed Core7.6.9 on VM107 after
+a reviewed7.6.7 cold reset, while remoting still selected a7.6.7 plugin directory.
+The human approved a bounded endpoint/new-baseline/provider amendment. The exact
+reviewed helper now points the existing PowerShell.7.6 endpoint to its signed
+canonical installed plugin, preserving security/listener/firewall/authentication
+and update policy. Fresh unchanged production Direct/WSMan proof passes7.6.9.
+No WinRM/guest restart was needed for that proof.
 
-Thirty original records and four immutable payload links were independently
-verified before Nathan expressly approved exceptional cold recovery despite
-missing authoritative application raw evidence. The existing VM107 baseline was
-restored, exact7.6.7/production Clean reverified, and the same lease released.
-That recovery preserves the full trial as failed; it does not satisfy the missing
-raw-evidence gate or create application acceptance. Detailed evidence stays private.
+The new checkpoint selector is aiw-msix-worker107-core76plus-clean-r2. Snapshot
+creation and matching provider deployment remain pending; never infer the future
+snapshot configuration hash. Preserve all old snapshots and completed leases.
+Native acceptance must wait for actual reviewed deployment, cold restore and
+Clean proof, a newly qualified coherent package, then fresh GUI typed IDs,
+approval/Start and console document edit/save/close. Authoritative original export
+and completeness precede final cold rollback/Clean release and independent review.
+Application acceptance remains unestablished. Detailed evidence is private.
 
-The local repair grants only the exact fresh run SID read access to the separately
-protected input directory. It verifies closed directory/file ACLs, ownership,
-inheritance, three ordinary payloads and hashes before/after enrollment and before
-later execution stages. Ancestor permissions and application write authority are
-unchanged. Focused inert coverage includes actual Windows inheritance propagation
-and negative ACL/layout/reparse cases without enrollment or application execution.
-Independent source review and all five source qualification checks passed at
-local commit c7ccb9d. The user subsequently clarified that stable Core7.6+ is
-approved, including7.6.9; exact patch equality between controller and worker is
-not required. Production keeps each run bound to its observed runtime bytes and
-requires coherent worker/WSMan identities. The acceptance harness now uses that
-same contract and records each observed version separately. A new coherent
-package and fresh native trials remain required before claiming acceptance. Earlier
-source/package/CI receipts apply only to their recorded bytes. No public push or
-merge is authorized by this repair.
+The original failed full trial and exceptional recovery remain completed history;
+its missing raw evidence is not repaired by later tests. Never replay completed
+runs, preparations or nonces. No public push, new CI, merge or release is authorized.
 
 ## Coordinated dependency finding
 
