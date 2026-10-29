@@ -1,8 +1,14 @@
-#requires -Version 7.0
+#Requires -Version 7.6
+#Requires -PSEdition Core
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$PortableArchive, [Parameter(Mandatory)][string]$EvidenceDirectory,
     [string]$MakeAppxPath = 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\makeappx.exe')
 $ErrorActionPreference = 'Stop'
+if ([Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() -cne 'X64' -or $PSVersionTable.PSVersion.ToString() -match '-' -or ($PSVersionTable.ContainsKey('GitCommitId') -and $PSVersionTable.GitCommitId -match 'preview|rc')) { throw 'Stable x64 PowerShell Core >=7.6 required; prerelease runtime refused' }
+$PSModuleAutoLoadingPreference = 'None'
+foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security')) { Import-Module $module -SkipEditionCheck -ErrorAction Stop }
+if (@(Get-PSSession -ErrorAction SilentlyContinue | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'Windows compatibility session forbidden' }
+
 Set-StrictMode -Version Latest
 if (Test-Path -LiteralPath $EvidenceDirectory) { throw 'Fresh evidence directory required' }
 New-Item -ItemType Directory -Path $EvidenceDirectory | Out-Null

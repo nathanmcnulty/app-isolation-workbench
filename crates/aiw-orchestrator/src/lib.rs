@@ -6,6 +6,14 @@
 
 #![forbid(unsafe_code)]
 
+mod vm_msix_plan;
+#[cfg(windows)]
+pub use vm_msix_plan::{HeldVmMsixPreparation, open_vm_msix_preparation};
+pub use vm_msix_plan::{
+    VM_MSIX_PREPARATION_SCHEMA, VM_MSIX_RUN_PLAN_SCHEMA, VmMsixExecutionBinding, VmMsixPreparation,
+    VmMsixPreparedFile,
+};
+
 use std::{
     collections::BTreeMap,
     fmt,
@@ -91,6 +99,9 @@ pub enum RunLifecycleKind {
     deny_unknown_fields
 )]
 pub enum PlannedAction {
+    ExecuteVmMsix {
+        binding: Box<VmMsixExecutionBinding>,
+    },
     AssessHost,
     PrepareWorkspace,
     ExecuteScenario {
@@ -219,7 +230,12 @@ impl RunPlan {
         trust_deltas: Vec<String>,
     ) -> Result<Self, AiwError> {
         let value = Self {
-            schema: if actions.iter().any(|action| {
+            schema: if actions
+                .iter()
+                .any(|action| matches!(action, PlannedAction::ExecuteVmMsix { .. }))
+            {
+                VM_MSIX_RUN_PLAN_SCHEMA.into()
+            } else if actions.iter().any(|action| {
                 matches!(
                     action,
                     PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { .. }
@@ -262,6 +278,7 @@ impl RunPlan {
             Some(RUN_PLAN_SCHEMA_VERSION)
                 | Some(IMPORTED_MSI_RUN_PLAN_SCHEMA_VERSION)
                 | Some(IMPORTED_BAMBU_RUN_PLAN_SCHEMA_VERSION)
+                | Some(VM_MSIX_RUN_PLAN_SCHEMA)
         ) {
             return Err(run_error(
                 "AIW_PLAN_SCHEMA_UNSUPPORTED",
@@ -2889,6 +2906,21 @@ impl RunLayout {
         if has_wsb_action(plan) {
             self.read_wsb_import_receipt_locked(plan, stage)?;
         }
+        if plan
+            .actions
+            .iter()
+            .any(|action| matches!(action, PlannedAction::ExecuteVmMsix { .. }))
+        {
+            #[cfg(windows)]
+            let _held = open_vm_msix_preparation(plan)?;
+            #[cfg(not(windows))]
+            return Err(run_error(
+                "AIW_WINDOWS_REQUIRED",
+                "VM MSIX approval requires protected Windows provenance",
+                stage,
+                &plan.run_id,
+            ));
+        }
         Ok(())
     }
 
@@ -3634,6 +3666,11 @@ pub struct CompletedRunSnapshot {
 }
 
 fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
+    let vm_count = plan
+        .actions
+        .iter()
+        .filter(|action| matches!(action, PlannedAction::ExecuteVmMsix { .. }))
+        .count();
     let has_bambu_action = plan.actions.iter().any(|action| {
         matches!(
             action,
@@ -3646,7 +3683,9 @@ fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
             PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
         )
     });
-    let expected_schema = if has_bambu_action {
+    let expected_schema = if vm_count != 0 {
+        VM_MSIX_RUN_PLAN_SCHEMA
+    } else if has_bambu_action {
         IMPORTED_BAMBU_RUN_PLAN_SCHEMA_VERSION
     } else if has_msi_action {
         IMPORTED_MSI_RUN_PLAN_SCHEMA_VERSION
@@ -3697,6 +3736,11 @@ fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
             wsb_action_count += 1;
         }
         match action {
+            PlannedAction::ExecuteVmMsix { binding } => {
+                binding.validate().map_err(|detail| {
+                    run_error("AIW_MSIX_BINDING_INVALID", &detail, "plan", &plan.run_id)
+                })?;
+            }
             PlannedAction::ExecuteScenario { scenario_id } => {
                 validate_id("scenarioId", scenario_id)?
             }
@@ -3825,7 +3869,7 @@ fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
             ));
         }
     }
-    if wsb_action_count > 1 {
+    if wsb_action_count > 1 || vm_count > 1 || (vm_count != 0 && wsb_action_count != 0) {
         return Err(run_error(
             "AIW_PLAN_BINDING_INVALID",
             "a run plan may contain at most one Windows Sandbox profile action",
@@ -4010,6 +4054,7 @@ fn action_allowed(lifecycle: RunLifecycleKind, action: &PlannedAction) -> bool {
                 | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
                 | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { .. }
                 | PlannedAction::CollectEvidence
+                | PlannedAction::ExecuteVmMsix { .. }
         ),
         RunLifecycleKind::Launch => matches!(
             action,
@@ -4019,9 +4064,10 @@ fn action_allowed(lifecycle: RunLifecycleKind, action: &PlannedAction) -> bool {
                 | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
                 | PlannedAction::CollectEvidence
         ),
-        RunLifecycleKind::Authoring => {
-            !matches!(action, PlannedAction::LaunchValidatedProfile { .. })
-        }
+        RunLifecycleKind::Authoring => !matches!(
+            action,
+            PlannedAction::LaunchValidatedProfile { .. } | PlannedAction::ExecuteVmMsix { .. }
+        ),
     }
 }
 
@@ -5649,6 +5695,92 @@ mod tests {
             vec!["starts one exact Windows Sandbox session".into()],
         )
         .unwrap()
+    }
+
+    #[test]
+    fn vm_msix_plan_has_distinct_schema_and_rejects_mixed_or_rebound_authority() {
+        let action = PlannedAction::ExecuteVmMsix {
+            binding: Box::new(VmMsixExecutionBinding {
+                preparation_sha256: "a".repeat(64),
+                worker_profile_sha256: "b".repeat(64),
+                package_sha256: aiw_probe::MSIX_PACKAGE_SHA256.into(),
+                workspace: Box::new(wsb_workspace("msix-plan")),
+            }),
+        };
+        let make = |lifecycle, actions| {
+            RunPlan::new(
+                "msix-plan",
+                "fixed-msix",
+                "f".repeat(64),
+                lifecycle,
+                "2026-10-22T00:00:00Z",
+                actions,
+                vec!["Restore dedicated VM107".into()],
+            )
+        };
+        let plan = make(RunLifecycleKind::Assessment, vec![action.clone()]).unwrap();
+        assert_eq!(plan.schema, VM_MSIX_RUN_PLAN_SCHEMA);
+        assert!(make(RunLifecycleKind::Authoring, vec![action.clone()]).is_err());
+        assert!(make(RunLifecycleKind::Launch, vec![action.clone()]).is_err());
+        assert!(
+            make(
+                RunLifecycleKind::Assessment,
+                vec![action.clone(), action.clone()]
+            )
+            .is_err()
+        );
+        let sandbox = wsb_plan("msix-plan").actions.remove(0);
+        assert!(make(RunLifecycleKind::Assessment, vec![action, sandbox]).is_err());
+        let mut changed = serde_json::to_value(plan).unwrap();
+        changed["actions"][0]["binding"]["packageSha256"] = "0".repeat(64).into();
+        assert!(RunPlan::from_value(changed).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn vm_msix_approval_requires_native_protected_preparation_before_authority_is_recorded() {
+        let base = root();
+        let workspace = HeldRunWorkspace::create(&base, "msix-authority").unwrap();
+        let binding = VmMsixExecutionBinding {
+            preparation_sha256: "a".repeat(64),
+            worker_profile_sha256: "b".repeat(64),
+            package_sha256: aiw_probe::MSIX_PACKAGE_SHA256.into(),
+            workspace: Box::new(workspace.evidence().clone()),
+        };
+        let plan = RunPlan::new(
+            "msix-authority",
+            "fixed-msix",
+            "c".repeat(64),
+            RunLifecycleKind::Assessment,
+            "2026-10-22T00:00:00Z",
+            vec![PlannedAction::ExecuteVmMsix {
+                binding: Box::new(binding),
+            }],
+            vec!["Restore exact VM107".into()],
+        )
+        .unwrap();
+        let layout = RunLayout::new(workspace.root_path(), "msix-authority").unwrap();
+        layout.create(&plan).unwrap();
+        let approval = ApprovalRecord::for_plan(&plan, "operator", "2026-10-22T00:00:01Z").unwrap();
+        assert_eq!(
+            layout.write_approval(&approval).unwrap_err().code.as_ref(),
+            "AIW_MSIX_PROVENANCE_REJECTED"
+        );
+        assert!(!layout.approval_path().exists());
+        assert_eq!(layout.read_plan().unwrap(), plan);
+        drop(layout);
+        drop(workspace);
+        assert_eq!(
+            base.parent().unwrap(),
+            fs::canonicalize(std::env::temp_dir()).unwrap()
+        );
+        assert!(
+            base.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("aiw-orchestrator-test-")
+        );
+        fs::remove_dir_all(base).unwrap();
     }
 
     fn msi_wsb_plan(run_id: &str) -> RunPlan {

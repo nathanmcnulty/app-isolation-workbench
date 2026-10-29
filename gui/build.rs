@@ -12,6 +12,7 @@ fn main() {
             "cancel_pending",
             "export_document",
             "load_retained_report",
+            "recover_msix_worker",
         ]),
     ))
     .expect("desktop configuration failed");

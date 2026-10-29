@@ -11,6 +11,11 @@
     let source;
     try { source = typeof input === "string" ? JSON.parse(input) : input; } catch (_) { return null; }
     const prose = (value) => typeof value === "string" && value.trim().length > 0;
+    if (source && source.profile === "notepad-plus-plus-msix-vm107" && source.worker && source.worker.vmId === 107 && prose(source.workflow)) {
+      return { execution: "Signed Notepad++ MSIX as a fresh standard user on dedicated VM107. " + source.workflow,
+        changes: "VM107 is rebooted and connected to the lab network. Temporary automatic sign-in is cleared before the native control. A durable host lease prevents another trial until cold restore is verified. Medium full-trust package; broader isolation is not measured.",
+        lifetime: "Only VM107 is restored to " + source.worker.checkpoint + ". Raw evidence stays in this host workspace. Complete the console edit within the approved 30-minute interval." };
+    }
     if (source && source.schemaVersion === "aiw.dev/wsb-msi-recipe-inspection/v0alpha1") {
       const recipe = source.recipe;
       if (!recipe || !recipe.data || !prose(recipe.data.lifetime) ||

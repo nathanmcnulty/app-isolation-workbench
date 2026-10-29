@@ -1,7 +1,13 @@
-#requires -Version 5.1
+#Requires -Version 7.6
+#Requires -PSEdition Core
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$EvidenceDirectory)
 $ErrorActionPreference = 'Stop'
+if ([Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() -cne 'X64' -or $PSVersionTable.PSVersion.ToString() -match '-' -or ($PSVersionTable.ContainsKey('GitCommitId') -and $PSVersionTable.GitCommitId -match 'preview|rc')) { throw 'Stable x64 PowerShell Core >=7.6 required; prerelease runtime refused' }
+$PSModuleAutoLoadingPreference = 'None'
+foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security')) { Import-Module $module -SkipEditionCheck -ErrorAction Stop }
+if (@(Get-PSSession -ErrorAction SilentlyContinue | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'Windows compatibility session forbidden' }
+
 Set-StrictMode -Version Latest
 if (Test-Path -LiteralPath $EvidenceDirectory) { throw 'Fresh evidence directory required' }
 [IO.Directory]::CreateDirectory($EvidenceDirectory) | Out-Null

@@ -742,6 +742,13 @@ enum RunCommand {
         #[arg(long, value_enum, default_value_t = AdminOutputFormat::Json)]
         format: AdminOutputFormat,
     },
+    /// Project retained Sandbox and reviewed MSIX research into shared assessment observations.
+    ReportAssessment {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long, value_enum, default_value_t = AssessmentReportFormat::Json)]
+        format: AssessmentReportFormat,
+    },
     /// Combine retained Notepad++ and Bambu results without executing or comparing applications.
     ReportWsbSet {
         #[arg(long)]
@@ -875,6 +882,8 @@ enum SchemaKind {
     WsbReportSetInput,
     #[value(name = "wsb-report-set")]
     WsbReportSet,
+    ApplicationAssessmentInput,
+    ApplicationAssessmentReport,
     #[value(name = "wsb-msi-report-set-input")]
     WsbMsiReportSetInput,
     #[value(name = "wsb-msi-report-set")]
@@ -2559,6 +2568,19 @@ fn run(command: Command) -> Result<()> {
                     }))
                 }
             }
+            RunCommand::ReportAssessment { input, format } => {
+                let manifest: aiw_runner::ApplicationAssessmentInput =
+                    read_document(&input, 1024 * 1024)?;
+                let report = aiw_runner::report_application_assessment(&manifest)
+                    .map_err(|error| anyhow!(error))?;
+                match format {
+                    AssessmentReportFormat::Json => write_json(&report),
+                    AssessmentReportFormat::Markdown => {
+                        print!("{}", report.to_markdown());
+                        Ok(())
+                    }
+                }
+            }
             RunCommand::ReportWsbSet { input, format } => {
                 let manifest: aiw_runner::WsbReportSetInput = read_document(&input, 1024 * 1024)?;
                 manifest.validate().map_err(|error| anyhow!(error))?;
@@ -2797,6 +2819,12 @@ fn run(command: Command) -> Result<()> {
                 write_json(&schema_for!(aiw_runner::WsbReportSetInput))
             }
             SchemaKind::WsbReportSet => write_json(&schema_for!(aiw_runner::WsbReportSet)),
+            SchemaKind::ApplicationAssessmentInput => {
+                write_json(&schema_for!(aiw_runner::ApplicationAssessmentInput))
+            }
+            SchemaKind::ApplicationAssessmentReport => {
+                write_json(&schema_for!(aiw_runner::ApplicationAssessmentReport))
+            }
             SchemaKind::WsbMsiReportSetInput => {
                 write_json(&schema_for!(aiw_runner::WsbMsiReportSetInput))
             }
@@ -3941,6 +3969,14 @@ mod tests {
         for (kind, expected) in [
             (SchemaKind::WsbReportSetInput, "wsb-report-set-input"),
             (SchemaKind::WsbReportSet, "wsb-report-set"),
+            (
+                SchemaKind::ApplicationAssessmentInput,
+                "application-assessment-input",
+            ),
+            (
+                SchemaKind::ApplicationAssessmentReport,
+                "application-assessment-report",
+            ),
             (SchemaKind::WsbMsiReportSetInput, "wsb-msi-report-set-input"),
             (SchemaKind::WsbMsiReportSet, "wsb-msi-report-set"),
             (SchemaKind::WsbSettingsComparison, "wsb-settings-comparison"),

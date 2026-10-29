@@ -1,5 +1,7 @@
 # Verified desktop archive handoff
 
+Build and helper scripts now require stable x64 PowerShell Core 7.6+. Production MSIX execution selects `C:\Program Files\PowerShell\7\pwsh.exe` and requires the separately approved worker runtime, endpoint and baseline described in the [setup plan](handoffs/2026-10-24-powershell76/SETUP-AND-ACCEPTANCE.md). A verified archive alone does not establish native acceptance of that runtime migration.
+
 The desktop handoff now exports an already verified package and extracts it on
 another supported Windows host without rebuilding or running an application.
 This closes the manual ZIP preparation gap. It remains an **unsigned development

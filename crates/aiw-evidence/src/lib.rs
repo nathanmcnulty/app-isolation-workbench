@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
 mod bundle;
+mod msix_lifecycle;
+pub use msix_lifecycle::verify_notepad_msix_lifecycle;
 
 use std::collections::BTreeMap;
 

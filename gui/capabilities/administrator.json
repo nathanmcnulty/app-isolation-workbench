@@ -5,6 +5,7 @@
   "permissions": [
     "allow-analyze-package", "allow-create-package",
     "allow-get-state", "allow-choose-input", "allow-prepare-workflow", "allow-submit-approval",
-    "allow-start-approved-workflow", "allow-cancel-pending", "allow-export-document", "allow-load-retained-report"
+    "allow-start-approved-workflow", "allow-cancel-pending", "allow-export-document", "allow-load-retained-report",
+    "allow-recover-msix-worker"
   ]
 }

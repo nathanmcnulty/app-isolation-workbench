@@ -2,6 +2,17 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { clean, reviewSummary } = require("../ui/display.js");
 
+test("VM MSIX review names the dedicated target, network, sign-in and recovery boundary", () => {
+  const value={profile:"notepad-plus-plus-msix-vm107",worker:{vmId:107,checkpoint:"aiw-msix-worker107-tls-clean-r1"},workflow:"Install, edit, uninstall, collect, restore"};
+  const summary=reviewSummary(value);
+  assert.match(summary.execution,/dedicated VM107/);
+  assert.match(summary.changes,/lab network/);
+  assert.match(summary.changes,/automatic sign-in is cleared/);
+  assert.match(summary.changes,/cold restore/);
+  assert.match(summary.lifetime,/aiw-msix-worker107-tls-clean-r1/);
+  assert.equal(reviewSummary({...value,worker:{vmId:106}}),null);
+});
+
 test("all bidi controls and terminal controls stay visibly identifiable", () => {
   for (const code of [0, 7, 8, 11, 12, 27, 31, ...Array.from({ length: 33 }, (_, i) => 127 + i), 0x061c, 0x200e, 0x200f,
     0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069]) {

@@ -21,6 +21,7 @@ dependencies = [
 name = "aiw-admin-workflow"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "aiw-evidence",
  "aiw-orchestrator",
  "aiw-probe",
  "aiw-provider-wsb",
@@ -28,6 +29,7 @@ dependencies = [
  "aiw-schema",
  "aiw-windows-platform",
  "anyhow",
+ "base64 0.23.1",
  "hex",
  "serde",
  "serde_json",
@@ -88,6 +90,7 @@ dependencies = [
  "hex",
  "schemars 1.2.2",
  "serde",
+ "serde_json",
  "sha2 0.11.0",
  "thiserror 2.0.21",
 ]
@@ -128,6 +131,7 @@ dependencies = [
  "serde_yaml_ng",
  "sha2 0.11.0",
  "thiserror 2.0.21",
+ "zip",
 ]
 
 [[package]]
@@ -157,6 +161,7 @@ version = "0.1.0-alpha.1"
 name = "aiw-windows-platform"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "aiw-evidence",
  "aiw-probe",
  "aiw-provider-wsb",
  "aiw-token",

@@ -27,14 +27,58 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+
+      - name: Stage trusted hosted Core bootstrap away from the installation
+        # Bootstrap exception: this step only copies the trusted runner runtime.
+        # Its original machine-runtime process exits before the MSI step starts.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($PSVersionTable.PSEdition -cne 'Core' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Program Files\PowerShell\7\pwsh.exe' -or $PSHOME -ine 'C:\Program Files\PowerShell\7') { throw 'Unexpected hosted bootstrap runtime' }
+          $bootstrap = Join-Path $env:RUNNER_TEMP 'aiw-core-bootstrap'
+          if (Test-Path -LiteralPath $bootstrap) { throw 'Bootstrap destination must be fresh' }
+          $originalHash = (Get-FileHash -LiteralPath (Join-Path $PSHOME 'pwsh.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+          Copy-Item -LiteralPath $PSHOME -Destination $bootstrap -Recurse -ErrorAction Stop
+          if ((Get-FileHash -LiteralPath (Join-Path $bootstrap 'pwsh.exe') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $originalHash) { throw 'Copied bootstrap image hash differs' }
+          "AIW_CI_BOOTSTRAP_SHA256=$originalHash" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Provision stable PowerShell 7.6.7 (hosted runner only)
+        # Run from the copy after the original machine-runtime process has exited.
+        # No AIW operation executes until the exact stable runtime is selected.
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "%RUNNER_TEMP%\aiw-core-bootstrap\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bootstrap = [IO.Path]::Combine($env:RUNNER_TEMP, 'aiw-core-bootstrap')
+          $env:PSModulePath = [IO.Path]::Combine($PSHOME, 'Modules')
+          foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility')) { Import-Module ([IO.Path]::Combine($PSHOME, 'Modules', $module, ($module+'.psd1'))) -SkipEditionCheck -ErrorAction Stop }
+          $PSModuleAutoLoadingPreference = 'None'
+          if ([Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine (Join-Path $bootstrap 'pwsh.exe') -or $PSHOME -ine $bootstrap -or (Get-FileHash -LiteralPath (Join-Path $bootstrap 'pwsh.exe') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $env:AIW_CI_BOOTSTRAP_SHA256) { throw 'Staged bootstrap runtime identity differs' }
+          $msi = Join-Path $env:RUNNER_TEMP 'PowerShell-7.6.7-win-x64.msi'
+          Invoke-WebRequest -Uri 'https://github.com/PowerShell/PowerShell/releases/download/v7.6.7/PowerShell-7.6.7-win-x64.msi' -OutFile $msi
+          if ((Get-FileHash -LiteralPath $msi -Algorithm SHA256).Hash.ToLowerInvariant() -cne 'ec575cef9ec56fcd905de0d5eeac9cb7f81a0a65abb87bb5cd0e87fdfe2b8cc0') { throw 'PowerShell MSI hash differs from the reviewed release' }
+          $install = Start-Process msiexec.exe -ArgumentList @('/i', $msi, '/quiet', '/norestart', 'ENABLE_PSREMOTING=0', 'REGISTER_MANIFEST=0', 'ADD_PATH=1') -Wait -PassThru
+          if ($install.ExitCode -notin @(0,3010)) { throw 'PowerShell runtime provisioning failed' }
+          $runtime = 'C:\Program Files\PowerShell\7\pwsh.exe'
+          & $runtime -NoProfile -NonInteractive -Command '$env:PSModulePath = [IO.Path]::Combine($PSHOME, ''Modules''); Import-Module ([IO.Path]::Combine($PSHOME, ''Modules'', ''Microsoft.PowerShell.Utility'', ''Microsoft.PowerShell.Utility.psd1'')) -SkipEditionCheck -ErrorAction Stop; if ($PSVersionTable.PSEdition -cne ''Core'' -or $PSVersionTable.PSVersion.ToString() -cne ''7.6.7'' -or $PSVersionTable.PSVersion.PreReleaseLabel) { throw ''Unexpected provisioned runtime'' }; $PSVersionTable | ConvertTo-Json -Depth 3'
+          if ($LASTEXITCODE -ne 0) { throw 'PowerShell runtime proof failed' }
+          'C:\Program Files\PowerShell\7' | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          'AIW_TEST_PWSH=C:\Program Files\PowerShell\7\pwsh.exe' | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Build unsigned desktop inputs without signing authority
         id: build
-        shell: pwsh
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         env:
           SOURCE_REVISION: ${{ github.sha }}
           PUBLISH_REQUESTED: ${{ inputs.publish }}
           REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
         run: |
+          $ErrorActionPreference = 'Stop'
+          # AIW inline runtime assertion: independent of repository checkout.
+          if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion.ToString() -cne '7.6.7' -or $PSVersionTable.PSVersion.PreReleaseLabel -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() -cne 'X64' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Program Files\PowerShell\7\pwsh.exe' -or $PSHOME -ine 'C:\Program Files\PowerShell\7') { throw 'Expected exact stable machine PowerShell 7.6.7 x64' }
+          foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security','Microsoft.PowerShell.Archive')) { Import-Module (Join-Path $PSHOME ('Modules\'+$module+'\'+$module+'.psd1')) -SkipEditionCheck -ErrorAction Stop }
+          $PSModuleAutoLoadingPreference = 'None'
+          if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'Compatibility session is prohibited' }
+          $PSVersionTable | ConvertTo-Json -Depth 3 | Write-Host
           $ErrorActionPreference = 'Stop'
           if ($env:PUBLISH_REQUESTED -ceq 'true' -and $env:REPOSITORY_PRIVATE -cne 'false') { throw 'Public publication requires the reviewed repository to be public first' }
           if ($env:ACTIONS_ID_TOKEN_REQUEST_URL -or $env:ACTIONS_ID_TOKEN_REQUEST_TOKEN) { throw 'Build unexpectedly has OIDC authority' }
@@ -79,17 +123,60 @@ jobs:
       contents: read
       id-token: write
     steps:
+      - name: Stage trusted hosted Core bootstrap away from the installation
+        # Bootstrap exception: this step only copies the trusted runner runtime.
+        # Its original machine-runtime process exits before the MSI step starts.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($PSVersionTable.PSEdition -cne 'Core' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Program Files\PowerShell\7\pwsh.exe' -or $PSHOME -ine 'C:\Program Files\PowerShell\7') { throw 'Unexpected hosted bootstrap runtime' }
+          $bootstrap = Join-Path $env:RUNNER_TEMP 'aiw-core-bootstrap'
+          if (Test-Path -LiteralPath $bootstrap) { throw 'Bootstrap destination must be fresh' }
+          $originalHash = (Get-FileHash -LiteralPath (Join-Path $PSHOME 'pwsh.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+          Copy-Item -LiteralPath $PSHOME -Destination $bootstrap -Recurse -ErrorAction Stop
+          if ((Get-FileHash -LiteralPath (Join-Path $bootstrap 'pwsh.exe') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $originalHash) { throw 'Copied bootstrap image hash differs' }
+          "AIW_CI_BOOTSTRAP_SHA256=$originalHash" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Provision stable PowerShell 7.6.7 (hosted runner only)
+        # Run from the copy after the original machine-runtime process has exited.
+        # No AIW operation executes until the exact stable runtime is selected.
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "%RUNNER_TEMP%\aiw-core-bootstrap\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bootstrap = [IO.Path]::Combine($env:RUNNER_TEMP, 'aiw-core-bootstrap')
+          $env:PSModulePath = [IO.Path]::Combine($PSHOME, 'Modules')
+          foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility')) { Import-Module ([IO.Path]::Combine($PSHOME, 'Modules', $module, ($module+'.psd1'))) -SkipEditionCheck -ErrorAction Stop }
+          $PSModuleAutoLoadingPreference = 'None'
+          if ([Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine (Join-Path $bootstrap 'pwsh.exe') -or $PSHOME -ine $bootstrap -or (Get-FileHash -LiteralPath (Join-Path $bootstrap 'pwsh.exe') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $env:AIW_CI_BOOTSTRAP_SHA256) { throw 'Staged bootstrap runtime identity differs' }
+          $msi = Join-Path $env:RUNNER_TEMP 'PowerShell-7.6.7-win-x64.msi'
+          Invoke-WebRequest -Uri 'https://github.com/PowerShell/PowerShell/releases/download/v7.6.7/PowerShell-7.6.7-win-x64.msi' -OutFile $msi
+          if ((Get-FileHash -LiteralPath $msi -Algorithm SHA256).Hash.ToLowerInvariant() -cne 'ec575cef9ec56fcd905de0d5eeac9cb7f81a0a65abb87bb5cd0e87fdfe2b8cc0') { throw 'PowerShell MSI hash differs from the reviewed release' }
+          $install = Start-Process msiexec.exe -ArgumentList @('/i', $msi, '/quiet', '/norestart', 'ENABLE_PSREMOTING=0', 'REGISTER_MANIFEST=0', 'ADD_PATH=1') -Wait -PassThru
+          if ($install.ExitCode -notin @(0,3010)) { throw 'PowerShell runtime provisioning failed' }
+          $runtime = 'C:\Program Files\PowerShell\7\pwsh.exe'
+          & $runtime -NoProfile -NonInteractive -Command '$env:PSModulePath = [IO.Path]::Combine($PSHOME, ''Modules''); Import-Module ([IO.Path]::Combine($PSHOME, ''Modules'', ''Microsoft.PowerShell.Utility'', ''Microsoft.PowerShell.Utility.psd1'')) -SkipEditionCheck -ErrorAction Stop; if ($PSVersionTable.PSEdition -cne ''Core'' -or $PSVersionTable.PSVersion.ToString() -cne ''7.6.7'' -or $PSVersionTable.PSVersion.PreReleaseLabel) { throw ''Unexpected provisioned runtime'' }; $PSVersionTable | ConvertTo-Json -Depth 3'
+          if ($LASTEXITCODE -ne 0) { throw 'PowerShell runtime proof failed' }
+          'C:\Program Files\PowerShell\7' | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          'AIW_TEST_PWSH=C:\Program Files\PowerShell\7\pwsh.exe' | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: aiw-desktop-signing-inputs-${{ github.sha }}
           path: inputs
       - name: Check exact transferred inventory before Azure login
-        shell: pwsh
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         env:
           SOURCE_REVISION: ${{ github.sha }}
           RECEIPT: ${{ needs.build.outputs.receipt }}
           CLIENT_ID: ${{ vars.AIW_SIGNING_CLIENT_ID }}
         run: |
+          $ErrorActionPreference = 'Stop'
+          # AIW inline runtime assertion: independent of repository checkout.
+          if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion.ToString() -cne '7.6.7' -or $PSVersionTable.PSVersion.PreReleaseLabel -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() -cne 'X64' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Program Files\PowerShell\7\pwsh.exe' -or $PSHOME -ine 'C:\Program Files\PowerShell\7') { throw 'Expected exact stable machine PowerShell 7.6.7 x64' }
+          foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security','Microsoft.PowerShell.Archive')) { Import-Module (Join-Path $PSHOME ('Modules\'+$module+'\'+$module+'.psd1')) -SkipEditionCheck -ErrorAction Stop }
+          $PSModuleAutoLoadingPreference = 'None'
+          if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'Compatibility session is prohibited' }
+          $PSVersionTable | ConvertTo-Json -Depth 3 | Write-Host
           $ErrorActionPreference = 'Stop'
           if ($env:CLIENT_ID -notmatch '^[0-9a-f-]{36}$' -or $env:RECEIPT -notmatch '^[0-9a-f]{64}$') { throw 'Missing signing identity or receipt' }
           $expected = @('aiw.exe', 'aiw-desktop.exe', 'aiw-guest-agent.exe', 'verify-desktop-package.ps1', 'desktop-package-archive.ps1')
@@ -149,6 +236,43 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+
+      - name: Stage trusted hosted Core bootstrap away from the installation
+        # Bootstrap exception: this step only copies the trusted runner runtime.
+        # Its original machine-runtime process exits before the MSI step starts.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($PSVersionTable.PSEdition -cne 'Core' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Program Files\PowerShell\7\pwsh.exe' -or $PSHOME -ine 'C:\Program Files\PowerShell\7') { throw 'Unexpected hosted bootstrap runtime' }
+          $bootstrap = Join-Path $env:RUNNER_TEMP 'aiw-core-bootstrap'
+          if (Test-Path -LiteralPath $bootstrap) { throw 'Bootstrap destination must be fresh' }
+          $originalHash = (Get-FileHash -LiteralPath (Join-Path $PSHOME 'pwsh.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+          Copy-Item -LiteralPath $PSHOME -Destination $bootstrap -Recurse -ErrorAction Stop
+          if ((Get-FileHash -LiteralPath (Join-Path $bootstrap 'pwsh.exe') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $originalHash) { throw 'Copied bootstrap image hash differs' }
+          "AIW_CI_BOOTSTRAP_SHA256=$originalHash" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Provision stable PowerShell 7.6.7 (hosted runner only)
+        # Run from the copy after the original machine-runtime process has exited.
+        # No AIW operation executes until the exact stable runtime is selected.
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "%RUNNER_TEMP%\aiw-core-bootstrap\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bootstrap = [IO.Path]::Combine($env:RUNNER_TEMP, 'aiw-core-bootstrap')
+          $env:PSModulePath = [IO.Path]::Combine($PSHOME, 'Modules')
+          foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility')) { Import-Module ([IO.Path]::Combine($PSHOME, 'Modules', $module, ($module+'.psd1'))) -SkipEditionCheck -ErrorAction Stop }
+          $PSModuleAutoLoadingPreference = 'None'
+          if ([Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine (Join-Path $bootstrap 'pwsh.exe') -or $PSHOME -ine $bootstrap -or (Get-FileHash -LiteralPath (Join-Path $bootstrap 'pwsh.exe') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $env:AIW_CI_BOOTSTRAP_SHA256) { throw 'Staged bootstrap runtime identity differs' }
+          $msi = Join-Path $env:RUNNER_TEMP 'PowerShell-7.6.7-win-x64.msi'
+          Invoke-WebRequest -Uri 'https://github.com/PowerShell/PowerShell/releases/download/v7.6.7/PowerShell-7.6.7-win-x64.msi' -OutFile $msi
+          if ((Get-FileHash -LiteralPath $msi -Algorithm SHA256).Hash.ToLowerInvariant() -cne 'ec575cef9ec56fcd905de0d5eeac9cb7f81a0a65abb87bb5cd0e87fdfe2b8cc0') { throw 'PowerShell MSI hash differs from the reviewed release' }
+          $install = Start-Process msiexec.exe -ArgumentList @('/i', $msi, '/quiet', '/norestart', 'ENABLE_PSREMOTING=0', 'REGISTER_MANIFEST=0', 'ADD_PATH=1') -Wait -PassThru
+          if ($install.ExitCode -notin @(0,3010)) { throw 'PowerShell runtime provisioning failed' }
+          $runtime = 'C:\Program Files\PowerShell\7\pwsh.exe'
+          & $runtime -NoProfile -NonInteractive -Command '$env:PSModulePath = [IO.Path]::Combine($PSHOME, ''Modules''); Import-Module ([IO.Path]::Combine($PSHOME, ''Modules'', ''Microsoft.PowerShell.Utility'', ''Microsoft.PowerShell.Utility.psd1'')) -SkipEditionCheck -ErrorAction Stop; if ($PSVersionTable.PSEdition -cne ''Core'' -or $PSVersionTable.PSVersion.ToString() -cne ''7.6.7'' -or $PSVersionTable.PSVersion.PreReleaseLabel) { throw ''Unexpected provisioned runtime'' }; $PSVersionTable | ConvertTo-Json -Depth 3'
+          if ($LASTEXITCODE -ne 0) { throw 'PowerShell runtime proof failed' }
+          'C:\Program Files\PowerShell\7' | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          'AIW_TEST_PWSH=C:\Program Files\PowerShell\7\pwsh.exe' | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: aiw-desktop-unsigned-${{ github.sha }}
@@ -159,11 +283,18 @@ jobs:
           path: ${{ runner.temp }}\signed-inputs
       - name: Assemble and round-trip exact signed bytes without executing applications
         id: assemble
-        shell: pwsh
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         env:
           SOURCE_REVISION: ${{ github.sha }}
           RECEIPT: ${{ needs.build.outputs.receipt }}
         run: |
+          $ErrorActionPreference = 'Stop'
+          # AIW inline runtime assertion: independent of repository checkout.
+          if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion.ToString() -cne '7.6.7' -or $PSVersionTable.PSVersion.PreReleaseLabel -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() -cne 'X64' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Program Files\PowerShell\7\pwsh.exe' -or $PSHOME -ine 'C:\Program Files\PowerShell\7') { throw 'Expected exact stable machine PowerShell 7.6.7 x64' }
+          foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security','Microsoft.PowerShell.Archive')) { Import-Module (Join-Path $PSHOME ('Modules\'+$module+'\'+$module+'.psd1')) -SkipEditionCheck -ErrorAction Stop }
+          $PSModuleAutoLoadingPreference = 'None'
+          if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'Compatibility session is prohibited' }
+          $PSVersionTable | ConvertTo-Json -Depth 3 | Write-Host
           $ErrorActionPreference = 'Stop'
           if ($env:ACTIONS_ID_TOKEN_REQUEST_URL -or $env:ACTIONS_ID_TOKEN_REQUEST_TOKEN) { throw 'Assembly unexpectedly has OIDC authority' }
           $inputs = Join-Path $env:RUNNER_TEMP 'signed-inputs'
@@ -178,7 +309,7 @@ jobs:
           # App Isolation Workbench signed alpha candidate
 
           This candidate still needs runtime acceptance of these exact signed bytes.
-          Run the following in PowerShell from this downloaded handoff folder.
+          Run the following in stable x64 PowerShell Core >=7.6 from this downloaded handoff folder (recommended CI pin: 7.6.7; native acceptance pending). Open the verified machine runtime explicitly with `& 'C:\Program Files\PowerShell\7\pwsh.exe' -NoProfile`; Windows PowerShell and per-user aliases are unsupported.
           Compare the hashes below with the independently supplied CI/release record.
           Use a supported Windows 11 host with Windows Sandbox enabled; the GUI
           checks readiness before preparation.
@@ -257,17 +388,60 @@ jobs:
       id-token: write
       attestations: write
     steps:
+      - name: Stage trusted hosted Core bootstrap away from the installation
+        # Bootstrap exception: this step only copies the trusted runner runtime.
+        # Its original machine-runtime process exits before the MSI step starts.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($PSVersionTable.PSEdition -cne 'Core' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Program Files\PowerShell\7\pwsh.exe' -or $PSHOME -ine 'C:\Program Files\PowerShell\7') { throw 'Unexpected hosted bootstrap runtime' }
+          $bootstrap = Join-Path $env:RUNNER_TEMP 'aiw-core-bootstrap'
+          if (Test-Path -LiteralPath $bootstrap) { throw 'Bootstrap destination must be fresh' }
+          $originalHash = (Get-FileHash -LiteralPath (Join-Path $PSHOME 'pwsh.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+          Copy-Item -LiteralPath $PSHOME -Destination $bootstrap -Recurse -ErrorAction Stop
+          if ((Get-FileHash -LiteralPath (Join-Path $bootstrap 'pwsh.exe') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $originalHash) { throw 'Copied bootstrap image hash differs' }
+          "AIW_CI_BOOTSTRAP_SHA256=$originalHash" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Provision stable PowerShell 7.6.7 (hosted runner only)
+        # Run from the copy after the original machine-runtime process has exited.
+        # No AIW operation executes until the exact stable runtime is selected.
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "%RUNNER_TEMP%\aiw-core-bootstrap\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bootstrap = [IO.Path]::Combine($env:RUNNER_TEMP, 'aiw-core-bootstrap')
+          $env:PSModulePath = [IO.Path]::Combine($PSHOME, 'Modules')
+          foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility')) { Import-Module ([IO.Path]::Combine($PSHOME, 'Modules', $module, ($module+'.psd1'))) -SkipEditionCheck -ErrorAction Stop }
+          $PSModuleAutoLoadingPreference = 'None'
+          if ([Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine (Join-Path $bootstrap 'pwsh.exe') -or $PSHOME -ine $bootstrap -or (Get-FileHash -LiteralPath (Join-Path $bootstrap 'pwsh.exe') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $env:AIW_CI_BOOTSTRAP_SHA256) { throw 'Staged bootstrap runtime identity differs' }
+          $msi = Join-Path $env:RUNNER_TEMP 'PowerShell-7.6.7-win-x64.msi'
+          Invoke-WebRequest -Uri 'https://github.com/PowerShell/PowerShell/releases/download/v7.6.7/PowerShell-7.6.7-win-x64.msi' -OutFile $msi
+          if ((Get-FileHash -LiteralPath $msi -Algorithm SHA256).Hash.ToLowerInvariant() -cne 'ec575cef9ec56fcd905de0d5eeac9cb7f81a0a65abb87bb5cd0e87fdfe2b8cc0') { throw 'PowerShell MSI hash differs from the reviewed release' }
+          $install = Start-Process msiexec.exe -ArgumentList @('/i', $msi, '/quiet', '/norestart', 'ENABLE_PSREMOTING=0', 'REGISTER_MANIFEST=0', 'ADD_PATH=1') -Wait -PassThru
+          if ($install.ExitCode -notin @(0,3010)) { throw 'PowerShell runtime provisioning failed' }
+          $runtime = 'C:\Program Files\PowerShell\7\pwsh.exe'
+          & $runtime -NoProfile -NonInteractive -Command '$env:PSModulePath = [IO.Path]::Combine($PSHOME, ''Modules''); Import-Module ([IO.Path]::Combine($PSHOME, ''Modules'', ''Microsoft.PowerShell.Utility'', ''Microsoft.PowerShell.Utility.psd1'')) -SkipEditionCheck -ErrorAction Stop; if ($PSVersionTable.PSEdition -cne ''Core'' -or $PSVersionTable.PSVersion.ToString() -cne ''7.6.7'' -or $PSVersionTable.PSVersion.PreReleaseLabel) { throw ''Unexpected provisioned runtime'' }; $PSVersionTable | ConvertTo-Json -Depth 3'
+          if ($LASTEXITCODE -ne 0) { throw 'PowerShell runtime proof failed' }
+          'C:\Program Files\PowerShell\7' | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          'AIW_TEST_PWSH=C:\Program Files\PowerShell\7\pwsh.exe' | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Fetch only this run's assembled candidate
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: aiw-desktop-candidate-${{ github.sha }}
           path: release
       - name: Verify transferred handoff without executing payload or scripts
-        shell: pwsh
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         env:
           SOURCE_REVISION: ${{ github.sha }}
           INVENTORY: ${{ needs.assemble.outputs.handoff-inventory }}
         run: |
+          $ErrorActionPreference = 'Stop'
+          # AIW inline runtime assertion: independent of repository checkout.
+          if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion.ToString() -cne '7.6.7' -or $PSVersionTable.PSVersion.PreReleaseLabel -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() -cne 'X64' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Program Files\PowerShell\7\pwsh.exe' -or $PSHOME -ine 'C:\Program Files\PowerShell\7') { throw 'Expected exact stable machine PowerShell 7.6.7 x64' }
+          foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security','Microsoft.PowerShell.Archive')) { Import-Module (Join-Path $PSHOME ('Modules\'+$module+'\'+$module+'.psd1')) -SkipEditionCheck -ErrorAction Stop }
+          $PSModuleAutoLoadingPreference = 'None'
+          if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'Compatibility session is prohibited' }
+          $PSVersionTable | ConvertTo-Json -Depth 3 | Write-Host
           $ErrorActionPreference = 'Stop'
           $expected = @('aiw-desktop.zip', 'desktop-package-archive.ps1', 'verify-desktop-package.ps1', 'distribution.json', 'START-HERE.md')
           $records = @($env:INVENTORY | ConvertFrom-Json)
@@ -286,7 +460,7 @@ jobs:
         with:
           subject-path: ${{ github.workspace }}\release\*
       - name: Publish only the verified alpha assets and independent hashes
-        shell: pwsh
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_REVISION: ${{ github.sha }}
@@ -294,6 +468,13 @@ jobs:
           ATTESTATION_URL: ${{ steps.attest.outputs.attestation-url }}
           RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
+          $ErrorActionPreference = 'Stop'
+          # AIW inline runtime assertion: independent of repository checkout.
+          if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion.ToString() -cne '7.6.7' -or $PSVersionTable.PSVersion.PreReleaseLabel -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() -cne 'X64' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Program Files\PowerShell\7\pwsh.exe' -or $PSHOME -ine 'C:\Program Files\PowerShell\7') { throw 'Expected exact stable machine PowerShell 7.6.7 x64' }
+          foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security','Microsoft.PowerShell.Archive')) { Import-Module (Join-Path $PSHOME ('Modules\'+$module+'\'+$module+'.psd1')) -SkipEditionCheck -ErrorAction Stop }
+          $PSModuleAutoLoadingPreference = 'None'
+          if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'Compatibility session is prohibited' }
+          $PSVersionTable | ConvertTo-Json -Depth 3 | Write-Host
           $ErrorActionPreference = 'Stop'
           $repo = 'nathanmcnulty/app-isolation-workbench'
           $tag = 'desktop-alpha-' + $env:SOURCE_REVISION.Substring(0, 12)

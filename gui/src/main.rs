@@ -48,6 +48,9 @@ mod desktop {
         workflow_name: String,
     }
     impl ApprovalGate for GuiGate {
+        fn progress(&self, message: &str) {
+            self.controller.progress(&self.id, message);
+        }
         fn review(&self, r: &ApprovalReview) -> Result<Option<String>> {
             let review = Review {
                 workflow_name: self.workflow_name.clone(),
@@ -129,6 +132,9 @@ mod desktop {
                     .blocking_pick_file(),
                 "bambu-installer" => builder
                     .add_filter("Supported Bambu Studio EXE", &["exe"])
+                    .blocking_pick_file(),
+                "msix" => builder
+                    .add_filter("Supported signed MSIX", &["msix"])
                     .blocking_pick_file(),
                 "document" => builder
                     .add_filter("UTF-8 text", &["txt"])
@@ -241,7 +247,10 @@ mod desktop {
         operator_identity: String,
         package: Option<PackageValidationInput>,
     ) -> std::result::Result<(), String> {
-        if !matches!(kind.as_str(), "assessment" | "interactive" | "bambu") {
+        if !matches!(
+            kind.as_str(),
+            "assessment" | "interactive" | "bambu" | "msix"
+        ) {
             return Err("Unsupported workflow.".into());
         }
         if (package.is_none() && installer.is_empty())
@@ -260,7 +269,9 @@ mod desktop {
         let gate = GuiGate {
             controller: c.clone(),
             id: id.clone(),
-            workflow_name: if kind == "interactive" {
+            workflow_name: if kind == "msix" {
+                "Signed Notepad++ MSIX on VM107"
+            } else if kind == "interactive" {
                 "Interactive Notepad++ document transfer"
             } else if kind == "bambu" {
                 "Fixed Bambu Studio STL-to-3MF export"
@@ -270,6 +281,51 @@ mod desktop {
             .into(),
         };
         spawn_work(app, c, id, move || {
+            if kind == "msix" {
+                if package.is_some() {
+                    anyhow::bail!("VM MSIX requires its distinct protected file intake")
+                }
+                let result = service::msix::assess_with_gate(
+                    Path::new(&installer),
+                    Path::new(&evidence),
+                    &operator_identity,
+                    &gate,
+                )?;
+                let report = if result.execution_started {
+                    Some(service::msix::read_report(
+                        &result.workspace,
+                        &result.run_id,
+                    )?)
+                } else {
+                    None
+                };
+                let verified = report
+                    .as_ref()
+                    .is_some_and(|value| value["workflowVerified"] == true);
+                let summary = result.summary_text().unwrap_or(result.next).to_owned();
+                return Ok((
+                    if result.execution_started {
+                        Phase::Completed
+                    } else {
+                        Phase::Cancelled
+                    },
+                    ResultView {
+                        outcome: if verified {
+                            ResultOutcome::Verified
+                        } else if result.execution_started {
+                            ResultOutcome::Incomplete
+                        } else {
+                            ResultOutcome::NotRun
+                        },
+                        run_id: result.run_id.clone(),
+                        workspace: path_text(&result.workspace)?,
+                        evidence_root: path_text(&result.evidence_root)?,
+                        summary: summary.clone(),
+                        can_export_document: false,
+                        report_markdown: summary,
+                    },
+                ));
+            }
             let result = if let Some(package) = package {
                 if kind == "bambu" {
                     service::assess_bambu_package_with_gate(
@@ -488,6 +544,41 @@ mod desktop {
         Ok(())
     }
     #[tauri::command]
+    fn recover_msix_worker(
+        app: tauri::AppHandle,
+        c: State<'_, Controller>,
+        workspace: String,
+        run_id: String,
+    ) -> std::result::Result<(), String> {
+        let c = c.inner().clone();
+        let id = c.begin_recovery()?;
+        let gate = GuiGate {
+            controller: c.clone(),
+            id: id.clone(),
+            workflow_name: "VM107 recovery".into(),
+        };
+        spawn_work(app, c, id, move || {
+            let report = service::msix::recover(Path::new(&workspace), &run_id, &gate)?;
+            let summary = report["summary"]
+                .as_str()
+                .unwrap_or("VM107 recovery retained")
+                .to_owned();
+            Ok((
+                Phase::Completed,
+                ResultView {
+                    outcome: ResultOutcome::Incomplete,
+                    run_id,
+                    workspace,
+                    evidence_root: "Original retained run".into(),
+                    summary: summary.clone(),
+                    can_export_document: false,
+                    report_markdown: summary,
+                },
+            ))
+        });
+        Ok(())
+    }
+    #[tauri::command]
     fn load_retained_report(
         app: tauri::AppHandle,
         c: State<'_, Controller>,
@@ -495,8 +586,10 @@ mod desktop {
         workspace: String,
         run_id: String,
     ) -> std::result::Result<(), String> {
-        if !matches!(kind.as_str(), "assessment" | "interactive" | "bambu")
-            || workspace.is_empty()
+        if !matches!(
+            kind.as_str(),
+            "assessment" | "interactive" | "bambu" | "msix"
+        ) || workspace.is_empty()
             || run_id.is_empty()
         {
             return Err("Select a retained workflow kind, workspace, and run ID.".into());
@@ -504,6 +597,29 @@ mod desktop {
         let c = c.inner().clone();
         let id = c.begin()?;
         spawn_work(app, c, id, move || {
+            if kind == "msix" {
+                let report = service::msix::read_report(Path::new(&workspace), &run_id)?;
+                let summary = report["summary"]
+                    .as_str()
+                    .unwrap_or("Retained MSIX report")
+                    .to_owned();
+                return Ok((
+                    Phase::Completed,
+                    ResultView {
+                        outcome: if report["workflowVerified"] == true {
+                            ResultOutcome::Verified
+                        } else {
+                            ResultOutcome::Incomplete
+                        },
+                        run_id,
+                        workspace,
+                        evidence_root: "Recorded in the protected run".into(),
+                        summary: summary.clone(),
+                        can_export_document: false,
+                        report_markdown: summary,
+                    },
+                ));
+            }
             if kind == "bambu" {
                 let report = service::report_bambu(Path::new(&workspace), &run_id)?;
                 return Ok((Phase::Completed, ResultView {
@@ -546,7 +662,8 @@ mod desktop {
                 start_approved_workflow,
                 cancel_pending,
                 export_document,
-                load_retained_report
+                load_retained_report,
+                recover_msix_worker
             ])
             .setup(|app| {
                 tauri::WebviewWindowBuilder::new(

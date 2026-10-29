@@ -20,6 +20,7 @@ name = "msix_standard_user_lifecycle"
 required-features = ["research-msix-lifecycle"]
 
 [dependencies]
+aiw-evidence.workspace = true
 aiw-probe.workspace = true
 aiw-provider-wsb.workspace = true
 aiw-token.workspace = true
