@@ -116,6 +116,58 @@ mod desktop {
         });
     }
     #[tauri::command]
+    async fn open_results(
+        app: tauri::AppHandle,
+        store: State<'_, std::sync::Arc<aiw_desktop::results::ResultsStore>>,
+    ) -> std::result::Result<Option<aiw_desktop::results::Loaded>, String> {
+        let store = store.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let Some(path) = app
+                .dialog()
+                .file()
+                .add_filter("Assessment selection JSON", &["json"])
+                .blocking_pick_file()
+            else {
+                return Ok(None);
+            };
+            let path = path
+                .into_path()
+                .map_err(|_| "Selection must be a local file")?;
+            store.load(&path).map(Some)
+        })
+        .await
+        .map_err(|_| "Results reader stopped".to_string())?
+    }
+    #[tauri::command]
+    async fn export_results(
+        app: tauri::AppHandle,
+        store: State<'_, std::sync::Arc<aiw_desktop::results::ResultsStore>>,
+        token: String,
+        format: String,
+    ) -> std::result::Result<bool, String> {
+        if !["json", "markdown"].contains(&format.as_str()) {
+            return Err("Unsupported summary format".into());
+        }
+        let store = store.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let name = if format == "json" {
+                "results-summary.json"
+            } else {
+                "results-summary.md"
+            };
+            let Some(path) = app.dialog().file().set_file_name(name).blocking_save_file() else {
+                return Ok(false);
+            };
+            let path = path
+                .into_path()
+                .map_err(|_| "Export must be a local file")?;
+            store.export(&token, &path, &format)?;
+            Ok(true)
+        })
+        .await
+        .map_err(|_| "Summary export stopped".to_string())?
+    }
+    #[tauri::command]
     fn get_state(c: State<'_, Controller>) -> Snapshot {
         c.snapshot()
     }
@@ -651,8 +703,13 @@ mod desktop {
         let c = Controller::new(path_text(&parent)?);
         tauri::Builder::default()
             .manage(c)
+            .manage(std::sync::Arc::new(
+                aiw_desktop::results::ResultsStore::default(),
+            ))
             .plugin(tauri_plugin_dialog::init())
             .invoke_handler(tauri::generate_handler![
+                open_results,
+                export_results,
                 get_state,
                 choose_input,
                 analyze_package,

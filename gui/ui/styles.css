@@ -42,3 +42,13 @@ button { min-height: 42px; padding: 9px 16px; border: 0; border-radius: 7px; fon
 @keyframes pulse { 0%, 100% { opacity: .5; transform: translateX(-40%); } 50% { opacity: 1; transform: translateX(180%); } }
 .result-summary { white-space: pre-wrap; }.boundary-callout { display: grid; gap: 4px; margin: 18px 0; padding: 14px; border-left: 4px solid var(--teal); background: var(--soft-teal); }.boundary-callout span { color: #38635f; font-size: .88rem; }.export-row { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 12px; }.cancel-button { margin-top: 2px; color: #8a3030; border: 1px solid #e0aaaa; background: #fff; }.cancel-button:hover { background: #fff5f5; }.advanced-card { padding: 19px 25px; }.advanced-card details > summary { font-size: .95rem; }.error-card { display: grid; grid-template-columns: 1fr minmax(240px, .7fr); gap: 18px; border-color: #efbaba; background: var(--soft-red); }.error-card h2 { color: #9e2525; }.error-card p { margin-bottom: 0; }.error-card pre { background: #fff8f8; }.hidden { display: none !important; }footer { color: #788592; font-size: .78rem; text-align: center; }
 @media (max-width: 760px) { .shell { width: min(100% - 24px, 680px); padding-top: 24px; }.topbar, .notice, .close-warning { display: block; }.phase-badge { display: inline-block; margin-top: 14px; }.notice strong, .notice span, .close-warning strong, .close-warning span { display: block; }.notice span, .close-warning span { margin-top: 4px; }.mode-switch, .field-grid, .review-grid, .result-grid, .detail-grid, .plan-details, .approval-box, .start-box, .export-row, .error-card, .retained-grid { grid-template-columns: 1fr; }.approval-box .primary, .start-box .primary, .export-row .primary { width: 100%; }.card { padding: 19px; } }
+
+.view-nav { display: flex; gap: .75rem; margin: 1rem 0; }
+.view-nav [aria-pressed="true"] { outline: 3px solid #315da8; outline-offset: 2px; }
+.results-scroll { overflow-x: auto; }
+#resultsTable { border-collapse: collapse; width: 100%; font-size: .9rem; }
+#resultsTable th, #resultsTable td { border-bottom: 1px solid #cbd5e1; padding: .75rem; text-align: left; vertical-align: top; min-width: 8rem; overflow-wrap: anywhere; }
+#resultsTable caption { text-align: left; padding: 1rem 0; font-weight: 600; }
+#resultsTable ul { padding-left: 1.25rem; }
+#resultsTable summary { cursor: pointer; }
+:focus-visible { outline: 3px solid #315da8; outline-offset: 3px; }

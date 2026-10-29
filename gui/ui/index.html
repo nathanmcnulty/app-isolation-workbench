@@ -18,6 +18,26 @@
       <div id="phaseBadge" class="phase-badge" aria-live="polite">Loading state</div>
     </header>
 
+    <nav aria-label="Workbench views" class="view-nav"><button id="workflowView" type="button" aria-pressed="true">Workflow</button><button id="resultsView" type="button" aria-pressed="false">Results</button></nav>
+    <section id="resultsPanel" class="card hidden" aria-labelledby="resultsHeading">
+      <h2 id="resultsHeading" tabindex="-1">Results Explorer</h2>
+      <p>Open an explicit assessment selection JSON: 1 MiB maximum, 1–32 entries. Uses existing retained verifiers. Viewing never starts or modifies a run.</p>
+      <p class="notice">Fixed workflow observations only. General compatibility and isolation are unmeasured. Cleanup is historical. Failed, not reached and unmeasured are distinct; a completed stage alone does not pass a function.</p>
+      <button id="openResults" type="button">Open selection…</button>
+      <button id="exportResultsJson" type="button" disabled>Export JSON summary…</button>
+      <button id="exportResultsMarkdown" type="button" disabled>Export Markdown summary…</button>
+      <p class="helper">Exports contain all loaded selections, regardless of filters, with anonymous selection numbers. Choose a new file outside every selected retained location. Existing files are never overwritten.</p>
+      <p id="resultsStatus" role="status" aria-live="polite">No selection loaded.</p>
+      <div class="field-grid">
+        <label class="field">Application<select id="resultsApplication"><option value="">All applications</option><option>Notepad++</option><option>Bambu Studio</option><option>Unavailable</option></select></label>
+        <label class="field">Outcome<select id="resultsOutcome"><option value="">All outcomes</option><option value="insufficientEvidence">Insufficient evidence</option><option value="failed">Failed</option><option value="cancelled">Cancelled</option><option value="partial">Partial</option><option value="unavailable">Unavailable</option></select></label>
+        <label class="field">Function<select id="resultsFunction"><option value="">All functions</option><option value="install">Install</option><option value="launch">Launch</option><option value="openDocument">Open document</option><option value="editSaveDocument">Edit / save document</option><option value="close">Close</option><option value="uninstall">Uninstall</option><option value="stlTo3mfExport">STL to 3MF export</option></select></label>
+        <label class="field">Function result<select id="resultsFunctionStatus"><option value="">All results</option><option value="passed">Passed</option><option value="failed">Failed</option><option value="unmeasured">Unmeasured</option></select></label>
+      </div>
+      <p id="resultsCount"></p>
+      <div class="results-scroll" tabindex="0" aria-label="Scrollable comparison"><table id="resultsTable"><caption>Retained workflow comparison — expand selections for stages and evidence references</caption><thead><tr><th scope="col">Selection</th><th scope="col">Application / workflow</th><th scope="col">Outcome</th><th scope="col">Tested functions</th><th scope="col">Evidence gaps</th><th scope="col">Historical cleanup</th></tr></thead><tbody id="resultsRows"></tbody></table></div>
+    </section>
+    <div id="workflowPanel">
     <section class="notice" aria-label="Workflow boundary">
       <strong>Two deliberate gates</strong>
       <span>Prepare creates a reviewable plan. Approval records your exact confirmation. Start is a separate action that begins the Sandbox run.</span>
@@ -114,9 +134,11 @@
     </section>
 
     <section id="errorCard" class="error-card hidden" aria-live="assertive"><div><p class="eyebrow">Action needed</p><h2 id="errorSummary">The workflow needs attention</h2><p id="errorRemediation"></p></div><details><summary>Technical details</summary><pre id="errorDetail"></pre></details><p id="errorLocation" class="helper"></p></section>
+    </div>
     <footer>Local administrator surface · Backend-owned evidence and cleanup</footer>
   </main>
   <script src="display.js"></script>
   <script src="app.js"></script>
+  <script src="results.js"></script>
 </body>
 </html>

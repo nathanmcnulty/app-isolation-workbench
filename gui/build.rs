@@ -2,6 +2,8 @@ fn main() {
     #[cfg(windows)]
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
+            "open_results",
+            "export_results",
             "get_state",
             "choose_input",
             "analyze_package",

@@ -572,3 +572,6 @@ mod tests {
         assert!(c.request_close());
     }
 }
+
+#[cfg(windows)]
+pub mod results;
