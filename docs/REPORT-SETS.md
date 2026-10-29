@@ -1,5 +1,7 @@
 # Retained application report sets
 
+The desktop [Results Explorer](RESULTS-EXPLORER.md) opens explicit shared assessment selections, compares retained observations, and exports privacy-limited local summaries without executing a run.
+
 `run report-wsb-set` combines verified Notepad++ MSI and Bambu Studio export runs. Each entry selects an explicit `notepadMsi` or `bambuExport` profile and contains a `run` selector. The reader calls that profile's existing retained verifier; it never detects or executes an application from caller-supplied commands.
 
 ```json
