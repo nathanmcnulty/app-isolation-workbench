@@ -60,11 +60,20 @@ Fixture retention is opt-in test-only: `AIW_PAIRED_FIXTURE_RETAIN=1` with the
 `paired_protected_` tests emits `AIW_PAIRED_DEMO_SELECTION=...` for newly created
 synthetic selections. It accepts no executable/intake path, never loads arbitrary
 production workspaces, and makes zero real provider/application/control calls.
-No paired demo fixture has yet been retained or previewed for this paired goal.
-A fresh preserved Results demo at `C:/aiw/results-explorer-160bf207-6a83-48be-b235-07f37d20b6c9`
-passed its real Rust export/unchanged-byte assertions and a browser keyboard
-failure-detail/filter/focus preview; see paired-product-workflow.md. It contains
-the old reviewed archive and labeled application examples, not paired runs.
+Paired fixtures were retained by the two `paired_protected_` tests under
+`C:/Users/labadmin/AppData/Local/Temp/aiw-w1-runner-15776-{1,2}` (expand the brace
+notation to the two explicit paths in paired-product-workflow.md). Actual
+ResultsStore load/export demonstration passed for both originals and duplicates:
+one eligible recorded case comparison, one cleanupUnknown, two duplicates,
+deterministic reload and exclusive safe exports. Browser keyboard/drill-down and
+eligible-filter preview passed at
+`C:/aiw/results-explorer-2d01aa1d-5314-46cb-9754-503e839094b5`.
+This does not exercise the full admin gate coordinator. Independent demo review
+found a test-only output containment gap, fixed before directory creation with a
+negative regression and bounded reads. Two affected tests, all-target desktop
+Clippy, 25 Node tests and follow-up independent source review passed.
+The preserved mixed-app Results preview is under
+`C:/aiw/results-explorer-160bf207-6a83-48be-b235-07f37d20b6c9`.
 
 No live VM/Sandbox/AppContainer/application/control calls, authentication, host
 security changes/grants, dependency installation, signing, push, publication,

@@ -1085,6 +1085,165 @@ mod boundary_tests {
 #[cfg(test)]
 mod demo {
     use super::*;
+    fn fixture_bytes(path: &Path, limit: u64) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        File::open(path)
+            .unwrap()
+            .take(limit + 1)
+            .read_to_end(&mut bytes)
+            .unwrap();
+        assert!(
+            bytes.len() as u64 <= limit,
+            "fixture exceeds its read bound"
+        );
+        bytes
+    }
+    fn separate_demo_parent(parent: &Path, fixtures: &[PathBuf]) -> bool {
+        fixtures.iter().all(|root| !contains_path(root, parent))
+    }
+    #[test]
+    fn paired_demo_rejects_output_inside_fixture_before_creating_files() {
+        let fixtures = vec![PathBuf::from(r"C:\fresh\fixture")];
+        assert!(!separate_demo_parent(
+            Path::new(r"c:\fresh\fixture"),
+            &fixtures
+        ));
+        assert!(!separate_demo_parent(
+            Path::new(r"C:\fresh\fixture\w1-run\output"),
+            &fixtures
+        ));
+        assert!(separate_demo_parent(Path::new(r"C:\exports"), &fixtures));
+    }
+
+    #[test]
+    #[ignore = "opens only two explicitly supplied fresh synthetic fixture selections; never executes a run"]
+    fn demonstrate_paired_results() {
+        let selections: Vec<PathBuf> = serde_json::from_str(
+            &std::env::var("AIW_PAIRED_DEMO_SELECTIONS")
+                .expect("two explicit synthetic selections"),
+        )
+        .unwrap();
+        assert_eq!(selections.len(), 2);
+        let mut entries = Vec::new();
+        let mut before = Vec::new();
+        let mut fixture_roots = Vec::new();
+        for selection in &selections {
+            let parent = selection.parent().unwrap();
+            assert!(
+                parent
+                    .file_name()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .starts_with("aiw-w1-runner-")
+            );
+            let marker_path = parent.join("synthetic-demo.json");
+            let marker: Value =
+                serde_json::from_slice(&fixture_bytes(&marker_path, 16384)).unwrap();
+            assert_eq!(
+                marker["schemaVersion"],
+                "aiw.dev/paired-synthetic-demo/v0alpha1"
+            );
+            assert_eq!(marker["origin"], "syntheticRehearsal");
+            assert_eq!(marker["realProviderApplicationControlCalls"], 0);
+            let bytes = fixture_bytes(selection, LIMIT);
+            fixture_roots.push(parent.canonicalize().unwrap());
+            let input: Value = serde_json::from_slice(&bytes).unwrap();
+            let rows = input["windowsSandbox"]["entries"].as_array().unwrap();
+            assert_eq!(rows.len(), 2);
+            for row in rows {
+                assert_eq!(row["profile"], "pairedControls");
+                let workspace = PathBuf::from(row["run"]["workspaceRoot"].as_str().unwrap())
+                    .canonicalize()
+                    .unwrap();
+                assert_eq!(workspace.parent().unwrap(), parent.canonicalize().unwrap());
+                let mut row = row.clone();
+                row["run"]["id"] = json!(format!("SYNTHETIC-pair-{}", entries.len() + 1));
+                entries.push(row);
+            }
+            before.push((selection.clone(), bytes));
+        }
+        let parent =
+            PathBuf::from(std::env::var_os("AIW_RESULTS_DEMO").expect("explicit output parent"));
+        let parent = parent.canonicalize().unwrap();
+        assert!(
+            separate_demo_parent(&parent, &fixture_roots),
+            "demo output parent overlaps retained fixture"
+        );
+        let root = parent.join(format!("results-explorer-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let selection = root.join("selection.json");
+        let input = json!({"schemaVersion":aiw_runner::APPLICATION_ASSESSMENT_INPUT_SCHEMA,"windowsSandbox":{"schemaVersion":aiw_runner::WSB_REPORT_SET_INPUT_SCHEMA,"entries":entries}});
+        write_new(&selection, &[], &serde_json::to_vec_pretty(&input).unwrap()).unwrap();
+        let store = ResultsStore::default();
+        let loaded = store.load(&selection).unwrap();
+        assert_eq!(loaded.summary.rows.len(), 4);
+        assert_eq!(
+            loaded
+                .summary
+                .rows
+                .iter()
+                .filter(|r| r["paired"]["origin"] == "syntheticRehearsal")
+                .count(),
+            2
+        );
+        assert_eq!(
+            loaded
+                .summary
+                .rows
+                .iter()
+                .filter(|r| r["unavailableReason"] == "duplicateRun")
+                .count(),
+            2
+        );
+        assert_eq!(
+            loaded
+                .summary
+                .rows
+                .iter()
+                .filter(|r| r["paired"]["eligible"] == true)
+                .count(),
+            1
+        );
+        assert_eq!(
+            loaded
+                .summary
+                .rows
+                .iter()
+                .filter(|r| r["paired"]["reason"] == "cleanupUnknown")
+                .count(),
+            1
+        );
+        store
+            .export(&loaded.token, &root.join("verified-summary.json"), "json")
+            .unwrap();
+        store
+            .export(&loaded.token, &root.join("verified-summary.md"), "markdown")
+            .unwrap();
+        assert!(
+            store
+                .export(&loaded.token, &root.join("verified-summary.json"), "json")
+                .is_err()
+        );
+        let again = store.load(&selection).unwrap();
+        assert_eq!(
+            serde_json::to_vec(&loaded.summary).unwrap(),
+            serde_json::to_vec(&again.summary).unwrap()
+        );
+        for (path, bytes) in before {
+            assert_eq!(std::fs::read(path).unwrap(), bytes);
+        }
+        let mut demo = again;
+        demo.summary.scope = "DEMONSTRATION: SYNTHETIC paired controls produced by the actual shared kernel with inert bytes and fake transports; one clean completion, one unknown outer cleanup, and duplicates. Zero real provider/application/control calls. No production acceptance.";
+        write_new(
+            &root.join("demo-view.json"),
+            &[],
+            &serde_json::to_vec_pretty(&demo).unwrap(),
+        )
+        .unwrap();
+        println!("PAIRED_RESULTS_DEMONSTRATION={}", root.display());
+    }
+
     #[test]
     #[ignore = "writes a fresh offline fixture demonstration to AIW_RESULTS_DEMO; never executes a run"]
     fn demonstrate_results() {

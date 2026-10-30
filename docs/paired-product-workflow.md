@@ -98,7 +98,9 @@ fail closed rather than weakening protected intake.
   `C:/aiw/paired-desktop-node-tests.log`.
 - Root/desktop formatting, diff whitespace and governance: passed.
 - Preview package verifier fixture contract: passed;
-  `C:/aiw/paired-preview-verifier-tests.log`. Four packaging scripts parsed.
+  `C:/aiw/paired-preview-verifier-tests.log`. Desktop package verifier and archive
+  round-trip/refusal controls passed (`C:/aiw/paired-desktop-verifier-tests.log`).
+  Four packaging scripts parsed.
 - Explicit preserved Results demo: one passed;
   `C:/aiw/paired-results-preview-generation.log`.
 - Independent source review covered the admin/project, recovery bindings,
@@ -107,3 +109,50 @@ fail closed rather than weakening protected intake.
   builds, edits or provider calls.
 
 These are slice checks; the active goal still requires the remaining work above.
+
+## Paired Results service demonstration
+
+The two fresh retained selections emitted by `paired_protected_` tests are:
+
+- `C:/Users/labadmin/AppData/Local/Temp/aiw-w1-runner-15776-1/paired-assessment-selection.json`
+- `C:/Users/labadmin/AppData/Local/Temp/aiw-w1-runner-15776-2/paired-assessment-selection.json`
+
+They contain inert bytes, synthetic readiness/receipts and fake provider calls;
+no real provider, application or control is executed. The producer's existing
+whole-workspace byte snapshot verifies report/report-set reads do not change
+retained inputs. Marker `synthetic-demo.json` records origin, zero real calls,
+fake boundary count and whether cleanup was deliberately unknown.
+
+The ignored `results::demo::demonstrate_paired_results` test accepts exactly two
+explicit selections through JSON `AIW_PAIRED_DEMO_SELECTIONS`, requires those
+markers, bounds every manifest read, checks original workspace containment and
+rejects an output parent inside a source fixture before creating files. It then
+uses the actual ResultsStore loader/exporter for the four selections (two
+originals and two duplicates), verifies one eligible case comparison and one
+cleanupUnknown comparison, unchanged selection manifests, deterministic reload,
+exclusive JSON/Markdown export, and zero new execution paths. It does not call
+the admin preparation/gate coordinator.
+
+A successful service demonstration and real browser preview are retained under
+`C:/aiw/results-explorer-2d01aa1d-5314-46cb-9754-503e839094b5`. Files
+`verified-summary.json` and `.md` were exported by Rust outside the retained
+fixture trees. `paired-keyboard-preview.png` shows the explicit synthetic scope.
+Keyboard entry/open/expand preserved focus; the paired detail showed the six
+fixed cases, held/self/descendant token facts and hash-only evidence references.
+The eligible filter showed exactly one of four selections, excluding unknown
+cleanup and duplicates. Application functions remained unmeasured.
+
+The preview script now escapes the demonstration's own scope in its notice,
+so a paired-only demo cannot inherit the older ten-row application's description.
+Browser preview has no execution backend. This is a paired Results integration
+demonstration, not the remaining full admin-gate/fake-kernel product rehearsal or
+native acceptance. Producer log: `C:/aiw/paired-retained-demo-generation.log`.
+Service log: `C:/aiw/paired-results-service-demo.log`; post-review rerun:
+`C:/aiw/paired-results-service-demo-final.log`.
+
+Post-review paired demo validation: two tests passed, zero failed; desktop
+all-target Clippy passed with warnings denied; all 25 Node tests passed; preview
+script syntax and diff whitespace passed. Independent follow-up source review
+verified the containment/bounded-read fix and found no remaining consequential
+issue in that delta. Logs: `paired-results-service-demo-final.log`,
+`paired-results-demo-clippy.log`, `paired-results-demo-node.log` under `C:/aiw`.

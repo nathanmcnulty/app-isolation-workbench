@@ -6,10 +6,11 @@ const http = require('node:http');
 const root = path.resolve(process.argv[2] || '');
 const data = JSON.parse(fs.readFileSync(path.join(root, 'demo-view.json'), 'utf8'));
 if (!data.summary.scope.startsWith('DEMONSTRATION:')) throw new Error('Expected explicitly labeled demonstration data');
+const scope = String(data.summary.scope).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 const ui = path.resolve(__dirname, '../gui/ui');
 const source = fs.readFileSync(path.join(ui, 'index.html'), 'utf8');
 const panel = source.slice(source.indexOf('    <nav aria-label="Workbench views"'), source.indexOf('    <div id="workflowPanel">'));
-const html = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Results Explorer — OFFLINE DEMONSTRATION</title><link rel="stylesheet" href="styles.css"><main class="shell"><h1>Results Explorer — offline demonstration</h1><p class="notice">Selections 1–4 exercise the pinned reviewed archive, duplicate, missing and tampered copies. Selections 5–10 are SYNTHETIC examples. This preview has no run backend. The accompanying verified-summary files were exported by the real Rust backend.</p>${panel}<div id="workflowPanel"><p>Read-only preview. Use Results to inspect the demonstration.</p></div></main><script src="preview.js"></script><script src="results.js"></script></html>`;
+const html = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Results Explorer — OFFLINE DEMONSTRATION</title><link rel="stylesheet" href="styles.css"><main class="shell"><h1>Results Explorer — offline demonstration</h1><p class="notice">${scope} This preview has no run backend. The accompanying verified-summary files were exported by the real Rust backend.</p>${panel}<div id="workflowPanel"><p>Read-only preview. Use Results to inspect the demonstration.</p></div></main><script src="preview.js"></script><script src="results.js"></script></html>`;
 const files = new Map([
   ['/', ['text/html; charset=utf-8', html]],
   ['/styles.css', ['text/css; charset=utf-8', fs.readFileSync(path.join(ui, 'styles.css'))]],
