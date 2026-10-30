@@ -1,0 +1,367 @@
+{
+  "schemaVersion": "aiw.dev/paired-controls-result/v0alpha1",
+  "runId": "synthetic-placeholder",
+  "sandboxId": "00000000-0000-4000-8000-000000000001",
+  "requestSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "profileSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "origin": "syntheticRehearsal",
+  "windows": {
+    "major": 10,
+    "minor": 0,
+    "build": 26100,
+    "revision": 0,
+    "observerArchitecture": "x86_64"
+  },
+  "resources": {
+    "filePath": "C:\\AIW\\Control\\SharedCanary\\canary.txt",
+    "fileSha256": "6f0427a3e5b44f60867720acaf9f18004f8e1b4bc773bc2b07eaa25cbd692f48",
+    "fileSizeBytes": 29,
+    "fileDaclBeforeSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "fileDaclAfterSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "registryHive": "HKLM",
+    "registryView": "registry64",
+    "registryKey": "SOFTWARE\\AIWControlCanary",
+    "registryValue": "Canary",
+    "registryType": "binary",
+    "registrySha256": "6d602d862214f8c9e36008aa2d5a94f53432b5d213d5e94ec52345720280bf42",
+    "registrySizeBytes": 29,
+    "registryDaclBeforeSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "registryDaclAfterSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+  },
+  "launcherId": 10,
+  "launcherToken": {
+    "schemaVersion": "aiw.dev/token-evidence/v0alpha1",
+    "processId": 10,
+    "tokenType": "primary",
+    "isAppContainer": false,
+    "userSid": "S-1-5-21-11-22-33-1001",
+    "integrity": {
+      "sid": "S-1-16-8192",
+      "rid": 8192,
+      "level": "medium"
+    },
+    "elevationType": "default",
+    "isElevated": false,
+    "capabilities": [],
+    "restrictedSidCount": 0
+  },
+  "userSid": "S-1-5-21-11-22-33-1001",
+  "packageSid": "S-1-15-2-1-2-3-4-5-6-7",
+  "baseline": {
+    "fileProcess": {
+      "processId": 20,
+      "exitCode": 0,
+      "timedOut": false,
+      "heldToken": {
+        "schemaVersion": "aiw.dev/token-evidence/v0alpha1",
+        "processId": 20,
+        "tokenType": "primary",
+        "isAppContainer": false,
+        "userSid": "S-1-5-21-11-22-33-1001",
+        "integrity": {
+          "sid": "S-1-16-8192",
+          "rid": 8192,
+          "level": "medium"
+        },
+        "elevationType": "default",
+        "isElevated": false,
+        "capabilities": [],
+        "restrictedSidCount": 0
+      },
+      "selfToken": {
+        "schemaVersion": "aiw.dev/token-evidence/v0alpha1",
+        "processId": 20,
+        "tokenType": "primary",
+        "isAppContainer": false,
+        "userSid": "S-1-5-21-11-22-33-1001",
+        "integrity": {
+          "sid": "S-1-16-8192",
+          "rid": 8192,
+          "level": "medium"
+        },
+        "elevationType": "default",
+        "isElevated": false,
+        "capabilities": [],
+        "restrictedSidCount": 0
+      },
+      "jobEmpty": true
+    },
+    "file": {
+      "resource": "fixedFile",
+      "stage": "fileRead",
+      "outcome": "success",
+      "nativeCode": null,
+      "sizeBytes": 29,
+      "sha256": "6f0427a3e5b44f60867720acaf9f18004f8e1b4bc773bc2b07eaa25cbd692f48"
+    },
+    "registryProcess": {
+      "processId": 21,
+      "exitCode": 0,
+      "timedOut": false,
+      "heldToken": {
+        "schemaVersion": "aiw.dev/token-evidence/v0alpha1",
+        "processId": 21,
+        "tokenType": "primary",
+        "isAppContainer": false,
+        "userSid": "S-1-5-21-11-22-33-1001",
+        "integrity": {
+          "sid": "S-1-16-8192",
+          "rid": 8192,
+          "level": "medium"
+        },
+        "elevationType": "default",
+        "isElevated": false,
+        "capabilities": [],
+        "restrictedSidCount": 0
+      },
+      "selfToken": {
+        "schemaVersion": "aiw.dev/token-evidence/v0alpha1",
+        "processId": 21,
+        "tokenType": "primary",
+        "isAppContainer": false,
+        "userSid": "S-1-5-21-11-22-33-1001",
+        "integrity": {
+          "sid": "S-1-16-8192",
+          "rid": 8192,
+          "level": "medium"
+        },
+        "elevationType": "default",
+        "isElevated": false,
+        "capabilities": [],
+        "restrictedSidCount": 0
+      },
+      "jobEmpty": true
+    },
+    "registry": {
+      "resource": "fixedRegistry64",
+      "stage": "queryValue",
+      "outcome": "success",
+      "nativeCode": null,
+      "sizeBytes": 29,
+      "sha256": "6d602d862214f8c9e36008aa2d5a94f53432b5d213d5e94ec52345720280bf42"
+    },
+    "childProcess": {
+      "processId": 22,
+      "exitCode": 0,
+      "timedOut": false,
+      "heldToken": {
+        "schemaVersion": "aiw.dev/token-evidence/v0alpha1",
+        "processId": 22,
+        "tokenType": "primary",
+        "isAppContainer": false,
+        "userSid": "S-1-5-21-11-22-33-1001",
+        "integrity": {
+          "sid": "S-1-16-8192",
+          "rid": 8192,
+          "level": "medium"
+        },
+        "elevationType": "default",
+        "isElevated": false,
+        "capabilities": [],
+        "restrictedSidCount": 0
+      },
+      "selfToken": {
+        "schemaVersion": "aiw.dev/token-evidence/v0alpha1",
+        "processId": 22,
+        "tokenType": "primary",
+        "isAppContainer": false,
+        "userSid": "S-1-5-21-11-22-33-1001",
+        "integrity": {
+          "sid": "S-1-16-8192",
+          "rid": 8192,
+          "level": "medium"
+        },
+        "elevationType": "default",
+        "isElevated": false,
+        "capabilities": [],
+        "restrictedSidCount": 0
+      },
+      "jobEmpty": true
+    },
+    "childId": 23,
+    "childToken": {
+      "schemaVersion": "aiw.dev/token-evidence/v0alpha1",
+      "processId": 23,
+      "tokenType": "primary",
+      "isAppContainer": false,
+      "userSid": "S-1-5-21-11-22-33-1001",
+      "integrity": {
+        "sid": "S-1-16-8192",
+        "rid": 8192,
+        "level": "medium"
+      },
+      "elevationType": "default",
+      "isElevated": false,
+      "capabilities": [],
+      "restrictedSidCount": 0
+    },
+    "childStdoutBytes": 0,
+    "childOutcome": "success"
+  },
+  "candidate": {
+    "fileProcess": {
+      "processId": 30,
+      "exitCode": 0,
+      "timedOut": false,
+      "heldToken": {
+        "schemaVersion": "aiw.dev/token-evidence/v0alpha1",
+        "processId": 30,
+        "tokenType": "primary",
+        "isAppContainer": true,
+        "appContainerSid": "S-1-15-2-1-2-3-4-5-6-7",
+        "userSid": "S-1-5-21-11-22-33-1001",
+        "integrity": {
+          "sid": "S-1-16-4096",
+          "rid": 4096,
+          "level": "low"
+        },
+        "elevationType": "default",
+        "isElevated": false,
+        "capabilities": [],
+        "restrictedSidCount": 0
+      },
+      "selfToken": {
+        "schemaVersion": "aiw.dev/token-evidence/v0alpha1",
+        "processId": 30,
+        "tokenType": "primary",
+        "isAppContainer": true,
+        "appContainerSid": "S-1-15-2-1-2-3-4-5-6-7",
+        "userSid": "S-1-5-21-11-22-33-1001",
+        "integrity": {
+          "sid": "S-1-16-4096",
+          "rid": 4096,
+          "level": "low"
+        },
+        "elevationType": "default",
+        "isElevated": false,
+        "capabilities": [],
+        "restrictedSidCount": 0
+      },
+      "jobEmpty": true
+    },
+    "file": {
+      "resource": "fixedFile",
+      "stage": "fileRead",
+      "outcome": "accessDenied",
+      "nativeCode": 5,
+      "sizeBytes": null,
+      "sha256": null
+    },
+    "registryProcess": {
+      "processId": 31,
+      "exitCode": 0,
+      "timedOut": false,
+      "heldToken": {
+        "schemaVersion": "aiw.dev/token-evidence/v0alpha1",
+        "processId": 31,
+        "tokenType": "primary",
+        "isAppContainer": true,
+        "appContainerSid": "S-1-15-2-1-2-3-4-5-6-7",
+        "userSid": "S-1-5-21-11-22-33-1001",
+        "integrity": {
+          "sid": "S-1-16-4096",
+          "rid": 4096,
+          "level": "low"
+        },
+        "elevationType": "default",
+        "isElevated": false,
+        "capabilities": [],
+        "restrictedSidCount": 0
+      },
+      "selfToken": {
+        "schemaVersion": "aiw.dev/token-evidence/v0alpha1",
+        "processId": 31,
+        "tokenType": "primary",
+        "isAppContainer": true,
+        "appContainerSid": "S-1-15-2-1-2-3-4-5-6-7",
+        "userSid": "S-1-5-21-11-22-33-1001",
+        "integrity": {
+          "sid": "S-1-16-4096",
+          "rid": 4096,
+          "level": "low"
+        },
+        "elevationType": "default",
+        "isElevated": false,
+        "capabilities": [],
+        "restrictedSidCount": 0
+      },
+      "jobEmpty": true
+    },
+    "registry": {
+      "resource": "fixedRegistry64",
+      "stage": "openKey",
+      "outcome": "accessDenied",
+      "nativeCode": 5,
+      "sizeBytes": null,
+      "sha256": null
+    },
+    "childProcess": {
+      "processId": 32,
+      "exitCode": 0,
+      "timedOut": false,
+      "heldToken": {
+        "schemaVersion": "aiw.dev/token-evidence/v0alpha1",
+        "processId": 32,
+        "tokenType": "primary",
+        "isAppContainer": true,
+        "appContainerSid": "S-1-15-2-1-2-3-4-5-6-7",
+        "userSid": "S-1-5-21-11-22-33-1001",
+        "integrity": {
+          "sid": "S-1-16-4096",
+          "rid": 4096,
+          "level": "low"
+        },
+        "elevationType": "default",
+        "isElevated": false,
+        "capabilities": [],
+        "restrictedSidCount": 0
+      },
+      "selfToken": {
+        "schemaVersion": "aiw.dev/token-evidence/v0alpha1",
+        "processId": 32,
+        "tokenType": "primary",
+        "isAppContainer": true,
+        "appContainerSid": "S-1-15-2-1-2-3-4-5-6-7",
+        "userSid": "S-1-5-21-11-22-33-1001",
+        "integrity": {
+          "sid": "S-1-16-4096",
+          "rid": 4096,
+          "level": "low"
+        },
+        "elevationType": "default",
+        "isElevated": false,
+        "capabilities": [],
+        "restrictedSidCount": 0
+      },
+      "jobEmpty": true
+    },
+    "childId": 33,
+    "childToken": {
+      "schemaVersion": "aiw.dev/token-evidence/v0alpha1",
+      "processId": 33,
+      "tokenType": "primary",
+      "isAppContainer": true,
+      "appContainerSid": "S-1-15-2-1-2-3-4-5-6-7",
+      "userSid": "S-1-5-21-11-22-33-1001",
+      "integrity": {
+        "sid": "S-1-16-4096",
+        "rid": 4096,
+        "level": "low"
+      },
+      "elevationType": "default",
+      "isElevated": false,
+      "capabilities": [],
+      "restrictedSidCount": 0
+    },
+    "childStdoutBytes": 0,
+    "childOutcome": "success"
+  },
+  "fixtureUnchanged": true,
+  "launcherUnchanged": true,
+  "fileUnchanged": true,
+  "fileAclUnchanged": true,
+  "registryValueUnchanged": true,
+  "registryAclUnchanged": true,
+  "profileDeleted": true,
+  "driverComplete": true
+}

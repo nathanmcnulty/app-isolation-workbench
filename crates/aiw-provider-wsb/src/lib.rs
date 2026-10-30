@@ -946,3 +946,10 @@ pub use runtime_observations::{
 };
 
 pub use application_token::MAX_APPLICATION_EVIDENCE_BYTES;
+
+pub mod paired_controls;
+pub use paired_controls::{
+    ControlAccess, ControlReadObservation, PAIRED_CONTROL_REQUEST_SCHEMA,
+    PAIRED_CONTROL_RESULT_SCHEMA, PairedComparisonReason, PairedControlComparison,
+    PairedControlResult, PairedControlsRequest, PairedInvocation, PairedVariant,
+};

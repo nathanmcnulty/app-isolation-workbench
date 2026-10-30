@@ -6,6 +6,10 @@
 //! or recover a Windows Sandbox provider lease.
 
 use std::path::Path;
+mod paired;
+#[cfg(windows)]
+pub use paired::prepare_windows_sandbox_paired_controls;
+pub use paired::{WsbPairedControls, build_wsb_paired_controls_preparation};
 
 use aiw_evidence::canonical_json_bytes;
 pub use aiw_orchestrator::WsbPlanningImportReceipt;
@@ -171,6 +175,8 @@ pub struct WsbPreparationReceipt {
     pub msi: Option<WsbMsiApplication>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bambu: Option<WsbBambuApplication>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paired_controls: Option<WsbPairedControls>,
 }
 
 #[derive(Debug, Clone, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -371,7 +377,9 @@ impl WsbPreparationReceipt {
         if let Some(os) = &self.host_os_version {
             os.validate().map_err(WsbPreparationError::Contract)?;
         }
-        let expected_schema = if self.bambu.is_some() {
+        let expected_schema = if self.paired_controls.is_some() {
+            paired::PAIRED_PREPARATION_SCHEMA
+        } else if self.bambu.is_some() {
             WSB_BAMBU_PREPARATION_RECEIPT_SCHEMA_VERSION
         } else if self.msi.is_some() {
             if self
@@ -398,7 +406,15 @@ impl WsbPreparationReceipt {
         } else {
             WSB_PREPARATION_RECEIPT_SCHEMA_VERSION
         };
-        if self.msi.is_some() && self.bambu.is_some()
+        if [
+            self.msi.is_some(),
+            self.bambu.is_some(),
+            self.paired_controls.is_some(),
+        ]
+        .iter()
+        .filter(|v| **v)
+        .count()
+            > 1
             || self.schema_version != expected_schema
             || self.status != WsbPreparationStatus::PendingApproval
             || self.run_id.is_empty()
@@ -470,6 +486,14 @@ impl WsbPreparationReceipt {
                 ));
             }
         }
+        if let Some(controls) = &self.paired_controls {
+            controls.validate(&self.workspace, &self.guest_agent)?;
+            if self.host_os_version.as_ref() != Some(&controls.profile.expected_windows) {
+                return Err(WsbPreparationError::Contract(
+                    "Paired environment provenance differs".into(),
+                ));
+            }
+        }
         if let Some(bambu) = &self.bambu {
             bambu.validate(&self.workspace)?;
         }
@@ -488,7 +512,10 @@ impl PreparedWsbArtifacts {
     pub fn validate(&self) -> Result<(), WsbPreparationError> {
         self.receipt.validate()?;
         let mut profile_plan = self.wsb_plan.clone();
-        if self.receipt.msi.is_some() || self.receipt.bambu.is_some() {
+        if self.receipt.msi.is_some()
+            || self.receipt.bambu.is_some()
+            || self.receipt.paired_controls.is_some()
+        {
             if profile_plan.probe.output != GUEST_MSI_RESULT {
                 return Err(WsbPreparationError::Contract(
                     "imported application output path is not fixed".to_owned(),
@@ -506,6 +533,8 @@ impl PreparedWsbArtifacts {
                 != [
                     if let Some(msi) = &self.receipt.msi {
                         msi_trust_delta(msi)
+                    } else if self.receipt.paired_controls.is_some() {
+                        paired::CONTROL_TRUST_DELTA.to_owned()
                     } else if self.receipt.bambu.is_some() {
                         TRUST_DELTA_BAMBU.to_owned()
                     } else {
@@ -539,6 +568,7 @@ impl PreparedWsbArtifacts {
             ] => {
                 self.receipt.msi.is_none()
                     && self.receipt.bambu.is_none()
+                    && self.receipt.paired_controls.is_none()
                     && sandbox_plan_sha256 == &self.receipt.wsb_plan_sha256
                     && provider_sha256 == &self.receipt.provider.sha256
                     && guest_agent_sha256 == &self.receipt.guest_agent.sha256
@@ -593,6 +623,30 @@ impl PreparedWsbArtifacts {
                     && application_sha256 == &bambu.staged_payload.sha256
                     && scenario_sha256 == &bambu.scenario_sha256
             }),
+            [
+                PlannedAction::AssessHost,
+                PlannedAction::PrepareWorkspace,
+                PlannedAction::ExecuteWindowsSandboxPairedControls {
+                    sandbox_plan_sha256,
+                    provider_sha256,
+                    guest_agent_sha256,
+                    workspace,
+                    workspace_identity_sha256,
+                    profile,
+                },
+                PlannedAction::CollectEvidence,
+            ] => self
+                .receipt
+                .paired_controls
+                .as_ref()
+                .is_some_and(|controls| {
+                    sandbox_plan_sha256 == &self.receipt.wsb_plan_sha256
+                        && provider_sha256 == &self.receipt.provider.sha256
+                        && guest_agent_sha256 == &self.receipt.guest_agent.sha256
+                        && workspace.as_ref() == &self.receipt.workspace
+                        && workspace_identity_sha256 == &self.receipt.workspace_identity_sha256
+                        && profile.as_ref() == &controls.profile
+                }),
             _ => false,
         };
         if !matching_action {
@@ -726,6 +780,7 @@ pub fn build_wsb_preparation(
         provider_mutated: false,
         msi: None,
         bambu: None,
+        paired_controls: None,
     };
     let artifacts = PreparedWsbArtifacts {
         run_plan,
@@ -1524,6 +1579,7 @@ pub(crate) struct HeldVerifiedWsbPreparation {
         aiw_windows_platform::HeldApplicationFile,
         aiw_windows_platform::HeldVerifiedApplicationFileImport,
     )>,
+    held_controls: paired::HeldControlFiles,
     held_document: Option<(
         aiw_windows_platform::BoundWorkspaceFile,
         aiw_windows_platform::HeldApplicationFile,
@@ -1542,11 +1598,14 @@ impl HeldVerifiedWsbPreparation {
             .revalidate()
             .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?;
         ensure_empty_directory(&self.workspace.output_path())?;
-        require_profile_tools_allowlist(
-            &self.workspace.tools_path(),
-            application_file_name(&self.artifacts.receipt),
-            document_file_present(&self.artifacts.receipt),
-        )?;
+        paired::require_receipt_tools(&self.workspace.tools_path(), &self.artifacts.receipt)?;
+        for (file, observed) in &self.held_controls {
+            file.revalidate()
+                .map_err(|e| WsbPreparationError::Workspace(e.to_string()))?;
+            observed
+                .revalidate()
+                .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
+        }
         if let Some((file, observed, intake)) = &self.held_application {
             intake
                 .revalidate()
@@ -1611,7 +1670,9 @@ pub(crate) fn open_verified_windows_sandbox_preparation(
     let mut receipt_file = open_bundle_file(&workspace_root.join(RECEIPT_FILE))?;
     let receipt: WsbPreparationReceipt = read_json_bounded(&mut receipt_file)?;
     receipt.validate()?;
-    if allow_revoking && (receipt.msi.is_some() || receipt.bambu.is_some()) {
+    if allow_revoking
+        && (receipt.msi.is_some() || receipt.bambu.is_some() || receipt.paired_controls.is_some())
+    {
         return Err(WsbPreparationError::Contract(
             "private golden discard does not authorize imported application workspace deletion"
                 .to_owned(),
@@ -1654,11 +1715,8 @@ pub(crate) fn open_verified_windows_sandbox_preparation(
         .revalidate()
         .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?;
     ensure_empty_directory(&workspace.output_path())?;
-    require_profile_tools_allowlist(
-        &workspace.tools_path(),
-        application_file_name(&receipt),
-        document_file_present(&receipt),
-    )?;
+    paired::require_receipt_tools(&workspace.tools_path(), &receipt)?;
+    let held_controls = paired::open_control_files(&workspace, &receipt)?;
     let state = if workspace.root_path().join("runs").exists() {
         if !allow_imported {
             return Err(WsbPreparationError::Contract(
@@ -1819,6 +1877,7 @@ pub(crate) fn open_verified_windows_sandbox_preparation(
         wsb_plan_file,
         _held_agent: held_agent,
         held_application,
+        held_controls,
         held_document,
         workspace,
     };
@@ -1863,7 +1922,9 @@ pub fn import_windows_sandbox_preparation(
     )?;
     let run_id = held.artifacts.receipt.run_id.clone();
     let receipt = WsbPlanningImportReceipt {
-        schema_version: if held.artifacts.receipt.bambu.is_some() {
+        schema_version: if held.artifacts.receipt.paired_controls.is_some() {
+            aiw_orchestrator::WSB_PAIRED_CONTROL_IMPORT_SCHEMA
+        } else if held.artifacts.receipt.bambu.is_some() {
             aiw_orchestrator::WSB_BAMBU_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION
         } else if held.artifacts.receipt.msi.is_some() {
             aiw_orchestrator::WSB_MSI_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION
@@ -2730,6 +2791,60 @@ mod tests {
             version: None,
             signature_status: ReadinessState::Unknown,
         }
+    }
+
+    #[test]
+    fn paired_preparation_binds_immutable_roles_environment_and_separate_pending_approval() {
+        let workspace = workspace();
+        let agent = guest();
+        let mut ready = readiness();
+        let windows = aiw_probe::WindowsVersionObservation {
+            major: 10,
+            minor: 0,
+            build: 26100,
+            revision: 0,
+            observer_architecture: "x86_64".into(),
+        };
+        ready.os_version = Some(windows.clone());
+        let role = |name: &str| WsbMsiDocument {
+            staged_payload: BinaryIdentity {
+                canonical_path: format!("{}\\{name}", workspace.tools.final_path),
+                ..agent.clone()
+            },
+            staged_identity: identity(&format!("{}\\{name}", workspace.tools.final_path), 'a'),
+        };
+        let controls=WsbPairedControls{profile:aiw_probe::PairedControlProfile{revision:aiw_probe::PAIRED_CONTROL_REVISION.into(),source_sha256:aiw_probe::paired_controls::paired_control_source_sha256(),fixture_sha256:agent.sha256.clone(),fixture_size_bytes:agent.size_bytes,launcher_sha256:agent.sha256.clone(),launcher_size_bytes:agent.size_bytes,origin:aiw_probe::ControlEvidenceOrigin::SyntheticRehearsal,expected_windows:windows,policy:aiw_probe::paired_controls::PairedControlPolicy::ClassicAppContainerNoCapabilitiesFixedChildOutputGrant},fixture:role("aiw-control-fixture.exe"),launcher:role("aiw-control-appcontainer.exe")};
+        let base = build_wsb_preparation("run-one", &project(), &ready, &workspace, &agent, "now")
+            .unwrap();
+        let paired = build_wsb_paired_controls_preparation(base.clone(), controls.clone()).unwrap();
+        assert_eq!(
+            paired.run_plan.schema,
+            aiw_probe::PAIRED_CONTROL_PLAN_SCHEMA
+        );
+        assert!(paired.receipt.approval_required);
+        assert!(!paired.receipt.provider_acquired);
+        assert!(!paired.receipt.provider_mutated);
+        assert_eq!(
+            paired.run_plan.hash().unwrap(),
+            paired.receipt.run_plan_sha256
+        );
+        let mut drift = controls;
+        drift.fixture.staged_payload.sha256 = "f".repeat(64);
+        assert!(build_wsb_paired_controls_preparation(base, drift).is_err());
+        let mut changed = paired.clone();
+        changed
+            .receipt
+            .paired_controls
+            .as_mut()
+            .unwrap()
+            .profile
+            .expected_windows
+            .revision = 1;
+        assert!(changed.validate().is_err());
+        assert_eq!(
+            canonical_hash(&paired.receipt).unwrap(),
+            canonical_hash(&paired.clone().receipt).unwrap()
+        );
     }
 
     #[cfg(windows)]

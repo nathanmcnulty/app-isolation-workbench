@@ -1964,3 +1964,9 @@ mod tests {
         assert_eq!(result.signature_status, ReadinessState::Unknown);
     }
 }
+
+pub mod paired_controls;
+pub use paired_controls::{
+    ControlEvidenceOrigin, PAIRED_CONTROL_PLAN_SCHEMA, PAIRED_CONTROL_REVISION,
+    PairedControlProfile,
+};

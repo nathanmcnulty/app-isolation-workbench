@@ -12,6 +12,8 @@ name = "aiw-guest-agent"
 path = "src/main.rs"
 
 [dependencies]
+aiw-control-fixture = { path = "../aiw-control-fixture" }
+aiw-probe.workspace = true
 aiw-evidence.workspace = true
 aiw-provider-wsb.workspace = true
 aiw-token.workspace = true

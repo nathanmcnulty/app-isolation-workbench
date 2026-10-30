@@ -90,6 +90,9 @@ pub use assessment_report::{
 pub use assessment_report::{
     export_windows_sandbox_msi_document, report_windows_sandbox_msi, report_windows_sandbox_msi_run,
 };
+#[cfg(windows)]
+pub use preparation::prepare_windows_sandbox_paired_controls;
+pub use preparation::{WsbPairedControls, build_wsb_paired_controls_preparation};
 mod session;
 
 pub use preparation::{
@@ -172,11 +175,15 @@ pub struct WsbGoldenProbeStart {
     pub msi: Option<WsbMsiApplication>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bambu: Option<WsbBambuApplication>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paired_controls: Option<WsbPairedControls>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WsbGoldenProbeExecution {
+    #[serde(skip)]
+    paired_observation: Option<Box<aiw_provider_wsb::PairedControlResult>>,
     #[serde(skip)]
     bambu_observation: Option<
         Box<(
@@ -242,8 +249,17 @@ pub struct WsbImportedMsiExecution {
 #[serde(untagged)]
 pub enum WsbApprovedExecution {
     GoldenProbe(WsbGoldenProbeExecution),
+    PairedControls(Box<WsbPairedControlExecution>),
     ImportedMsi(WsbImportedMsiExecution),
     ImportedBambu(Box<WsbBambuExecution>),
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WsbPairedControlExecution {
+    pub lifecycle: WsbGoldenProbeExecution,
+    pub observations: aiw_provider_wsb::PairedControlResult,
+    pub comparison: aiw_provider_wsb::PairedControlComparison,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -403,6 +419,12 @@ pub fn observe_wsb_session_status(layout: &RunLayout) -> Result<WsbSessionStatus
                 ..
             }
             | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
+                provider_sha256,
+                workspace,
+                workspace_identity_sha256,
+                ..
+            }
+            | PlannedAction::ExecuteWindowsSandboxPairedControls {
                 provider_sha256,
                 workspace,
                 workspace_identity_sha256,
@@ -762,7 +784,31 @@ pub(crate) fn execute_wsb_golden_probe(
     };
     let verification = match verification {
         Ok(value) if value.successful => value,
-        Ok(_) => {
+        Ok(value) => {
+            if let ExecutionGuestRequest::PairedControls(expected) = &context.guest_request {
+                let verified_failure = (|| {
+                    let failure: aiw_provider_wsb::paired_controls::PairedControlDriverFailure =
+                        read_bounded_json(
+                            &context.output_root.join("scenario-result.json"),
+                            64 * 1024,
+                        )?;
+                    let bytes = read_bounded_bytes(
+                        &context.output_root.join("evidence.jsonl"),
+                        aiw_provider_wsb::MAX_APPLICATION_EVIDENCE_BYTES as u64,
+                    )?;
+                    aiw_provider_wsb::paired_controls::verify_paired_driver_failure_evidence(
+                        &bytes,
+                        &value.evidence_root_hash,
+                        expected,
+                        &failure,
+                    )
+                    .map_err(RunnerError::Receipt)
+                })();
+                if let Err(error) = verified_failure {
+                    record_terminal_failure(layout, error.clone())?;
+                    return Err(error);
+                }
+            }
             let error = RunnerError::Receipt("guest reported failure".to_owned());
             record_terminal_failure(layout, error.clone())?;
             return Err(error);
@@ -776,6 +822,35 @@ pub(crate) fn execute_wsb_golden_probe(
         record_terminal_failure(layout, RunnerError::Cancelled)?;
         return Err(RunnerError::Cancelled);
     }
+    let paired_observation = if let ExecutionGuestRequest::PairedControls(expected) =
+        &context.guest_request
+    {
+        let verify = (|| {
+            let observed: aiw_provider_wsb::PairedControlResult =
+                read_bounded_json(&context.output_root.join("scenario-result.json"), 64 * 1024)?;
+            let bytes = read_bounded_bytes(
+                &context.output_root.join("evidence.jsonl"),
+                aiw_provider_wsb::MAX_APPLICATION_EVIDENCE_BYTES as u64,
+            )?;
+            aiw_provider_wsb::paired_controls::verify_paired_controls_evidence(
+                &bytes,
+                &verification.evidence_root_hash,
+                expected,
+                &observed,
+            )
+            .map_err(RunnerError::Receipt)?;
+            Ok::<_, RunnerError>(Box::new(observed))
+        })();
+        match verify {
+            Ok(observed) => Some(observed),
+            Err(error) => {
+                record_terminal_failure(layout, error.clone())?;
+                return Err(error);
+            }
+        }
+    } else {
+        None
+    };
     let scenario = (|| -> Result<_, RunnerError> {
         Ok(match &context.guest_request {
             ExecutionGuestRequest::ImportedMsi(expected) => {
@@ -849,9 +924,9 @@ pub(crate) fn execute_wsb_golden_probe(
                     product_registration,
                 )
             }
-            ExecutionGuestRequest::Golden(_) | ExecutionGuestRequest::ImportedBambu(_) => {
-                (None, None, None, None, None, None)
-            }
+            ExecutionGuestRequest::Golden(_)
+            | ExecutionGuestRequest::ImportedBambu(_)
+            | ExecutionGuestRequest::PairedControls(_) => (None, None, None, None, None, None),
         })
     })();
     let (
@@ -891,6 +966,7 @@ pub(crate) fn execute_wsb_golden_probe(
         workspace_identity_sha256: request.workspace_identity_sha256.clone(),
         cleanup_complete: true,
         bambu_observation,
+        paired_observation,
         scenario,
         application_token,
         behavior,
@@ -921,9 +997,9 @@ pub fn start_approved_windows_sandbox_golden_probe(
         false,
     )? {
         WsbApprovedExecution::GoldenProbe(result) => Ok(result),
-        WsbApprovedExecution::ImportedMsi(_) | WsbApprovedExecution::ImportedBambu(_) => {
-            Err(RunnerError::ApprovalBinding)
-        }
+        WsbApprovedExecution::ImportedMsi(_)
+        | WsbApprovedExecution::ImportedBambu(_)
+        | WsbApprovedExecution::PairedControls(_) => Err(RunnerError::ApprovalBinding),
     }
 }
 
@@ -1019,7 +1095,11 @@ fn start_approved_windows_sandbox_inner(
     held.revalidate_imported()
         .map_err(|error| RunnerError::Preparation(error.to_string()))?;
     let artifacts = held.artifacts.clone();
-    if (artifacts.receipt.msi.is_some() || artifacts.receipt.bambu.is_some()) && !allow_msi {
+    if (artifacts.receipt.msi.is_some()
+        || artifacts.receipt.bambu.is_some()
+        || artifacts.receipt.paired_controls.is_some())
+        && !allow_msi
+    {
         return Err(RunnerError::ApprovalBinding);
     }
     let layout = RunLayout::new(held.workspace().root_path(), &artifacts.receipt.run_id)
@@ -1029,7 +1109,9 @@ fn start_approved_windows_sandbox_inner(
     }
 
     let request = WsbGoldenProbeStart {
-        schema_version: if artifacts.receipt.msi.is_some() {
+        schema_version: if artifacts.receipt.paired_controls.is_some() {
+            "aiw.dev/wsb-paired-controls-start/v0alpha1"
+        } else if artifacts.receipt.msi.is_some() {
             "aiw.dev/wsb-imported-msi-start/v0alpha1"
         } else if artifacts.receipt.bambu.is_some() {
             "aiw.dev/wsb-imported-bambu-start/v0alpha1"
@@ -1047,6 +1129,7 @@ fn start_approved_windows_sandbox_inner(
         timeout_seconds,
         msi: artifacts.receipt.msi.clone(),
         bambu: artifacts.receipt.bambu.clone(),
+        paired_controls: artifacts.receipt.paired_controls.clone(),
     };
     let approval = layout.read_approval().map_err(journal_error)?;
     if !matches!(
@@ -1059,6 +1142,11 @@ fn start_approved_windows_sandbox_inner(
 
     crate::launch_profile::verify_bound_profile(&artifacts).map_err(RunnerError::Preparation)?;
 
+    if request.paired_controls.as_ref().is_some_and(|controls| {
+        controls.profile.origin != aiw_probe::ControlEvidenceOrigin::NativeWorker
+    }) {
+        return Err(RunnerError::ApprovalBinding);
+    }
     let mut native_lease =
         aiw_windows_platform::acquire_windows_sandbox(&artifacts.receipt.provider.sha256)
             .map_err(native_invocation_error)?;
@@ -1078,7 +1166,7 @@ fn start_approved_windows_sandbox_inner(
         }),
         plan: artifacts.wsb_plan,
     };
-    let result = execute_wsb_golden_probe(
+    let mut result = execute_wsb_golden_probe(
         &request,
         &readiness,
         &layout,
@@ -1086,6 +1174,27 @@ fn start_approved_windows_sandbox_inner(
         &AlreadyHeldProviderLease,
         held.workspace(),
     )?;
+    if let Some(controls) = &request.paired_controls {
+        let observations = *result.paired_observation.take().ok_or(RunnerError::Drift)?;
+        let expected = aiw_provider_wsb::PairedControlsRequest::new(
+            &result.run_id,
+            &result.sandbox_id,
+            &result.config_sha256,
+            &request.guest_agent.sha256,
+            controls.profile.clone(),
+        )
+        .map_err(RunnerError::Preparation)?;
+        let comparison = observations
+            .compare(&expected, Some(result.cleanup_complete))
+            .map_err(RunnerError::Receipt)?;
+        return Ok(WsbApprovedExecution::PairedControls(Box::new(
+            WsbPairedControlExecution {
+                lifecycle: result,
+                observations,
+                comparison,
+            },
+        )));
+    }
     if request.bambu.is_some() {
         let (scenario, artifact) = *result.bambu_observation.ok_or(RunnerError::Drift)?;
         Ok(WsbApprovedExecution::ImportedBambu(Box::new(
@@ -1544,7 +1653,29 @@ fn prepare_execution(
     {
         return Err(RunnerError::Drift);
     }
-    let guest_request = if let Some(msi) = &request.msi {
+    let guest_request = if let Some(controls) = &request.paired_controls {
+        if require_empty_output {
+            controls
+                .validate(&request.workspace, &request.guest_agent)
+                .map_err(|_| RunnerError::ApprovalBinding)?;
+            revalidate_identity(&controls.fixture.staged_payload)?;
+            revalidate_identity(&controls.launcher.staged_payload)?;
+        } else {
+            controls
+                .validate_historical(&request.workspace, &request.guest_agent)
+                .map_err(|_| RunnerError::ApprovalBinding)?;
+        }
+        ExecutionGuestRequest::PairedControls(Box::new(
+            aiw_provider_wsb::PairedControlsRequest::from_retained_binding(
+                &plan.run_id,
+                &session_id,
+                &rendered.sha256,
+                &request.guest_agent.sha256,
+                controls.profile.clone(),
+            )
+            .map_err(RunnerError::Preparation)?,
+        ))
+    } else if let Some(msi) = &request.msi {
         revalidate_identity(&msi.staged_payload)?;
         ExecutionGuestRequest::ImportedMsi(Box::new(
             aiw_provider_wsb::ImportedMsiGuestRequest::new(
@@ -1591,7 +1722,7 @@ fn prepare_execution(
         &request.guest_agent.sha256,
         guest_request.digest(),
     );
-    if request.msi.is_some() || request.bambu.is_some() {
+    if request.msi.is_some() || request.bambu.is_some() || request.paired_controls.is_some() {
         completion.artifacts[0].path = "scenario-result.json".to_owned();
         completion.artifacts[0].role = aiw_evidence::ArtifactRole::ScenarioResults;
         completion.artifacts[1].maximum_bytes =
@@ -1603,6 +1734,9 @@ fn prepare_execution(
         .is_some_and(|msi| msi.scenario.requires_document_transfer())
     {
         add_msi_document_artifact_expectation(&mut completion);
+    }
+    if request.paired_controls.is_some() {
+        completion.artifacts[0].maximum_bytes = 64 * 1024;
     }
     if request.bambu.is_some() {
         add_bambu_artifact_expectation(&mut completion);
@@ -2193,6 +2327,7 @@ enum ExecutionGuestRequest {
     Golden(Box<GuestRequest>),
     ImportedMsi(Box<aiw_provider_wsb::ImportedMsiGuestRequest>),
     ImportedBambu(Box<aiw_provider_wsb::ImportedBambuGuestRequest>),
+    PairedControls(Box<aiw_provider_wsb::PairedControlsRequest>),
 }
 
 impl ExecutionGuestRequest {
@@ -2201,6 +2336,7 @@ impl ExecutionGuestRequest {
             Self::Golden(v) => &v.request_sha256,
             Self::ImportedMsi(v) => &v.request_sha256,
             Self::ImportedBambu(v) => &v.request_sha256,
+            Self::PairedControls(v) => &v.request_sha256,
         }
     }
     fn binding(&self) -> (&str, &str, &str) {
@@ -2208,6 +2344,7 @@ impl ExecutionGuestRequest {
             Self::Golden(v) => (&v.run_id, &v.sandbox_id, &v.config_sha256),
             Self::ImportedMsi(v) => (&v.run_id, &v.sandbox_id, &v.config_sha256),
             Self::ImportedBambu(v) => (&v.run_id, &v.sandbox_id, &v.config_sha256),
+            Self::PairedControls(v) => (&v.run_id, &v.sandbox_id, &v.config_sha256),
         }
     }
     fn validate(&self) -> Result<(), RunnerError> {
@@ -2225,6 +2362,7 @@ impl ExecutionGuestRequest {
             }
             Self::ImportedMsi(v) => v.validate().map_err(|_| RunnerError::Drift),
             Self::ImportedBambu(v) => v.validate().map_err(|_| RunnerError::Drift),
+            Self::PairedControls(v) => v.validate().map_err(|_| RunnerError::Drift),
         }
     }
 }
@@ -2284,48 +2422,74 @@ fn ensure_approval(
             PlannedAction::PrepareWorkspace,
             PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. }
                 | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
-                | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { .. },
+                | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { .. }
+                | PlannedAction::ExecuteWindowsSandboxPairedControls { .. },
             PlannedAction::CollectEvidence,
         ]
     ) {
         return Err(RunnerError::ApprovalBinding);
     }
-    match (&plan.actions[2], &request.msi, &request.bambu) {
-        (PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. }, None, None) => {}
-        (
-            PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
-                import_receipt_sha256,
-                application_sha256,
-                scenario_sha256,
-                ..
-            },
-            Some(msi),
-            None,
-        ) if import_receipt_sha256 == &msi.import_receipt_sha256
-            && application_sha256 == &msi.staged_payload.sha256
-            && scenario_sha256 == &msi.scenario_sha256 =>
-        {
-            msi.validate(&request.workspace)
-                .map_err(|_| RunnerError::ApprovalBinding)?;
+    if [
+        request.msi.is_some(),
+        request.bambu.is_some(),
+        request.paired_controls.is_some(),
+    ]
+    .iter()
+    .filter(|v| **v)
+    .count()
+        > 1
+    {
+        return Err(RunnerError::ApprovalBinding);
+    }
+    if let Some(controls) = &request.paired_controls {
+        let PlannedAction::ExecuteWindowsSandboxPairedControls { profile, .. } = &plan.actions[2]
+        else {
+            return Err(RunnerError::ApprovalBinding);
+        };
+        if profile.as_ref() != &controls.profile {
+            return Err(RunnerError::ApprovalBinding);
         }
-        (
-            PlannedAction::ExecuteWindowsSandboxImportedBambuScenario {
-                import_receipt_sha256,
-                application_sha256,
-                scenario_sha256,
-                ..
-            },
-            None,
-            Some(bambu),
-        ) if import_receipt_sha256 == &bambu.import_receipt_sha256
-            && application_sha256 == &bambu.staged_payload.sha256
-            && scenario_sha256 == &bambu.scenario_sha256 =>
-        {
-            bambu
-                .validate(&request.workspace)
-                .map_err(|_| RunnerError::ApprovalBinding)?;
+        controls
+            .validate_historical(&request.workspace, &request.guest_agent)
+            .map_err(|_| RunnerError::ApprovalBinding)?;
+    } else {
+        match (&plan.actions[2], &request.msi, &request.bambu) {
+            (PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. }, None, None) => {}
+            (
+                PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
+                    import_receipt_sha256,
+                    application_sha256,
+                    scenario_sha256,
+                    ..
+                },
+                Some(msi),
+                None,
+            ) if import_receipt_sha256 == &msi.import_receipt_sha256
+                && application_sha256 == &msi.staged_payload.sha256
+                && scenario_sha256 == &msi.scenario_sha256 =>
+            {
+                msi.validate(&request.workspace)
+                    .map_err(|_| RunnerError::ApprovalBinding)?;
+            }
+            (
+                PlannedAction::ExecuteWindowsSandboxImportedBambuScenario {
+                    import_receipt_sha256,
+                    application_sha256,
+                    scenario_sha256,
+                    ..
+                },
+                None,
+                Some(bambu),
+            ) if import_receipt_sha256 == &bambu.import_receipt_sha256
+                && application_sha256 == &bambu.staged_payload.sha256
+                && scenario_sha256 == &bambu.scenario_sha256 =>
+            {
+                bambu
+                    .validate(&request.workspace)
+                    .map_err(|_| RunnerError::ApprovalBinding)?;
+            }
+            _ => return Err(RunnerError::ApprovalBinding),
         }
-        _ => return Err(RunnerError::ApprovalBinding),
     }
     let wsb_hash = canonical_hash(&request.wsb_plan)?;
     let workspace_hash = canonical_hash(&request.workspace)?;
@@ -2341,6 +2505,14 @@ fn ensure_approval(
                 workspace_identity_sha256,
             }
             | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+                ..
+            }
+            | PlannedAction::ExecuteWindowsSandboxPairedControls {
                 sandbox_plan_sha256,
                 provider_sha256,
                 guest_agent_sha256,
@@ -2382,7 +2554,14 @@ fn validate_start(
     request: &WsbGoldenProbeStart,
     readiness: &WindowsSandboxReadiness,
 ) -> Result<(), RunnerError> {
-    let schema = if request.msi.is_some() {
+    if let Some(controls) = &request.paired_controls
+        && readiness.os_version.as_ref() != Some(&controls.profile.expected_windows)
+    {
+        return Err(RunnerError::Drift);
+    }
+    let schema = if request.paired_controls.is_some() {
+        "aiw.dev/wsb-paired-controls-start/v0alpha1"
+    } else if request.msi.is_some() {
         "aiw.dev/wsb-imported-msi-start/v0alpha1"
     } else if request.bambu.is_some() {
         "aiw.dev/wsb-imported-bambu-start/v0alpha1"
@@ -2891,6 +3070,9 @@ mod tests {
         }
     }
 
+    #[path = "paired_control_tests.rs"]
+    mod paired_control_tests;
+
     type StartAction = Box<dyn FnOnce() + Send>;
 
     struct FakeProcess {
@@ -3074,6 +3256,16 @@ mod tests {
         WsbGoldenProbeStart,
         WindowsSandboxReadiness,
     ) {
+        setup_transformed(|_, _| {})
+    }
+    fn setup_transformed(
+        transform: impl FnOnce(&mut WsbGoldenProbeStart, &mut RunPlan),
+    ) -> (
+        Root,
+        RunLayout,
+        WsbGoldenProbeStart,
+        WindowsSandboxReadiness,
+    ) {
         let root = Root::new();
         let tools = root.0.join("tools");
         let output = root.0.join("output");
@@ -3117,7 +3309,7 @@ mod tests {
         provider_identity.signature_status = aiw_probe::ReadinessState::Available;
         let workspace = workspace_evidence(&root.0, &tools, &output);
         let workspace_identity_sha256 = canonical_hash(&workspace).unwrap();
-        let start = WsbGoldenProbeStart {
+        let mut start = WsbGoldenProbeStart {
             schema_version: "aiw.dev/wsb-golden-probe-start/v0alpha2".to_owned(),
             run_root: wsb_plan.workspace_root.clone(),
             project_path: project_path.to_string_lossy().into_owned(),
@@ -3129,8 +3321,9 @@ mod tests {
             timeout_seconds: 1,
             msi: None,
             bambu: None,
+            paired_controls: None,
         };
-        let plan = RunPlan::new(
+        let mut plan = RunPlan::new(
             "w1-run",
             project.metadata.name.clone(),
             project_revision_hash(&project).unwrap(),
@@ -3151,9 +3344,15 @@ mod tests {
             vec!["starts an approved Windows Sandbox golden probe".to_owned()],
         )
         .unwrap();
+        transform(&mut start, &mut plan);
         let layout = RunLayout::new(&root.0, "w1-run").unwrap();
         let receipt = aiw_orchestrator::WsbPlanningImportReceipt {
-            schema_version: aiw_orchestrator::WSB_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION.to_owned(),
+            schema_version: if start.paired_controls.is_some() {
+                aiw_orchestrator::WSB_PAIRED_CONTROL_IMPORT_SCHEMA
+            } else {
+                aiw_orchestrator::WSB_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION
+            }
+            .to_owned(),
             run_id: plan.run_id.clone(),
             imported_at: "now".to_owned(),
             status: aiw_orchestrator::WsbPlanningImportStatus::PendingApproval,
@@ -3238,6 +3437,10 @@ mod tests {
             blockers: vec![],
             warnings: vec![],
         };
+        let mut ready = ready;
+        if let Some(controls) = &start.paired_controls {
+            ready.os_version = Some(controls.profile.expected_windows.clone());
+        }
         (root, layout, start, ready)
     }
 
@@ -4442,6 +4645,7 @@ mod tests {
             timeout_seconds: 180,
             msi: None,
             bambu: None,
+            paired_controls: None,
         };
         let native = NativeWsbProcess {
             state: Mutex::new(NativeWsbState {

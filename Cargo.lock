@@ -109,7 +109,9 @@ dependencies = [
 name = "aiw-guest-agent"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "aiw-control-fixture",
  "aiw-evidence",
+ "aiw-probe",
  "aiw-provider-wsb",
  "aiw-token",
  "aiw-windows-platform",
@@ -149,6 +151,7 @@ dependencies = [
 name = "aiw-probe"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "aiw-evidence",
  "hex",
  "schemars",
  "serde",

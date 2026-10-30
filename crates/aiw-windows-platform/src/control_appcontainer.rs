@@ -1,5 +1,6 @@
-//! Fixed, disposable AppContainer control launcher. This is research-only and
-//! intentionally has no caller-supplied executable, argument, or path.
+//! Fixed, disposable AppContainer control launcher. The historical research
+//! entry point remains strict; the paired collector retains inconclusive native
+//! observations. Neither accepts a caller-supplied executable, argument or path.
 
 use std::ffi::OsStr;
 use std::fs;
@@ -53,6 +54,7 @@ const CANARY_DIR: &str = r"C:\AIW\Control\SharedCanary";
 const CHILD_DIR: &str = r"C:\AIW\Control\AppContainerChild";
 const CHILD_TOKEN: &str = r"C:\AIW\Control\AppContainerChild\child-token.json";
 const PROFILE_NAME: &str = "AIW.Control.Research.v0alpha1";
+const PAIRED_PROFILE_NAME: &str = "AIW.Control.Paired.v0alpha1";
 const TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_JSON: u64 = 48 * 1024;
 
@@ -267,6 +269,214 @@ pub fn execute_fixed_control_appcontainer()
         },
     })
 }
+/// Guard before the agent's fixture role parses any mode or mutates a file.
+pub fn validate_fixed_paired_fixture_role(mode: &str) -> Result<(), ControlAppContainerError> {
+    require_paired_role_path(Path::new(FIXTURE))?;
+    let directory = match mode {
+        "read-canary" | "read-registry" => CANARY_DIR,
+        "child" | "child-token" => CHILD_DIR,
+        _ => return Err(fixed("unreviewed paired fixture role")),
+    };
+    if std::env::current_dir().map_err(|e| fixed(e.to_string()))? != Path::new(directory) {
+        return Err(fixed("fixed paired fixture directory required"));
+    }
+    Ok(())
+}
+fn require_paired_role_path(path: &Path) -> Result<(), ControlAppContainerError> {
+    if std::env::current_exe().map_err(|e| fixed(e.to_string()))? != path {
+        return Err(fixed("fixed paired guest helper path required"));
+    }
+    let token = collect_current_process_token().map_err(|e| fixed(e.to_string()))?;
+    if token.is_elevated
+        || token.user_sid != fixed_account_sid(aiw_provider_wsb::STANDARD_USER_ACCOUNT_NAME)?
+    {
+        return Err(fixed(
+            "fixed paired standard-user primary identity required",
+        ));
+    }
+    Ok(())
+}
+// Account lookup is native; environment variables are never identity authority.
+pub(crate) fn fixed_account_sid(name: &str) -> Result<String, ControlAppContainerError> {
+    use windows::Win32::Security::{LookupAccountNameW, SID_NAME_USE};
+    let name = wide(OsStr::new(name))?;
+    let mut sid = [0u64; 16];
+    let mut sid_size = std::mem::size_of_val(&sid) as u32;
+    let mut domain = [0u16; 256];
+    let mut domain_size = domain.len() as u32;
+    let mut usage = SID_NAME_USE::default();
+    unsafe {
+        LookupAccountNameW(
+            PCWSTR::null(),
+            PCWSTR(name.as_ptr()),
+            Some(PSID(sid.as_mut_ptr().cast())),
+            &mut sid_size,
+            Some(PWSTR(domain.as_mut_ptr())),
+            &mut domain_size,
+            &mut usage,
+        )
+    }
+    .map_err(|e| fixed(e.to_string()))?;
+    sid_string(PSID(sid.as_mut_ptr().cast()))
+}
+
+/// The fixed standard-user helper writes this bounded, typed observation. The
+/// elevated guest agent independently binds its held launcher process token and
+/// fixed resources; this helper alone is not an assessment or completion receipt.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PairedLauncherObservation {
+    pub launcher_token: TokenEvidence,
+    pub package_sid: String,
+    pub baseline: aiw_provider_wsb::PairedVariant,
+    pub candidate: aiw_provider_wsb::PairedVariant,
+    pub profile_deleted: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PairedLauncherAttempt {
+    pub launcher_token: TokenEvidence,
+    pub observation: Option<PairedLauncherObservation>,
+    pub progress: Vec<aiw_provider_wsb::paired_controls::PairedCaseProgress>,
+}
+pub fn execute_fixed_paired_control_launcher()
+-> Result<PairedLauncherAttempt, ControlAppContainerError> {
+    require_paired_role_path(Path::new(r"C:\AIW\Control\aiw-control-appcontainer.exe"))?;
+    require_regular_file(Path::new(FIXTURE))?;
+    require_empty_directory(Path::new(CHILD_DIR))?;
+    let launcher_token = collect_current_process_token().map_err(|e| fixed(e.to_string()))?;
+    verify_token(
+        &launcher_token,
+        std::process::id(),
+        None,
+        &launcher_token.user_sid,
+    )?;
+    let mut progress = Vec::new();
+    let observation = (|| {
+        use aiw_provider_wsb::paired_controls::PairedVariantKind;
+        let baseline = collect_paired_variant(
+            None,
+            &launcher_token.user_sid,
+            PairedVariantKind::Baseline,
+            &mut progress,
+        )?;
+        let mut profile = AppContainerProfile::create_paired()?;
+        let package_sid = profile.string_sid()?;
+        for path in [CONTROL_ROOT, FIXTURE, CANARY_DIR] {
+            grant_package_access(
+                Path::new(path),
+                profile.sid,
+                (GENERIC_READ | GENERIC_EXECUTE).0,
+            )?;
+        }
+        grant_package_access(
+            Path::new(CHILD_DIR),
+            profile.sid,
+            (GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE).0,
+        )?;
+        let candidate = collect_paired_variant(
+            Some(profile.sid),
+            &launcher_token.user_sid,
+            PairedVariantKind::Candidate,
+            &mut progress,
+        )?;
+        let profile_deleted = profile.delete().is_ok();
+        Ok::<_, ControlAppContainerError>(PairedLauncherObservation {
+            launcher_token: launcher_token.clone(),
+            package_sid,
+            baseline,
+            candidate,
+            profile_deleted,
+        })
+    })();
+    aiw_provider_wsb::paired_controls::validate_paired_progress(&progress).map_err(fixed)?;
+    // A failed case/grant/profile/cleanup never erases the already collected
+    // prefix. The outer agent binds this attempt to its held launcher token.
+    Ok(PairedLauncherAttempt {
+        launcher_token,
+        observation: observation.ok(),
+        progress,
+    })
+}
+fn collect_paired_variant(
+    profile: Option<PSID>,
+    user_sid: &str,
+    variant: aiw_provider_wsb::paired_controls::PairedVariantKind,
+    progress: &mut Vec<aiw_provider_wsb::paired_controls::PairedCaseProgress>,
+) -> Result<aiw_provider_wsb::PairedVariant, ControlAppContainerError> {
+    use aiw_provider_wsb::paired_controls::{FixedControlCase, normalize_control_variant};
+    let mut cases = Vec::new();
+    for (mode, case, directory) in [
+        ("read-canary", FixedControlCase::File, CANARY_DIR),
+        ("read-registry", FixedControlCase::Registry, CANARY_DIR),
+        ("child", FixedControlCase::Child, CHILD_DIR),
+    ] {
+        let collected = collect_fixture(mode, profile, Path::new(directory), profile, user_sid)?;
+        if retain_collected_progress(progress, variant, case, &collected)? {
+            return Err(fixed(
+                "malformed fixed case report; measured prefix retained",
+            ));
+        }
+        cases.push(collected);
+        remove_fixed_result(Path::new(directory), mode)?;
+    }
+    match fs::remove_file(CHILD_TOKEN) {
+        Ok(()) => (),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+        Err(e) => return Err(fixed(format!("remove fixed child token failed: {e}"))),
+    }
+    require_empty_directory(Path::new(CHILD_DIR))?;
+    let mut cases = cases.into_iter();
+    normalize_control_variant(
+        cases.next().expect("three fixed cases"),
+        cases.next().expect("three fixed cases"),
+        cases.next().expect("three fixed cases"),
+    )
+    .map_err(fixed)
+}
+
+fn retain_collected_progress(
+    progress: &mut Vec<aiw_provider_wsb::paired_controls::PairedCaseProgress>,
+    variant: aiw_provider_wsb::paired_controls::PairedVariantKind,
+    case: aiw_provider_wsb::paired_controls::FixedControlCase,
+    collected: &aiw_provider_wsb::paired_controls::CollectedControlCase,
+) -> Result<bool, ControlAppContainerError> {
+    use aiw_provider_wsb::paired_controls::{PairedCaseProgress, normalize_control_case};
+    let normalized = normalize_control_case(collected.clone(), case);
+    let mut malformed = normalized.is_err();
+    let unmeasured = || {
+        let mut value = collected.clone();
+        value.report = None;
+        normalize_control_case(value, case).map_err(fixed)
+    };
+    let (process, observation) = match normalized {
+        Ok(value) => value,
+        Err(_) => unmeasured()?,
+    };
+    let mut next = progress.clone();
+    next.push(PairedCaseProgress {
+        variant,
+        case,
+        process,
+        observation,
+    });
+    if aiw_provider_wsb::paired_controls::validate_paired_progress(&next).is_err() {
+        malformed = true;
+        let (process, observation) = unmeasured()?;
+        next.pop();
+        next.push(PairedCaseProgress {
+            variant,
+            case,
+            process,
+            observation,
+        });
+    }
+    aiw_provider_wsb::paired_controls::validate_paired_progress(&next).map_err(fixed)?;
+    *progress = next;
+    Ok(malformed)
+}
+
 fn launch_fixture(
     mode: &str,
     appcontainer: Option<PSID>,
@@ -274,6 +484,57 @@ fn launch_fixture(
     expected_sid: Option<PSID>,
     expected_user_sid: &str,
 ) -> Result<FixedFixtureObservation, ControlAppContainerError> {
+    let collected = collect_fixture(
+        mode,
+        appcontainer,
+        directory,
+        expected_sid,
+        expected_user_sid,
+    )?;
+    let token = collected
+        .process
+        .held_token
+        .ok_or_else(|| fixed("held fixture token absent"))?;
+    let report = collected
+        .report
+        .ok_or_else(|| fixed("fixed fixture JSON absent"))?;
+    let code = collected
+        .process
+        .exit_code
+        .ok_or_else(|| fixed("fixture exit code absent"))?;
+    if collected.process.timed_out || collected.process.job_empty != Some(true) {
+        return Err(fixed("fixed fixture deadline or cleanup failed"));
+    }
+    let wire: FixtureWire = serde_json::from_value(report.clone())
+        .map_err(|error| fixed(format!("parse fixture token failed: {error}")))?;
+    if wire.own_process_token != token {
+        return Err(fixed("fixture JSON token differed from held process token"));
+    }
+    if code != 0 {
+        return Err(fixed(format!("fixed fixture {mode} exited with {code}")));
+    }
+    verify_fixture_report(&report, mode, &token, appcontainer.is_some())?;
+    Ok(FixedFixtureObservation {
+        process_id: collected.process.process_id,
+        exit_code: code,
+        fixture_token: token,
+        report,
+        job_empty: true,
+    })
+}
+
+// Process authority is identical for research and production paired controls.
+// Only the legacy wrapper above imposes an expected control outcome.
+fn collect_fixture(
+    mode: &str,
+    appcontainer: Option<PSID>,
+    directory: &Path,
+    expected_sid: Option<PSID>,
+    expected_user_sid: &str,
+) -> Result<aiw_provider_wsb::paired_controls::CollectedControlCase, ControlAppContainerError> {
+    if !matches!(mode, "read-canary" | "read-registry" | "child") {
+        return Err(fixed("unreviewed fixture mode"));
+    }
     let report_path = directory.join(format!("{mode}-result.json"));
     if report_path.exists() {
         return Err(fixed("fixed fixture result path already exists"));
@@ -354,42 +615,40 @@ fn launch_fixture(
         let cleanup = job.terminate();
         return Err(fixed(format!("resume fixture failed; cleanup={cleanup:?}")));
     }
-    let exit = wait(HANDLE(process.as_raw_handle() as isize as *mut _), TIMEOUT);
-    exit?;
-    job.terminate_and_verify_empty()?;
+    let completed = wait_completion(HANDLE(process.as_raw_handle() as isize as *mut _), TIMEOUT)?;
+    let job_empty = job.terminate_and_verify_empty().ok().map(|()| true);
     let mut code = 0u32;
-    unsafe {
-        GetExitCodeProcess(
-            HANDLE(process.as_raw_handle() as isize as *mut _),
-            &mut code,
-        )
-    }
-    .map_err(|error| fixed(format!("read fixture exit code failed: {error}")))?;
-    let bytes = read_bounded(&report_path, MAX_JSON)?;
-    let report: serde_json::Value = serde_json::from_slice(&bytes)
-        .map_err(|error| fixed(format!("parse fixture JSON failed: {error}")))?;
-    let wire: FixtureWire = serde_json::from_value(report.clone())
-        .map_err(|error| fixed(format!("parse fixture token failed: {error}")))?;
-    if wire.own_process_token != token {
-        return Err(fixed("fixture JSON token differed from held process token"));
-    }
-    if code != 0 {
-        let detail = report
-            .get("result")
-            .map(ToString::to_string)
-            .unwrap_or_default();
-        let detail: String = detail.chars().take(4096).collect();
-        return Err(fixed(format!(
-            "fixed fixture {mode} exited with {code}: {detail}"
-        )));
-    }
-    verify_fixture_report(&report, mode, &token, appcontainer.is_some())?;
-    Ok(FixedFixtureObservation {
-        process_id: info.dwProcessId,
-        exit_code: code as i32,
-        fixture_token: token,
+    let exit_code = if completed {
+        unsafe {
+            GetExitCodeProcess(
+                HANDLE(process.as_raw_handle() as isize as *mut _),
+                &mut code,
+            )
+        }
+        .ok()
+        .map(|()| code as i32)
+    } else {
+        None
+    };
+    // A timeout cannot be made successful by stale or partially written JSON.
+    // Invalid/missing output remains unmeasured, never an inferred denial.
+    let report = if completed && job_empty == Some(true) {
+        read_bounded(&report_path, MAX_JSON)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+    } else {
+        None
+    };
+    Ok(aiw_provider_wsb::paired_controls::CollectedControlCase {
+        process: aiw_provider_wsb::PairedInvocation {
+            process_id: info.dwProcessId,
+            exit_code,
+            timed_out: !completed,
+            held_token: Some(token),
+            self_token: None, // Filled only by the strict shared raw normalizer.
+            job_empty,
+        },
         report,
-        job_empty: true,
     })
 }
 
@@ -526,10 +785,17 @@ fn verify_token(
 struct AppContainerProfile {
     sid: PSID,
     deleted: bool,
+    name: &'static str,
 }
 impl AppContainerProfile {
     fn create_fresh() -> Result<Self, ControlAppContainerError> {
-        let name = wide(OsStr::new(PROFILE_NAME))?;
+        Self::create(PROFILE_NAME)
+    }
+    fn create_paired() -> Result<Self, ControlAppContainerError> {
+        Self::create(PAIRED_PROFILE_NAME)
+    }
+    fn create(profile_name: &'static str) -> Result<Self, ControlAppContainerError> {
+        let name = wide(OsStr::new(profile_name))?;
         let sid = unsafe {
             CreateAppContainerProfile(
                 PCWSTR(name.as_ptr()),
@@ -542,13 +808,14 @@ impl AppContainerProfile {
         Ok(Self {
             sid,
             deleted: false,
+            name: profile_name,
         })
     }
     fn string_sid(&self) -> Result<String, ControlAppContainerError> {
         sid_string(self.sid)
     }
     fn delete(&mut self) -> Result<(), ControlAppContainerError> {
-        let name = wide(OsStr::new(PROFILE_NAME))?;
+        let name = wide(OsStr::new(self.name))?;
         let result = unsafe { DeleteAppContainerProfile(PCWSTR(name.as_ptr())) };
         result
             .map_err(|error| fixed(format!("delete fresh AppContainer profile failed: {error}")))?;
@@ -691,9 +958,16 @@ impl Job {
     }
 }
 fn wait(handle: HANDLE, timeout: Duration) -> Result<(), ControlAppContainerError> {
+    if wait_completion(handle, timeout)? {
+        Ok(())
+    } else {
+        Err(fixed("fixed fixture deadline expired"))
+    }
+}
+fn wait_completion(handle: HANDLE, timeout: Duration) -> Result<bool, ControlAppContainerError> {
     match unsafe { WaitForSingleObject(handle, timeout.as_millis() as u32) } {
-        WAIT_OBJECT_0 => Ok(()),
-        WAIT_TIMEOUT => Err(fixed("fixed fixture deadline expired")),
+        WAIT_OBJECT_0 => Ok(true),
+        WAIT_TIMEOUT => Ok(false),
         _ => Err(fixed("wait fixed fixture failed")),
     }
 }
@@ -864,4 +1138,73 @@ fn sid_string(sid: PSID) -> Result<String, ControlAppContainerError> {
 }
 fn fixed(message: impl Into<String>) -> ControlAppContainerError {
     ControlAppContainerError::Fixed(message.into())
+}
+
+#[cfg(test)]
+mod paired_tests {
+    use super::*;
+    use aiw_provider_wsb::paired_controls::{
+        CollectedControlCase, ControlAccess, FixedControlCase, PairedVariantKind,
+    };
+    #[test]
+    fn malformed_late_case_retains_valid_prefix_and_only_held_unmeasured_case() {
+        let synthetic: aiw_provider_wsb::PairedControlResult = serde_json::from_str(include_str!(
+            "../../../fixtures/paired-controls/synthetic-result.json"
+        ))
+        .unwrap();
+        let mut progress = Vec::new();
+        for (case, mode, process, result) in [
+            (
+                FixedControlCase::File,
+                "readCanary",
+                synthetic.baseline.file_process.clone(),
+                serde_json::json!({"status":"readCanary","outcome":{"kind":"success","sizeBytes":29,"sha256":synthetic.baseline.file.sha256}}),
+            ),
+            (
+                FixedControlCase::Registry,
+                "readRegistry",
+                synthetic.baseline.registry_process.clone(),
+                serde_json::json!({"status":"readRegistry","probe":{"scope":{"hive":"HKLM","view":"registry64","key":synthetic.resources.registry_key,"value":"Canary"},"outcome":{"kind":"success","sizeBytes":29,"sha256":synthetic.baseline.registry.sha256}}}),
+            ),
+        ] {
+            let report = serde_json::json!({"schemaVersion":"aiw.dev/control-fixture-report/v0alpha1","mode":mode,"ownProcessToken":process.held_token,"result":result});
+            let collected = CollectedControlCase {
+                process,
+                report: Some(report),
+            };
+            assert!(
+                !retain_collected_progress(
+                    &mut progress,
+                    PairedVariantKind::Baseline,
+                    case,
+                    &collected
+                )
+                .unwrap()
+            );
+        }
+        let prefix = progress.clone();
+        let mut bad_child = synthetic.baseline.child_token.clone().unwrap();
+        bad_child.user_sid = "S-1-5-21-9-9-9-1001".into();
+        let process = synthetic.baseline.child_process.clone();
+        let report = serde_json::json!({"schemaVersion":"aiw.dev/control-fixture-report/v0alpha1","mode":"child","ownProcessToken":process.held_token,"result":{"status":"child","childProcessId":bad_child.process_id,"childToken":bad_child,"childStdoutBytes":0}});
+        let collected = CollectedControlCase {
+            process,
+            report: Some(report),
+        };
+        assert!(
+            retain_collected_progress(
+                &mut progress,
+                PairedVariantKind::Baseline,
+                FixedControlCase::Child,
+                &collected
+            )
+            .unwrap()
+        );
+        assert_eq!(&progress[..2], prefix.as_slice());
+        assert_eq!(progress[2].observation.outcome, ControlAccess::Unmeasured);
+        assert!(progress[2].process.held_token.is_some());
+        assert!(progress[2].process.self_token.is_none());
+        assert!(progress[2].observation.child_token.is_none());
+        aiw_provider_wsb::paired_controls::validate_paired_progress(&progress).unwrap();
+    }
 }

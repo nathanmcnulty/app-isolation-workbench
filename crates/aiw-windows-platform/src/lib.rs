@@ -3,6 +3,11 @@
 use aiw_probe::WindowsSandboxReadiness;
 
 #[cfg(windows)]
+mod guest_paired_controls;
+#[cfg(windows)]
+pub use guest_paired_controls::{PairedGuestOutcome, execute_fixed_paired_controls};
+
+#[cfg(windows)]
 mod powershell;
 #[cfg(windows)]
 pub use powershell::{HeldPowerShell, observe_machine_powershell};
@@ -47,7 +52,9 @@ pub use guest_bambu::{
 
 #[cfg(windows)]
 pub use control_appcontainer::{
-    ControlAppContainerError, ControlAppContainerObservation, execute_fixed_control_appcontainer,
+    ControlAppContainerError, ControlAppContainerObservation, PairedLauncherAttempt,
+    PairedLauncherObservation, execute_fixed_control_appcontainer,
+    execute_fixed_paired_control_launcher, validate_fixed_paired_fixture_role,
 };
 
 #[cfg(windows)]

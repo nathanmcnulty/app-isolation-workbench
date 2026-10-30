@@ -46,6 +46,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+pub use aiw_probe::PAIRED_CONTROL_PLAN_SCHEMA;
+pub const WSB_PAIRED_CONTROL_IMPORT_SCHEMA: &str = "aiw.dev/wsb-planning-import-receipt/v0alpha4";
 pub const RUN_PLAN_SCHEMA_VERSION: &str = "aiw.dev/run-plan/v0alpha3";
 pub const IMPORTED_MSI_RUN_PLAN_SCHEMA_VERSION: &str = "aiw.dev/run-plan/v0alpha4";
 pub const IMPORTED_BAMBU_RUN_PLAN_SCHEMA_VERSION: &str = "aiw.dev/run-plan/v0alpha5";
@@ -99,6 +101,14 @@ pub enum RunLifecycleKind {
     deny_unknown_fields
 )]
 pub enum PlannedAction {
+    ExecuteWindowsSandboxPairedControls {
+        sandbox_plan_sha256: String,
+        provider_sha256: String,
+        guest_agent_sha256: String,
+        workspace: Box<WorkspaceBindingEvidence>,
+        workspace_identity_sha256: String,
+        profile: Box<aiw_probe::PairedControlProfile>,
+    },
     ExecuteVmMsix {
         binding: Box<VmMsixExecutionBinding>,
     },
@@ -232,6 +242,11 @@ impl RunPlan {
         let value = Self {
             schema: if actions
                 .iter()
+                .any(|a| matches!(a, PlannedAction::ExecuteWindowsSandboxPairedControls { .. }))
+            {
+                PAIRED_CONTROL_PLAN_SCHEMA.into()
+            } else if actions
+                .iter()
                 .any(|action| matches!(action, PlannedAction::ExecuteVmMsix { .. }))
             {
                 VM_MSIX_RUN_PLAN_SCHEMA.into()
@@ -276,6 +291,7 @@ impl RunPlan {
         if !matches!(
             schema,
             Some(RUN_PLAN_SCHEMA_VERSION)
+                | Some(PAIRED_CONTROL_PLAN_SCHEMA)
                 | Some(IMPORTED_MSI_RUN_PLAN_SCHEMA_VERSION)
                 | Some(IMPORTED_BAMBU_RUN_PLAN_SCHEMA_VERSION)
                 | Some(VM_MSIX_RUN_PLAN_SCHEMA)
@@ -3683,7 +3699,13 @@ fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
             PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
         )
     });
-    let expected_schema = if vm_count != 0 {
+    let has_pair_action = plan
+        .actions
+        .iter()
+        .any(|a| matches!(a, PlannedAction::ExecuteWindowsSandboxPairedControls { .. }));
+    let expected_schema = if has_pair_action {
+        PAIRED_CONTROL_PLAN_SCHEMA
+    } else if vm_count != 0 {
         VM_MSIX_RUN_PLAN_SCHEMA
     } else if has_bambu_action {
         IMPORTED_BAMBU_RUN_PLAN_SCHEMA_VERSION
@@ -3736,6 +3758,37 @@ fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
             wsb_action_count += 1;
         }
         match action {
+            PlannedAction::ExecuteWindowsSandboxPairedControls {
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+                profile,
+            } => {
+                profile.validate_historical().map_err(|detail| {
+                    run_error("AIW_PAIR_BINDING_INVALID", &detail, "plan", &plan.run_id)
+                })?;
+                if profile.fixture_sha256 != *guest_agent_sha256
+                    || [
+                        sandbox_plan_sha256,
+                        provider_sha256,
+                        guest_agent_sha256,
+                        workspace_identity_sha256,
+                    ]
+                    .iter()
+                    .any(|h| !is_hash(h))
+                    || workspace.validate().is_err()
+                    || hash_value(workspace)? != *workspace_identity_sha256
+                {
+                    return Err(run_error(
+                        "AIW_PAIR_BINDING_INVALID",
+                        "Paired workspace or executable bindings rejected",
+                        "plan",
+                        &plan.run_id,
+                    ));
+                }
+            }
             PlannedAction::ExecuteVmMsix { binding } => {
                 binding.validate().map_err(|detail| {
                     run_error("AIW_MSIX_BINDING_INVALID", &detail, "plan", &plan.run_id)
@@ -3887,6 +3940,7 @@ fn is_wsb_action(action: &PlannedAction) -> bool {
     matches!(
         action,
         PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. }
+            | PlannedAction::ExecuteWindowsSandboxPairedControls { .. }
             | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
             | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { .. }
     )
@@ -3925,6 +3979,7 @@ fn wsb_workspace(plan: &RunPlan) -> Result<&WorkspaceBindingEvidence, AiwError> 
     })?;
     match action {
         PlannedAction::ExecuteWindowsSandboxGoldenProbe { workspace, .. }
+        | PlannedAction::ExecuteWindowsSandboxPairedControls { workspace, .. }
         | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { workspace, .. }
         | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { workspace, .. } => {
             Ok(workspace.as_ref())
@@ -3995,6 +4050,21 @@ fn validate_wsb_import(receipt: &WsbPlanningImportReceipt, plan: &RunPlan) -> Re
             workspace,
             workspace_identity_sha256,
         ),
+        PlannedAction::ExecuteWindowsSandboxPairedControls {
+            sandbox_plan_sha256,
+            provider_sha256,
+            guest_agent_sha256,
+            workspace,
+            workspace_identity_sha256,
+            ..
+        } => (
+            WSB_PAIRED_CONTROL_IMPORT_SCHEMA,
+            sandbox_plan_sha256,
+            provider_sha256,
+            guest_agent_sha256,
+            workspace,
+            workspace_identity_sha256,
+        ),
         _ => unreachable!("wsb_action only returns WSB profile actions"),
     };
     if receipt.schema_version != receipt_schema
@@ -4053,6 +4123,7 @@ fn action_allowed(lifecycle: RunLifecycleKind, action: &PlannedAction) -> bool {
                 | PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. }
                 | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
                 | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { .. }
+                | PlannedAction::ExecuteWindowsSandboxPairedControls { .. }
                 | PlannedAction::CollectEvidence
                 | PlannedAction::ExecuteVmMsix { .. }
         ),
@@ -4066,7 +4137,9 @@ fn action_allowed(lifecycle: RunLifecycleKind, action: &PlannedAction) -> bool {
         ),
         RunLifecycleKind::Authoring => !matches!(
             action,
-            PlannedAction::LaunchValidatedProfile { .. } | PlannedAction::ExecuteVmMsix { .. }
+            PlannedAction::LaunchValidatedProfile { .. }
+                | PlannedAction::ExecuteVmMsix { .. }
+                | PlannedAction::ExecuteWindowsSandboxPairedControls { .. }
         ),
     }
 }
