@@ -91,6 +91,25 @@ fn project_row(report: &Value, row: &Value, index: usize) -> Value {
     let is_paired = kind == "windowsSandbox" && evidence["profile"] == "pairedControls";
     let mut stages = vec![];
     let mut gaps = source_gaps(&report["missingEvidence"]);
+    if is_paired {
+        for gap in &mut gaps {
+            let label = match gap.as_str() {
+                "ordinaryBaseline" => "ordinary-user application baseline",
+                "independentHostMeasurements" => "independent host measurements",
+                "filesystemRegistryChanges" => "application filesystem and registry changes",
+                "networkUiIpcObservations" => "network, UI and IPC observations",
+                "persistenceResidue" => "application persistence residue",
+                "descendantCoverage" => "application descendant coverage",
+                "offlineCanary" => "application denial canaries",
+                "effectiveBackendVerification" => "effective application boundary verification",
+                "captureCompleteness" => "full application capture completeness",
+                "targetToken" => "application target token",
+                other => other,
+            };
+            *gap = format!("Beyond fixed controls: {label}");
+        }
+    }
+
     let mut refs = vec![];
     let mut cleanup = Value::Null;
     let mut outcome = "unavailable";
@@ -796,7 +815,7 @@ mod tests {
         ))
         .unwrap();
         let detail = json!({"profile":{"origin":"syntheticRehearsal","sourceSha256":"a".repeat(64),"fixtureSha256":"b".repeat(64)},"recordedOutcome":"insufficientEvidence","recordedCleanupVerified":null,"evidenceStatus":"verified","observations":observation,"comparison":{"eligible":false,"reason":"cleanupUnknown"},"operator":"secret-account@example.invalid","privatePath":"private-path-sentinel","rawArtifact":"credential-sentinel"});
-        let raw = json!({"entries":[{"id":"secret-account@example.invalid","functions":{"install":true,"launch":true},"source":{"kind":"windowsSandbox","evidence":{"profile":"pairedControls","result":{"kind":"pairedControls","report":detail}}}}]});
+        let raw = json!({"missingEvidence":["ordinaryBaseline","descendantCoverage","targetToken"],"entries":[{"id":"secret-account@example.invalid","functions":{"install":true,"launch":true},"source":{"kind":"windowsSandbox","evidence":{"profile":"pairedControls","result":{"kind":"pairedControls","report":detail}}}}]});
         let summary = project(&raw);
         assert_eq!(summary.schema_version, "aiw.dev/results-summary/v0alpha2");
         let row = &summary.rows[0];
@@ -805,6 +824,21 @@ mod tests {
         assert_eq!(row["functions"]["launch"], "unmeasured");
         assert_eq!(row["paired"]["origin"], "syntheticRehearsal");
         assert_eq!(row["paired"]["eligible"], false);
+        assert!(
+            row["evidenceGaps"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|g| g == "Beyond fixed controls: ordinary-user application baseline")
+        );
+        assert!(
+            !row["evidenceGaps"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|g| g == "ordinaryBaseline")
+        );
+
         assert!(row["historicalCleanupVerified"].is_null());
         let cases = row["paired"]["cases"].as_array().unwrap();
         assert_eq!(cases.len(), 6);

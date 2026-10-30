@@ -61,7 +61,7 @@
     text("errorDetail", "");
     text("errorLocation", "Check the current workflow state and retained evidence before retrying.");
     show("errorCard", true);
-    if (newlyVisible) $("errorCard").scrollIntoView({ block: "nearest" });
+    if (newlyVisible) { $("errorCard").scrollIntoView({ block: "nearest" }); $("errorCard").focus?.({ preventScroll: true }); }
   }
 
   function setBusy(busy) {
@@ -230,9 +230,9 @@
     applyControls(snapshot, state.busy);
     if (previousPhase !== snapshot.phase && ![previousPhase, snapshot.phase].some((phase) => ["analyzing", "packaging"].includes(phase))) {
       const target = snapshot.error ? "errorCard" : snapshot.phase === "review" ? "reviewCard" : snapshot.phase === "approved" ? "startBox" : ["running", "exporting"].includes(snapshot.phase) ? "progressCard" : snapshot.result ? "resultCard" : null;
-      if (target) $(target).scrollIntoView({ block: "start" });
+      if (target) { $(target).scrollIntoView({ block: "start" }); $(target).focus?.({ preventScroll: true }); }
     }
-    if (snapshot.closeRefused && !previousCloseRefused) $("closeWarning").scrollIntoView({ block: "start" });
+    if (snapshot.closeRefused && !previousCloseRefused) { $("closeWarning").scrollIntoView({ block: "start" }); $("closeWarning").focus?.({ preventScroll: true }); }
   }
 
   async function poll() {

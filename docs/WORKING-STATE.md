@@ -76,10 +76,17 @@ and 25 Node tests passed. Independent source review found no consequential issue
 See paired-product-workflow.md for exact logs and receipt details. No provider
 process or native trial ran during preparation validation.
 
-NEXT: paired-workflow keyboard/focus preview; final review and applicable final
-validation against final commits; exact diff/PR handoff and one source-pinned
-future native-acceptance proposal. Keep goal active and Benchmark 2/remaining
-W4/W5 open. Native behavior and guest Tools mapping intake remain untrialed.
+The paired UI replay slice is complete, with actual Controller snapshots and
+ResultsStore exports from a coupled synthetic fixture, exact separate gates,
+keyboard focus through completion and Results drill-down. Browser replay has no
+provider backend. 28 Node tests pass. Independent final source review found no
+remaining consequential issue; preview privacy and evidence wording findings were
+fixed. See paired-product-workflow.md for artifact paths and boundaries.
+
+NEXT: final workspace/desktop validation against the code commit, exact diff/PR
+handoff and consolidated source-pinned future native-acceptance proposal. Keep
+Benchmark 2/remaining W4/W5 open. Native behavior and guest Tools mapping intake
+remain untrialed.
 
 Fixture retention is opt-in test-only: `AIW_PAIRED_FIXTURE_RETAIN=1` with the
 `paired_protected_` tests emits `AIW_PAIRED_DEMO_SELECTION=...` for newly created

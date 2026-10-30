@@ -90,16 +90,7 @@ fn prepare() -> (Fixture, PairedRun, ApprovalReview) {
     };
     save_stage(&run.evidence_root, "paired-workflow", &run).unwrap();
     run.validate().unwrap();
-    let plan = fixture.artifacts.run_plan.clone();
-    let review = ApprovalReview {
-        run_id: run.run_id.clone(),
-        workspace: run.workspace.clone(),
-        evidence_root: run.evidence_root.clone(),
-        recipe: serde_json::json!({"origin":"syntheticRehearsal"}),
-        proposed_approval: ApprovalRecord::for_plan(&plan, "synthetic-operator", "synthetic-time")
-            .unwrap(),
-        plan,
-    };
+    let review = paired_review(&run, &fixture.artifacts, "synthetic-operator").unwrap();
     (fixture, run, review)
 }
 fn run(
@@ -143,6 +134,7 @@ fn coupled_declined_stale_and_not_started_gates_never_dispatch() {
 fn coupled_approved_pair_uses_one_dispatch_and_actual_retained_reader() {
     let (f, owned, review) = prepare();
     let gate = Gate::new(true, true);
+    let ui_review = review.clone();
     let result = run(&f, owned.clone(), review, &gate, Scenario::Valid).unwrap();
     assert!(result.approval_recorded && result.start_requested);
     assert!(!result.recovery_required);
@@ -155,6 +147,10 @@ fn coupled_approved_pair_uses_one_dispatch_and_actual_retained_reader() {
     assert!(report.comparison.as_ref().unwrap().eligible);
     assert!(!report.comparison.as_ref().unwrap().production_acceptance);
     assert_eq!(report.recorded_cleanup_verified, Some(true));
+    let readable = summary(&report);
+    assert!(readable.contains("SYNTHETIC"));
+    assert!(readable.contains("access denied (native code 5)"));
+    assert!(!readable.contains("Some("));
     assert_eq!(gate.prepared.get(), 1);
     assert_eq!(gate.reviews.get(), 1);
     assert_eq!(gate.starts.get(), 1);
@@ -196,6 +192,7 @@ fn coupled_approved_pair_uses_one_dispatch_and_actual_retained_reader() {
     save_stage(f.evidence_root(), "paired-assessment-selection", &selection).unwrap();
     let marker = serde_json::json!({"schemaVersion":"aiw.dev/paired-synthetic-demo/v0alpha1","origin":"syntheticRehearsal","realProviderApplicationControlCalls":0,"fakeProviderCalls":calls.len(),"unknownCleanup":false,"coordinator":"actual paired run_prepared_with_gate","approvalReviews":gate.reviews.get(),"separateStartGates":gate.starts.get(),"productionAcceptance":false});
     save_stage(f.evidence_root(), "synthetic-demo", &marker).unwrap();
+    save_stage(f.evidence_root(),"ui-review-source",&serde_json::json!({"schemaVersion":"aiw.dev/paired-ui-review-source/v0alpha1","run":owned,"recipe":ui_review.recipe,"plan":ui_review.plan,"approval":ui_review.proposed_approval})).unwrap();
     println!(
         "AIW_COUPLED_DEMO_SELECTION={}",
         f.evidence_root()

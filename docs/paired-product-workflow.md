@@ -263,3 +263,39 @@ Additional extraction regressions: 13 paired runner tests and the strict-fake
 negative test passed. Admin/runner all-target Clippy passed with warnings denied.
 Logs: `C:/aiw/paired-coupled-runner-regression.log`,
 `C:/aiw/paired-coupled-fake-negative.log`, `C:/aiw/paired-coupled-clippy.log`.
+
+
+## Final UI replay slice
+
+The opt-in `workflow_demo::demonstrate_paired_workflow` test reads only an explicit
+retained synthetic coupled-service fixture. It uses the actual Controller for
+idle, preparation, review, approval, running and completed snapshots and the actual
+ResultsStore for load/export. The review now uses the same production recipe
+builder as native preparation. The replay has no provider backend and writes no
+new approval; browser clicks replay these recorded states only.
+
+Fresh controller/review/export output is under
+`C:/aiw/paired-ui-replay-2e4e835e-c9c9-435d-b042-b64a5eaf229a`.
+The original keyboard proof is under
+`C:/aiw/paired-ui-replay-eb704d10-26ea-40e5-b00d-ff9278f35e84`:
+`separate-start-keyboard.png`, `running-focus.png`, `results-keyboard.png`.
+Each preview carries a persistent SYNTHETIC/UI REPLAY/NO PROVIDER BACKEND banner.
+Controller DTOs contain local review details and are test artifacts, not safe
+summary exports. Only `verified-summary.json` and `.md` use the export allowlist.
+
+Browser keyboard checks verified literal approval does not Start, separate Start,
+progress and terminal focus, entering Results, opening the bounded selection and
+expanding fixed file/registry/child evidence and hash-only references. Actual
+product focus moves on phase/error transitions and preserves steady editing.
+Paired application-wide gaps are labeled beyond fixed controls; fixed-case gaps
+remain independently exposed. Human summaries distinguish denied/missing/errors
+and avoid counting unmeasured fallback records as measurements.
+
+Preview servers bind loopback only, use fixed asset routes, enforce exact Host
+and same-origin requests and set CORP/CSP/no-store headers. They expose no file,
+execution or recovery API. Independent source review found and resolved a preview
+cross-origin privacy gap and an overbroad measured-prefix label; final review found
+no remaining consequential issue. Source review did not execute native behavior.
+28 Node tests pass (`C:/aiw/paired-final-node.log`). The final workspace validation
+and consolidated native-acceptance proposal are recorded separately in the final
+handoff, without upgrading any native acceptance claim.

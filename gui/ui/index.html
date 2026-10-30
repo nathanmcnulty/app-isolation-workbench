@@ -45,7 +45,7 @@
       <strong>Two deliberate gates</strong>
       <span>Prepare creates a reviewable plan. Approval records your exact confirmation. Start is a separate action that begins the Sandbox run.</span>
     </section>
-    <div id="closeWarning" class="close-warning hidden" role="status"><strong>Run in progress</strong><span>The window cannot safely close while the backend owns an active workflow. Keep it open until the retained result or recovery instruction appears.</span></div>
+    <div id="closeWarning" tabindex="-1" class="close-warning hidden" role="status"><strong>Run in progress</strong><span>The window cannot safely close while the backend owns an active workflow. Keep it open until the retained result or recovery instruction appears.</span></div>
 
     <section class="card" aria-labelledby="package-title">
       <div class="card-heading"><div><p class="eyebrow">Package</p><h2 id="package-title">Build a Sandbox package</h2></div><span class="step-mark">No execution</span></div>
@@ -84,7 +84,7 @@
       <button id="prepare" class="primary" type="button">Prepare review</button>
     </section>
 
-    <section id="reviewCard" class="card hidden" aria-labelledby="review-title">
+    <section id="reviewCard" tabindex="-1" class="card hidden" aria-labelledby="review-title">
       <div class="card-heading"><div><p class="eyebrow">Step 2</p><h2 id="review-title">Review the exact plan</h2></div><span class="step-mark">Review</span></div>
       <p class="section-intro">Check what will run and what happens to your data. Full technical details are available below. The Sandbox has not started.</p>
       <div class="review-grid">
@@ -112,10 +112,10 @@
         <label class="field"><span>Typed confirmation</span><input id="confirmation" type="text" spellcheck="false" autocomplete="off" placeholder="approve &lt;plan hash&gt;"></label>
         <button id="approve" class="primary" type="button">Approve plan</button>
       </div>
-      <div id="startBox" class="start-box hidden"><div><span class="eyebrow">Start gate</span><h3>Approval recorded</h3><p>The backend accepted the approval. Start remains a separate explicit action.</p></div><button id="start" class="primary" type="button">Start approved workflow</button></div>
+      <div id="startBox" tabindex="-1" class="start-box hidden"><div><span class="eyebrow">Start gate</span><h3>Approval recorded</h3><p>The backend accepted the approval. Start remains a separate explicit action.</p></div><button id="start" class="primary" type="button">Start approved workflow</button></div>
     </section>
 
-    <section id="progressCard" class="card hidden" aria-labelledby="progress-title">
+    <section id="progressCard" tabindex="-1" class="card hidden" aria-labelledby="progress-title">
       <div class="card-heading"><div><p class="eyebrow">Current run</p><h2 id="progress-title">Workflow status</h2></div><span id="elapsed" class="timer">Elapsed 00:00</span></div>
       <p id="progressSummary" class="progress-summary">Waiting for the backend.</p>
       <p id="editingInstructions" class="notice hidden">When Notepad++ opens inside Sandbox, edit the document, save it, and close Notepad++. Leave Sandbox open so the backend can verify the saved output and complete cleanup.</p>
@@ -126,7 +126,7 @@
       <p id="pairedRecoveryHint" class="helper hidden">Cleanup is unresolved. Recovery uses only this backend-bound retained session and never repeats an assessment. Results remains read-only.</p>
     </section>
 
-    <section id="resultCard" class="card hidden" aria-labelledby="result-title">
+    <section id="resultCard" tabindex="-1" class="card hidden" aria-labelledby="result-title">
       <div class="card-heading"><div><p id="resultEyebrow" class="eyebrow">Retained result</p><h2 id="result-title">Workflow result</h2></div><span id="resultBadge" class="step-mark">Result</span></div>
       <div class="result-grid"><div class="result-fact"><span>Run</span><strong id="resultRun" class="mono">—</strong></div><div class="result-fact"><span>Workspace</span><strong id="resultWorkspace">—</strong></div><div class="result-fact"><span>Evidence root</span><strong id="resultEvidence">—</strong></div></div>
       <p id="resultSummary" class="result-summary"></p>
@@ -139,7 +139,7 @@
       <details><summary id="retained-title">Open a retained report (read-only)</summary><div class="retained-grid"><label class="field"><span>Report kind</span><select id="retainedKind"><option value="assessment">Assessment</option><option value="interactive">Interactive</option><option value="bambu">Bambu Studio export</option><option value="msix">Signed MSIX VM107</option><option value="paired">Fixed paired controls</option></select></label><label class="field"><span>Workspace</span><div class="input-action"><input id="retainedWorkspace" type="text" placeholder="Retained workspace path"><button id="chooseWorkspace" class="secondary" type="button">Choose folder</button></div></label><label class="field"><span>Run ID</span><input id="retainedRunId" type="text" placeholder="Run identifier"></label><button id="loadRetained" class="secondary" type="button">Load report</button><button id="recoverMsix" class="secondary" type="button">Recover VM107 retained lease</button></div><p class="helper">Load report is read-only. Recover VM107 retained lease uses only the original approved VM107 lease to restore and verify the worker; it never repeats application execution.</p></details>
     </section>
 
-    <section id="errorCard" class="error-card hidden" aria-live="assertive"><div><p class="eyebrow">Action needed</p><h2 id="errorSummary">The workflow needs attention</h2><p id="errorRemediation"></p></div><details><summary>Technical details</summary><pre id="errorDetail"></pre></details><p id="errorLocation" class="helper"></p></section>
+    <section id="errorCard" tabindex="-1" class="error-card hidden" aria-live="assertive"><div><p class="eyebrow">Action needed</p><h2 id="errorSummary">The workflow needs attention</h2><p id="errorRemediation"></p></div><details><summary>Technical details</summary><pre id="errorDetail"></pre></details><p id="errorLocation" class="helper"></p></section>
     </div>
     <footer>Local administrator surface · Backend-owned evidence and cleanup</footer>
   </main>

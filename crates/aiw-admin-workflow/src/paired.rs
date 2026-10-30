@@ -176,14 +176,56 @@ pub fn open_retained(workspace: &Path, run_id: &str) -> Result<PairedRun> {
     Ok(run)
 }
 pub fn summary(report: &aiw_runner::PairedControlRunReport) -> String {
+    use aiw_provider_wsb::{ControlAccess as Access, PairedComparisonReason as Reason};
+    let recorded = |value: Option<bool>| match value {
+        Some(true) => "verified in the historical receipt",
+        Some(false) => "not verified in the historical receipt",
+        None => "unmeasured or unresolved",
+    };
+    let access = |value: Access| match value {
+        Access::Success => "completed",
+        Access::AccessDenied => "access denied",
+        Access::NotFound => "resource missing",
+        Access::Timeout => "timed out",
+        Access::Failure => "failed",
+        Access::Unmeasured => "unmeasured",
+    };
+    let origin = match report.profile.origin {
+        aiw_probe::ControlEvidenceOrigin::SyntheticRehearsal => {
+            "SYNTHETIC offline rehearsal; not native acceptance"
+        }
+        aiw_probe::ControlEvidenceOrigin::NativeWorker if report.observations.is_some() => {
+            "historical native fixed-case records"
+        }
+        _ => "native profile requested; no verified complete pair",
+    };
+    let evidence = match report.evidence_status {
+        aiw_runner::PairedReportEvidenceStatus::Verified => "receipt-verified recorded evidence",
+        aiw_runner::PairedReportEvidenceStatus::DriverIncomplete => {
+            "verified incomplete driver progress"
+        }
+        aiw_runner::PairedReportEvidenceStatus::Absent => "no verified case evidence",
+        aiw_runner::PairedReportEvidenceStatus::Rejected => "evidence rejected",
+    };
     let mut text = format!(
-        "Fixed ordinary-user / classic AppContainer controls. Origin: {:?}. Evidence: {:?}.\n\nGeneral compatibility, effective host isolation and production acceptance remain unmeasured. Historical outer cleanup: {:?}.\n",
-        report.profile.origin, report.evidence_status, report.recorded_cleanup_verified
+        "Fixed ordinary-user / classic AppContainer controls. {origin}. Evidence: {evidence}.\n\nGeneral compatibility, effective host isolation and production acceptance remain unmeasured. Historical outer cleanup: {}.\n",
+        recorded(report.recorded_cleanup_verified)
     );
     if let Some(comparison) = &report.comparison {
+        let reason = match comparison.reason {
+            Reason::FixedControlsObserved => "fixed cases observed",
+            Reason::BaselineFailed => "baseline failed",
+            Reason::CandidateFailed => "candidate failed",
+            Reason::DriverIncomplete => "driver incomplete",
+            Reason::CleanupUnknown => "outer cleanup unresolved",
+        };
         text.push_str(&format!(
-            "Fixed-case comparison eligible: {}. Reason: {:?}.\n",
-            comparison.eligible, comparison.reason
+            "Fixed-case comparison: {}; {reason}.\n",
+            if comparison.eligible {
+                "eligible only for these recorded cases"
+            } else {
+                "inconclusive"
+            }
         ));
     }
     if let Some(observed) = &report.observations {
@@ -191,18 +233,27 @@ pub fn summary(report: &aiw_runner::PairedControlRunReport) -> String {
             ("Ordinary-user baseline", &observed.baseline),
             ("AppContainer candidate", &observed.candidate),
         ] {
+            let code = |value: Option<u32>| {
+                value
+                    .map(|c| format!(" (native code {c})"))
+                    .unwrap_or_default()
+            };
             text.push_str(&format!(
-                "{name}: file {:?}, registry {:?}, child {:?}.\n",
-                variant.file.outcome, variant.registry.outcome, variant.child_outcome
+                "{name}: file {}{}, registry {}{}, child {}.\n",
+                access(variant.file.outcome),
+                code(variant.file.native_code),
+                access(variant.registry.outcome),
+                code(variant.registry.native_code),
+                access(variant.child_outcome)
             ));
         }
         text.push_str(&format!(
-            "Inner profile deletion recorded: {:?}. This is separate from outer cleanup.\n",
-            observed.profile_deleted
+            "Inner profile deletion: {}. This is separate from outer cleanup.\n",
+            recorded(observed.profile_deleted)
         ));
     }
     if let Some(failure) = &report.driver_failure {
-        text.push_str(&format!("Driver incomplete; {} measured case records retained. No comparable pair established.\n",failure.progress.len()));
+        text.push_str(&format!("Driver incomplete; {} case progress records retained. No comparable pair established.\n",failure.progress.len()));
     }
     text.push_str("Open an explicit selection in Results for token facts, failures, evidence hashes and safe JSON/Markdown summary export.\n");
     text
@@ -340,18 +391,7 @@ pub fn assess_with_gate(
         agent_sha256: manifest.guest_agent_sha256,
     };
     save_stage(&evidence_root, "paired-workflow", &run)?;
-    let review = ApprovalReview {
-        run_id,
-        workspace,
-        evidence_root,
-        recipe: serde_json::json!({"schemaVersion":"aiw.dev/admin-paired-recipe/v0alpha1","executionIdentity":"Fixed ordinary-user versus classic AppContainer controls inside one offline Windows Sandbox. These are fixed primitives, not an application compatibility assessment.","dataLifetime":"Only the fixed canaries and child token output are used. Original evidence is retained locally. Results summary exports exclude raw tokens, account identifiers and private paths.","limits":"Runtime CLI protocol, Sandbox feature readiness and current session availability are UNMEASURED during preparation. They are required and rechecked only after this exact approval and separate Start. No general compatibility, effective host isolation, network or production acceptance claim. Outer worker cleanup and inner profile/job cleanup are separate.","providerChecks":{"runtime":"requiredAtStartNotObserved","requiredProtocol":prepared.receipt.provider_protocol},"profile":profile,"runPlan":prepared.run_plan}),
-        plan: prepared.run_plan,
-        proposed_approval: ApprovalRecord::for_plan(
-            &run.validate()?.read_plan()?,
-            identity.trim(),
-            now_rfc3339(),
-        )?,
-    };
+    let review = paired_review(&run, &prepared, identity)?;
     let start_workspace = run.workspace.clone();
     let start_project = run.project_path.clone();
     let start_agent = run.agent_sha256.clone();
@@ -366,6 +406,31 @@ pub fn assess_with_gate(
         )
         .map(|_| ())
         .map_err(Into::into)
+    })
+}
+
+fn paired_review(
+    run: &PairedRun,
+    prepared: &aiw_runner::PreparedWsbArtifacts,
+    identity: &str,
+) -> Result<ApprovalReview> {
+    let profile = &prepared
+        .receipt
+        .paired_controls
+        .as_ref()
+        .ok_or_else(|| anyhow!("Fixed control profile missing"))?
+        .profile;
+    Ok(ApprovalReview {
+        run_id: run.run_id.clone(),
+        workspace: run.workspace.clone(),
+        evidence_root: run.evidence_root.clone(),
+        recipe: serde_json::json!({"schemaVersion":"aiw.dev/admin-paired-recipe/v0alpha1","executionIdentity":"Fixed ordinary-user versus classic AppContainer controls inside one offline Windows Sandbox. These are fixed primitives, not an application compatibility assessment.","dataLifetime":"Only the fixed canaries and child token output are used. Original evidence is retained locally. Results summary exports exclude raw tokens, account identifiers and private paths.","limits":"Runtime CLI protocol, Sandbox feature readiness and current session availability are UNMEASURED during preparation. They are required and rechecked only after this exact approval and separate Start. No general compatibility, effective host isolation, network or production acceptance claim. Outer worker cleanup and inner profile/job cleanup are separate.","providerChecks":{"runtime":"requiredAtStartNotObserved","requiredProtocol":prepared.receipt.provider_protocol},"profile":profile,"runPlan":prepared.run_plan}),
+        plan: prepared.run_plan.clone(),
+        proposed_approval: ApprovalRecord::for_plan(
+            &run.validate()?.read_plan()?,
+            identity.trim(),
+            now_rfc3339(),
+        )?,
     })
 }
 

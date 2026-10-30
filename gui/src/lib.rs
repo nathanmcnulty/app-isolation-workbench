@@ -805,3 +805,7 @@ mod tests {
 
 #[cfg(windows)]
 pub mod results;
+
+#[cfg(all(test, windows))]
+#[path = "workflow_demo.rs"]
+mod workflow_demo;

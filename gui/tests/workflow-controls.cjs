@@ -221,3 +221,18 @@ test("paired workflow drops installer inputs, fences stale polling and serialize
   snapshot={phase:"completed",workflowId:"owned-pair",pairedCancelRequested:false,pairedRecoveryRequired:false}; await poll();
   assert.equal(element("cancel").hidden,true); assert.equal(element("recoverPaired").hidden,true);
 });
+
+
+test("phase transitions focus their destination without stealing focus on repeated polls", async () => {
+  const elements=new Map(),intervals=[];let focused=null,snapshot={phase:"idle",workflowId:null},fail=false;
+  const element=id=>{if(!elements.has(id))elements.set(id,{value:"",textContent:"",disabled:false,handlers:{},classList:{toggle(){}},scrollIntoView(){},focus(){focused=id;},addEventListener(event,handler){this.handlers[event]=handler;}});return elements.get(id);};
+  const context={document:{getElementById:element,querySelector:()=>({value:"paired"}),querySelectorAll:()=>[]},window:{AiwDisplay:display,__TAURI__:{core:{invoke:async()=>{if(fail)throw new Error("synthetic failure");return snapshot;}}}},setInterval:callback=>intervals.push(callback)};
+  vm.runInNewContext(fs.readFileSync(require.resolve("../ui/app.js"),"utf8"),context);await new Promise(setImmediate);
+  const poll=intervals.find(callback=>callback.name==="poll");
+  snapshot={phase:"review",workflowId:"owned",review:{challengeId:"exact",recipeJson:"{}",planJson:"{}",approvalJson:"{}",exactConfirmation:"approve exact"}};
+  await poll();assert.equal(focused,"reviewCard");focused="confirmation";await poll();assert.equal(focused,"confirmation");
+  snapshot={...snapshot,phase:"approved",startChallengeId:"start"};await poll();assert.equal(focused,"startBox");
+  snapshot={...snapshot,phase:"running"};await poll();assert.equal(focused,"progressCard");
+  snapshot={phase:"completed",workflowId:"owned",result:{outcome:"incomplete",canExportDocument:false}};await poll();assert.equal(focused,"resultCard");
+  fail=true;await poll();assert.equal(focused,"errorCard");
+});
