@@ -2133,6 +2133,36 @@ impl RunLayout {
         })
     }
 
+    /// Reads retained plan/approval/status without locks, repair or file creation.
+    /// A concurrent lifecycle change rejects the snapshot rather than mixing eras.
+    pub fn retained_snapshot(&self) -> Result<RetainedRunSnapshot, AiwError> {
+        let status = self.status()?;
+        let plan = self.read_plan_locked()?;
+        let records = self.load_records(false)?;
+        self.verify_committed(&records)?;
+        let approval = if records
+            .iter()
+            .any(|record| record.event.kind == RunEventKind::ApprovalRecorded)
+        {
+            Some(self.read_approval_locked()?)
+        } else {
+            None
+        };
+        if self.status()? != status {
+            return Err(run_error(
+                "AIW_RUN_SNAPSHOT_CONFLICT",
+                "run lifecycle changed while reading retained evidence",
+                "snapshot",
+                &self.run_id,
+            ));
+        }
+        Ok(RetainedRunSnapshot {
+            plan,
+            approval,
+            status,
+        })
+    }
+
     /// Reads a terminal run without taking a lock, repairing a journal, or
     /// creating any missing storage.  The status is observed both before and
     /// after the artifact reads so a concurrent lifecycle change is reported
@@ -3669,6 +3699,14 @@ pub enum RecoveryStatus {
         result: RunResult,
         last_sequence: u64,
     },
+}
+
+/// Read-only retained state; an unsettled lifecycle makes cleanup unknown.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RetainedRunSnapshot {
+    pub plan: RunPlan,
+    pub approval: Option<ApprovalRecord>,
+    pub status: RecoveryStatus,
 }
 
 /// The immutable lifecycle artifacts for a run whose terminal journal commit
@@ -6297,6 +6335,68 @@ mod tests {
                 ..
             }
         ));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn retained_snapshot_requires_committed_approval_and_never_repairs_intents() {
+        let root = root();
+        let missing = layout(&root, "missing");
+        assert!(missing.retained_snapshot().is_err());
+        assert!(!root.join("runs").exists());
+        let pending = layout(&root, "run-one");
+        let pending_plan = plan("run-one");
+        pending.create(&pending_plan).unwrap();
+        let approval = ApprovalRecord::for_plan(&pending_plan, "admin", "now").unwrap();
+        {
+            let _lock = pending.acquire_lock("test").unwrap();
+            let hash = hash_value(&approval).unwrap();
+            pending
+                .append_record(
+                    artifact_event(RunEventKind::ApprovalIntent, "now", "intent", &hash).unwrap(),
+                )
+                .unwrap();
+            fs::write(
+                pending.approval_path(),
+                serde_json::to_vec(&approval).unwrap(),
+            )
+            .unwrap();
+        }
+        let before = tree_snapshot(&root, &root);
+        let snapshot = pending.retained_snapshot().unwrap();
+        assert!(snapshot.approval.is_none());
+        assert!(matches!(
+            snapshot.status,
+            RecoveryStatus::RecoveryRequired {
+                pending_event: RunEventKind::ApprovalIntent,
+                ..
+            }
+        ));
+        assert_eq!(tree_snapshot(&root, &root), before);
+        let approved = layout(&root, "run-two");
+        let approved_plan = plan("run-two");
+        approved.create(&approved_plan).unwrap();
+        approve(&approved, &approved_plan);
+        {
+            let _lock = approved.acquire_lock("test").unwrap();
+            let hash = hash_value(&success("run-two")).unwrap();
+            approved
+                .append_record(
+                    artifact_event(RunEventKind::TerminalIntent, "now", "intent", &hash).unwrap(),
+                )
+                .unwrap();
+        }
+        let before = tree_snapshot(&root, &root);
+        let snapshot = approved.retained_snapshot().unwrap();
+        assert!(snapshot.approval.is_some());
+        assert!(matches!(
+            snapshot.status,
+            RecoveryStatus::RecoveryRequired {
+                pending_event: RunEventKind::TerminalIntent,
+                ..
+            }
+        ));
+        assert_eq!(tree_snapshot(&root, &root), before);
         fs::remove_dir_all(root).unwrap();
     }
 

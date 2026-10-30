@@ -17,6 +17,7 @@ pub const WSB_REPORT_SET_SCHEMA: &str = "aiw.dev/wsb-report-set/v0alpha1";
 pub enum ReportSetProfile {
     NotepadMsi,
     BambuExport,
+    PairedControls,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -69,6 +70,7 @@ pub struct WsbReportSetRow {
 pub enum WsbReportSetResult {
     NotepadMsi(WsbMsiReportSetResult),
     BambuExport(Box<WsbBambuRunReport>),
+    PairedControls(Box<crate::PairedControlRunReport>),
     Unavailable(ReportSetUnavailableReason),
 }
 
@@ -95,6 +97,7 @@ impl WsbReportSetResult {
                 | WsbMsiReportSetResult::UnsuccessfulAttempt(s),
             ) => Some((&s.run_id, &s.request_sha256)),
             Self::BambuExport(s) => Some((&s.run_id, &s.request_sha256)),
+            Self::PairedControls(s) => Some((&s.run_id, &s.request_sha256)),
             _ => None,
         }
     }
@@ -158,6 +161,22 @@ pub fn report_windows_sandbox_set(input: &WsbReportSetInput) -> Result<WsbReport
                     report => WsbReportSetResult::NotepadMsi(report),
                 }
             }
+            ReportSetProfile::PairedControls => {
+                match crate::report_set::read_report_project(&run.project_path).and_then(
+                    |project| {
+                        crate::report_windows_sandbox_paired_controls(
+                            &run.workspace_root,
+                            &run.run_id,
+                            &project,
+                            &run.guest_agent_sha256,
+                        )
+                        .map_err(|_| ReportSetUnavailableReason::EvidenceRejected)
+                    },
+                ) {
+                    Ok(report) => WsbReportSetResult::PairedControls(Box::new(report)),
+                    Err(reason) => WsbReportSetResult::Unavailable(reason),
+                }
+            }
             ReportSetProfile::BambuExport => {
                 let read =
                     crate::report_set::read_report_project(&run.project_path).and_then(|project| {
@@ -213,7 +232,7 @@ fn cell(value: &str) -> String {
 impl WsbReportSet {
     /// Rendering is not verification. Construct a verified set through the retained reader first.
     pub fn to_markdown(&self) -> String {
-        let mut out = "# Retained application workflow results\n\nEach run is independently reverified. These are fixed workflow observations inside Windows Sandbox, not general compatibility or application-level isolation verdicts. Baseline/candidate comparison remains unmeasured. Cleanup is a historical record. Null or unavailable evidence never means a function passed.\n\n| Entry | Application | Result | Install | Launch | Open document | Edit/save | Close | STL to 3MF |\n|---|---|---|---|---|---|---|---|---|\n".to_owned();
+        let mut out = "# Retained application workflow results\n\nEach run is independently reverified. These are fixed workflow observations inside Windows Sandbox, not general compatibility or application-level isolation verdicts. Fixed paired controls apply only to their recorded cases. Application comparisons remain unmeasured. Cleanup is a historical record. Null or unavailable evidence never means a function passed.\n\n| Entry | Application | Result | Install | Launch | Open document | Edit/save | Close | STL to 3MF |\n|---|---|---|---|---|---|---|---|---|\n".to_owned();
         for row in &self.entries {
             let (app, status) = match &row.result {
                 WsbReportSetResult::NotepadMsi(WsbMsiReportSetResult::CompletedScenario(s)) => {
@@ -222,6 +241,18 @@ impl WsbReportSet {
                 WsbReportSetResult::NotepadMsi(WsbMsiReportSetResult::UnsuccessfulAttempt(s)) => {
                     (s.application_name.as_str(), "Unsuccessful".to_owned())
                 }
+                WsbReportSetResult::PairedControls(s) => (
+                    "Fixed AIW controls",
+                    format!(
+                        "Paired fixed controls; evidence {:?}; comparison {}",
+                        s.evidence_status,
+                        if s.comparison.as_ref().is_some_and(|c| c.eligible) {
+                            "eligible for recorded fixed cases"
+                        } else {
+                            "inconclusive"
+                        }
+                    ),
+                ),
                 WsbReportSetResult::BambuExport(s) => (
                     "Bambu Studio",
                     if row.functions.stl_to_3mf_export == Some(true) {
@@ -305,6 +336,52 @@ mod tests {
                 },
             }],
         }
+    }
+
+    #[test]
+    fn paired_control_profiles_never_populate_application_function_results() {
+        let profile=aiw_probe::PairedControlProfile {
+            revision:aiw_probe::PAIRED_CONTROL_REVISION.into(),source_sha256:aiw_probe::paired_controls::paired_control_source_sha256(),fixture_sha256:"a".repeat(64),fixture_size_bytes:1,launcher_sha256:"a".repeat(64),launcher_size_bytes:1,
+            origin:aiw_probe::ControlEvidenceOrigin::SyntheticRehearsal,expected_windows:aiw_probe::WindowsVersionObservation{major:10,minor:0,build:26100,revision:0,observer_architecture:"x86_64".into()},policy:aiw_probe::paired_controls::PairedControlPolicy::ClassicAppContainerNoCapabilitiesFixedChildOutputGrant,
+        };
+        let request = aiw_provider_wsb::PairedControlsRequest::new(
+            "synthetic-report-set",
+            "00000000-0000-4000-8000-000000000001",
+            &"b".repeat(64),
+            &"a".repeat(64),
+            profile,
+        )
+        .unwrap();
+        let report = crate::paired_report::read_paired_output(
+            std::path::Path::new("unused-no-file-access"),
+            &request,
+            None,
+            None,
+            false,
+            "synthetic-revision",
+        )
+        .unwrap();
+        assert_eq!(
+            report.evidence_status,
+            crate::PairedReportEvidenceStatus::Absent
+        );
+        assert!(report.comparison.is_none());
+        let result = WsbReportSetResult::PairedControls(Box::new(report));
+        let functions = serde_json::to_value(result.functions()).unwrap();
+        assert!(
+            functions
+                .as_object()
+                .unwrap()
+                .values()
+                .all(serde_json::Value::is_null)
+        );
+        assert_eq!(
+            result.identity(),
+            Some(("synthetic-report-set", request.request_sha256.as_str()))
+        );
+        let parsed: ReportSetProfile = serde_json::from_str("\"pairedControls\"").unwrap();
+        assert!(matches!(parsed, ReportSetProfile::PairedControls));
+        assert!(serde_json::from_str::<ReportSetProfile>("\"historicalResearchControl\"").is_err());
     }
 
     #[test]

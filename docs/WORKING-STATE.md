@@ -30,14 +30,29 @@ resolved path/role alias and partial-evidence/provenance findings. Keep the
 native limitation explicit: held source inspection of Sandbox Tools mappings
 requires separately authorized disposable-worker validation.
 
+The retained paired reader and shared report-set profile are implemented. Results
+now shows paired native outcomes, token/descendant facts, fixed bindings, gaps
+and separate cleanup, with filters and safe JSON/Markdown summary v0alpha2.
+Read-only snapshots require committed approval; pending approval files confer no
+authority. Current-source Start validation remains distinct from historical reads.
+Protected synthetic fixture tests exercise the actual kernel, held-workspace
+reader and shared report set, including duplicates and unknown cleanup: reads
+preserve fixture bytes and make no provider calls. Source review findings about
+pending approval and absent/rejected native-observation labels were fixed.
+
 Next: admin/desktop preparation, immutable review, separate approval/Start,
-progress and backend-owned running cancellation/recovery; historical read-only
-paired reporter and shared assessment selection; Results paired details and safe
-exports; full actual-service offline product rehearsal with stale UI responses
-and unknown cleanup; final independent review and applicable validation against
-final commits; exact demonstration/diff and a consolidated source-pinned future
-native-acceptance proposal. The current backend checkpoint is not the full usable
-product slice. Keep Benchmark 2 and remaining W4/W5 open.
+progress and backend-owned running cancellation/exact recovery. Complete the
+full actual-service offline product rehearsal and real keyboard/focus feature
+preview; then final independent review and applicable final validation against
+final commits, exact demonstration/diff, draft PR and one source-pinned future
+native-acceptance proposal. Backend/Results work is not the full usable paired
+product slice. Keep the goal active and Benchmark 2/remaining W4/W5 open.
+
+Fixture retention is opt-in test-only: `AIW_PAIRED_FIXTURE_RETAIN=1` with the
+`paired_protected_` tests emits `AIW_PAIRED_DEMO_SELECTION=...` for newly created
+synthetic selections. It accepts no executable/intake path, never loads arbitrary
+production workspaces, and makes zero real provider/application/control calls.
+No demo fixture has yet been retained or previewed for this paired goal.
 
 No live VM/Sandbox/AppContainer/application/control calls, authentication, host
 security changes/grants, dependency installation, signing, push, publication,

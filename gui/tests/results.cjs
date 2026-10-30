@@ -66,3 +66,34 @@ test('Results assets are valid UTF-8 and hostile control text stays inert',()=>{
   for(const name of ['../ui/index.html','../ui/results.js'])decoder.decode(fs.readFileSync(require.resolve(name)));
   assert.equal(api.clean('safe\u202e\u0000text'),'safe  text');
 });
+
+test('Paired filters preserve denied, missing, timeout and unknown cleanup distinctions',()=>{
+  const app={application:'Notepad++',outcome:'failed',functions:{install:'unmeasured'}};
+  const fixed={application:'Fixed AIW controls',outcome:'insufficientEvidence',functions:{install:'unmeasured'},paired:{eligible:false,origin:'syntheticRehearsal',cases:[{case:'file',variant:'candidate',outcome:'accessDenied'},{case:'registry',variant:'baseline',outcome:'notFound'},{case:'child',variant:'candidate',outcome:'timeout'}]},historicalCleanupVerified:null};
+  assert.deepEqual(api.filterRows([app,fixed],{comparison:'inconclusive'}),[fixed]);
+  assert.equal(api.filterRows([app,fixed],{comparison:'eligible'}).length,0);
+  assert.deepEqual(api.filterRows([app,fixed],{control:'registry',controlOutcome:'notFound'}),[fixed]);
+  assert.equal(api.filterRows([app,fixed],{control:'registry',controlOutcome:'accessDenied'}).length,0);
+  assert.equal(api.filterRows([fixed],{function:'install',status:'passed'}).length,0);
+  assert.equal(fixed.historicalCleanupVerified,null);
+});
+
+test('Paired drill-down remains inert and exposes token facts without executing a run',async()=>{
+  const d=dom(),calls=[];
+  const row={selection:1,application:'Fixed AIW controls',workflow:'Ordinary user / classic AppContainer',outcome:'failed',functions:{install:'unmeasured'},stages:[],failureEvidence:'driverIncomplete',evidenceReferences:[],evidenceGaps:[],historicalCleanupVerified:null,paired:{origin:'syntheticRehearsal',eligible:false,reason:'baselineFailed',cases:[{variant:'baseline',case:'file',outcome:'notFound',nativeCode:2,process:{heldTokenObserved:true,selfTokenObserved:false,integrity:'medium',appContainer:false,noCapabilities:true,jobEmpty:null}},{variant:'candidate',case:'child',outcome:'timeout',process:{timedOut:true},descendantTokenObserved:false}]}};
+  const window={document:d.document,__TAURI__:{core:{invoke:async(name)=>{calls.push(name);return {token:'paired-synthetic',summary:{rows:[row]}};}}}};
+  vm.runInNewContext(fs.readFileSync(require.resolve('../ui/results.js'),'utf8'),{window});
+  await d.get('openResults').handlers.click();assert.equal(d.focused(),d.get('openResults'));
+  const walk=n=>[n.textContent||'',...n.children.flatMap(walk)].join(' ');
+  const text=walk(d.get('resultsRows'));assert.match(text,/SYNTHETIC offline example/);assert.match(text,/Resource missing.*native error 2/);assert.match(text,/Timed out/);assert.match(text,/Held token observed: yes/);assert.match(text,/Outer worker cleanup is listed separately/);
+  d.get('resultsControlOutcome').value='accessDenied';d.get('resultsControlOutcome').handlers.change();assert.match(d.get('resultsCount').textContent,/0 of 1/);
+  assert.deepEqual(calls,['open_results']);
+});
+
+test('An unstarted native-worker profile is never labeled as native observations',async()=>{
+  const d=dom();const row={selection:1,application:'Fixed AIW controls',workflow:'profile only',outcome:'partial',functions:{},stages:[],failureEvidence:'absent',evidenceReferences:[],evidenceGaps:[],historicalCleanupVerified:null,paired:{origin:'nativeWorker',evidenceStatus:'absent',observationsVerified:false,eligible:false,reason:'unmeasured',cases:[]}};
+  const window={document:d.document,__TAURI__:{core:{invoke:async()=>({token:'unstarted',summary:{rows:[row]}})}}};
+  vm.runInNewContext(fs.readFileSync(require.resolve('../ui/results.js'),'utf8'),{window});await d.get('openResults').handlers.click();
+  const walk=n=>[n.textContent||'',...n.children.flatMap(walk)].join(' ');const text=walk(d.get('resultsRows'));
+  assert.match(text,/Native-worker profile; no verified fixed-control observations/);assert.doesNotMatch(text,/Verified native fixed-control observations/);
+});

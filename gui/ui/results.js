@@ -2,6 +2,8 @@
   "use strict";
   const clean = value => String(value == null ? "" : value).replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, " ").slice(0, 4096);
   const label = value => ({
+    fixtureUnchanged: "Fixture executable bytes unchanged", launcherUnchanged: "Launcher bytes unchanged", fileUnchanged: "Fixed file bytes unchanged", fileAclUnchanged: "Fixed file permissions unchanged", registryValueUnchanged: "Fixed registry bytes unchanged", registryAclUnchanged: "Fixed registry permissions unchanged",
+    success: "Read / child completed", accessDenied: "Access denied", notFound: "Resource missing", timeout: "Timed out", failure: "Failed", baseline: "Ordinary-user baseline", candidate: "AppContainer candidate", file: "File read", registry: "Registry read (64-bit)", child: "Child process", driverIncomplete: "Driver incomplete", fixedControlsObserved: "Recorded fixed controls observed", baselineFailed: "Baseline failed", candidateFailed: "Candidate failed", cleanupUnknown: "Comparison cleanup / completion unestablished",
     insufficientEvidence: "Insufficient evidence", notReached: "Not reached", unmeasured: "Unmeasured", passed: "Passed", failed: "Failed", cancelled: "Cancelled", partial: "Partial", unavailable: "Unavailable",
     install: "Install", launch: "Launch", openDocument: "Open document", editSaveDocument: "Edit / save document", close: "Close", uninstall: "Uninstall", stlTo3mfExport: "STL to 3MF export",
     beforeInstallCapture: "Capture before installation", afterInstallCapture: "Capture after installation", prepareDocument: "Prepare document", afterExerciseCapture: "Capture after use", prepareFixture: "Prepare fixture", export: "Export", collectArtifact: "Collect artifact",
@@ -11,6 +13,8 @@
   function filterRows(rows, filters) {
     return rows.filter(row => (!filters.application || row.application === filters.application) &&
       (!filters.outcome || row.outcome === filters.outcome) &&
+      (!filters.comparison || (row.paired && (filters.comparison === "eligible" ? row.paired.eligible === true : filters.comparison === "inconclusive" && row.paired.eligible !== true))) &&
+      ((!filters.control && !filters.controlOutcome) || row.paired?.cases?.some(item => (!filters.control || item.case === filters.control) && (!filters.controlOutcome || item.outcome === filters.controlOutcome))) &&
       (!filters.function || (filters.status ? row.functions[filters.function] === filters.status : row.functions[filters.function] !== "unmeasured")) &&
       (filters.function || !filters.status || Object.values(row.functions).includes(filters.status)));
   }
@@ -50,7 +54,7 @@
   const node = (tag, content) => { const n = root.document.createElement(tag); if (content != null) n.textContent = clean(content); return n; };
   function render() {
     const rows = loaded ? loaded.summary.rows : [];
-    const filtered = filterRows(rows, { application: $("resultsApplication").value, outcome: $("resultsOutcome").value, function: $("resultsFunction").value, status: $("resultsFunctionStatus").value });
+    const filtered = filterRows(rows, { application: $("resultsApplication").value, outcome: $("resultsOutcome").value, function: $("resultsFunction").value, status: $("resultsFunctionStatus").value, comparison: $("resultsComparison").value, control: $("resultsControl").value, controlOutcome: $("resultsControlOutcome").value });
     $("resultsRows").replaceChildren();
     $("resultsCount").textContent = `${filtered.length} of ${rows.length} selections shown.`;
     if (!filtered.length) { const tr = node("tr"), td = node("td", rows.length ? "No results match these filters." : "No retained selections loaded."); td.colSpan = 6; tr.append(td); $("resultsRows").append(tr); }
@@ -59,6 +63,25 @@
       details.append(summary);
       details.append(node("p", "Failure evidence: " + row.failureEvidence));
       if (row.unavailableReason) details.append(node("p", "Unavailable: " + label(row.unavailableReason)));
+      if (row.paired) {
+        const paired = row.paired, tri = value => value === true ? "yes" : value === false ? "no" : "unmeasured";
+        details.append(node("p", paired.origin === "syntheticRehearsal" ? "SYNTHETIC offline example — cannot satisfy production acceptance." : paired.observationsVerified && paired.origin === "nativeWorker" ? "Verified native fixed-control observations; general compatibility and isolation remain unmeasured." : (paired.origin === "nativeWorker" ? "Native-worker profile" : "Fixed-control profile") + "; no verified fixed-control observations (" + label(paired.evidenceStatus) + ")."));
+        details.append(node("p", "Fixed-case comparison: " + (paired.eligible ? "eligible for these recorded cases only" : "inconclusive") + "; " + label(paired.reason)));
+        details.append(node("p", "Absent case evidence is unmeasured; it does not establish denial or that a stage was not reached."));
+        details.append(node("p", "Driver complete: " + tri(paired.driverComplete) + "; inner profile deletion recorded: " + tri(paired.innerProfileDeleted) + ". These are historical inner-control observations."));
+        for (const [name, value] of Object.entries(paired.recordedBindings || {})) details.append(node("p", label(name) + ": " + tri(value)));
+        const controls = node("ul");
+        for (const item of paired.cases || []) {
+          const entry = node("li", label(item.variant) + " / " + label(item.case) + ": " + label(item.outcome) + (item.nativeCode == null ? "" : " (native error " + item.nativeCode + ")"));
+          const process = item.process || {};
+          entry.append(node("p", "Held token observed: " + tri(process.heldTokenObserved) + "; self token observed: " + tri(process.selfTokenObserved) + "; integrity: " + label(process.integrity) + "; AppContainer: " + tri(process.appContainer) + "; elevated: " + tri(process.elevated) + "; no capabilities: " + tri(process.noCapabilities)));
+          entry.append(node("p", "Timed out: " + tri(process.timedOut) + "; inner job empty: " + tri(process.jobEmpty) + ". Outer worker cleanup is listed separately."));
+          if (item.case === "child") entry.append(node("p", "Descendant token observed: " + tri(item.descendantTokenObserved) + "; integrity: " + label(item.descendantIntegrity) + "; AppContainer: " + tri(item.descendantAppContainer)));
+          if (item.sha256) entry.append(node("p", "Fixed read bytes SHA-256: " + item.sha256));
+          controls.append(entry);
+        }
+        details.append(controls);
+      }
       details.append(node("p", "Stage progress (separate from function results)"));
       const stages = node("ul");
       for (const stage of row.stages) stages.append(node("li", label(stage.stage) + ": " + label(stage.status)));
@@ -91,7 +114,7 @@
   $("openResults").addEventListener("click", async () => { await controls.open(); $("openResults").focus(); });
   $("exportResultsJson").addEventListener("click", async () => { await controls.export("json"); $("exportResultsJson").focus(); });
   $("exportResultsMarkdown").addEventListener("click", async () => { await controls.export("markdown"); $("exportResultsMarkdown").focus(); });
-  for (const id of ["resultsApplication", "resultsOutcome", "resultsFunction", "resultsFunctionStatus"]) $(id).addEventListener("change", render);
+  for (const id of ["resultsApplication", "resultsOutcome", "resultsFunction", "resultsFunctionStatus", "resultsComparison", "resultsControl", "resultsControlOutcome"]) $(id).addEventListener("change", render);
   function view(results) {
     $("resultsPanel").classList.toggle("hidden", !results); $("workflowPanel").classList.toggle("hidden", results);
     $("resultsView").setAttribute("aria-pressed", String(results)); $("workflowView").setAttribute("aria-pressed", String(!results));

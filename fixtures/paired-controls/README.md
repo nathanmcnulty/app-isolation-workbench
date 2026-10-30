@@ -31,5 +31,16 @@ cargo test -p aiw-guest-agent --locked --offline paired_
 
 The native adapter is source-reviewed and compiled, but no native paired trial
 has been run. In particular, held source inspection of Sandbox Tools mappings
-requires future disposable-worker validation. The admin/desktop/report integration
-and full offline product demonstration remain unfinished at this checkpoint.
+requires future disposable-worker validation. The retained paired reader and Results projection/export are implemented. The
+admin/desktop preparation/execution controls and full offline product demonstration
+remain unfinished at this checkpoint.
+
+The test-only protected fixture rehearsal also uses real protected temporary
+workspace/role file identities and the production retained reader/report-set
+service. Provider enrollment/readiness, guest tokens, resources and observations
+remain synthetic; the inert executable files are never launched. A separate
+unknown-cleanup case verifies that viewing neither recovers nor promotes the run.
+Optional `AIW_PAIRED_FIXTURE_RETAIN=1` preserves only newly created fixture roots
+and emits their explicit selection manifest paths for subsequent read-only demo.
+Results summary v0alpha2 exports closed outcomes/flags/hashes only; raw records,
+SIDs, process IDs, account identifiers and private paths remain excluded.

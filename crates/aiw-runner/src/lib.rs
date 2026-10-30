@@ -9,6 +9,10 @@
 //! exact-ID `connect`, and exact-ID `stop` argument arrays. It has no shell, elevation, command,
 //! script, URL, or arbitrary policy API.
 
+mod paired_report;
+#[cfg(windows)]
+pub use paired_report::report_windows_sandbox_paired_controls;
+pub use paired_report::{PairedControlRunReport, PairedReportEvidenceStatus};
 mod bambu_report;
 mod launch_profile;
 mod packaging_recipe;

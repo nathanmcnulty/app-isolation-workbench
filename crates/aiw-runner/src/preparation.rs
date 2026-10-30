@@ -6,7 +6,7 @@
 //! or recover a Windows Sandbox provider lease.
 
 use std::path::Path;
-mod paired;
+pub(crate) mod paired;
 #[cfg(windows)]
 pub use paired::prepare_windows_sandbox_paired_controls;
 pub use paired::{WsbPairedControls, build_wsb_paired_controls_preparation};
@@ -374,6 +374,12 @@ impl WsbPreparationReceipt {
         Ok(())
     }
     pub fn validate(&self) -> Result<(), WsbPreparationError> {
+        self.validate_for_read(false)
+    }
+    pub(crate) fn validate_historical(&self) -> Result<(), WsbPreparationError> {
+        self.validate_for_read(true)
+    }
+    fn validate_for_read(&self, historical: bool) -> Result<(), WsbPreparationError> {
         if let Some(os) = &self.host_os_version {
             os.validate().map_err(WsbPreparationError::Contract)?;
         }
@@ -487,7 +493,11 @@ impl WsbPreparationReceipt {
             }
         }
         if let Some(controls) = &self.paired_controls {
-            controls.validate(&self.workspace, &self.guest_agent)?;
+            if historical {
+                controls.validate_historical(&self.workspace, &self.guest_agent)?;
+            } else {
+                controls.validate(&self.workspace, &self.guest_agent)?;
+            }
             if self.host_os_version.as_ref() != Some(&controls.profile.expected_windows) {
                 return Err(WsbPreparationError::Contract(
                     "Paired environment provenance differs".into(),
@@ -510,7 +520,17 @@ pub struct PreparedWsbArtifacts {
 
 impl PreparedWsbArtifacts {
     pub fn validate(&self) -> Result<(), WsbPreparationError> {
-        self.receipt.validate()?;
+        self.validate_for_read(false)
+    }
+    pub(crate) fn validate_historical(&self) -> Result<(), WsbPreparationError> {
+        self.validate_for_read(true)
+    }
+    fn validate_for_read(&self, historical: bool) -> Result<(), WsbPreparationError> {
+        if historical {
+            self.receipt.validate_historical()?;
+        } else {
+            self.receipt.validate()?;
+        }
         let mut profile_plan = self.wsb_plan.clone();
         if self.receipt.msi.is_some()
             || self.receipt.bambu.is_some()
@@ -2687,7 +2707,7 @@ fn require_non_reparse_file(path: &Path) -> Result<(), WsbPreparationError> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use aiw_probe::{
         WINDOWS_SYSTEM_SID, WINDOWS_WORKSPACE_SCHEMA_VERSION, WINDOWS_WORKSPACE_SECURITY_POLICY,
@@ -2793,6 +2813,113 @@ mod tests {
         }
     }
 
+    /// Test-only, inert bytes and synthetic readiness. No executable/provider
+    /// is run; only fresh protected fixture files and normal journal services.
+    #[cfg(windows)]
+    pub(crate) fn protected_paired_fixture(
+        parent: &Path,
+        run_id: &str,
+    ) -> (
+        aiw_windows_platform::HeldRunWorkspace,
+        Project,
+        PreparedWsbArtifacts,
+        WindowsSandboxReadiness,
+    ) {
+        use std::io::Write;
+        let held = aiw_windows_platform::HeldRunWorkspace::create(parent, run_id).unwrap();
+        let mut ready = readiness();
+        let provider_path = parent.join("wsb.exe");
+        std::fs::write(&provider_path, b"synthetic-inert-provider-never-executed").unwrap();
+        let provider = aiw_windows_platform::HeldApplicationFile::open(&provider_path).unwrap();
+        ready.provider_binary.as_mut().unwrap().canonical_path =
+            provider_path.to_string_lossy().into_owned();
+        ready.provider_binary.as_mut().unwrap().sha256 = provider.observation().sha256.clone();
+        ready.provider_binary.as_mut().unwrap().size_bytes = provider.observation().size_bytes;
+        ready.provider_file_identity = Some(provider.observation().identity.clone());
+        ready.provider_file_identity.as_mut().unwrap().final_path =
+            provider_path.to_string_lossy().into_owned();
+        // Fake provider authority retains the kernel's 64-bit identity schema;
+        // this is not native Store enrollment. Workspace/role IDs below are real
+        // protected fixture identities. No provider is ever invoked.
+        ready
+            .provider_file_identity
+            .as_mut()
+            .unwrap()
+            .volume_serial_number = "00000000".into();
+        ready.provider_file_identity.as_mut().unwrap().file_id = "0000000000000000".into();
+
+        let package = ready.provider_package.as_mut().unwrap();
+        package.family_name = "MicrosoftWindows.WindowsSandbox_cw5n1h2txyewy".into();
+        package.publisher_id = "cw5n1h2txyewy".into();
+        package.version = PINNED_CLI_VERSION.into();
+        ready.catalog_trust.as_mut().unwrap().trust_policy =
+            "cacheOnlyWholeChainExcludeRoot".into();
+
+        let windows = aiw_probe::WindowsVersionObservation {
+            major: 10,
+            minor: 0,
+            build: 26100,
+            revision: 0,
+            observer_architecture: "x86_64".into(),
+        };
+        ready.os_version = Some(windows.clone());
+        let mut roles = Vec::new();
+        for leaf in [
+            GUEST_AGENT_FILE,
+            paired::CONTROL_FIXTURE_FILE,
+            paired::CONTROL_LAUNCHER_FILE,
+        ] {
+            let mut file = held.create_tools_file_new(leaf).unwrap().into_file();
+            file.write_all(b"synthetic-inert-agent-never-executed")
+                .unwrap();
+            file.sync_all().unwrap();
+            drop(file);
+            let bound = held.reopen_tools_file_readonly(leaf).unwrap();
+            let input =
+                aiw_windows_platform::HeldApplicationFile::open(bound.final_path()).unwrap();
+            roles.push(WsbMsiDocument {
+                staged_payload: BinaryIdentity {
+                    canonical_path: provider_path_text(bound.final_path()),
+                    sha256: input.observation().sha256.clone(),
+                    size_bytes: input.observation().size_bytes,
+                    version: None,
+                    signature_status: ReadinessState::Unknown,
+                },
+                staged_identity: bound.identity().clone(),
+            });
+        }
+        let agent = roles.remove(0).staged_payload;
+        let fixture = roles.remove(0);
+        let launcher = roles.remove(0);
+        let profile=aiw_probe::PairedControlProfile {revision:aiw_probe::PAIRED_CONTROL_REVISION.into(),source_sha256:aiw_probe::paired_controls::paired_control_source_sha256(),fixture_sha256:agent.sha256.clone(),fixture_size_bytes:agent.size_bytes,launcher_sha256:agent.sha256.clone(),launcher_size_bytes:agent.size_bytes,origin:aiw_probe::ControlEvidenceOrigin::SyntheticRehearsal,expected_windows:windows,policy:aiw_probe::paired_controls::PairedControlPolicy::ClassicAppContainerNoCapabilitiesFixedChildOutputGrant};
+        let project = project();
+        let base = build_wsb_preparation(
+            run_id,
+            &project,
+            &ready,
+            held.evidence(),
+            &agent,
+            "synthetic-time",
+        )
+        .unwrap();
+        let artifacts = build_wsb_paired_controls_preparation(
+            base,
+            WsbPairedControls {
+                profile,
+                fixture,
+                launcher,
+            },
+        )
+        .unwrap();
+        let staged = stage_bundle(&held, &artifacts).unwrap();
+        complete_bundle(&held, &artifacts, staged).unwrap();
+        (held, project, artifacts, ready)
+    }
+    #[cfg(windows)]
+    fn provider_path_text(path: &Path) -> String {
+        provider_path(&path.to_string_lossy())
+    }
+
     #[test]
     fn paired_preparation_binds_immutable_roles_environment_and_separate_pending_approval() {
         let workspace = workspace();
@@ -2828,6 +2955,34 @@ mod tests {
             paired.run_plan.hash().unwrap(),
             paired.receipt.run_plan_sha256
         );
+        let mut historical = paired.clone();
+        historical
+            .receipt
+            .paired_controls
+            .as_mut()
+            .unwrap()
+            .profile
+            .source_sha256 = "0".repeat(64);
+        if let PlannedAction::ExecuteWindowsSandboxPairedControls { profile, .. } =
+            &mut historical.run_plan.actions[2]
+        {
+            profile.source_sha256 = "0".repeat(64);
+        } else {
+            panic!("fixed paired action");
+        }
+        historical.receipt.run_plan_sha256 = historical.run_plan.hash().unwrap();
+        historical.validate_historical().unwrap();
+        assert!(historical.validate().is_err());
+        let mut rejected = historical.clone();
+        rejected
+            .receipt
+            .paired_controls
+            .as_mut()
+            .unwrap()
+            .fixture
+            .staged_payload
+            .sha256 = "f".repeat(64);
+        assert!(rejected.validate_historical().is_err());
         let mut drift = controls;
         drift.fixture.staged_payload.sha256 = "f".repeat(64);
         assert!(build_wsb_paired_controls_preparation(base, drift).is_err());

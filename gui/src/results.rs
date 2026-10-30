@@ -78,7 +78,7 @@ fn project(report: &Value) -> Summary {
         .map(|(index, row)| project_row(report, row, index))
         .collect();
     Summary {
-        schema_version: "aiw.dev/results-summary/v0alpha1",
+        schema_version: "aiw.dev/results-summary/v0alpha2",
         scope: SCOPE,
         rows,
     }
@@ -87,6 +87,8 @@ fn project_row(report: &Value, row: &Value, index: usize) -> Value {
     let source = &row["source"];
     let evidence = &source["evidence"];
     let kind = source["kind"].as_str().unwrap_or("");
+    let mut paired = Value::Null;
+    let is_paired = kind == "windowsSandbox" && evidence["profile"] == "pairedControls";
     let mut stages = vec![];
     let mut gaps = source_gaps(&report["missingEvidence"]);
     let mut refs = vec![];
@@ -140,6 +142,29 @@ fn project_row(report: &Value, row: &Value, index: usize) -> Value {
                     reason = known(&result["report"]["summary"], REASONS, "evidenceRejected");
                 }
                 ("Notepad++", "Sandbox MSI assessment", d)
+            } else if result["kind"] == "pairedControls" {
+                let d = &result["report"];
+                cleanup = json!(d["recordedCleanupVerified"].as_bool());
+                outcome = known(
+                    &d["recordedOutcome"],
+                    &["failed", "cancelled", "insufficientEvidence"],
+                    "partial",
+                );
+                evidence_status = known(
+                    &d["evidenceStatus"],
+                    &["verified", "driverIncomplete", "absent", "rejected"],
+                    "unmeasured",
+                );
+                paired = project_paired(d);
+                gaps.extend(source_gaps(&d["evidenceGaps"]));
+                if paired["origin"] == "syntheticRehearsal" {
+                    gaps.push("Synthetic offline example; not production acceptance".into());
+                }
+                (
+                    "Fixed AIW controls",
+                    "Ordinary user / classic AppContainer",
+                    d,
+                )
             } else if result["kind"] == "bambuExport" {
                 let d = &result["report"];
                 cleanup = json!(d["recordedCleanupVerified"].as_bool());
@@ -178,15 +203,23 @@ fn project_row(report: &Value, row: &Value, index: usize) -> Value {
             } else {
                 reason = known(&result["report"], REASONS, "evidenceRejected");
                 let bambu = evidence["profile"] == "bambuExport";
-                (
-                    if bambu { "Bambu Studio" } else { "Notepad++" },
-                    if bambu {
-                        "Sandbox STL-to-3MF export"
-                    } else {
-                        "Sandbox MSI assessment"
-                    },
-                    &Value::Null,
-                )
+                if is_paired {
+                    (
+                        "Fixed AIW controls",
+                        "Ordinary user / classic AppContainer",
+                        &Value::Null,
+                    )
+                } else {
+                    (
+                        if bambu { "Bambu Studio" } else { "Notepad++" },
+                        if bambu {
+                            "Sandbox STL-to-3MF export"
+                        } else {
+                            "Sandbox MSI assessment"
+                        },
+                        &Value::Null,
+                    )
+                }
             }
         }
         _ => {
@@ -219,7 +252,11 @@ fn project_row(report: &Value, row: &Value, index: usize) -> Value {
         .map(|key| {
             (
                 (*key).into(),
-                json!(match row["functions"][key].as_bool() {
+                json!(match if is_paired {
+                    None
+                } else {
+                    row["functions"][key].as_bool()
+                } {
                     Some(true) => "passed",
                     Some(false) => "failed",
                     None => "unmeasured",
@@ -227,10 +264,105 @@ fn project_row(report: &Value, row: &Value, index: usize) -> Value {
             )
         })
         .collect();
-    json!({"selection":index+1, "application":application, "workflow":workflow, "outcome":outcome, "unavailableReason":if outcome=="unavailable" {Some(reason)} else {None}, "functions":functions, "stages":stages, "failureEvidence":evidence_status, "historicalCleanupVerified":cleanup, "evidenceReferences":refs, "evidenceGaps":gaps})
+    json!({"selection":index+1, "application":application, "workflow":workflow, "outcome":outcome, "unavailableReason":if outcome=="unavailable" {Some(reason)} else {None}, "functions":functions, "stages":stages, "failureEvidence":evidence_status, "historicalCleanupVerified":cleanup, "evidenceReferences":refs, "evidenceGaps":gaps,"paired":paired})
+}
+fn project_paired(detail: &Value) -> Value {
+    fn process(p: &Value) -> Value {
+        let held = &p["heldToken"];
+        json!({"heldTokenObserved":held.is_object(),"selfTokenObserved":p["selfToken"].is_object(),"timedOut":p["timedOut"].as_bool(),"jobEmpty":p["jobEmpty"].as_bool(),
+            "appContainer":held["isAppContainer"].as_bool(),"elevated":held["isElevated"].as_bool(),"integrity":known(&held["integrity"]["level"],&["low","medium","high","system"],"unmeasured"),
+            "noCapabilities":held["capabilities"].as_array().map(Vec::is_empty)})
+    }
+    let status = known(
+        &detail["evidenceStatus"],
+        &["verified", "driverIncomplete", "absent", "rejected"],
+        "unmeasured",
+    );
+    let verified = status == "verified" && detail["observations"].is_object();
+    let mut cases = vec![];
+    for variant in ["baseline", "candidate"] {
+        let full = if verified {
+            &detail["observations"][variant]
+        } else {
+            &Value::Null
+        };
+        for case in ["file", "registry", "child"] {
+            let prefix = detail["driverFailure"]["progress"]
+                .as_array()
+                .filter(|_| status == "driverIncomplete")
+                .and_then(|v| {
+                    v.iter()
+                        .take(6)
+                        .find(|p| p["variant"] == variant && p["case"] == case)
+                });
+            let partial = prefix.map(|p| &p["observation"]).unwrap_or(&Value::Null);
+            let reading = if full.is_object() {
+                &full[case]
+            } else {
+                &partial["read"]
+            };
+            let outcome = if case == "child" {
+                if full.is_object() {
+                    &full["childOutcome"]
+                } else {
+                    &partial["outcome"]
+                }
+            } else {
+                &reading["outcome"]
+            };
+            let process_key = match case {
+                "file" => "fileProcess",
+                "registry" => "registryProcess",
+                _ => "childProcess",
+            };
+            let root = if full.is_object() {
+                &full[process_key]
+            } else {
+                prefix.map(|p| &p["process"]).unwrap_or(&Value::Null)
+            };
+            let child = if full.is_object() {
+                &full["childToken"]
+            } else {
+                &partial["childToken"]
+            };
+            cases.push(json!({"variant":variant,"case":case,"outcome":known(outcome,&["success","accessDenied","notFound","timeout","failure","unmeasured"],"unmeasured"),
+                "nativeCode":reading["nativeCode"].as_u64().filter(|v|[2,3,5].contains(v)),"stage":known(&reading["stage"],&["fileRead","openKey","querySize","queryValue"],"notMeasured"),
+                "sha256":hash(&reading["sha256"]),"sizeBytes":reading["sizeBytes"].as_u64().filter(|v|*v==29),"process":process(root),"descendantTokenObserved":child.is_object(),
+                "descendantAppContainer":child["isAppContainer"].as_bool(),"descendantIntegrity":known(&child["integrity"]["level"],&["low","medium","high","system"],"unmeasured")}));
+        }
+    }
+    let bindings: serde_json::Map<String, Value> = [
+        "fixtureUnchanged",
+        "launcherUnchanged",
+        "fileUnchanged",
+        "fileAclUnchanged",
+        "registryValueUnchanged",
+        "registryAclUnchanged",
+    ]
+    .into_iter()
+    .map(|key| {
+        (
+            key.into(),
+            json!(if verified {
+                detail["observations"][key].as_bool()
+            } else {
+                None
+            }),
+        )
+    })
+    .collect();
+    json!({"origin":known(&detail["profile"]["origin"],&["syntheticRehearsal","nativeWorker"],"unmeasured"),"evidenceStatus":status,"observationsVerified":verified,"eligible":verified && detail["comparison"]["eligible"].as_bool().unwrap_or(false),
+        "reason":known(&detail["comparison"]["reason"],&["fixedControlsObserved","baselineFailed","candidateFailed","driverIncomplete","cleanupUnknown"],"unmeasured"),
+        "driverComplete":if verified {detail["observations"]["driverComplete"].as_bool()} else {None},"innerProfileDeleted":if verified {detail["observations"]["profileDeleted"].as_bool()} else {None},"recordedBindings":bindings,
+        "sourceSha256":hash(&detail["profile"]["sourceSha256"]),"fixtureSha256":hash(&detail["profile"]["fixtureSha256"]),"cases":cases})
 }
 fn source_gaps(value: &Value) -> Vec<String> {
     const GAPS: &[&str] = &[
+        "General application compatibility is unmeasured",
+        "Network, endpoint and host containment are unmeasured",
+        "Cleanup is historical; viewing makes no current-state claim",
+        "Committed approval/dispatch provenance unavailable; no execution evidence accepted",
+        "No committed completed assessment; retained observations remain inconclusive",
         "ordinaryBaseline",
         "independentHostMeasurements",
         "filesystemRegistryChanges",
@@ -426,6 +558,34 @@ fn markdown(summary: &Summary) -> String {
         ));
         if let Some(reason) = row["unavailableReason"].as_str() {
             text.push_str(&format!("Unavailable reason: {reason}\n\n"));
+        }
+        if row["paired"].is_object() {
+            let paired = &row["paired"];
+            text.push_str(&format!("Fixed paired controls: requested origin {}. Comparison eligible for recorded cases: {}. Reason: {}. General compatibility/isolation and production acceptance remain unmeasured.\n\n",
+                paired["origin"].as_str().unwrap_or("unmeasured"),paired["eligible"],paired["reason"].as_str().unwrap_or("unmeasured")));
+            if paired["origin"] == "syntheticRehearsal" {
+                text.push_str("**SYNTHETIC offline example; not production acceptance.**\n\n");
+            }
+            text.push_str(&format!("Driver complete: {}. Inner profile deletion recorded: {}. Fixed bindings unchanged: {}. These are retained observations, separate from outer worker cleanup.\n\n",paired["driverComplete"],paired["innerProfileDeleted"],paired["recordedBindings"]));
+            text.push_str("| Variant | Control | Observation | Native code | Held/self tokens observed | Integrity | AppContainer | Descendant token observed | Inner job empty |\n|---|---|---|---|---|---|---|---|---|\n");
+            for item in paired["cases"].as_array().into_iter().flatten() {
+                text.push_str(&format!(
+                    "| {} | {} | {} | {} | {}/{} | {} | {} | {} | {} |\n",
+                    item["variant"].as_str().unwrap_or(""),
+                    item["case"].as_str().unwrap_or(""),
+                    item["outcome"].as_str().unwrap_or("unmeasured"),
+                    item["nativeCode"],
+                    item["process"]["heldTokenObserved"],
+                    item["process"]["selfTokenObserved"],
+                    item["process"]["integrity"]
+                        .as_str()
+                        .unwrap_or("unmeasured"),
+                    item["process"]["appContainer"],
+                    item["descendantTokenObserved"],
+                    item["process"]["jobEmpty"]
+                ));
+            }
+            text.push_str("\nOuter worker cleanup is separate. Missing evidence does not establish a denial or a stage not reached.\n\n");
         }
         text.push_str("| Function | Observation |\n|---|---|\n");
         for function in FUNCTIONS {
@@ -629,6 +789,83 @@ mod tests {
             .canonicalize()
             .unwrap()
     }
+    #[test]
+    fn paired_projection_omits_private_fields_and_never_promotes_application_functions() {
+        let observation: Value = serde_json::from_str(include_str!(
+            "../../fixtures/paired-controls/synthetic-result.json"
+        ))
+        .unwrap();
+        let detail = json!({"profile":{"origin":"syntheticRehearsal","sourceSha256":"a".repeat(64),"fixtureSha256":"b".repeat(64)},"recordedOutcome":"insufficientEvidence","recordedCleanupVerified":null,"evidenceStatus":"verified","observations":observation,"comparison":{"eligible":false,"reason":"cleanupUnknown"},"operator":"secret-account@example.invalid","privatePath":"private-path-sentinel","rawArtifact":"credential-sentinel"});
+        let raw = json!({"entries":[{"id":"secret-account@example.invalid","functions":{"install":true,"launch":true},"source":{"kind":"windowsSandbox","evidence":{"profile":"pairedControls","result":{"kind":"pairedControls","report":detail}}}}]});
+        let summary = project(&raw);
+        assert_eq!(summary.schema_version, "aiw.dev/results-summary/v0alpha2");
+        let row = &summary.rows[0];
+        assert_eq!(row["application"], "Fixed AIW controls");
+        assert_eq!(row["functions"]["install"], "unmeasured");
+        assert_eq!(row["functions"]["launch"], "unmeasured");
+        assert_eq!(row["paired"]["origin"], "syntheticRehearsal");
+        assert_eq!(row["paired"]["eligible"], false);
+        assert!(row["historicalCleanupVerified"].is_null());
+        let cases = row["paired"]["cases"].as_array().unwrap();
+        assert_eq!(cases.len(), 6);
+        assert_eq!(cases[0]["outcome"], "success");
+        assert_eq!(cases[3]["outcome"], "accessDenied");
+        assert_eq!(cases[3]["nativeCode"], 5);
+        assert_eq!(cases[5]["descendantTokenObserved"], true);
+        assert_eq!(row["paired"]["innerProfileDeleted"], true);
+        assert_eq!(row["paired"]["recordedBindings"]["fileAclUnchanged"], true);
+
+        let bytes = serde_json::to_string(&summary).unwrap();
+        let md = markdown(&summary);
+        for output in [&bytes, &md] {
+            for secret in [
+                "S-1-",
+                "secret-account",
+                "example.invalid",
+                "private-path-sentinel",
+                "credential-sentinel",
+                "canary.txt",
+                "launcherId",
+                "runId",
+            ] {
+                assert!(!output.contains(secret), "leaked {secret}");
+            }
+        }
+        assert!(md.contains("SYNTHETIC"));
+        assert!(md.contains("accessDenied"));
+        assert!(md.contains("Outer worker cleanup is separate"));
+        assert_eq!(bytes, serde_json::to_string(&project(&raw)).unwrap());
+        assert_eq!(md, markdown(&project(&raw)));
+        let mut rejected = raw["entries"][0]["source"]["evidence"]["result"]["report"].clone();
+        rejected["evidenceStatus"] = "rejected".into();
+        rejected["profile"]["origin"] = "nativeWorker".into();
+        rejected["comparison"]["eligible"] = true.into();
+        let projected = project_paired(&rejected);
+        assert_eq!(projected["observationsVerified"], false);
+        assert_eq!(projected["eligible"], false);
+        assert!(
+            projected["cases"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|c| c["outcome"] == "unmeasured")
+        );
+    }
+    #[test]
+    fn paired_partial_projection_preserves_missing_and_timeout_without_inventing_reached_stages() {
+        let detail = json!({"evidenceStatus":"driverIncomplete","profile":{"origin":"syntheticRehearsal"},"driverFailure":{"progress":[{"variant":"baseline","case":"file","process":{"heldToken":{},"timedOut":false},"observation":{"read":{"outcome":"notFound","nativeCode":2,"stage":"fileRead"},"outcome":"notFound"}},{"variant":"baseline","case":"registry","process":{"timedOut":true},"observation":{"read":{"outcome":"timeout"},"outcome":"timeout"}}]}});
+        let paired = project_paired(&detail);
+        assert_eq!(paired["cases"][0]["outcome"], "notFound");
+        assert_eq!(paired["cases"][1]["outcome"], "timeout");
+        assert_eq!(paired["cases"][2]["outcome"], "unmeasured");
+        assert_eq!(paired["eligible"], false);
+        assert!(
+            !serde_json::to_string(&paired)
+                .unwrap()
+                .contains("notReached")
+        );
+    }
+
     #[test]
     fn fixture_flow_deterministic_unchanged_duplicate_missing_tampered_and_export() {
         let root = temp();

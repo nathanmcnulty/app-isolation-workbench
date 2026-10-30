@@ -228,6 +228,248 @@ fn pair_process(start: &WsbGoldenProbeStart, mutation: usize) -> FakeProcess {
         write_pair_completion(&output_start, mutation);
     }))
 }
+fn report_pair(
+    start: &WsbGoldenProbeStart,
+    cleanup: Option<bool>,
+    outcome: Option<RunOutcome>,
+) -> PairedControlRunReport {
+    let expected = PairedControlsRequest::from_retained_binding(
+        "w1-run",
+        &deterministic_sandbox_id("w1-run"),
+        &render_config(&start.wsb_plan).unwrap().sha256,
+        &start.guest_agent.sha256,
+        start.paired_controls.as_ref().unwrap().profile.clone(),
+    )
+    .unwrap();
+    crate::paired_report::read_paired_output(
+        Path::new(&start.workspace.output.final_path),
+        &expected,
+        cleanup,
+        outcome,
+        true,
+        "synthetic-project-revision",
+    )
+    .unwrap()
+}
+
+#[cfg(windows)]
+#[test]
+fn paired_protected_fixture_runs_fake_kernel_and_actual_retained_report_set_without_execution() {
+    protected_pair_rehearsal(false);
+}
+#[cfg(windows)]
+#[test]
+fn paired_protected_unknown_cleanup_remains_inconclusive_and_never_recovers_on_read() {
+    protected_pair_rehearsal(true);
+}
+#[cfg(windows)]
+fn protected_pair_rehearsal(unknown_cleanup: bool) {
+    let mut root = Root::new();
+    let (held, project, artifacts, ready) =
+        crate::preparation::tests::protected_paired_fixture(&root.0, "w1-run");
+    let workspace = held.root_path().to_path_buf();
+    let project_path = root.0.join("project.yaml");
+    fs::write(&project_path, serde_yaml::to_string(&project).unwrap()).unwrap();
+    let receipt = aiw_orchestrator::WsbPlanningImportReceipt {
+        schema_version: aiw_orchestrator::WSB_PAIRED_CONTROL_IMPORT_SCHEMA.into(),
+        run_id: "w1-run".into(),
+        imported_at: "synthetic-time".into(),
+        status: aiw_orchestrator::WsbPlanningImportStatus::PendingApproval,
+        project_revision_sha256: artifacts.receipt.project_revision_sha256.clone(),
+        workspace_root: artifacts.receipt.workspace.root.final_path.clone(),
+        workspace_identity_sha256: artifacts.receipt.workspace_identity_sha256.clone(),
+        preparation_receipt_sha256: canonical_hash(&artifacts.receipt).unwrap(),
+        run_plan_sha256: artifacts.receipt.run_plan_sha256.clone(),
+        windows_sandbox_plan_sha256: artifacts.receipt.wsb_plan_sha256.clone(),
+        guest_agent_sha256: artifacts.receipt.guest_agent.sha256.clone(),
+        provider_sha256: artifacts.receipt.provider.sha256.clone(),
+        run_root: artifacts.receipt.workspace.root.final_path.clone(),
+        journal_sequence: 1,
+        approval_present: false,
+        provider_acquired: false,
+        provider_mutated: false,
+    };
+    let layout = RunLayout::new(&workspace, "w1-run").unwrap();
+    layout
+        .create_or_verify_pending_wsb_import_bound(&held, &artifacts.run_plan, &receipt)
+        .unwrap();
+    let unstarted = crate::report_windows_sandbox_paired_controls(
+        &workspace,
+        "w1-run",
+        &project,
+        &artifacts.receipt.guest_agent.sha256,
+    )
+    .unwrap();
+    assert_eq!(
+        unstarted.evidence_status,
+        PairedReportEvidenceStatus::Absent
+    );
+    assert!(unstarted.observations.is_none());
+    layout
+        .write_approval(
+            &ApprovalRecord::for_plan(&artifacts.run_plan, "synthetic-operator", "synthetic-time")
+                .unwrap(),
+        )
+        .unwrap();
+    let start = WsbGoldenProbeStart {
+        schema_version: "aiw.dev/wsb-paired-controls-start/v0alpha1".into(),
+        run_root: artifacts.wsb_plan.workspace_root.clone(),
+        project_path: project_path.to_string_lossy().into_owned(),
+        provider: artifacts.receipt.provider.clone(),
+        guest_agent: artifacts.receipt.guest_agent.clone(),
+        workspace: artifacts.receipt.workspace.clone(),
+        workspace_identity_sha256: artifacts.receipt.workspace_identity_sha256.clone(),
+        wsb_plan: artifacts.wsb_plan.clone(),
+        timeout_seconds: 1,
+        msi: None,
+        bambu: None,
+        paired_controls: artifacts.receipt.paired_controls.clone(),
+    };
+    assert_eq!(
+        start.run_root, artifacts.receipt.workspace.root.final_path,
+        "fixture must use the same root spelling as the native facade"
+    );
+    let fake = pair_process(&start, 0);
+    if unknown_cleanup {
+        let id = deterministic_sandbox_id("w1-run");
+        *fake.results.lock().unwrap() = vec![
+            empty_list(),
+            started(&id),
+            list_with(&id, "running"),
+            list_with(&id, "running"),
+            stopped(&id),
+            list_with(&id, "still-present"),
+        ]
+        .into_iter()
+        .collect();
+    }
+    let process = TraceFake {
+        process: fake,
+        arguments: Mutex::new(vec![]),
+    };
+    let execution = super::super::execute_wsb_golden_probe(
+        &start,
+        &ready,
+        &layout,
+        &process,
+        &TestLease::default(),
+        &held,
+    );
+    if unknown_cleanup {
+        assert!(matches!(execution, Err(RunnerError::RecoveryRequired(_))));
+    } else {
+        execution.unwrap();
+    }
+    let before = fixture_file_snapshot(&workspace);
+    let before_read_calls = process.arguments.lock().unwrap().len();
+    let report = crate::report_windows_sandbox_paired_controls(
+        &workspace,
+        "w1-run",
+        &project,
+        &start.guest_agent.sha256,
+    )
+    .unwrap();
+    assert_eq!(report.evidence_status, PairedReportEvidenceStatus::Verified);
+    assert_eq!(
+        report.recorded_cleanup_verified,
+        if unknown_cleanup { None } else { Some(true) }
+    );
+    assert_eq!(
+        report.comparison.as_ref().unwrap().eligible,
+        !unknown_cleanup
+    );
+    assert!(!report.comparison.as_ref().unwrap().production_acceptance);
+    let entry = crate::WsbReportSetEntry {
+        profile: crate::ReportSetProfile::PairedControls,
+        run: crate::WsbMsiReportSetEntry {
+            id: "synthetic-safe-fixture".into(),
+            workspace_root: workspace.clone(),
+            run_id: "w1-run".into(),
+            project_path,
+            guest_agent_sha256: start.guest_agent.sha256.clone(),
+        },
+    };
+    let mut duplicate = entry.clone();
+    duplicate.run.id = "synthetic-duplicate".into();
+    let set = crate::report_windows_sandbox_set(&crate::WsbReportSetInput {
+        schema_version: crate::WSB_REPORT_SET_INPUT_SCHEMA.into(),
+        entries: vec![entry.clone(), duplicate.clone()],
+    })
+    .unwrap();
+    assert!(matches!(
+        set.entries[1].result,
+        crate::WsbReportSetResult::Unavailable(crate::ReportSetUnavailableReason::DuplicateRun)
+    ));
+    let functions = serde_json::to_value(&set.entries[0].functions).unwrap();
+    assert!(
+        functions
+            .as_object()
+            .unwrap()
+            .values()
+            .all(serde_json::Value::is_null)
+    );
+    assert_eq!(before, fixture_file_snapshot(&workspace));
+    assert_eq!(
+        process.arguments.lock().unwrap().len(),
+        before_read_calls,
+        "retained views must not invoke any provider boundary"
+    );
+    assert_eq!(
+        process
+            .arguments
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|args| args.first().is_some_and(|s| s == "start"))
+            .count(),
+        1
+    );
+    if std::env::var("AIW_PAIRED_FIXTURE_RETAIN").as_deref() == Ok("1") {
+        let selection = root.0.join("paired-assessment-selection.json");
+        let value = serde_json::json!({"schemaVersion":crate::APPLICATION_ASSESSMENT_INPUT_SCHEMA,"windowsSandbox":{"schemaVersion":crate::WSB_REPORT_SET_INPUT_SCHEMA,"entries":[entry,duplicate]}});
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&selection)
+            .unwrap();
+        file.write_all(&serde_json::to_vec_pretty(&value).unwrap())
+            .unwrap();
+        file.sync_all().unwrap();
+        let marker = serde_json::json!({"schemaVersion":"aiw.dev/paired-synthetic-demo/v0alpha1","origin":"syntheticRehearsal","realProviderApplicationControlCalls":0,"fakeProviderCalls":before_read_calls,"unknownCleanup":unknown_cleanup,"scope":"Test-only inert bytes and fake provider; not production acceptance"});
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(root.0.join("synthetic-demo.json"))
+            .unwrap();
+        file.write_all(&serde_json::to_vec_pretty(&marker).unwrap())
+            .unwrap();
+        file.sync_all().unwrap();
+        root.preserve_on_drop();
+        println!("AIW_PAIRED_DEMO_SELECTION={}", selection.display());
+    }
+}
+#[cfg(windows)]
+fn fixture_file_snapshot(root: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
+    // Inventory only this freshly created test fixture, never retained discovery.
+    fn collect(root: &Path, path: &Path, out: &mut std::collections::BTreeMap<PathBuf, Vec<u8>>) {
+        for item in fs::read_dir(path).unwrap() {
+            let item = item.unwrap();
+            let path = item.path();
+            if item.file_type().unwrap().is_dir() {
+                collect(root, &path, out)
+            } else {
+                out.insert(
+                    path.strip_prefix(root).unwrap().to_path_buf(),
+                    fs::read(path).unwrap(),
+                );
+            }
+        }
+    }
+    let mut out = std::collections::BTreeMap::new();
+    collect(root, root, &mut out);
+    out
+}
+
 #[test]
 fn paired_driver_failure_is_verified_and_terminal_without_replaying_dispatch() {
     for mutation in [7, 8] {
@@ -241,6 +483,17 @@ fn paired_driver_failure_is_verified_and_terminal_without_replaying_dispatch() {
         } else {
             assert!(error.to_string().contains("failure binding rejected"));
         }
+        let report = report_pair(&start, Some(true), Some(RunOutcome::Failed));
+        assert_eq!(
+            report.evidence_status,
+            if mutation == 7 {
+                PairedReportEvidenceStatus::DriverIncomplete
+            } else {
+                PairedReportEvidenceStatus::Rejected
+            }
+        );
+        assert!(report.comparison.is_none());
+
         assert!(matches!(
             layout.status().unwrap(),
             aiw_orchestrator::RecoveryStatus::Terminal { .. }
@@ -292,6 +545,25 @@ fn paired_production_kernel_collects_comparable_and_inconclusive_synthetic_recei
         assert_eq!(comparison.reason, reason);
         assert!(!comparison.production_acceptance);
         assert_eq!(comparison.origin, ControlEvidenceOrigin::SyntheticRehearsal);
+        let output = Path::new(&start.workspace.output.final_path);
+        let original = ["scenario-result.json", "evidence.jsonl", "completion.json"]
+            .map(|leaf| fs::read(output.join(leaf)).unwrap());
+        let report = report_pair(&start, Some(true), Some(RunOutcome::InsufficientEvidence));
+        assert_eq!(report.evidence_status, PairedReportEvidenceStatus::Verified);
+        assert_eq!(report.comparison.as_ref().unwrap().reason, reason);
+        let unknown = report_pair(&start, None, Some(RunOutcome::InsufficientEvidence));
+        assert!(!unknown.comparison.as_ref().unwrap().eligible);
+        assert_eq!(unknown.recorded_cleanup_verified, None);
+        let incomplete = report_pair(&start, Some(true), None);
+        assert!(!incomplete.comparison.as_ref().unwrap().eligible);
+        assert_eq!(incomplete.recorded_cleanup_verified, Some(true));
+        for (leaf, bytes) in ["scenario-result.json", "evidence.jsonl", "completion.json"]
+            .into_iter()
+            .zip(original)
+        {
+            assert_eq!(fs::read(output.join(leaf)).unwrap(), bytes);
+        }
+
         assert!(matches!(
             layout.status().unwrap(),
             aiw_orchestrator::RecoveryStatus::Terminal { .. }
@@ -453,6 +725,9 @@ fn paired_duplicate_and_out_of_order_evidence_is_rejected() {
                 .is_err()
         );
         assert_eq!(layout.read_result().unwrap().outcome, RunOutcome::Failed);
+        let report = report_pair(&start, Some(true), Some(RunOutcome::Failed));
+        assert_eq!(report.evidence_status, PairedReportEvidenceStatus::Rejected);
+        assert!(report.observations.is_none());
     }
 }
 

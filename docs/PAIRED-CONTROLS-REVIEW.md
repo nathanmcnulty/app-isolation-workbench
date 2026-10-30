@@ -48,3 +48,29 @@ runner lifecycle tests, 1 preparation test, 5 guest dispatch/publication tests a
 1 pure prefix-retention test passed. Component all-target Clippy, including the
 native platform crate, passed with warnings denied. Formatting and diff checks
 passed. These checks did not execute native control paths, providers or apps.
+
+## Retained reader and Results review
+
+The independent reviewer also reviewed the paired retained reader, private
+historical validation path, shared report-set routing and Results projection,
+filters and exports. Two findings were fixed: pending ApprovalIntent artifacts
+are not committed approval, and requested native-worker origin alone is not a
+verified native observation. Regression tests cover both. Missing/rejected
+records contain no copied measurements or eligible comparison. Historical
+cleanup remains separate, and application functions remain unmeasured.
+
+The test-only protected-workspace rehearsal was reviewed as truthful: inert
+files, synthetic provider/guest provenance, real fresh protected file bindings,
+actual shared runner with fake process/lease, followed by the actual retained
+reader/report-set services. No production authority check was weakened. Tests
+verify unchanged fixture bytes, duplicate identity handling and zero additional
+provider-boundary calls on reads. The separate unresolved-cleanup case remains
+inconclusive and viewing performs no recovery. Native behavior is still untested.
+
+Incremental logs: paired-retained-snapshot-tests (1), paired-historical-preparation-
+tests (1), paired-report-service-tests (8), paired-report-set-tests (4),
+paired-protected-fixture-tests (1), paired-protected-unknown-cleanup-tests (1),
+paired-results-rust-tests (5), paired-results-projection-tests, paired-results-node-
+tests (10), paired-report-clippy and paired-results-clippy under `C:/aiw/`.
+Read the actual logs for their recorded source state; full-product final validation
+and actual desktop keyboard preview have not occurred.
