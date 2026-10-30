@@ -1,6 +1,7 @@
 # Fixed paired-control desktop workflow
 
-Status: local implementation, offline validation in progress. Native acceptance,
+Status: local implementation and offline validation complete; see the final
+[handoff](PAIRED-IMPLEMENTATION-HANDOFF.md) for exact results. Native acceptance,
 Benchmark 2 and remaining W4/W5 work remain open. No general application
 compatibility or effective-isolation verdict is established by these controls.
 
@@ -313,3 +314,16 @@ Start readiness is published after durable StartIntent assertions. A negative
 observer check cannot signal an uncommitted cancellation. No production journal,
 reader, approval or provider behavior changed. Independent source review accepted
 the fix; final validation is rerun against the corrective code commit.
+
+
+## Final disposition
+
+The code at `e2e44fe2bf3ca98113618131f4f6d8700354219f` passed the final
+workspace suite: 678 passed, 0 failed, 27 opt-in ignored. Workspace all-target
+Clippy, formatting and governance passed. Desktop: 20 passed, 4 opt-in ignored,
+all-target Clippy/format and offline binary build passed; Node: 28 passed.
+Structured workspace result: `C:/aiw/paired-final-root-fixed.json`.
+The exact review bundle, safe exports, demo scope, independent source review,
+initial failed run and remaining limits are in the final handoff. Earlier
+remaining-work notes above describe historical checkpoints and are superseded
+by this disposition. Native trials and production acceptance remain open.

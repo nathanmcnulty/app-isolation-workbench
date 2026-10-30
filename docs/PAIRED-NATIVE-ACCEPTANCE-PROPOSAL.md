@@ -12,6 +12,8 @@ Do not repeat PR #103 trials or recover/replay completed historical runs.
 - Source commitment (length-prefixed exact UTF-8 bytes from the 13 sources in
   `crates/aiw-probe/src/paired_controls.rs`):
   `95201a1b89182f699358f2641e8ec47de7a45e2ed56c7fdc1b55418227803f49`.
+- The read-only compiled CLI identity matched this source pin:
+  `C:/aiw/paired-final-control-source.json`; no provider was invoked.
 - Fixed policy: `classicAppContainerNoCapabilitiesFixedChildOutputGrant`.
 - Locally built, unexecuted x64 debug/static-CRT guest agent:
   `C:\aiw\app-isolation-workbench\target\guest-agent-static\x86_64-pc-windows-msvc\debug\aiw-guest-agent.exe`.
