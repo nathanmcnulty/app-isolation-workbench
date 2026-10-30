@@ -1,4 +1,8 @@
-# Proposed native acceptance — not executed or authorized here
+# Proposed native acceptance — historical proposal
+
+Superseded by the consolidated [f99bbd4 reconciliation and approval request](PAIRED-NATIVE-APPROVAL.md), which pins the newly assembled local package, corrects
+the production selection-manifest procedure and names the unresolved VM107 gates.
+This older proposal is retained as history, not execution authority.
 
 Implementation source: `b7af36f0baa16982c8c0d20e8269acc5a586f1b9` on
 `codex/paired-controls`, descendant of main `53c02c8` including merged PR #103.

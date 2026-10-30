@@ -38,11 +38,22 @@ coverage, exact commits/logs, demonstration and limitations;
 [source-pinned future native proposal](PAIRED-NATIVE-ACCEPTANCE-PROPOSAL.md).
 All output remains local; no PR was submitted.
 
+Reconciliation at f99bbd4 is recorded in
+[the consolidated native approval request](PAIRED-NATIVE-APPROVAL.md). The exact
+unsigned local package was assembled/verified offline from clean f99bbd4 at
+`C:/aiw/paired-native-review-f99bbd4-20261030`; no unchanged suite was rerun.
+No proven source blocker was found. Current VM107 OS/provider/nested Sandbox
+facts remain unverified and block launch-ready Start approval. The production
+path does not emit a selection manifest; the request constructs one from the
+fresh typed locator. Fixed-control acceptance cannot close full Benchmark 2's
+real-application requirement. No remote worker VM, provider or control was accessed/executed.
+
 ## Open acceptance and preserved boundaries
 
 Native guest/provider/control behavior and held-file inspection through Sandbox
 Tools mappings remain untrialed. Fail closed rather than weakening intake.
-No independently enrolled new desktop package/provider identity was available.
+The new unsigned desktop package is now locally enrolled and inventory-verified.
+VM107 current provider/OS/readiness commitments remain unavailable.
 Keep live Benchmark 2 acceptance and remaining W4/W5 requirements open; no general
 compatibility/effective-isolation claim, release or production acceptance follows.
 
