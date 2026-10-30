@@ -1136,6 +1136,12 @@ mod demo {
                     .to_str()
                     .unwrap()
                     .starts_with("aiw-w1-runner-")
+                    || parent
+                        .file_name()
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                        .starts_with("aiw-paired-service-")
             );
             let marker_path = parent.join("synthetic-demo.json");
             let marker: Value =

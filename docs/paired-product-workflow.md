@@ -10,7 +10,8 @@ Select **Fixed paired controls** in the desktop workflow. The product accepts no
 installer, document, executable, script or policy input. It uses a compiled
 project and the enrolled shared guest agent, with fixed file, registry and child
 cases. Preparation imports the typed paired action into the existing protected
-workspace, journal and session kernel. It does not acquire a provider.
+workspace, journal and session kernel. Offline preparation makes no provider calls;
+the native readiness-invocation gap below still requires correction.
 
 The desktop presents the immutable recipe, plan and proposed approval. Literal
 approval of the displayed plan hash records approval; a separate Start challenge
@@ -78,12 +79,11 @@ alongside unmeasured application functions and separate historical cleanup.
 This preview has no execution backend; it exercises the preserved Results path,
 not the complete new paired workflow.
 
-These checks are not yet a complete coupled admin-service-to-fake-kernel product
-rehearsal. That demonstration, a paired-workflow keyboard/focus preview, final validation
-against final commits, and the consolidated source-pinned future native acceptance
-proposal remain required by the active goal. Native held-file inspection through
-Sandbox Tools mappings still needs separately authorized disposable-worker proof;
-fail closed rather than weakening protected intake.
+The coupled coordinator/kernel rehearsal described below now extends these
+checks. The paired-workflow keyboard/focus preview, native preparation correction,
+final validation and consolidated source-pinned native proposal remain required.
+Native held-file inspection through Sandbox Tools mappings still needs separately
+authorized disposable-worker proof; fail closed rather than weakening intake.
 
 ## Slice validation (2026-10-30)
 
@@ -145,8 +145,8 @@ cleanup and duplicates. Application functions remained unmeasured.
 The preview script now escapes the demonstration's own scope in its notice,
 so a paired-only demo cannot inherit the older ten-row application's description.
 Browser preview has no execution backend. This is a paired Results integration
-demonstration, not the remaining full admin-gate/fake-kernel product rehearsal or
-native acceptance. Producer log: `C:/aiw/paired-retained-demo-generation.log`.
+demonstration, separate from the coupled admin-gate/fake-kernel rehearsal below
+and from native acceptance. Producer log: `C:/aiw/paired-retained-demo-generation.log`.
 Service log: `C:/aiw/paired-results-service-demo.log`; post-review rerun:
 `C:/aiw/paired-results-service-demo-final.log`.
 
@@ -156,3 +156,68 @@ script syntax and diff whitespace passed. Independent follow-up source review
 verified the containment/bounded-read fix and found no remaining consequential
 issue in that delta. Logs: `paired-results-service-demo-final.log`,
 `paired-results-demo-clippy.log`, `paired-results-demo-node.log` under `C:/aiw`.
+
+## Coupled admin-service rehearsal
+
+The opt-in runner feature `offline-rehearsal` is default-off. The admin crate
+activates it only as a dev dependency. Shared inert preparation/readiness and
+receipt helpers were factored from the existing tests; the harness calls the
+same kernel, journal, approval, receipt reader and exact recovery code. It creates
+only fresh synthetic workspaces, accepts no existing workspace/executable/script,
+and uses a strict fake process/lease boundary. Fake calls must match the full
+planned executable, arguments, configuration, UUID and order. Recovery cannot
+Start or connect. Repeated dispatch relies on the real kernel's rejection rather
+than a harness-only duplicate guard.
+
+The actual `run_prepared_with_gate` coordinator is now exercised with a compiled
+fixed project, persisted locator/plan, exact approval, separate Start and the
+fake kernel. Cases cover declined/stale approval, no Start, direct unapproved
+kernel refusal, valid pair, project/input/provider drift, missing baseline and
+candidate resources, malformed denial code, duplicate/out-of-order evidence,
+driver failure/tampering, unknown cleanup and exact recovery, interrupted Start,
+running cancellation and no replay. A bounded pause at durable StartIntent lets
+a scoped test thread call the actual owned cancellation service. A whole-owned
+fixture byte snapshot across the actual retained read proves it is unchanged.
+
+The first full seven-test matrix passed (`C:/aiw/paired-coupled-service-tests2.log`).
+Eight non-matrix tests, including the actual cancellation service and 2048-character
+Start-error diagnostic, passed after final harness changes
+(`C:/aiw/paired-coupled-gates-final2.log`). These are nine distinct coupled tests;
+the two logs overlap. Initial failures exposed fake connect/stop response mistakes,
+which were fixed; they are not native results. Independent review fixed the weak
+fake invocation matching, and the follow-up found no further consequential issue.
+
+The valid coupled run emitted
+`C:/Users/labadmin/AppData/Local/Temp/aiw-paired-service-2292-1/paired-assessment-selection.json`.
+A prior equivalent coupled fixture under `aiw-paired-service-6156-2`, combined with
+the previously retained unknown-cleanup fixture, passed the actual ResultsStore
+load/export/determinism/duplicate checks. Output:
+`C:/aiw/results-explorer-401abd2d-d5b2-4ec8-a96c-42df8364ca5a`;
+log `C:/aiw/paired-coupled-results-demo.log`. These are explicitly synthetic,
+zero-real-provider/application/control-call records, not production acceptance.
+
+The coupled tests also exposed hidden Start errors when an absent-evidence report
+was available. The service now retains a bounded operation error and the desktop
+shows the cause with exact-run preservation/recovery guidance. This local text is
+not added to the Results export allowlist. Desktop checks: 20 library tests passed,
+three opt-in tests ignored, and all-target Clippy passed. Logs:
+`paired-coupled-desktop-tests.log` and `paired-coupled-desktop-clippy.log`.
+
+## Remaining preparation requirement found by source audit
+
+The native paired preparation facade currently calls `assess_windows_sandbox`,
+whose platform implementation invokes the provider with `--version` and
+`list --raw`. These read-only invocations still violate this goal's stronger
+requirement that preparation execute no provider. No such native invocation was
+performed in the offline rehearsal. Before goal completion, replace this paired
+preparation path with static trusted identity inspection/enrollment, keeping
+runtime protocol/session checks after exact approval and explicit Start. Do not
+pretend unknown runtime readiness is measured, weaken the provider commitment,
+or simply mark unknown sessions available. The full paired-workflow keyboard
+preview, final validation/PR handoff and source-pinned future native acceptance
+proposal also remain outstanding.
+
+Additional extraction regressions: 13 paired runner tests and the strict-fake
+negative test passed. Admin/runner all-target Clippy passed with warnings denied.
+Logs: `C:/aiw/paired-coupled-runner-regression.log`,
+`C:/aiw/paired-coupled-fake-negative.log`, `C:/aiw/paired-coupled-clippy.log`.

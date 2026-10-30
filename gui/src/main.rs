@@ -359,6 +359,12 @@ mod desktop {
                     &gate,
                 )?;
                 let summary=result.report.as_ref().map(service::paired::summary).unwrap_or_else(|| if result.start_requested {"No verified paired result is available. Preserve evidence; inspect exact session status before retrying.".into()} else {"Preparation retained; explicit approval/Start was cancelled. No provider was executed.".into()});
+                let summary = match &result.operation_error {
+                    Some(error) => format!(
+                        "{summary}\n\nOperation stopped: {error}\nPreserve the retained evidence. Inspect this exact run's status; use recovery only when cleanup is unresolved. Do not repeat Start for this run."
+                    ),
+                    None => summary,
+                };
                 return Ok((
                     if result.report.as_ref().is_some_and(|r| {
                         r.recorded_outcome == Some(aiw_orchestrator::RunOutcome::Cancelled)

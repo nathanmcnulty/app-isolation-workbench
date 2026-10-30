@@ -50,11 +50,26 @@ and new work. UI actions are single-flight and discard pre-action polling respon
 Independent source review found no further consequential issue after these fixes.
 See `docs/paired-product-workflow.md` for behavior and explicit limits.
 
-Next: complete the full coupled admin-service/fake-kernel offline product rehearsal
-and real paired-workflow keyboard/focus preview; then final independent review and applicable final
-validation against final commits, exact demonstration/diff, draft PR and one
-source-pinned future native-acceptance proposal. Service/controller unit tests are
-not that full rehearsal. Keep goal active and Benchmark 2/remaining W4/W5 open.
+The coupled admin-service/fake-kernel rehearsal is implemented and reviewed:
+nine distinct tests cover exact gates, direct unapproved refusal, valid pair,
+input/provider drift, missing/denied, receipt/driver tampering, duplicate/out-of-order
+evidence, cancellation through the actual service, interrupted dispatch and exact
+recovery. Eight non-matrix final tests and the earlier full matrix passed. New
+closed default-off runner feature shares the original inert fixture/receipt
+helpers; it exposes no native acquisition or arbitrary executable/script route.
+The actual ResultsStore exported a coupled fixture plus unknown cleanup and
+duplicates to `C:/aiw/results-explorer-401abd2d-d5b2-4ec8-a96c-42df8364ca5a`.
+See paired-product-workflow.md for exact logs and selection paths.
+
+NEXT REQUIRED: fix native paired preparation's inherited `assess_windows_sandbox`
+call, which launches provider `--version` and `list --raw` before approval. This
+source-audited gap violates the no-provider-execution-during-preparation requirement;
+none of those native calls ran here. Use static trusted provider identity inspection
+for preparation and retain full live checks at explicit Start; do not fabricate
+runtime readiness/session measurements. Then complete paired-workflow keyboard/focus
+preview, final validation/review against final commits, exact diff/PR handoff and
+one source-pinned future native-acceptance proposal. Keep goal active and Benchmark
+2/remaining W4/W5 open.
 
 Fixture retention is opt-in test-only: `AIW_PAIRED_FIXTURE_RETAIN=1` with the
 `paired_protected_` tests emits `AIW_PAIRED_DEMO_SELECTION=...` for newly created

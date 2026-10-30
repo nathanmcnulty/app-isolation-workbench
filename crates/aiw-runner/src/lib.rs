@@ -9,7 +9,11 @@
 //! exact-ID `connect`, and exact-ID `stop` argument arrays. It has no shell, elevation, command,
 //! script, URL, or arbitrary policy API.
 
+#[cfg(all(windows, feature = "offline-rehearsal"))]
+pub mod offline_rehearsal;
 mod paired_report;
+#[cfg(any(test, feature = "offline-rehearsal"))]
+mod synthetic_receipt;
 #[cfg(windows)]
 pub use paired_report::report_windows_sandbox_paired_controls;
 pub use paired_report::{PairedControlRunReport, PairedReportEvidenceStatus};
@@ -1587,7 +1591,7 @@ fn native_recovery_error(
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "offline-rehearsal"))]
 pub(crate) fn recover_wsb_session(
     request: &WsbGoldenProbeStart,
     readiness: &WindowsSandboxReadiness,

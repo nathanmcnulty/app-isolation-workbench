@@ -24,6 +24,7 @@ pub struct PairedWorkflowResult {
     pub approval_recorded: bool,
     pub start_requested: bool,
     pub operation_failed: bool,
+    pub operation_error: Option<String>,
     pub recovery_required: bool,
     pub report: Option<aiw_runner::PairedControlRunReport>,
 }
@@ -397,6 +398,7 @@ fn run_prepared_with_gate(
                 approval_recorded: false,
                 start_requested: false,
                 operation_failed: false,
+                operation_error: None,
                 recovery_required: false,
                 report: None,
             });
@@ -412,6 +414,7 @@ fn run_prepared_with_gate(
                 approval_recorded: true,
                 start_requested: false,
                 operation_failed: false,
+                operation_error: None,
                 recovery_required: false,
                 report: None,
             });
@@ -428,6 +431,10 @@ fn run_prepared_with_gate(
         #[cfg(not(windows))]
         let report = None;
         let operation_failed = operation.is_err();
+        let operation_error = operation
+            .as_ref()
+            .err()
+            .map(|e| e.to_string().chars().take(2048).collect());
         if let Err(error) = operation
             && report.is_none()
         {
@@ -441,6 +448,7 @@ fn run_prepared_with_gate(
             approval_recorded: true,
             start_requested: true,
             operation_failed,
+            operation_error,
             recovery_required,
             report,
         })
@@ -532,3 +540,7 @@ mod tests {
         assert_eq!(gate.finished.get(), 1);
     }
 }
+
+#[cfg(all(test, windows))]
+#[path = "paired_rehearsal_tests.rs"]
+mod rehearsal_tests;
