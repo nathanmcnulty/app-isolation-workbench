@@ -40,19 +40,31 @@ reader and shared report set, including duplicates and unknown cleanup: reads
 preserve fixture bytes and make no provider calls. Source review findings about
 pending approval and absent/rejected native-observation labels were fixed.
 
-Next: admin/desktop preparation, immutable review, separate approval/Start,
-progress and backend-owned running cancellation/exact recovery. Complete the
-full actual-service offline product rehearsal and real keyboard/focus feature
-preview; then final independent review and applicable final validation against
-final commits, exact demonstration/diff, draft PR and one source-pinned future
-native-acceptance proposal. Backend/Results work is not the full usable paired
-product slice. Keep the goal active and Benchmark 2/remaining W4/W5 open.
+The admin/desktop product slice now includes fixed compiled-project preparation,
+immutable review, separate exact approval/Start, progress, backend-owned running
+cancellation and exact-session recovery. Optional enrolled agent control-source
+metadata fails closed before preparation when absent/stale. Original workspace
+bindings are held through mutations; copied layouts cannot recover another root.
+Terminal cancellation clears its pending state; unresolved cleanup blocks close
+and new work. UI actions are single-flight and discard pre-action polling responses.
+Independent source review found no further consequential issue after these fixes.
+See `docs/paired-product-workflow.md` for behavior and explicit limits.
+
+Next: complete the full coupled admin-service/fake-kernel offline product rehearsal
+and real paired-workflow keyboard/focus preview; then final independent review and applicable final
+validation against final commits, exact demonstration/diff, draft PR and one
+source-pinned future native-acceptance proposal. Service/controller unit tests are
+not that full rehearsal. Keep goal active and Benchmark 2/remaining W4/W5 open.
 
 Fixture retention is opt-in test-only: `AIW_PAIRED_FIXTURE_RETAIN=1` with the
 `paired_protected_` tests emits `AIW_PAIRED_DEMO_SELECTION=...` for newly created
 synthetic selections. It accepts no executable/intake path, never loads arbitrary
 production workspaces, and makes zero real provider/application/control calls.
-No demo fixture has yet been retained or previewed for this paired goal.
+No paired demo fixture has yet been retained or previewed for this paired goal.
+A fresh preserved Results demo at `C:/aiw/results-explorer-160bf207-6a83-48be-b235-07f37d20b6c9`
+passed its real Rust export/unchanged-byte assertions and a browser keyboard
+failure-detail/filter/focus preview; see paired-product-workflow.md. It contains
+the old reviewed archive and labeled application examples, not paired runs.
 
 No live VM/Sandbox/AppContainer/application/control calls, authentication, host
 security changes/grants, dependency installation, signing, push, publication,

@@ -17,6 +17,7 @@ mod installer_inspection;
 #[cfg(windows)]
 pub mod msix;
 pub mod packaging;
+pub mod paired;
 
 const MAX_CONFIG_BYTES: u64 = 16 * 1024 * 1024;
 
@@ -80,6 +81,10 @@ pub struct ApprovalReview {
 }
 
 pub trait ApprovalGate {
+    fn paired_prepared(&self, _run: &paired::PairedRun) -> Result<()> {
+        Ok(())
+    }
+    fn paired_finished(&self, _run: &paired::PairedRun, _recovery_required: bool) {}
     fn progress(&self, _message: &str) {}
     /// Return the literal operator response. The service requires exactly
     /// `approve <displayed plan hash>`; `None` is cancellation.
@@ -282,6 +287,8 @@ struct ProductAssetManifest {
     scenario_id: String,
     guest_agent_sha256: String,
     #[serde(default)]
+    guest_agent_control_source_sha256: Option<String>,
+    #[serde(default)]
     launch_profile_path: Option<String>,
     #[serde(default)]
     launch_profile_sha256: Option<String>,
@@ -473,6 +480,10 @@ impl ProductAssetManifest {
             || self.scenario_id != scenario_id
             || !valid_sha256(&self.project_sha256)
             || !valid_sha256(&self.guest_agent_sha256)
+            || self
+                .guest_agent_control_source_sha256
+                .as_deref()
+                .is_some_and(|hash| !valid_sha256(hash))
             || self
                 .launch_profile_sha256
                 .as_deref()
@@ -1990,6 +2001,7 @@ mod tests {
             guest_agent_path: "tools/agent.exe".into(),
             scenario_id: SCENARIO_ID.into(),
             guest_agent_sha256: "a".repeat(64),
+            guest_agent_control_source_sha256: None,
             launch_profile_path: None,
             launch_profile_sha256: None,
         };
@@ -2005,6 +2017,7 @@ mod tests {
             guest_agent_path: "tools/agent.exe".into(),
             scenario_id: SCENARIO_ID.into(),
             guest_agent_sha256: "0".repeat(64),
+            guest_agent_control_source_sha256: None,
             launch_profile_path: Some("profile.json".into()),
             launch_profile_sha256: None,
         };
@@ -2020,6 +2033,7 @@ mod tests {
             guest_agent_path: "tools/agent.exe".into(),
             scenario_id: BAMBU_SCENARIO_ID.into(),
             guest_agent_sha256: "b".repeat(64),
+            guest_agent_control_source_sha256: None,
             launch_profile_path: Some("profile.json".into()),
             launch_profile_sha256: Some("c".repeat(64)),
         };
@@ -2047,6 +2061,7 @@ mod tests {
             guest_agent_path: "tools/agent.exe".into(),
             scenario_id: SCENARIO_ID.into(),
             guest_agent_sha256: "b".repeat(64),
+            guest_agent_control_source_sha256: None,
             launch_profile_path: None,
             launch_profile_sha256: None,
         };

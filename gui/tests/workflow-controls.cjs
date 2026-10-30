@@ -168,3 +168,56 @@ test("Bambu mode selects the EXE path and dispatches the fixed workflow without 
   assert.equal(element("chooseDestination").disabled, true);
   assert.equal(element("export").disabled, true);
 });
+
+
+test("paired workflow drops installer inputs, fences stale polling and serializes explicit cancellation/recovery", async () => {
+  const elements = new Map(), calls = [], intervals = [];
+  const element = id => {
+    if (!elements.has(id)) elements.set(id, { value:"", textContent:"", disabled:false, hidden:false, handlers:{},
+      classList:{toggle(name,on){if(name==="hidden") element(id).hidden=on;}}, scrollIntoView(){}, focus(){},
+      addEventListener(event,handler){this.handlers[event]=handler;} });
+    return elements.get(id);
+  };
+  let snapshot={phase:"idle",workflowId:null}, heldPoll=null, releaseAction=null;
+  const context={document:{getElementById:element,querySelector:()=>({value:"paired"}),querySelectorAll:()=>[]},
+    window:{AiwDisplay:display,__TAURI__:{core:{invoke:async(name,args)=>{
+      calls.push({name,args});
+      if(name==="get_state") { if(heldPoll) { const held=heldPoll; heldPoll=null; return held.promise; } return snapshot; }
+      if(name==="prepare_workflow") { await new Promise(resolve=>releaseAction=resolve); snapshot={phase:"preparing",workflowId:"owned-pair"}; }
+      if(name==="cancel_paired_workflow") snapshot={phase:"running",workflowId:"owned-pair",pairedCancelRequested:true};
+      if(name==="recover_paired_workflow") snapshot={phase:"running",workflowId:"owned-pair",pairedRecoveryRequired:true};
+    }}}},setInterval:callback=>intervals.push(callback)};
+  vm.runInNewContext(fs.readFileSync(require.resolve("../ui/app.js"),"utf8"),context);
+  await new Promise(setImmediate);
+  assert.equal(element("installerField").hidden,true);
+  element("installer").value="must not enter paired request";
+  element("documentInput").value="must not enter paired request";
+  let releasePoll;
+  heldPoll={promise:new Promise(resolve=>releasePoll=resolve)};
+  const poll=intervals.find(callback=>callback.name==="poll");
+  const oldPoll=poll();
+  const preparing=element("prepare").handlers.click();
+  await element("prepare").handlers.click();
+  assert.equal(calls.filter(c=>c.name==="prepare_workflow").length,1);
+  const request=calls.find(c=>c.name==="prepare_workflow").args;
+  assert.equal(request.installer,""); assert.equal(request.documentInput,null);
+  releasePoll({phase:"completed",workflowId:"stale",result:{outcome:"verified",canExportDocument:true}});
+  await oldPoll;
+  assert.equal(element("export").disabled,true);
+  releaseAction(); await preparing;
+  assert.equal(calls.some(c=>c.name==="start_approved_workflow"),false);
+  snapshot={phase:"running",workflowId:"owned-pair",pairedCancelAvailable:true}; await poll();
+  element("cancel").handlers.click(); element("cancel").handlers.click(); await new Promise(setImmediate);
+  assert.equal(calls.filter(c=>c.name==="cancel_paired_workflow").length,1);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.find(c=>c.name==="cancel_paired_workflow").args)),{workflowId:"owned-pair"});
+  assert.match(element("cancel").textContent,/waiting for cleanup/);
+  snapshot={phase:"failed",workflowId:"owned-pair",pairedRecoveryRequired:true}; await poll();
+  assert.equal(element("prepare").disabled,true);
+  assert.equal(element("recoverPaired").disabled,false);
+  assert.equal(calls.some(c=>c.name==="recover_paired_workflow"),false);
+  element("recoverPaired").handlers.click(); element("recoverPaired").handlers.click(); await new Promise(setImmediate);
+  assert.equal(calls.filter(c=>c.name==="recover_paired_workflow").length,1);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.find(c=>c.name==="recover_paired_workflow").args)),{workflowId:"owned-pair"});
+  snapshot={phase:"completed",workflowId:"owned-pair",pairedCancelRequested:false,pairedRecoveryRequired:false}; await poll();
+  assert.equal(element("cancel").hidden,true); assert.equal(element("recoverPaired").hidden,true);
+});

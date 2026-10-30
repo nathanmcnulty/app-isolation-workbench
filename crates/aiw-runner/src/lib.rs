@@ -410,7 +410,7 @@ pub fn observe_wsb_session_status(layout: &RunLayout) -> Result<WsbSessionStatus
             "session transaction is not covered by committed approved run state".to_owned(),
         ));
     }
-    let plan = layout.read_plan().map_err(journal_error)?;
+    let plan = layout.retained_snapshot().map_err(journal_error)?.plan;
     let plan_hash = plan.hash().map_err(journal_error)?;
     let provider_bindings: Vec<(&str, &WorkspaceBindingEvidence, &str)> = plan
         .actions
@@ -1257,6 +1257,11 @@ pub fn recover_windows_sandbox(layout: &RunLayout) -> Result<WsbRecoveryResult, 
         acquire_windows_sandbox_recovery,
     };
 
+    // Synthetic rehearsals never establish authority over a real worker.
+    let retained = layout.retained_snapshot().map_err(journal_error)?;
+    if retained.plan.actions.iter().any(|action|matches!(action,PlannedAction::ExecuteWindowsSandboxPairedControls{profile,..} if profile.origin==aiw_probe::ControlEvidenceOrigin::SyntheticRehearsal)) {
+        return Err(RunnerError::ApprovalBinding);
+    }
     let inspection = session::inspect_for_recovery(layout)?;
     let transaction = inspection.transaction.clone().ok_or_else(|| {
         RunnerError::Transaction("no provider session transaction exists".to_owned())
@@ -1427,7 +1432,7 @@ fn recovery_workspace(
     layout: &RunLayout,
     transaction: &SessionTransaction,
 ) -> Result<WorkspaceBindingEvidence, RunnerError> {
-    let plan = layout.read_plan().map_err(journal_error)?;
+    let plan = layout.retained_snapshot().map_err(journal_error)?.plan;
     if plan.hash().map_err(journal_error)? != transaction.plan_hash
         || plan.run_id != transaction.run_id
         || plan.project_revision_hash != transaction.project_revision_hash
@@ -1447,6 +1452,12 @@ fn recovery_workspace(
                 ..
             }
             | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
+                provider_sha256,
+                workspace,
+                workspace_identity_sha256,
+                ..
+            }
+            | PlannedAction::ExecuteWindowsSandboxPairedControls {
                 provider_sha256,
                 workspace,
                 workspace_identity_sha256,
@@ -1480,6 +1491,29 @@ fn recovery_workspace(
     {
         return Err(RunnerError::Transaction(
             "session transaction recovery binding differs from the run plan".to_owned(),
+        ));
+    }
+    let run_dir = layout.run_dir();
+    let selected_root = run_dir
+        .parent()
+        .and_then(Path::parent)
+        .ok_or(RunnerError::Drift)?;
+    if !same_windows_path(selected_root, Path::new(&workspace.root.final_path)) {
+        return Err(RunnerError::Transaction(
+            "selected layout is not the bound recovery workspace".into(),
+        ));
+    }
+    ensure_no_reparse_components(selected_root)?;
+    if !same_windows_path(
+        selected_root
+            .canonicalize()
+            .map_err(|_| RunnerError::Drift)?,
+        Path::new(&workspace.root.final_path)
+            .canonicalize()
+            .map_err(|_| RunnerError::Drift)?,
+    ) {
+        return Err(RunnerError::Transaction(
+            "selected run layout differs from its original recovery workspace".into(),
         ));
     }
     Ok((*workspace).clone())

@@ -9,6 +9,7 @@ param(
     [string]$Product = 'NotepadPlusPlus',
     [string]$GuestAgent,
     [string]$GuestAgentSha256,
+    [string]$GuestAgentControlSourceSha256,
     [string]$LaunchProfile,
     [string]$LaunchProfileSha256,
     [string]$ArchivePath
@@ -237,6 +238,17 @@ try {
     } else {
         $manifest.PSObject.Properties.Remove('launchProfilePath')
         $manifest.PSObject.Properties.Remove('launchProfileSha256')
+    }
+    if ($GuestAgentControlSourceSha256) {
+        Assert-LowerSha256 $GuestAgentControlSourceSha256 'GuestAgentControlSourceSha256'
+        if (-not $GuestAgent -or -not $GuestAgentSha256) { throw 'Control-source enrollment requires an explicit independently retained guest-agent hash' }
+        $controlIdentityText = & $cliSource provider paired-control-identity | Out-String
+        if ($LASTEXITCODE -ne 0) { throw 'Read-only fixed control-source identity failed' }
+        $controlIdentity = $controlIdentityText | ConvertFrom-Json
+        if ($controlIdentity.sourceSha256 -cne $GuestAgentControlSourceSha256) { throw 'Declared guest control-source identity differs from this CLI source; no control was executed' }
+        $manifest | Add-Member -NotePropertyName guestAgentControlSourceSha256 -NotePropertyValue $GuestAgentControlSourceSha256 -Force
+    } else {
+        $manifest.PSObject.Properties.Remove('guestAgentControlSourceSha256')
     }
     Write-Utf8NoBom (Join-Path $packagedProductRoot 'manifest.json') ($manifest | ConvertTo-Json -Depth 20)
 

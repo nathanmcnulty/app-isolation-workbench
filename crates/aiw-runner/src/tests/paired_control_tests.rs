@@ -293,6 +293,10 @@ fn protected_pair_rehearsal(unknown_cleanup: bool) {
     layout
         .create_or_verify_pending_wsb_import_bound(&held, &artifacts.run_plan, &receipt)
         .unwrap();
+    assert!(matches!(
+        crate::recover_windows_sandbox(&layout),
+        Err(RunnerError::ApprovalBinding)
+    ));
     let unstarted = crate::report_windows_sandbox_paired_controls(
         &workspace,
         "w1-run",
@@ -779,4 +783,50 @@ fn paired_historical_source_can_recover_but_cannot_start_again() {
             .all(|args| args.first().is_none_or(|s| s != "start"))
     );
     assert!(!request_path(&start).exists());
+}
+
+#[test]
+fn paired_recovery_binding_rejects_copied_layout_and_changed_provider_without_dispatch() {
+    let (_root, layout, start, ready) = setup_pair();
+    let context = prepare_execution(&start, &ready, &layout, false).unwrap();
+    let store = TransactionStore::new(&layout, context.binding);
+    store.create("synthetic-binding-test").unwrap();
+    let transaction = store.load_current().unwrap().unwrap();
+    assert_eq!(
+        recovery_workspace(&layout, &transaction).unwrap(),
+        start.workspace
+    );
+    let other = Root::new();
+    let copied = RunLayout::new(&other.0, "w1-run").unwrap();
+    fs::create_dir_all(copied.run_dir().join("journal-heads")).unwrap();
+    for leaf in [
+        "plan.json",
+        "approval.json",
+        "events.jsonl",
+        "wsb-planning-import.json",
+    ] {
+        let source = layout.run_dir().join(leaf);
+        if source.exists() {
+            fs::copy(source, copied.run_dir().join(leaf)).unwrap();
+        }
+    }
+    for entry in fs::read_dir(layout.run_dir().join("journal-heads")).unwrap() {
+        let entry = entry.unwrap();
+        fs::copy(
+            entry.path(),
+            copied
+                .run_dir()
+                .join("journal-heads")
+                .join(entry.file_name()),
+        )
+        .unwrap();
+    }
+    assert!(copied.retained_snapshot().is_ok());
+    assert!(recovery_workspace(&copied, &transaction).is_err());
+    let mut changed = transaction.clone();
+    changed.provider_sha256 = "f".repeat(64);
+    assert!(recovery_workspace(&layout, &changed).is_err());
+    let mut changed = transaction;
+    changed.workspace_identity_sha256 = "f".repeat(64);
+    assert!(recovery_workspace(&layout, &changed).is_err());
 }

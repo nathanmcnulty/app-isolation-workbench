@@ -12,6 +12,8 @@ fn main() {
             "submit_approval",
             "start_approved_workflow",
             "cancel_pending",
+            "cancel_paired_workflow",
+            "recover_paired_workflow",
             "export_document",
             "load_retained_report",
             "recover_msix_worker",

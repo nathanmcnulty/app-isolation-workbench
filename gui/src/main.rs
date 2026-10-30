@@ -48,6 +48,16 @@ mod desktop {
         workflow_name: String,
     }
     impl ApprovalGate for GuiGate {
+        fn paired_prepared(&self, run: &service::paired::PairedRun) -> Result<()> {
+            self.controller
+                .register_paired(&self.id, &run.plan_sha256, serde_json::to_string(run)?)
+                .map_err(anyhow::Error::msg)
+        }
+        fn paired_finished(&self, run: &service::paired::PairedRun, recovery_required: bool) {
+            self.controller
+                .settle_paired(&self.id, &run.plan_sha256, recovery_required);
+            self.controller.progress(&self.id,if recovery_required {"Exact worker cleanup is unresolved. Preserve the run and use its separate recovery action."} else {"Worker operation settled; reading the retained fixed-control evidence."});
+        }
         fn progress(&self, message: &str) {
             self.controller.progress(&self.id, message);
         }
@@ -301,16 +311,23 @@ mod desktop {
     ) -> std::result::Result<(), String> {
         if !matches!(
             kind.as_str(),
-            "assessment" | "interactive" | "bambu" | "msix"
+            "assessment" | "interactive" | "bambu" | "msix" | "paired"
         ) {
             return Err("Unsupported workflow.".into());
         }
-        if (package.is_none() && installer.is_empty())
+        if (kind != "paired" && package.is_none() && installer.is_empty())
             || evidence.is_empty()
             || operator_identity.trim().is_empty()
         {
             return Err(
                 "Choose the supported installer, evidence folder, and operator identity.".into(),
+            );
+        }
+        if kind == "paired"
+            && (!installer.is_empty() || document_input.is_some() || package.is_some())
+        {
+            return Err(
+                "Fixed paired controls accept no installer, document or executable input.".into(),
             );
         }
         if kind == "interactive" && document_input.as_deref().is_none_or(str::is_empty) {
@@ -321,7 +338,9 @@ mod desktop {
         let gate = GuiGate {
             controller: c.clone(),
             id: id.clone(),
-            workflow_name: if kind == "msix" {
+            workflow_name: if kind == "paired" {
+                "Fixed ordinary-user / classic AppContainer controls"
+            } else if kind == "msix" {
                 "Signed Notepad++ MSIX on VM107"
             } else if kind == "interactive" {
                 "Interactive Notepad++ document transfer"
@@ -333,6 +352,41 @@ mod desktop {
             .into(),
         };
         spawn_work(app, c, id, move || {
+            if kind == "paired" {
+                let result = service::paired::assess_with_gate(
+                    Path::new(&evidence),
+                    &operator_identity,
+                    &gate,
+                )?;
+                let summary=result.report.as_ref().map(service::paired::summary).unwrap_or_else(|| if result.start_requested {"No verified paired result is available. Preserve evidence; inspect exact session status before retrying.".into()} else {"Preparation retained; explicit approval/Start was cancelled. No provider was executed.".into()});
+                return Ok((
+                    if result.report.as_ref().is_some_and(|r| {
+                        r.recorded_outcome == Some(aiw_orchestrator::RunOutcome::Cancelled)
+                    }) && !result.recovery_required
+                    {
+                        Phase::Cancelled
+                    } else if result.recovery_required || result.operation_failed {
+                        Phase::Failed
+                    } else if result.start_requested {
+                        Phase::Completed
+                    } else {
+                        Phase::Cancelled
+                    },
+                    ResultView {
+                        outcome: if result.start_requested {
+                            ResultOutcome::Incomplete
+                        } else {
+                            ResultOutcome::NotRun
+                        },
+                        run_id: result.run.run_id.clone(),
+                        workspace: path_text(&result.run.workspace)?,
+                        evidence_root: path_text(&result.run.evidence_root)?,
+                        summary: summary.clone(),
+                        can_export_document: false,
+                        report_markdown: summary,
+                    },
+                ));
+            }
             if kind == "msix" {
                 if package.is_some() {
                     anyhow::bail!("VM MSIX requires its distinct protected file intake")
@@ -546,6 +600,62 @@ mod desktop {
         c.cancel(&workflow_id)
     }
     #[tauri::command]
+    fn cancel_paired_workflow(
+        c: State<'_, Controller>,
+        workflow_id: String,
+    ) -> std::result::Result<(), String> {
+        let context = c.claim_paired_cancel(&workflow_id)?;
+        let result = (|| -> Result<()> {
+            let run: service::paired::PairedRun = serde_json::from_str(&context)?;
+            service::paired::request_cancellation(&run)
+        })();
+        if let Err(error) = result {
+            c.paired_cancel_failed(&workflow_id);
+            return Err(error.to_string());
+        }
+        c.progress(
+            &workflow_id,
+            "Cancellation recorded. The leased runner is cleaning only this exact owned session.",
+        );
+        Ok(())
+    }
+    #[tauri::command]
+    fn recover_paired_workflow(
+        app: tauri::AppHandle,
+        c: State<'_, Controller>,
+        workflow_id: String,
+    ) -> std::result::Result<(), String> {
+        let context = c.claim_paired_recovery(&workflow_id)?;
+        let controller = c.inner().clone();
+        let id = workflow_id.clone();
+        spawn_work(app, controller.clone(), workflow_id, move || {
+            let run: service::paired::PairedRun = serde_json::from_str(&context)?;
+            let needed = service::paired::needs_recovery(&run)?;
+            let operation = if needed {
+                service::paired::recover_owned(&run).map(|_| ())
+            } else {
+                Ok(())
+            };
+            let unresolved = service::paired::needs_recovery(&run).unwrap_or(true);
+            controller.settle_paired(&id, &run.plan_sha256, unresolved);
+            operation?;
+            let summary=service::paired::report(&run).as_ref().map(service::paired::summary).unwrap_or_else(|_|if needed { "Exact recovery completed; no assessment was replayed. Inspect Results for retained evidence.".into() } else { "Retained status requires no recovery; no provider was acquired and no assessment was replayed. Inspect Results for retained evidence.".into() });
+            Ok((
+                Phase::Completed,
+                ResultView {
+                    outcome: ResultOutcome::Incomplete,
+                    run_id: run.run_id.clone(),
+                    workspace: path_text(&run.workspace)?,
+                    evidence_root: path_text(&run.evidence_root)?,
+                    summary: summary.clone(),
+                    can_export_document: false,
+                    report_markdown: summary,
+                },
+            ))
+        });
+        Ok(())
+    }
+    #[tauri::command]
     fn export_document(
         app: tauri::AppHandle,
         c: State<'_, Controller>,
@@ -640,7 +750,7 @@ mod desktop {
     ) -> std::result::Result<(), String> {
         if !matches!(
             kind.as_str(),
-            "assessment" | "interactive" | "bambu" | "msix"
+            "assessment" | "interactive" | "bambu" | "msix" | "paired"
         ) || workspace.is_empty()
             || run_id.is_empty()
         {
@@ -648,7 +758,34 @@ mod desktop {
         }
         let c = c.inner().clone();
         let id = c.begin()?;
+        let paired_controller = c.clone();
+        let paired_id = id.clone();
         spawn_work(app, c, id, move || {
+            if kind == "paired" {
+                let run = service::paired::open_retained(Path::new(&workspace), &run_id)?;
+                paired_controller
+                    .register_paired(&paired_id, &run.plan_sha256, serde_json::to_string(&run)?)
+                    .map_err(anyhow::Error::msg)?;
+                paired_controller.settle_paired(
+                    &paired_id,
+                    &run.plan_sha256,
+                    service::paired::native_recovery_required(&run).unwrap_or(true),
+                );
+                let report = service::paired::report(&run)?;
+                let summary = service::paired::summary(&report);
+                return Ok((
+                    Phase::Completed,
+                    ResultView {
+                        outcome: ResultOutcome::Incomplete,
+                        run_id,
+                        workspace,
+                        evidence_root: path_text(&run.evidence_root)?,
+                        summary: summary.clone(),
+                        can_export_document: false,
+                        report_markdown: summary,
+                    },
+                ));
+            }
             if kind == "msix" {
                 let report = service::msix::read_report(Path::new(&workspace), &run_id)?;
                 let summary = report["summary"]
@@ -718,6 +855,8 @@ mod desktop {
                 submit_approval,
                 start_approved_workflow,
                 cancel_pending,
+                cancel_paired_workflow,
+                recover_paired_workflow,
                 export_document,
                 load_retained_report,
                 recover_msix_worker

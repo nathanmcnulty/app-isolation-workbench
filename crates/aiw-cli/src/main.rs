@@ -795,6 +795,8 @@ struct ProviderArgs {
 
 #[derive(Debug, Subcommand)]
 enum ProviderCommand {
+    /// Print only the compiled fixed-control revision/policy identity. No host probe or execution.
+    PairedControlIdentity,
     /// Compile the fixed Bambu STL-to-3MF scenario for separate preparation and approval.
     CompileBambuExportScenario {
         #[arg(long)]
@@ -2718,6 +2720,9 @@ fn run(command: Command) -> Result<()> {
             }
         },
         Command::Provider(args) => match args.command {
+            ProviderCommand::PairedControlIdentity => write_json(
+                &serde_json::json!({"schemaVersion":"aiw.dev/paired-control-source-identity/v0alpha1","revision":aiw_probe::PAIRED_CONTROL_REVISION,"sourceSha256":aiw_probe::paired_controls::paired_control_source_sha256(),"policy":"classicAppContainerNoCapabilitiesFixedChildOutputGrant"}),
+            ),
             ProviderCommand::CompileBambuExportScenario { project, scenario } => {
                 let loaded = read_project(&project)?;
                 let scenario = aiw_provider_wsb::compile_bambu_studio_export_scenario(
@@ -3742,6 +3747,23 @@ fn emit_error(envelope: &impl Serialize) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn paired_source_identity_is_closed_and_accepts_no_execution_arguments() {
+        use clap::Parser;
+        assert!(super::Cli::try_parse_from(["aiw", "provider", "paired-control-identity"]).is_ok());
+        for extra in ["--root", "--execute", "--provider", "--script"] {
+            assert!(
+                super::Cli::try_parse_from([
+                    "aiw",
+                    "provider",
+                    "paired-control-identity",
+                    extra,
+                    "untrusted"
+                ])
+                .is_err()
+            );
+        }
+    }
     #[test]
     fn document_export_keeps_json_default_and_accepts_summary() {
         let arguments = [

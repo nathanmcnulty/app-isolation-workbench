@@ -1,0 +1,46 @@
+schemaVersion: aiw.dev/v0alpha2
+kind: AppIsolationProject
+metadata:
+  name: aiw-fixed-paired-controls
+  displayName: Fixed ordinary-user and classic AppContainer controls
+  owner: aiw
+application:
+  type: exe
+  path: tools/aiw-guest-agent.exe
+  sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  entryPoints:
+    - id: fixed-control
+      path: aiw-control-fixture.exe
+  architecture: x64
+  mayReboot: false
+isolationIntent:
+  runtimeBoundary: windowsSandbox
+  network: blocked
+  allowClipboard: false
+  allowHostFileAccess: false
+  allowHostRegistryAccess: false
+  requireDescendantCoverage: true
+executionProviders:
+  - type: windowsSandbox
+    id: windows-sandbox
+    version: planning-placeholder
+    executableSha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+candidates:
+  - id: fixed-pair-worker
+    type: isolationSession
+    config:
+      type: windowsSandbox
+      providerId: windows-sandbox
+      network: blocked
+scenarios:
+  - id: fixed-file-registry-child-pair
+    description: The typed paired action alone executes the fixed file, registry and child cases; no installer or arbitrary application is executed.
+    required: true
+    steps:
+      - type: observeFile
+        path: Control/SharedCanary/canary.txt
+      - type: observeRegistry
+        key: HKLM/SOFTWARE/AIWControlCanary/Canary
+      - type: launch
+        entrypoint: fixed-control
+        arguments: [--mode, child]

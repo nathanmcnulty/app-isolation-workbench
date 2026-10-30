@@ -96,6 +96,9 @@ pub struct Snapshot {
     pub error: Option<ErrorView>,
     pub defaults: Defaults,
     pub close_refused: bool,
+    pub paired_cancel_available: bool,
+    pub paired_cancel_requested: bool,
+    pub paired_recovery_required: bool,
 }
 
 enum Pending {
@@ -109,6 +112,9 @@ struct Inner {
     cancelled: bool,
     closing: bool,
     worker_active: bool,
+    paired_settled: bool,
+    paired_recovering: bool,
+    paired_run: Option<(String, String)>, // plan hash and backend-created typed run JSON; never IPC input.
 }
 
 #[derive(Clone)]
@@ -127,12 +133,18 @@ impl Controller {
                 error: None,
                 defaults: Defaults { evidence },
                 close_refused: false,
+                paired_cancel_available: false,
+                paired_cancel_requested: false,
+                paired_recovery_required: false,
             },
             pending: None,
             package_snapshot: None,
             cancelled: false,
             closing: false,
             worker_active: false,
+            paired_settled: false,
+            paired_recovering: false,
+            paired_run: None,
         })))
     }
     pub fn snapshot(&self) -> Snapshot {
@@ -145,7 +157,7 @@ impl Controller {
     pub fn progress(&self, id: &str, message: &str) {
         if let Ok(mut inner) = self.0.lock()
             && inner.snapshot.workflow_id.as_deref() == Some(id)
-            && inner.snapshot.phase == Phase::Running
+            && matches!(inner.snapshot.phase, Phase::Preparing | Phase::Running)
         {
             inner.snapshot.progress = Some(message.chars().take(4096).collect());
         }
@@ -164,7 +176,11 @@ impl Controller {
     }
     fn begin_phase(&self, phase: Phase) -> Result<String, String> {
         let mut i = self.0.lock().map_err(|_| "controller unavailable")?;
-        if i.worker_active || i.snapshot.phase.busy() || i.closing {
+        if i.worker_active
+            || i.snapshot.phase.busy()
+            || i.closing
+            || i.snapshot.paired_recovery_required
+        {
             return Err("Wait for the current workflow to finish.".into());
         }
         let id = Uuid::new_v4().to_string();
@@ -179,6 +195,12 @@ impl Controller {
         i.snapshot.error = None;
         i.snapshot.close_refused = false;
         i.pending = None;
+        i.paired_settled = false;
+        i.paired_recovering = false;
+        i.paired_run = None;
+        i.snapshot.paired_cancel_available = false;
+        i.snapshot.paired_cancel_requested = false;
+        i.snapshot.paired_recovery_required = false;
         i.cancelled = false;
         i.worker_active = true;
         Ok(id)
@@ -196,6 +218,12 @@ impl Controller {
         if i.cancelled {
             let _ = tx.send(None);
             return Ok(rx);
+        }
+        if i.paired_run
+            .as_ref()
+            .is_some_and(|(hash, _)| hash != &review.plan_hash)
+        {
+            return Err("Review differs from the owned paired plan.".into());
         }
         review.challenge_id = Uuid::new_v4().to_string();
         i.snapshot.review = Some(review);
@@ -260,6 +288,11 @@ impl Controller {
             );
         }
         i.snapshot.phase = Phase::Running;
+        if i.paired_run.is_some() {
+            i.snapshot.paired_cancel_available = true;
+            // Cleared only by the backend's retained-state observation.
+            i.snapshot.paired_recovery_required = true;
+        }
         i.snapshot.start_challenge_id = None;
         Ok(())
     }
@@ -274,6 +307,114 @@ impl Controller {
         i.snapshot.review = None;
         i.snapshot.start_challenge_id = None;
         i.snapshot.error = Some(ErrorView { code: "AIW_DESKTOP_GATE_UNAVAILABLE".into(), summary: "The workflow worker is no longer available".into(), remediation: "Preserve the retained workspace. Inspect its exact status before retrying; no completed result is established.".into(), detail, run_id: None });
+    }
+    /// Called only by the backend service after immutable preparation/import.
+    pub fn register_paired(
+        &self,
+        id: &str,
+        plan_hash: &str,
+        run_json: String,
+    ) -> Result<(), String> {
+        if run_json.len() > 128 * 1024 {
+            return Err("Paired context exceeds its bound.".into());
+        }
+        let value: serde_json::Value =
+            serde_json::from_str(&run_json).map_err(|_| "Invalid paired context")?;
+        if run_json.len() > 128 * 1024
+            || value["schemaVersion"] != "aiw.dev/paired-workflow-run/v0alpha1"
+            || value["planSha256"].as_str() != Some(plan_hash)
+            || plan_hash.len() != 64
+            || !plan_hash
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return Err("Paired context binding rejected.".into());
+        }
+        let mut i = self.0.lock().map_err(|_| "controller unavailable")?;
+        if i.snapshot.workflow_id.as_deref() != Some(id)
+            || i.snapshot.phase != Phase::Preparing
+            || i.paired_run.is_some()
+        {
+            return Err("No matching preparing paired workflow.".into());
+        }
+        i.paired_run = Some((plan_hash.into(), run_json));
+        Ok(())
+    }
+    pub fn settle_paired(&self, id: &str, plan_hash: &str, recovery_required: bool) {
+        if let Ok(mut i) = self.0.lock()
+            && i.snapshot.workflow_id.as_deref() == Some(id)
+            && i.paired_run
+                .as_ref()
+                .is_some_and(|(hash, _)| hash == plan_hash)
+        {
+            i.paired_settled = true;
+            i.snapshot.paired_recovery_required = recovery_required;
+            i.snapshot.paired_cancel_available = false;
+            i.snapshot.paired_cancel_requested = false;
+        }
+    }
+    /// No path/session ID comes from the UI. Claiming is single-use per request.
+    pub fn claim_paired_cancel(&self, id: &str) -> Result<String, String> {
+        let mut i = self.0.lock().map_err(|_| "controller unavailable")?;
+        if i.snapshot.workflow_id.as_deref() != Some(id)
+            || i.snapshot.phase != Phase::Running
+            || !i.worker_active
+            || i.paired_settled
+            || i.paired_recovering
+            || !i.snapshot.paired_cancel_available
+            || i.snapshot.paired_cancel_requested
+        {
+            return Err("No cancellable owned paired run.".into());
+        }
+        let run = i
+            .paired_run
+            .as_ref()
+            .ok_or("Paired context unavailable")?
+            .1
+            .clone();
+        i.snapshot.paired_cancel_requested = true;
+        i.snapshot.paired_cancel_available = false;
+        Ok(run)
+    }
+    pub fn paired_cancel_failed(&self, id: &str) {
+        if let Ok(mut i) = self.0.lock()
+            && i.snapshot.workflow_id.as_deref() == Some(id)
+            && i.worker_active
+            && i.snapshot.phase == Phase::Running
+            && !i.paired_settled
+            && !i.paired_recovering
+        {
+            i.snapshot.paired_cancel_requested = false;
+            i.snapshot.paired_cancel_available = i.paired_run.is_some();
+        }
+    }
+    pub fn claim_paired_recovery(&self, id: &str) -> Result<String, String> {
+        let mut i = self.0.lock().map_err(|_| "controller unavailable")?;
+        if i.snapshot.workflow_id.as_deref() != Some(id)
+            || i.worker_active
+            || !i.snapshot.paired_recovery_required
+            || !matches!(
+                i.snapshot.phase,
+                Phase::Failed | Phase::Completed | Phase::Cancelled
+            )
+        {
+            return Err("No unresolved owned paired run is ready for recovery.".into());
+        }
+        let run = i
+            .paired_run
+            .as_ref()
+            .ok_or("Paired context unavailable")?
+            .1
+            .clone();
+        i.worker_active = true;
+        i.paired_recovering = true;
+        i.snapshot.paired_cancel_requested = false;
+        i.snapshot.phase = Phase::Running;
+        i.snapshot.paired_cancel_available = false;
+        i.snapshot.progress = Some(
+            "Reconciling only the retained exact paired session; no assessment is replayed.".into(),
+        );
+        Ok(run)
     }
     pub fn cancel(&self, id: &str) -> Result<(), String> {
         let mut i = self.0.lock().map_err(|_| "controller unavailable")?;
@@ -307,7 +448,7 @@ impl Controller {
     /// Returns true only when closing cannot abandon a worker or pending stage publication.
     pub fn request_close(&self) -> bool {
         let mut i = self.0.lock().expect("controller lock poisoned");
-        if !i.worker_active && !i.snapshot.phase.busy() {
+        if !i.worker_active && !i.snapshot.phase.busy() && !i.snapshot.paired_recovery_required {
             return true;
         }
         i.snapshot.close_refused = true;
@@ -339,15 +480,16 @@ impl Controller {
             i.snapshot = previous;
             i.worker_active = false;
             i.snapshot.close_refused = false;
-            return i.closing;
+            return i.closing && !i.snapshot.paired_recovery_required;
         }
         i.snapshot.phase = phase;
+        i.snapshot.paired_cancel_available = false;
         i.worker_active = false;
         i.snapshot.close_refused = false;
         i.snapshot.result = result;
         i.snapshot.error = error;
         i.snapshot.review = None;
-        i.closing
+        i.closing && !i.snapshot.paired_recovery_required
     }
     pub fn begin_export(&self) -> Result<(String, ResultView), String> {
         let mut i = self.0.lock().map_err(|_| "controller unavailable")?;
@@ -375,6 +517,94 @@ impl Controller {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn running_pair() -> (Controller, String) {
+        let c = Controller::new("test".into());
+        let id = c.begin().unwrap();
+        let hash = "a".repeat(64);
+        let context = serde_json::json!({"schemaVersion":"aiw.dev/paired-workflow-run/v0alpha1", "planSha256":hash}).to_string();
+        assert!(
+            c.register_paired("foreign", &hash, context.clone())
+                .is_err()
+        );
+        assert!(
+            c.register_paired(&id, &"b".repeat(64), context.clone())
+                .is_err()
+        );
+        c.register_paired(&id, &hash, context.clone()).unwrap();
+        assert!(c.register_paired(&id, &hash, context).is_err());
+        let mut wrong = review();
+        wrong.plan_hash = "b".repeat(64);
+        assert!(c.offer_review(&id, wrong).is_err());
+        let approval = c.offer_review(&id, review()).unwrap();
+        let r = c.snapshot().review.unwrap();
+        c.approve(&id, &r.challenge_id, &r.exact_confirmation)
+            .unwrap();
+        approval.recv().unwrap();
+        let start = c.offer_start(&id).unwrap();
+        c.start(&id, &c.snapshot().start_challenge_id.unwrap())
+            .unwrap();
+        assert!(start.recv().unwrap());
+        (c, id)
+    }
+
+    #[test]
+    fn paired_cancel_is_owned_single_use_and_stale_failures_cannot_reenable_it() {
+        let (c, id) = running_pair();
+        assert!(c.claim_paired_cancel("foreign").is_err());
+        assert!(c.claim_paired_cancel(&id).is_ok());
+        assert!(c.snapshot().paired_cancel_requested);
+        assert!(c.claim_paired_cancel(&id).is_err());
+        c.settle_paired("foreign", &"a".repeat(64), false);
+        assert!(c.snapshot().paired_cancel_requested);
+        c.settle_paired(&id, &"a".repeat(64), false);
+        c.paired_cancel_failed(&id);
+        assert!(!c.snapshot().paired_cancel_requested);
+        assert!(!c.snapshot().paired_cancel_available);
+        assert!(c.claim_paired_cancel(&id).is_err());
+        c.finish(&id, Phase::Completed, None, None);
+        assert!(c.claim_paired_recovery(&id).is_err());
+        assert!(c.request_close());
+    }
+
+    #[test]
+    fn paired_unresolved_cleanup_blocks_close_and_new_work_and_recovery_is_single_flight() {
+        let (c, id) = running_pair();
+        c.claim_paired_cancel(&id).unwrap();
+        c.settle_paired(&id, &"a".repeat(64), true);
+        c.finish(&id, Phase::Failed, None, None);
+        assert!(!c.request_close());
+        assert!(c.begin().is_err());
+        assert!(c.begin_packaging().is_err());
+        assert!(c.claim_paired_recovery("foreign").is_err());
+        assert!(c.claim_paired_recovery(&id).is_ok());
+        assert!(c.claim_paired_recovery(&id).is_err());
+        c.paired_cancel_failed(&id);
+        assert!(!c.snapshot().paired_cancel_available);
+        c.settle_paired(&id, &"a".repeat(64), true);
+        assert!(!c.finish(&id, Phase::Failed, None, None));
+        assert!(!c.request_close());
+        c.claim_paired_recovery(&id).unwrap();
+        c.settle_paired(&id, &"a".repeat(64), false);
+        assert!(c.finish(&id, Phase::Completed, None, None));
+        assert!(c.request_close());
+        assert!(c.begin().is_err()); // A previously requested close still owns completion.
+    }
+
+    #[test]
+    fn paired_registration_bounds_input_before_decoding() {
+        let c = Controller::new("test".into());
+        let id = c.begin().unwrap();
+        assert!(
+            c.register_paired(&id, &"a".repeat(64), " ".repeat(128 * 1024 + 1))
+                .is_err()
+        );
+        assert!(
+            c.register_paired(&id, &"a".repeat(64), "{}".into())
+                .is_err()
+        );
+        assert!(!c.snapshot().paired_recovery_required);
+    }
 
     #[test]
     fn packaging_operations_exclude_execution_and_guard_close_until_publication() {
