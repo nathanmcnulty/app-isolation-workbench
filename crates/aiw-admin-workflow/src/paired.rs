@@ -316,7 +316,7 @@ pub fn assess_with_gate(
         .revalidate()
         .map_err(|e| anyhow!("Bundled guest agent changed: {e}"))?;
     let workspace = PathBuf::from(&prepared.receipt.workspace.root.final_path);
-    aiw_runner::import_windows_sandbox_preparation(
+    aiw_runner::import_windows_sandbox_paired_preparation(
         &workspace,
         &project,
         &manifest.guest_agent_sha256,
@@ -344,7 +344,7 @@ pub fn assess_with_gate(
         run_id,
         workspace,
         evidence_root,
-        recipe: serde_json::json!({"schemaVersion":"aiw.dev/admin-paired-recipe/v0alpha1","executionIdentity":"Fixed ordinary-user versus classic AppContainer controls inside one offline Windows Sandbox. These are fixed primitives, not an application compatibility assessment.","dataLifetime":"Only the fixed canaries and child token output are used. Original evidence is retained locally. Results summary exports exclude raw tokens, account identifiers and private paths.","limits":"No general compatibility, effective host isolation, network or production acceptance claim. Outer worker cleanup and inner profile/job cleanup are separate.","profile":profile,"runPlan":prepared.run_plan}),
+        recipe: serde_json::json!({"schemaVersion":"aiw.dev/admin-paired-recipe/v0alpha1","executionIdentity":"Fixed ordinary-user versus classic AppContainer controls inside one offline Windows Sandbox. These are fixed primitives, not an application compatibility assessment.","dataLifetime":"Only the fixed canaries and child token output are used. Original evidence is retained locally. Results summary exports exclude raw tokens, account identifiers and private paths.","limits":"Runtime CLI protocol, Sandbox feature readiness and current session availability are UNMEASURED during preparation. They are required and rechecked only after this exact approval and separate Start. No general compatibility, effective host isolation, network or production acceptance claim. Outer worker cleanup and inner profile/job cleanup are separate.","providerChecks":{"runtime":"requiredAtStartNotObserved","requiredProtocol":prepared.receipt.provider_protocol},"profile":profile,"runPlan":prepared.run_plan}),
         plan: prepared.run_plan,
         proposed_approval: ApprovalRecord::for_plan(
             &run.validate()?.read_plan()?,

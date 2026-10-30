@@ -163,6 +163,9 @@ pub struct WsbPreparationReceipt {
     pub provider_catalog: CatalogTrustIdentity,
     pub provider_file_identity: WindowsFileIdentity,
     pub provider_protocol: WindowsSandboxCliProtocol,
+    /// For new static paired receipts this is required protocol, not an observation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_protocol_observation: Option<ProviderProtocolObservation>,
     pub guest_agent: BinaryIdentity,
     pub wsb_plan_relative_path: String,
     pub wsb_plan_sha256: String,
@@ -177,6 +180,12 @@ pub struct WsbPreparationReceipt {
     pub bambu: Option<WsbBambuApplication>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paired_controls: Option<WsbPairedControls>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ProviderProtocolObservation {
+    RequiredAtStartNotObserved,
 }
 
 #[derive(Debug, Clone, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -383,7 +392,10 @@ impl WsbPreparationReceipt {
         if let Some(os) = &self.host_os_version {
             os.validate().map_err(WsbPreparationError::Contract)?;
         }
-        let expected_schema = if self.paired_controls.is_some() {
+        let deferred = self.provider_protocol_observation.is_some();
+        let expected_schema = if self.paired_controls.is_some() && deferred {
+            paired::PAIRED_STATIC_PREPARATION_SCHEMA
+        } else if self.paired_controls.is_some() {
             paired::PAIRED_PREPARATION_SCHEMA
         } else if self.bambu.is_some() {
             WSB_BAMBU_PREPARATION_RECEIPT_SCHEMA_VERSION
@@ -426,7 +438,13 @@ impl WsbPreparationReceipt {
             || self.run_id.is_empty()
             || self.created_at.is_empty()
             || self.project_id.is_empty()
-            || self.readiness_schema_version != READINESS_SCHEMA
+            || self.readiness_schema_version
+                != if deferred {
+                    aiw_probe::WINDOWS_SANDBOX_STATIC_IDENTITY_SCHEMA
+                } else {
+                    READINESS_SCHEMA
+                }
+            || (deferred && self.paired_controls.is_none())
             || self.wsb_plan_relative_path != WSB_PLAN_FILE
             || self.run_plan_relative_path != RUN_PLAN_FILE
             || !self.approval_required
@@ -467,7 +485,11 @@ impl WsbPreparationReceipt {
         }
         if canonical_hash(&self.workspace)? != self.workspace_identity_sha256
             || self.provider.signature_status != ReadinessState::Available
-            || self.provider.version.as_deref() != Some(PINNED_CLI_VERSION)
+            || if deferred {
+                self.provider.version.is_some()
+            } else {
+                self.provider.version.as_deref() != Some(PINNED_CLI_VERSION)
+            }
             || self.provider_package.architecture != "x64"
             || self.provider_package.signature_kind != "store"
             || !self.provider_package.status_ok
@@ -707,8 +729,40 @@ pub fn build_wsb_preparation(
     guest_agent: &BinaryIdentity,
     created_at: &str,
 ) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
-    validate_request_contract(run_id, project, created_at)?;
     let trusted = require_readiness(readiness)?;
+    let protocol = readiness
+        .cli_protocol
+        .as_ref()
+        .ok_or_else(|| WsbPreparationError::Readiness("CLI protocol is absent".into()))?;
+    let artifacts = build_preparation_identity(
+        run_id,
+        project,
+        workspace,
+        guest_agent,
+        created_at,
+        trusted,
+        &readiness.schema_version,
+        readiness.os_version.as_ref(),
+        protocol,
+        false,
+    )?;
+    artifacts.validate()?;
+    Ok(artifacts)
+}
+#[allow(clippy::too_many_arguments)]
+fn build_preparation_identity(
+    run_id: &str,
+    project: &Project,
+    workspace: &WorkspaceBindingEvidence,
+    guest_agent: &BinaryIdentity,
+    created_at: &str,
+    trusted: TrustedReadiness<'_>,
+    identity_schema: &str,
+    os: Option<&aiw_probe::WindowsVersionObservation>,
+    protocol: &WindowsSandboxCliProtocol,
+    deferred: bool,
+) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
+    validate_request_contract(run_id, project, created_at)?;
     let provider = trusted.provider.clone();
     workspace
         .validate()
@@ -770,10 +824,6 @@ pub fn build_wsb_preparation(
     let run_plan_sha256 = run_plan
         .hash()
         .map_err(|error| WsbPreparationError::Contract(error.to_string()))?;
-    let provider_protocol = readiness
-        .cli_protocol
-        .clone()
-        .ok_or_else(|| WsbPreparationError::Readiness("CLI protocol is absent".to_owned()))?;
     let receipt = WsbPreparationReceipt {
         schema_version: WSB_PREPARATION_RECEIPT_SCHEMA_VERSION.to_owned(),
         run_id: run_id.to_owned(),
@@ -783,13 +833,15 @@ pub fn build_wsb_preparation(
         project_revision_sha256,
         workspace: workspace.clone(),
         workspace_identity_sha256,
-        readiness_schema_version: readiness.schema_version.clone(),
-        host_os_version: readiness.os_version.clone(),
+        readiness_schema_version: identity_schema.into(),
+        host_os_version: os.cloned(),
         provider,
         provider_package: trusted.package.clone(),
         provider_catalog: trusted.catalog.clone(),
         provider_file_identity: trusted.file_identity.clone(),
-        provider_protocol,
+        provider_protocol: protocol.clone(),
+        provider_protocol_observation: deferred
+            .then_some(ProviderProtocolObservation::RequiredAtStartNotObserved),
         guest_agent: guest_agent.clone(),
         wsb_plan_relative_path: WSB_PLAN_FILE.to_owned(),
         wsb_plan_sha256,
@@ -807,7 +859,6 @@ pub fn build_wsb_preparation(
         wsb_plan,
         receipt,
     };
-    artifacts.validate()?;
     Ok(artifacts)
 }
 
@@ -1052,10 +1103,102 @@ pub(crate) fn require_readiness(
     })
 }
 
+fn require_static_identity(
+    identity: &aiw_probe::WindowsSandboxStaticIdentity,
+) -> Result<TrustedReadiness<'_>, WsbPreparationError> {
+    identity
+        .os_version
+        .validate()
+        .map_err(WsbPreparationError::Contract)?;
+    if identity.schema_version != aiw_probe::WINDOWS_SANDBOX_STATIC_IDENTITY_SCHEMA
+        || identity.process_architecture != "x86_64"
+        || identity.os_version.build < 26100
+        || identity.virtualization != ReadinessState::Available
+        || identity.provider.version.is_some()
+        || identity.provider.signature_status != ReadinessState::Available
+        || identity.provider.size_bytes == 0
+        || !identity
+            .provider
+            .canonical_path
+            .to_ascii_lowercase()
+            .ends_with("\\wsb.exe")
+        || identity.package.architecture != "x64"
+        || identity.package.signature_kind != "store"
+        || !identity.package.status_ok
+        || identity.catalog.verification_status != ReadinessState::Available
+        || normalized_windows_path(&identity.provider.canonical_path)
+            != normalized_windows_path(&identity.file_identity.final_path)
+    {
+        return Err(WsbPreparationError::Readiness(
+            "Static provider identity is not trusted; runtime checks remain deferred".into(),
+        ));
+    }
+    require_hash(&identity.provider.sha256)?;
+    require_hash(&identity.catalog.catalog_sha256)?;
+    Ok(TrustedReadiness {
+        provider: &identity.provider,
+        package: &identity.package,
+        catalog: &identity.catalog,
+        file_identity: &identity.file_identity,
+    })
+}
+fn static_identity_matches_receipt(
+    receipt: &WsbPreparationReceipt,
+    identity: &aiw_probe::WindowsSandboxStaticIdentity,
+) -> Result<(), WsbPreparationError> {
+    let trusted = require_static_identity(identity)?;
+    let mut recorded = receipt.provider.clone();
+    recorded.version = None;
+    if trusted.provider != &recorded
+        || trusted.package != &receipt.provider_package
+        || trusted.catalog != &receipt.provider_catalog
+        || trusted.file_identity != &receipt.provider_file_identity
+    {
+        return Err(WsbPreparationError::Readiness(
+            "Static provider identity drifted since preparation".into(),
+        ));
+    }
+    receipt.verify_host_os_version(Some(&identity.os_version))
+}
+pub(crate) fn runtime_identity_matches_receipt(
+    receipt: &WsbPreparationReceipt,
+    readiness: &WindowsSandboxReadiness,
+) -> Result<(), WsbPreparationError> {
+    let trusted = require_readiness(readiness)?;
+    if readiness.sandbox_feature != ReadinessState::Available
+        || readiness.virtualization != ReadinessState::Available
+        || readiness.process_architecture != "x86_64"
+    {
+        return Err(WsbPreparationError::Readiness(
+            "Runtime feature, virtualization or architecture is unavailable".into(),
+        ));
+    }
+    let mut expected = receipt.provider.clone();
+    if receipt.provider_protocol_observation.is_some() {
+        expected.version = Some(PINNED_CLI_VERSION.into());
+    }
+    if trusted.provider != &expected
+        || trusted.package != &receipt.provider_package
+        || trusted.catalog != &receipt.provider_catalog
+        || trusted.file_identity != &receipt.provider_file_identity
+        || readiness.cli_protocol.as_ref() != Some(&receipt.provider_protocol)
+    {
+        return Err(WsbPreparationError::Readiness(
+            "Runtime provider identity/protocol drifted since approval".into(),
+        ));
+    }
+    receipt.verify_host_os_version(readiness.os_version.as_ref())
+}
+
 #[cfg(windows)]
 pub(crate) fn require_current_readiness_matches_receipt(
     receipt: &WsbPreparationReceipt,
 ) -> Result<(), WsbPreparationError> {
+    if receipt.paired_controls.is_some() {
+        let identity = aiw_windows_platform::inspect_windows_sandbox_static()
+            .map_err(WsbPreparationError::Readiness)?;
+        return static_identity_matches_receipt(receipt, &identity);
+    }
     let readiness = aiw_windows_platform::assess_windows_sandbox();
     let trusted = require_readiness(&readiness)?;
     if trusted.provider != &receipt.provider
@@ -1678,6 +1821,31 @@ impl HeldVerifiedWsbPreparation {
 }
 
 #[cfg(windows)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ProviderInspectionMode {
+    LegacyByProfile,
+    StaticOnly,
+    PairedStaticOnly,
+}
+
+#[cfg(windows)]
+trait PreparationProviderInspector {
+    fn static_identity(&self) -> Result<aiw_probe::WindowsSandboxStaticIdentity, String>;
+    fn runtime_readiness(&self) -> WindowsSandboxReadiness;
+}
+#[cfg(windows)]
+struct NativePreparationProviderInspector;
+#[cfg(windows)]
+impl PreparationProviderInspector for NativePreparationProviderInspector {
+    fn static_identity(&self) -> Result<aiw_probe::WindowsSandboxStaticIdentity, String> {
+        aiw_windows_platform::inspect_windows_sandbox_static()
+    }
+    fn runtime_readiness(&self) -> WindowsSandboxReadiness {
+        aiw_windows_platform::assess_windows_sandbox()
+    }
+}
+
+#[cfg(windows)]
 pub(crate) fn open_verified_windows_sandbox_preparation(
     workspace_root: &Path,
     project: &Project,
@@ -1685,11 +1853,52 @@ pub(crate) fn open_verified_windows_sandbox_preparation(
     allow_imported: bool,
     allow_revoking: bool,
 ) -> Result<HeldVerifiedWsbPreparation, WsbPreparationError> {
-    use aiw_windows_platform::{HeldRunWorkspace, assess_windows_sandbox};
+    open_verified_preparation_with_inspector(
+        workspace_root,
+        project,
+        expected_guest_agent_sha256,
+        allow_imported,
+        allow_revoking,
+        ProviderInspectionMode::LegacyByProfile,
+        &NativePreparationProviderInspector,
+    )
+}
+#[cfg(windows)]
+pub(crate) fn open_preparation_for_start(
+    workspace_root: &Path,
+    project: &Project,
+    expected_guest_agent_sha256: &str,
+) -> Result<HeldVerifiedWsbPreparation, WsbPreparationError> {
+    open_verified_preparation_with_inspector(
+        workspace_root,
+        project,
+        expected_guest_agent_sha256,
+        true,
+        false,
+        ProviderInspectionMode::StaticOnly,
+        &NativePreparationProviderInspector,
+    )
+}
+#[cfg(windows)]
+fn open_verified_preparation_with_inspector(
+    workspace_root: &Path,
+    project: &Project,
+    expected_guest_agent_sha256: &str,
+    allow_imported: bool,
+    allow_revoking: bool,
+    mode: ProviderInspectionMode,
+    inspector: &dyn PreparationProviderInspector,
+) -> Result<HeldVerifiedWsbPreparation, WsbPreparationError> {
+    use aiw_windows_platform::HeldRunWorkspace;
 
     let mut receipt_file = open_bundle_file(&workspace_root.join(RECEIPT_FILE))?;
     let receipt: WsbPreparationReceipt = read_json_bounded(&mut receipt_file)?;
     receipt.validate()?;
+    if mode == ProviderInspectionMode::PairedStaticOnly && receipt.paired_controls.is_none() {
+        return Err(WsbPreparationError::Contract(
+            "This operation requires the fixed paired profile".into(),
+        ));
+    }
     if allow_revoking
         && (receipt.msi.is_some() || receipt.bambu.is_some() || receipt.paired_controls.is_some())
     {
@@ -1878,17 +2087,25 @@ pub(crate) fn open_verified_windows_sandbox_preparation(
         )?;
     }
 
-    let readiness = assess_windows_sandbox();
-    let trusted = require_readiness(&readiness)?;
-    if trusted.provider != &observed.receipt.provider
-        || trusted.package != &observed.receipt.provider_package
-        || trusted.catalog != &observed.receipt.provider_catalog
-        || trusted.file_identity != &observed.receipt.provider_file_identity
-        || readiness.cli_protocol.as_ref() != Some(&observed.receipt.provider_protocol)
+    if mode != ProviderInspectionMode::LegacyByProfile || observed.receipt.paired_controls.is_some()
     {
-        return Err(WsbPreparationError::Readiness(
-            "provider identity drifted since preparation".to_owned(),
-        ));
+        let identity = inspector
+            .static_identity()
+            .map_err(WsbPreparationError::Readiness)?;
+        static_identity_matches_receipt(&observed.receipt, &identity)?;
+    } else {
+        let readiness = inspector.runtime_readiness();
+        let trusted = require_readiness(&readiness)?;
+        if trusted.provider != &observed.receipt.provider
+            || trusted.package != &observed.receipt.provider_package
+            || trusted.catalog != &observed.receipt.provider_catalog
+            || trusted.file_identity != &observed.receipt.provider_file_identity
+            || readiness.cli_protocol.as_ref() != Some(&observed.receipt.provider_protocol)
+        {
+            return Err(WsbPreparationError::Readiness(
+                "provider identity drifted since preparation".to_owned(),
+            ));
+        }
     }
     let mut held = HeldVerifiedWsbPreparation {
         artifacts: observed,
@@ -1928,17 +2145,71 @@ pub fn import_windows_sandbox_preparation(
     expected_guest_agent_sha256: &str,
     imported_at: &str,
 ) -> Result<WsbPlanningImportResult, WsbPreparationError> {
+    import_preparation_with_inspector(
+        workspace_root,
+        project,
+        expected_guest_agent_sha256,
+        imported_at,
+        ProviderInspectionMode::LegacyByProfile,
+        &NativePreparationProviderInspector,
+    )
+}
+#[cfg(windows)]
+pub fn import_windows_sandbox_paired_preparation(
+    workspace_root: &Path,
+    project: &Project,
+    expected_guest_agent_sha256: &str,
+    imported_at: &str,
+) -> Result<WsbPlanningImportResult, WsbPreparationError> {
+    import_preparation_with_inspector(
+        workspace_root,
+        project,
+        expected_guest_agent_sha256,
+        imported_at,
+        ProviderInspectionMode::PairedStaticOnly,
+        &NativePreparationProviderInspector,
+    )
+}
+#[cfg(windows)]
+pub fn verify_windows_sandbox_paired_preparation(
+    workspace_root: &Path,
+    project: &Project,
+    expected_guest_agent_sha256: &str,
+) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
+    Ok(open_verified_preparation_with_inspector(
+        workspace_root,
+        project,
+        expected_guest_agent_sha256,
+        false,
+        false,
+        ProviderInspectionMode::PairedStaticOnly,
+        &NativePreparationProviderInspector,
+    )?
+    .artifacts)
+}
+
+#[cfg(windows)]
+fn import_preparation_with_inspector(
+    workspace_root: &Path,
+    project: &Project,
+    expected_guest_agent_sha256: &str,
+    imported_at: &str,
+    mode: ProviderInspectionMode,
+    inspector: &dyn PreparationProviderInspector,
+) -> Result<WsbPlanningImportResult, WsbPreparationError> {
     if imported_at.is_empty() {
         return Err(WsbPreparationError::Contract(
             "planning import timestamp must not be empty".to_owned(),
         ));
     }
-    let mut held = open_verified_windows_sandbox_preparation(
+    let mut held = open_verified_preparation_with_inspector(
         workspace_root,
         project,
         expected_guest_agent_sha256,
         true,
         false,
+        mode,
+        inspector,
     )?;
     let run_id = held.artifacts.receipt.run_id.clone();
     let receipt = WsbPlanningImportReceipt {
@@ -2717,7 +2988,7 @@ pub(crate) mod tests {
         WindowsFileIdentity, workspace_policy_hash,
     };
 
-    fn project() -> Project {
+    pub(super) fn project() -> Project {
         serde_yaml::from_str(include_str!("../../../examples/minimal.aiw.yaml")).unwrap()
     }
 
@@ -2859,11 +3130,11 @@ pub(crate) mod tests {
     }
 
     #[cfg(windows)]
-    struct TempDir(std::path::PathBuf);
+    pub(super) struct TempDir(pub(super) std::path::PathBuf);
 
     #[cfg(windows)]
     impl TempDir {
-        fn new(label: &str) -> Self {
+        pub(super) fn new(label: &str) -> Self {
             use std::sync::atomic::{AtomicU64, Ordering};
 
             static NEXT: AtomicU64 = AtomicU64::new(1);
@@ -4006,3 +4277,7 @@ pub(crate) mod tests {
         ));
     }
 }
+
+#[cfg(all(test, windows))]
+#[path = "preparation/static_provider_tests.rs"]
+mod static_provider_tests;

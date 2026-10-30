@@ -181,6 +181,8 @@ impl Fixture {
             )
             .unwrap();
         }
+        preparation::runtime_identity_matches_receipt(&self.artifacts.receipt, &readiness)
+            .map_err(|e| RunnerError::Preparation(e.to_string()))?;
         let process = Fake::new(self.start.clone(), scenario, self.calls.clone(), false);
         execute_wsb_golden_probe(
             &self.start,

@@ -139,17 +139,14 @@ pub(crate) fn protected_paired_fixture(
     let launcher = roles.remove(0);
     let profile=aiw_probe::PairedControlProfile {revision:aiw_probe::PAIRED_CONTROL_REVISION.into(),source_sha256:aiw_probe::paired_controls::paired_control_source_sha256(),fixture_sha256:agent.sha256.clone(),fixture_size_bytes:agent.size_bytes,launcher_sha256:agent.sha256.clone(),launcher_size_bytes:agent.size_bytes,origin:aiw_probe::ControlEvidenceOrigin::SyntheticRehearsal,expected_windows:windows,policy:aiw_probe::paired_controls::PairedControlPolicy::ClassicAppContainerNoCapabilitiesFixedChildOutputGrant};
     let project = project_factory(&agent.sha256);
-    let base = build_wsb_preparation(
+    let static_identity = static_identity(&ready);
+    let artifacts = paired::build_wsb_static_paired_preparation(
         run_id,
         &project,
-        &ready,
+        &static_identity,
         held.evidence(),
         &agent,
         "synthetic-time",
-    )
-    .unwrap();
-    let artifacts = build_wsb_paired_controls_preparation(
-        base,
         WsbPairedControls {
             profile,
             fixture,
@@ -160,4 +157,21 @@ pub(crate) fn protected_paired_fixture(
     let staged = stage_bundle(&held, &artifacts).unwrap();
     complete_bundle(&held, &artifacts, staged).unwrap();
     (held, project, artifacts, ready)
+}
+
+pub(crate) fn static_identity(
+    ready: &WindowsSandboxReadiness,
+) -> aiw_probe::WindowsSandboxStaticIdentity {
+    let mut provider = ready.provider_binary.clone().unwrap();
+    provider.version = None;
+    aiw_probe::WindowsSandboxStaticIdentity {
+        schema_version: aiw_probe::WINDOWS_SANDBOX_STATIC_IDENTITY_SCHEMA.into(),
+        os_version: ready.os_version.clone().unwrap(),
+        process_architecture: ready.process_architecture.clone(),
+        virtualization: ready.virtualization,
+        provider,
+        package: ready.provider_package.clone().unwrap(),
+        catalog: ready.catalog_trust.clone().unwrap(),
+        file_identity: ready.provider_file_identity.clone().unwrap(),
+    }
 }

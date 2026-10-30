@@ -228,6 +228,11 @@ mod source_import;
 #[cfg(windows)]
 mod source_inspection;
 
+#[cfg(windows)]
+pub fn inspect_windows_sandbox_static() -> Result<aiw_probe::WindowsSandboxStaticIdentity, String> {
+    windows_platform::inspect_windows_sandbox_static()
+}
+
 #[must_use]
 pub fn assess_windows_sandbox() -> WindowsSandboxReadiness {
     platform::assess_windows_sandbox()

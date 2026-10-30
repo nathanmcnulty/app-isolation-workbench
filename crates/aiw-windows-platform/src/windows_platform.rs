@@ -842,7 +842,11 @@ fn empty_readiness() -> WindowsSandboxReadiness {
     }
 }
 
-fn assess_provider(result: &mut WindowsSandboxReadiness) -> Result<(), String> {
+struct HeldStaticProvider {
+    _provider: File,
+    identity: aiw_probe::WindowsSandboxStaticIdentity,
+}
+fn inspect_static_provider() -> Result<HeldStaticProvider, String> {
     let _winrt = WinRtApartment::initialize()?;
     let package = resolve_package()?;
     let (package_identity, install_root) = validate_package(&package)?;
@@ -854,6 +858,52 @@ fn assess_provider(result: &mut WindowsSandboxReadiness) -> Result<(), String> {
     let file_identity = file_identity(&provider, &final_path)?;
     let (sha256, size_bytes) = hash_held_file(&mut provider)?;
     let catalog_trust = verify_catalog_member(&provider, &final_path, &catalog_path)?;
+
+    let identity = aiw_probe::WindowsSandboxStaticIdentity {
+        schema_version: aiw_probe::WINDOWS_SANDBOX_STATIC_IDENTITY_SCHEMA.into(),
+        os_version: observe_windows_version()?,
+        process_architecture: std::env::consts::ARCH.into(),
+        virtualization: if virtualization_firmware_enabled() {
+            ReadinessState::Available
+        } else {
+            ReadinessState::Unknown
+        },
+        provider: BinaryIdentity {
+            canonical_path: final_path.to_string_lossy().into_owned(),
+            sha256,
+            size_bytes,
+            version: None,
+            signature_status: ReadinessState::Available,
+        },
+        package: package_identity,
+        catalog: catalog_trust,
+        file_identity,
+    };
+    Ok(HeldStaticProvider {
+        _provider: provider,
+        identity,
+    })
+}
+/// Inspects Store/package/catalog/file/OS identity without launching the provider.
+pub(super) fn inspect_windows_sandbox_static()
+-> Result<aiw_probe::WindowsSandboxStaticIdentity, String> {
+    inspect_static_provider().map(|held| held.identity)
+}
+
+fn assess_provider(result: &mut WindowsSandboxReadiness) -> Result<(), String> {
+    let static_provider = inspect_static_provider()?;
+    let HeldStaticProvider {
+        _provider: provider,
+        identity,
+    } = static_provider;
+    let final_path = PathBuf::from(&identity.provider.canonical_path);
+    let package_identity = identity.package;
+    let file_identity = identity.file_identity;
+    let catalog_trust = identity.catalog;
+    let sha256 = identity.provider.sha256;
+    let size_bytes = identity.provider.size_bytes;
+    // Keep the inspected provider handle through both runtime observations.
+    let _provider = provider;
 
     let version_output = invoke_read_only(
         &final_path,

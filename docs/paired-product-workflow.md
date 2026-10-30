@@ -10,8 +10,8 @@ Select **Fixed paired controls** in the desktop workflow. The product accepts no
 installer, document, executable, script or policy input. It uses a compiled
 project and the enrolled shared guest agent, with fixed file, registry and child
 cases. Preparation imports the typed paired action into the existing protected
-workspace, journal and session kernel. Offline preparation makes no provider calls;
-the native readiness-invocation gap below still requires correction.
+workspace, journal and session kernel. Paired preparation uses static trusted identity inspection and makes no provider
+invocations. Runtime protocol, feature and session checks remain deferred until Start.
 
 The desktop presents the immutable recipe, plan and proposed approval. Literal
 approval of the displayed plan hash records approval; a separate Start challenge
@@ -80,7 +80,7 @@ This preview has no execution backend; it exercises the preserved Results path,
 not the complete new paired workflow.
 
 The coupled coordinator/kernel rehearsal described below now extends these
-checks. The paired-workflow keyboard/focus preview, native preparation correction,
+checks. The paired-workflow keyboard/focus preview,
 final validation and consolidated source-pinned native proposal remain required.
 Native held-file inspection through Sandbox Tools mappings still needs separately
 authorized disposable-worker proof; fail closed rather than weakening intake.
@@ -203,19 +203,61 @@ not added to the Results export allowlist. Desktop checks: 20 library tests pass
 three opt-in tests ignored, and all-target Clippy passed. Logs:
 `paired-coupled-desktop-tests.log` and `paired-coupled-desktop-clippy.log`.
 
-## Remaining preparation requirement found by source audit
+## Static provider identity and deferred runtime checks
 
-The native paired preparation facade currently calls `assess_windows_sandbox`,
-whose platform implementation invokes the provider with `--version` and
-`list --raw`. These read-only invocations still violate this goal's stronger
-requirement that preparation execute no provider. No such native invocation was
-performed in the offline rehearsal. Before goal completion, replace this paired
-preparation path with static trusted identity inspection/enrollment, keeping
-runtime protocol/session checks after exact approval and explicit Start. Do not
-pretend unknown runtime readiness is measured, weaken the provider commitment,
-or simply mark unknown sessions available. The full paired-workflow keyboard
-preview, final validation/PR handoff and source-pinned future native acceptance
-proposal also remain outstanding.
+Paired preparation, import and verification now use static trusted Store/package,
+cache-only catalog, held file hash/size/file ID and exact OS inspection. The
+`WindowsSandboxStaticIdentity` type contains no runtime protocol, Sandbox feature
+or session-availability fields. It does not construct an artificial supported
+readiness result and does not launch `--version`, `list`, or another provider command.
+Full readiness reuses the static inspection prefix before its existing runtime
+checks; only the separately approved Start path reaches that full leased preflight.
+
+New paired preparation receipt v0alpha8 has
+`providerProtocolObservation: requiredAtStartNotObserved`, no provider version,
+and the static identity schema. Its `providerProtocol` is the required pinned
+protocol, not an observed runtime result. Approval disclosure explicitly says
+protocol, feature readiness and current sessions are unmeasured until Start.
+Original v0alpha7 receipts keep their observed-protocol semantics and unchanged
+serialization; historical reporting and exact recovery remain independent of
+current static inspection. No retained record was rewritten or upgraded.
+
+Dedicated paired import/verification entrypoints reject non-paired metadata
+before inspection. Caller-owned inspection modes prevent tampered metadata from
+selecting legacy runtime probing. Native Start uses unconditional static inspection
+before validating approval; after approval it acquires the existing native lease,
+then checks every static identity commitment, required observed CLI protocol,
+feature/virtualization/architecture, exact OS and empty sessions before dispatch.
+Legacy generic preparation/import behavior remains explicitly separate.
+
+The real preparation body is tested with an inspector that panics on any runtime
+request. It stages fixed roles, verifies, imports and reopens with four static
+inspections, zero runtime requests, no approval and no session transaction. The
+test exposed a live staging-writer/read-only reopening conflict: preparation now
+closes the verified writer, takes protected relative read-only custody, compares
+the staged hash/size and holds/revalidates both agent handles through role copying
+and receipt publication. No sharing or intake protection was relaxed.
+
+Static/runtime identity and receipt-mode mutation tests reject provider, package,
+catalog, file-ID, protocol, feature, virtualization, session and OS drift. Two
+focused static tests and 15 paired runner regressions passed. Ten admin paired
+checks passed against the new receipt (the evidence matrix was already exercised
+and is reserved for final validation). The existing offline platform suite passed
+173 tests, with 10 live/opt-in tests ignored; no provider/application/control trial
+was run. All-target Clippy, desktop compilation, formatting and 25 Node tests pass.
+Independent source review found no remaining consequential issue in identity
+binding, version compatibility, handle transition or caller-owned mode routing.
+
+Logs under `C:/aiw`: `paired-static-tests4.log`, `paired-static-regression.log`,
+`paired-static-admin-tests.log`, `paired-static-platform-tests.log`,
+`paired-static-clippy.log`, `paired-static-clippy2.log`,
+`paired-static-desktop-check.log`, `paired-static-node-tests.log`.
+
+Still required: paired-workflow keyboard/focus preview, final review/validation
+against final commits, exact diff/PR handoff and consolidated source-pinned future
+native acceptance proposal. Native provider availability, guest Tools mapping
+semantics and native control behavior remain untrialed; Benchmark 2 and W4/W5
+acceptance remain open.
 
 Additional extraction regressions: 13 paired runner tests and the strict-fake
 negative test passed. Admin/runner all-target Clippy passed with warnings denied.

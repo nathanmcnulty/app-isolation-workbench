@@ -98,9 +98,14 @@ pub use assessment_report::{
 pub use assessment_report::{
     export_windows_sandbox_msi_document, report_windows_sandbox_msi, report_windows_sandbox_msi_run,
 };
+pub use preparation::{
+    ProviderProtocolObservation, WsbPairedControls, build_wsb_paired_controls_preparation,
+};
 #[cfg(windows)]
-pub use preparation::prepare_windows_sandbox_paired_controls;
-pub use preparation::{WsbPairedControls, build_wsb_paired_controls_preparation};
+pub use preparation::{
+    import_windows_sandbox_paired_preparation, prepare_windows_sandbox_paired_controls,
+    verify_windows_sandbox_paired_preparation,
+};
 mod session;
 
 pub use preparation::{
@@ -1092,12 +1097,10 @@ fn start_approved_windows_sandbox_inner(
     timeout_seconds: u32,
     allow_msi: bool,
 ) -> Result<WsbApprovedExecution, RunnerError> {
-    let mut held = preparation::open_verified_windows_sandbox_preparation(
+    let mut held = preparation::open_preparation_for_start(
         workspace_root,
         project,
         expected_guest_agent_sha256,
-        true,
-        false,
     )
     .map_err(|error| RunnerError::Preparation(error.to_string()))?;
     held.revalidate_imported()
@@ -1163,6 +1166,8 @@ fn start_approved_windows_sandbox_inner(
         layout.run_id(),
     )?);
     let readiness = native_lease.readiness().clone();
+    preparation::runtime_identity_matches_receipt(&artifacts.receipt, &readiness)
+        .map_err(|e| RunnerError::Preparation(e.to_string()))?;
     artifacts
         .receipt
         .verify_host_os_version(readiness.os_version.as_ref())

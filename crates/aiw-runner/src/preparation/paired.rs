@@ -1,6 +1,7 @@
 //! Fixed role copies of the approved agent; no caller-supplied executable intake.
 use super::*;
 pub const PAIRED_PREPARATION_SCHEMA: &str = "aiw.dev/wsb-preparation-receipt/v0alpha7";
+pub const PAIRED_STATIC_PREPARATION_SCHEMA: &str = "aiw.dev/wsb-preparation-receipt/v0alpha8";
 pub const CONTROL_FIXTURE_FILE: &str = "aiw-control-fixture.exe";
 pub const CONTROL_LAUNCHER_FILE: &str = "aiw-control-appcontainer.exe";
 pub const CONTROL_TRUST_DELTA: &str = "runs the fixed ordinary-user versus classic AppContainer file/registry/child controls inside one disposable offline Windows Sandbox; zero capability SIDs; only fixed fixture traversal and low-integrity child-output package grants; no general compatibility or isolation verdict";
@@ -70,6 +71,12 @@ pub fn build_wsb_paired_controls_preparation(
     controls: WsbPairedControls,
 ) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
     base.validate()?;
+    finish_paired_preparation(base, controls)
+}
+fn finish_paired_preparation(
+    base: PreparedWsbArtifacts,
+    controls: WsbPairedControls,
+) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
     controls.validate(&base.receipt.workspace, &base.receipt.guest_agent)?;
     if base.receipt.msi.is_some()
         || base.receipt.bambu.is_some()
@@ -110,7 +117,13 @@ pub fn build_wsb_paired_controls_preparation(
         .run_plan
         .hash()
         .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
-    artifacts.receipt.schema_version = PAIRED_PREPARATION_SCHEMA.into();
+    artifacts.receipt.schema_version = if artifacts.receipt.provider_protocol_observation.is_some()
+    {
+        PAIRED_STATIC_PREPARATION_SCHEMA
+    } else {
+        PAIRED_PREPARATION_SCHEMA
+    }
+    .into();
     artifacts.receipt.paired_controls = Some(controls);
     artifacts.validate()?;
     Ok(artifacts)
@@ -183,6 +196,37 @@ pub(crate) fn require_receipt_tools(
 }
 /// Non-executing preparation: copy only the held, expected-hash agent into its
 /// fixed roles, publish immutable plans/receipt last, then require normal import.
+#[allow(clippy::too_many_arguments)]
+pub fn build_wsb_static_paired_preparation(
+    run_id: &str,
+    project: &Project,
+    identity: &aiw_probe::WindowsSandboxStaticIdentity,
+    workspace: &WorkspaceBindingEvidence,
+    agent: &BinaryIdentity,
+    created_at: &str,
+    controls: WsbPairedControls,
+) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
+    let trusted = require_static_identity(identity)?;
+    let protocol = WindowsSandboxCliProtocol {
+        cli_version: PINNED_CLI_VERSION.into(),
+        protocol: "windowsSandboxCli/v0.8.107.0".into(),
+        list_schema: "WindowsSandboxEnvironments/Id".into(),
+    };
+    let base = build_preparation_identity(
+        run_id,
+        project,
+        workspace,
+        agent,
+        created_at,
+        trusted,
+        &identity.schema_version,
+        Some(&identity.os_version),
+        &protocol,
+        true,
+    )?;
+    finish_paired_preparation(base, controls)
+}
+
 #[cfg(windows)]
 #[allow(clippy::too_many_arguments)]
 pub fn prepare_windows_sandbox_paired_controls(
@@ -193,15 +237,53 @@ pub fn prepare_windows_sandbox_paired_controls(
     agent_sha256: &str,
     created_at: &str,
 ) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
+    prepare_paired_with_inspector(
+        workspace_parent,
+        run_id,
+        project,
+        agent_source,
+        agent_sha256,
+        created_at,
+        &NativePreparationProviderInspector,
+    )
+}
+#[cfg(windows)]
+#[allow(clippy::too_many_arguments)]
+pub(super) fn prepare_paired_with_inspector(
+    workspace_parent: &Path,
+    run_id: &str,
+    project: &Project,
+    agent_source: &Path,
+    agent_sha256: &str,
+    created_at: &str,
+    inspector: &dyn PreparationProviderInspector,
+) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
     use aiw_windows_platform::HeldRunWorkspace;
     validate_request_contract(run_id, project, created_at)?;
     let mut source = open_guest_agent_source(agent_source, agent_sha256)?;
-    let readiness = aiw_windows_platform::assess_windows_sandbox();
-    require_readiness(&readiness)?;
+    let static_identity = inspector
+        .static_identity()
+        .map_err(WsbPreparationError::Readiness)?;
+    require_static_identity(&static_identity)?;
     let workspace = HeldRunWorkspace::create(workspace_parent, run_id)
         .map_err(|e| WsbPreparationError::Workspace(e.to_string()))?;
     let operation = (|| {
-        let (_agent, identity) = stage_guest_agent(&mut source, &workspace)?;
+        let (agent_writer, identity) = stage_guest_agent(&mut source, &workspace)?;
+        // Convert the staging writer to read-only custody before opening the
+        // same agent for role copies. A live writer conflicts with read-only sharing.
+        drop(agent_writer);
+        let agent_file = workspace
+            .reopen_tools_file_readonly(GUEST_AGENT_FILE)
+            .map_err(|e| WsbPreparationError::Workspace(e.to_string()))?;
+        let agent_guard = aiw_windows_platform::HeldApplicationFile::open(agent_file.final_path())
+            .map_err(|e| WsbPreparationError::GuestAgent(e.to_string()))?;
+        if agent_guard.observation().sha256 != identity.sha256
+            || agent_guard.observation().size_bytes != identity.size_bytes
+        {
+            return Err(WsbPreparationError::GuestAgent(
+                "Staged agent changed before fixed role copies".into(),
+            ));
+        }
         let fixture = copy_agent_role(&workspace, CONTROL_FIXTURE_FILE, &identity)?;
         let launcher = copy_agent_role(&workspace, CONTROL_LAUNCHER_FILE, &identity)?;
         let profile = aiw_probe::PairedControlProfile {
@@ -212,20 +294,16 @@ pub fn prepare_windows_sandbox_paired_controls(
             launcher_sha256: identity.sha256.clone(),
             launcher_size_bytes: identity.size_bytes,
             origin: aiw_probe::ControlEvidenceOrigin::NativeWorker,
-            expected_windows: readiness.os_version.clone().ok_or_else(||
-                WsbPreparationError::Readiness("Exact OS provenance required".into()))?,
+            expected_windows: static_identity.os_version.clone(),
             policy: aiw_probe::paired_controls::PairedControlPolicy::ClassicAppContainerNoCapabilitiesFixedChildOutputGrant,
         };
-        let base = build_wsb_preparation(
+        let artifacts = build_wsb_static_paired_preparation(
             run_id,
             project,
-            &readiness,
+            &static_identity,
             workspace.evidence(),
             &identity,
             created_at,
-        )?;
-        let artifacts = build_wsb_paired_controls_preparation(
-            base,
             WsbPairedControls {
                 profile,
                 fixture,
@@ -239,6 +317,12 @@ pub fn prepare_windows_sandbox_paired_controls(
         ensure_empty_directory(&workspace.output_path())?;
         require_receipt_tools(&workspace.tools_path(), &artifacts.receipt)?;
         let staged = stage_bundle(&workspace, &artifacts)?;
+        agent_guard
+            .revalidate()
+            .map_err(|e| WsbPreparationError::GuestAgent(e.to_string()))?;
+        agent_file
+            .revalidate()
+            .map_err(|e| WsbPreparationError::Workspace(e.to_string()))?;
         require_workspace_allowlist(workspace.root_path(), PreparationWorkspaceState::Building)?;
         complete_bundle(&workspace, &artifacts, staged)?;
         Ok(artifacts)
