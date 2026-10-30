@@ -299,3 +299,17 @@ no remaining consequential issue. Source review did not execute native behavior.
 28 Node tests pass (`C:/aiw/paired-final-node.log`). The final workspace validation
 and consolidated native-acceptance proposal are recorded separately in the final
 handoff, without upgrading any native acceptance claim.
+
+
+## Final workspace cancellation rehearsal finding
+
+The first final workspace attempt at `b7af36f` exposed a test-only race:
+WaitForOwnedCancellation read the lock-free journal while the actual cancellation
+service was publishing its intent/artifact/commit, yielding
+`AIW_ARTIFACT_UNJOURNALED` and an inconclusive result. The fake now waits for a
+bounded atomic handshake after the actual service returns and a stable committed
+cancellation observation succeeds, then verifies durable cancellation again.
+Start readiness is published after durable StartIntent assertions. A negative
+observer check cannot signal an uncommitted cancellation. No production journal,
+reader, approval or provider behavior changed. Independent source review accepted
+the fix; final validation is rerun against the corrective code commit.

@@ -389,6 +389,7 @@ fn coupled_owned_cancellation_service_interrupts_only_the_running_original() {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         request_cancellation(&owned).unwrap();
+        f.observe_committed_cancellation().unwrap();
         let result = worker.join().unwrap();
         assert_eq!(
             result.report.unwrap().recorded_outcome,

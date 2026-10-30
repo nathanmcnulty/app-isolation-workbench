@@ -5,7 +5,7 @@ use super::*;
 use std::io::Read;
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
 const RUN: &str = "w1-run";
@@ -37,6 +37,7 @@ pub struct Fixture {
     readiness: WindowsSandboxReadiness,
     start: WsbGoldenProbeStart,
     calls: Arc<Mutex<Vec<Vec<String>>>>,
+    owned_cancellation_committed: Arc<AtomicBool>,
 }
 impl Fixture {
     pub fn prepare(project_factory: impl FnOnce(&str) -> Project) -> Self {
@@ -106,6 +107,7 @@ impl Fixture {
             readiness,
             start,
             calls: Arc::new(Mutex::new(vec![])),
+            owned_cancellation_committed: Arc::new(AtomicBool::new(false)),
         }
     }
     pub fn evidence_root(&self) -> &Path {
@@ -122,6 +124,18 @@ impl Fixture {
     }
     pub fn calls(&self) -> Vec<Vec<String>> {
         self.calls.lock().unwrap().clone()
+    }
+    /// Test-only handshake after the real service has finished publication.
+    /// This observes cancellation; it cannot request it or grant execution.
+    pub fn observe_committed_cancellation(&self) -> Result<(), RunnerError> {
+        if !cancellation_requested(&self.layout())? {
+            return Err(RunnerError::Process(
+                "offline cancellation is not committed".into(),
+            ));
+        }
+        self.owned_cancellation_committed
+            .store(true, Ordering::Release);
+        Ok(())
     }
     /// Inventory only this harness's fresh owned tree, never disk discovery.
     pub fn retained_bytes(&self) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
@@ -183,7 +197,8 @@ impl Fixture {
         }
         preparation::runtime_identity_matches_receipt(&self.artifacts.receipt, &readiness)
             .map_err(|e| RunnerError::Preparation(e.to_string()))?;
-        let process = Fake::new(self.start.clone(), scenario, self.calls.clone(), false);
+        let mut process = Fake::new(self.start.clone(), scenario, self.calls.clone(), false);
+        process.owned_cancellation_committed = Some(self.owned_cancellation_committed.clone());
         execute_wsb_golden_probe(
             &self.start,
             &readiness,
@@ -235,6 +250,7 @@ struct Fake {
     responses: Mutex<std::collections::VecDeque<(&'static str, serde_json::Value)>>,
     lifecycle: WindowsSandboxCliLifecyclePlan,
     recovery: bool,
+    owned_cancellation_committed: Option<Arc<AtomicBool>>,
 }
 impl Fake {
     fn new(
@@ -292,6 +308,7 @@ impl Fake {
             responses: Mutex::new(responses.into()),
             lifecycle,
             recovery,
+            owned_cancellation_committed: None,
         }
     }
 }
@@ -319,7 +336,9 @@ impl ProcessBoundary for Fake {
         }
         let (_, value) = pending.pop_front().unwrap();
         drop(pending);
-        self.calls.lock().unwrap().push(args.to_vec());
+        if command != "start" {
+            self.calls.lock().unwrap().push(args.to_vec());
+        }
         if command == "start" {
             let tx =
                 session::observe_transaction(&RunLayout::new(&self.start.run_root, RUN).unwrap())
@@ -328,6 +347,7 @@ impl ProcessBoundary for Fake {
                     .unwrap();
             assert_eq!(tx.current_state(), SessionTransactionState::StartIntent);
             assert_eq!(tx.session_id, deterministic_sandbox_id(RUN));
+            self.calls.lock().unwrap().push(args.to_vec());
             if self.scenario == Scenario::InterruptedDispatch {
                 return Err(RunnerError::ProviderFailure);
             }
@@ -338,7 +358,13 @@ impl ProcessBoundary for Fake {
             }
             if self.scenario == Scenario::WaitForOwnedCancellation {
                 let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-                while !cancellation_requested(&self.start_layout())? {
+                // Do not read a lock-free journal during the service's multi-file
+                // publication. Observe only after the actual request returns.
+                let committed = self
+                    .owned_cancellation_committed
+                    .as_ref()
+                    .ok_or(RunnerError::ProviderFailure)?;
+                while !committed.load(Ordering::Acquire) {
                     if std::time::Instant::now() >= deadline {
                         return Err(RunnerError::Process(
                             "offline cancellation handshake timed out".into(),
@@ -346,6 +372,13 @@ impl ProcessBoundary for Fake {
                     }
                     std::thread::sleep(std::time::Duration::from_millis(10));
                 }
+            }
+            if self.scenario == Scenario::WaitForOwnedCancellation
+                && !cancellation_requested(&self.start_layout())?
+            {
+                return Err(RunnerError::Process(
+                    "offline cancellation was not durable".into(),
+                ));
             }
             let mutation = match self.scenario {
                 Scenario::BaselineMissing => 1,
@@ -385,6 +418,7 @@ mod tests {
         let fixture = Fixture::prepare(|_| {
             serde_yaml::from_str(include_str!("../../../examples/minimal.aiw.yaml")).unwrap()
         });
+        assert!(fixture.observe_committed_cancellation().is_err());
         let fake = Fake::new(
             fixture.start.clone(),
             Scenario::Valid,
