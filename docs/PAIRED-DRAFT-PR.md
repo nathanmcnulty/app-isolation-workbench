@@ -26,10 +26,13 @@ Independent source review findings were fixed. Final offline Rust/Node results,
 formatting, Clippy, governance, exact commits/diff and labeled demonstration are
 recorded in [the implementation handoff](PAIRED-IMPLEMENTATION-HANDOFF.md).
 
-No native provider/application/control trial was run; PR #103's completed trials
-were not repeated. The guest agent was built and PE-checked but not executed.
-Sandbox Tools held-file mapping semantics and the new native workflow require
-separately authorized disposable-worker acceptance. See the
-[source-pinned proposal](PAIRED-NATIVE-ACCEPTANCE-PROPOSAL.md). General application
+One separately approved VM107 Start attempt stopped during the required native
+provider-list preflight with a 15-second timeout, before Sandbox dispatch or any
+control case. Actual retained Results/export validation reports all six cases
+unmeasured and no cleanup/comparison claim. Reporting now distinguishes committed
+approval without dispatch from missing approval. See the
+[source-pinned attempt record](PAIRED-NATIVE-ATTEMPT.md). No application trial ran;
+PR #103's trials were not repeated. Sandbox Tools mapping and the six-case native
+workflow remain unvalidated. General application
 compatibility/effective isolation, live Benchmark 2 acceptance and remaining
 W4/W5 requirements remain open. No release or production acceptance is claimed.

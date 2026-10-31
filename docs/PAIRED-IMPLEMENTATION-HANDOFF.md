@@ -1,5 +1,14 @@
 # Offline implementation handoff
 
+Current follow-up: source `2ec65edfe749b73a13ddf0c923db973de1292fc8` improves
+approval-without-dispatch reporting and adds a read-only Results backend example.
+One subsequently approved VM107 Start stopped at required provider-list preflight,
+before any control case. Actual retained exports correctly preserve all six cases
+as unmeasured. See [the attempt record](PAIRED-NATIVE-ATTEMPT.md) for exact native
+and backend evidence and the remaining positive acceptance gate. The baseline
+offline results below retain their original source/scope; unchanged suites were
+not rerun or represented as new full-suite results for this follow-up.
+
 Completed offline implementation and validation on 2026-10-30. Native acceptance remains open.
 
 Code commit: `e2e44fe2bf3ca98113618131f4f6d8700354219f`.

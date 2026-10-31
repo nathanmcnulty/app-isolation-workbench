@@ -1,14 +1,19 @@
 # Reconciliation and bounded native approval request
 
 Request ID: `AIW-PAIRED-NATIVE-F99BBD4-20261030`. Prepared 2026-10-30.
-Status: **approved console installation and non-executing preparation completed;
-stopped at pending approval**.
-The current source is `d370ec8cd5bcaa6915ac24801789070dd0040e3b`; the original
+Status: **subsequently approved; one Start attempted and stopped during required
+provider-list preflight, before Sandbox dispatch**. See the
+[actual attempt and retained Results](PAIRED-NATIVE-ATTEMPT.md) for current state.
+The execution-package source is `d370ec8cd5bcaa6915ac24801789070dd0040e3b`; the original
 f99bbd4 reconciliation and package remain retained. Exact current provider,
 catalog, file-ID, workspace and fresh plan pins are recorded below.
-No plan approval, Start or native control trial is authorized.
+The user approved this exact assessment for the PR-readiness milestone. Approval
+was committed and Start issued once; no control case ran. The retained run is
+Ready/sequence 3 with no session transaction/result/output. Do not replay Start.
+The proposal and preparation history below describe the reviewed bindings, not
+a second dispatch authorization. Publication remains separate.
 
-## Current console installation and prepared plan — 2026-10-30 America/Anchorage
+## Console installation and prepared plan — before the approved attempt
 
 The user explicitly authorized VM107 console installation, followed by
 non-executing preparation, stopping before plan approval/Start and publication.
@@ -367,7 +372,7 @@ that source. The protected request/guest validates its own current source too.
 The package includes inert existing application recipe metadata; this request
 permits only **Fixed paired controls**, no installer selection or other workflow.
 
-## Current target-provider gates — statically verified, runtime deferred
+## Provider gates recorded at preparation — historical stage
 
 The current provider/catalog/file-ID and v0alpha8 preparation pins are recorded
 above, from actual production static inspection. The following command completed
@@ -383,7 +388,11 @@ No `host assess`, `wsb --version`, list, Start, approval, recovery, classic
 bootstrap, feature/VM/security changes or controller fallback was performed.
 Runtime checks remain required after a future exact approval and separate Start.
 
-## Conditional future assessment — not authorized by console/preparation approval
+## Reviewed assessment procedure — single Start now consumed
+
+**Historical procedure below.** The later user approval was used for one Start;
+required provider-list preflight timed out before dispatch. Do not execute these
+commands again. The [attempt record](PAIRED-NATIVE-ATTEMPT.md) is current.
 
 Use the **existing pending run** and exact immutable pins above. Do not reprepare
 in the desktop: its Prepare action creates a different run/plan, invalidating this
@@ -577,7 +586,7 @@ full native tokens, request hashes, input hashes and failures locally. Summary
 exports alone use the privacy allowlist: no raw artifacts/tokens, account IDs,
 credentials or absolute private paths. No cleanup of retained inputs is authorized.
 
-## Approval status and publication boundary
+## Preparation-stage approval status and publication boundary — retained history
 
 The user authorized blocker remediation and non-executing preparation, preserving
 the stop before plan approval/Start. Source fixes are committed at d370ec8 and

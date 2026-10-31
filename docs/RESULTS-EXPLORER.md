@@ -6,6 +6,13 @@ There is no disk search, execution entry point, verdict engine or report-JSON im
 The original report-set and retained evidence verifiers determine results and duplicates.
 PR #103's completed native trials are unchanged and were not repeated.
 
+The separately approved VM107 paired attempt later stopped during provider
+preflight, before dispatch. Its actual retained Results backend/export check
+correctly shows six unmeasured cases, with committed approval distinguished from
+missing dispatch. Exact artifacts and limitations are in the
+[native attempt record](PAIRED-NATIVE-ATTEMPT.md). This supplies real incomplete
+retained-input coverage, not a successful native control or GUI demonstration.
+
 Select **Results → Open selection…**, choose a manifest, filter by application,
 recorded outcome, function and function result, and expand a selection to inspect
 failed/not-reached stages, failure-evidence status and hash references. The view
@@ -60,6 +67,21 @@ moves focus to the Results heading; dialog completion returns it to the initiati
 control. Filters keep focus, status changes are announced, column headers/caption
 name the table, and its horizontal scroll region is keyboard focusable. All report
 text uses `textContent`; control/bidi characters are bounded and sanitized.
+
+For a developer check without a GUI connection, build the read-only
+`gui/examples/export-retained-results.rs` example with installed/cached dependencies:
+
+```powershell
+cargo build --manifest-path C:\aiw\app-isolation-workbench\gui\Cargo.toml --example export-retained-results --locked --offline
+```
+
+The example requires three explicit paths: an existing selection manifest and two
+new JSON/Markdown summary destinations under existing local parents. It calls the
+same ResultsStore twice to compare summaries, then its normal safe exporters.
+It creates no directories or approval/run artifacts and has no execution/provider
+route. If a later export fails, an earlier/partial new output may remain; preserve
+it and choose new paths for any separately justified retry. This is backend
+verification, not native dialog/focus acceptance.
 
 ## Reproducible safe demonstration
 
