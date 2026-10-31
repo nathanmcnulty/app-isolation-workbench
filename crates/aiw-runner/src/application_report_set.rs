@@ -342,7 +342,7 @@ mod tests {
     fn paired_control_profiles_never_populate_application_function_results() {
         let profile=aiw_probe::PairedControlProfile {
             revision:aiw_probe::PAIRED_CONTROL_REVISION.into(),source_sha256:aiw_probe::paired_controls::paired_control_source_sha256(),fixture_sha256:"a".repeat(64),fixture_size_bytes:1,launcher_sha256:"a".repeat(64),launcher_size_bytes:1,
-            origin:aiw_probe::ControlEvidenceOrigin::SyntheticRehearsal,expected_windows:aiw_probe::WindowsVersionObservation{major:10,minor:0,build:26100,revision:0,observer_architecture:"x86_64".into()},policy:aiw_probe::paired_controls::PairedControlPolicy::ClassicAppContainerNoCapabilitiesFixedChildOutputGrant,
+            origin:aiw_probe::ControlEvidenceOrigin::SyntheticRehearsal,expected_host_windows:Some(aiw_probe::paired_controls::parse_guest_windows("10.0.26000.1").unwrap()),expected_windows:aiw_probe::WindowsVersionObservation{major:10,minor:0,build:26100,revision:0,observer_architecture:"x86_64".into()},policy:aiw_probe::paired_controls::PairedControlPolicy::ClassicAppContainerNoCapabilitiesFixedChildOutputGrant,
         };
         let request = aiw_provider_wsb::PairedControlsRequest::new(
             "synthetic-report-set",

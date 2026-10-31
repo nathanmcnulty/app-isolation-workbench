@@ -67,12 +67,32 @@ Actual a033 Results exports deterministic, 29 retained files unchanged, private
 markers absent. New reader also reproduced old v1 summaries byte-for-byte.
 Audit: `C:/aiw/paired-private-diagnostic-native-4dab54a5-6ecd-4c70-ad9d-cecab615492b`.
 
-Next: reviewed diagnostic-only patch retains exact expected/observed Windows
-tuples while preserving equality. Focused equality/component-drift test1 passed;
-platform all-target Clippy, formatting and governance passed (test module moved
-after production items to fix the initial Clippy finding). Fresh agent/package/
-plan and native diagnostic follow under standing authority. Never guess a
-guest version, relax the gate or substitute binaries in retained evidence.
+Diagnostic-only source `4f82f0b` retains exact expected/observed Windows tuples
+while preserving equality. Focused test1, platform all-target Clippy, formatting
+and governance passed. Its offline package completed exact14: receipt
+`47ecdc9d07cfe51c60cf9b20b188728b8a07bf5edd05c4570f5d48b2e0524fd0`,
+agent `483b82b9652e5a121bc1058b560978330e5b55b0fc60e47deab85ac8203b32bb`.
+Package: `C:/aiw/paired-windows-mismatch-package-4f82f0b-20261031`.
+No preparation/approval/Start for that package has occurred. Console-tool
+timeouts/debugger attachment failures prevent further interactive work for now;
+fresh namespace is still absent, no aiw process was active at its latest check.
+
+Offline follow-up fixes the confirmed host/guest version conflation: versioned
+profiles commit both tuples, preserving legacy hashes and exact guest equality.
+CLI/desktop can supply an exact guest tuple; blank retains strict host-version
+matching. Both values remain in the approval-bound profile. Independent source
+review found no consequential finding. Affected Rust checks cover53 unique tests
+(admin13/CLI2/probe3/provider9/runner15/guest11); desktop22 passed/4 opt-in ignored,
+Node7 passed. Workspace/desktop all-target Clippy, formats and governance passed.
+One stale drift-test value was corrected, then only changed cases rerun.
+The new model's actual Results reader reproduced both v1/v2 native summaries
+byte-for-byte, with each29-file retained snapshot unchanged and zero assessment/
+provider calls. Audit: `C:/aiw/paired-host-guest-reader-53e67253-1b0f-4aaf-8010-e6461177db3d`.
+Logs: `C:/aiw/paired-host-guest-*`. The actual guest tuple and positive native
+acceptance remain unknown. Next: clean-source agent/package build, and use the
+preserved diagnostic package for one fresh native plan once console access works.
+Never guess a guest version,
+relax a gate or substitute binaries in retained evidence.
 See [workflow diagnostics](paired-product-workflow.md#bounded-private-driver-diagnostics-after-the-native-unmeasured-driver-failure)
 and [draft PR](PAIRED-DRAFT-PR.md). Future errors must be observed, not guessed.
 

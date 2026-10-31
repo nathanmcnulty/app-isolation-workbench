@@ -137,7 +137,7 @@ pub(crate) fn protected_paired_fixture(
     let agent = roles.remove(0).staged_payload;
     let fixture = roles.remove(0);
     let launcher = roles.remove(0);
-    let profile=aiw_probe::PairedControlProfile {revision:aiw_probe::PAIRED_CONTROL_REVISION.into(),source_sha256:aiw_probe::paired_controls::paired_control_source_sha256(),fixture_sha256:agent.sha256.clone(),fixture_size_bytes:agent.size_bytes,launcher_sha256:agent.sha256.clone(),launcher_size_bytes:agent.size_bytes,origin:aiw_probe::ControlEvidenceOrigin::SyntheticRehearsal,expected_windows:windows,policy:aiw_probe::paired_controls::PairedControlPolicy::ClassicAppContainerNoCapabilitiesFixedChildOutputGrant};
+    let profile=aiw_probe::PairedControlProfile {revision:aiw_probe::PAIRED_CONTROL_REVISION.into(),source_sha256:aiw_probe::paired_controls::paired_control_source_sha256(),fixture_sha256:agent.sha256.clone(),fixture_size_bytes:agent.size_bytes,launcher_sha256:agent.sha256.clone(),launcher_size_bytes:agent.size_bytes,origin:aiw_probe::ControlEvidenceOrigin::SyntheticRehearsal,expected_host_windows:Some(windows.clone()),expected_windows:aiw_probe::WindowsVersionObservation{revision:1,..windows},policy:aiw_probe::paired_controls::PairedControlPolicy::ClassicAppContainerNoCapabilitiesFixedChildOutputGrant};
     let project = project_factory(&agent.sha256);
     let static_identity = static_identity(&ready);
     let artifacts = paired::build_wsb_static_paired_preparation(

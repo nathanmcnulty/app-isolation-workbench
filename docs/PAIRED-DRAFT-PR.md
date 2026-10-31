@@ -68,3 +68,16 @@ The actual reader exported deterministic summaries with all29 retained files
 unchanged, and also reproduced the older v1 native summaries byte-for-byte.
 The next diagnostic-only change retains both exact version tuples, preserving
 the rejection gate. No guest version is guessed or approved by that diagnostic.
+
+The preparation model now keeps exact host and guest Windows commitments
+separate. New profiles bind both in the existing plan/request/approval hashes;
+legacy profiles retain their original hashes for reporting and exact recovery.
+Desktop and CLI preparation accept a bounded exact guest version. Leaving it
+blank still requires the host's version; no observed mismatch is automatically
+accepted. Host drift checks and the guest equality guard remain in place. This
+fix passed53 affected Rust checks, desktop22 (4 opt-in ignored), Node7,
+workspace/desktop all-target Clippy, formatting and governance. Completed
+component evidence was reused, and only changed cases rerun after correcting a
+stale drift-test value. The new reader reproduced both actual v1/v2 native
+summaries byte-for-byte with retained inputs unchanged. The actual guest tuple
+and positive native six-case acceptance remain unverified.

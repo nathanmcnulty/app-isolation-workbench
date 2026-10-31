@@ -520,7 +520,7 @@ impl WsbPreparationReceipt {
             } else {
                 controls.validate(&self.workspace, &self.guest_agent)?;
             }
-            if self.host_os_version.as_ref() != Some(&controls.profile.expected_windows) {
+            if self.host_os_version.as_ref() != Some(controls.profile.approved_host_windows()) {
                 return Err(WsbPreparationError::Contract(
                     "Paired environment provenance differs".into(),
                 ));
@@ -3067,7 +3067,7 @@ pub(crate) mod tests {
             },
             staged_identity: identity(&format!("{}\\{name}", workspace.tools.final_path), 'a'),
         };
-        let controls=WsbPairedControls{profile:aiw_probe::PairedControlProfile{revision:aiw_probe::PAIRED_CONTROL_REVISION.into(),source_sha256:aiw_probe::paired_controls::paired_control_source_sha256(),fixture_sha256:agent.sha256.clone(),fixture_size_bytes:agent.size_bytes,launcher_sha256:agent.sha256.clone(),launcher_size_bytes:agent.size_bytes,origin:aiw_probe::ControlEvidenceOrigin::SyntheticRehearsal,expected_windows:windows,policy:aiw_probe::paired_controls::PairedControlPolicy::ClassicAppContainerNoCapabilitiesFixedChildOutputGrant},fixture:role("aiw-control-fixture.exe"),launcher:role("aiw-control-appcontainer.exe")};
+        let controls=WsbPairedControls{profile:aiw_probe::PairedControlProfile{revision:aiw_probe::PAIRED_CONTROL_REVISION.into(),source_sha256:aiw_probe::paired_controls::paired_control_source_sha256(),fixture_sha256:agent.sha256.clone(),fixture_size_bytes:agent.size_bytes,launcher_sha256:agent.sha256.clone(),launcher_size_bytes:agent.size_bytes,origin:aiw_probe::ControlEvidenceOrigin::SyntheticRehearsal,expected_host_windows:Some(windows.clone()),expected_windows:windows,policy:aiw_probe::paired_controls::PairedControlPolicy::ClassicAppContainerNoCapabilitiesFixedChildOutputGrant},fixture:role("aiw-control-fixture.exe"),launcher:role("aiw-control-appcontainer.exe")};
         let base = build_wsb_preparation("run-one", &project(), &ready, &workspace, &agent, "now")
             .unwrap();
         let paired = build_wsb_paired_controls_preparation(base.clone(), controls.clone()).unwrap();

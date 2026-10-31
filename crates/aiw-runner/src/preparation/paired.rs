@@ -81,7 +81,7 @@ fn finish_paired_preparation(
     if base.receipt.msi.is_some()
         || base.receipt.bambu.is_some()
         || base.receipt.paired_controls.is_some()
-        || base.receipt.host_os_version.as_ref() != Some(&controls.profile.expected_windows)
+        || base.receipt.host_os_version.as_ref() != Some(controls.profile.approved_host_windows())
     {
         return Err(WsbPreparationError::Contract(
             "Paired controls require a fresh exclusive profile and exact recorded host environment"
@@ -236,6 +236,7 @@ pub fn prepare_windows_sandbox_paired_controls(
     agent_source: &Path,
     agent_sha256: &str,
     created_at: &str,
+    expected_guest_windows: Option<&aiw_probe::WindowsVersionObservation>,
 ) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
     prepare_paired_with_inspector(
         workspace_parent,
@@ -244,6 +245,7 @@ pub fn prepare_windows_sandbox_paired_controls(
         agent_source,
         agent_sha256,
         created_at,
+        expected_guest_windows,
         &NativePreparationProviderInspector,
     )
 }
@@ -256,6 +258,7 @@ pub(super) fn prepare_paired_with_inspector(
     agent_source: &Path,
     agent_sha256: &str,
     created_at: &str,
+    expected_guest_windows: Option<&aiw_probe::WindowsVersionObservation>,
     inspector: &dyn PreparationProviderInspector,
 ) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
     use aiw_windows_platform::HeldRunWorkspace;
@@ -265,6 +268,14 @@ pub(super) fn prepare_paired_with_inspector(
         .static_identity()
         .map_err(WsbPreparationError::Readiness)?;
     require_static_identity(&static_identity)?;
+    if let Some(guest) = expected_guest_windows {
+        guest.validate().map_err(WsbPreparationError::Contract)?;
+        if guest.observer_architecture != "x86_64" {
+            return Err(WsbPreparationError::Contract(
+                "Fixed controls require an exact x64 guest version".into(),
+            ));
+        }
+    }
     let workspace = HeldRunWorkspace::create(workspace_parent, run_id)
         .map_err(|e| WsbPreparationError::Workspace(e.to_string()))?;
     let operation = (|| {
@@ -294,7 +305,8 @@ pub(super) fn prepare_paired_with_inspector(
             launcher_sha256: identity.sha256.clone(),
             launcher_size_bytes: identity.size_bytes,
             origin: aiw_probe::ControlEvidenceOrigin::NativeWorker,
-            expected_windows: static_identity.os_version.clone(),
+            expected_windows: expected_guest_windows.unwrap_or(&static_identity.os_version).clone(),
+            expected_host_windows: Some(static_identity.os_version.clone()),
             policy: aiw_probe::paired_controls::PairedControlPolicy::ClassicAppContainerNoCapabilitiesFixedChildOutputGrant,
         };
         let artifacts = build_wsb_static_paired_preparation(

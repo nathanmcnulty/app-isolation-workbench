@@ -192,6 +192,8 @@ test("paired workflow drops installer inputs, fences stale polling and serialize
   assert.equal(element("installerField").hidden,true);
   element("installer").value="must not enter paired request";
   element("documentInput").value="must not enter paired request";
+  element("pairedGuestWindows").value="10.0.26100.2";
+  assert.equal(element("pairedGuestWindowsField").hidden,false);
   let releasePoll;
   heldPoll={promise:new Promise(resolve=>releasePoll=resolve)};
   const poll=intervals.find(callback=>callback.name==="poll");
@@ -201,6 +203,8 @@ test("paired workflow drops installer inputs, fences stale polling and serialize
   assert.equal(calls.filter(c=>c.name==="prepare_workflow").length,1);
   const request=calls.find(c=>c.name==="prepare_workflow").args;
   assert.equal(request.installer,""); assert.equal(request.documentInput,null);
+  assert.equal(request.pairedGuestWindows,"10.0.26100.2");
+  assert.equal(element("pairedGuestWindows").disabled,true);
   releasePoll({phase:"completed",workflowId:"stale",result:{outcome:"verified",canExportDocument:true}});
   await oldPoll;
   assert.equal(element("export").disabled,true);

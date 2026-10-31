@@ -593,6 +593,7 @@ mod tests {
             launcher_size_bytes: 10,
             origin: ControlEvidenceOrigin::SyntheticRehearsal,
             expected_windows: windows.clone(),
+            expected_host_windows: Some(windows.clone()),
             policy: PairedControlPolicy::ClassicAppContainerNoCapabilitiesFixedChildOutputGrant,
         };
         let request = PairedControlsRequest::new(
@@ -661,6 +662,26 @@ mod tests {
             digest(&result.compare(&request, Some(true)).unwrap()).unwrap()
         );
     }
+    #[test]
+    fn paired_guest_result_matches_guest_commitment_and_never_substitutes_host_version() {
+        let (original, mut result) = fixture();
+        let mut profile = original.profile.clone();
+        profile.expected_host_windows.as_mut().unwrap().revision += 1;
+        let request = PairedControlsRequest::new(
+            &original.run_id,
+            &original.sandbox_id,
+            &original.config_sha256,
+            &original.agent_sha256,
+            profile,
+        )
+        .unwrap();
+        result.profile_sha256 = request.profile.hash().unwrap();
+        result.request_sha256 = request.request_sha256.clone();
+        assert!(result.compare(&request, Some(true)).unwrap().eligible);
+        result.windows = request.profile.approved_host_windows().clone();
+        assert!(result.compare(&request, Some(true)).is_err());
+    }
+
     #[test]
     fn baseline_candidate_driver_and_cleanup_failures_are_inconclusive() {
         let (request, result) = fixture();

@@ -65,6 +65,52 @@ receipt/evidence readbacks and summaries remain preserved. Next diagnostic sourc
 must retain both exact Windows-version tuples while continuing to reject every
 mismatch; do not guess the guest build, relax equality or edit retained profiles.
 
+### Preserved diagnostic package and offline host/guest model repair
+
+The diagnostic-only package at
+`C:\aiw\paired-windows-mismatch-package-4f82f0b-20261031` completed offline
+assembly and exact14 verification from clean source
+`4f82f0b27fdbd0feef8fdcfd4511804b0cab6b0b`. It retains both expected and observed
+Windows tuples on the existing mismatch rejection. This package has **not** been
+prepared, approved or started on VM107. The standing fixed-control test authority
+applies; no new per-test approval is requested. Console-tool timeouts and debugger
+attachment failures currently prevent interactive continuation. The last bounded
+read-only check found its new VM namespace absent and no active aiw child.
+
+| Diagnostic package pin | Value |
+|---|---|
+| Receipt content SHA-256 | `47ecdc9d07cfe51c60cf9b20b188728b8a07bf5edd05c4570f5d48b2e0524fd0` |
+| CLI SHA-256 | `6235577e1d231dca32b8c69688b75482b046c56d591e6491fea32731206d6ff5` |
+| Desktop SHA-256 | `189750a3f23bb6f47832ec36160c3592175fc74b18952091870ec060348024d1` |
+| Agent / fixed roles SHA-256 | `483b82b9652e5a121bc1058b560978330e5b55b0fc60e47deab85ac8203b32bb` |
+| Agent / fixed role size | **5,984,256 bytes** each; static-CRT x64 agent, copied into the same closed three roles during fresh preparation |
+| Fixed source SHA-256 | `4f60ad22451af6427e159753cc93b088c273e5ef58d5aa8249494196af4d6131` |
+| Fresh target namespace | `C:\AIW-Paired-4f82f0b-20261031` on the same pinned VM107; not created at the last check |
+
+Do not substitute a future model-fix agent into this package or any retained
+workspace. The source-level defect is confirmed independently of the missing
+numeric tuple: preparation copied the observed **host** tuple into the sole
+profile field used for the **guest** equality check. The offline repair versions
+the profile and binds exact host and guest separately. Receipt/Start host checks
+use the host commitment; guest/result equality remains exact. Explicit bounded
+guest input passes through CLI and desktop preparation into the same immutable
+plan/profile/request/approval hashes. Blank retains strict host-version matching;
+no mismatch is automatically adopted. Legacy v1 profiles omit the new field,
+preserve their hashes and remain readable/recoverable, while new dispatch requires
+current source/revision. See [the model contract](paired-product-workflow.md#separate-exact-host-and-guest-windows-commitments).
+
+The working model-fix Results reader SHA-256
+`8361518d3abd88aa87aa1b2646a1939f685d49e8c6877801c392d2c0780e2e98`
+read both actual retained native v1/v2 failures. Each deterministic JSON/Markdown
+export matched its previous summary bytes exactly; each explicit29-file retained
+snapshot and selector remained unchanged. Private diagnostic/identity/path
+markers were absent, with zero provider/assessment execution routes. Reader
+exports live outside retained workspaces at `C:\AIW-Results-HostGuest-20261031`.
+The precise readback/audit path is recorded by
+`C:/aiw/paired-current-host-guest-reader-root.txt`. This validates historical
+reading/export only; neither a guest tuple nor positive native case acceptance
+was obtained. Unchanged suites retain their original source-scoped evidence.
+
 ## Approved execution request: one prepared console fixed pair
 
 Request ID: `AIW-PAIRED-CONSOLE-EXEC-D370EC8-20261031-01`.

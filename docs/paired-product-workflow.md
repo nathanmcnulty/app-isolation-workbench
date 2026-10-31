@@ -359,3 +359,53 @@ Independent source review found no consequential issue. Unchanged broader suites
 retain their recorded source/scope and were not rerun. The source fingerprint
 changes with these producer/protocol files: every follow-up dispatch needs new
 agent/package/source/plan pins. Never edit or replay the old retained failure.
+
+## Separate exact host and guest Windows commitments
+
+The later native a033 run retained the exact failing guard: the observed guest
+version differed from the approved profile. That profile was formed from the
+host version and reused as both host and guest commitment. This identifies a
+model defect; it does not reveal either unretained guest tuple or the old v1
+run's failing stage. Diagnostic-only source `4f82f0b` retains both exact tuples
+on mismatch while continuing to refuse before control setup. Its verified
+package is retained; no fresh native plan has run from it yet.
+
+New fixed-profile revision `aiw.dev/paired-file-registry-child/v0alpha2` requires
+`expectedHostWindows` and keeps `expectedWindows` as the exact guest commitment.
+Preparation records the statically observed host; receipt consistency and Start
+readiness compare that host field. The guest equality guard and result verifier
+still require the approved guest field exactly. Both tuples enter the existing
+profile/request/run-plan hashes and approval review. There is no new verdict
+engine, observed-version adoption, wildcard version or relaxed drift check.
+
+CLI `admin prepare-paired --guest-windows major.minor.build.revision` and the
+desktop's optional paired-only version field use the same bounded canonical
+four-component parser (each component at most 65535, fixed x64). Invalid input
+fails before workflow creation. An omitted value commits the host tuple as the
+guest expectation, preserving the former strict behavior; a measured different
+guest tuple requires a new explicit plan. The numeric commitment does not assert
+that the guest has already been observed or that any case has passed.
+
+Historical v1 profiles omit the new host field, retain their exact hashes and
+continue to bind their original single tuple for both environments. Reporting
+and exact recovery use historical validation. New dispatch requires the current
+revision/source and cannot reuse an old profile. Synthetic protected preparation
+and kernel fixtures deliberately use different host/guest tuples. The actual
+guest tuple and positive native six-case acceptance remain unverified.
+
+Validation for this model repair: admin13 / CLI2 / probe3 / provider9 / runner15 /
+guest11 unique affected Rust tests, desktop22 passed / 4 opt-in ignored, Node7;
+workspace and desktop all-target Clippy, formats and governance passed. The first
+runner drift fixture assigned1 when the newly distinct host already had revision1;
+it was corrected to increment the observed host, with separate host/guest
+approval-tamper cases. Focused reruns passed, including actual legacyv1-shaped
+fake recovery and guest-versus-host substitution rejection. Completed slow
+workflow checks were reused rather than repeated unchanged. Logs:
+`C:/aiw/paired-host-guest-*`. Independent source/docs review: no actionable finding.
+
+The model-fix reader also loaded the actual retained native v1 and v2 failures;
+both previous JSON/Markdown summary pairs were byte-identical. Each29-file
+explicit retained snapshot and selector remained unchanged, private fields were
+excluded, and zero provider/assessment calls were made. Audit:
+`C:/aiw/paired-host-guest-reader-53e67253-1b0f-4aaf-8010-e6461177db3d`.
+This is historical reading/export evidence, not native control acceptance.

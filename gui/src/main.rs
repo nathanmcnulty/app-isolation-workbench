@@ -307,6 +307,7 @@ mod desktop {
         document_input: Option<String>,
         evidence: String,
         operator_identity: String,
+        paired_guest_windows: Option<String>,
         package: Option<PackageValidationInput>,
     ) -> std::result::Result<(), String> {
         if !matches!(
@@ -333,6 +334,13 @@ mod desktop {
         if kind == "interactive" && document_input.as_deref().is_none_or(str::is_empty) {
             return Err("Choose a UTF-8 text input.".into());
         }
+        if kind != "paired" && paired_guest_windows.is_some() {
+            return Err("A guest-version commitment belongs only to fixed paired controls.".into());
+        }
+        let expected_guest_windows = paired_guest_windows
+            .as_deref()
+            .map(service::paired::parse_guest_windows)
+            .transpose()?;
         let c = c.inner().clone();
         let id = c.begin()?;
         let gate = GuiGate {
@@ -356,6 +364,7 @@ mod desktop {
                 let result = service::paired::assess_with_gate(
                     Path::new(&evidence),
                     &operator_identity,
+                    expected_guest_windows.as_ref(),
                     &gate,
                 )?;
                 let summary=result.report.as_ref().map(service::paired::summary).unwrap_or_else(|| if result.start_requested {"No verified paired result is available. Preserve evidence; inspect exact session status before retrying.".into()} else {"Preparation retained; explicit approval/Start was cancelled. No provider was executed.".into()});

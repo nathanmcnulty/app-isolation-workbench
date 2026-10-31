@@ -43,6 +43,7 @@
     const msix = kind() === "msix";
     const paired = kind() === "paired";
     show("installerField", !paired);
+    show("pairedGuestWindowsField", paired);
     show("documentField", kind() === "interactive");
     text("installerLabel", msix ? "Supported signed Notepad++ MSIX" : bambu ? "Supported Bambu Studio installer" : "Supported Notepad++ installer");
     text("chooseInstaller", msix ? "Choose MSIX" : bambu ? "Choose EXE" : "Choose MSI");
@@ -65,7 +66,7 @@
   }
 
   function setBusy(busy) {
-    ["prepare", "approve", "start", "cancel", "chooseInstaller", "chooseDocument", "chooseEvidence", "chooseDestination", "chooseWorkspace", "operatorIdentity", "export", "loadRetained", "recoverPaired"].forEach((id) => { if ($(id)) $(id).disabled = busy; });
+    ["prepare", "approve", "start", "cancel", "chooseInstaller", "chooseDocument", "chooseEvidence", "chooseDestination", "chooseWorkspace", "operatorIdentity", "pairedGuestWindows", "export", "loadRetained", "recoverPaired"].forEach((id) => { if ($(id)) $(id).disabled = busy; });
     document.querySelectorAll("input[name=workflowKind]").forEach((radio) => { radio.disabled = busy; });
   }
 
@@ -74,7 +75,7 @@
     const editable = ["idle", "cancelled", "failed", "completed"].includes(phase);
     const pending = ["preparing", "review", "approved"].includes(phase);
     const locked = busy || !!snapshot?.pairedRecoveryRequired || ["preparing", "running", "exporting", "analyzing", "packaging"].includes(phase);
-    ["chooseInstaller", "chooseDocument", "chooseEvidence", "operatorIdentity", "prepare"].forEach((id) => { $(id).disabled = locked || !editable; });
+    ["chooseInstaller", "chooseDocument", "chooseEvidence", "operatorIdentity", "pairedGuestWindows", "prepare"].forEach((id) => { $(id).disabled = locked || !editable; });
     $("chooseWorkspace").disabled = !!busy;
     $("loadRetained").disabled = !!busy;
     $("recoverMsix").disabled = locked || !editable || value("retainedKind") !== "msix";
@@ -263,7 +264,7 @@
   $("chooseEvidence").addEventListener("click", () => choose("evidence", "evidence"));
   $("chooseDestination").addEventListener("click", () => choose("destination", "destination"));
   $("chooseWorkspace").addEventListener("click", () => choose("workspace", "retainedWorkspace"));
-  $("prepare").addEventListener("click", () => action("prepare_workflow", { kind: kind(), installer: kind() === "paired" ? "" : value("installer"), documentInput: kind() === "paired" ? null : value("documentInput") || null, evidence: value("evidence"), operatorIdentity: value("operatorIdentity") }));
+  $("prepare").addEventListener("click", () => action("prepare_workflow", { kind: kind(), installer: kind() === "paired" ? "" : value("installer"), documentInput: kind() === "paired" ? null : value("documentInput") || null, evidence: value("evidence"), operatorIdentity: value("operatorIdentity"), pairedGuestWindows: kind() === "paired" ? value("pairedGuestWindows") || null : null }));
   $("approve").addEventListener("click", () => { const review = state.current && state.current.review; if (review) action("submit_approval", { workflowId: state.current.workflowId, challengeId: review.challengeId, confirmation: value("confirmation") }); });
   $("start").addEventListener("click", () => { const snapshot = state.current; if (snapshot) action("start_approved_workflow", { workflowId: snapshot.workflowId, challengeId: snapshot.startChallengeId }); });
   $("cancel").addEventListener("click", () => { const snapshot = state.current; if (!snapshot || state.busy) return; if (["preparing", "review", "approved"].includes(snapshot.phase)) action("cancel_pending", { workflowId: snapshot.workflowId }); else if (snapshot.phase === "running" && snapshot.pairedCancelAvailable) action("cancel_paired_workflow", { workflowId: snapshot.workflowId }); });

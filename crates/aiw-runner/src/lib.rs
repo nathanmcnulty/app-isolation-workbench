@@ -2602,7 +2602,7 @@ fn validate_start(
     readiness: &WindowsSandboxReadiness,
 ) -> Result<(), RunnerError> {
     if let Some(controls) = &request.paired_controls
-        && readiness.os_version.as_ref() != Some(&controls.profile.expected_windows)
+        && readiness.os_version.as_ref() != Some(controls.profile.approved_host_windows())
     {
         return Err(RunnerError::Drift);
     }
@@ -3486,7 +3486,7 @@ mod tests {
         };
         let mut ready = ready;
         if let Some(controls) = &start.paired_controls {
-            ready.os_version = Some(controls.profile.expected_windows.clone());
+            ready.os_version = Some(controls.profile.approved_host_windows().clone());
         }
         (root, layout, start, ready)
     }

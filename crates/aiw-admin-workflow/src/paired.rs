@@ -2,6 +2,7 @@
 //! aiw-runner; this service owns preparation and the existing approval gates.
 use super::*;
 use aiw_orchestrator::{PlannedAction, RecoveryStatus};
+pub use aiw_probe::paired_controls::parse_guest_windows;
 
 pub const PRODUCT: &str = "aiw-fixed-paired-controls";
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -320,10 +321,17 @@ pub fn report(run: &PairedRun) -> Result<aiw_runner::PairedControlRunReport> {
 fn prepare_review_context(
     evidence_parent: &Path,
     identity: &str,
+    expected_guest_windows: Option<&aiw_probe::WindowsVersionObservation>,
     progress: impl Fn(&str),
 ) -> Result<PreparedReviewContext> {
     if identity.trim().is_empty() {
         bail!("Operator identity is required");
+    }
+    if let Some(guest) = expected_guest_windows {
+        guest.validate().map_err(anyhow::Error::msg)?;
+        if guest.observer_architecture != "x86_64" {
+            bail!("Fixed paired controls require an exact x64 guest version");
+        }
     }
     // Reuse the already enrolled shared agent from the existing product package.
     // Its application recipe is not executed or used as the control project.
@@ -362,6 +370,7 @@ fn prepare_review_context(
         &assets.guest_agent,
         &manifest.guest_agent_sha256,
         &now_rfc3339(),
+        expected_guest_windows,
     )?;
     agent
         .revalidate()
@@ -412,17 +421,22 @@ struct PreparedReviewContext {
 
 /// Prepare/import only. No gate callback, approval writer, lease or Start route.
 /// Uses this package's enrolled fixed agent; accepts no executable/policy inputs.
-pub fn prepare_for_review(evidence_parent: &Path, identity: &str) -> Result<serde_json::Value> {
+pub fn prepare_for_review(
+    evidence_parent: &Path,
+    identity: &str,
+    expected_guest_windows: Option<&aiw_probe::WindowsVersionObservation>,
+) -> Result<serde_json::Value> {
     #[cfg(windows)]
     {
-        let context = prepare_review_context(evidence_parent, identity, |_| {})?;
+        let context =
+            prepare_review_context(evidence_parent, identity, expected_guest_windows, |_| {})?;
         let value = preparation_review_value(&context.run, &context.review);
         save_stage(&context.run.evidence_root, "paired-review", &value)?;
         Ok(value)
     }
     #[cfg(not(windows))]
     {
-        let _ = (evidence_parent, identity);
+        let _ = (evidence_parent, identity, expected_guest_windows);
         bail!("Fixed paired preparation requires Windows; no provider was invoked")
     }
 }
@@ -443,10 +457,15 @@ fn preparation_review_value(run: &PairedRun, review: &ApprovalReview) -> serde_j
 pub fn assess_with_gate(
     evidence_parent: &Path,
     identity: &str,
+    expected_guest_windows: Option<&aiw_probe::WindowsVersionObservation>,
     gate: &dyn ApprovalGate,
 ) -> Result<PairedWorkflowResult> {
-    let context =
-        prepare_review_context(evidence_parent, identity, |message| gate.progress(message))?;
+    let context = prepare_review_context(
+        evidence_parent,
+        identity,
+        expected_guest_windows,
+        |message| gate.progress(message),
+    )?;
     let PreparedReviewContext {
         run,
         review,

@@ -21,7 +21,7 @@ fn setup_pair_source(
     WindowsSandboxReadiness,
 ) {
     setup_transformed(|start, plan| {
-        let profile = PairedControlProfile {
+        let mut profile = PairedControlProfile {
             revision: aiw_probe::PAIRED_CONTROL_REVISION.into(),
             source_sha256: source
                 .map(str::to_owned)
@@ -31,6 +31,9 @@ fn setup_pair_source(
             launcher_sha256: start.guest_agent.sha256.clone(),
             launcher_size_bytes: start.guest_agent.size_bytes,
             origin: ControlEvidenceOrigin::SyntheticRehearsal,
+            expected_host_windows: Some(
+                aiw_probe::paired_controls::parse_guest_windows("10.0.26000.1").unwrap(),
+            ),
             expected_windows: aiw_probe::WindowsVersionObservation {
                 major: 10,
                 minor: 0,
@@ -40,6 +43,10 @@ fn setup_pair_source(
             },
             policy: PairedControlPolicy::ClassicAppContainerNoCapabilitiesFixedChildOutputGrant,
         };
+        if source.is_some() {
+            profile.revision = "aiw.dev/paired-file-registry-child/v0alpha1".into();
+            profile.expected_host_windows = None;
+        }
         let role = |name: &str| {
             let path = Path::new(&start.workspace.tools.final_path).join(name);
             fs::write(&path, b"guest-agent").unwrap();
@@ -489,7 +496,7 @@ fn paired_production_kernel_collects_comparable_and_inconclusive_synthetic_recei
 }
 #[test]
 fn paired_unapproved_drifted_and_stale_inputs_cannot_reach_fake_dispatch() {
-    for mutant in 0..5 {
+    for mutant in 0..7 {
         let (_root, layout, mut start, mut ready) = setup_pair();
         let process = FakeProcess::new(vec![]);
         match mutant {
@@ -510,7 +517,27 @@ fn paired_unapproved_drifted_and_stale_inputs_cannot_reach_fake_dispatch() {
                 start.paired_controls.as_mut().unwrap().profile.origin =
                     ControlEvidenceOrigin::NativeWorker
             }
-            _ => ready.os_version.as_mut().unwrap().revision = 1,
+            4 => ready.os_version.as_mut().unwrap().revision += 1,
+            5 => {
+                start
+                    .paired_controls
+                    .as_mut()
+                    .unwrap()
+                    .profile
+                    .expected_windows
+                    .revision += 1
+            }
+            _ => {
+                start
+                    .paired_controls
+                    .as_mut()
+                    .unwrap()
+                    .profile
+                    .expected_host_windows
+                    .as_mut()
+                    .unwrap()
+                    .revision += 1
+            }
         }
         assert!(
             execute_wsb_golden_probe(&start, &ready, &layout, &process, &TestLease::default())
@@ -646,6 +673,12 @@ fn paired_duplicate_and_out_of_order_evidence_is_rejected() {
 fn paired_historical_source_can_recover_but_cannot_start_again() {
     let old_source = "9".repeat(64);
     let (_root, layout, start, ready) = setup_pair_source(Some(&old_source));
+    let profile = &start.paired_controls.as_ref().unwrap().profile;
+    assert_eq!(
+        profile.revision,
+        "aiw.dev/paired-file-registry-child/v0alpha1"
+    );
+    assert!(profile.expected_host_windows.is_none());
     let original_plan = layout.read_plan().unwrap();
     let original_hash = original_plan.hash().unwrap();
     let rejected = FakeProcess::new(vec![]);

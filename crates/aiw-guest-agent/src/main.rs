@@ -1363,6 +1363,7 @@ mod tests {
             launcher_size_bytes: 7,
             origin: aiw_probe::ControlEvidenceOrigin::SyntheticRehearsal,
             expected_windows: result.windows.clone(),
+            expected_host_windows: Some(result.windows.clone()),
             policy: PairedControlPolicy::ClassicAppContainerNoCapabilitiesFixedChildOutputGrant,
         };
         let request = aiw_provider_wsb::PairedControlsRequest::new(

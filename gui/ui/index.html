@@ -79,6 +79,7 @@
         <label id="documentField" class="field hidden"><span>Bounded text input <em>interactive only</em></span><div class="input-action"><input id="documentInput" type="text" readonly placeholder="Choose a UTF-8 text file"><button id="chooseDocument" class="secondary" type="button">Choose text</button></div></label>
         <label class="field"><span>Evidence folder</span><div class="input-action"><input id="evidence" type="text" readonly placeholder="Backend default will appear here"><button id="chooseEvidence" class="secondary" type="button">Choose folder</button></div></label>
         <label class="field"><span>Operator identity</span><input id="operatorIdentity" type="text" autocomplete="off" placeholder="Name or administrator ID"></label>
+        <label id="pairedGuestWindowsField" class="field hidden"><span>Expected Windows version inside the test environment <em>optional</em></span><input id="pairedGuestWindows" type="text" autocomplete="off" maxlength="23" placeholder="major.minor.build.revision" aria-describedby="pairedGuestWindowsHint"><small id="pairedGuestWindowsHint">Use an exact version from retained diagnostics. Leave blank to require the host's version. Both commitments appear in the plan; a mismatch stops the controls.</small></label>
       </div>
       <p id="setupHint" class="helper">Select the exact supported MSI and identify the operator before preparing.</p>
       <button id="prepare" class="primary" type="button">Prepare review</button>

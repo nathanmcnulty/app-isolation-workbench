@@ -117,6 +117,10 @@ enum AdminCommand {
         evidence: PathBuf,
         #[arg(long)]
         identity: String,
+        /// Exact previously observed guest version (major.minor.build.revision).
+        /// Omission requires the guest to match the separately recorded host version.
+        #[arg(long, value_parser = aiw_probe::paired_controls::parse_guest_windows)]
+        guest_windows: Option<aiw_probe::WindowsVersionObservation>,
     },
     /// Assess supported application bytes through a packaged fixed workflow.
     Assess {
@@ -1351,9 +1355,17 @@ fn main() -> ExitCode {
 fn run(command: Command) -> Result<()> {
     match command {
         Command::Admin(args) => match args.command {
-            AdminCommand::PreparePaired { evidence, identity } => {
-                let review = admin_workflow::paired::prepare_for_review(&evidence, &identity)
-                    .map_err(admin_workflow::public_error)?;
+            AdminCommand::PreparePaired {
+                evidence,
+                identity,
+                guest_windows,
+            } => {
+                let review = admin_workflow::paired::prepare_for_review(
+                    &evidence,
+                    &identity,
+                    guest_windows.as_ref(),
+                )
+                .map_err(admin_workflow::public_error)?;
                 write_json(&review).map_err(|error| anyhow::anyhow!(
                     "Paired preparation exists at {}; no approval or Start was requested. Preserve paired-review.json; output failed: {error}",
                     review["run"]["evidenceRoot"].as_str().unwrap_or("the selected evidence parent")
@@ -3874,6 +3886,16 @@ mod tests {
             "operator",
         ];
         assert!(Cli::try_parse_from(base).is_ok());
+        for version in ["10.0.26100.1", "10.0.26300.9711"] {
+            let mut args = base.to_vec();
+            args.extend(["--guest-windows", version]);
+            assert!(Cli::try_parse_from(args).is_ok());
+        }
+        for version in ["10.0.1", "10.0.65536.0", "10.0.1.0;Start", "10.0.1.0\n"] {
+            let mut args = base.to_vec();
+            args.extend(["--guest-windows", version]);
+            assert!(Cli::try_parse_from(args).is_err());
+        }
         for forbidden in [
             "--start",
             "--approve",

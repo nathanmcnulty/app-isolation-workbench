@@ -34,6 +34,15 @@ fn paired_static_prepare_verify_and_import_never_request_runtime_invocation_or_a
         Path::new(&source.receipt.guest_agent.canonical_path),
         &source.receipt.guest_agent.sha256,
         "synthetic-time",
+        Some(
+            &source
+                .receipt
+                .paired_controls
+                .as_ref()
+                .unwrap()
+                .profile
+                .expected_windows,
+        ),
         &inspector,
     )
     .unwrap();
@@ -48,6 +57,12 @@ fn paired_static_prepare_verify_and_import_never_request_runtime_invocation_or_a
     );
     assert!(artifacts.receipt.provider.version.is_none());
     assert!(!artifacts.receipt.provider_acquired && !artifacts.receipt.provider_mutated);
+    let profile = &artifacts.receipt.paired_controls.as_ref().unwrap().profile;
+    assert_ne!(&profile.expected_windows, profile.approved_host_windows());
+    assert_eq!(
+        Some(profile.approved_host_windows()),
+        artifacts.receipt.host_os_version.as_ref()
+    );
     let held = open_verified_preparation_with_inspector(
         &workspace,
         &project,
