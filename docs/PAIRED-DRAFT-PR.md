@@ -36,3 +36,9 @@ PR #103's trials were not repeated. Sandbox Tools mapping and the six-case nativ
 workflow remain unvalidated. General application
 compatibility/effective isolation, live Benchmark 2 acceptance and remaining
 W4/W5 requirements remain open. No release or production acceptance is claimed.
+
+A separately approved, hash-guarded readiness diagnostic subsequently succeeded
+once in VM107 console session 1: pinned protocol recognized, session list empty,
+no blockers, exit 0 in 6424ms. It did not start an assessment, change the retained
+run or establish the cause of the earlier remote-context timeout. Additional
+native execution needs separate authority; publication remains separate.

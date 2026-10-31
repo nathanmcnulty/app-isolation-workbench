@@ -53,7 +53,7 @@ Actual headless Results on VM107 exports partial/unmeasured evidence correctly.
 Repeat/collision/retained-destination checks preserve all 17 files in the bounded
 explicit retained tree and original exports; both formats repeat byte-identically.
 No provider/execution entry point exists in that reader/export path. The console
-browser tool timed out after its documented reset/retry; no current native GUI
+browser tool initially timed out; no current Results GUI
 demonstration is claimed. Bounded existing AppModel/TWinUI logs supplied no matching
 events; remote-context causation remains unproven.
 
@@ -67,19 +67,24 @@ Native six-case collection, guest Tools custody, inner and outer cleanup, and
 current GUI execution remain unvalidated. Keep full Benchmark 2 and W4/W5 open;
 no general compatibility, effective isolation or production acceptance is claimed.
 
-A reviewed one-shot **readiness-only** console diagnostic is now staged, unexecuted,
+A reviewed one-shot **readiness-only** console diagnostic completed once,
 on VM107 at `ReviewTools-2ec65ed\Inspect-VM107-console-readiness.ps1` under the d370
 root. SHA-256 `6fcf137e742dcb2896cf5775f706c94c98221e4d468541d5a69a51110f324af2`.
 It accepts no operation/target/path overrides and calls only pinned `host assess`,
 requiring existing console session 1 and the original runtime/identity/byte pins.
 Wrong-machine refusal, AST/compile, capped-stream and unresolved-stream deadline
 checks passed offline; one source-review IO-bound issue was fixed before staging.
-The diagnostic output directory is absent. See the proposed follow-up in the
-consolidated request; this includes no additional Start, recovery or trial.
-The user has now explicitly approved **the fixed console diagnostic only**.
-Do not ask for that same approval again. It remains unexecuted pending working
-console control; do not substitute remoting/session 0 or another worker.
-Console browser control still times out. Local preparation evidence:
+After the user restored browser access, the hash-guarded helper ran in existing
+Core 7.6.9 console session 1 (caller PID 5404, CLI PID 1364, non-admin token).
+It exited 0 in 6424ms: supported, protocol verified, session list available and
+empty, no blockers. Both streams completed; five records were hash-verified on
+readback. This proves readiness at that time/context, not timeout causation or
+control acceptance. Original transaction/result remain absent and journal hash
+unchanged. See the consolidated request's completed observation and exact pins.
+Both the fixed diagnostic permission and original single Start are consumed.
+No retry, additional Start, approval, recovery or trial occurred. Further native
+work requires a separate pinned request; preserve the existing run.
+Local preparation/completion evidence:
 `C:/aiw/paired-console-diagnostic-preparation-4ea6c2a8-5237-41fc-b266-4dff331fdd52`.
 
 No push, PR creation, publication, signing, release, merge, security weakening,

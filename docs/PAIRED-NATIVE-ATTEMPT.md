@@ -135,9 +135,10 @@ Logs under `C:/aiw`: `paired-predispatch-report-tests.log`,
 `paired-retained-export-example-build.log`. Current live backend record:
 `vm107-results-export.json` in the audit directory.
 
-The positive six-case native demonstration remains incomplete. Before another
-assessment attempt, separately review a bounded diagnostic of the timeout and
-update execution authority for the exact target/context/source; this request's
+The positive six-case native demonstration remains incomplete. The separately
+approved console diagnostic below now establishes readiness in session 1. Before
+another assessment attempt, update execution authority for exact fresh plan,
+target/context/source bindings; this request's
 single Start must not be replayed. Preserve the existing approved run and its
 diagnostics. Full Benchmark 2 still needs its declared real-application candidate;
 W4/W5 closure, publication and production acceptance remain open.
@@ -149,3 +150,22 @@ Sandbox provider query was used for that final check. Documentation review's two
 factual corrections (execution-package source versus reporting source, and VM107
 CLI PID versus controller PID) were fixed. Final governance/format/diff evidence
 is retained under `C:/aiw/paired-attempt-final-governance.json` and the local audit.
+
+## Subsequent approved console-readiness observation
+
+After browser access recovered, the reviewed fixed diagnostic ran once on VM107
+at 2026-10-31 07:26 UTC, without another Start or run approval. Caller PID 5404
+and CLI PID 1364 were both in existing labadmin console session 1; admin-token
+membership was false. The unchanged d370ec8 CLI's `host assess` exited 0 in
+6424ms, with empty stderr and valid readiness JSON: supported, no blockers,
+exact provider protocol/schema recognized, session list available and empty.
+This is read-only readiness evidence, not native control/cleanup acceptance or
+proof of the earlier timeout's cause. Original transaction/result remain absent;
+the retained journal hash is unchanged. No recovery/cancellation/retry occurred.
+
+The five bounded records and independently verified local readback hashes are
+pinned in the [completed diagnostic record](PAIRED-NATIVE-APPROVAL.md#completed-console-observation-and-remaining-approval-boundary).
+The console diagnostic permission is consumed. No further native assessment or
+publication is authorized; preserve the existing run and prepare any subsequent
+request separately with fresh plan bindings. Earlier test/review evidence is
+reused; unchanged Rust/Node suites were not rerun.

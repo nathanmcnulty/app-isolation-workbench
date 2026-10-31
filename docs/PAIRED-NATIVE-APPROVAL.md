@@ -16,14 +16,14 @@ a second dispatch authorization. Publication remains separate.
 ## Proposed follow-up: one console-readiness diagnostic, no Start
 
 Follow-up ID: `AIW-PAIRED-CONSOLE-READINESS-D370EC8-20261030`.
-Status: **explicitly approved for one fixed console diagnostic; staged but not
-executed on VM107 because console control is still unavailable**. This is additional
+Status: **explicitly approved and completed once on VM107, 2026-10-31
+07:26:33–07:26:45 UTC**. This is additional
 readiness observation in the existing console context, not permission to replay
 the consumed Start, approve/reprepare a run, or trial an application.
 The user replied **"Approve fixed console diagnostic only"** to the scoped
 question. That authorization is recorded locally as
 `console-diagnostic-user-authorization.json` in the proposal evidence directory.
-Working console access remains required. The response grants no additional Start,
+Browser access recovered after the user signed in. The response grants no additional Start,
 run approval, recovery, trial, security change or publication authority.
 
 The prior invocation was through trusted remoting. A subsequent observer was in
@@ -58,8 +58,8 @@ settings. Normal existing access and TLS pins remain required for staging/readba
 | Raw local proposal/evidence | `C:/aiw/paired-console-diagnostic-preparation-4ea6c2a8-5237-41fc-b266-4dff331fdd52` |
 
 Staging used exclusive new-file creation and independently verified the helper's
-bytes on VM107; the diagnostic output directory remains absent. No helper code,
-provider query or run operation was executed there by staging. Original package,
+bytes on VM107; the diagnostic output directory was absent immediately before
+execution. No helper code, provider query or run operation was executed by staging. Original package,
 approved run, retained inputs and exports are not diagnostic write destinations.
 
 Expected effects are a fresh diagnostic directory and create-new `intent.json`,
@@ -87,12 +87,12 @@ recover a foreign resource or start an assessment. A completed diagnostic merely
 supplies readiness evidence for further review. Preserve all records/partial
 prefixes; no diagnostic cleanup/deletion or additional Start is included.
 
-The exact future console command below is **not executed**. Before using it,
-confirm the helper hash and use the identified existing console, without changing
-privileges or authentication:
+The following records the approved console procedure, now consumed. **Do not run
+it again.** Execution checked the helper hash and used the identified existing
+console, without changing privileges or authentication:
 
-Run it only under the explicit diagnostic authorization above, in the existing
-Core 7.6.9 console. The command does not grant any further Start authority.
+The existing Core 7.6.9 console used an equivalent hash-guarded invocation, with
+the child invocation inside the successful hash branch. No further Start authority follows.
 
 ```powershell
 $ErrorActionPreference = 'Stop'
@@ -103,13 +103,45 @@ if ((Get-FileHash -LiteralPath $consoleDiagnostic -Algorithm SHA256).Hash.ToLowe
 
 Offline evidence: PowerShell AST parsed; helper compiled; a capped oversized stream
 and unresolved-stream deadline check passed; the authoritative controller VM203
-was rejected at the wrong-machine guard before any provider query/output. Whole
-VM107 diagnostic execution remains unperformed. Independent source review found
+was rejected at the wrong-machine guard before any provider query/output.
+Independent source review found
 one stream-bound/deadline issue in the first draft, fixed before staging; final
 review reported no remaining consequential issue. Existing Rust/Node suites were
-not rerun for this local helper. Browser console control still times out, including
-after its documented reset/retry; do not substitute another worker or silently
-run this through remoting/session 0.
+not rerun for this local helper. The actual invocation and result are recorded
+below; no other worker or remoting/session-0 execution was substituted.
+
+### Completed console observation and remaining approval boundary
+
+The helper ran once under `AIW\labadmin`, caller PID **5404**, session **1**,
+administrator-token membership **false**. Pinned `aiw.exe host assess`, child PID
+**1364**, session **1**, completed with exit **0** in **6424ms**. Both streams
+completed, stderr was empty, and the 3001-byte readiness JSON parsed successfully.
+The original package/provider/catalog/runtime/OS/identity guards passed.
+Readiness reports `supported: true`, virtualization/feature available, the exact
+`windowsSandboxCli/v0.8.107.0` protocol and `WindowsSandboxEnvironments/Id` schema,
+current sessions available with an empty ID list, and **no blockers**.
+This establishes readiness in that console context at that time. It does not
+prove the cause of the earlier remoting timeout or establish native controls,
+isolation, compatibility, cleanup or Benchmark 2 acceptance.
+
+Five create-new records remain in the pinned diagnostic directory: `intent.json`,
+`process.json`, `readiness.stdout.json`, `readiness.stderr.txt`, `result.json`.
+Hash-verified local copies and `readback-hashes.json` are in
+`C:/aiw/paired-console-diagnostic-preparation-4ea6c2a8-5237-41fc-b266-4dff331fdd52/completed-readback-4a62858f-41f5-4336-9d5e-15b2342d13d3`;
+console proof is `console-readiness-completed.png` in its parent evidence directory.
+An initial console path assignment had a keyboard symbol translation error and
+failed before invoking the helper; the corrected hash-guarded helper ran once.
+No query retry, Start, run approval, cancel/recovery or publication was issued.
+Read-only postcheck found the original transaction/result absent and journal
+SHA-256 unchanged at
+`2fefabbd2b1e38297ccfb191f2ad653ac1afb7f4d093ee16fa337fbf48f07108`.
+
+The readiness-only permission and prior single-Start permission are consumed.
+Any further native assessment needs a separate source-pinned request for the
+smallest fixed paired control flow in console session 1, with fresh preparation
+and plan bindings and explicit approval/Start authority. Preserve the old run;
+do not replay it. No further preparation or execution is authorized by this
+observation, and publication remains a separate decision.
 
 ## Console installation and prepared plan — before the approved attempt
 
