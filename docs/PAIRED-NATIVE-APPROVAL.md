@@ -1,15 +1,94 @@
 # Reconciliation and bounded native approval request
 
 Request ID: `AIW-PAIRED-NATIVE-F99BBD4-20261030`. Prepared 2026-10-30.
-Status: **source blockers fixed and reviewed; refreshed package built; native
-preparation remains blocked by Store installation in a remote logon session**.
+Status: **approved console installation and non-executing preparation completed;
+stopped at pending approval**.
 The current source is `d370ec8cd5bcaa6915ac24801789070dd0040e3b`; the original
-f99bbd4 reconciliation and package remain retained. This request is not yet
-dispatchable: exact provider/catalog/file-ID and fresh plan pins are unavailable.
+f99bbd4 reconciliation and package remain retained. Exact current provider,
+catalog, file-ID, workspace and fresh plan pins are recorded below.
 No plan approval, Start or native control trial is authorized.
 
+## Current console installation and prepared plan — 2026-10-30 America/Anchorage
 
-## Blocker remediation — 2026-10-30 (America/Anchorage)
+The user explicitly authorized VM107 console installation, followed by
+non-executing preparation, stopping before plan approval/Start and publication.
+Browser access worked in this turn. The direct-IP OpenID route reported a redirect
+mismatch; the established `https://pve.wombat-universe.ts.net/` route completed
+normal existing-account sign-in without changing authentication configuration.
+Only VM107 (`aiw-worker`, `pve-r630`) was selected. Its console reached the existing
+labadmin desktop; trusted HTTPS/Core independently confirmed VM UUID/operator SID
+and active console session 1. No Windows credential was typed or changed.
+
+Store search did not expose this system component. The exact approved Store link
+was opened through File Explorer; Edge's first-run flow was left unfinished before
+applying personalization settings, without browser sign-in or data import.
+With the console user and Store initialized, the same exact approved WinGet
+installation succeeded (exit 0), and the console Store download queue visibly
+showed Windows Sandbox downloaded and then installed. No Update all/check-for-
+updates action or other application installation was requested. Sandbox was not
+opened. The earlier 0x80070520 limitation is resolved, not a current blocker.
+
+Audit directory:
+`C:/aiw/paired-console-preparation-efe09ad0-3ac2-42de-b0a1-605685618350`.
+Installation record: `vm107-install-with-active-console.json`; console proof:
+`sandbox-installing-console.png`, `sandbox-installed-console.png`.
+
+The independently hashed d370ec8 CLI/verifier and all 14 package payloads were
+reverified on VM107. Exactly one `admin prepare-paired` call then completed
+successfully through trusted Core remoting. The actual production static inspector
+verified Store registration, cache-only catalog membership and held provider file
+identity; preparation staged the three fixed roles, protected workspace and typed
+v0alpha8 receipt, then imported the v0alpha7 plan under a v0alpha4 planning-import
+receipt. No provider lease/runtime
+command was acquired or invoked. This is actual preparation evidence, not a fake
+provider result or a native control observation.
+
+| Current exact binding | Value |
+|---|---|
+| Run ID | `paired-1793425345541054400` |
+| Evidence root | `C:\AIW-Paired-d370ec8-20261030\Evidence\paired-1793425345541054400` |
+| Workspace / CLI `--root` | `C:\AIW-Paired-d370ec8-20261030\Evidence\paired-1793425345541054400\paired-1793425345541054400` |
+| Project path | evidence root + `\paired-project.yaml` |
+| Exact locator / pending review | evidence root + `\paired-workflow.json` / `\paired-review.json` |
+| Created / imported | 2026-10-30 21:42:25 / 21:42:30 America/Anchorage (2026-10-31T05:42:25Z / 05:42:30Z) |
+| Canonical run-plan hash | `b0d2e739ce45e7c9bbb0a0ed9651905cefcd0dfaae53c4e06450c1108035f234` |
+| Canonical Sandbox-plan hash | `291de53cf6c90fc35801631c40bed87fe82d090cf7261e1a41894957649abc69` |
+| Project revision hash | `c1b4c4e9323d7b25ebc7397aab9f7194eeb9bc0d30c874f08fd545107bef4e66` |
+| Fixed profile hash | `8eab0eaac3e8fe3d1aa400996a643b207298f5b22d50f2d72f356527e508a6cb` |
+| Workspace identity / security-policy hash | `cb246b2b5cd2b80dd36ffcb9f941e5e749b1baf60efa77b85def6f51a9d5c4ef` / `5b304775afdaed1a7acbbbd80658f36e7b60b9896cae2ae626691aae59a8f878` |
+| Canonical preparation-receipt commitment in import | `62a10d1d3d0b99825e6277c05d36c7d02dec406560a18e872f87ef98eda1e02e` |
+| Preparation-file bytes SHA-256 (6876 bytes) | `5f59f8330879c03c91e356723ccd7eb79dc05058cbcbce58226fa36b7f2d7038` |
+| Plan-file bytes SHA-256 (3525 bytes) | `f3611b8d0c1b22c181047c7c30341acfd108a594d4ee32dfaf430ca1b75431e6` |
+| Registered provider package | `MicrosoftWindows.WindowsSandbox_0.8.107.0_x64__cw5n1h2txyewy`, Store, status OK |
+| Package family / publisher | `MicrosoftWindows.WindowsSandbox_cw5n1h2txyewy` / `CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US` |
+| Provider path | `C:\Program Files\WindowsApps\MicrosoftWindows.WindowsSandbox_0.8.107.0_x64__cw5n1h2txyewy\wsb.exe` |
+| Provider SHA-256 / size | `247e092b5c5bd37820f225a7dd3ddf10ae37a67e2751a19c24b802c84769c441` / 156160 bytes |
+| Provider file volume / ID | `322b0dfe` / `000300000002a99d` |
+| Catalog | same package root + `\AppxMetadata\CodeIntegrity.cat` |
+| Catalog SHA-256 / volume / ID | `a5cd4096113be4c7240049327b55d7018c06ee009809999a42cd7ecaca035905` / `322b0dfe` / `000500000002531e` |
+| Catalog member / trust | `9B406D701D4E6AADC1AD76D80C72FCC2F527E6BFA4597FCF2E4C73E44EA702DF` / `catalogMember`, `cacheOnlyWholeChainExcludeRoot`, verification available |
+| Workspace volume / root file ID | `28322b3c322b0dfe` / `f4a90200000004000000000000000000` |
+| Verified persisted status | `pendingApproval`, journal sequence 1; Windows Sandbox session status `none` |
+
+The provider executable's runtime version is **unmeasured** (`version=null`);
+package version 0.8.107.0 is observed. The receipt declares required protocol
+`windowsSandboxCli/v0.8.107.0`, observation `requiredAtStartNotObserved`.
+Runtime protocol, full feature readiness, global session availability and mapped
+guest Tools behavior remain deferred to the separately authorized Start. The
+plan's intended `nativeWorker` origin is not a measured control result.
+
+`paired-review.json.proposedApproval` contains a typed proposal for this exact
+run/hash/operator/trust-delta tuple. Its prefilled `approvedAt` is **not consent**;
+no approval record was committed. A read-only `run status` verified pending state
+and session `none`, with nine fixed retained plan/receipt/journal/tool file hashes
+unchanged before/after. Approval, cancellation, result, revocation and session-
+transaction artifacts are absent; guest Output and Exports are empty. Historical
+f99 Evidence/Exports remain empty and untouched. Zero provider runtime/control
+calls occurred. Records: `vm107-preparation-result.json`,
+`vm107-prepared-stop-state-v2.json`, plus exact retained document copies.
+
+
+## Earlier blocker remediation — retained history
 
 The user authorized fixing the blockers and continuing, with the existing stop
 before plan approval/Start and publication retained. Stronger read-only target
@@ -259,10 +338,11 @@ Current refreshed unsigned package:
 - New VM107 staging root: `C:\AIW-Paired-d370ec8-20261030`, with `Package`,
   `Evidence` and `Exports` siblings. Preserve the old f99bbd4 root unchanged.
 - Controller and remote verifiers both confirmed all 14 payload files and exact
-  inventory. Records under the remediation directory:
+  inventory. Records under the earlier remediation directory:
   `controller-package-verification.json`, `vm107-package-verification.json`,
   `stage-readiness-fix-result.json`. Final trusted endpoint inspection confirms
-  both old and new Evidence/Exports directories empty, no plan/approval/Start.
+  both old and new Evidence/Exports directories empty at that historical stage.
+  Current preparation subsequently created only the exact pending run above.
 
 The same 5,968,896-byte x64 static-CRT guest agent supplies **all three fixed
 roles**, SHA-256:
@@ -287,65 +367,71 @@ that source. The protected request/guest validates its own current source too.
 The package includes inert existing application recipe metadata; this request
 permits only **Fixed paired controls**, no installer selection or other workflow.
 
-## Current target-provider gates — inspected and blocked
+## Current target-provider gates — statically verified, runtime deferred
 
-The exact OS, operator, runtime, endpoint and VM metadata are now recorded above.
-The Sandbox provider/catalog/file-ID pins cannot be filled: the required package
-is still absent after the approved install attempt. Firmware virtualization's
-false negative is corrected by the reviewed Windows hypervisor query described
-above; no CPU/security change is needed. Missing provider pins are not blank
-fields to fill with historical hashes. Required protocol remains
-`windowsSandboxCli/v0.8.107.0`; it was not probed or observed.
-
-No plan or v0alpha8 preparation receipt was created. The user approved exact
-Store installation, but its remote-session failure prevents completing that
-prerequisite unattended using the available trusted route. After installation,
-capture fresh exact provider/OS/static pins and use only this closed command in
-the verified new package to perform authorized non-executing preparation:
+The current provider/catalog/file-ID and v0alpha8 preparation pins are recorded
+above, from actual production static inspection. The following command completed
+once on VM107; **do not repeat it or create another plan**:
 
 ```powershell
 & 'C:\AIW-Paired-d370ec8-20261030\Package\aiw.exe' admin prepare-paired --evidence 'C:\AIW-Paired-d370ec8-20261030\Evidence' --identity 'AIW\labadmin'
 if ($LASTEXITCODE -ne 0) { throw 'Preparation failed; preserve evidence and stop' }
-# STOP. paired-review.json is a pending proposal, not an approval or result.
-# Supply its exact typed plan/provider/run pins in this request before approval.
+# STOP. Completed; paired-review.json remains pending, not approval or a result.
 ```
 
 No `host assess`, `wsb --version`, list, Start, approval, recovery, classic
-bootstrap, feature/VM/security changes or controller fallback is authorized here.
-Do not modify old records or repeat failed preparation without a changed cause.
+bootstrap, feature/VM/security changes or controller fallback was performed.
+Runtime checks remain required after a future exact approval and separate Start.
 
-## Conditional future assessment — not authorized by prerequisite approval
+## Conditional future assessment — not authorized by console/preparation approval
 
-Preserve both staged package roots and all old records. The commands below are
-a **future verification/UI procedure**, not authorization to execute now.
-The provider gates and missing fresh plan must first be resolved and this request
-updated. The UI was not launched. CLI preparation and UI preparation each make a
-fresh plan; never transfer an approval between them or assume that opening the UI
-resumes the CLI's pending proposal.
+Use the **existing pending run** and exact immutable pins above. Do not reprepare
+in the desktop: its Prepare action creates a different run/plan, invalidating this
+request's bindings. This smallest native assessment would use the existing CLI
+approval and Start entry points into the same shared native runner used by the
+desktop. It would exercise production native provider/guest/collector/reporting,
+but **would not exercise desktop Controller/Tauri approval/Start interaction**;
+that UI's completed fake-provider/replay evidence remains a separate limitation.
+
+After a new explicit authorization for this request, the operator must reverify
+VM identity, package inventory, retained plan/receipt/tool hashes, provider/catalog
+identity and exclusive reservation. Any drift requires a new request, not repair
+or silent re-preparation. The intended approval record has:
+
+- schema `aiw.dev/approval-record/v0alpha1`, run `paired-1793425345541054400`;
+- `planHash=b0d2e739ce45e7c9bbb0a0ed9651905cefcd0dfaae53c4e06450c1108035f234`;
+- `approvedBy=AIW\labadmin`; actual future consent/recording time in `approvedAt`;
+- exactly the two trust deltas in the retained plan/proposal: the fixed ordinary
+  versus zero-capability classic AppContainer controls in one offline Sandbox,
+  and read-only Tools mapping with writable Output treated as untrusted.
+
+Copy those fields from the bounded pending review **only after** that new consent,
+updating the timestamp to actual recording time. Publish a new
+`C:\AIW-Paired-d370ec8-20261030\Authorized-approval.json` exclusively (never
+replace an existing file), then use `aiw run approve --approval` with the exact
+workspace and run below. That step commits approval but does not start execution.
+No authorized-approval file exists now. Stop if any existing committed approval,
+cancellation, result, transaction, unexpected output or foreign resource is found.
+The exact future commands are documented for review only; **neither was run**:
 
 ```powershell
 $ErrorActionPreference = 'Stop'
-if ((Get-CimInstance Win32_ComputerSystemProduct).UUID.ToLowerInvariant() -cne 'e5cecc90-35c2-4831-bf9c-424be23f7d4e') { throw 'Wrong VM; stop' }
-$pairedAdapter = @(Get-CimInstance Win32_NetworkAdapterConfiguration -Filter 'IPEnabled = True' | Where-Object { $_.MACAddress -ieq 'CC:34:21:B8:5A:31' -and $_.IPAddress -contains '192.168.1.174' })
-if ($pairedAdapter.Count -ne 1) { throw 'Worker network identity mismatch; stop' }
-$pairedPackage = 'C:\AIW-Paired-d370ec8-20261030\Package'
-$pairedVerifier = Join-Path $pairedPackage 'verify-desktop-package.ps1'
-if ((Get-FileHash -LiteralPath $pairedVerifier -Algorithm SHA256).Hash.ToLowerInvariant() -cne '8398e34b15d2876cc7aa30ca45e59c290468e77afe318ba374b8f3ceab85bcfe') { throw 'Verifier drift; stop before executing it' }
-$pairedVerified = & $pairedVerifier -PackageRoot $pairedPackage -ReceiptSha256 'dc2e9499cc82e1258b7fe81da51abe2c2a9d83b83581d8e015f2146989f56390' -SourceRevision 'd370ec8cd5bcaa6915ac24801789070dd0040e3b' | ConvertFrom-Json
-if ($pairedVerified.exactInventory -ne $true) { throw 'Package verification failed; stop' }
-# Opens only the UI after prerequisite access/staging authorization. It does not
-# authorize approval/Start, and no application installer/control is selected here.
-Start-Process -FilePath (Join-Path $pairedPackage 'aiw-desktop.exe') -WindowStyle Normal
+$pairedCli = 'C:\AIW-Paired-d370ec8-20261030\Package\aiw.exe'
+$pairedWorkspace = 'C:\AIW-Paired-d370ec8-20261030\Evidence\paired-1793425345541054400\paired-1793425345541054400'
+$pairedRunId = 'paired-1793425345541054400'
+if ((Get-FileHash -LiteralPath $pairedCli -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0dccb24c04f895a22e647af10b7ce0d72b70902c328e59b4b2329013cb5a111a') { throw 'CLI drift' }
+# FUTURE GATE 1: only after explicit consent and exclusive new approval-file creation.
+& $pairedCli run approve --root $pairedWorkspace --run-id $pairedRunId --approval 'C:\AIW-Paired-d370ec8-20261030\Authorized-approval.json'
+if ($LASTEXITCODE -ne 0) { throw 'Approval failed; stop, no Start' }
+# FUTURE GATE 2: separate Start, once; a lost response is not permission to retry.
+& $pairedCli run start --root $pairedWorkspace --run-id $pairedRunId --project 'C:\AIW-Paired-d370ec8-20261030\Evidence\paired-1793425345541054400\paired-project.yaml' --guest-agent-sha256 'b5cd415894b5d142215ae9b71f8d619d43404eb2511eb9304ad63f53db097512' --timeout-seconds 300
+if ($LASTEXITCODE -ne 0) { throw 'Start did not settle successfully; preserve records and follow exact owned cleanup/recovery conditions' }
 ```
 
-Open the verified desktop visibly on VM107, choose **Fixed paired controls**, use
-the existing identified operator and `C:\AIW-Paired-d370ec8-20261030\Evidence`.
-No installer/document is supplied. The guest uses native fixed roles, not the
-old PowerShell research control driver. Review immutable recipe/plan and the bound
-provider/OS tuple, then approve only its generated exact literal and issue its
-separate Start once. Derive every run/workspace/session/challenge value from the
-fresh typed `paired-workflow.json`, plan and durable session transaction; never
-predict a nonce, adopt a foreign lease or replay a historical ID.
+The shared native runner reopens and holds the prepared inputs, verifies committed
+approval, acquires its local provider lease and performs current protocol/session/
+feature checks before dispatch. All outcomes and cleanup must be retained; no
+request for plan approval or Start has been fulfilled by preparing this document.
 
 The production path creates **one fresh Windows Sandbox**, with networking,
 vGPU, audio/video input, printer and clipboard redirection disabled, Protected
@@ -443,14 +529,13 @@ producer must not be used for native evidence. After the run settles, construct
 one explicit entry from the exact fresh typed locator, profile `pairedControls`.
 Use this read-only/bookkeeping command against only the new approved evidence
 parent (the fresh locator supplies all run values); it writes only a new selection
-outside retained workspaces. Supply the **exact locator path from the specifically
-approved and executed run**, and pin it in this request after preparation. Preserve
-other pending/failed roots; do not enumerate them to choose a run. The script's
-mandatory parameter is deliberately unresolved until that actual run exists:
+outside retained workspaces. The **exact prepared-run locator** is pinned below;
+use it only after that same run is separately approved/executed and settles.
+Preserve other pending/failed roots; do not enumerate them to choose a run:
 
 ```powershell
-param([Parameter(Mandatory)][string]$pairedLocatorPath)
 $ErrorActionPreference = 'Stop'
+$pairedLocatorPath = 'C:\AIW-Paired-d370ec8-20261030\Evidence\paired-1793425345541054400\paired-workflow.json'
 $pairedEvidenceParent = 'C:\AIW-Paired-d370ec8-20261030\Evidence'
 $pairedSelectionPath = 'C:\AIW-Paired-d370ec8-20261030\Exports\selection.json'
 # Explicit approved-run locator only: no discovery, guessed ID or test producer.
@@ -473,6 +558,7 @@ try {
     $pairedLocatorStream.Dispose()
 }
 if ($pairedRun.schemaVersion -cne 'aiw.dev/paired-workflow-run/v0alpha1' -or $pairedRun.agentSha256 -cne 'b5cd415894b5d142215ae9b71f8d619d43404eb2511eb9304ad63f53db097512') { throw 'Wrong paired locator/agent' }
+if ($pairedRun.runId -cne 'paired-1793425345541054400' -or $pairedRun.planSha256 -cne 'b0d2e739ce45e7c9bbb0a0ed9651905cefcd0dfaae53c4e06450c1108035f234') { throw 'Locator differs from approved run/plan' }
 if ((Normalize-PairedLocatorRoot $pairedRun.evidenceRoot) -ine $pairedExpectedRoot -or !(Normalize-PairedLocatorRoot $pairedRun.workspace).StartsWith($pairedExpectedRoot + '\',[StringComparison]::OrdinalIgnoreCase)) { throw 'Locator root/workspace mismatch' }
 $pairedSelection = [ordered]@{schemaVersion='aiw.dev/application-assessment-input/v0alpha1'; windowsSandbox=[ordered]@{schemaVersion='aiw.dev/wsb-report-set-input/v0alpha1';entries=@([ordered]@{profile='pairedControls';run=[ordered]@{id='native-fixed-pair-1';workspaceRoot=$pairedRun.workspace;runId=$pairedRun.runId;projectPath=$pairedRun.projectPath;guestAgentSha256=$pairedRun.agentSha256}})}}
 $pairedSelectionBytes = [Text.UTF8Encoding]::new($false).GetBytes(($pairedSelection | ConvertTo-Json -Depth 16))
@@ -497,26 +583,27 @@ The user authorized blocker remediation and non-executing preparation, preservin
 the stop before plan approval/Start. Source fixes are committed at d370ec8 and
 independently reviewed; focused checks and refreshed offline assembly passed.
 Normal trusted TLS/Core remoting was used. No security, feature, CPU, snapshot,
-network or power change was made. Exact Store installation was attempted only
-after the two explicit consents, and failed with 0x80070520; subsequent inspection
-confirms the package remains absent. No Sandbox provider, control executable,
-application installer or desktop UI was launched. Old package/evidence remains.
+network or power change was made. Exact Store installation succeeded after the
+separately authorized console session/Store initialization resolved 0x80070520.
+Only the approved prerequisite was installed. No Sandbox provider/runtime,
+control executable, application trial or AIW desktop UI was launched. Old package/
+evidence remains unchanged.
 
-Non-executing preparation could not produce a plan because its prerequisite gate
-is blocked by provider acquisition; the production preparation API was not invoked.
-The refreshed prepare-only command is ready, but was not invoked against a known
-missing provider merely to create another failed root. Plan approval and
-Start remain unperformed and unauthorized. No native acceptance or cleanup trial
+Non-executing production preparation/import completed once and produced the exact
+pending plan pinned at the top of this request. Read-only status verified pending
+approval, journal sequence 1 and no bound session transaction. Global provider
+session availability remains unmeasured. Plan approval and Start remain
+unperformed and unauthorized. No native acceptance or cleanup trial
 is claimed; no historical run was replayed/recovered. Existing Rust/Node review
 and test evidence was reused without rerunning unchanged suites.
 
-The eventual native scope, if prerequisites are separately resolved and freshly
-pinned, remains one fresh six-case pair and only its necessary owned cleanup or
+The eventual native scope, if separately authorized with these exact bindings
+still current, remains this one six-case pair and only its necessary owned cleanup or
 exact recovery. That later operation requires its own exact plan approval and
 separate Start. Full Benchmark 2/W4/W5 closure and publication remain separate.
 No push, PR, signing, publication or release occurred.
 
-Final document review found and fixed one procedure issue: CLI preparation and
+Earlier document review found and fixed one procedure issue: CLI preparation and
 later fresh UI preparation can leave two roots, so selection now uses only the
 exact approved-run locator instead of counting/discovering children. All three
 PowerShell blocks parsed. The changed selector alone ran against a clearly
@@ -526,3 +613,14 @@ Record: remediation directory `updated-selector-check.json`. No unchanged native
 or broad test suite was rerun; document governance and diff checks passed.
 Independent read-only review rechecked the correction and completed staging
 facts; no remaining consequential finding was reported.
+
+Current console/preparation document checks: all three PowerShell blocks parsed;
+only the selector bookkeeping block was exercised with a labeled synthetic
+two-root fixture and temporary destinations. Explicit selection, collision and
+outside-parent rejection, unchanged input bytes and zero provider calls passed
+(`pinned-selector-check.json` in the current audit directory). Neither the
+documented completed preparation command nor future approve/Start block was run
+as a document check. Independent review matched current pins and pending status
+to retained receipts; its plan-schema/import-receipt wording finding was fixed.
+Unchanged source suites/builds were reused; only document governance/diff checks
+are new here.

@@ -59,30 +59,34 @@ passed; broad unchanged suites were reused. Source fix commit is
 `d370ec8cd5bcaa6915ac24801789070dd0040e3b`. Refreshed offline desktop/CLI package
 assembly and exact inventory passed; pins are in the consolidated request.
 The new package is staged and all 14 payloads verified on VM107 at
-`C:\AIW-Paired-d370ec8-20261030\Package`. Final trusted inspection confirms old
-and new Evidence/Exports empty. No preparation, approval or Start was performed.
+`C:\AIW-Paired-d370ec8-20261030\Package`. The user subsequently authorized console
+installation followed by preparation only. Browser access worked; normal existing
+Proxmox sign-in and VM107's labadmin console/Store initialization resolved the
+Store logon error. Exact Microsoft product `9NSMXC3NB0HN` installed successfully,
+without opening Sandbox, signing into Edge or importing browser data. No CPU,
+feature, security, network or power setting changed.
 
-The required Sandbox Store package is still absent. Store source terms/region
-sharing and then the separate package agreements were accepted only after explicit
-user consents. The exact official Microsoft Store product `9NSMXC3NB0HN` resolved,
-but approved installation failed with **0x80070520**, no usable Store logon session
-in WinRM. Post-attempt native Appx inspection confirms zero current/all-user
-registrations, zero Sandbox/control processes and no logged-on interactive user.
-A logged-on VM107 Store installation is the remaining prerequisite; no sign-in,
-classic Sandbox bootstrap or security/VM workaround was attempted.
-Preserve old f99 staging and all old receipts. See consolidated request
-for diagnosis, exact facts and logs. Preparation/approval/Start remain unperformed
-on VM107 until provider trust and refreshed source pins are resolved.
+The production static inspector verified registered Sandbox 0.8.107.0, held
+provider identity and cache-only catalog trust. One closed prepare-only call
+created/imported pending run `paired-1793425345541054400`, canonical plan hash
+`b0d2e739ce45e7c9bbb0a0ed9651905cefcd0dfaae53c4e06450c1108035f234`.
+Read-only status verified pendingApproval/sequence1, no bound Sandbox transaction;
+nine fixed retained files stayed unchanged. No approval/cancellation/result/
+revocation artifact exists; guest Output and Exports are empty. Old f99 staging and
+Evidence/Exports remain unchanged. Full current pins and future-only execution
+scope are in the consolidated request. Audit:
+`C:/aiw/paired-console-preparation-efe09ad0-3ac2-42de-b0a1-605685618350`.
+No plan approval, Start, provider runtime/control call, trial or publication occurred.
 
 ## Open acceptance and preserved boundaries
 
 Native guest/provider/control behavior and held-file inspection through Sandbox
 Tools mappings remain untrialed. Fail closed rather than weakening intake.
 The new unsigned desktop package is now locally enrolled and inventory-verified.
-VM107 current OS/runtime/endpoint pins are observed. Sandbox provider/catalog
-commitments are unavailable because the required package is absent; the active
-Windows hypervisor is observed and the firmware-only false negative is fixed.
-No protected preparation exists.
+VM107 current OS/runtime/endpoint and provider/catalog/file-ID pins are observed.
+The active Windows hypervisor is observed and the firmware-only false negative is
+fixed. Protected static preparation exists; runtime protocol/feature/session checks
+and guest mapped-Tools behavior remain unmeasured until separately authorized Start.
 Keep live Benchmark 2 acceptance and remaining W4/W5 requirements open; no general
 compatibility/effective-isolation claim, release or production acceptance follows.
 
