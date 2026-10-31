@@ -357,7 +357,7 @@ mod tests {
             &request,
             None,
             None,
-            false,
+            crate::paired_report::PairedExecutionProvenance::ApprovalUnavailable,
             "synthetic-revision",
         )
         .unwrap();

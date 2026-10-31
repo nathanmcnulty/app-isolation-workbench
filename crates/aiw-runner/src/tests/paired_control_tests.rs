@@ -128,7 +128,7 @@ fn report_pair(
         &expected,
         cleanup,
         outcome,
-        true,
+        crate::paired_report::PairedExecutionProvenance::ApprovedDispatch,
         "synthetic-project-revision",
     )
     .unwrap()
@@ -191,12 +191,37 @@ fn protected_pair_rehearsal(unknown_cleanup: bool) {
         PairedReportEvidenceStatus::Absent
     );
     assert!(unstarted.observations.is_none());
+    assert!(
+        unstarted
+            .evidence_gaps
+            .iter()
+            .any(|gap| { gap == "Committed approval unavailable; no execution evidence accepted" })
+    );
     layout
         .write_approval(
             &ApprovalRecord::for_plan(&artifacts.run_plan, "synthetic-operator", "synthetic-time")
                 .unwrap(),
         )
         .unwrap();
+    let approved_without_dispatch = crate::report_windows_sandbox_paired_controls(
+        &workspace,
+        "w1-run",
+        &project,
+        &artifacts.receipt.guest_agent.sha256,
+    )
+    .unwrap();
+    assert!(approved_without_dispatch.evidence_gaps.iter().any(|gap| {
+        gap == "Approval recorded; Sandbox dispatch not committed; fixed control cases remain unmeasured"
+    }));
+    assert_eq!(
+        approved_without_dispatch.evidence_status,
+        PairedReportEvidenceStatus::Absent
+    );
+    assert!(approved_without_dispatch.observations.is_none());
+    assert!(approved_without_dispatch.comparison.is_none());
+    assert_eq!(approved_without_dispatch.recorded_cleanup_verified, None);
+    assert_eq!(approved_without_dispatch.recorded_outcome, None);
+    assert!(!layout.run_dir().join("wsb-session-transaction").exists());
     let start = WsbGoldenProbeStart {
         schema_version: "aiw.dev/wsb-paired-controls-start/v0alpha1".into(),
         run_root: artifacts.wsb_plan.workspace_root.clone(),

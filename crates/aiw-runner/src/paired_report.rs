@@ -6,6 +6,13 @@ use aiw_provider_wsb::paired_controls::{
 };
 use aiw_provider_wsb::{PairedControlComparison, PairedControlResult, PairedControlsRequest};
 
+#[derive(Clone, Copy)]
+pub(super) enum PairedExecutionProvenance {
+    ApprovalUnavailable,
+    ApprovedWithoutDispatch,
+    ApprovedDispatch,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum PairedReportEvidenceStatus {
@@ -163,7 +170,13 @@ pub fn report_windows_sandbox_paired_controls(
         &request,
         cleanup,
         outcome,
-        before.approval.is_some() && inspection.transaction.is_some(),
+        if before.approval.is_none() {
+            PairedExecutionProvenance::ApprovalUnavailable
+        } else if inspection.transaction.is_none() {
+            PairedExecutionProvenance::ApprovedWithoutDispatch
+        } else {
+            PairedExecutionProvenance::ApprovedDispatch
+        },
         &artifacts.receipt.project_revision_sha256,
     )?;
     if let aiw_orchestrator::RecoveryStatus::Terminal { result, .. } = &before.status
@@ -201,7 +214,7 @@ pub(super) fn read_paired_output(
     request: &PairedControlsRequest,
     cleanup: Option<bool>,
     outcome: Option<RunOutcome>,
-    approved: bool,
+    provenance: PairedExecutionProvenance,
     revision: &str,
 ) -> Result<PairedControlRunReport, RunnerError> {
     request.validate().map_err(RunnerError::Receipt)?;
@@ -225,12 +238,20 @@ pub(super) fn read_paired_output(
             "Cleanup is historical; viewing makes no current-state claim".into(),
         ],
     };
-    if !approved {
-        report.evidence_gaps.push(
-            "Committed approval/dispatch provenance unavailable; no execution evidence accepted"
-                .into(),
-        );
-        return Ok(report);
+    match provenance {
+        PairedExecutionProvenance::ApprovalUnavailable => {
+            report
+                .evidence_gaps
+                .push("Committed approval unavailable; no execution evidence accepted".into());
+            return Ok(report);
+        }
+        PairedExecutionProvenance::ApprovedWithoutDispatch => {
+            report.evidence_gaps.push(
+                "Approval recorded; Sandbox dispatch not committed; fixed control cases remain unmeasured".into(),
+            );
+            return Ok(report);
+        }
+        PairedExecutionProvenance::ApprovedDispatch => {}
     }
     let mut expectation = completion_expectation(
         &request.run_id,

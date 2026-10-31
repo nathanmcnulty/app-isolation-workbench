@@ -381,6 +381,8 @@ fn source_gaps(value: &Value) -> Vec<String> {
         "Network, endpoint and host containment are unmeasured",
         "Cleanup is historical; viewing makes no current-state claim",
         "Committed approval/dispatch provenance unavailable; no execution evidence accepted",
+        "Committed approval unavailable; no execution evidence accepted",
+        "Approval recorded; Sandbox dispatch not committed; fixed control cases remain unmeasured",
         "No committed completed assessment; retained observations remain inconclusive",
         "ordinaryBaseline",
         "independentHostMeasurements",
@@ -793,6 +795,18 @@ fn write_new(destination: &Path, excluded: &[PathBuf], bytes: &[u8]) -> Result<(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn approved_without_dispatch_gap_is_preserved_without_private_diagnostics() {
+        let gap = "Approval recorded; Sandbox dispatch not committed; fixed control cases remain unmeasured";
+        assert_eq!(
+            source_gaps(&json!([
+                gap,
+                "private-path-sentinel S-1-5-21 account diagnostic"
+            ])),
+            vec![gap.to_string()]
+        );
+    }
+
     use super::*;
     fn temp() -> PathBuf {
         let path = std::env::temp_dir().join(format!("aiw-results-{}", uuid::Uuid::new_v4()));
