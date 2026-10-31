@@ -409,3 +409,42 @@ explicit retained snapshot and selector remained unchanged, private fields were
 excluded, and zero provider/assessment calls were made. Audit:
 `C:/aiw/paired-host-guest-reader-53e67253-1b0f-4aaf-8010-e6461177db3d`.
 This is historical reading/export evidence, not native control acceptance.
+
+## Native file-identity blocker and diagnostic localization
+
+The 4f diagnostic retained host `10.0.26300.9711` versus guest
+`10.0.26100.9711`, both x64. A new f68 profile explicitly committed both tuples
+and reached a subsequent file operation, then retained unsupported
+`GetFileInformationByHandleEx(FileIdInfo)` / `0x80070032`. All six cases remain
+unmeasured. Exact outer cleanup was verified; inner cleanup and the precise
+failed open are unknown. The bare error can come from mapped inputs, copied
+local roles or launcher observation; do not infer the first Tools open failed.
+
+The next diagnostic-only patch labels fixed role paths and setup/open/revalidate
+stages. A failed strict role open also triggers one read-attributes-only open at
+the same fixed path and one basic metadata query. Raw attributes, volume/index,
+link count and size (or unavailability) are explicitly diagnostic/not custody;
+they can describe a later object, and partial/zero values are not interpreted.
+The original error always propagates. There is no content read, write, process,
+identity conversion, transport fallback or acceptance branch. All existing
+check conditions, successful copy/execution path, policy/verdicts and outer
+receipt/cleanup deadlines remain intact; metadata IO has no hard-cancellation
+claim.
+Current completed tests are reused; platform Clippy and independent review cover
+the changed diagnostic adapters, with formatting/governance checked separately.
+Every diagnostic dispatch still requires fresh source/agent/package/plan pins.
+
+Microsoft documents [read-only mapped-folder permissions](https://learn.microsoft.com/en-us/windows/security/application-security/application-isolation/windows-sandbox/windows-sandbox-configure-using-wsb-file)
+and warns that [file metadata may be partial or unavailable depending on the filesystem/server](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfileinformationbyhandle).
+Neither contract proves support for a particular identity API on this object.
+Do not fabricate a 128-bit identity, silently fall back in generic
+`HeldApplicationFile`, or drop its local-volume/stream/reparse checks.
+
+If the localized failure is the read-only Tools transport, a separately reviewed
+closed-role transport design may retain fixed handles, require supported identity
+and exact bounded bytes, and copy through those handles into fresh protected
+guest-local files before applying unchanged strict local execution custody.
+The host's original NTFS agent/control handles remain retained across native
+Start/cleanup. Unsupported transport metadata must remain fail-closed; no such
+adapter is implemented or accepted yet. Existing path-reopening/unbounded role
+copying must not become a bypass. No native positive case acceptance follows.

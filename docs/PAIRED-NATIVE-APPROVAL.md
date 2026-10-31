@@ -15,6 +15,102 @@ The approved execution record below and the latest standing test authority
 supersede older pending-proposal wording.
 Publication remains separate.
 
+## Latest native model assessment: f68f9e5
+
+Standing fixed-control test authority continued without another permission
+question. The clean-source model package was built offline and verified exact14
+on the same pinned VM107, existing non-admin `AIW\labadmin` session1/Core7.6.9.
+No VM/security/access change, new application trial or PR #103 repeat occurred.
+The native helper and all9 generated document hashes passed independent review
+and nine focused offline guard checks before execution.
+
+| Binding | Exact value |
+|---|---|
+| Source | `f68f9e5db6b1dd80bc09129227fd9314d8314cdf` |
+| Worker package | `C:\AIW-Paired-f68f9e5-20261031\Package` |
+| Receipt content SHA-256 | `f5f88a00038a9ee50fe24dfbc3dcf8c837ddcbacf6606f4a3e454b492271920c` |
+| CLI / desktop SHA-256 | `2d68cd088552601af409f87eea2f5162228e5ac385f7a37392ffcc69e14ba59c` / `379bd3efb46e615488c726a1361c90f54f782822a9c73f0807187adffd0085a0` |
+| Agent / all fixed role payloads | `f97630e45892e7fde192bc1eb2e1f71037dab863bdbd9aea60f055a8df8adeb1`, **5,998,592 bytes** each, static-CRT x64 |
+| Fixed source / revision | `6a8976fda79dda3d2ae5ea2fed10aff9ba95cc8248b50bc4fefa1f53f26a7fb0` / `aiw.dev/paired-file-registry-child/v0alpha2` |
+| Host / guest expectation | `10.0.26300.9711` / `10.0.26100.9711`, both x64, separately committed and remeasured |
+| Fresh run | `paired-1793486681293548700` |
+| Canonical plan | `72d9c8db4e584ec9d0943fe2ec79a028ba0fde6820159d52d5fe74fc206062b8` |
+| Profile | `cbc5cec7642991da2d54dd3866b40f19e4a6e53dcaa5a6aaaf474bdcca04b353` |
+| Reviewed helper | SHA-256 `282bd4d82d89dbc60e44fb9d51b8d621ac5d2325c4526b1284699d713c7c375c`, **18,362 bytes** |
+
+The concrete scope was presented before native execution and retained as
+`consolidated-execution-scope.json` under
+`C:/aiw/paired-host-guest-native-bb5252b6-29ee-448b-b9ae-b2a6ffd62d51`.
+It contains the exact worker/runtime/provider/file-ID/role/plan pins, fixed six
+case expectations, canaries, policy/grant differences, files/registry/process
+effects, deadline and cleanup/stop conditions. It permits one approval/Start,
+one bounded owned cancellation if necessary, no explicit recovery/retry or
+publication. The unchanged provider/runtime/identity pins and detailed fixed
+effects are retained in the approved record below.
+
+Actual native preparation/import used `--guest-windows 10.0.26100.9711` once,
+with no provider invocation, approval or Start during preparation. Approval
+PID10916 exited0. Start PID8032/session1 issued **once** at
+`2026-10-31T22:48:23Z`, exited1 after **69,186ms**. Outer session
+`26637d45-0a97-c6dd-6093-1ffd101dd348` reached exact `cleanupVerified`; terminal
+failed / journal6 / sessionclean. No cancellation, explicit recovery or replay.
+
+The receipt-bound private v2 error is:
+`native application source observation failed: fixed WSB tree native operation failed at GetFileInformationByHandleEx(FileIdInfo): The request is not supported. (0x80070032)`.
+This proves the exact Windows guard passed and a subsequent held-file operation
+was unsupported. It does **not** identify which mapped/local role or launcher
+observation open failed. Empty progress/null token does not prove no setup or
+cases occurred. All six retained outcomes remain **unmeasured**; inner cleanup
+is unmeasured. Do not attribute the error to the first Tools open or infer
+general compatibility/isolation or native control acceptance.
+
+The current narrow source follow-up adds fixed role/path/stage context to
+private diagnostics. On a failed strict role open it also queries read-only
+basic metadata at that same fixed path, explicitly labeled diagnostic/not
+custody. It need not describe the original failed object; partial/zero values
+are not interpreted or accepted as identity. The original error always remains
+an error. Existing check conditions, copy/successful execution path, policy,
+verdict and deadlines remain unchanged. Independent review found
+no consequential issue. No transport fallback
+or fabricated identity has been introduced. A fresh package/plan must localize
+the operation before a custody repair is selected.
+
+Actual ResultsStore/report-set/export accepted this bound failed-driver evidence,
+loaded it twice deterministically, and left all29 retained files unchanged.
+Private fields were excluded; reader provider/assessment calls were zero.
+JSON SHA-256 `8f08562299f2c20f48d07173c9e729998673746c1bc1aae8da8498fdecceda56`;
+Markdown `b48813afcccce34df810a8ff2e3b722f70807945bd6c76dc470d70536371dabf`.
+Production static preparation, shared approval/Start/kernel/native provider,
+native version checks, failed-driver publication and exact outer cleanup have
+now been exercised. Positive native cases/tokens/inner cleanup remain unproven;
+those complete paths still have explicitly synthetic/fake-provider evidence.
+The native desktop approval dialog itself was not exercised by this CLI run.
+
+### Prior 4f diagnostic established the exact guest tuple
+
+Frozen diagnostic source `4f82f0b` was prepared once as
+`paired-1793485650921721800`, plan
+`1674eb06df06b472ea56385c88272760cb25c8ea2b3fb4e3201c3679dfdbb661`,
+profile `ecfd44d38e84c06accfe7681008830618b4ff42ed18e3385d4c5159dd3492c1d`.
+Helper SHA-256 `0f1223610d3cb244e7dc311d372be93277222d9f2393cb16da71c7332b061675`
+passed independent review and nine focused checks. Start PID9444/session1 issued
+once at `22:31:24Z`, exited1 after66500ms, with exact outer cleanup verified for
+`d2dbf068-96bb-8f7c-4369-2992083a980d`, failed/journal6/clean.
+Its bound diagnostic records expected `10.0.26300.9711/x86_64`, observed
+`10.0.26100.9711/x86_64`. This exact tuple became an explicit expectation in the
+new f68 plan; it was not adopted into, or used to repair, any retained run.
+No numeric guest observation is backfilled into older attempts.
+All six 4f cases remain unmeasured. No cancellation or explicit recovery.
+
+Audit `C:/aiw/paired-windows-mismatch-native-ad02dba4-9067-42e1-b903-c3f7cc51a1db`
+retains the source-pinned scope, nine documents, helper review/checks, native
+receipt/evidence, exact tuple and deterministic safe exports with all29 input
+files unchanged and zero reader provider/assessment calls. Summary JSON SHA-256
+`2a4a20c043a926668863a889c806889170590541b075079efdead9fe3ce02943`;
+Markdown `66d0558d23bd97ef3a77a58728e634d9dd4d1b8e0507fb8127f932d386110546`.
+The previous pending-package notes below are historical and superseded by these
+actual execution records. Full Benchmark 2 and W4/W5 remain open.
+
 ## Standing-authority diagnostic follow-up: a033df9
 
 Under the continuing test authority quoted below, fresh source

@@ -57,19 +57,25 @@ pub fn execute_fixed_paired_controls(
         hold_role(FIXTURE_INPUT, request)?,
         hold_role(LAUNCHER_INPUT, request)?,
     ];
-    let user = StandardUserSession::establish().map_err(|e| e.to_string())?;
-    let resources = FixedPairedResources::prepare(&user.context().user_sid)?;
-    resources.stage_roles()?;
+    let user = StandardUserSession::establish()
+        .map_err(|e| format!("establish fixed paired standard-user session: {e}"))?;
+    let resources = FixedPairedResources::prepare(&user.context().user_sid)
+        .map_err(|e| format!("prepare fixed paired resources: {e}"))?;
+    resources
+        .stage_roles()
+        .map_err(|e| format!("stage fixed paired local roles: {e}"))?;
     let roles = [hold_role(FIXTURE, request)?, hold_role(LAUNCHER, request)?];
-    for input in &inputs {
-        input.revalidate().map_err(|e| e.to_string())?;
+    for (path, input) in [AGENT, FIXTURE_INPUT, LAUNCHER_INPUT].iter().zip(&inputs) {
+        input
+            .revalidate()
+            .map_err(|e| format!("revalidate fixed paired input role ({path}): {e}"))?;
     }
     let (launcher, held_token) = GuestProcess::start_standard_user_measured(
         LAUNCHER,
         &["--paired-control-launcher".into()],
         &user,
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| format!("launch fixed paired ordinary-user broker: {e}"))?;
     let exit = launcher.wait_for_exit(Duration::from_secs(120));
     let cleanup = if exit.is_ok() {
         launcher.verify_empty_after_success()
@@ -82,9 +88,12 @@ pub fn execute_fixed_paired_controls(
         return Err(format!("fixed paired launcher failed with exit {exit}"));
     }
     let observation = HeldApplicationFile::open_bounded(Path::new(OBSERVATION), 64 * 1024)
-        .map_err(|e| e.to_string())?;
-    let bytes = std::fs::read(OBSERVATION).map_err(|e| e.to_string())?;
-    observation.revalidate().map_err(|e| e.to_string())?;
+        .map_err(|e| format!("open fixed paired launcher observation ({OBSERVATION}): {e}"))?;
+    let bytes = std::fs::read(OBSERVATION)
+        .map_err(|e| format!("read fixed paired launcher observation ({OBSERVATION}): {e}"))?;
+    observation.revalidate().map_err(|e| {
+        format!("revalidate fixed paired launcher observation ({OBSERVATION}): {e}")
+    })?;
     let observation: PairedLauncherAttempt =
         serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
     if held_token != observation.launcher_token
@@ -181,13 +190,52 @@ fn require_approved_windows(
 
 fn hold_role(path: &str, request: &PairedControlsRequest) -> Result<HeldApplicationFile, String> {
     let file = HeldApplicationFile::open_bounded(Path::new(path), 128 * 1024 * 1024)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| role_open_diagnostic(path, &e))?;
     if file.observation().sha256 != request.agent_sha256
         || file.observation().size_bytes != request.profile.fixture_size_bytes
     {
         return Err("fixed paired executable differs from approved exact agent bytes".into());
     }
     Ok(file)
+}
+
+/// Read-only error detail for the closed role paths above, never replacement
+/// custody or a reason to accept an unsupported role. The original open always
+/// remains an error. Partial/zero metadata is reported without interpretation.
+fn role_open_diagnostic(path: &str, error: &impl std::fmt::Display) -> String {
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::os::windows::io::AsRawHandle;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Storage::FileSystem::{
+        BY_HANDLE_FILE_INFORMATION, FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ, GetFileInformationByHandle,
+    };
+
+    let detail = (|| {
+        let file = std::fs::OpenOptions::new()
+            .access_mode(FILE_READ_ATTRIBUTES.0)
+            .share_mode(FILE_SHARE_READ.0)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
+            .open(path)
+            .map_err(|e| e.to_string())?;
+        let mut info = BY_HANDLE_FILE_INFORMATION::default();
+        // SAFETY: the owned read-attributes handle and output live through the call.
+        unsafe { GetFileInformationByHandle(HANDLE(file.as_raw_handle()), &mut info) }
+            .map_err(|e| e.to_string())?;
+        Ok::<_, String>(format!(
+            "attrs={:08x}, volume={:08x}, index={:08x}{:08x}, links={}, bytes={}",
+            info.dwFileAttributes,
+            info.dwVolumeSerialNumber,
+            info.nFileIndexHigh,
+            info.nFileIndexLow,
+            info.nNumberOfLinks,
+            (u64::from(info.nFileSizeHigh) << 32) | u64::from(info.nFileSizeLow),
+        ))
+    })();
+    let detail = detail.unwrap_or_else(|e| format!("unavailable: {e}"));
+    format!(
+        "open fixed paired role ({path}): {error}; diagnostic basic metadata (not custody): {detail}"
+    )
 }
 
 fn progress_matches_variant(
