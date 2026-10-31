@@ -133,6 +133,7 @@ pub fn paired_control_source_sha256() -> String {
         include_str!("../../aiw-windows-platform/src/control_registry.rs"),
         include_str!("../../aiw-windows-platform/src/guest_paired_controls.rs"),
         include_str!("../../aiw-windows-platform/src/guest_document/paired_controls.rs"),
+        include_str!("../../aiw-windows-platform/src/guest_document/paired_inputs.rs"),
         include_str!("../../aiw-windows-platform/src/guest_standard_user.rs"),
         include_str!("../../aiw-windows-platform/src/guest_msi.rs"),
         include_str!("../../aiw-windows-platform/src/guest_document.rs"),

@@ -1,6 +1,13 @@
 # Offline implementation handoff
 
-Current follow-up: source `2ec65edfe749b73a13ddf0c923db973de1292fc8` improves
+For the current checkout and native follow-up, start with
+[working state](WORKING-STATE.md) and the
+[source-pinned native record](PAIRED-NATIVE-APPROVAL.md). The evidence below is
+historical and retains its recorded source/scope; it is not a current native
+acceptance claim. Latest 3b diagnostic localizes the mapped-input FileIdInfo
+blocker; six native cases remain unmeasured.
+
+Earlier follow-up: source `2ec65edfe749b73a13ddf0c923db973de1292fc8` improves
 approval-without-dispatch reporting and adds a read-only Results backend example.
 One subsequently approved VM107 Start stopped at required provider-list preflight,
 before any control case. Actual retained exports correctly preserve all six cases

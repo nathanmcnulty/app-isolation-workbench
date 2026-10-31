@@ -27,9 +27,12 @@ Model repair: affected Rust53, desktop22/4 opt-in ignored, Node7, workspace/desk
 Clippy, formats and governance passed; unchanged completed checks were reused.
 
 Native VM107 preparation/approval/Start/provider/guest failure/outer cleanup and
-actual Results export paths have been exercised. The latest model passes the
-host/guest version gate, then reports an unsupported file-ID operation. Its exact
-role/stage is being localized without weakening custody checks. All six native
+actual Results export paths have been exercised. The latest diagnostic localizes
+an unsupported extended file-ID query on the first mapped agent input, before
+standard-user/resource setup. A separate closed mapped-input transport has passed
+five new inert-file/fault tests, probe3, workspace all-target Clippy, formats,
+governance and independent source review. Strict local executable custody remains
+mandatory; native mapped-directory support remains unvalidated. All six native
 case outcomes remain unmeasured; positive case/token/inner-cleanup paths remain
 covered by explicitly synthetic/fake-provider tests. Each actual29-file retained
 snapshot was unchanged by deterministic safe exports; older native summaries

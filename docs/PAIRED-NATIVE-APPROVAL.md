@@ -15,7 +15,59 @@ The approved execution record below and the latest standing test authority
 supersede older pending-proposal wording.
 Publication remains separate.
 
-## Latest native model assessment: f68f9e5
+## Latest native diagnostic assessment: 3b15929
+
+The standing fixed-control test authority covered this fresh source-pinned
+diagnostic assessment on the same VM107, non-admin console session1/Core7.6.9.
+Its exact scope was presented before execution. Independent review checked the
+actual helper, all9 original document hashes, canonical plan and scope; nine
+isolated offline guard checks passed. No new application trial or PR #103 repeat.
+
+| Binding | Exact value |
+|---|---|
+| Source | `3b159298925c07d2f3a2db72e684bac31920fe03` |
+| Worker package | `C:\AIW-Paired-3b15929-20261031\Package` |
+| Receipt SHA-256 | `ac261740f2c3235a35cf48f77cd6b8e4a4e384278928d7be64ba462c089fc3ae` |
+| CLI / desktop SHA-256 | `b16904c300406422c116ba1df9a09c1bad168390c5a18f12919e0327e110c900` / `5360af72943423f49025402b88df4e142d959cd784fe9bd5466f634a3970e52b` |
+| Agent / three role payloads | `5a56b758b31a69d5f11f815a0dc22d0b46537597cf4f07f103763f355430c8fb`, **6,007,296 bytes** each, static-CRT x64 |
+| Fixed source / revision | `21bb08df32e73c2f8365179204c66a433dd69812631c268549ea2e95f4ca5a52` / `aiw.dev/paired-file-registry-child/v0alpha2` |
+| Host / guest | `10.0.26300.9711` / `10.0.26100.9711`, both x64 |
+| Run / canonical plan | `paired-1793489386127952000` / `5bf2f26612a89582af56a5de30361e514d3cfc89163975bc5f9110b031edc5c9` |
+| Profile | `e4e3ef3e1319969694a0114d384577e0f52456ef5c10345e168fb3380553383f` |
+| Reviewed helper | `38611b31b295756c9614eabd18fc0ed19c6cd275c4d9d20aa6ef4888a182d868`, **18,362 bytes** |
+
+Audit: `C:/aiw/paired-role-context-native-2a622d10-7f5e-4f42-9f34-0fb47b11d74e`.
+`consolidated-execution-scope.json` contains all exact worker/runtime/provider/
+file-ID pins, policy/effects, time bounds, cleanup/stop conditions and nine typed
+documents. One preparation, approval PID8232/exit0 and Start PID5220/session1 at
+`2026-10-31T23:32:03Z`; exit1 after **67,237ms**. Outer session
+`08441999-808a-703e-652a-5355a5b939ac` reached exact cleanupVerified; terminal
+failed / journal6 / sessionclean. No cancellation, recovery, kill or retry.
+
+The receipt-bound v2 diagnostic identifies the **first mapped agent role**
+`C:\AIW\Tools\aiw-guest-agent.exe`: unsupported extended
+`GetFileInformationByHandleEx(FileIdInfo)` / `0x80070032`. Source order proves
+this attempt stopped before standard-user/resource setup and cases. All six
+retained outcomes remain unmeasured. Do not apply this attribution to older
+unlocalized runs. Separate read-attributes metadata at the same path reported
+attrs `00000020`, volume `322b0dfe`, legacy index `000300000002ac52`, links1,
+bytes6007296. This may describe a later object; it is **not custody proof**.
+
+The actual unchanged f68 Results reader exported deterministic safe JSON/Markdown,
+with all29 explicitly snapshotted retained files unchanged and zero provider/
+assessment calls. JSON SHA-256
+`0f296213cfc0f32ee8df1e85f2ce82c46d929bde8a0f8070f0d79a73e5f636ff`;
+Markdown `e3e1d475925b264c9c385de9bf05cd5ae2ebbd49613ec6a2f4db86245f7729c1`.
+Private diagnostic fields remain excluded. No positive native acceptance.
+
+The next offline repair introduces a separate closed mapped-input transport with
+supported basic identities, retained parent-relative ancestry/role handles and
+exact bounded copying into exclusive protected local files. Local executable
+custody stays unchanged and mandatory. Mapping-directory API support remains
+unmeasured; unsupported metadata/open/sharing semantics must refuse. A fresh
+reviewed source/agent/package/plan and concrete scope precede any next Start.
+
+## Previous native model assessment: f68f9e5
 
 Standing fixed-control test authority continued without another permission
 question. The clean-source model package was built offline and verified exact14

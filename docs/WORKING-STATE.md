@@ -2,8 +2,8 @@
 
 Updated 2026-10-31 (America/Anchorage). Checkout `C:\aiw\app-isolation-workbench`,
 branch `codex/paired-controls`, atop local main `53c02c8` including PR #103.
-Start with `scripts/work-status.ps1`. Execution/model source is `f68f9e5`;
-a diagnostic-only role/stage context change is currently being finalized.
+Start with `scripts/work-status.ps1`. Latest executed diagnostic source is
+`3b15929`; a closed mapped-input transport repair is being validated offline.
 
 ## Authority and scope
 
@@ -26,6 +26,7 @@ All six cases remain unmeasured in every retained attempt below.
 | `paired-1793482773445455100` | a033 v2 diagnostic identifies Windows equality guard; exact guest tuple was not retained. Outer cleanup verified. |
 | `paired-1793485650921721800` | 4f diagnostic: expected host `10.0.26300.9711`, observed guest `10.0.26100.9711`, both x64. PID9444 exited1/66500ms; cleanup verified. |
 | `paired-1793486681293548700` | f68 separates host/guest commitments and passes OS guard. PID8032 exited1/69186ms with unsupported `GetFileInformationByHandleEx(FileIdInfo)` / `0x80070032`. Exact role/open stage is unlocalized. Empty progress does not prove no setup/cases ran. Outer cleanup verified, journal6. |
+| `paired-1793489386127952000` | 3b localizes first mapped agent role's unsupported extended file-ID query, before account/resource setup/cases. PID5220 exited1/67237ms. Separate basic metadata was diagnostic only. Outer cleanup verified, journal6. |
 
 No cancellation, explicit recovery, second Start or new application trial in
 these fresh diagnostic/model runs. Raw current audits:
@@ -51,14 +52,28 @@ desktop22/4 opt-in ignored, Node7, workspace/desktop all-target Clippy, formats,
 governance and independent review passed. Logs `C:/aiw/paired-host-guest-*`.
 Broader unchanged workspace678/desktop20/Node28 evidence remains scoped to e2e44fe.
 
-The current narrow patch labels fixed role paths/stages in private failure
-messages and adds read-only basic metadata for the same fixed path after a
-failed role open. Raw partial/zero values are diagnostic-only, not original-object
-or custody proof; the original error always propagates. No acceptance/policy change.
-Platform Clippy passed; finish formatting/governance/commit and a fresh diagnostic
-package/plan. Localize the unsupported operation before choosing a transport
-repair. Do not assume it is the first mapped Tools open, fabricate identities or
-weaken generic `HeldApplicationFile`. Reuse unchanged completed suites.
+The 3b diagnostic package/plan/helper were freshly pinned and independently
+reviewed before one native Start. Actual Results export was deterministic, all29
+retained files unchanged, private diagnostic excluded, provider/assessment calls0.
+Audit `C:/aiw/paired-role-context-native-2a622d10-7f5e-4f42-9f34-0fb47b11d74e`.
+It establishes the first mapped role as the blocker for this attempt only.
+
+The next repair keeps a separate closed Agent/Fixture/Launcher mapped transport:
+retained parent-relative ancestry/role handles, disk/nonzero basic identities,
+ordinary/reparse/link/size/hash checks and exact bounded copy from held inputs.
+Exclusive fresh local copies still require unchanged strict `HeldApplicationFile`
+before execution. No generic fallback, fabricated IDs or case/policy/verdict change.
+Five offline inert-file/fault tests passed; independent final source/docs review
+found no consequential issue. The first compile caught a namespace typo; then a
+positive test exposed directory-size growth0→4096 with stable identity. Corrected
+directory-only identity comparison preserves disk/type/reparse/nonzero checks,
+and all leaf checks remain intact. Original failed logs are retained. Probe3,
+workspace all-target Clippy, formats and governance passed. Logs
+`C:/aiw/paired-mapped-*`. Unchanged desktop/Node/model suites are reused at their
+recorded sources. Mapping-directory support remains unknown and fails closed.
+Finish commit/new package pins,
+review actual fresh helper/scope, then one fresh assessment under standing authority.
+Reuse unchanged completed suites. Preserve every old run and source package.
 
 VM107 only: UUID `e5cecc90-35c2-4831-bf9c-424be23f7d4e`, MAC `CC:34:21:B8:5A:31`,
 IP `192.168.1.174`, existing `AIW\labadmin`, non-admin console session1/Core7.6.9.

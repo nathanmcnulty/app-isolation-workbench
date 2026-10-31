@@ -157,13 +157,18 @@ impl FixedPairedResources {
             registry_unchanged,
         ))
     }
-    pub(crate) fn stage_roles(&self) -> Result<(), String> {
+    pub(crate) fn stage_roles(
+        &self,
+        inputs: &mut super::paired_inputs::FixedPairedInputs,
+    ) -> Result<(), String> {
         for leaf in ["aiw-control-fixture.exe", "aiw-control-appcontainer.exe"] {
-            let source = Path::new(r"C:\AIW\Tools").join(leaf);
-            let mut input = File::open(source).map_err(|e| e.to_string())?;
             let mut output = create_new_file(&self.directories[0], leaf)?;
-            std::io::copy(&mut input, &mut output).map_err(|e| e.to_string())?;
-            output.sync_all().map_err(|e| e.to_string())?;
+            if leaf == "aiw-control-fixture.exe" {
+                inputs.copy_fixture(&mut output)?;
+            } else {
+                inputs.copy_launcher(&mut output)?;
+            }
+            // Drop the writer before unchanged strict local execution custody.
         }
         Ok(())
     }

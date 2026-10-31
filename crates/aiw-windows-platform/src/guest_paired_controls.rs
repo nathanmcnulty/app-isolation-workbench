@@ -1,6 +1,7 @@
 //! Native fixed guest setup/collection. No host callers can select executables,
 //! scripts, resources, accounts, profile names or policy fragments.
 use crate::guest_document::paired_controls::FixedPairedResources;
+use crate::guest_document::paired_inputs::FixedPairedInputs;
 use crate::guest_msi::GuestProcess;
 use crate::guest_standard_user::StandardUserSession;
 use crate::{HeldApplicationFile, PairedLauncherAttempt};
@@ -12,8 +13,6 @@ use std::path::Path;
 use std::time::Duration;
 
 const AGENT: &str = r"C:\AIW\Tools\aiw-guest-agent.exe";
-const FIXTURE_INPUT: &str = r"C:\AIW\Tools\aiw-control-fixture.exe";
-const LAUNCHER_INPUT: &str = r"C:\AIW\Tools\aiw-control-appcontainer.exe";
 const FIXTURE: &str = r"C:\AIW\Control\aiw-control-fixture.exe";
 const LAUNCHER: &str = r"C:\AIW\Control\aiw-control-appcontainer.exe";
 const OBSERVATION: &str = r"C:\AIW\Control\paired-launcher.json";
@@ -52,24 +51,17 @@ pub fn execute_fixed_paired_controls(
     }
     let windows = crate::observe_windows_version().map_err(|e| e.to_string())?;
     require_approved_windows(&windows, &request.profile.expected_windows)?;
-    let inputs = [
-        hold_role(AGENT, request)?,
-        hold_role(FIXTURE_INPUT, request)?,
-        hold_role(LAUNCHER_INPUT, request)?,
-    ];
+    let mut inputs =
+        FixedPairedInputs::open(request.profile.fixture_size_bytes, &request.agent_sha256)?;
     let user = StandardUserSession::establish()
         .map_err(|e| format!("establish fixed paired standard-user session: {e}"))?;
     let resources = FixedPairedResources::prepare(&user.context().user_sid)
         .map_err(|e| format!("prepare fixed paired resources: {e}"))?;
     resources
-        .stage_roles()
+        .stage_roles(&mut inputs)
         .map_err(|e| format!("stage fixed paired local roles: {e}"))?;
     let roles = [hold_role(FIXTURE, request)?, hold_role(LAUNCHER, request)?];
-    for (path, input) in [AGENT, FIXTURE_INPUT, LAUNCHER_INPUT].iter().zip(&inputs) {
-        input
-            .revalidate()
-            .map_err(|e| format!("revalidate fixed paired input role ({path}): {e}"))?;
-    }
+    inputs.revalidate()?;
     let (launcher, held_token) = GuestProcess::start_standard_user_measured(
         LAUNCHER,
         &["--paired-control-launcher".into()],
@@ -118,8 +110,9 @@ pub fn execute_fixed_paired_controls(
     let partial_token = held_token.clone();
     let complete = (|| {
         let (resources, file_unchanged, registry_value_unchanged) = resources.observation()?;
-        let fixture_unchanged = roles[0].revalidate().is_ok() && inputs[1].revalidate().is_ok();
-        let launcher_unchanged = roles[1].revalidate().is_ok() && inputs[2].revalidate().is_ok();
+        let inputs_unchanged = inputs.revalidate().is_ok();
+        let fixture_unchanged = roles[0].revalidate().is_ok() && inputs_unchanged;
+        let launcher_unchanged = roles[1].revalidate().is_ok() && inputs_unchanged;
         let result = PairedControlResult {
             schema_version: PAIRED_CONTROL_RESULT_SCHEMA.into(),
             run_id: request.run_id.clone(),

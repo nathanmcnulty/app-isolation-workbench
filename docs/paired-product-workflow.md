@@ -420,7 +420,7 @@ unmeasured. Exact outer cleanup was verified; inner cleanup and the precise
 failed open are unknown. The bare error can come from mapped inputs, copied
 local roles or launcher observation; do not infer the first Tools open failed.
 
-The next diagnostic-only patch labels fixed role paths and setup/open/revalidate
+The 3b diagnostic-only patch labels fixed role paths and setup/open/revalidate
 stages. A failed strict role open also triggers one read-attributes-only open at
 the same fixed path and one basic metadata query. Raw attributes, volume/index,
 link count and size (or unavailability) are explicitly diagnostic/not custody;
@@ -440,11 +440,50 @@ Neither contract proves support for a particular identity API on this object.
 Do not fabricate a 128-bit identity, silently fall back in generic
 `HeldApplicationFile`, or drop its local-volume/stream/reparse checks.
 
-If the localized failure is the read-only Tools transport, a separately reviewed
-closed-role transport design may retain fixed handles, require supported identity
-and exact bounded bytes, and copy through those handles into fresh protected
-guest-local files before applying unchanged strict local execution custody.
-The host's original NTFS agent/control handles remain retained across native
-Start/cleanup. Unsupported transport metadata must remain fail-closed; no such
-adapter is implemented or accepted yet. Existing path-reopening/unbounded role
-copying must not become a bypass. No native positive case acceptance follows.
+The actual 3b assessment localized the first mapped agent open's unsupported
+extended FileIdInfo query. The separate basic query returned nonzero volume/index,
+link1 and the expected size, but remains diagnostic only and may refer to a later
+object. Source order establishes this attempt stopped before user/resources/cases;
+it does not localize older ambiguous failures. Outer cleanup was verified. All six
+cases remain unmeasured. Actual Results safe summaries are deterministic, all29
+retained inputs unchanged and private diagnostic fields excluded, provider calls0.
+Exact bindings and outcome are in [the consolidated record](PAIRED-NATIVE-APPROVAL.md).
+
+The offline repair adds a private `FixedPairedInputs` type under guest_document.
+Only the closed Agent/Fixture/Launcher roles exist; callers cannot supply paths.
+It retains C:→AIW→Tools and role handles with parent-relative, non-reparse,
+read-only/no-delete sharing; requires disk handles, ordinary types, nonzero basic
+volume/index identities, leaf link1 and exact approved size/default-stream hash.
+Every ancestry identity is compared independently across the mapping boundary;
+no common-volume assumption or fabricated 128-bit ID is introduced. Full named
+ancestry and leaf identities and held content are revalidated before/after copy
+and around execution. Unsupported metadata/open/sharing remains refusal.
+
+Role staging copies exact bounded bytes from already-held inputs, replacing
+path reopen/unbounded copy. Exclusive fresh protected local destinations are
+flushed and writer handles dropped before unchanged strict local
+`HeldApplicationFile` checks. Local volume/stream/reparse/ACL/128-bit identity
+checks stay mandatory. The transport claims default-stream byte custody only,
+not mapped-source NTFS ACL/ADS validation or case evidence. The host's original
+NTFS agent/control handles remain retained across Start/cleanup. Synchronous IO
+has byte/memory bounds, not a hard per-read cancellation guarantee; existing
+outer deadlines/receipts/cleanup remain unchanged. Source fingerprint includes
+the new implementation. Native mapping-directory API support and positive case
+acceptance remain unverified pending fresh pins, checks and independent review.
+
+Five inert-file/pure fault tests pass: held namespace and sharing protection,
+each role's missing/changed/short/extra/link/writer refusal, partial/unsafe metadata,
+changed held/named bindings, exact-copy and partial read/write failures, bounds,
+exclusive destination collision, strict local HAF writer transition and ADS
+refusal. Initial compile caught a namespace typo. A positive-copy failure then
+demonstrated directory length0→4096 with identical volume/index/type/link count;
+directory identity now compares volume/index separately from changing child-size/
+link metadata, while every observation still checks disk/ordinary/non-reparse/
+nonzero identity. Leaf full metadata/size/link1/hash checks are unchanged. The
+corrected full five-test set passed. Failed logs remain `C:/aiw/paired-mapped-*`.
+Independent source/docs review found no consequential issue. These local tests
+create inert bytes only; they do not execute role images or prove mapped native
+capability, cases, tokens or cleanup.
+Probe3, workspace all-target Clippy with warnings denied, formatting and
+governance passed. Unchanged desktop/Node/model suites retain their original
+source-scoped evidence; they were not rerun for this private adapter change.
