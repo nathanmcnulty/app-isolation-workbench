@@ -1,9 +1,70 @@
 # Reconciliation and bounded native approval request
 
 Request ID: `AIW-PAIRED-NATIVE-F99BBD4-20261030`. Prepared 2026-10-30.
-Status: **no native execution authorized or performed**. This supersedes the
-previous native proposal. The target-enrollment fields below remain required
-before this can become a launch-ready Start request. Publication is separate.
+Status: **prerequisite inspection/staging approved and completed; preparation
+blocked at the prerequisite gate; production API not invoked**. No plan approval, Start,
+Sandbox launch or control trial was authorized or performed. This supersedes the
+previous native proposal. Publication is separate.
+
+
+## Approved prerequisite result — 2026-10-30 (America/Anchorage)
+
+The user explicitly approved VM107 identity/readiness inspection, staging the
+pinned f99bbd4 package and non-executing preparation, stopping before approval or
+Start. Normal trusted Core HTTPS and the existing fixed read-only hypervisor
+metadata verb were used. No install, configuration change or native trial ran.
+
+**Outcome:** package staged and verified; preparation is blocked. The required
+Store package is not registered, and the exact native virtualization API used by
+AIW reports false. We stopped at the declared prerequisite gate. The production
+preparation API/UI was **not invoked**, so there is no API error/result receipt to
+claim. The expected refusal below is source-backed inference. No protected plan,
+approval challenge, session UUID or preparation receipt exists for this target.
+
+| Target observation | Exact observed value |
+|---|---|
+| VM / UUID | 107 / `e5cecc90-35c2-4831-bf9c-424be23f7d4e` |
+| MAC / IPv4 | `CC:34:21:B8:5A:31` / `192.168.1.174` |
+| Computer / operator / SID | `AIW` / `AIW\labadmin` / `S-1-5-21-3556347314-2314855617-1438300668-1001` |
+| OS | Windows `10.0.26300.9711`, Enterprise 26H2, x64 |
+| Core / endpoint | `7.6.9` / `PowerShell.7.6`, native x64 Core; zero compatibility sessions |
+| Direct pwsh / SHA-256 | `C:\Program Files\PowerShell\7\pwsh.exe` / `2a6769a3330dc1084d0154bfde7d164ab750ca7f700f313f9d417c1be78b2233` |
+| Loaded SMA SHA-256 / MVID | `e767f5c26347b254dd06fa0b65e18424cc4eb93fc3102c5a8fdd9dd88355db97` / `3cdcbc79-3cd6-4f39-a354-e3f5c63accfe` |
+| WSMan host SHA-256 | `5767426ba5c35fd51dd6619b1dcbb155590f98db41af0152803c289cb0aa8dbf` |
+| Loaded plugin SHA-256 | `ab16acc15bfe2edc54793cf363daa7c786317b592dcf8dee33e1d433d8a254a5` |
+| Endpoint config / startup SHA-256 | `14d52a954f5eb61e3967ec47879784eb7695d0c730d3b45b5a066559b43535bf` / `add8a2db2c9a130df381b506638c0f2b0e7fd92d4b63f374500acf90f5454591` |
+| HTTPS listener | port 5986, `CN=192.168.1.174`, thumbprint `BC14DCC4E37F83161EBB55AF8624E36A79E19256`; normal trust verification |
+| Listener certificate expiry | 2026-11-04 23:49:10 America/Anchorage (2026-11-05T08:49:10Z); observed only, not renewed |
+| Current checkpoint / config SHA-256 | `aiw-msix-worker107-core76plus-clean-r2` / `11c1c0d216647eb18844661086837c2ef38c5dce6fa0b451af0c626c3d07026e` |
+| Current VM config SHA-256 | `5ec2d6ae94a71dfd9460116011068a95a03045dff911c16d6b4243ba67782ff9` |
+| Read-only hypervisor provider SHA-256 | `4c04db8da745ccc9ff84b704a2923380a0f10b3e243487eb7be79c1efc35fb5a`; matches current normalized source, not a Sandbox executable hash |
+| VM state / lease | running; `leasePresent=false`, phase `none`; unchanged before/after staging; no lease acquired |
+| Optional-feature WMI observations | `Containers-DisposableClientVM: InstallState=1`; Hyper-V-All, VirtualMachinePlatform and HypervisorPlatform each `InstallState=2` |
+| Native firmware query | `IsProcessorFeaturePresent(PF_VIRT_FIRMWARE_ENABLED=21) = false` |
+| CIM CPU observations | VM monitor, firmware virtualization and SLAT flags each false; hypervisorPresent=true; no claim of nested readiness |
+| Required Store package | `MicrosoftWindows.WindowsSandbox`: zero current-user and zero all-user registrations, using the native Core Appx cmdlet |
+| Sandbox provider path/hash/size/file-ID | **not available: no registered package resolved** |
+| Catalog hash/trust / observed CLI protocol | **not available / unmeasured**; no substitute hashes or version probes |
+| Classic System32 files | WindowsSandbox.exe and WindowsSandboxClient.exe present; System32 wsb.exe absent; none executed or accepted as authority |
+| Native runtime sessions | unmeasured; no `wsb list` or other Sandbox provider command invoked |
+| Staged package | `C:\AIW-Paired-f99bbd4-20261030\Package`; exact 14-payload inventory verified; receipt `9c5c1976844f5eb14e459dae166448a8b2bbe06f78b539aeac8153bb3e373109` |
+| New Evidence / Exports | both empty at final observation; no plan or approval records |
+
+The raw observations and checksummed result index are retained locally under
+`C:/aiw/paired-target-preparation-38602e66-2c6f-4327-9662-63164f198333` (`result-index.json`). They are engineering evidence, not a
+privacy-limited Results summary. These records include actual target values;
+VM203 observations and old 7.6.7/r1/provider pins were not substituted.
+
+Source implication at f99bbd4: `resolve_package` requires the operator's exact
+Store package and maps zero matches to `AIW_WSB_CLI_PACKAGE_MISSING`. It offers
+no classic System32 fallback. `require_static_identity` also requires firmware
+virtualization `Available`. `prepare_paired_with_inspector` checks both before
+creating the protected workspace. The admin wrapper would create an evidence
+root/project first if invoked; it was not invoked here and Evidence remains empty.
+Independent source review confirmed this interpretation and found no justified
+source fix or bypass. Enabling/installing provider or virtualization prerequisites,
+launching classic Sandbox to bootstrap Store registration, or changing VM settings
+is outside this approval. The mapped-Tools native question also remains untested.
 
 ## What the completed goal establishes
 
@@ -14,7 +75,7 @@ The offline implementation goal is complete. Native acceptance is not complete.
 
 | Goal/path | Implemented production path | Exercised evidence and limits |
 |---|---|---|
-| Fixed paired preparation | Desktop `prepare_workflow(kind=paired)` -> `paired::assess_with_gate` -> enrolled package agent -> compiled fixed project -> static trusted identity inspection, protected role staging/import and immutable plan | Real staging/custody/import bodies with injected static inspector and fresh protected local fixtures. Production package lookup/Store inspection on VM107 has not been exercised. Preparation never invokes a provider. |
+| Fixed paired preparation | Desktop `prepare_workflow(kind=paired)` -> `paired::assess_with_gate` -> enrolled package agent -> compiled fixed project -> static trusted identity inspection, protected role staging/import and immutable plan | Real staging/custody/import bodies with injected static inspector and fresh protected local fixtures. The production static inspector API was not invoked on VM107 after the preflight stop; the independent current/all-user registration checks above are actual target observations. Preparation never invokes a provider. |
 | Approval and dispatch | Actual Controller exact approval challenge, separate Start; `start_approved_windows_sandbox` statically reopens, verifies committed approval, acquires native Sandbox lease, checks current runtime identity and calls shared kernel | Coupled service tests exercise the actual gate coordinator and kernel through `Fixture.dispatch`, `Fake` and `OfflineLease`. They do not call the native Start/lease/transport boundary. Browser replay uses actual Controller snapshots, not native Tauri/provider execution. |
 | Native six-case collector | Guest request -> elevated guarded WDAG agent -> held Tools inputs -> fresh standard account/resources -> measured standard-user launcher -> baseline and AppContainer fixed cases | Compiled and source-reviewed; role binaries, real account/profile setup, Win32 process/token/jobs, mapped Tools semantics and six native invocations remain untrialed for this implementation. |
 | Cancellation and recovery | Owned cancellation writes the original journal; native leased kernel owns cleanup; cached original run/context only for exact-session recovery | Actual coordinator/journal/session services with strict fake provider responses. The final test-only handshake prevents reading during cancellation publication. No real provider stop/recovery was exercised for this new path. |
@@ -79,7 +140,8 @@ Controller is VM203, UUID `652a575b-a462-418e-95bb-360b28516925`,
 These observations are **not VM107 pins**. Never restore VM203 or execute the
 control roles/AppContainer on the controller.
 
-Proposed Sandbox host is **VM107 only**, historical enrollment `aiw-worker`, UUID
+The inspected target and conditional future Sandbox host is **VM107 only**,
+enrollment `aiw-worker`, UUID
 `e5cecc90-35c2-4831-bf9c-424be23f7d4e`, MAC `CC:34:21:B8:5A:31`,
 IP `192.168.1.174`, Proxmox `pve-r630`. Verify the current tuple and exclusive
 reservation with no foreign/outstanding VM/MSIX/Sandbox lease before mutation.
@@ -132,35 +194,30 @@ that source. The protected request/guest validates its own current source too.
 The package includes inert existing application recipe metadata; this request
 permits only **Fixed paired controls**, no installer selection or other workflow.
 
-## Mandatory target fields — currently unavailable, not wildcard approval
+## Target-provider gates — inspected and blocked
 
-No remote worker VM was contacted in preparing this request. Before native approval/Start,
-retain VM107's current exact OS tuple and x64 architecture, operator/endpoint
-identity, local trusted Store Sandbox package identity/version/publisher,
-cache-verified catalog hash/trust, provider canonical file hash/size/file-ID and
-static receipt v0alpha8. Required runtime protocol is
-`windowsSandboxCli/v0.8.107.0`. Do not substitute historical provider hash
-`247e...`, controller VM203 observations or guessed worker OS values.
+The exact OS, operator, runtime, endpoint and VM metadata are now recorded above.
+The Sandbox provider/catalog/file-ID pins cannot be filled: the required package
+is absent for this operator and all users. Firmware virtualization is also not
+reported available by AIW's exact native query. These are observed blockers, not
+blank fields to fill with historical hashes. Required protocol remains
+`windowsSandboxCli/v0.8.107.0`; it was not probed or observed.
 
-Prepare/import is static and may bind those fields without a provider invocation.
-Feature/virtualization readiness, protocol and absence of current Sandbox sessions
-remain explicitly unmeasured until approved Start's leased runtime preflight.
-No speculative Start to discover unsupported features is permitted: use a bounded
-read-only feature/virtualization check first, and stop if unavailable/unsupported.
-Record exact provider/OS commitments in this same request/attached preparation
-before presenting the generated literal plan approval and separate Start.
-A changed commitment requires fresh preparation/approval, not an in-place edit.
-This missing target evidence prevents a launch-ready native approval today.
-These are required fields to fill from target observations, not authorization for
-any current provider/OS tuple. No execution will occur under blank or inferred pins.
+No plan or v0alpha8 preparation receipt was created. Separate authorization and
+an environment decision are required to address these prerequisites. This request
+authorizes no installation, feature/VM changes, classic Sandbox bootstrap launch
+or controller fallback. After any separately approved environment change, capture
+fresh exact provider/OS/static pins and create a fresh plan before requesting
+literal approval or Start. Do not modify old records in place.
 
-## One bounded operation requested once those gates are complete
+## Conditional future assessment — not authorized by prerequisite approval
 
-Stage the exact verified package to the new VM107 destination
-`C:\AIW-Paired-f99bbd4-20261030\Package`; create sibling `Evidence` and
-`Exports` directories within that new root. The containing root must not already exist; collision
-means stop and choose a newly reviewed destination, never overwrite or clean it.
-Verify inventory on VM107 with the exact receipt/source pins below before launch.
+The approved first staging operation is complete at
+`C:\AIW-Paired-f99bbd4-20261030\Package`, with empty sibling `Evidence` and
+`Exports` directories. Do not replay copying or overwrite this root. Retain it
+unchanged. The commands below remain a future verification/UI procedure only;
+package verification was executed separately, while the UI was not launched.
+Do not run them past verification while the target-provider gates are blocked.
 
 ```powershell
 $ErrorActionPreference = 'Stop'
@@ -328,21 +385,21 @@ credentials or absolute private paths. No cleanup of retained inputs is authoriz
 
 ## Approval status and publication boundary
 
-Package preparation is local and unsigned; nothing was pushed, published, signed,
-installed or released. VM107 was not accessed, authenticated to or modified here.
-No provider/application/control was executed by this reconciliation.
+The approved inspection/staging scope has been used and is stopped. Package
+files were copied only to the declared new VM107 root and verified there. Normal
+TLS/Core identity inspection and two fixed read-only hypervisor metadata probes
+ran. The VM configuration hash and lease state stayed unchanged. No security,
+feature, provider installation, snapshot, network or power change was made.
+No Sandbox provider, control executable, application installer or UI was launched.
 
-A native Start approval cannot honestly be requested as launch-ready until VM107's
-current static enrollment and read-only feature/virtualization facts are retained.
-The immediately reviewable prerequisite authorization is: access VM107 through its
-existing trusted route solely to verify identity/exclusive reservation, inspect
-those read-only facts, stage/verify this pinned package, and perform non-executing
-preparation; **stop before literal plan approval or Start**. This fills this same
-consolidated request rather than inventing the missing target hashes. Existing
-session restrictions prohibit VM access without that authorization.
+Non-executing preparation could not produce a plan because its prerequisite gate
+is blocked; the production preparation API was not invoked. Plan approval and
+Start remain unperformed and unauthorized. No native acceptance or cleanup trial
+is claimed; no historical run was replayed/recovered. Existing Rust/Node review
+and test evidence was reused without rerunning unchanged suites.
 
-Once the target fields are filled, the single native scope above is one fresh
-six-case paired assessment and only its necessary owned cleanup/recovery, with
-exact plan approval and separate Start. It is a control-profile acceptance gate
-supporting Benchmark 2, not full Benchmark 2 or W4/W5 closure. Publication, hosted
-release/PR creation, application trials and broader acceptance remain separate.
+The eventual native scope, if prerequisites are separately resolved and freshly
+pinned, remains one fresh six-case pair and only its necessary owned cleanup or
+exact recovery. That later operation requires its own exact plan approval and
+separate Start. Full Benchmark 2/W4/W5 closure and publication remain separate.
+No push, PR, signing, publication or release occurred.

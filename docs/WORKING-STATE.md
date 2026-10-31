@@ -38,29 +38,40 @@ coverage, exact commits/logs, demonstration and limitations;
 [source-pinned future native proposal](PAIRED-NATIVE-ACCEPTANCE-PROPOSAL.md).
 All output remains local; no PR was submitted.
 
-Reconciliation at f99bbd4 is recorded in
-[the consolidated native approval request](PAIRED-NATIVE-APPROVAL.md). The exact
-unsigned local package was assembled/verified offline from clean f99bbd4 at
-`C:/aiw/paired-native-review-f99bbd4-20261030`; no unchanged suite was rerun.
-No proven source blocker was found. Current VM107 OS/provider/nested Sandbox
-facts remain unverified and block launch-ready Start approval. The production
-path does not emit a selection manifest; the request constructs one from the
-fresh typed locator. Fixed-control acceptance cannot close full Benchmark 2's
-real-application requirement. No remote worker VM, provider or control was accessed/executed.
+Reconciliation at f99bbd4 and the approved VM107 prerequisite work are recorded
+in [the consolidated request](PAIRED-NATIVE-APPROVAL.md). User approved identity/
+readiness inspection, staging and non-executing preparation only, stopping before
+plan approval/Start. The pinned unsigned package is now staged and exact-inventory
+verified at `C:\AIW-Paired-f99bbd4-20261030\Package` on VM107. Current identity,
+Windows 26300.9711/x64, Core 7.6.9 and normal HTTPS5986 pins are retained in the
+request. Evidence directory:
+`C:/aiw/paired-target-preparation-38602e66-2c6f-4327-9662-63164f198333`.
+
+Preparation is blocked before its production API invocation: required Store
+Sandbox package absent for current/all users and native PF_VIRT_FIRMWARE_ENABLED
+false. Classic System32 Sandbox files are not a fallback. Evidence/Exports remain
+empty; no plan, approval, Start, Sandbox provider or control invocation. No VM
+configuration/feature/security changes, installs, restores or publication. Source
+review found no justified bypass/fix; environment changes require separate scope.
+No unchanged Rust/Node suites reran. Production does not auto-emit a selection
+manifest; the request derives one from a future fresh typed locator.
 
 ## Open acceptance and preserved boundaries
 
 Native guest/provider/control behavior and held-file inspection through Sandbox
 Tools mappings remain untrialed. Fail closed rather than weakening intake.
 The new unsigned desktop package is now locally enrolled and inventory-verified.
-VM107 current provider/OS/readiness commitments remain unavailable.
+VM107 current OS/runtime/endpoint pins are observed. Sandbox provider/catalog
+commitments are unavailable because the required package is absent; virtualization
+is not available to the approved profile. No protected preparation exists.
 Keep live Benchmark 2 acceptance and remaining W4/W5 requirements open; no general
 compatibility/effective-isolation claim, release or production acceptance follows.
 
-No live VM/Sandbox/AppContainer/application/control trials, authentication, host
-security changes/grants, dependency installation, signing, push, publication,
-PR creation, merge or release are authorized. The guest agent and desktop were
-built offline, not run as assessments. Preserve completed records and unrelated
+Only the bounded VM107 prerequisite inspection/staging access was authorized
+and used; it is stopped. No live Sandbox/AppContainer/application/control trials,
+further setup/security/grant changes, installation, signing, push, publication,
+PR creation, merge or release are authorized. Approval/Start were not granted.
+The guest agent and desktop were built offline, not run as assessments. Preserve completed records and unrelated
 work; never repeat PR #103's completed trials.
 
 Future separately authorized execution must first inspect exact current
