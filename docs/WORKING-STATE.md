@@ -83,7 +83,12 @@ control acceptance. Original transaction/result remain absent and journal hash
 unchanged. See the consolidated request's completed observation and exact pins.
 Both the fixed diagnostic permission and original single Start are consumed.
 No retry, additional Start, approval, recovery or trial occurred. Further native
-work requires a separate pinned request; preserve the existing run.
+work requires a separate pinned request; preserve the existing run. The
+[pending preparation-only request](PAIRED-NATIVE-APPROVAL.md#pending-next-request-fresh-preparation-only-no-approval-or-start)
+pins one fresh evidence parent, the same d370ec8 package and existing console
+session 1. It is not authorized or executed. Its new root was confirmed absent
+at 2026-10-31T07:30:41Z. Fresh typed plan/run/receipt bindings must be obtained
+under that preparation permission before a separate execution request is possible.
 Local preparation/completion evidence:
 `C:/aiw/paired-console-diagnostic-preparation-4ea6c2a8-5237-41fc-b266-4dff331fdd52`.
 

@@ -13,7 +13,89 @@ Ready/sequence 3 with no session transaction/result/output. Do not replay Start.
 The proposal and preparation history below describe the reviewed bindings, not
 a second dispatch authorization. Publication remains separate.
 
-## Proposed follow-up: one console-readiness diagnostic, no Start
+## Pending next request: fresh preparation only, no approval or Start
+
+Request ID: `AIW-PAIRED-CONSOLE-PREP-D370EC8-20261031-01`.
+Status: **prepared for approval; not authorized or executed**. This request
+supersedes no historical permission. Both previous one-shot permissions are
+consumed. It requests exactly one new static preparation/import in VM107's
+existing labadmin console session 1, using the unchanged d370ec8 package.
+It does **not** request another readiness diagnostic, provider command, run
+approval, Start, cancellation/recovery, application trial or publication.
+
+Why this gate is necessary: the old run must be preserved, and a fresh plan's
+generated run ID, workspace identity, preparation/import receipt commitments and
+canonical plan hash cannot be honestly pinned before preparation. After this
+step, stop and present those exact bindings in a separate execution request.
+No approval/Start permission may be inferred from approval of this preparation.
+
+| Preparation binding | Exact value |
+|---|---|
+| Worker | VM107, UUID `e5cecc90-35c2-4831-bf9c-424be23f7d4e`, MAC `CC:34:21:B8:5A:31`, IP `192.168.1.174` |
+| Existing identity/context | `AIW\labadmin`, SID `S-1-5-21-3556347314-2314855617-1438300668-1001`, console session 1, existing non-admin token; no elevation |
+| OS/runtime | Windows `10.0.26300.9711` x64; `C:\Program Files\PowerShell\7\pwsh.exe`, Core 7.6.9; executable/engine hashes in the target table below |
+| Execution package source | `d370ec8cd5bcaa6915ac24801789070dd0040e3b` |
+| CLI | `C:\AIW-Paired-d370ec8-20261030\Package\aiw.exe`, SHA-256 `0dccb24c04f895a22e647af10b7ce0d72b70902c328e59b4b2329013cb5a111a` |
+| Verifier | Package sibling `verify-desktop-package.ps1`, SHA-256 `8398e34b15d2876cc7aa30ca45e59c290468e77afe318ba374b8f3ceab85bcfe` |
+| Receipt content commitment | `dc2e9499cc82e1258b7fe81da51abe2c2a9d83b83581d8e015f2146989f56390`, exact 14-payload inventory |
+| New request root | `C:\AIW-Paired-d370ec8-20261030\Console-paired-request-20261031-01` |
+| New evidence parent | Request root + `\Evidence` |
+| Fixed role binaries | All three use SHA-256 `b5cd415894b5d142215ae9b71f8d619d43404eb2511eb9304ad63f53db097512`, 5,968,896 bytes |
+| Fixed control source | `aiw.dev/paired-file-registry-child/v0alpha1`, SHA-256 `95201a1b89182f699358f2641e8ec47de7a45e2ed56c7fdc1b55418227803f49` |
+
+Read-only observation at **2026-10-31T07:30:41Z** confirmed the new request root
+absent and the historical journal unchanged; it created no target files and
+invoked no provider. Record: `next-request-path-check-*` in the diagnostic audit
+directory below. Absence must be rechecked immediately before any authorized
+creation. Do not substitute another destination if occupied.
+
+Approved procedure, **only if this request is subsequently approved**:
+
+1. Recheck exact VM/account/session/token/runtime/OS/network and package/provider
+   byte, catalog and file identity pins recorded here, using static reads only.
+   Refuse drift, privilege changes, reparse-point parents, occupied destination
+   or unavailable console. Verify the package with the pinned verifier and receipt.
+   Do not repeat `host assess` or issue a provider command.
+2. Exclusively create the new request root and its empty `Evidence` child. Invoke
+   exactly once in the identified interactive Core console:
+
+   ```powershell
+   & 'C:\AIW-Paired-d370ec8-20261030\Package\aiw.exe' admin prepare-paired --evidence 'C:\AIW-Paired-d370ec8-20261030\Console-paired-request-20261031-01\Evidence' --identity 'AIW\labadmin'
+   ```
+
+3. Preserve its durable `paired-workflow.json` / `paired-review.json`, generated
+   project/locator, protected workspace, role copies, plan, static preparation and
+   import receipts. Derive all new execution bindings from these actual typed
+   records; never reuse the old run ID/hash. If console output fails, inspect the
+   same created preparation, without invoking preparation again.
+4. Stop before `run approve`, `run start`, desktop Approve/Start or recovery.
+   Independently review the actual pins and publish no artifacts. Present the
+   complete new execution request for separate user approval.
+
+Permitted effects: new files/directories and protection ACLs only within this
+request's fresh evidence tree, plus normal OS process bookkeeping. The fixed CLI
+uses `prepare_for_review` -> `prepare_review_context` -> preparation/import; it has
+no gate callback, approval writer, runtime provider lease or Start route. No guest
+account/profile, canary file/registry key, AppContainer profile, Sandbox session,
+installer or fixed test process is created by preparation. Historical run,
+packages, exports and diagnostic records remain untouched. The broader paired
+assessment's policy differences, six case expectations, guest effects, native
+deadlines and owned cleanup conditions below are **future execution scope**, not
+authority to perform them under this request.
+
+Observation limit: allow at most five minutes before recording preparation as
+unsettled and stopping further operations. This is an observer limit, not a new
+native timeout or permission to kill a process. Preserve its exact process ID,
+partial records and custody; read-only observation of that same process may
+continue until its terminal state is established. No retry, cleanup/delete,
+foreign lease adoption, VM restore/power change or recovery is included. Any
+refusal, package drift, partial result or unexpected side effect stops this step.
+
+This is the smallest next approval gate toward the fixed six-case demonstration.
+Even a successful future demonstration leaves the declared real-application
+Benchmark 2 candidate, broader W4/W5 and production acceptance open.
+
+## Completed follow-up: one console-readiness diagnostic, no Start
 
 Follow-up ID: `AIW-PAIRED-CONSOLE-READINESS-D370EC8-20261030`.
 Status: **explicitly approved and completed once on VM107, 2026-10-31
