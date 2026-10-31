@@ -327,3 +327,35 @@ The exact review bundle, safe exports, demo scope, independent source review,
 initial failed run and remaining limits are in the final handoff. Earlier
 remaining-work notes above describe historical checkpoints and are superseded
 by this disposition. Native trials and production acceptance remain open.
+
+## Bounded private driver diagnostics after the native unmeasured driver failure
+
+The console run `paired-1793435382044001000` reached the native provider and
+agent, then published a receipt-bound `driverIncomplete` with no case progress.
+Exact outer cleanup was verified; the failing stage, internal actions and inner
+cleanup remain unknown. The error had only been printed to logon
+stderr, which that launch path did not retain; it cannot be recovered afterward.
+
+New failed-driver artifacts use `aiw.dev/paired-controls-driver-failure/v0alpha2`
+with an optional private `diagnostic`, sanitized by the existing guest helper:
+at most 2,048 Unicode scalars (at most 8,192 UTF-8 bytes), no control characters.
+The host enforces the same bound. Only an actual collector/driver error is attached; no
+process/token/case/cleanup observation is invented. The same two artifacts and
+receipt-last publication bind the field through the existing evidence verifier.
+No new artifact route, verdict, executable selection, policy grant or case gate.
+
+Legacy v1 remains readable with no diagnostic field. Absent values serialize by
+omission, preserving historical payload hashes; v1 with a diagnostic and unknown
+schemas are rejected before binding normalization. Event/result equality also
+rejects an unexpected explicit null field or changed diagnostic. Existing
+progress/token provenance checks still run. The desktop field allowlist never
+copies diagnostic text to the view/JSON/Markdown summary; privacy regressions
+include private-path, credential and hostile-text sentinels with six unmeasured
+cases. Retained raw engineering records remain private and are not safe exports.
+
+Affected offline validation passed: provider88, guest11, paired-runner15 and the
+new desktop privacy regression, workspace and desktop all-target Clippy, formats.
+Independent source review found no consequential issue. Unchanged broader suites
+retain their recorded source/scope and were not rerun. The source fingerprint
+changes with these producer/protocol files: every follow-up dispatch needs new
+agent/package/source/plan pins. Never edit or replay the old retained failure.

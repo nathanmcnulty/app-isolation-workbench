@@ -3,117 +3,65 @@
 Updated 2026-10-31 (America/Anchorage). Owning checkout
 `C:\aiw\app-isolation-workbench`, branch `codex/paired-controls`, atop local main
 `53c02c8` including merged PR #103. Start with `scripts/work-status.ps1`.
-This pointer is not execution authority.
+This pointer is not execution authority; the latest user authorization controls.
 
-## Current milestone
+## Current milestone and authority
 
-The user approved taking Results Explorer/fixed paired controls toward a locally
-reviewable PR, including the single source-pinned VM107 assessment. Publication
-remains separate. The attempt stopped in required provider readiness before
-Sandbox dispatch; positive six-case native acceptance is **not achieved**.
+Offline Results Explorer and fixed paired controls are locally implemented and
+reviewed. The user approved the pinned console assessment, then explicitly asked
+to continue routine testing/fixes without repeated approval questions. Continue
+within the existing fixed-control/VM107 scope, with reviewed fresh source/agent/
+package/plan pins and preserved evidence. No blind retry, new application trial,
+security/VM change, publication, push, PR creation, merge, signing or release.
 
-Current source change: `2ec65edfe749b73a13ddf0c923db973de1292fc8` distinguishes
-missing approval from approval recorded without dispatch in retained Results.
-Both states still refuse control evidence; no execution/verdict/provider gate
-changed. A read-only developer example uses the actual desktop Results backend
-to verify deterministic summaries and create exclusive allowlisted JSON/Markdown
-exports. Independent source review has no remaining consequential finding.
+Native six-case acceptance is **not achieved**; full Benchmark 2 and W4/W5 remain
+open. No general compatibility, effective host isolation or production acceptance.
 
-Focused affected tests passed (2 protected paired regressions, 1 shared function
-matrix, 1 desktop privacy/gap check), as did runner/desktop all-target Clippy,
-formatting and the offline example build. Earlier unchanged broad evidence is
-retained: 678 workspace Rust tests, 20 desktop tests, 28 Node tests plus lint,
-formatting and reviewed labeled fixture demonstrations. Do not rerun unchanged
-suites merely for reassurance. No new JavaScript or control-agent code changed.
+## Actual native state
 
-See [native attempt and Results](PAIRED-NATIVE-ATTEMPT.md) for exact artifacts,
-current checks and limitations; [draft PR](PAIRED-DRAFT-PR.md) for review text;
-[implementation handoff](PAIRED-IMPLEMENTATION-HANDOFF.md) for earlier evidence.
+Historical run `paired-1793425345541054400` remains unchanged: approved once,
+required provider list timed out before dispatch, no transaction/result. Its
+Results exports preserve all six cases as unmeasured. Do not replay/recover it.
+A separately approved console readiness query succeeded (session1, empty list,
+no blockers), which did not prove the timeout's cause or any control observation.
 
-## Exact current native record
-
-The d370ec8 execution package remains unchanged at
-`C:\AIW-Paired-d370ec8-20261030\Package` on VM107. Source
-`d370ec8cd5bcaa6915ac24801789070dd0040e3b` fixed the active-Hyper-V false negative
-and added closed preparation-only CLI access. Approved console/Store setup
-installed Sandbox 0.8.107.0 without security/CPU/feature changes. Production static
-preparation/import completed, with exact pins in the
-[consolidated request](PAIRED-NATIVE-APPROVAL.md).
-
-Run `paired-1793425345541054400`, canonical plan hash
-`b0d2e739ce45e7c9bbb0a0ed9651905cefcd0dfaae53c4e06450c1108035f234`,
-was approved and Start issued **once**. Required native `list` timed out at 15039ms;
-CLI exited 1 after 22s. No Sandbox dispatch transaction, guest request/output or
-result exists. Read-only status is **Ready / sequence 3 / session none**, with
-approval committed. No cancellation/recovery/retry was issued. This is neither
-a passing assessment nor a current/global cleanup certificate.
-
-Audit: `C:/aiw/paired-native-assessment-9fbf14ab-776c-42ed-8ee6-8b8a8009fca0`.
-Actual headless Results on VM107 exports partial/unmeasured evidence correctly.
-Repeat/collision/retained-destination checks preserve all 17 files in the bounded
-explicit retained tree and original exports; both formats repeat byte-identically.
-No provider/execution entry point exists in that reader/export path. The console
-browser tool initially timed out; no current Results GUI
-demonstration is claimed. Bounded existing AppModel/TWinUI logs supplied no matching
-events; remote-context causation remains unproven.
-
-## Remaining gates and preserved boundaries
-
-The one-Start request is consumed. Do not replay Start or silently reprepare.
-Further native work needs a reviewed bounded diagnostic/execution scope with
-current exact source/context pins. Do not infer that changing session, token,
-timeout, identity, grants or security settings will fix the unproven cause.
-Native six-case collection, guest Tools custody, inner and outer cleanup, and
-current GUI execution remain unvalidated. Keep full Benchmark 2 and W4/W5 open;
-no general compatibility, effective isolation or production acceptance is claimed.
-
-A reviewed one-shot **readiness-only** console diagnostic completed once,
-on VM107 at `ReviewTools-2ec65ed\Inspect-VM107-console-readiness.ps1` under the d370
-root. SHA-256 `6fcf137e742dcb2896cf5775f706c94c98221e4d468541d5a69a51110f324af2`.
-It accepts no operation/target/path overrides and calls only pinned `host assess`,
-requiring existing console session 1 and the original runtime/identity/byte pins.
-Wrong-machine refusal, AST/compile, capped-stream and unresolved-stream deadline
-checks passed offline; one source-review IO-bound issue was fixed before staging.
-After the user restored browser access, the hash-guarded helper ran in existing
-Core 7.6.9 console session 1 (caller PID 5404, CLI PID 1364, non-admin token).
-It exited 0 in 6424ms: supported, protocol verified, session list available and
-empty, no blockers. Both streams completed; five records were hash-verified on
-readback. This proves readiness at that time/context, not timeout causation or
-control acceptance. Original transaction/result remain absent and journal hash
-unchanged. See the consolidated request's completed observation and exact pins.
-Both the fixed diagnostic permission and original single Start are consumed.
-No retry, additional Start, approval, recovery or trial occurred. Further native
-work requires a separate pinned request; preserve the existing run.
-
-The approved fresh preparation `-01` refused before run creation after an operator
-console-key error created empty `C:\Evidence`; that directory remains preserved.
-The separately approved corrected preparation `-02` then succeeded once, exit 0,
-using a literal child path independently verified before the call. Both preparation
-permissions are consumed. The old run is unchanged; no further approval or Start.
-
-New run **`paired-1793435382044001000`**, plan
+New run `paired-1793435382044001000`, plan
 `afaf470e23d7b22313450c0df530ef7a757c4aac68942109abcedc14d32b8a2e`,
-is pendingApproval / sequence 1, provider acquired/mutated false, no approval,
-transaction/result/cancellation or guest output. Workspace identity
-`77b3277c84307c6639051756a437bfb8bf3d57a09ff2bb13943fce54ebdb0e70`.
-All three role hashes and nine document readbacks verified. No active aiw process.
-Audit: `C:/aiw/paired-console-corrected-preparation-e7b6cb08-fa17-471a-a1f7-c32103477d4c`.
-See the [pending execution request](PAIRED-NATIVE-APPROVAL.md#pending-execution-request-one-prepared-console-fixed-pair)
-for every target/plan/provider/fixture pin, six-case expectations, effects and
-bounds. Its fixed no-argument execution helper remains local only, unstaged and
-unexecuted; SHA-256 `93edeac698313aa7ebd13d6ab84d5b2c0744d1b85df1544d1b3ecd246bf7ed16`.
-Offline parse/no-argument/wrong-machine checks passed; bounded C# IO is unchanged
-from the reviewed diagnostic. Independent helper review has no consequential
-finding. This new request is not approved and grants no execution authority.
+was approved and Start issued once in console session1, non-admin. Native outer
+session `8b1276f0-0a3e-5c54-37ad-3b6e51d85b29` started/connected and published a
+receipt-bound driver failure with no retained case measurements. PID6288 exited1 after68717ms. Exact-session
+cleanup was verified; terminal failed / journal6 / sessionclean. No cancellation
+or recovery. All six cases remain unmeasured. Actual Results backend/export:
+29 retained files byte-unchanged, deterministic JSON/MD, private markers absent,
+zero reader provider/execution routes. Old records and accidental empty
+`C:\Evidence` are preserved; do not clean it up under test authority.
 
-No push, PR creation, publication, signing, release, merge, security weakening,
-new application trials or repeats of PR #103 are authorized. Preserve both old
-f99bbd4 and d370ec8 packages, all old receipts and unrelated work.
+The original observer stopped after approval on a Ready-schema field error;
+a source-reviewed Start-only continuation preserved approval and issued the first
+Start. See [the approved execution record](PAIRED-NATIVE-APPROVAL.md#approved-execution-request-one-prepared-console-fixed-pair)
+for exact pins, native outcomes, driver repairs and continuing test authority.
+Raw audit: `C:/aiw/paired-console-native-execution-7d1fb92e-b439-4198-aee3-cb5166927dfc`.
 
-VM107 only: UUID `e5cecc90-35c2-4831-bf9c-424be23f7d4e`,
-MAC `CC:34:21:B8:5A:31`, IP `192.168.1.174`. Never touch VM106 or restore VM203.
-Keep normal trusted HTTPS5986 / PowerShell.7.6, certificate
-`BC14DCC4E37F83161EBB55AF8624E36A79E19256`; no TLS bypass, device-code login,
-compatibility fallback, key/grant expansion or foreign lease adoption.
-Never replay/recover historical runs `msix-1792704525359564000`,
-`msix-bounded-1792816990610240800` or `msix-1793226013277315400`.
+## Current code and validation
+
+The guest's specific collector/driver error was lost in logon stderr. The reviewed source
+change retains bounded private diagnostics in v2 failed-driver evidence, keeps
+v1 exact payload compatibility, and leaves measurement/verification/grant gates
+and the summary field allowlist intact. It cannot recover the old missing error.
+Provider88 / guest11 / paired-runner15 tests and the GUI privacy regression passed;
+workspace and GUI all-target Clippy and formatting passed. Logs:
+`C:/aiw/paired-private-diagnostic-*.log`. No consequential source-review finding.
+Unchanged broad evidence remains scoped to its recorded source: workspace678,
+desktop20, Node28 plus earlier lint/fixtures. Do not rerun unchanged suites.
+
+Next: finish governance/commit, build and verify a fresh static-agent/package from
+that clean source, prepare a fresh pinned fixed-control plan, and continue native
+testing under standing authority. Preserve all old packages/runs; never substitute
+new binaries in retained evidence. See [workflow diagnostics](paired-product-workflow.md#bounded-private-driver-diagnostics-after-the-native-unmeasured-driver-failure)
+and [draft PR](PAIRED-DRAFT-PR.md). Future errors must be observed, not guessed.
+
+VM107 only: UUID `e5cecc90-35c2-4831-bf9c-424be23f7d4e`, MAC
+`CC:34:21:B8:5A:31`, IP `192.168.1.174`. Never touch VM106 or restore VM203.
+Trusted HTTPS5986/Core7.6 certificate `BC14DCC4E37F83161EBB55AF8624E36A79E19256`;
+no TLS bypass, compatibility fallback, key/grant expansion or foreign adoption.
+Historical MSIX runs remain retained and must not be replayed or recovered.

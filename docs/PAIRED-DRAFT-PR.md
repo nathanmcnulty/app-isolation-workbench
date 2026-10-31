@@ -49,5 +49,14 @@ That folder remains untouched. A separately approved corrected preparation then
 succeeded once in console session 1, producing the exact new pending plan without
 provider invocation, approval or Start. Its target/receipt/plan/fixture bindings
 and reviewed fixed execution helper are in the consolidated approval request;
-execution remains pending a separate explicit authorization. The historical run
+the later explicit approval and actual native outcome are recorded below. The historical run
 is unchanged. Unchanged test suites were reused, and publication remains separate.
+
+The later console assessment reached the actual native provider/guest path and
+failed without retained case measurements; exact outer cleanup was verified. Its Results
+exports correctly retain all six cases as unmeasured. The guest's collector/driver error
+was lost in logon stderr, so a v2 failure artifact now retains bounded private
+diagnostics while preserving v1 evidence compatibility and the summary allowlist.
+No isolation guard, success criterion or measurement was relaxed. Routine fixed-
+control follow-up testing is authorized; every new source/agent/plan remains
+pinned, and publication remains separate.

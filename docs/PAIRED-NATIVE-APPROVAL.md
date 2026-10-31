@@ -11,20 +11,75 @@ The user approved this exact assessment for the PR-readiness milestone. Approval
 was committed and Start issued once; no control case ran. The retained run is
 Ready/sequence 3 with no session transaction/result/output. Do not replay Start.
 The old proposal and preparation history below do not authorize another dispatch.
-The new pending request immediately below is the only current execution proposal.
+The approved execution record below and the latest standing test authority
+supersede older pending-proposal wording.
 Publication remains separate.
 
-## Pending execution request: one prepared console fixed pair
+## Approved execution request: one prepared console fixed pair
 
 Request ID: `AIW-PAIRED-CONSOLE-EXEC-D370EC8-20261031-01`.
-Status: **not approved, not staged and not executed**. The separately approved
+Status: **approved; one Start completed with a native driver failure with no retained case measurements and verified exact-session cleanup**. The user explicitly approved this request and
+asked to continue routine testing/fixes without repeated approval questions.
+The separately approved
 corrected preparation succeeded once with exit **0** in VM107 console session 1;
 its permission stops before approval/Start and is consumed. This request seeks
 one exact approval and one Start for the **new** prepared run below. It does not
 replay `paired-1793425345541054400`, repeat PR #103, install software or trial an
 application. Do not execute the historical commands later in this document.
 
-### Exact current target and immutable bindings
+### Actual execution and continuing test authority
+
+The user replied **"Approved. I want you to stop asking me for approval to test
+things. Just take it as far as you can please."** This authorizes the pinned
+assessment and routine fixed-control testing/fixes in the existing scope. Do not
+ask again for each ordinary test or repair. Preserve exact source/plan/context
+bindings and prior evidence; do not blindly replay a Start or weaken a guard.
+No publication, new application trial, VM restore or security change follows.
+
+The original helper `93edeac...` recorded approval at `2026-10-31T20:16:05Z`, then
+stopped **before Start** because Ready carries `core.approval.planHash`, whereas
+PendingApproval carries `core.planHash`. This was a driver error, not a product
+schema defect. Source review and eight offline positive/negative checks preceded
+a Start-only continuation with **no reapproval route**. It preserves JSON dates
+as strings in Core 7.6.9 and pins the actual retained approval SHA-256
+`3830e10ff04726a9edcf2f1d17879f80d904154ee7dbe020233a83d12ff5252a`.
+Continuation SHA-256 `112ccb45bc467b8675678098b79619d23eb9ff1be973c3287426f70f6f3fb02b`,
+18,284 bytes. The original helper/Execution directory were preserved. One console
+invocation remained unsubmitted at `>>`; remote Control-C cleared that input
+before a quote-free invocation from the verified Core directory. No Start was
+issued by that unsubmitted input.
+
+The continuation caller was PID **2960**, session **1**, non-admin. Actual Start
+PID **6288**, session **1**, issued once at `20:28:04Z`, exited **1** after
+**68,717ms**. Native provider list/start/connect succeeded. Outer session
+`8b1276f0-0a3e-5c54-37ad-3b6e51d85b29` ran the pinned agent. The guest published a
+receipt-bound native-origin `driverIncomplete` result with empty progress and no
+launcher token. **All six cases remain unmeasured.** The failure stage and whether
+guest setup or case execution occurred are unknown; inner cleanup is unmeasured. Exact kernel cleanup reached
+`cleanupVerified`; terminal core result is failed, journal sequence **6**, session
+status clean. Native stop succeeded and subsequent list omitted that exact ID.
+No cancellation, recovery, second Start or new application trial occurred.
+
+Actual desktop ResultsStore loaded that explicit retained run twice, produced
+matching summaries and exclusively exported JSON/Markdown under request-root
+`Exports`. All **29** files in the bounded explicit retained snapshot were byte
+unchanged. Private identity/path markers were absent; the reader has zero
+provider/execution entry points. Summary JSON SHA-256
+`f768b7c9ef990cb85a2fcad68369ff901bdecdc112f4253079de03c3d9e8dd24`;
+Markdown `c37338d3ea71b1c8d2b5d9d1891a00efebd05cc9ea47ad239723d908d9e7cd79`.
+
+Raw audit: `C:/aiw/paired-console-native-execution-7d1fb92e-b439-4198-aee3-cb5166927dfc`:
+`user-authorization.json`, staged-helper records, `postapproval-driver-stop.json`,
+`continuation-offline-checks.json`, native observations, `native-terminal-readback.json`,
+`native-provider-diagnostics.jsonl`, `native-results-export.json`, summaries and
+console proof. The lost guest collector/driver error was printed only to logon stderr, which
+this path did not capture. It cannot be reconstructed from the v1 failure payload.
+A bounded private v2 failure diagnostic is being implemented/reviewed offline;
+existing verification, case and summary allowlists remain intact. Any follow-up
+native test requires fresh source/agent/package/plan pins, not mutation or replay
+of this retained run. The procedure below is the historical approved proposal;
+its original helper must not be rerun.
+### Pins at approval and immutable input bindings
 
 | Binding | Exact value |
 |---|---|
@@ -57,7 +112,7 @@ canonical spelling; the literal paths above name the same objects. Canonical
 commitments are distinct from raw JSON file hashes. No pending proposal timestamp
 is consent: actual `approvedAt` must be recorded only after this new authorization.
 
-### Exact procedure requested, with no execution yet
+### Original approved procedure — historical, do not replay
 
 Only after explicit approval of this request:
 
@@ -204,8 +259,9 @@ Local raw engineering evidence:
 `post-preparation-verification.json`, `preparation-completed-console.png` and the
 nine document copies. The execution helper passed offline parse/no-argument and
 wrong-machine refusal checks before any provider/output; its capped C# observer
-is unchanged from the reviewed diagnostic. It remains **local only, unstaged and
-unexecuted**. Unchanged Rust/Node suites are reused, not rerun or claimed anew.
+is unchanged from the reviewed diagnostic. These were pre-execution checks;
+subsequent staging, driver repair and actual execution are recorded above.
+Unchanged baseline suites retain their historical source/scope.
 
 ## Completed corrected request: literal-path preparation only
 

@@ -203,12 +203,15 @@ fn execute_paired_controls_request(
             )
         }
         Err(error) => {
-            // Keep diagnostics out of the structured result/export field set.
-            // Failed setup contains no invented token, denial, PID or cleanup.
+            // Logon-command stderr is not retained by every native provider.
+            // Preserve bounded private diagnostics in the existing receipt-bound
+            // artifact, never as a measurement or an allowlisted summary field.
             eprintln!("AIW_PAIRED_DRIVER_INCOMPLETE: {error}");
-            let result =
+            let mut result =
                 aiw_provider_wsb::paired_controls::PairedControlDriverFailure::for_request(request)
                     .map_err(anyhow::Error::msg)?;
+            result.diagnostic = Some(bounded_diagnostic(&error));
+            result.validate(request).map_err(anyhow::Error::msg)?;
             (
                 serde_json::to_value(result)?,
                 "pairedControlsDriverFailure",
@@ -1673,6 +1676,51 @@ mod tests {
         let value = serde_json::to_value(failure).unwrap();
         assert_eq!(value.as_object().unwrap().len(), 9);
         assert!(value["launcherToken"].is_null());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn paired_private_diagnostic_is_bounded_and_published_under_the_failed_receipt() {
+        let (request, _) = paired_request();
+        let root = test_root("paired-private-diagnostic");
+        let mut failure =
+            aiw_provider_wsb::paired_controls::PairedControlDriverFailure::for_request(&request)
+                .unwrap();
+        failure.diagnostic = Some(bounded_diagnostic(&format!(
+            "private-path-sentinel credential-sentinel\n{}",
+            "🧪".repeat(4096)
+        )));
+        let diagnostic = failure.diagnostic.as_deref().unwrap();
+        assert_eq!(
+            diagnostic.chars().count(),
+            aiw_provider_wsb::paired_controls::MAX_PAIRED_DRIVER_DIAGNOSTIC_CHARS
+        );
+        assert!(!diagnostic.chars().any(char::is_control));
+        failure.validate(&request).unwrap();
+        publish_paired_controls(
+            &request,
+            &root,
+            serde_json::to_value(&failure).unwrap(),
+            "pairedControlsDriverFailure",
+            CompletionStatus::Failed,
+        )
+        .unwrap();
+        let receipt: WindowsSandboxCompletionReceipt =
+            serde_json::from_slice(&fs::read(root.join("completion.json")).unwrap()).unwrap();
+        assert_eq!(receipt.status, CompletionStatus::Failed);
+        assert_eq!(receipt.artifacts.len(), 2);
+        let retained =
+            serde_json::from_slice(&fs::read(root.join("scenario-result.json")).unwrap()).unwrap();
+        aiw_provider_wsb::paired_controls::verify_paired_driver_failure_evidence(
+            &fs::read(root.join("evidence.jsonl")).unwrap(),
+            &receipt.evidence_root_hash,
+            &request,
+            &retained,
+        )
+        .unwrap();
+        assert_eq!(failure, retained);
+        assert!(retained.progress.is_empty());
+        assert!(retained.launcher_token.is_none());
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -915,6 +915,34 @@ mod tests {
     }
 
     #[test]
+    fn paired_private_driver_diagnostic_never_reaches_json_markdown_or_case_outcomes() {
+        let detail = json!({"profile":{"origin":"nativeWorker"},"recordedOutcome":"failed","recordedCleanupVerified":true,"evidenceStatus":"driverIncomplete","driverFailure":{"schemaVersion":"aiw.dev/paired-controls-driver-failure/v0alpha2","diagnostic":"private-path-sentinel C:\\private\\account credential-sentinel <script>hostile</script>\u{202e}","progress":[],"launcherToken":null}});
+        let raw = json!({"entries":[{"id":"local-selector","source":{"kind":"windowsSandbox","evidence":{"profile":"pairedControls","result":{"kind":"pairedControls","report":detail}}}}]});
+        let summary = project(&raw);
+        let paired = &summary.rows[0]["paired"];
+        assert_eq!(paired["evidenceStatus"], "driverIncomplete");
+        assert_eq!(paired["eligible"], false);
+        assert!(
+            paired["cases"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|case| case["outcome"] == "unmeasured")
+        );
+        for output in [serde_json::to_string(&summary).unwrap(), markdown(&summary)] {
+            for private in [
+                "private-path-sentinel",
+                "credential-sentinel",
+                "<script>",
+                "C:\\private",
+                "diagnostic",
+            ] {
+                assert!(!output.contains(private), "private field leaked: {private}");
+            }
+        }
+    }
+
+    #[test]
     fn fixture_flow_deterministic_unchanged_duplicate_missing_tampered_and_export() {
         let root = temp();
         let inputs = root.join("retained");

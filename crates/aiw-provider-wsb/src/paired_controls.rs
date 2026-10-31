@@ -9,6 +9,10 @@ use std::collections::BTreeSet;
 
 pub const PAIRED_CONTROL_REQUEST_SCHEMA: &str = "aiw.dev/paired-controls-request/v0alpha1";
 pub const PAIRED_CONTROL_RESULT_SCHEMA: &str = "aiw.dev/paired-controls-result/v0alpha1";
+pub const PAIRED_CONTROL_DRIVER_FAILURE_SCHEMA: &str =
+    "aiw.dev/paired-controls-driver-failure/v0alpha2";
+const LEGACY_DRIVER_FAILURE_SCHEMA: &str = "aiw.dev/paired-controls-driver-failure/v0alpha1";
+pub const MAX_PAIRED_DRIVER_DIAGNOSTIC_CHARS: usize = 2048;
 pub const PAIRED_CONTROL_FILE_BYTES: &[u8] = b"AIW controlled readable bytes";
 pub const PAIRED_CONTROL_REGISTRY_BYTES: &[u8] = b"AIW controlled registry bytes";
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
@@ -758,6 +762,72 @@ mod tests {
         }
     }
     #[test]
+    fn driver_failure_versions_preserve_legacy_payloads_and_bind_private_diagnostics() {
+        fn evidence(payload: serde_json::Value) -> (Vec<u8>, String) {
+            let mut log = aiw_evidence::EvidenceLog::new();
+            log.append(aiw_evidence::EvidenceEvent {
+                observed_utc: "not-trusted".into(),
+                kind: "pairedControlsDriverFailure".into(),
+                source: "aiw-guest-agent".into(),
+                payload,
+            })
+            .unwrap();
+            let mut bytes = Vec::new();
+            for record in log.records() {
+                serde_json::to_writer(&mut bytes, record).unwrap();
+                bytes.push(b'\n');
+            }
+            (bytes, log.manifest().unwrap().root_hash)
+        }
+        let (request, _) = fixture();
+        let mut legacy = PairedControlDriverFailure::for_request(&request).unwrap();
+        legacy.schema_version = LEGACY_DRIVER_FAILURE_SCHEMA.into();
+        let legacy_json = serde_json::to_value(&legacy).unwrap();
+        assert!(legacy_json.get("diagnostic").is_none());
+        let roundtrip: PairedControlDriverFailure =
+            serde_json::from_value(legacy_json.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&roundtrip).unwrap(), legacy_json);
+        let (bytes, root) = evidence(legacy_json.clone());
+        verify_paired_driver_failure_evidence(&bytes, &root, &request, &roundtrip).unwrap();
+
+        // Explicit null is not part of the old receipt-bound payload, either.
+        let mut extra_null = legacy_json;
+        extra_null["diagnostic"] = serde_json::Value::Null;
+        let (bytes, root) = evidence(extra_null.clone());
+        let parsed: PairedControlDriverFailure = serde_json::from_value(extra_null).unwrap();
+        assert!(verify_paired_driver_failure_evidence(&bytes, &root, &request, &parsed).is_err());
+
+        let mut current = PairedControlDriverFailure::for_request(&request).unwrap();
+        current.diagnostic = Some("private diagnostic: input custody refused".into());
+        let (bytes, root) = evidence(serde_json::to_value(&current).unwrap());
+        verify_paired_driver_failure_evidence(&bytes, &root, &request, &current).unwrap();
+        assert!(current.progress.is_empty());
+        assert!(current.launcher_token.is_none());
+        let mut changed = current.clone();
+        changed.diagnostic = Some("different private diagnostic".into());
+        assert!(verify_paired_driver_failure_evidence(&bytes, &root, &request, &changed).is_err());
+        changed.schema_version = LEGACY_DRIVER_FAILURE_SCHEMA.into();
+        assert!(changed.validate(&request).is_err());
+        changed.diagnostic = None;
+        changed.schema_version = "aiw.dev/paired-controls-driver-failure/v0alpha99".into();
+        assert!(changed.validate(&request).is_err());
+    }
+
+    #[test]
+    fn driver_failure_diagnostics_have_a_unicode_scalar_and_control_character_bound() {
+        let (request, _) = fixture();
+        let mut failure = PairedControlDriverFailure::for_request(&request).unwrap();
+        failure.diagnostic = Some("🧪".repeat(MAX_PAIRED_DRIVER_DIAGNOSTIC_CHARS));
+        failure.validate(&request).unwrap();
+        failure.diagnostic = Some("🧪".repeat(MAX_PAIRED_DRIVER_DIAGNOSTIC_CHARS + 1));
+        assert!(failure.validate(&request).is_err());
+        for value in ["private\nline", "private\0value", "private\u{7f}value"] {
+            failure.diagnostic = Some(value.into());
+            assert!(failure.validate(&request).is_err());
+        }
+    }
+
+    #[test]
     fn historical_source_commitments_remain_readable_but_cannot_prepare_new_requests() {
         let (request, mut result) = fixture();
         let mut historical = request.profile.clone();
@@ -883,6 +953,10 @@ pub struct PairedControlDriverFailure {
     pub reason: PairedDriverFailureReason,
     pub progress: Vec<PairedCaseProgress>,
     pub launcher_token: Option<TokenEvidence>,
+    /// Private retained diagnostics only; never case evidence or summary text.
+    /// Omit absent values to preserve exact legacy receipt/event payloads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostic: Option<String>,
 }
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -893,7 +967,7 @@ impl PairedControlDriverFailure {
     pub fn for_request(request: &PairedControlsRequest) -> Result<Self, String> {
         request.validate()?;
         Ok(Self {
-            schema_version: "aiw.dev/paired-controls-driver-failure/v0alpha1".into(),
+            schema_version: PAIRED_CONTROL_DRIVER_FAILURE_SCHEMA.into(),
             run_id: request.run_id.clone(),
             sandbox_id: request.sandbox_id.clone(),
             request_sha256: request.request_sha256.clone(),
@@ -902,12 +976,26 @@ impl PairedControlDriverFailure {
             reason: PairedDriverFailureReason::DriverIncomplete,
             progress: Vec::new(),
             launcher_token: None,
+            diagnostic: None,
         })
     }
     pub fn validate(&self, request: &PairedControlsRequest) -> Result<(), String> {
+        match self.schema_version.as_str() {
+            LEGACY_DRIVER_FAILURE_SCHEMA if self.diagnostic.is_none() => {}
+            PAIRED_CONTROL_DRIVER_FAILURE_SCHEMA => {}
+            _ => return Err("Unsupported paired driver failure schema or diagnostic".into()),
+        }
+        if self.diagnostic.as_ref().is_some_and(|value| {
+            value.chars().count() > MAX_PAIRED_DRIVER_DIAGNOSTIC_CHARS
+                || value.chars().any(char::is_control)
+        }) {
+            return Err("Paired driver diagnostic exceeds the private field policy".into());
+        }
         let mut binding = self.clone();
+        binding.schema_version = PAIRED_CONTROL_DRIVER_FAILURE_SCHEMA.into();
         binding.progress.clear();
         binding.launcher_token = None;
+        binding.diagnostic = None;
         if binding != Self::for_request(request)? {
             return Err("Paired driver failure binding rejected".into());
         }
