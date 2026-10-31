@@ -16,12 +16,15 @@ a second dispatch authorization. Publication remains separate.
 ## Proposed follow-up: one console-readiness diagnostic, no Start
 
 Follow-up ID: `AIW-PAIRED-CONSOLE-READINESS-D370EC8-20261030`.
-Status: **reviewed and staged only; not executed on VM107**. This is additional
+Status: **explicitly approved for one fixed console diagnostic; staged but not
+executed on VM107 because console control is still unavailable**. This is additional
 readiness observation in the existing console context, not permission to replay
 the consumed Start, approve/reprepare a run, or trial an application.
-Execution of this one console diagnostic still requires explicit user
-authorization and working console access. Staging/review and the consumed Start
-do not authorize it.
+The user replied **"Approve fixed console diagnostic only"** to the scoped
+question. That authorization is recorded locally as
+`console-diagnostic-user-authorization.json` in the proposal evidence directory.
+Working console access remains required. The response grants no additional Start,
+run approval, recovery, trial, security change or publication authority.
 
 The prior invocation was through trusted remoting. A subsequent observer was in
 Windows session 0 while the existing labadmin console was active in session 1;
@@ -88,7 +91,7 @@ The exact future console command below is **not executed**. Before using it,
 confirm the helper hash and use the identified existing console, without changing
 privileges or authentication:
 
-Run it only after the explicit diagnostic authorization above, in the existing
+Run it only under the explicit diagnostic authorization above, in the existing
 Core 7.6.9 console. The command does not grant any further Start authority.
 
 ```powershell

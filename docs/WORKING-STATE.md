@@ -76,6 +76,9 @@ Wrong-machine refusal, AST/compile, capped-stream and unresolved-stream deadline
 checks passed offline; one source-review IO-bound issue was fixed before staging.
 The diagnostic output directory is absent. See the proposed follow-up in the
 consolidated request; this includes no additional Start, recovery or trial.
+The user has now explicitly approved **the fixed console diagnostic only**.
+Do not ask for that same approval again. It remains unexecuted pending working
+console control; do not substitute remoting/session 0 or another worker.
 Console browser control still times out. Local preparation evidence:
 `C:/aiw/paired-console-diagnostic-preparation-4ea6c2a8-5237-41fc-b266-4dff331fdd52`.
 
