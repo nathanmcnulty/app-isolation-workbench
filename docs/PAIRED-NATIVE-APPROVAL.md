@@ -13,6 +13,101 @@ Ready/sequence 3 with no session transaction/result/output. Do not replay Start.
 The proposal and preparation history below describe the reviewed bindings, not
 a second dispatch authorization. Publication remains separate.
 
+## Proposed follow-up: one console-readiness diagnostic, no Start
+
+Follow-up ID: `AIW-PAIRED-CONSOLE-READINESS-D370EC8-20261030`.
+Status: **reviewed and staged only; not executed on VM107**. This is additional
+readiness observation in the existing console context, not permission to replay
+the consumed Start, approve/reprepare a run, or trial an application.
+Execution of this one console diagnostic still requires explicit user
+authorization and working console access. Staging/review and the consumed Start
+do not authorize it.
+
+The prior invocation was through trusted remoting. A subsequent observer was in
+Windows session 0 while the existing labadmin console was active in session 1;
+that difference is an unproven cause of the required list timeout. The smallest
+next diagnostic is the same pinned CLI's fixed `host assess` once from console
+session 1, retaining both caller/child session IDs and bounded readiness output.
+It invokes the existing read-only provider version/list and feature checks, with
+unchanged native 15-second operation deadlines; it has no Sandbox Start, connect,
+stop, approval, cancellation or recovery entry point.
+
+Exact target, runtime, execution package, native provider/catalog and identity
+pins remain those recorded below: VM107 UUID
+`e5cecc90-35c2-4831-bf9c-424be23f7d4e`, MAC `CC:34:21:B8:5A:31`,
+IPv4 `192.168.1.174`, Windows `10.0.26300.9711`, existing `AIW\labadmin` /
+`S-1-5-21-3556347314-2314855617-1438300668-1001`, console session **1**, native
+x64 Core **7.6.9**. The helper verifies exact Core executable/engine hashes,
+package inventory/source d370ec8, CLI/verifier hashes and registered Sandbox
+0.8.107.0/provider/catalog hashes before any query. It records the existing token's
+administrator membership and does not elevate, sign in, change tokens, grant
+access, register an endpoint, enable a feature/log or alter security/network/VM
+settings. Normal existing access and TLS pins remain required for staging/readback.
+
+| Follow-up pin | Exact value |
+|---|---|
+| Helper on VM107 | `C:\AIW-Paired-d370ec8-20261030\ReviewTools-2ec65ed\Inspect-VM107-console-readiness.ps1` |
+| Helper SHA-256 | `6fcf137e742dcb2896cf5775f706c94c98221e4d468541d5a69a51110f324af2` |
+| CLI invoked | `C:\AIW-Paired-d370ec8-20261030\Package\aiw.exe` |
+| CLI SHA-256 | `0dccb24c04f895a22e647af10b7ce0d72b70902c328e59b4b2329013cb5a111a` |
+| CLI arguments | exactly `host assess`; no operation, target or path overrides |
+| New diagnostic directory | `C:\AIW-Paired-d370ec8-20261030\Console-readiness-20261030` |
+| Raw local proposal/evidence | `C:/aiw/paired-console-diagnostic-preparation-4ea6c2a8-5237-41fc-b266-4dff331fdd52` |
+
+Staging used exclusive new-file creation and independently verified the helper's
+bytes on VM107; the diagnostic output directory remains absent. No helper code,
+provider query or run operation was executed there by staging. Original package,
+approved run, retained inputs and exports are not diagnostic write destinations.
+
+Expected effects are a fresh diagnostic directory and create-new `intent.json`,
+`process.json`, bounded `readiness.stdout.json` / `readiness.stderr.txt`, and
+`result.json`, or explicit `unsettled.json` / `stream-failure.json` instead. These
+are **private local engineering records**, not Results summaries. The only process
+launch requested is the pinned CLI and its existing read-only readiness probes.
+No canary/account/AppContainer profile, Sandbox environment, registry grant or
+run result is created; no retained input is repaired, deleted or rewritten.
+Normal OS/provider bookkeeping may occur. No general compatibility, isolation,
+current/global cleanup or native case acceptance follows from the observation.
+
+The wrapper retains at most 2,097,152 stdout and 65,536 stderr UTF-16 characters,
+capping during fixed-buffer reads. Its process wait and both asynchronous drains
+share a 120-second observer budget after process launch. This does not change
+native per-operation deadlines and is not a deadline for preflight hashing or
+local filesystem writes. On expiry it records process/stream state and PID,
+preserves evidence, and stops without killing/retrying or claiming cleanup.
+Oversized/error streams retain bounded prefixes and typed failure flags.
+
+Stop before query on wrong VM/account/session/runtime/OS/package/provider,
+unsupported module/context, drift or any destination collision. Stop after any
+timeout/unsupported/failure result; do not rerun, widen grants, extend deadlines,
+recover a foreign resource or start an assessment. A completed diagnostic merely
+supplies readiness evidence for further review. Preserve all records/partial
+prefixes; no diagnostic cleanup/deletion or additional Start is included.
+
+The exact future console command below is **not executed**. Before using it,
+confirm the helper hash and use the identified existing console, without changing
+privileges or authentication:
+
+Run it only after the explicit diagnostic authorization above, in the existing
+Core 7.6.9 console. The command does not grant any further Start authority.
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$consoleDiagnostic = 'C:\AIW-Paired-d370ec8-20261030\ReviewTools-2ec65ed\Inspect-VM107-console-readiness.ps1'
+if ((Get-FileHash -LiteralPath $consoleDiagnostic -Algorithm SHA256).Hash.ToLowerInvariant() -cne '6fcf137e742dcb2896cf5775f706c94c98221e4d468541d5a69a51110f324af2') { throw 'Diagnostic drift; stop' }
+& 'C:\Program Files\PowerShell\7\pwsh.exe' -NoProfile -File $consoleDiagnostic
+```
+
+Offline evidence: PowerShell AST parsed; helper compiled; a capped oversized stream
+and unresolved-stream deadline check passed; the authoritative controller VM203
+was rejected at the wrong-machine guard before any provider query/output. Whole
+VM107 diagnostic execution remains unperformed. Independent source review found
+one stream-bound/deadline issue in the first draft, fixed before staging; final
+review reported no remaining consequential issue. Existing Rust/Node suites were
+not rerun for this local helper. Browser console control still times out, including
+after its documented reset/retry; do not substitute another worker or silently
+run this through remoting/session 0.
+
 ## Console installation and prepared plan — before the approved attempt
 
 The user explicitly authorized VM107 console installation, followed by

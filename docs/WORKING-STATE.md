@@ -67,6 +67,18 @@ Native six-case collection, guest Tools custody, inner and outer cleanup, and
 current GUI execution remain unvalidated. Keep full Benchmark 2 and W4/W5 open;
 no general compatibility, effective isolation or production acceptance is claimed.
 
+A reviewed one-shot **readiness-only** console diagnostic is now staged, unexecuted,
+on VM107 at `ReviewTools-2ec65ed\Inspect-VM107-console-readiness.ps1` under the d370
+root. SHA-256 `6fcf137e742dcb2896cf5775f706c94c98221e4d468541d5a69a51110f324af2`.
+It accepts no operation/target/path overrides and calls only pinned `host assess`,
+requiring existing console session 1 and the original runtime/identity/byte pins.
+Wrong-machine refusal, AST/compile, capped-stream and unresolved-stream deadline
+checks passed offline; one source-review IO-bound issue was fixed before staging.
+The diagnostic output directory is absent. See the proposed follow-up in the
+consolidated request; this includes no additional Start, recovery or trial.
+Console browser control still times out. Local preparation evidence:
+`C:/aiw/paired-console-diagnostic-preparation-4ea6c2a8-5237-41fc-b266-4dff331fdd52`.
+
 No push, PR creation, publication, signing, release, merge, security weakening,
 new application trials or repeats of PR #103 are authorized. Preserve both old
 f99bbd4 and d370ec8 packages, all old receipts and unrelated work.
