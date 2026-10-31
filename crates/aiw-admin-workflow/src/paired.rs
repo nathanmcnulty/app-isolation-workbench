@@ -317,11 +317,11 @@ pub fn report(run: &PairedRun) -> Result<aiw_runner::PairedControlRunReport> {
 }
 
 #[cfg(windows)]
-pub fn assess_with_gate(
+fn prepare_review_context(
     evidence_parent: &Path,
     identity: &str,
-    gate: &dyn ApprovalGate,
-) -> Result<PairedWorkflowResult> {
+    progress: impl Fn(&str),
+) -> Result<PreparedReviewContext> {
     if identity.trim().is_empty() {
         bail!("Operator identity is required");
     }
@@ -354,7 +354,7 @@ pub fn assess_with_gate(
     file.write_all(serde_yaml::to_string(&project)?.as_bytes())?;
     file.sync_all()?;
     drop(file);
-    gate.progress("Preparing fixed controls and immutable plan; no provider is executed.");
+    progress("Preparing fixed controls and immutable plan; no provider is executed.");
     let prepared = aiw_runner::prepare_windows_sandbox_paired_controls(
         &evidence_root,
         &run_id,
@@ -392,6 +392,67 @@ pub fn assess_with_gate(
     };
     save_stage(&evidence_root, "paired-workflow", &run)?;
     let review = paired_review(&run, &prepared, identity)?;
+    Ok(PreparedReviewContext {
+        run,
+        review,
+        project,
+        _agent: agent,
+    })
+}
+
+#[cfg(windows)]
+struct PreparedReviewContext {
+    run: PairedRun,
+    review: ApprovalReview,
+    project: Project,
+    // Preserve the desktop's original package-agent custody through approval,
+    // Start and completion. Headless preparation drops it only on return.
+    _agent: aiw_windows_platform::HeldApplicationFile,
+}
+
+/// Prepare/import only. No gate callback, approval writer, lease or Start route.
+/// Uses this package's enrolled fixed agent; accepts no executable/policy inputs.
+pub fn prepare_for_review(evidence_parent: &Path, identity: &str) -> Result<serde_json::Value> {
+    #[cfg(windows)]
+    {
+        let context = prepare_review_context(evidence_parent, identity, |_| {})?;
+        let value = preparation_review_value(&context.run, &context.review);
+        save_stage(&context.run.evidence_root, "paired-review", &value)?;
+        Ok(value)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (evidence_parent, identity);
+        bail!("Fixed paired preparation requires Windows; no provider was invoked")
+    }
+}
+
+#[cfg(windows)]
+fn preparation_review_value(run: &PairedRun, review: &ApprovalReview) -> serde_json::Value {
+    serde_json::json!({
+        "schemaVersion":"aiw.dev/admin-paired-preparation/v0alpha1",
+        "status":"pendingApproval", "approvalRecorded":false,
+        "startRequested":false, "providerInvoked":false,
+        "measurements":"unmeasured; this is a plan review, not a result or approval",
+        "run":run, "recipe":review.recipe, "plan":review.plan,
+        "proposedApproval":review.proposed_approval,
+    })
+}
+
+#[cfg(windows)]
+pub fn assess_with_gate(
+    evidence_parent: &Path,
+    identity: &str,
+    gate: &dyn ApprovalGate,
+) -> Result<PairedWorkflowResult> {
+    let context =
+        prepare_review_context(evidence_parent, identity, |message| gate.progress(message))?;
+    let PreparedReviewContext {
+        run,
+        review,
+        project,
+        _agent,
+    } = context;
     let start_workspace = run.workspace.clone();
     let start_project = run.project_path.clone();
     let start_agent = run.agent_sha256.clone();

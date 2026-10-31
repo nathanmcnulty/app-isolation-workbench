@@ -409,3 +409,19 @@ fn coupled_owned_cancellation_service_interrupts_only_the_running_original() {
         );
     });
 }
+
+#[test]
+fn preparation_review_cannot_be_mistaken_for_committed_approval_or_measurements() {
+    let (f, owned, review) = prepare();
+    let before = f.retained_bytes();
+    let value = preparation_review_value(&owned, &review);
+    assert_eq!(value["status"], "pendingApproval");
+    assert_eq!(value["approvalRecorded"], false);
+    assert_eq!(value["startRequested"], false);
+    assert_eq!(value["providerInvoked"], false);
+    assert_eq!(value["run"]["planSha256"], owned.plan_sha256);
+    assert_eq!(value["proposedApproval"]["planHash"], owned.plan_sha256);
+    assert!(f.layout().read_approval().is_err());
+    assert!(f.calls().is_empty());
+    assert_eq!(f.retained_bytes(), before);
+}

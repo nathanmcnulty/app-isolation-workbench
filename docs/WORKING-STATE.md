@@ -47,14 +47,21 @@ Windows 26300.9711/x64, Core 7.6.9 and normal HTTPS5986 pins are retained in the
 request. Evidence directory:
 `C:/aiw/paired-target-preparation-38602e66-2c6f-4327-9662-63164f198333`.
 
-Preparation is blocked before its production API invocation: required Store
-Sandbox package absent for current/all users and native PF_VIRT_FIRMWARE_ENABLED
-false. Classic System32 Sandbox files are not a fallback. Evidence/Exports remain
-empty; no plan, approval, Start, Sandbox provider or control invocation. No VM
-configuration/feature/security changes, installs, restores or publication. Source
-review found no justified bypass/fix; environment changes require separate scope.
-No unchanged Rust/Node suites reran. Production does not auto-emit a selection
-manifest; the request derives one from a future fresh typed locator.
+The user subsequently authorized fixing blockers and continuing toward preparation,
+with no assessment approval/Start/publication. A stronger read-only query showed
+Windows Hyper-V already active (WHvGetCapability S_OK/4bytes/BOOL1, VBS running):
+the firmware-only gate was a false negative. A reviewed local source fix now uses
+that supported query as an independent prerequisite, keeping all provider trust
+and approval gates. No VM CPU/settings/security change was made. A closed
+prepare-only CLI now reuses the desktop preparation service, with no approval,
+Start, recovery or executable/policy inputs. Focused affected checks and Clippy
+passed; broad unchanged suites were reused. Updated package preparation is next.
+
+The required Sandbox Store package is still absent. Store source terms/region
+sharing were accepted only after explicit user consent; catalog lookup is in
+progress. Preserve old f99 staging and all old receipts. See consolidated request
+for diagnosis, exact facts and logs. Preparation/approval/Start remain unperformed
+on VM107 until provider trust and refreshed source pins are resolved.
 
 ## Open acceptance and preserved boundaries
 
@@ -67,9 +74,10 @@ is not available to the approved profile. No protected preparation exists.
 Keep live Benchmark 2 acceptance and remaining W4/W5 requirements open; no general
 compatibility/effective-isolation claim, release or production acceptance follows.
 
-Only the bounded VM107 prerequisite inspection/staging access was authorized
-and used; it is stopped. No live Sandbox/AppContainer/application/control trials,
-further setup/security/grant changes, installation, signing, push, publication,
+VM107 blocker remediation and non-executing preparation are authorized; the
+Store source-consent action was explicitly approved. Plan approval/Start and
+publication remain unapproved. No live Sandbox/AppContainer/application/control trials,
+unrelated setup, security weakening/grant expansion, signing, push, publication,
 PR creation, merge or release are authorized. Approval/Start were not granted.
 The guest agent and desktop were built offline, not run as assessments. Preserve completed records and unrelated
 work; never repeat PR #103's completed trials.

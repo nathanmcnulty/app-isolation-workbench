@@ -58,10 +58,9 @@ use windows::Win32::System::Pipes::CreatePipe;
 use windows::Win32::System::Threading::{
     CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW,
     DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess,
-    InitializeProcThreadAttributeList, IsProcessorFeaturePresent, LPPROC_THREAD_ATTRIBUTE_LIST,
-    PF_VIRT_FIRMWARE_ENABLED, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROCESS_INFORMATION, ResumeThread,
-    STARTF_USESTDHANDLES, STARTUPINFOEXW, TerminateProcess, UpdateProcThreadAttribute,
-    WaitForSingleObject,
+    InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
+    PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROCESS_INFORMATION, ResumeThread, STARTF_USESTDHANDLES,
+    STARTUPINFOEXW, TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
 };
 #[cfg(test)]
 use windows::Win32::System::Threading::{
@@ -782,11 +781,11 @@ pub(super) fn assess_windows_sandbox() -> WindowsSandboxReadiness {
     let mut result = empty_readiness();
     result.os_version = observe_windows_version().ok();
     result.os_build = result.os_version.as_ref().map(|os| u32::from(os.build));
-    result.virtualization = if virtualization_firmware_enabled() {
-        ReadinessState::Available
-    } else {
-        ReadinessState::Unknown
-    };
+    let virtualization = crate::virtualization::observe();
+    result.virtualization = virtualization.readiness();
+    if virtualization.uses_active_hypervisor() {
+        result.warnings.push("AIW_WSB_ACTIVE_WINDOWS_HYPERVISOR: firmware extensions are not reported, but the read-only Windows hypervisor capability query verified an active partition API. This is host readiness, not Sandbox execution or isolation evidence.".into());
+    }
     result.app_execution_alias = observed_alias();
 
     if result.os_build.is_none_or(|build| build < 26_100) {
@@ -803,7 +802,7 @@ pub(super) fn assess_windows_sandbox() -> WindowsSandboxReadiness {
     }
     if result.virtualization != ReadinessState::Available {
         result.blockers.push(
-            "AIW_WSB_VIRTUALIZATION_UNVERIFIED: firmware virtualization is not reported as enabled."
+            "AIW_WSB_VIRTUALIZATION_UNVERIFIED: neither firmware extensions nor an active Windows hypervisor capability were verified."
                 .to_owned(),
         );
     }
@@ -863,11 +862,7 @@ fn inspect_static_provider() -> Result<HeldStaticProvider, String> {
         schema_version: aiw_probe::WINDOWS_SANDBOX_STATIC_IDENTITY_SCHEMA.into(),
         os_version: observe_windows_version()?,
         process_architecture: std::env::consts::ARCH.into(),
-        virtualization: if virtualization_firmware_enabled() {
-            ReadinessState::Available
-        } else {
-            ReadinessState::Unknown
-        },
+        virtualization: crate::virtualization::observe().readiness(),
         provider: BinaryIdentity {
             canonical_path: final_path.to_string_lossy().into_owned(),
             sha256,
@@ -1976,10 +1971,6 @@ pub fn observe_windows_version() -> Result<aiw_probe::WindowsVersionObservation,
         &value.to_string(),
         std::env::consts::ARCH,
     )
-}
-
-fn virtualization_firmware_enabled() -> bool {
-    unsafe { IsProcessorFeaturePresent(PF_VIRT_FIRMWARE_ENABLED).as_bool() }
 }
 
 struct WinRtApartment;

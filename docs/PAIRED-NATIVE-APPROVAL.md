@@ -1,11 +1,59 @@
 # Reconciliation and bounded native approval request
 
 Request ID: `AIW-PAIRED-NATIVE-F99BBD4-20261030`. Prepared 2026-10-30.
-Status: **prerequisite inspection/staging approved and completed; preparation
-blocked at the prerequisite gate; production API not invoked**. No plan approval, Start,
-Sandbox launch or control trial was authorized or performed. This supersedes the
-previous native proposal. Publication is separate.
+Status: **prerequisite work completed; a host-readiness false negative is now
+corrected offline and reviewed; provider acquisition is in progress**. The old
+f99bbd4 package remains unchanged. A refreshed package is required before new
+preparation. No plan approval, Start or native control trial is authorized.
 
+
+## Blocker remediation — 2026-10-30 (America/Anchorage)
+
+The user authorized fixing the blockers and continuing, with the existing stop
+before plan approval/Start and publication retained. Stronger read-only target
+observations correct the initial firmware-only interpretation: VM107 returned
+S_OK from `WHvGetCapability(HypervisorPresent)`, exactly four bytes and BOOL1;
+Device Guard reports VBS running. The Windows hypervisor is already active.
+No Proxmox CPU change, guest feature toggle or security weakening is warranted.
+
+Microsoft documents the firmware flag's false-negative case under an active
+Hyper-V root OS ([explanation](https://devblogs.microsoft.com/oldnewthing/20201216-00/?p=104550/)).
+The supported [Windows hypervisor capability query](https://learn.microsoft.com/en-us/virtualization/api/hypervisor-platform/funcs/whvgetcapability)
+provides an independent prerequisite observation. Generic hypervisor/vendor bits
+are insufficient; [QEMU can expose Hyper-V identification](https://www.qemu.org/docs/master/system/i386/hyperv.html).
+
+The local source correction reuses one private native observation for static and
+full readiness: the existing firmware flag OR an exact successful Windows API
+query. It loads only the fixed DLL under the OS-supplied absolute System32 path,
+restricts dependency search to System32, holds/frees the module safely, initializes
+outputs and rejects missing/error/short/invalid outputs. It creates no partition
+and invokes no Sandbox provider. Every existing Store/catalog/OS/hash/session/
+approval gate remains. Schema and control verdicts are unchanged.
+
+A closed `aiw admin prepare-paired --evidence <existing-parent> --identity <operator>`
+command now calls the same enrolled-agent/static preparation/import service as
+the desktop. It writes only a pending review/proposed approval and has no approval,
+Start, recovery, executable or policy-override input. Desktop agent custody remains
+held through its original gates. This provides non-executing preparation through
+the existing trusted remoting route without interactive sign-in changes.
+
+Focused checks passed: two virtualization tests (including seven malformed/error
+cases), five preparation/parser/integration checks, two affected static-pipeline
+regressions, affected all-target Clippy with warnings denied, desktop all-target
+Clippy and formatting. Independent implementation review found no consequential
+issue in either the query or preparation-only entry point. Logs under `C:/aiw`:
+`paired-hypervisor-fix-tests.log`, `paired-preparation-command-tests.log`,
+`paired-hypervisor-static-regression.log`, `paired-hypervisor-preparation-clippy.log`,
+`paired-hypervisor-desktop-clippy.log`. Unchanged broad suites were not rerun.
+
+Current diagnosis evidence is at the directory recorded in
+`C:/aiw/paired-current-remediation-root.txt`. Store catalog access initially stopped
+at its required transaction-terms and region-sharing consent. The user explicitly
+accepted those source terms/region sharing; the approved catalog query is now in
+progress. No terms were silently accepted before that reply. No new provider,
+Sandbox instance or control has yet been installed/launched by this remediation.
+The historical prerequisite observations below remain retained; the firmware flag
+alone no longer justifies labeling this active Hyper-V target unavailable.
 
 ## Approved prerequisite result — 2026-10-30 (America/Anchorage)
 
@@ -61,8 +109,10 @@ no classic System32 fallback. `require_static_identity` also requires firmware
 virtualization `Available`. `prepare_paired_with_inspector` checks both before
 creating the protected workspace. The admin wrapper would create an evidence
 root/project first if invoked; it was not invoked here and Evidence remains empty.
-Independent source review confirmed this interpretation and found no justified
-source fix or bypass. Enabling/installing provider or virtualization prerequisites,
+The initial source review confirmed the conservative f99 refusal from those
+limited observations. The later stronger capability observation and reviewed
+readiness correction above supersede the firmware-only interpretation; no bypass
+of provider trust or approval is permitted. Enabling/installing provider or virtualization prerequisites,
 launching classic Sandbox to bootstrap Store registration, or changing VM settings
 is outside this approval. The mapped-Tools native question also remains untested.
 

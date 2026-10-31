@@ -3,6 +3,9 @@
 use aiw_probe::WindowsSandboxReadiness;
 
 #[cfg(windows)]
+mod virtualization;
+
+#[cfg(windows)]
 mod guest_paired_controls;
 #[cfg(windows)]
 pub use guest_paired_controls::{PairedGuestOutcome, execute_fixed_paired_controls};

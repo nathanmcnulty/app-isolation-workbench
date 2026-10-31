@@ -111,6 +111,13 @@ struct AdminArgs {
 
 #[derive(Debug, Subcommand)]
 enum AdminCommand {
+    /// Prepare the packaged fixed paired controls for review only. Never approves or starts.
+    PreparePaired {
+        #[arg(long)]
+        evidence: PathBuf,
+        #[arg(long)]
+        identity: String,
+    },
     /// Assess supported application bytes through a packaged fixed workflow.
     Assess {
         /// Select one packaged fixed application workflow.
@@ -1344,6 +1351,14 @@ fn main() -> ExitCode {
 fn run(command: Command) -> Result<()> {
     match command {
         Command::Admin(args) => match args.command {
+            AdminCommand::PreparePaired { evidence, identity } => {
+                let review = admin_workflow::paired::prepare_for_review(&evidence, &identity)
+                    .map_err(admin_workflow::public_error)?;
+                write_json(&review).map_err(|error| anyhow::anyhow!(
+                    "Paired preparation exists at {}; no approval or Start was requested. Preserve paired-review.json; output failed: {error}",
+                    review["run"]["evidenceRoot"].as_str().unwrap_or("the selected evidence parent")
+                ))
+            }
             AdminCommand::ExportDocument {
                 workspace,
                 run_id,
@@ -3844,6 +3859,44 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&export).unwrap()["outputSha256"],
             export.output_sha256
+        );
+    }
+
+    #[test]
+    fn paired_preparation_command_has_no_approval_start_or_executable_inputs() {
+        let base = [
+            "aiw",
+            "admin",
+            "prepare-paired",
+            "--evidence",
+            "fresh-parent",
+            "--identity",
+            "operator",
+        ];
+        assert!(Cli::try_parse_from(base).is_ok());
+        for forbidden in [
+            "--start",
+            "--approve",
+            "--guest-agent",
+            "--project",
+            "--installer",
+            "--policy",
+            "--recover",
+        ] {
+            let mut args = base.to_vec();
+            args.push(forbidden);
+            args.push("override");
+            assert!(Cli::try_parse_from(args).is_err(), "accepted {forbidden}");
+        }
+        assert!(
+            Cli::try_parse_from([
+                "aiw",
+                "admin",
+                "prepare-paired",
+                "--evidence",
+                "fresh-parent"
+            ])
+            .is_err()
         );
     }
 
