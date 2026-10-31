@@ -55,11 +55,22 @@ that supported query as an independent prerequisite, keeping all provider trust
 and approval gates. No VM CPU/settings/security change was made. A closed
 prepare-only CLI now reuses the desktop preparation service, with no approval,
 Start, recovery or executable/policy inputs. Focused affected checks and Clippy
-passed; broad unchanged suites were reused. Updated package preparation is next.
+passed; broad unchanged suites were reused. Source fix commit is
+`d370ec8cd5bcaa6915ac24801789070dd0040e3b`. Refreshed offline desktop/CLI package
+assembly and exact inventory passed; pins are in the consolidated request.
+The new package is staged and all 14 payloads verified on VM107 at
+`C:\AIW-Paired-d370ec8-20261030\Package`. Final trusted inspection confirms old
+and new Evidence/Exports empty. No preparation, approval or Start was performed.
 
 The required Sandbox Store package is still absent. Store source terms/region
-sharing were accepted only after explicit user consent; catalog lookup is in
-progress. Preserve old f99 staging and all old receipts. See consolidated request
+sharing and then the separate package agreements were accepted only after explicit
+user consents. The exact official Microsoft Store product `9NSMXC3NB0HN` resolved,
+but approved installation failed with **0x80070520**, no usable Store logon session
+in WinRM. Post-attempt native Appx inspection confirms zero current/all-user
+registrations, zero Sandbox/control processes and no logged-on interactive user.
+A logged-on VM107 Store installation is the remaining prerequisite; no sign-in,
+classic Sandbox bootstrap or security/VM workaround was attempted.
+Preserve old f99 staging and all old receipts. See consolidated request
 for diagnosis, exact facts and logs. Preparation/approval/Start remain unperformed
 on VM107 until provider trust and refreshed source pins are resolved.
 
@@ -69,8 +80,9 @@ Native guest/provider/control behavior and held-file inspection through Sandbox
 Tools mappings remain untrialed. Fail closed rather than weakening intake.
 The new unsigned desktop package is now locally enrolled and inventory-verified.
 VM107 current OS/runtime/endpoint pins are observed. Sandbox provider/catalog
-commitments are unavailable because the required package is absent; virtualization
-is not available to the approved profile. No protected preparation exists.
+commitments are unavailable because the required package is absent; the active
+Windows hypervisor is observed and the firmware-only false negative is fixed.
+No protected preparation exists.
 Keep live Benchmark 2 acceptance and remaining W4/W5 requirements open; no general
 compatibility/effective-isolation claim, release or production acceptance follows.
 
