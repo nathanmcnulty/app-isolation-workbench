@@ -85,23 +85,26 @@ Both the fixed diagnostic permission and original single Start are consumed.
 No retry, additional Start, approval, recovery or trial occurred. Further native
 work requires a separate pinned request; preserve the existing run.
 
-The user approved fresh preparation `-01`. Static pins and console session 1 /
-non-admin identity passed. One CLI preparation exited 1 before run creation:
-`AIW_ADMIN_EVIDENCE_NOT_READY`. A console key error (`+` received as `=`) changed
-the folder variable and created empty `C:\Evidence` instead of the intended
-Evidence child. The correct request root was also created and remains empty.
-Both directories are preserved; no retry/provider/approval/Start occurred. The
-original journal remains unchanged, no original transaction/result exists, and
-no preparation process remains. This was an operator/console-driver error, not
-a production source defect. Evidence:
-`C:/aiw/paired-console-fresh-preparation-8ce6368b-4080-46e8-8ac8-6a186aa66d1a`.
-The `-01` permission is consumed. The
-[corrected preparation-only request](PAIRED-NATIVE-APPROVAL.md#pending-corrected-request-literal-path-preparation-only)
-uses a literal child path and independent verification before the CLI call; it
-is not authorized/executed and does not permit cleanup of `C:\Evidence`.
-Fresh typed plan/run/receipt bindings still precede any separate Start request.
-Local preparation/completion evidence:
-`C:/aiw/paired-console-diagnostic-preparation-4ea6c2a8-5237-41fc-b266-4dff331fdd52`.
+The approved fresh preparation `-01` refused before run creation after an operator
+console-key error created empty `C:\Evidence`; that directory remains preserved.
+The separately approved corrected preparation `-02` then succeeded once, exit 0,
+using a literal child path independently verified before the call. Both preparation
+permissions are consumed. The old run is unchanged; no further approval or Start.
+
+New run **`paired-1793435382044001000`**, plan
+`afaf470e23d7b22313450c0df530ef7a757c4aac68942109abcedc14d32b8a2e`,
+is pendingApproval / sequence 1, provider acquired/mutated false, no approval,
+transaction/result/cancellation or guest output. Workspace identity
+`77b3277c84307c6639051756a437bfb8bf3d57a09ff2bb13943fce54ebdb0e70`.
+All three role hashes and nine document readbacks verified. No active aiw process.
+Audit: `C:/aiw/paired-console-corrected-preparation-e7b6cb08-fa17-471a-a1f7-c32103477d4c`.
+See the [pending execution request](PAIRED-NATIVE-APPROVAL.md#pending-execution-request-one-prepared-console-fixed-pair)
+for every target/plan/provider/fixture pin, six-case expectations, effects and
+bounds. Its fixed no-argument execution helper remains local only, unstaged and
+unexecuted; SHA-256 `93edeac698313aa7ebd13d6ab84d5b2c0744d1b85df1544d1b3ecd246bf7ed16`.
+Offline parse/no-argument/wrong-machine checks passed; bounded C# IO is unchanged
+from the reviewed diagnostic. Independent helper review has no consequential
+finding. This new request is not approved and grants no execution authority.
 
 No push, PR creation, publication, signing, release, merge, security weakening,
 new application trials or repeats of PR #103 are authorized. Preserve both old

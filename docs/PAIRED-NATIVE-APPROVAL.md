@@ -10,13 +10,209 @@ catalog, file-ID, workspace and fresh plan pins are recorded below.
 The user approved this exact assessment for the PR-readiness milestone. Approval
 was committed and Start issued once; no control case ran. The retained run is
 Ready/sequence 3 with no session transaction/result/output. Do not replay Start.
-The proposal and preparation history below describe the reviewed bindings, not
-a second dispatch authorization. Publication remains separate.
+The old proposal and preparation history below do not authorize another dispatch.
+The new pending request immediately below is the only current execution proposal.
+Publication remains separate.
 
-## Pending corrected request: literal-path preparation only
+## Pending execution request: one prepared console fixed pair
+
+Request ID: `AIW-PAIRED-CONSOLE-EXEC-D370EC8-20261031-01`.
+Status: **not approved, not staged and not executed**. The separately approved
+corrected preparation succeeded once with exit **0** in VM107 console session 1;
+its permission stops before approval/Start and is consumed. This request seeks
+one exact approval and one Start for the **new** prepared run below. It does not
+replay `paired-1793425345541054400`, repeat PR #103, install software or trial an
+application. Do not execute the historical commands later in this document.
+
+### Exact current target and immutable bindings
+
+| Binding | Exact value |
+|---|---|
+| Execution source / reporting source | `d370ec8cd5bcaa6915ac24801789070dd0040e3b` / `2ec65edfe749b73a13ddf0c923db973de1292fc8` |
+| Worker | VM107 (`aiw-worker`, `pve-r630`), UUID `e5cecc90-35c2-4831-bf9c-424be23f7d4e`; MAC `CC:34:21:B8:5A:31`, IP `192.168.1.174` |
+| Identity / execution context | Existing `AIW\labadmin`, SID `S-1-5-21-3556347314-2314855617-1438300668-1001`; interactive session **1**, **non-admin token**, no elevation or identity change |
+| OS / runtime | Windows `10.0.26300.9711` x64; Core **7.6.9**, `C:\Program Files\PowerShell\7\pwsh.exe`; exe SHA-256 `2a6769a3330dc1084d0154bfde7d164ab750ca7f700f313f9d417c1be78b2233`, engine SHA-256 `e767f5c26347b254dd06fa0b65e18424cc4eb93fc3102c5a8fdd9dd88355db97` |
+| Package / receipt | `C:\AIW-Paired-d370ec8-20261030\Package`, exact 14-payload inventory; receipt content SHA-256 `dc2e9499cc82e1258b7fe81da51abe2c2a9d83b83581d8e015f2146989f56390` |
+| CLI / verifier SHA-256 | `0dccb24c04f895a22e647af10b7ce0d72b70902c328e59b4b2329013cb5a111a` / `8398e34b15d2876cc7aa30ca45e59c290468e77afe318ba374b8f3ceab85bcfe` |
+| Request root | `C:\AIW-Paired-d370ec8-20261030\Console-paired-request-20261031-01` |
+| New run ID | `paired-1793435382044001000` |
+| Evidence root | request root + `\Evidence\paired-1793435382044001000` |
+| Workspace / CLI `--root` | evidence root + `\paired-1793435382044001000` |
+| Project / locator / pending review | evidence root + `\paired-project.yaml`, `\paired-workflow.json`, `\paired-review.json` |
+| Canonical plan hash | `afaf470e23d7b22313450c0df530ef7a757c4aac68942109abcedc14d32b8a2e` |
+| Project revision / profile hash | `c1b4c4e9323d7b25ebc7397aab9f7194eeb9bc0d30c874f08fd545107bef4e66` / `8eab0eaac3e8fe3d1aa400996a643b207298f5b22d50f2d72f356527e508a6cb` |
+| Workspace identity / security policy hash | `77b3277c84307c6639051756a437bfb8bf3d57a09ff2bb13943fce54ebdb0e70` / `5b304775afdaed1a7acbbbd80658f36e7b60b9896cae2ae626691aae59a8f878` |
+| Canonical preparation commitment / WSB plan commitment in import | `6ba13d0810424d9ff9afc2e1ed92325d68bb9e0aba6ef6481aa996c509ddb951` / `ca079fea3452cbd8ce654c09bb913f2ac6430f41e18baf5dfb8eb6ae3aceb9ab` |
+| Pending review / locator file SHA-256 | `94456eca5f6637f05a00b6b171ea6b8987005b325d8c4da829d6b9deb21ad4b2` / `a0e06d9cd083e14bef53a1cbc24a0388ec2c172efde6acd5bca3791d413450ed` |
+| Raw plan / preparation / import file SHA-256 | `a318139afcee9757373c1a7aaeffb36e30a8ec4c4a9356e087ab29fe399ad268` / `d78615088821212b3985bd323e375c8062f37193fe0ad6ab697f1f98165df7b6` / `c3e4370a299043d13539a06e74a32f97ee47ffbb056596ba2a4ae1608ce08db1` |
+| Pending journal | sequence **1**, SHA-256 `c0ac47756afdc70ef7d4595d8d0cbb2b5eb1f28355c8414bee95c32f1102003e` |
+| All three fixed role binaries | SHA-256 `b5cd415894b5d142215ae9b71f8d619d43404eb2511eb9304ad63f53db097512`, **5,968,896 bytes** each; no substitute executable |
+| Fixed control source | `aiw.dev/paired-file-registry-child/v0alpha1`, SHA-256 `95201a1b89182f699358f2641e8ec47de7a45e2ed56c7fdc1b55418227803f49` |
+| Native provider | `MicrosoftWindows.WindowsSandbox_0.8.107.0_x64__cw5n1h2txyewy`, Store/OK; `wsb.exe` SHA-256 `247e092b5c5bd37820f225a7dd3ddf10ae37a67e2751a19c24b802c84769c441`, 156160 bytes |
+| Catalog / provider IDs | catalog SHA-256 `a5cd4096113be4c7240049327b55d7018c06ee009809999a42cd7ecaca035905`; volume `322b0dfe`, provider file ID `000300000002a99d`, catalog file ID `000500000002531e` |
+| Required runtime protocol / schema | `windowsSandboxCli/v0.8.107.0` / `WindowsSandboxEnvironments/Id`; rechecked by the actual approved Start |
+
+The `\\?\` prefix in actual evidence-root/project fields is the retained Windows
+canonical spelling; the literal paths above name the same objects. Canonical
+commitments are distinct from raw JSON file hashes. No pending proposal timestamp
+is consent: actual `approvedAt` must be recorded only after this new authorization.
+
+### Exact procedure requested, with no execution yet
+
+Only after explicit approval of this request:
+
+1. Reverify the exact target/context, package inventory, static provider/catalog
+   hashes and IDs, nine pinned retained documents, three role hashes, pending
+   sequence 1, absent approval/cancellation/result/transaction and empty output.
+   Refuse drift/collision or unavailable console. Do not reprepare or repeat the
+   readiness diagnostic. Start itself must perform fresh required runtime checks.
+2. Stage the reviewed fixed helper as a **new** file at request root +
+   `\Run-PreparedFixedPair-Once.ps1`, then independently hash it. Local reviewed
+   source: `C:/aiw/paired-console-corrected-preparation-e7b6cb08-fa17-471a-a1f7-c32103477d4c/Run-PreparedFixedPair-Once.ps1`.
+   Exact SHA-256 **`93edeac698313aa7ebd13d6ab84d5b2c0744d1b85df1544d1b3ecd246bf7ed16`**,
+   **18,339 bytes**. No arguments, target/path/identity or timeout overrides.
+   Invoke it once through the pinned Core executable with `-NoProfile -File`
+   from existing console session 1, after checking that exact hash. Never run it
+   through remoting/session 0. Remoting is only for static staging/readback.
+3. The helper exclusively creates request root + `\Execution-20261031-01`, records
+   intent/actual process/session IDs and bounded streams, verifies the native
+   pending status, and creates `Authorized-approval.json` there from the exact
+   retained proposal with the actual recording time. The approval tuple is schema
+   `aiw.dev/approval-record/v0alpha1`, the new run/plan above, `AIW\labadmin`, and
+   exactly the retained plan's two trust deltas: fixed ordinary-versus-classic
+   AppContainer controls with zero capabilities/fixed grants; read-only Tools and
+   writable Output treated as untrusted. It calls production `run approve` once,
+   verifies Ready/no session, then production `run start` **once**, using the
+   exact workspace/project/agent pins and `--timeout-seconds 300`.
+4. Observe that same child and its original durable run. No retry, fresh dispatch,
+   altered deadline/grant, VM restore, security change or foreign session action.
+   Preserve errors/partial output. A settled Start, including failure, is a
+   recorded outcome; exit 0 alone is not six-case acceptance.
+
+This exercises the production CLI/shared runner/native provider/guest collector
+path. It does **not** prove desktop Controller/Tauri approval/Start interaction;
+that path's completed fake-provider and labeled replay evidence remains separate.
+
+### Fixed controls, effects and acceptance scope
+
+Exactly one fresh outer Windows Sandbox: networking, vGPU, audio/video input,
+printer and clipboard redirection disabled; Protected Client enabled; 2048 MiB.
+Only this run's protected Tools maps read-only to `C:\AIW\Tools`, and its Output
+maps writable to `C:\AIW\Output`. No installer or additional executable selection.
+
+The fixed elevated WDAG agent creates fresh ordinary `AiwStandardUser` and its
+profile, the fixed canary resources and measured launcher. The ordinary baseline
+uses that user's non-elevated medium token. The candidate uses the same user,
+fresh `AIW.Control.Paired.v0alpha1`, low integrity, AppContainer true and **zero
+capabilities**. Required child tokens must retain the exact user/package bindings.
+
+Six observations: ordinary file read **29 matching bytes**, ordinary 64-bit
+registry read **29 matching REG_BINARY bytes**, ordinary child success/medium
+token; candidate file and registry **native access denied code 5** at allowed
+read stages; candidate child success/low AppContainer token with the same package
+SID and zero capabilities. Failed, not reached and unmeasured remain distinct.
+Missing paths (2/3), timeouts, generic failure or absent evidence are not denial.
+
+File `C:\AIW\Control\SharedCanary\canary.txt`: SHA-256
+`6f0427a3e5b44f60867720acaf9f18004f8e1b4bc773bc2b07eaa25cbd692f48`.
+HKLM 64-bit `SOFTWARE\AIWControlCanary`, `Canary`: SHA-256
+`6d602d862214f8c9e36008aa2d5a94f53432b5d213d5e94ec52345720280bf42`.
+Only SYSTEM/Administrators control and ordinary-user read ACEs protect canaries;
+no package ACE on the canary file/key. The declared candidate policy adds only
+fixture traversal/read/execute and low-integrity child-output package grants,
+as detailed in the retained policy section below. Both variants share fixed
+resource bytes/DACLs and fixture bytes; these must remain unchanged.
+
+Guest effects include the fresh account/profile/hive, fixed `C:\AIW\Control`
+directories, role copies, canary file/key, AppContainer profile, bounded output
+and child processes/jobs. The kernel verifies inner jobs/profile cleanup and
+stops/verifies absence of **only the exact journal-bound outer session**.
+Canary/account/control-directory residue is destroyed with that Sandbox, not
+individually certified removed. This says nothing about historical or global
+cleanup. Host effects are this run's journal/approval/receipts/output, existing
+provider lease/mutex bookkeeping and normal ephemeral Sandbox state, plus the
+new helper/execution/export files under the request root. Existing packages,
+old run, diagnostics and **`C:\Evidence` remain unchanged**.
+
+Accept this fixed profile only with verified native-origin complete driver and
+all six cases, exact token/fixture/resource bindings, verified inner and outer
+cleanup and comparison `eligible=true`, reason `fixedControlsObserved`. A broken
+baseline/driver is inconclusive. Fail-closed Tools custody may refuse before any
+case; do not relax that guard. No general compatibility, effective host isolation
+or production acceptance claim. Full Benchmark 2 still needs its declared real
+application candidate; W4/W5 remain open. This request authorizes no application
+trial or repetition of PR #103.
+
+### Limits, stopping and recovery boundary
+
+Native bounds remain unchanged: each fixture 15s; nested child 10s plus 2s
+termination wait; launcher 120s; outer guest-launcher cleanup 5s; provider reads
+15s and mutations 120s; receipt wait 300s. **300s is not an end-to-end limit.**
+The helper uses the previously reviewed capped C# drains: stdout at most
+2,097,152 and stderr 65,536 UTF-16 characters. Each status/approval/cancellation
+observer has a shared 15s process/drain budget. Start observation has a 20-minute
+shared budget; at 15 minutes without settlement, request the exact owned durable
+cancellation once, then keep observing the original Start for the remaining
+budget. No kill, fresh Start, generic provider stop or automatic recovery.
+These are observer bounds, not an extension of native operation deadlines or a
+deadline for preflight hashing/local record writes. On stream failure/overflow
+or expiry, record the original PID/state and preserve evidence. Continue only
+read-only observation of already-recorded exact processes; do not restart them.
+
+Stop before dispatch on wrong VM/token/session/runtime, drift, occupied or
+unsupported provider, existing outputs/authority, collision or unknown approval.
+Guest Tools custody is checked inside the dispatched worker, before guest
+account/resource setup and cases; an unsupported mapping must fail closed there
+and follow normal exact owned cleanup. Host preflight does not establish those
+guest mapping semantics. Any unsettled/unknown cleanup stops further work.
+**No explicit recovery call is authorized by this request.** If automatic owned
+cleanup cannot be verified, preserve the exact journal/transaction/session and
+prepare a separate bounded recovery request from actual recorded identities;
+never recover/replay the historical run or adopt/stop foreign resources. No VM
+restore/power-off, cleanup deletion or security/permission expansion is allowed.
+
+After settlement, the actual Results backend may load only this explicit run,
+verify functions/gaps/cleanup and export a minimal allowlisted JSON/Markdown pair
+to new request-root `\Exports\summary.json` and `\Exports\summary.md`, with an
+exclusive explicit `\Exports\selection.json`. This export parent is outside the
+retained evidence tree. Use the already pinned read-only backend example
+`ReviewTools-2ec65ed\export-retained-results.exe` (SHA-256
+`c5523a8cd81b99145f3b30fd216dc92f384adb83ed5da1b1e7868f558cbef113`);
+no execution/provider route, raw artifacts, credentials, account IDs or absolute
+private paths in summaries, no overwrite or retained-input modification. Native
+GUI dialogs/focus validation is not included in this smallest control request.
+Publication, push, PR creation, merge, signing and release remain separate.
+
+### Completed corrected preparation evidence
+
+The user approved corrected preparation `-02`. At `2026-10-31T08:28:45Z`, trusted
+independent readback verified the exact empty ordinary Evidence child before the
+CLI call, unchanged root identity and untouched `C:\Evidence`. The single console
+preparation then completed with exit **0**; actual receipts record creation at
+`08:29:42Z`, import at `08:29:48Z`, pending review at `08:29:51Z`. Status is
+`pendingApproval`, sequence **1**, provider acquired/mutated false, no approval,
+cancellation, transaction, result or guest output. Postcheck at `08:32:19Z`
+rehashed all three roles, found no active `aiw`, unchanged old journal and untouched
+`C:\Evidence`. Nine bounded documents were independently hash-verified on readback.
+An observer first rejected the verbatim path prefix; normalization corrected that
+read-only observer, with no preparation retry or retained modification.
+
+Local raw engineering evidence:
+`C:/aiw/paired-console-corrected-preparation-e7b6cb08-fa17-471a-a1f7-c32103477d4c`:
+`user-authorization.json`, `static-preflight.json`,
+`independent-evidence-child-check.json`, `prepared-state.json`,
+`post-preparation-verification.json`, `preparation-completed-console.png` and the
+nine document copies. The execution helper passed offline parse/no-argument and
+wrong-machine refusal checks before any provider/output; its capped C# observer
+is unchanged from the reviewed diagnostic. It remains **local only, unstaged and
+unexecuted**. Unchanged Rust/Node suites are reused, not rerun or claimed anew.
+
+## Completed corrected request: literal-path preparation only
 
 Request ID: `AIW-PAIRED-CONSOLE-PREP-D370EC8-20261031-02`.
-Status: **not authorized or executed**. The approved `-01` preparation call below
+Status: **explicitly approved; completed once, exit 0, before approval/Start**.
+The user replied **"Approve corrected preparation only"**. The permission is
+consumed. The approved `-01` preparation call below
 was issued once and refused before run creation. Its permission is consumed;
 do not repeat that command under its old permission.
 

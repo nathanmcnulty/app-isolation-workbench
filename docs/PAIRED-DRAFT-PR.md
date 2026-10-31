@@ -45,6 +45,9 @@ native execution needs separate authority; publication remains separate.
 
 A later separately approved fresh preparation refused before creating a run
 because an operator console-key error created the wrong empty evidence folder.
-No provider command or additional Start followed. Both empty directories are
-preserved, the historical run is unchanged, and the corrected literal-path
-preparation procedure remains unexecuted pending separate approval.
+That folder remains untouched. A separately approved corrected preparation then
+succeeded once in console session 1, producing the exact new pending plan without
+provider invocation, approval or Start. Its target/receipt/plan/fixture bindings
+and reviewed fixed execution helper are in the consolidated approval request;
+execution remains pending a separate explicit authorization. The historical run
+is unchanged. Unchanged test suites were reused, and publication remains separate.
