@@ -60,3 +60,11 @@ diagnostics while preserving v1 evidence compatibility and the summary allowlist
 No isolation guard, success criterion or measurement was relaxed. Routine fixed-
 control follow-up testing is authorized; every new source/agent/plan remains
 pinned, and publication remains separate.
+
+A fresh a033 package/plan exercised the v2 native failure path: the retained
+diagnostic identifies a guest-versus-approved Windows-version mismatch before
+control setup. Exact outer cleanup was verified; all six cases remain unmeasured.
+The actual reader exported deterministic summaries with all29 retained files
+unchanged, and also reproduced the older v1 native summaries byte-for-byte.
+The next diagnostic-only change retains both exact version tuples, preserving
+the rejection gate. No guest version is guessed or approved by that diagnostic.

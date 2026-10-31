@@ -54,10 +54,26 @@ workspace and GUI all-target Clippy and formatting passed. Logs:
 Unchanged broad evidence remains scoped to its recorded source: workspace678,
 desktop20, Node28 plus earlier lint/fixtures. Do not rerun unchanged suites.
 
-Next: finish governance/commit, build and verify a fresh static-agent/package from
-that clean source, prepare a fresh pinned fixed-control plan, and continue native
-testing under standing authority. Preserve all old packages/runs; never substitute
-new binaries in retained evidence. See [workflow diagnostics](paired-product-workflow.md#bounded-private-driver-diagnostics-after-the-native-unmeasured-driver-failure)
+Fresh a033 source/static agent/package were built offline and verified exact14
+on VM107. One fresh preparation/approval/Start produced
+`paired-1793482773445455100`, plan
+`6f4a37df2ad83f4bdf7d41257439a0b06cdd5326ee2053aa00bca5a75589fed4`.
+Native PID4400/session1 exited1 after69247ms with a receipt-bound v2 diagnostic:
+`paired guest environment differs from approved profile`. This locates this
+run's failing Windows equality gate before role custody/account/resources/cases;
+actual guest version values were not retained. All six remain unmeasured. Outer
+cleanup verified / journal6 / terminalfailed; no cancellation or recovery.
+Actual a033 Results exports deterministic, 29 retained files unchanged, private
+markers absent. New reader also reproduced old v1 summaries byte-for-byte.
+Audit: `C:/aiw/paired-private-diagnostic-native-4dab54a5-6ecd-4c70-ad9d-cecab615492b`.
+
+Next: reviewed diagnostic-only patch retains exact expected/observed Windows
+tuples while preserving equality. Focused equality/component-drift test1 passed;
+platform all-target Clippy, formatting and governance passed (test module moved
+after production items to fix the initial Clippy finding). Fresh agent/package/
+plan and native diagnostic follow under standing authority. Never guess a
+guest version, relax the gate or substitute binaries in retained evidence.
+See [workflow diagnostics](paired-product-workflow.md#bounded-private-driver-diagnostics-after-the-native-unmeasured-driver-failure)
 and [draft PR](PAIRED-DRAFT-PR.md). Future errors must be observed, not guessed.
 
 VM107 only: UUID `e5cecc90-35c2-4831-bf9c-424be23f7d4e`, MAC

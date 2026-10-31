@@ -15,6 +15,56 @@ The approved execution record below and the latest standing test authority
 supersede older pending-proposal wording.
 Publication remains separate.
 
+## Standing-authority diagnostic follow-up: a033df9
+
+Under the continuing test authority quoted below, fresh source
+`a033df92019e673d89420200dc1a338eb86f9965` was built offline, staged under
+`C:\AIW-Paired-a033df9-20261031`, and verified on the same VM107 identity,
+provider, runtime and non-admin session1 pins. No existing run was replayed or
+modified. Exact package inventory: **14**. Receipt content SHA-256
+`3ba341ace920093b4d0b8623431e1e1f0e37ba764726ff5ff08c4623d5da82f3`;
+CLI `611cb7a232fa7dc47291b51a9d83263349f679fa20af555a40be6a34ff7a2db3`;
+all three fixed role executables `0e805e9198df58cf81d5bfe3286409d5d4eacb76bbb07841101c0897862fc1a9`,
+**5,982,208 bytes** each. Fixed source commitment
+`69e6940c068e1864c714bd1eb06531a62dc84539f67c4d78404d26cc4521cf76`.
+
+One preparation generated run `paired-1793482773445455100`, canonical plan
+`6f4a37df2ad83f4bdf7d41257439a0b06cdd5326ee2053aa00bca5a75589fed4`,
+profile `e338f9be45f7cddfd18eab1b8f4f7b8e42ddf2e263cd4d7514d84a3a80adfbfb`.
+Nine exact generated documents were read back and pinned before approval. The
+fresh-only helper SHA-256
+`e4cbfdc97017c369782406f63ba7720cbc8c787a4f798e45aa92dbc96036c58b`
+passed independent review and nine focused offline checks; Ready uses the
+actual approval variant and JSON dates remain strings. No suite rerun was used
+to replace the existing completed source evidence.
+
+Actual approval PID4264 exited0; Start PID4400/session1 was issued **once** at
+`2026-10-31T21:41:54Z` and exited1 after **69,247ms**. The guest published the
+receipt-bound v2 diagnostic **"paired guest environment differs from approved
+profile"**, with no retained case measurements. This source returns that error
+at its exact Windows-version equality gate, before fixed role custody, account
+establishment or control-resource setup. This identifies this run's failing
+gate; it does not reconstruct the older v1 run's lost error. Exact expected and
+observed guest-version values were not retained. All six outcomes remain
+**unmeasured**. No compatibility, isolation or Benchmark2 acceptance follows.
+
+Outer session `e04b9d18-c9ae-e5f0-a957-03a59c9d8860` reached
+`cleanupVerified`; terminal core failed / journal6 / sessionclean. No owned
+cancellation or recovery occurred. Actual a033 ResultsStore/export read the
+explicit run twice: deterministic summaries, **29 retained files byte unchanged**,
+no private identity/path markers, zero reader provider/execution routes.
+JSON SHA-256 `a6c96cbeee519fa71216baaf9a2c7d06e389080e9a8eec559d18b314e8e4c637`;
+Markdown `8be3d10ee7064177046d51aa6f7b190b654b715fd619a100367bdc297787de3d`.
+The new reader also loaded the older native v1 failure and produced exactly its
+previous JSON/Markdown bytes, demonstrating historical compatibility on retained
+data. Private diagnostic text remains excluded from summary exports.
+
+Raw audit: `C:/aiw/paired-private-diagnostic-native-4dab54a5-6ecd-4c70-ad9d-cecab615492b`.
+The package, prepared records, helper checks/review, exclusive execution records,
+receipt/evidence readbacks and summaries remain preserved. Next diagnostic source
+must retain both exact Windows-version tuples while continuing to reject every
+mismatch; do not guess the guest build, relax equality or edit retained profiles.
+
 ## Approved execution request: one prepared console fixed pair
 
 Request ID: `AIW-PAIRED-CONSOLE-EXEC-D370EC8-20261031-01`.
@@ -74,7 +124,7 @@ Raw audit: `C:/aiw/paired-console-native-execution-7d1fb92e-b439-4198-aee3-cb516
 `native-provider-diagnostics.jsonl`, `native-results-export.json`, summaries and
 console proof. The lost guest collector/driver error was printed only to logon stderr, which
 this path did not capture. It cannot be reconstructed from the v1 failure payload.
-A bounded private v2 failure diagnostic is being implemented/reviewed offline;
+A bounded private v2 failure diagnostic was implemented/reviewed offline;
 existing verification, case and summary allowlists remain intact. Any follow-up
 native test requires fresh source/agent/package/plan pins, not mutation or replay
 of this retained run. The procedure below is the historical approved proposal;

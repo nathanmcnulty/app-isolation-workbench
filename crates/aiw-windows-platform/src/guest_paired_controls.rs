@@ -51,9 +51,7 @@ pub fn execute_fixed_paired_controls(
         return Err("paired setup requires the elevated guest token".into());
     }
     let windows = crate::observe_windows_version().map_err(|e| e.to_string())?;
-    if windows != request.profile.expected_windows {
-        return Err("paired guest environment differs from approved profile".into());
-    }
+    require_approved_windows(&windows, &request.profile.expected_windows)?;
     let inputs = [
         hold_role(AGENT, request)?,
         hold_role(FIXTURE_INPUT, request)?,
@@ -159,6 +157,28 @@ pub fn execute_fixed_paired_controls(
         },
     })
 }
+fn require_approved_windows(
+    observed: &aiw_probe::WindowsVersionObservation,
+    expected: &aiw_probe::WindowsVersionObservation,
+) -> Result<(), String> {
+    if observed != expected {
+        return Err(format!(
+            "paired guest environment differs from approved profile: expected {}.{}.{}.{} / {}; observed {}.{}.{}.{} / {}",
+            expected.major,
+            expected.minor,
+            expected.build,
+            expected.revision,
+            expected.observer_architecture,
+            observed.major,
+            observed.minor,
+            observed.build,
+            observed.revision,
+            observed.observer_architecture,
+        ));
+    }
+    Ok(())
+}
+
 fn hold_role(path: &str, request: &PairedControlsRequest) -> Result<HeldApplicationFile, String> {
     let file = HeldApplicationFile::open_bounded(Path::new(path), 128 * 1024 * 1024)
         .map_err(|e| e.to_string())?;
@@ -184,4 +204,41 @@ fn progress_matches_variant(
         && progress[2].observation.child_token == value.child_token
         && progress[2].observation.child_stdout_bytes == value.child_stdout_bytes
         && progress[2].observation.outcome == value.child_outcome
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn guest_windows_mismatch_retains_exact_versions_without_accepting_drift() {
+        let expected = aiw_probe::WindowsVersionObservation {
+            major: 10,
+            minor: 0,
+            build: 26300,
+            revision: 9711,
+            observer_architecture: "x86_64".into(),
+        };
+        assert!(require_approved_windows(&expected, &expected).is_ok());
+        for field in 0..5 {
+            let mut observed = expected.clone();
+            match field {
+                0 => observed.major += 1,
+                1 => observed.minor += 1,
+                2 => observed.build += 1,
+                3 => observed.revision += 1,
+                _ => observed.observer_architecture = "aarch64".into(),
+            }
+            let error = require_approved_windows(&observed, &expected).unwrap_err();
+            assert!(error.contains("expected 10.0.26300.9711 / x86_64; observed "));
+            assert!(error.contains(&format!(
+                "{}.{}.{}.{} / {}",
+                observed.major,
+                observed.minor,
+                observed.build,
+                observed.revision,
+                observed.observer_architecture,
+            )));
+        }
+    }
 }
