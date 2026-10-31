@@ -1,6 +1,6 @@
 # Working state
 
-Updated 2026-10-30 (America/Anchorage). Owning checkout
+Updated 2026-10-31 (America/Anchorage). Owning checkout
 `C:\aiw\app-isolation-workbench`, branch `codex/paired-controls`, atop local main
 `53c02c8` including merged PR #103. Start with `scripts/work-status.ps1`.
 This pointer is not execution authority.
@@ -83,12 +83,23 @@ control acceptance. Original transaction/result remain absent and journal hash
 unchanged. See the consolidated request's completed observation and exact pins.
 Both the fixed diagnostic permission and original single Start are consumed.
 No retry, additional Start, approval, recovery or trial occurred. Further native
-work requires a separate pinned request; preserve the existing run. The
-[pending preparation-only request](PAIRED-NATIVE-APPROVAL.md#pending-next-request-fresh-preparation-only-no-approval-or-start)
-pins one fresh evidence parent, the same d370ec8 package and existing console
-session 1. It is not authorized or executed. Its new root was confirmed absent
-at 2026-10-31T07:30:41Z. Fresh typed plan/run/receipt bindings must be obtained
-under that preparation permission before a separate execution request is possible.
+work requires a separate pinned request; preserve the existing run.
+
+The user approved fresh preparation `-01`. Static pins and console session 1 /
+non-admin identity passed. One CLI preparation exited 1 before run creation:
+`AIW_ADMIN_EVIDENCE_NOT_READY`. A console key error (`+` received as `=`) changed
+the folder variable and created empty `C:\Evidence` instead of the intended
+Evidence child. The correct request root was also created and remains empty.
+Both directories are preserved; no retry/provider/approval/Start occurred. The
+original journal remains unchanged, no original transaction/result exists, and
+no preparation process remains. This was an operator/console-driver error, not
+a production source defect. Evidence:
+`C:/aiw/paired-console-fresh-preparation-8ce6368b-4080-46e8-8ac8-6a186aa66d1a`.
+The `-01` permission is consumed. The
+[corrected preparation-only request](PAIRED-NATIVE-APPROVAL.md#pending-corrected-request-literal-path-preparation-only)
+uses a literal child path and independent verification before the CLI call; it
+is not authorized/executed and does not permit cleanup of `C:\Evidence`.
+Fresh typed plan/run/receipt bindings still precede any separate Start request.
 Local preparation/completion evidence:
 `C:/aiw/paired-console-diagnostic-preparation-4ea6c2a8-5237-41fc-b266-4dff331fdd52`.
 

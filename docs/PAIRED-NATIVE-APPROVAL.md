@@ -13,12 +13,61 @@ Ready/sequence 3 with no session transaction/result/output. Do not replay Start.
 The proposal and preparation history below describe the reviewed bindings, not
 a second dispatch authorization. Publication remains separate.
 
-## Pending next request: fresh preparation only, no approval or Start
+## Pending corrected request: literal-path preparation only
+
+Request ID: `AIW-PAIRED-CONSOLE-PREP-D370EC8-20261031-02`.
+Status: **not authorized or executed**. The approved `-01` preparation call below
+was issued once and refused before run creation. Its permission is consumed;
+do not repeat that command under its old permission.
+
+This request permits exactly one corrected preparation call, with the **same
+worker/account/session/token/runtime, package, provider/catalog/file identities,
+fixed roles/source hashes and five-minute observation/stop rules** pinned in the
+`-01` table/procedure below (reviewed source `ea9ea5b654b6f1be98f3bedd9884b5d499ef7347`).
+The existing request root is now an observed empty ordinary directory, created at
+`2026-10-31T08:19:04.1513254Z`; it must not be recreated or cleared. No root,
+package or account substitution, elevation, provider query or readiness repeat.
+
+Only the directory-creation procedure changes:
+
+1. Recheck the existing root is that exact owned ordinary directory, with no
+   reparse-point ancestors and no entries; the exact `Evidence` child must remain
+   absent. Recheck the same static target/package/provider/context pins. Stop on
+   drift, collision or unexpected state; do not choose another path.
+2. Create **only** the literal child below from the existing Core console session
+   1. No variable assignment, string concatenation, parent-directory creation or
+   interpolated destination is used:
+
+   ```powershell
+   New-Item -ItemType Directory -Path 'C:\AIW-Paired-d370ec8-20261030\Console-paired-request-20261031-01\Evidence' -Force:$false
+   ```
+
+3. **Before any CLI call**, independently read back that exact path over trusted
+   Core remoting: existing empty ordinary directory, local expected parent, no
+   reparse point; verify the original request root and `C:\Evidence` were not
+   changed. If creation/refusal/output is ambiguous, stop without preparing.
+4. Invoke exactly the `admin prepare-paired` command pinned below, once, in console
+   session 1, for that literal `Evidence` path and `AIW\labadmin`. Preserve all
+   partial/durable records and terminal exit information. Any failure consumes
+   this one attempt; no automatic retry. Derive new run/plan/import/preparation
+   commitments from actual outputs, review them independently, then stop before
+   approval/Start and present a separate complete execution request.
+
+Permitted new effects are solely that exact Evidence child and its new protected
+preparation tree, plus normal process bookkeeping. Do not delete, repair, use or
+change **`C:\Evidence`**, the empty directory accidentally created by `-01`.
+Its presence is disclosed residue, not part of this workflow or permission to
+clean it up. No provider command, Sandbox session, native case, approval, Start,
+cancel/recovery, VM/security change, application trial or publication is included.
+All historical retained inputs remain untouched. Native acceptance remains open.
+
+## Approved preparation attempt: fresh preparation only, no approval or Start
 
 Request ID: `AIW-PAIRED-CONSOLE-PREP-D370EC8-20261031-01`.
-Status: **prepared for approval; not authorized or executed**. This request
-supersedes no historical permission. Both previous one-shot permissions are
-consumed. It requests exactly one new static preparation/import in VM107's
+Status: **explicitly approved; issued once and refused before run creation**.
+The user replied **"Approve fresh preparation only"**. This permission is now
+consumed, as are the previous single Start and readiness diagnostic permissions.
+It permitted exactly one new static preparation/import in VM107's
 existing labadmin console session 1, using the unchanged d370ec8 package.
 It does **not** request another readiness diagnostic, provider command, run
 approval, Start, cancellation/recovery, application trial or publication.
@@ -94,6 +143,40 @@ refusal, package drift, partial result or unexpected side effect stops this step
 This is the smallest next approval gate toward the fixed six-case demonstration.
 Even a successful future demonstration leaves the declared real-application
 Benchmark 2 candidate, broader W4/W5 and production acceptance open.
+
+### Actual preparation refusal and console-driver correction
+
+Static preflight at `2026-10-31T08:17:13Z` reverified exact inventory and all
+target/runtime/provider/catalog byte and file identity pins, with zero provider
+commands. Existing console PID 8540 was independently confirmed session 1;
+console identity checks showed the approved SID/name and administrator-token
+membership false. The request root was absent before the directory command.
+
+The console keyboard translated the unshifted `+` keysym as `=`. Thus the second
+directory expression `($fresh+'\Evidence')` became an assignment to `$fresh`,
+creating **`C:\Evidence`** instead of the intended child. The request root itself
+was correctly created. This was an operator/console-driver error, **not a product
+source defect**. The subsequent single literal-path CLI call correctly exited
+**1**, `AIW_ADMIN_EVIDENCE_NOT_READY`, stage `adminEvidenceRoot`, run ID null,
+because its requested Evidence parent did not exist. No run/plan was created;
+no preparation retry, provider invocation, approval or Start followed.
+
+Read-only checks at `08:21:57Z` found both directories empty and ordinary:
+request-root creation `08:19:04.1513254Z`, `C:\Evidence` creation
+`08:19:04.1604347Z`. Both are preserved. No `aiw` process remained. The original
+run still has no transaction/result, and its journal SHA-256 remains
+`2fefabbd2b1e38297ccfb191f2ad653ac1afb7f4d093ee16fa337fbf48f07108`.
+
+Raw local audit:
+`C:/aiw/paired-console-fresh-preparation-8ce6368b-4080-46e8-8ac8-6a186aa66d1a`:
+`user-authorization.json`, `static-preflight.json`, `attempt-result.json`,
+`refusal-state.json`, `directory-side-effects.json`, `preparation-refused-console.png`.
+The first readback attempt failed because the requested Evidence folder was
+absent; it did not retry the CLI. The in-memory key map was corrected offline
+(`+` -> `Shift_L+equal`), without sending more VM input. The corrected request
+uses a literal destination and an independent existence/emptiness check before
+any future preparation call. Product source already handles this refusal
+correctly; unchanged Rust/Node suites were not rerun.
 
 ## Completed follow-up: one console-readiness diagnostic, no Start
 

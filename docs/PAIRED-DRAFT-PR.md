@@ -42,3 +42,9 @@ once in VM107 console session 1: pinned protocol recognized, session list empty,
 no blockers, exit 0 in 6424ms. It did not start an assessment, change the retained
 run or establish the cause of the earlier remote-context timeout. Additional
 native execution needs separate authority; publication remains separate.
+
+A later separately approved fresh preparation refused before creating a run
+because an operator console-key error created the wrong empty evidence folder.
+No provider command or additional Start followed. Both empty directories are
+preserved, the historical run is unchanged, and the corrected literal-path
+preparation procedure remains unexecuted pending separate approval.
