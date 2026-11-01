@@ -5,8 +5,10 @@ use super::*;
 use std::io::{Seek, SeekFrom, Write};
 use windows::Win32::Storage::FileSystem::{FILE_TYPE_DISK, GetFileType};
 
-const TOOLS: &str = r"C:\AIW\Tools";
 const MAX_BYTES: u64 = 128 * 1024 * 1024;
+// Read-only directory access, permitting other directory writers but never
+// delete/rename sharing. Role files continue to use SHARE_READ exclusively.
+const DIRECTORY_SHARING: u32 = FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0;
 
 #[derive(Clone, Copy)]
 enum Role {
@@ -38,7 +40,7 @@ struct HeldRole {
 }
 impl FixedPairedInputs {
     pub(crate) fn open(size: u64, sha256: &str) -> Result<Self, String> {
-        let ancestors = held_directory_chain(Path::new(TOOLS))
+        let ancestors = hold_fixed_ancestry()
             .map_err(|e| format!("hold fixed paired mapped Tools ancestry: {e}"))?;
         Self::from_ancestors(ancestors, size, sha256)
     }
@@ -118,7 +120,8 @@ impl FixedPairedInputs {
         let mut reopened = Vec::new();
         for (index, leaf) in components.iter().enumerate() {
             let parent = reopened.last().unwrap_or(&self.ancestors[0]);
-            let file = open_relative_directory(parent, leaf, 0, FILE_SHARE_READ.0)?
+            let file = open_relative_directory(parent, leaf, 0, DIRECTORY_SHARING)
+                .map_err(|e| format!("reopen fixed paired mapped directory ({leaf}): {e}"))?
                 .ok_or("fixed paired mapped ancestor disappeared")?;
             let info = file_information(&file)?;
             require_directory(&file, &info)?;
@@ -146,6 +149,26 @@ impl FixedPairedInputs {
         output.sync_all().map_err(|e| e.to_string())?;
         self.revalidate()
     }
+}
+
+fn hold_fixed_ancestry() -> Result<Vec<File>, String> {
+    let root = open_absolute_c_root(DIRECTORY_SHARING)
+        .map_err(|e| format!("open fixed paired mapped directory (C root): {e}"))?;
+    let mut ancestors = vec![root];
+    for leaf in ["AIW", "Tools"] {
+        let file = open_relative_directory(
+            ancestors
+                .last()
+                .ok_or("fixed paired mapped parent absent")?,
+            leaf,
+            0,
+            DIRECTORY_SHARING,
+        )
+        .map_err(|e| format!("open fixed paired mapped directory ({leaf}): {e}"))?
+        .ok_or_else(|| format!("fixed paired mapped directory absent: {leaf}"))?;
+        ancestors.push(file);
+    }
+    Ok(ancestors)
 }
 impl HeldRole {
     fn open(parent: &File, role: Role, size: u64, sha256: &str) -> Result<Self, String> {
@@ -290,14 +313,14 @@ mod tests {
         fn ancestors(&self) -> Vec<File> {
             let root = OpenOptions::new()
                 .read(true)
-                .share_mode(FILE_SHARE_READ.0)
+                .share_mode(DIRECTORY_SHARING)
                 .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
                 .open(&self.0)
                 .unwrap();
-            let aiw = open_relative_directory(&root, "AIW", 0, FILE_SHARE_READ.0)
+            let aiw = open_relative_directory(&root, "AIW", 0, DIRECTORY_SHARING)
                 .unwrap()
                 .unwrap();
-            let tools = open_relative_directory(&aiw, "Tools", 0, FILE_SHARE_READ.0)
+            let tools = open_relative_directory(&aiw, "Tools", 0, DIRECTORY_SHARING)
                 .unwrap()
                 .unwrap();
             vec![root, aiw, tools]
@@ -308,6 +331,89 @@ mod tests {
                 BYTES.len() as u64,
                 &hex::encode(Sha256::digest(BYTES)),
             )
+        }
+    }
+
+    #[test]
+    fn directory_writers_are_compatible_but_directory_deleters_and_role_writers_refuse() {
+        use windows::Win32::Storage::FileSystem::DELETE;
+        for relative in ["", "AIW", "AIW\\Tools"] {
+            let f = Fixture::new();
+            let path = f.0.join(relative);
+            let writer = OpenOptions::new()
+                .access_mode(FILE_ADD_FILE.0 | FILE_ADD_SUBDIRECTORY.0 | FILE_READ_ATTRIBUTES.0)
+                .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0 | FILE_SHARE_DELETE.0)
+                .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
+                .open(&path)
+                .unwrap();
+            let mut inputs = f.open().unwrap();
+            let output_path = f.0.join("copy-with-directory-writer.exe");
+            let mut output = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .share_mode(FILE_SHARE_READ.0)
+                .open(&output_path)
+                .unwrap();
+            inputs.copy_fixture(&mut output).unwrap();
+            assert!(std::fs::rename(&path, path.with_extension("replaced")).is_err());
+            assert!(
+                OpenOptions::new()
+                    .access_mode(DELETE.0)
+                    .share_mode(DIRECTORY_SHARING)
+                    .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0)
+                    .open(&path)
+                    .is_err()
+            );
+            assert!(
+                OpenOptions::new()
+                    .write(true)
+                    .open(f.leaf(Role::Fixture))
+                    .is_err()
+            );
+            assert!(
+                OpenOptions::new()
+                    .access_mode(DELETE.0)
+                    .share_mode(DIRECTORY_SHARING)
+                    .open(f.leaf(Role::Launcher))
+                    .is_err()
+            );
+            inputs.revalidate().unwrap();
+            drop(output);
+            drop(inputs);
+            drop(writer);
+            let deleter = OpenOptions::new()
+                .access_mode(DELETE.0 | FILE_READ_ATTRIBUTES.0)
+                .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0 | FILE_SHARE_DELETE.0)
+                .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
+                .open(&path)
+                .unwrap();
+            // Unsupported mapping semantics requiring DELETE sharing never fall back.
+            // Fixture acquisition uses the same directory sharing as production.
+            let root = OpenOptions::new()
+                .read(true)
+                .share_mode(DIRECTORY_SHARING)
+                .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
+                .open(&f.0);
+            if relative.is_empty() {
+                assert!(root.is_err());
+            } else {
+                let root = root.unwrap();
+                let aiw = open_relative_directory(&root, "AIW", 0, DIRECTORY_SHARING);
+                if relative == "AIW" {
+                    assert!(aiw.is_err());
+                } else {
+                    assert!(
+                        open_relative_directory(
+                            &aiw.unwrap().unwrap(),
+                            "Tools",
+                            0,
+                            DIRECTORY_SHARING
+                        )
+                        .is_err()
+                    );
+                }
+            }
+            drop(deleter);
         }
     }
     impl Drop for Fixture {

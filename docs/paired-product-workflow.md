@@ -452,7 +452,8 @@ Exact bindings and outcome are in [the consolidated record](PAIRED-NATIVE-APPROV
 The offline repair adds a private `FixedPairedInputs` type under guest_document.
 Only the closed Agent/Fixture/Launcher roles exist; callers cannot supply paths.
 It retains C:→AIW→Tools and role handles with parent-relative, non-reparse,
-read-only/no-delete sharing; requires disk handles, ordinary types, nonzero basic
+read-only access. Directory read/write sharing retains no-delete protection;
+role files share read only. It requires disk handles, ordinary types, nonzero basic
 volume/index identities, leaf link1 and exact approved size/default-stream hash.
 Every ancestry identity is compared independently across the mapping boundary;
 no common-volume assumption or fabricated 128-bit ID is introduced. Full named
@@ -487,3 +488,23 @@ capability, cases, tokens or cleanup.
 Probe3, workspace all-target Clippy with warnings denied, formatting and
 governance passed. Unchanged desktop/Node/model suites retain their original
 source-scoped evidence; they were not rerun for this private adapter change.
+
+The first native transport attempt at938 refused ancestry acquisition with
+`NtCreateFile0xc0000043`, before account/resource setup and cases. Exact AIW/Tools
+component and existing incompatible access remain unknown. Outer cleanup was
+verified; all six cases remain unmeasured. This does not establish mapped API
+support. The adapter-only follow-up permits directory read/write sharing while
+requesting read-only access and denying DELETE sharing. This grants no ACL
+rights; all full named identity checks remain. Role data write/delete sharing is
+still refused. It uses a closed C-root/AIW/Tools loop to add component diagnostics,
+without changing generic document helpers or local HAF. A new real-file test
+retains existing child-add/write directory handles at each ancestor during copy,
+checks blocked ancestor rename/delete and role write/delete, and refuses existing
+directory DELETE handles. There is no DELETE-sharing fallback.
+All six affected module tests and workspace all-target Clippy passed; independent
+source/docs review found no consequential issue. Other unchanged suites were reused.
+Microsoft documents [access/share compatibility and the delete/rename consequence
+of DELETE sharing](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew).
+The reviewed change addresses a plausible constraint; it does not identify the
+native conflicting handle or prove success. Fresh pins and native proof follow
+offline checks and review.

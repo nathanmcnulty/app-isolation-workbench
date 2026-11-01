@@ -15,7 +15,54 @@ The approved execution record below and the latest standing test authority
 supersede older pending-proposal wording.
 Publication remains separate.
 
-## Latest native diagnostic assessment: 3b15929
+## Latest native transport assessment: 9384503
+
+Standing fixed-control authority covered this fresh assessment on unchanged VM107,
+existing non-admin console session1/Core7.6.9. The actual helper, all9 original
+document hashes, canonical plan/profile/package and scope passed independent
+review; nine isolated offline script checks passed. Concrete scope was presented
+before the single Start. No new application trial or PR #103 repeat.
+
+| Binding | Exact value |
+|---|---|
+| Source | `93845032181cbd1e2983a0404c6be745900d4858` |
+| Worker package | `C:\AIW-Paired-9384503-20261031\Package` |
+| Receipt SHA-256 | `68334f88460632c3aed107cf51930747d934bc2d3ad4e5dd51a2ca9a5af18638` |
+| CLI / desktop SHA-256 | `294b34636ab8e5ccce64a26aead7d16e8b464060204030929b2d495d788ac537` / `48a06684df6d7be6a4b16605dcde8b9ca0bddd3a58b7e0f699b1acce9cdccbbd` |
+| Agent / three role payloads | `09a100d33b023734d92d15b6d8e39a3bc8ea751bd9ae26b1461c6005587c4b4b`, **6,059,008 bytes** each, static-CRT x64 |
+| Fixed source / revision | `9e65559d38a58a93648ae46a345e5549be10c77f587ffb5cc24f3ea509161c69` / `aiw.dev/paired-file-registry-child/v0alpha2` |
+| Host / guest | `10.0.26300.9711` / `10.0.26100.9711`, both x64 |
+| Run / canonical plan | `paired-1793491750791476500` / `23b933c0eafc7394126e6af9a36d62483d930a97c750e62be26489b80d820628` |
+| Profile | `2c8b023f292e048ec5cc2b42f04bd544c56ed9208277f01bf11b29882a864571` |
+| Reviewed helper | `658180d92da05524d1cd68a4e7cf6181c6ca50a30022aea44af5bc0d2a67c350`, **18,362 bytes** |
+
+Audit: `C:/aiw/paired-mapped-input-native-da71e403-621a-4d75-9a4c-bdb71c0a2810`.
+Its `consolidated-execution-scope.json` retains exact worker/provider/runtime,
+effects, limits and stop conditions. One approval PID4636/exit0 and Start
+PID6368/session1 at `2026-11-01T00:11:39Z`; exit1 after **66,984ms**. Outer session
+`d0cb7094-4412-f98e-6e87-6d7ed70c651f` reached cleanupVerified; terminal failed /
+journal6 / sessionclean. No cancellation, recovery, kill or retry.
+
+Receipt-bound v2 diagnostic:
+`hold fixed paired mapped Tools ancestry: open fixed document directory failed: NtCreateFile status=0xc0000043`.
+This is a sharing refusal during ancestry acquisition, before standard-user/
+resource setup/cases. The exact AIW-versus-Tools component and incompatible
+existing access are not identified. It does not prove native mapped-directory or
+role transport capability. All six cases remain unmeasured; no native acceptance.
+The next reviewed offline adapter-only change permits directory READ|WRITE
+sharing while retaining read-only access and denying DELETE sharing; role files
+keep SHARE_READ only. Component context is added. Unsupported delete-sharing
+requirements still refuse; no ACL/security configuration or generic HAF change.
+
+Actual unchanged f68 Results reader: deterministic safe exports, all29 explicitly
+snapshotted retained files unchanged, private diagnostic excluded and zero
+provider/assessment calls. JSON SHA-256
+`46ea1a132272d613763681d6e70cc3491d7eb4e16a3b0b0a52f5554cede85af4`;
+Markdown `3603ab679c492398014f96a0f40e3f4451e64eb722b66f7ab3a5b79365b2320f`.
+Every attempt/package remains retained; the next assessment needs fresh pins,
+plan, helper review and presented scope under the same standing authority.
+
+## Previous native diagnostic assessment: 3b15929
 
 The standing fixed-control test authority covered this fresh source-pinned
 diagnostic assessment on the same VM107, non-admin console session1/Core7.6.9.

@@ -38,6 +38,14 @@ covered by explicitly synthetic/fake-provider tests. Each actual29-file retained
 snapshot was unchanged by deterministic safe exports; older native summaries
 also reproduced byte-for-byte with the new reader.
 
+The first native transport attempt refused directory ancestry sharing before
+account/resource setup. A narrow directory-only sharing correction preserves
+read-only access, denies directory replacement and keeps role-file write/delete
+refusal. Unsupported mapping behavior still fails closed. Native Results dialogs,
+focus return, keyboard filtering and evidence drill-down were additionally checked
+with the pinned3b desktop and safe archive fixtures: both exports reproduce prior
+verified summaries byte-for-byte, and all original input files remain unchanged.
+
 Exact source/package/plan pins and native outcomes:
 [consolidated record](PAIRED-NATIVE-APPROVAL.md).
 No application trial ran and PR #103 was not repeated. General compatibility,

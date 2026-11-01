@@ -85,6 +85,25 @@ verification, not native dialog/focus acceptance.
 
 ## Reproducible safe demonstration
 
+Additional native desktop proof, 2026-10-31 local time: pinned source3b desktop
+SHA-256 `5360af72943423f49025402b88df4e142d959cd784fe9bd5466f634a3970e52b`
+opened the existing explicit4-row reviewed archive/duplicate/missing/tampered
+fixture selection. Native Open and both Save dialogs, Tab/Enter navigation,
+initiating-control focus return, outcome filter, keyboard table navigation and
+duplicate/verified evidence disclosures were exercised. This native check uses
+one application profile; the existing mixed-application synthetic demonstration
+remains separately labeled. No assessment/preparation/recovery/cancel route ran.
+
+Audit `C:/aiw/paired-native-results-ui-b12be912-8a77-4a8b-b12a-92373809bc0e`
+contains `source-and-input-pins.json`, `native-ui-checks.json`, screenshots and
+exclusive `native-summary.json`/`.md`. Both outputs match prior verified summaries
+byte-for-byte: JSON `3e872cd0342d991c044b617f2845fc8539af0ab97f3e026a8a6666d4c7579c6d`,
+Markdown `4938480eb7a84c9a2cb45235ec004dfb1a0511fb1bbdad1659db5fce7b80d188`.
+The three original files (selection plus two existing archives) stayed unchanged;
+the missing archive remained absent; private markers were excluded. Only the
+Results/get_state paths were used, and Results has no provider route; this does
+not claim a separate systemwide runtime call counter. The owned UI closed normally.
+
 From `C:\aiw\app-isolation-workbench`:
 
 ```powershell
