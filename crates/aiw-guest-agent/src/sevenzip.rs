@@ -68,6 +68,8 @@ pub(super) fn execute(request: &SevenZipRequest) -> Result<()> {
             );
             let mut result = SevenZipResult::for_request(request).map_err(anyhow::Error::msg)?;
             result.driver_error = Some(SevenZipDriverError::DriverIncomplete);
+            result.driver_diagnostic =
+                Some(aiw_provider_wsb::sevenzip::bound_driver_diagnostic(&error));
             result
         }
     };

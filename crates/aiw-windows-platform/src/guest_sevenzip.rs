@@ -6,7 +6,6 @@ use aiw_provider_wsb::sevenzip::*;
 use aiw_token::TokenEvidence;
 use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::Value;
-use std::path::Path;
 
 pub fn run_fixed_sevenzip_role() -> Result<u8, String> {
     native::run_production_role().map_err(|e| e.to_string())
@@ -14,12 +13,20 @@ pub fn run_fixed_sevenzip_role() -> Result<u8, String> {
 
 pub fn execute_fixed_sevenzip(request: &SevenZipRequest) -> Result<SevenZipResult, String> {
     request.validate()?;
-    request.profile.validate()?;
+    request.profile.validate().map_err(|error| {
+        format!(
+            "{error}; compiled source={}",
+            aiw_probe::seven_zip_source_sha256()
+        )
+    })?;
+    let current_image = std::env::current_exe().map_err(|e| e.to_string())?;
     if request.profile.origin != ControlEvidenceOrigin::NativeWorker
-        || std::env::current_exe().map_err(|e| e.to_string())?
-            != Path::new(r"C:\AIW\Tools\aiw-guest-agent.exe")
+        || !native::fixed_role_image(&current_image, r"C:\AIW\Tools\aiw-guest-agent.exe")
     {
-        return Err("fixed native 7-Zip agent and native-worker origin required".into());
+        return Err(format!(
+            "fixed native 7-Zip agent and native-worker origin required; current image={}",
+            current_image.display()
+        ));
     }
     let token = aiw_token::collect_current_process_token().map_err(|e| e.to_string())?;
     if !token.is_elevated
@@ -28,25 +35,36 @@ pub fn execute_fixed_sevenzip(request: &SevenZipRequest) -> Result<SevenZipResul
             != crate::control_appcontainer::fixed_account_sid("WDAGUtilityAccount")
                 .map_err(|e| e.to_string())?
     {
-        return Err("7-Zip setup requires fixed elevated Sandbox agent".into());
+        return Err(format!(
+            "7-Zip setup requires fixed elevated Sandbox agent; elevated={}, AppContainer={}, user={}",
+            token.is_elevated, token.is_app_container, token.user_sid
+        ));
     }
     let windows = crate::observe_windows_version().map_err(|e| e.to_string())?;
     if windows != request.profile.expected_windows {
-        return Err(
-            "7-Zip guest Windows differs from approved exact version; nothing installed".into(),
-        );
+        return Err(format!(
+            "7-Zip guest Windows differs from approved exact version; nothing installed; observed={windows:?}; expected={:?}",
+            request.profile.expected_windows
+        ));
     }
     // All operational errors after the approved identity checks retain whatever
     // measured prefix exists. They never become application incompatibility.
     let (stages_owned, operation) = native::execute_production(request);
+    let operation_error = operation.as_ref().err().map(ToString::to_string);
     let mut stages = Stages {
         issues: operation.is_err(),
+        diagnostics: operation_error.into_iter().collect(),
+        observed: vec![],
     };
     let mut result = SevenZipResult::for_request(request)?;
     result.windows = Some(windows);
     if !stages_owned {
         // A refused preexisting stage root is never this request's observation.
         result.driver_error = Some(SevenZipDriverError::DriverIncomplete);
+        result.driver_diagnostic = Some(bound_driver_diagnostic(&format!(
+            "Fresh raw-stage ownership refused: {}",
+            stages.diagnostics.join("; ")
+        )));
         return Ok(result);
     }
     result.launcher_token = stages.field("02-launcher", "heldToken");
@@ -71,7 +89,10 @@ pub fn execute_fixed_sevenzip(request: &SevenZipRequest) -> Result<SevenZipResul
         if !boundary.capabilities.is_empty()
             || boundary.grant_scope != "read app/input, write candidate data only"
         {
-            stages.issues = true;
+            stages.issue(
+                "workflow-03-boundary",
+                "unexpected capabilities or grant scope",
+            );
         }
         result.package_sid = Some(boundary.profile_sid);
         let baseline_access = if boundary.baseline.exit_code == Some(0)
@@ -108,29 +129,57 @@ pub fn execute_fixed_sevenzip(request: &SevenZipRequest) -> Result<SevenZipResul
         result.package_sid = stages.field("workflow-app-ready", "profileSid");
     }
     result.profile_deleted = stages.field("workflow-04-profile-cleanup", "deleted");
+    if let Some(error) = stages.field::<String>("99-driver-error", "driverError") {
+        stages.issue("99-driver-error", error);
+    }
+    if let Some(error) = stages.field::<String>("workflow-99-driver-error", "driverError") {
+        stages.issue("workflow-99-driver-error", error);
+    }
+    if let Some(collection) = stages.read::<Value>("07-stage-collection")
+        && collection["collectionErrors"]
+            .as_array()
+            .is_some_and(|errors| !errors.is_empty())
+    {
+        stages.issue("07-stage-collection", &collection["collectionErrors"]);
+    }
     if stages.issues {
         result.driver_error = Some(SevenZipDriverError::DriverIncomplete);
+        result.driver_diagnostic = Some(bound_driver_diagnostic(&stages.diagnostics.join("; ")));
     }
-    result.validate(request)?;
+    result.validate(request).map_err(|error| format!("Typed observation validation refused: {error}; positive local stage reads={:?}; private driver causes={}", stages.observed, stages.diagnostics.join("; ")))?;
     Ok(result)
 }
 
 struct Stages {
     issues: bool,
+    diagnostics: Vec<String>,
+    observed: Vec<String>,
 }
 impl Stages {
+    fn issue(&mut self, name: &str, detail: impl std::fmt::Display) {
+        self.issues = true;
+        if self.diagnostics.len() < 16 {
+            self.diagnostics.push(format!("{name}: {detail}"));
+        }
+    }
     fn read<T: DeserializeOwned>(&mut self, name: &str) -> Option<T> {
         match native::production_stage(name) {
-            Ok(Some(bytes)) => match serde_json::from_slice(&bytes) {
-                Ok(value) => Some(value),
-                Err(_) => {
-                    self.issues = true;
-                    None
-                }
-            },
+            Ok(Some(bytes)) => self.decode(name, &bytes),
             Ok(None) => None,
-            Err(_) => {
-                self.issues = true;
+            Err(error) => {
+                self.issue(name, error);
+                None
+            }
+        }
+    }
+    fn decode<T: DeserializeOwned>(&mut self, name: &str, bytes: &[u8]) -> Option<T> {
+        if !self.observed.iter().any(|value| value == name) {
+            self.observed.push(name.into());
+        }
+        match serde_json::from_slice(bytes) {
+            Ok(value) => Some(value),
+            Err(error) => {
+                self.issue(name, error);
                 None
             }
         }
@@ -139,8 +188,15 @@ impl Stages {
         let value = self.read::<Value>(name)?;
         match value.get(key).cloned().map(serde_json::from_value) {
             Some(Ok(value)) => Some(value),
-            _ => {
-                self.issues = true;
+            Some(Err(error)) => {
+                self.issue(&format!("{name}/{key}"), error);
+                None
+            }
+            None => {
+                self.issue(
+                    &format!("{name}/{key}"),
+                    "required field absent in retained stage",
+                );
                 None
             }
         }
@@ -232,4 +288,26 @@ struct Verification {
     #[serde(rename = "passed")]
     _passed: bool,
     input_after: SevenZipInventory,
+}
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+    #[test]
+    fn sevenzip_stage_decode_preserves_private_cause_without_inventing_a_measurement() {
+        let mut stages = Stages {
+            issues: false,
+            diagnostics: vec![],
+            observed: vec![],
+        };
+        let value = stages.decode::<RawInvocation>("workflow-baseline-0", br#"{"exitCode":"bad"}"#);
+        assert!(value.is_none());
+        assert!(stages.issues);
+        assert_eq!(stages.observed, ["workflow-baseline-0"]);
+        assert!(stages.diagnostics[0].contains("workflow-baseline-0"));
+        assert!(
+            stages.diagnostics[0].contains("missing field")
+                || stages.diagnostics[0].contains("invalid type")
+        );
+    }
 }

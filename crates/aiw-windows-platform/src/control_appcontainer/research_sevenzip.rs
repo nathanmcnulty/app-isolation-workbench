@@ -1,4 +1,5 @@
-//! Closed 7-Zip experiment. Default-off; these files are research, not receipts.
+//! Shared closed 7-Zip driver. The historical research entry is default-off;
+//! the production adapter separately binds typed requests and completion receipts.
 //! Only the elevated Sandbox role installs. The workflow role is standard user.
 use super::*;
 use crate::HeldApplicationFile;
@@ -38,13 +39,50 @@ const SEVENZIP_PROFILE: &str = "AIW.SevenZip.Research.v0alpha1";
 const DRIVER_BYTES: &[u8] = b"AIW sevenzip driver control\r\n";
 const DENIED_BYTES: &[u8] = b"AIW sevenzip ungranted canary";
 
+// GetModuleFileName may retain case or the Win32 verbatim prefix. This is
+// exactly the same fixed path, not filesystem canonicalization or a fallback.
+pub(crate) fn fixed_role_image(actual: &Path, expected: &str) -> bool {
+    actual.to_str().is_some_and(|value| {
+        value
+            .strip_prefix(r"\\?\")
+            .unwrap_or(value)
+            .eq_ignore_ascii_case(expected)
+    })
+}
+
+#[cfg(test)]
+mod image_spelling_tests {
+    use super::*;
+    #[test]
+    fn sevenzip_fixed_image_accepts_only_case_and_win32_verbatim_spelling() {
+        let expected = r"C:\AIW\Tools\aiw-guest-agent.exe";
+        for actual in [
+            expected,
+            r"c:\aiw\tools\AIW-GUEST-AGENT.EXE",
+            r"\\?\C:\AIW\Tools\aiw-guest-agent.exe",
+        ] {
+            assert!(fixed_role_image(Path::new(actual), expected));
+        }
+        for actual in [
+            r"C:\host\aiw-guest-agent.exe",
+            r"C:\AIW\Tools\other.exe",
+            r"C:\AIW\Tools\aiw-guest-agent.exe:payload",
+            r"C:\AIW\Tools\..\Tools\aiw-guest-agent.exe",
+            r"\\server\AIW\Tools\aiw-guest-agent.exe",
+            r"\??\C:\AIW\Tools\aiw-guest-agent.exe",
+        ] {
+            assert!(!fixed_role_image(Path::new(actual), expected));
+        }
+    }
+}
+
 /// All accepted roles are compiled and bound to fixed on-worker paths/identity.
 pub fn run() -> Result<u8> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     let exe = std::env::current_exe()?;
     let token = collect_current_process_token()?;
     if args == ["--output", r"C:\AIW\SevenZipOutput\result.json"] {
-        if exe != Path::new(INPUT_HELPER)
+        if !fixed_role_image(&exe, INPUT_HELPER)
             || !token.is_elevated
             || token.is_app_container
             || token.user_sid != fixed_account_sid("WDAGUtilityAccount")?
@@ -53,7 +91,7 @@ pub fn run() -> Result<u8> {
         }
         return setup();
     }
-    if exe != Path::new(HELPER)
+    if !fixed_role_image(&exe, HELPER)
         || args.len() != 1
         || token.is_elevated
         || token.user_sid != fixed_account_sid(aiw_provider_wsb::STANDARD_USER_ACCOUNT_NAME)?

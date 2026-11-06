@@ -360,7 +360,7 @@ mod sevenzip_projection_tests {
         let report = json!({"entries":[{"id":"private@example.invalid","functions":{"createArchive":true,"testArchive":false},"source":{"kind":"windowsSandbox","evidence":{"profile":"sevenZip","result":{"kind":"sevenZip","report":{
             "evidenceStatus":"driverIncomplete","recordedOutcome":"insufficientEvidence","recordedCleanupVerified":true,
             "profile":{"origin":"nativeWorker","expectedWindows":{"private":"secret"}},
-            "observations":{"profileDeleted":false,"launcherToken":{"userSid":"S-1-5-21-private","processId":555}},
+            "observations":{"profileDeleted":false,"driverDiagnostic":"diagnostic-private C:\\private\\agent S-1-5-21-sensitive candidate compatible","launcherToken":{"userSid":"S-1-5-21-private","processId":555}},
             "comparison":{"eligible":false,"reason":"baselineFailed","archiveBytesEqual":false,"selectedControlsVerified":null,
                 "functions":[{"function":"create","baseline":"passed","candidate":"notReached","private":"secret"},{"function":"test","baseline":"failed","candidate":"unmeasured"}],
                 "baselineArchive":{"sha256":"a".repeat(64),"sizeBytes":578,"path":"C:\\private\\archive"},"gaps":["raw secret"]}
@@ -379,6 +379,9 @@ mod sevenzip_projection_tests {
             "555",
             "C:\\\\private",
             "raw secret",
+            "diagnostic-private",
+            "S-1-5-21-sensitive",
+            "candidate compatible",
             "\"secret\"",
         ] {
             assert!(!output.contains(private), "leaked {private}");

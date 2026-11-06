@@ -45,3 +45,21 @@ desktop entry, verified retained comparison and sanitized Results export still
 require integration and native validation. Broad Benchmark 2, W4/W5 and
 production acceptance remain open. The earlier six-control/29-file Results
 milestone is reused without execution.
+
+## First production desktop attempt
+
+Source `614bb0e`, run `sevenzip-1793950517554284900`, was prepared in the native
+desktop on VM107, independently reviewed, approved by the exact plan hash
+`536730befc447df29c16c6da55a234ee115722e784592961a6e219c51890dc02`, and started
+once. The product retained `DriverIncomplete` and verified outer cleanup.
+Installation, tokens, controls and all four application functions are unmeasured
+in the retained result. This is neither candidate incompatibility nor production
+acceptance. The earlier successful research observations remain separate.
+
+The old fallback discarded private error text; its all-null result cannot
+establish whether failure occurred before installation or during final typed
+validation. The cause remains unknown. A follow-up fix adds bounded, receipt-bound
+private failure text (excluded from sanitized exports) and accepts only casing
+and Win32 verbatim spelling differences for the same fixed executable paths.
+Historical records omit the new optional field and retain their original bytes.
+The old approval and workspace must not be reused for another Start.

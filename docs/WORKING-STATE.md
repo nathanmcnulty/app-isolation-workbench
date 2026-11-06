@@ -1,7 +1,7 @@
 # Working state
 
 Updated 2026-11-05 (America/Anchorage). Checkout `C:\aiw\app-isolation-workbench`,
-branch `codex/real-app-assessment`; native research source `b7f17cf`.
+branch `codex/real-app-assessment`; production integration source `614bb0e`.
 Started from current main `8aeeafc` including merged PR #105. Working branch has not
 been pushed or published. Start with `scripts/work-status.ps1`.
 
@@ -19,7 +19,8 @@ mapped-input custody with strict local execution custody, process-driver control
 before install, held app tokens, exact inventory/content verification, protected
 input/write/delete and outside-grant canaries, durable atomic stages, separate
 Prepare/Approve/Start and original-session cleanup/recovery. These are research
-observations, not production receipts or an implemented desktop application path.
+observations, not production receipts. The separate desktop application path is
+implemented at `614bb0e`; its native acceptance remains open.
 Independent consequential review fixes are complete, including the separately
 reviewed fixed VM107 staging wrapper's held ancestry/executable custody.
 
@@ -79,7 +80,22 @@ inert package-verifier controls. Initial static release builds pass; the final
 package rebuild and production native proof are still in progress. Research ZIPs
 cannot enter verified production Results.
 
-Next: finish review fixes/checks, package the current source, validate the actual
-production desktop/Results flow inside VM107 and document its exact acceptance.
+The exact nine-file `614bb0e` product package was staged and verified on VM107.
+Desktop Prepare, independently reviewed plan, exact-hash Approve and single Start
+completed for `sevenzip-1793950517554284900`. The product retained
+`DriverIncomplete` with verified outer cleanup; all application functions remain
+unmeasured. Its old fallback discarded the cause. Preserve the old package,
+workspace, review and approval; do not Start it again. See
+[native acceptance](SEVENZIP-NATIVE-ACCEPTANCE.md). This is not incompatibility.
+
+Follow-up source adds bounded private receipt-bound diagnostics and same-fixed-path
+Windows spelling handling. Focused tests and independent consequential review pass;
+static rebuild passes; fresh native validation is in progress. The old failure's
+cause is unknown. Worker console access recovered after a temporary browser
+disconnection; no security settings changed. Retained GUI and evidence remain on
+VM107.
+
+Next: finish diagnostic package/checks, regain console access, preserve/reopen/export
+the failed attempt, then validate a fresh separately approved production plan.
 The requested full application flow,
 Benchmark2, W4/W5 and production acceptance remain **open**.

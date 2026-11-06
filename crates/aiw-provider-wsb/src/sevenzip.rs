@@ -13,6 +13,17 @@ pub const SEVENZIP_RESULT_SCHEMA: &str = "aiw.dev/sevenzip-assessment-result/v0a
 pub const SEVENZIP_EVENT: &str = "sevenZipAssessment";
 pub const SEVENZIP_DRIVER_BYTES: &[u8] = b"AIW sevenzip driver control\r\n";
 pub const SEVENZIP_CANARY_BYTES: &[u8] = b"AIW sevenzip ungranted canary";
+pub const MAX_SEVENZIP_DRIVER_DIAGNOSTIC_CHARS: usize = 2048;
+pub const MAX_SEVENZIP_DRIVER_DIAGNOSTIC_BYTES: usize = 8192;
+
+/// Private failure text only; this never supplies function or boundary evidence.
+/// Truncating Unicode scalar values also bounds UTF-8 bytes to 8192 (4 per scalar).
+pub fn bound_driver_diagnostic(value: &str) -> String {
+    value
+        .chars()
+        .take(MAX_SEVENZIP_DRIVER_DIAGNOSTIC_CHARS)
+        .collect()
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -215,6 +226,10 @@ pub struct SevenZipResult {
     pub candidate: Option<SevenZipVariant>,
     pub profile_deleted: Option<bool>,
     pub driver_error: Option<SevenZipDriverError>,
+    /// Private retained failure diagnostics. Never project this text into a safe
+    /// summary or treat it as a native observation, denial, or function result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub driver_diagnostic: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, JsonSchema)]
@@ -291,6 +306,7 @@ impl SevenZipResult {
             candidate: None,
             profile_deleted: None,
             driver_error: None,
+            driver_diagnostic: None,
         })
     }
     pub fn compare(
@@ -400,6 +416,15 @@ impl SevenZipResult {
     }
     pub fn validate(&self, request: &SevenZipRequest) -> Result<(), String> {
         request.validate()?;
+        if self.driver_diagnostic.as_ref().is_some_and(|value| {
+            self.driver_error.is_none()
+                || value.chars().count() > MAX_SEVENZIP_DRIVER_DIAGNOSTIC_CHARS
+                || value.len() > MAX_SEVENZIP_DRIVER_DIAGNOSTIC_BYTES
+        }) {
+            return Err(
+                "7-Zip private driver diagnostic exceeds bounds or lacks a driver failure".into(),
+            );
+        }
         if self.schema_version != SEVENZIP_RESULT_SCHEMA
             || self.run_id != request.run_id
             || self.sandbox_id != request.sandbox_id
@@ -1219,5 +1244,72 @@ mod tests {
         let mut supplied = serde_json::to_value(&result).unwrap();
         supplied["candidateCompatible"] = serde_json::json!(true);
         assert!(serde_json::from_value::<SevenZipResult>(supplied).is_err());
+    }
+    #[test]
+    fn sevenzip_private_driver_diagnostic_is_unicode_bounded_and_failure_only() {
+        let (request, result) = fixture();
+        let bounded = bound_driver_diagnostic(&"\u{1f9ea}".repeat(3000));
+        assert_eq!(bounded.chars().count(), 2048);
+        assert_eq!(bounded.len(), 8192);
+        assert_eq!(
+            bound_driver_diagnostic("native stage failed"),
+            "native stage failed"
+        );
+        let mut failed = result.clone();
+        failed.driver_error = Some(SevenZipDriverError::DriverIncomplete);
+        failed.driver_diagnostic = Some(bounded);
+        failed.validate(&request).unwrap();
+        failed.driver_diagnostic = Some("\u{1f9ea}".repeat(2049));
+        assert!(failed.validate(&request).is_err());
+        failed.driver_diagnostic = Some("x".repeat(2049));
+        assert!(failed.validate(&request).is_err());
+        let mut healthy = result;
+        healthy.driver_diagnostic = Some(String::new());
+        assert!(healthy.validate(&request).is_err());
+    }
+    #[test]
+    fn sevenzip_absent_diagnostic_preserves_historical_payload_and_receipt_event_bytes() {
+        let (request, result) = fixture();
+        assert_eq!(
+            result.schema_version,
+            "aiw.dev/sevenzip-assessment-result/v0alpha1"
+        );
+        let historical = serde_json::to_value(&result).unwrap();
+        assert!(historical.get("driverDiagnostic").is_none());
+        let (before, root) = evidence(historical.clone(), SEVENZIP_EVENT);
+        let parsed: SevenZipResult = serde_json::from_value(historical.clone()).unwrap();
+        assert_eq!(parsed.driver_diagnostic, None);
+        assert_eq!(serde_json::to_value(&parsed).unwrap(), historical);
+        let (after, after_root) = evidence(serde_json::to_value(&parsed).unwrap(), SEVENZIP_EVENT);
+        assert_eq!(before, after);
+        assert_eq!(root, after_root);
+        verify_sevenzip_evidence(&before, &root, &request, &parsed).unwrap();
+    }
+    #[test]
+    fn sevenzip_private_diagnostic_is_receipt_bound_and_never_supplies_function_measurements() {
+        let (request, _) = fixture();
+        let mut failed = SevenZipResult::for_request(&request).unwrap();
+        failed.driver_error = Some(SevenZipDriverError::DriverIncomplete);
+        let before = failed.compare(&request, Some(true)).unwrap();
+        failed.driver_diagnostic=Some("PRIVATE C:\\synthetic\\input; all functions passed and every file denied (untrusted diagnostic text)".into());
+        let after = failed.compare(&request, Some(true)).unwrap();
+        assert_eq!(before, after);
+        assert!(
+            !after.eligible
+                && !after.baseline_verified
+                && !after.candidate_verified
+                && !after.selected_controls_verified
+        );
+        assert!(
+            after
+                .functions
+                .iter()
+                .all(|row| row.baseline == SevenZipFunctionStatus::Unmeasured
+                    && row.candidate == SevenZipFunctionStatus::Unmeasured)
+        );
+        let (bytes, root) = evidence(serde_json::to_value(&failed).unwrap(), SEVENZIP_EVENT);
+        verify_sevenzip_evidence(&bytes, &root, &request, &failed).unwrap();
+        failed.driver_diagnostic = Some("different private cause".into());
+        assert!(verify_sevenzip_evidence(&bytes, &root, &request, &failed).is_err());
     }
 }
