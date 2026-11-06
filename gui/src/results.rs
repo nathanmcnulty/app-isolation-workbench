@@ -339,7 +339,9 @@ fn project_paired(detail: &Value) -> Value {
             } else {
                 prefix.map(|p| &p["process"]).unwrap_or(&Value::Null)
             };
-            let child = if full.is_object() {
+            let child = if case != "child" {
+                &Value::Null
+            } else if full.is_object() {
                 &full["childToken"]
             } else {
                 &partial["childToken"]
@@ -859,7 +861,16 @@ mod tests {
         assert_eq!(cases[0]["outcome"], "success");
         assert_eq!(cases[3]["outcome"], "accessDenied");
         assert_eq!(cases[3]["nativeCode"], 5);
-        assert_eq!(cases[5]["descendantTokenObserved"], true);
+        for index in [0, 1, 3, 4] {
+            assert_eq!(cases[index]["descendantTokenObserved"], false);
+            assert_eq!(cases[index]["descendantIntegrity"], "unmeasured");
+            assert!(cases[index]["descendantAppContainer"].is_null());
+        }
+        for (index, integrity, app_container) in [(2, "medium", false), (5, "low", true)] {
+            assert_eq!(cases[index]["descendantTokenObserved"], true);
+            assert_eq!(cases[index]["descendantIntegrity"], integrity);
+            assert_eq!(cases[index]["descendantAppContainer"], app_container);
+        }
         assert_eq!(row["paired"]["innerProfileDeleted"], true);
         assert_eq!(row["paired"]["recordedBindings"]["fileAclUnchanged"], true);
 
@@ -912,6 +923,38 @@ mod tests {
                 .unwrap()
                 .contains("notReached")
         );
+    }
+
+    #[test]
+    fn paired_partial_descendant_tokens_belong_only_to_child_cases() {
+        let mut progress = vec![];
+        for (variant, integrity, app_container) in
+            [("baseline", "medium", false), ("candidate", "low", true)]
+        {
+            for case in ["file", "registry", "child"] {
+                // Even an unexpected token on another observation cannot become
+                // evidence that that case created a descendant.
+                progress.push(json!({"variant":variant,"case":case,"observation":{
+                    "outcome":"success","read":{"outcome":"success"},
+                    "childToken":{"integrity":{"level":integrity},"isAppContainer":app_container}
+                }}));
+            }
+        }
+        let paired = project_paired(&json!({"evidenceStatus":"driverIncomplete",
+            "driverFailure":{"progress":progress}}));
+        for index in [0, 1, 3, 4] {
+            assert_eq!(paired["cases"][index]["descendantTokenObserved"], false);
+            assert_eq!(paired["cases"][index]["descendantIntegrity"], "unmeasured");
+            assert!(paired["cases"][index]["descendantAppContainer"].is_null());
+        }
+        for (index, integrity, app_container) in [(2, "medium", false), (5, "low", true)] {
+            assert_eq!(paired["cases"][index]["descendantTokenObserved"], true);
+            assert_eq!(paired["cases"][index]["descendantIntegrity"], integrity);
+            assert_eq!(
+                paired["cases"][index]["descendantAppContainer"],
+                app_container
+            );
+        }
     }
 
     #[test]
