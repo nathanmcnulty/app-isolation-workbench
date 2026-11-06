@@ -42,13 +42,14 @@ foreach ($file in $rustSources) {
 }
 foreach ($workflow in Get-ChildItem (Join-Path $repo '.github/workflows') -Filter '*.yml') {
     $source = [IO.File]::ReadAllText($workflow.FullName)
-    if ($source -notmatch 'Provision stable PowerShell 7\.6\.7' -or $source -notmatch 'ec575cef9ec56fcd905de0d5eeac9cb7f81a0a65abb87bb5cd0e87fdfe2b8cc0' -or $source -notmatch 'PowerShell\\7\\pwsh\.exe') { throw "Unpinned workflow runtime: $($workflow.Name)" }
+    $selectionName = if ($workflow.Name -ceq 'ci.yml') { 'Select stable PowerShell 7.6.x' } else { 'Provision stable PowerShell 7.6.7' }
+    if (-not $source.Contains($selectionName) -or $source -notmatch 'ec575cef9ec56fcd905de0d5eeac9cb7f81a0a65abb87bb5cd0e87fdfe2b8cc0' -or $source -notmatch 'PowerShell\\7\\pwsh\.exe') { throw "Unpinned workflow runtime: $($workflow.Name)" }
     $jobSection = ($source -split '(?m)^jobs:\r?\n',2)[1]
     $jobs = [regex]::Matches($jobSection,'(?ms)^  ([a-zA-Z][a-zA-Z0-9_-]*):\r?\n(.*?)(?=^  [a-zA-Z][a-zA-Z0-9_-]*:\r?\n|\z)')
     foreach ($job in $jobs) {
         $jobSource = $job.Groups[2].Value
         $stage = $jobSource.IndexOf('Stage trusted hosted Core bootstrap away from the installation')
-        $provision = $jobSource.IndexOf('Provision stable PowerShell 7.6.7')
+        $provision = $jobSource.IndexOf($selectionName)
         $firstOperation = $jobSource.IndexOf('AIW inline runtime assertion')
         if ($provision -lt 0 -or $firstOperation -lt 0 -or $provision -gt $firstOperation) { throw "Job lacks runtime provisioning before its first operation: $($workflow.Name)/$($job.Groups[1].Value)" }
         $shellTemplate = 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "{IMAGE}" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
@@ -61,7 +62,7 @@ foreach ($workflow in Get-ChildItem (Join-Path $repo '.github/workflows') -Filte
             $shell = $shellLine.Value.Trim()
             if ($shell -cne 'shell: pwsh' -and $shell -cne $bootstrapShell -and $shell -cne $machineShell) { throw "Unexpected workflow shell/context/runner parsing: $($workflow.Name)" }
         }
-        if ([regex]::Matches($jobSource,'name: Stage trusted hosted Core bootstrap').Count -ne 1 -or [regex]::Matches($jobSource,'name: Provision stable PowerShell').Count -ne 1) { throw 'Each job must stage and provision its runtime exactly once' }
+        if ([regex]::Matches($jobSource,'name: Stage trusted hosted Core bootstrap').Count -ne 1 -or [regex]::Matches($jobSource,('name: ' + [regex]::Escape($selectionName))).Count -ne 1) { throw 'Each job must stage and provision its runtime exactly once' }
         if ($jobSource -notmatch "\`$env:PSModulePath = \[IO.Path\]::Combine\(\`$PSHOME, 'Modules'\)" -or $jobSource -notmatch 'Staged bootstrap runtime identity differs') { throw 'The copied bootstrap must isolate module loading from the machine runtime being upgraded' }
         if ($jobSource -match 'scripts/powershell-runtime.ps1') { throw 'Inline hosted assertions must not depend on checkout files' }
         if ($job.Groups[1].Value -in @('sign','sign-control') -and $jobSource -match 'uses: actions/checkout@') { throw 'Signing job must not check out repository sources' }
@@ -78,6 +79,7 @@ foreach ($workflow in Get-ChildItem (Join-Path $repo '.github/workflows') -Filte
         if ($inline -match 'Hosted step native command failed') { throw 'Broad stale native exit checks must not decide in-process script success' }
     }
 }
+& (Join-Path $PSScriptRoot 'test-ci-runtime-selection.ps1') | ConvertFrom-Json | Out-Null
 $unsupported = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'test-control-sandbox.ps1'))
 if ($unsupported -notmatch 'Unsupported path:' -or $unsupported -match "'start','--raw'") { throw 'Offline control must fail before Sandbox launch until a verified runtime bootstrap exists' }
 [ordered]@{passed=$true;runtime=$observed;rejectionCases=$cases.Count;launchGraphFiles=$files.Count;offlineSandboxControl='unsupported-before-launch'} | ConvertTo-Json -Depth 5 -Compress
