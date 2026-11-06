@@ -1,62 +1,57 @@
 # Draft PR — not submitted
 
-**Title:** Add offline Results Explorer and fixed paired controls to the desktop workflow
+**Title:** Add offline Results Explorer and verified fixed paired controls
 
-The desktop opens a bounded explicit selection of retained assessments, compares
-application/workflow functions, exposes failures and evidence gaps, and exports
-privacy-limited JSON/Markdown summaries to new files outside retained workspaces.
-Existing report-set verifiers determine results. Failed, not reached and
-unmeasured remain distinct; cleanup describes historical receipts separately.
-Viewing/exporting cannot execute, cancel, recover or modify a run.
+The desktop opens a bounded explicit selection of retained assessments in a
+Results view, compares application/workflow functions, and exposes failed/not-reached
+stages, evidence gaps and hash references. Existing report-set verifiers determine
+results. Historical cleanup stays separate. Viewing/exporting cannot execute,
+cancel, recover or modify a run. JSON/Markdown summaries use a minimal allowlist
+and exclusive new files outside retained workspaces.
 
 The fixed ordinary-user versus classic AppContainer file, registry and child
-controls use shared static preparation, exact approval, separate Start, lease,
-journal, receipt and owned-cleanup services. Host and guest Windows versions are
-separately bound in new profiles; legacy hashes and historical reporting/recovery
-remain valid. Desktop/CLI accept an exact guest expectation, which is remeasured
-at runtime; host drift and guest equality checks remain strict. Private bounded
-driver diagnostics preserve engineering errors without entering safe summaries.
+controls use shared preparation, exact approval, separate Start, lease, journal,
+receipt and owned-cleanup services. Exact host/guest Windows versions are separately
+committed and remeasured. A closed mapped-role transport holds identities/bytes and
+copies into fresh protected local files; unchanged strict local custody applies
+before execution. Directory read/write sharing grants no ACL rights and excludes
+DELETE; role write/delete remains blocked. Unsupported semantics fail closed.
 
-Validation covers mixed applications, missing/tampered/duplicate/partial evidence,
-hostile text, input bounds, deterministic exports/failures, unchanged retained
-inputs, repeated clicks, stale loads and keyboard/focus behavior. Synthetic and
-fake-provider evidence is explicitly labeled. Independent review findings were
-fixed. Final offline baseline evidence and demonstration:
-[implementation handoff](PAIRED-IMPLEMENTATION-HANDOFF.md).
-Model repair: affected Rust53, desktop22/4 opt-in ignored, Node7, workspace/desktop
-Clippy, formats and governance passed; unchanged completed checks were reused.
+The current pinned VM107 assessment completed all six native observations: baseline
+file/registry reads and medium-token child success; candidate file/registry native
+access-denied5 and low AppContainer child success with zero capabilities. Held/self
+and descendant tokens, unchanged fixture/resource/ACL bindings, inner jobs/profile
+cleanup and exact outer cleanup were verified. The retained comparison is eligible
+with reason `fixedControlsObserved`. Generic core outcome remains
+`insufficientEvidence`; application functions, general compatibility/isolation and
+production acceptance remain unmeasured.
 
-Native VM107 preparation/approval/Start/provider/guest failure/outer cleanup and
-actual Results export paths have been exercised. The earlier source3b diagnostic localizes
-an unsupported extended file-ID query on the first mapped agent input, before
-standard-user/resource setup. A separate closed mapped-input transport has passed
-five new inert-file/fault tests, probe3, workspace all-target Clippy, formats,
-governance and independent source review. The directory-sharing correction adds
-a sixth transport regression; its six affected tests, workspace all-target Clippy,
-format/governance and independent review passed. Strict local custody remains
-mandatory; native mapped-directory support remains unvalidated. All six native
-case outcomes remain unmeasured; positive case/token/inner-cleanup paths remain
-covered by explicitly synthetic/fake-provider tests. Each actual29-file retained
-snapshot was unchanged by deterministic safe exports; older native summaries
-also reproduced byte-for-byte with the new reader.
+Final review found and fixed descendant-token fields incorrectly reused on
+file/registry summary rows. Full/partial projection regressions cover the fix.
+A corrected ResultsStore binary reverified the same original retained run twice,
+exported new safe summaries, and confirmed all29 retained files unchanged across
+both export sessions. Reader execution/provider calls were zero. Initial exports
+and all earlier runs/packages remain preserved; no assessment repeated.
 
-The first native transport attempt refused directory ancestry sharing before
-account/resource setup. A narrow directory-only sharing correction preserves
-read-only access, denies directory replacement and keeps role-file write/delete
-refusal. Unsupported mapping behavior still fails closed. Native Results dialogs,
-focus return, keyboard filtering and evidence drill-down were additionally checked
-with the pinned3b desktop and safe archive fixtures: both exports reproduce prior
-verified summaries byte-for-byte, and all original input files remain unchanged.
+Validation includes retained source-scoped Rust/Node tests, formatting, Clippy,
+governance, safe archive/native dialog demonstrations and labeled synthetic mixed
+applications. Cases cover absent/tampered/duplicate/partial/unsupported evidence,
+hostile text, input/export failures, repeated clicks/out-of-order loads and keyboard/
+focus. Baseline evidence is workspace678/27 opt-in ignored, desktop20/4 ignored,
+Node28; later model evidence Rust53, desktop22/4 ignored, Node7. Source3d transport
+has six affected tests and workspace all-target Clippy. The final Results correction
+has four focused Rust tests, desktop all-target offline Clippy/format, desktop and
+read-only reader builds, and independent source/evidence/privacy review. These are
+separate recorded scopes, not summed or represented as a fresh whole-suite run.
+Unchanged suites were not rerun.
 
-Exact source/package/plan pins and native outcomes:
-[consolidated record](PAIRED-NATIVE-APPROVAL.md).
-Requirement-by-requirement disposition and exact native-versus-fake paths:
+Exact executed source/package/plan pins, effects, limits, native observations and
+remaining scope: [native record](PAIRED-NATIVE-APPROVAL.md).
+Requirement/path matrix and complete validation/demonstration records:
 [acceptance audit](RESULTS-ACCEPTANCE-AUDIT.md).
-Implementation source3d was packaged and staged; fresh local exact14 verification
-passed on Nov5. Its current native assessment remains pending: the remoting
-certificate expired and the official console-control tool cannot initialize.
-Current worker readiness and a new plan are unobserved. No access/security change
-or native result is inferred from historical staging.
-No application trial ran and PR #103 was not repeated. General compatibility,
-effective host isolation, full Benchmark 2, production acceptance and broader
-W4/W5 requirements remain open. Publication remains separate.
+
+No new application trial or PR #103 repeat, installation, authentication,
+security/access/VM configuration change, historical replay/recovery, push, PR
+creation, merge, signing or release. Full Benchmark 2 still needs its declared
+real-application candidate and broader measurements; W4/W5 and production
+acceptance remain open. Publication remains separate.

@@ -4,10 +4,12 @@ For the current checkout and native follow-up, start with
 [working state](WORKING-STATE.md) and the
 [source-pinned native record](PAIRED-NATIVE-APPROVAL.md). The
 [acceptance audit](RESULTS-ACCEPTANCE-AUDIT.md) distinguishes implemented, fake-only
-and native-verified paths and records the current access limitation. The evidence below is
+and native-verified paths and records the completed current fixed pair. The evidence below is
 historical and retains its recorded source/scope; it is not a current native
 acceptance claim. The earlier source3b diagnostic localizes the mapped-input FileIdInfo
-blocker; six native cases remain unmeasured.
+blocker; those earlier runs retain six unmeasured cases. Current source3d completed
+all six native observations and exact cleanup; corrected Results source53ed verifies
+and exports that retained pair. Broader Benchmark 2 and production acceptance remain open.
 
 Earlier follow-up: source `2ec65edfe749b73a13ddf0c923db973de1292fc8` improves
 approval-without-dispatch reporting and adds a read-only Results backend example.

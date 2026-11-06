@@ -175,7 +175,32 @@ behavior is supported by semantic markup and accessibility-tree inspection; a
 human screen-reader usability study was not performed. W4/W5 and production
 acceptance remain open.
 
-## Draft PR text
+## Later native fixed-control demonstration
+
+The original fixture-validation record above retains its source/scope. A later
+approved fixed-control assessment on VM107 completed all six native observations;
+it was not an application trial or a repeat of PR #103. See the current
+[native record](PAIRED-NATIVE-APPROVAL.md) and [consolidated draft](PAIRED-DRAFT-PR.md).
+Its ResultsStore verifier loaded the original retained run twice deterministically
+and exported new safe summaries with all29 retained files unchanged and zero
+reader execution/provider calls. Final review corrected descendant-token fields:
+only child rows expose them. Corrected source53ed has four focused Rust regressions,
+desktop all-target offline Clippy/format, builds and independent review passed.
+
+Current native safe demonstration:
+`C:/aiw/paired-directory-sharing-native-65b084f3-5d85-4dda-83a1-12754bbda14f/summary-corrected.md`
+and adjacent `summary-corrected.json`. JSON SHA256
+`89595a81dbfc4eac7cccb5a0e42f3267ef91cec99dc3bb6aa857f6538c7c6b6e`;
+Markdown `1d480982f1154ba77b73f9bc41b8787b823eefb737b9a4458a3510fd40382729`.
+The comparison is eligible/`fixedControlsObserved`; all application functions,
+general compatibility/isolation and production acceptance remain unmeasured.
+Original exports are preserved as historical review evidence; corrected exports
+were written to new files without repeating the assessment.
+
+## Historical Results-only draft
+
+The current combined PR draft is [PAIRED-DRAFT-PR.md](PAIRED-DRAFT-PR.md).
+This earlier draft retains the original fixture-validation scope.
 
 **Title:** Add an offline desktop Results Explorer for retained assessments
 

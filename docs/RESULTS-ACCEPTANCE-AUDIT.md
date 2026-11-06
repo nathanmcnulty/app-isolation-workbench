@@ -4,8 +4,11 @@ Audited 2026-11-05, America/Anchorage. Implementation source:
 `3d60960bb1f957c446c477978ec4a390df5565b4`, based on main
 `53c02c8dfd367b7b12ff4c167e99fd03b9e1dcf1` including PR #103.
 Documentation commits after this source do not change the staged binaries.
-The full goal remains incomplete: positive native six-case acceptance is unproven.
-Full Benchmark 2, production acceptance and W4/W5 remain open.
+Results-only correction source is `53ed71f6c204c4b64a909086ce10d7dc66162702`;
+it does not change the executed agent, cases, policy or native retained inputs.
+The authorized Results/fixed-controls milestone is demonstrated: the current3d
+native pair is verified as `fixedControlsObserved`, with all six cases and recorded
+inner/outer cleanup. Full Benchmark 2, production acceptance and W4/W5 remain open.
 
 ## Original Results requirements
 
@@ -24,18 +27,19 @@ Full Benchmark 2, production acceptance and W4/W5 remain open.
 
 | Path | Current implementation | What was actually exercised |
 |---|---|---|
-| Desktop/CLI preparation and exact approval/Start gates | `aiw-admin-workflow/src/paired.rs` → protected runner preparation → immutable plan/review → approval → separate approved Start. Both exact host/guest Windows tuples and current source/agent commitments are bound. | Native preparation, approval and one Start per earlier fresh run; coupled fake-provider complete/gate/drift cases. Current3d package was staged, but no current3d preparation record was retrieved. |
-| Native dispatch and owned outer cleanup | Existing runner/kernel/provider lease, fixed WSB configuration, request/receipt/journal/session binding and exact owned cleanup. | Real VM107 provider and guest entry, bound driver failures and verified exact outer cleanup on earlier source snapshots. Latest executed source938 exited1/66984ms; journal6/cleanupVerified. |
-| Native guest intake | `aiw-windows-platform/src/guest_paired_controls.rs` validates native origin, fixed agent path/elevated WDAG token and exact guest Windows before `FixedPairedInputs::open`. | Earlier native runs reached these guards. Source3b localized unsupported extended FileIdInfo on the first mapped agent input. Source938 refused ancestry acquisition with sharing status0xc0000043; exact AIW/Tools component was unknown. |
-| Current mapped input repair | `guest_document/paired_inputs.rs`: closed Agent/Fixture/Launcher; read-only directory access, READ\|WRITE sharing with no DELETE; role SHARE_READ; supported basic identities, exact byte commitments, full held/named revalidation and bounded copying. Generic HAF is unchanged. | Six local inert-file/fault tests and source review. Current3d Sandbox mapping/directory/role capability is **not** established by those tests or staging. |
-| Local staging and baseline/candidate controls | Fresh protected local copies → unchanged strict `HeldApplicationFile` → standard-user broker → ordinary file/64-bit registry/child baseline and zero-capability classic AppContainer candidate → held token/progress/resource checks. | No native six-case success. Complete comparison, failure prefixes, token/binding rejection and inner cleanup evidence were supplied through explicitly synthetic/fake-provider seams. Local metadata/copy tests never execute control images. |
+| Desktop/CLI preparation and exact approval/Start gates | `aiw-admin-workflow/src/paired.rs` → protected runner preparation → immutable plan/review → approval → separate approved Start. Both exact host/guest Windows tuples and current source/agent commitments are bound. | Current3d fresh preparation, nine actual document hashes, independently reviewed helper/scope, one approval and one Start on VM107. Fake-provider gate/drift cases remain separately labeled. |
+| Native dispatch and owned outer cleanup | Existing runner/kernel/provider lease, fixed WSB configuration, request/receipt/journal/session binding and exact owned cleanup. | Current3d Start PID12888/session1 exited0/123755ms; exact session `d01f3d0e-2144-975c-151f-9ec08f17980b`, journal6/cleanupVerified. No cancellation/recovery/retry. |
+| Native guest intake | `aiw-windows-platform/src/guest_paired_controls.rs` validates native origin, fixed agent path/elevated WDAG token and exact guest Windows before `FixedPairedInputs::open`. | Current3d native worker measured guest10.0.26100.9711 against separately committed host10.0.26300.9711. Earlier3b extended-ID and938 ancestry-sharing refusals remain preserved. |
+| Current mapped input repair | `guest_document/paired_inputs.rs`: closed Agent/Fixture/Launcher; read-only directory access, READ\|WRITE sharing with no DELETE; role SHARE_READ; supported basic identities, exact byte commitments, full held/named revalidation and bounded copying. Generic HAF is unchanged. | Six local inert-file/fault tests and source review, followed by the actual3d mapped transport and strict local custody path into six measured controls. This proves this pinned mapping/profile, not every provider/filesystem configuration. |
+| Local staging and baseline/candidate controls | Fresh protected local copies → unchanged strict `HeldApplicationFile` → standard-user broker → ordinary file/64-bit registry/child baseline and zero-capability classic AppContainer candidate → held token/progress/resource checks. | Native baseline file29 bytes/fixed hash, registry64 REG_BINARY29 bytes/fixed hash and medium child success; candidate fileRead/openKey denial5 and low AppContainer child success/zero capabilities. All six held/self tokens and jobs verified; profile deletion and unchanged resource/ACL/fixture/launcher bindings recorded. Failure-prefix/token-rejection branches remain fake/synthetic checks. |
 | Interruption/cancellation/recovery | Existing durable owned cancellation and exact recovery services; historical source may be reported/recovered under its rules but not restarted. Synthetic records cannot acquire native recovery. | Fake process/lease tests cover interrupted dispatch, exact recovery, copied-layout/provider rejection and duplicate/out-of-order receipts. No new explicit native recovery or cancellation was performed in the diagnostic/model/transport attempts. |
-| Retained reading and safe summary export | Existing report-set verifiers → actual desktop `ResultsStore` projection → exclusive JSON/Markdown export. | Recorded native guest-driver failures loaded twice with deterministic summaries, explicit29-file snapshots unchanged at those observations, private fields excluded and zero reader execution/provider calls. Native UI additionally verified the safe archive flow. |
+| Retained reading and safe summary export | Existing report-set verifiers → actual desktop `ResultsStore` projection → exclusive JSON/Markdown export. | Current successful native pair independently verified as eligible/fixedControlsObserved; two deterministic loads and new safe JSON/Markdown exports, 29 retained files unchanged, private markers absent, zero reader execution/provider calls. Earlier failures and native archive-dialog/keyboard proof remain retained. |
 
-Neither a fake success nor outer cleanup proves native case/token/inner-cleanup
-acceptance. Current3d must still produce six verified cases, exact bindings,
-complete driver and verified inner/outer cleanup before its fixed-profile comparison
-can be accepted. This would still not establish general compatibility or isolation.
+The current native retained verifier establishes the fixed-profile comparison.
+The generic core outcome remains `insufficientEvidence`: application functions,
+general compatibility/isolation and production acceptance remain unmeasured.
+Inner jobs/profile and exact outer cleanup are recorded; individual removal of
+guest account/canary/control-directory residue is not separately certified.
 
 ## Reused validation and demonstration records
 
@@ -70,34 +74,44 @@ can be accepted. This would still not establish general compatibility or isolati
   Documentation commits following this checkpoint must be included in the final
   generated diff/list; these two files preserve the executed/staged source boundary.
 
-## Current native limitation and remaining work
+## Current native milestone and remaining limits
 
-Resume checkpoint:
-`C:/aiw/paired-resume-20261105-8b64bda5-f002-4e52-8c3d-9f58f15bd0aa/checkpoint.json`.
-The local3d package was freshly reverified: exact14 files and receipt
-`4978d8980456958ef662206be94cc8bdae78b20936c29f3c0dc33058c1c00875`.
-VM107 staging was last observed at `2026-11-01T00:36:43Z`; its current state is
-unobserved. No current empty/ready state is inferred from that old record.
+After the user restarted the controller and updated Codex, official computer
+control worked again. The existing browser at
+`https://pve.wombat-universe.ts.net/` provided VM107's existing console. Fresh UUID,
+SID/nonadmin session1, network, Core/runtime, exact OS/provider/basic IDs and14-file
+package checks passed. Existing noVNC clipboard transported reviewed helpers and
+hash-verified readbacks; the separate expired remoting certificate was unused.
+No authentication, certificate, VM, security or access change was made.
 
-The existing remoting certificate
-`BC14DCC4E37F83161EBB55AF8624E36A79E19256` expired
-`2026-11-05T08:49:10Z`. No renewal, validation bypass, remoting connection or access
-change was attempted. The available official computer-use JS tool failed before
-initialization with `failed to write kernel assets: The system cannot find the
-path specified. (os error 3)`, including after its normal reset. Workspace, Temp
-and the configured bundled Node runtime/module directories exist. No JS/UI/native
-action ran through that failed tool. No alternate automation protocol was built.
+Actual run `paired-1793931286787802700`, canonical plan
+`bdea70e96abec6c66a0c5be8c14ff381de09a76b1df7c9f6f9bd3939a96bf02c`,
+profile `84e547dcec7d3a123595cf23307f2e401fbe42eb10a6597e9abec41156dc8e4e`.
+Full pins/effects/limits and independent source/evidence reviews:
+[native record](PAIRED-NATIVE-APPROVAL.md). Private audit:
+`C:/aiw/paired-directory-sharing-native-65b084f3-5d85-4dda-83a1-12754bbda14f`.
+`native-terminal-readback.json` retains actual records. Initial exports in
+`native-results-export.json` exposed a display defect: nonchild cases copied the
+separate child token. Source53ed limits descendant fields to child cases, with
+four focused Rust tests, desktop all-target offline Clippy/format, independent
+review and corrected desktop/reader builds passed. No native assessment repeated.
+`native-results-export-corrected.json` records the corrected actual ResultsStore
+verification against the original VM107 run, two deterministic loads, new exclusive
+`Exports-Corrected` outputs and the same29-file snapshot unchanged across both
+export sessions. Corrected summary JSON SHA256
+`89595a81dbfc4eac7cccb5a0e42f3267ef91cec99dc3bb6aa857f6538c7c6b6e`;
+Markdown `1d480982f1154ba77b73f9bc41b8787b823eefb737b9a4458a3510fd40382729`.
+File/registry descendant fields are false/null/unmeasured; both child rows retain
+their own tokens. Initial summaries remain preserved as historical review evidence.
 
-When an authorized access route is operational, continue with fresh VM107 identity,
-runtime/provider/package and destination checks. Then prepare once with the pinned
-guest tuple, retrieve actual nine documents and plan/profile hashes, independently
-review the closed generated helper/scope, present the concrete scope, and perform
-one Start under standing authority. Preserve every old run; no blind retry or
-historical recovery. After settlement, verify six cases and both cleanup layers,
-then read/export the exact retained run with unchanged-input/determinism checks.
-No new3d plan ID/hash or native result is invented here.
+Independent review also fixed private diagnostic helpers before their use:
+bounded same-byte locator/document reads with leaf no-follow, accurate parent-owner
+labeling, and capped Results output drains with a shared60s observer deadline.
+Six focused inert-file checks passed. Creating a leaf symbolic-link fixture
+required unavailable privilege, so that check was not claimed; no security change.
+The production source and previously completed Rust/Node suites were unchanged.
 
-A human screen-reader study, real production data selection, positive current
-native paired acceptance, full Benchmark 2 and production acceptance remain
-unproven. Publication, new application trials and broader W4/W5 closure stay outside
-this work's authorized scope.
+A human screen-reader study and real production-data selection remain unperformed.
+Full Benchmark 2 still requires its declared real-application candidate and broader
+measurements. No new application trial, PR #103 repeat, W4/W5 closure or production
+acceptance is claimed. Publication remains separate.

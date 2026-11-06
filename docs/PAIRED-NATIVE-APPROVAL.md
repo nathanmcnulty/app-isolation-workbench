@@ -1,5 +1,10 @@
 # Reconciliation and bounded native approval request
 
+Current milestone (2026-11-05, America/Anchorage): source3d completed the native
+fixed six-case pair; retained comparison is eligible/`fixedControlsObserved`.
+The original request/attempt below is historical and must never be replayed.
+Full Benchmark 2, production acceptance and W4/W5 remain open.
+
 Request ID: `AIW-PAIRED-NATIVE-F99BBD4-20261030`. Prepared 2026-10-30.
 Status: **subsequently approved; one Start attempted and stopped during required
 provider-list preflight, before Sandbox dispatch**. See the
@@ -15,7 +20,7 @@ The approved execution record below and the latest standing test authority
 supersede older pending-proposal wording.
 Publication remains separate.
 
-## Current staged candidate: 3d60960; fresh native verification pending
+## Current completed native fixed pair: 3d60960
 
 Standing fixed-control test authority remains in effect; no per-test permission
 question is pending. The implementation is committed and independently reviewed.
@@ -23,43 +28,80 @@ Six affected transport tests, workspace all-target Clippy, format/governance and
 source review passed; unchanged suites were reused. Complete requirement/path
 disposition: [acceptance audit](RESULTS-ACCEPTANCE-AUDIT.md).
 
-| Binding | Exact staged value |
+| Binding | Exact executed value |
 |---|---|
 | Implementation source | `3d60960bb1f957c446c477978ec4a390df5565b4` |
 | VM107 package | `C:\AIW-Paired-3d60960-20261031\Package` |
 | Receipt SHA-256 | `4978d8980456958ef662206be94cc8bdae78b20936c29f3c0dc33058c1c00875` |
 | CLI / desktop SHA-256 | `93434e3b669eb0b7abf41eb8d0821d05fb551f78d2cfd4f45a74314e585274ce` / `c2b25076dfaa31357a4b35c6a091b27110736988aeb1d6cb9b447386435259c1` |
-| Bundled agent / intended fixed role bytes | `e90bd1300201dfd3bc93c03248ff26897e179d35f469e601b5d0bb4e2eb5c9bc`, **6,068,224 bytes**, static-CRT x64 |
+| Agent / fixture / launcher approved bytes | `e90bd1300201dfd3bc93c03248ff26897e179d35f469e601b5d0bb4e2eb5c9bc`, **6,068,224 bytes each**, static-CRT x64 |
 | Fixed source / revision | `66994af3552e6482bf1c8c97e2f852c40a52415f0c644decb6eb5a927a00640e` / `aiw.dev/paired-file-registry-child/v0alpha2` |
-| Intended host / guest | `10.0.26300.9711` / `10.0.26100.9711`, both x64; fresh verification required |
-| Target | VM107, UUID `e5cecc90-35c2-4831-bf9c-424be23f7d4e`, MAC `CC:34:21:B8:5A:31`, IP `192.168.1.174`, existing `AIW\labadmin`, non-admin console session1/Core7.6.9; reverify before use |
+| Measured host / guest | `10.0.26300.9711` / `10.0.26100.9711`, both x64 |
+| Verified target | VM107, UUID `e5cecc90-35c2-4831-bf9c-424be23f7d4e`, MAC `CC:34:21:B8:5A:31`, IP `192.168.1.174`, existing `AIW\labadmin`, non-admin console session1/Core7.6.9 |
+| Run / canonical plan | `paired-1793931286787802700` / `bdea70e96abec6c66a0c5be8c14ff381de09a76b1df7c9f6f9bd3939a96bf02c` |
+| Profile / project revision | `84e547dcec7d3a123595cf23307f2e401fbe42eb10a6597e9abec41156dc8e4e` / `e716b352a86c3ad245823bd7a80e3d0a0315a30294ed709f9f62f27f9c99909f` |
+| Request / receipt / evidence root | `6da192b83ade6a59c22ba7e0b4a4a05ccf4443efc06dd738f25b9ce1eb098d5b` / `85ccc306f7f35cd5856dc898203beaf417b0d73155b75249414fe12abc89b016` / `afbde619bfcd4a695129e954187cca128102c880b3162b95e43fa1fa6b4e300b` |
+| Reviewed helper | `b78f37b7f28b5c649c5c4b38dbad860ddbf3c3296d99039dd18652613a557b70`, 18,362 bytes |
+| Start / settlement | PID12888/session1, `2026-11-06T02:21:33Z`, exit0/123755ms; one approval, one Start, no cancellation/recovery/retry |
+| Exact outer cleanup | Session `d01f3d0e-2144-975c-151f-9ec08f17980b`; journal6, clean/cleanupVerified |
 
-Local exact14 package verification was repeated as a freshness check on Nov5.
-VM staging was last observed `2026-11-01T00:36:43Z`; audit
+Fresh local and VM exact14 package verification passed on Nov5. Private audit:
 `C:/aiw/paired-directory-sharing-native-65b084f3-5d85-4dda-83a1-12754bbda14f`.
-Preparation must create and verify the fixture/launcher copies from those same
-bytes; new role copies are not claimed as observed. Current VM state is unobserved.
-No3d prepared-state/approval/Start record was
-retrieved; no run/plan/helper hash is invented or adopted from an old run.
+After the user restarted the controller and updated Codex, official computer
+control reached the existing browser at `https://pve.wombat-universe.ts.net/` and
+VM107's existing console. All target/runtime/provider/package pins were freshly
+verified. The separate expired remoting certificate remained unused; no renewal,
+validation bypass, authentication, access, security or VM configuration change.
 
-The existing remoting certificate expired `2026-11-05T08:49:10Z`, and the available
-official computer-use tool fails before initialization with missing kernel assets
-(OS error3), including after reset. No remoting connection, certificate renewal,
-validation bypass, UI/native action or access/security change was attempted.
-Checkpoint:
-`C:/aiw/paired-resume-20261105-8b64bda5-f002-4e52-8c3d-9f58f15bd0aa/checkpoint.json`.
+One fresh preparation produced the actual9 bounded documents, mirrored with exact
+byte hashes in `prepared-state.json`. The closed helper, all9 hashes, canonical
+plan and full effects/limits were independently reviewed and the complete
+`consolidated-execution-scope.md` was presented before invocation under standing
+user authority. Existing noVNC clipboard transported reviewed helpers and
+hash-verified readbacks; original historical journal bytes remained unchanged.
+No old run was adopted or replayed.
 
-The current directory adapter permits READ|WRITE sharing with read-only access,
-denies DELETE sharing and leaves role SHARE_READ and strict local HAF unchanged.
-Native support remains unproven. Fixed effects, six case expectations, policy,
-limits and owned cleanup/stop conditions below remain unchanged. Once an authorized
-access route operates, reverify all current pins/destination, prepare once, retrieve
-the actual9 documents and immutable plan/profile, independently review the closed
-generated helper/scope, present that concrete scope, then use one Start. Existing
-standing approval covers the fixed test; it does not relax drift/cleanup guards.
-Positive six-case/inner-cleanup acceptance and full Benchmark 2 remain open.
+The native driver completed all six observations: ordinary file29 matching bytes,
+registry64 REG_BINARY29 matching bytes and medium-token child success; candidate
+fileRead/openKey native access-denied5 and low AppContainer child success with zero
+capabilities and the same user/package bindings. All six held/self tokens and
+empty inner jobs, profile deletion, and unchanged fixture/launcher/resource bytes
+and ACLs were recorded. These exercise the repaired mapped-input transport and
+unchanged strict local HAF on this pinned worker/profile. They do not generalize
+to other mappings or applications. Account/canary residue is destroyed with the
+outer worker; individual guest-residue deletion is not separately certified.
 
-## Latest recorded native transport assessment: 9384503
+`native-terminal-readback.json` retains the actual11 terminal/output records;
+its 90,768-byte payload SHA256 is
+`cc0659bcb5f1dae441d446ce1d12a9ab460d1e4d0ca75123d8a793d7be39996a`.
+Independent source/evidence review verified receipt/request/profile/artifact
+bindings and six observations. The actual retained ResultsStore reader loaded
+this explicit run twice deterministically and wrote new safe summaries outside
+Evidence; all29 retained files were unchanged and reader execution/provider calls
+were zero. Generic core `insufficientEvidence` is expected: the fixed-profile
+comparison is eligible/`fixedControlsObserved`, while application functions,
+general compatibility/isolation and production acceptance remain unmeasured.
+
+Final review found and fixed a Results display defect: file/registry rows copied
+descendant fields from the separate child case. Source `53ed71f6c204c4b64a909086ce10d7dc66162702`
+limits descendant fields to child cases, with full/partial regressions. Four focused
+Rust tests, desktop all-target offline Clippy/format and independent review passed.
+The native assessment is unchanged and was not repeated. Initial exports remain
+historical evidence; corrected exports use a separately pinned reader and new
+`Exports-Corrected` files. Full Benchmark 2, W4/W5 and production acceptance stay open.
+
+Corrected reader source53ed SHA256
+`3bfc6abe3c82cf60de80c4d357618fabfe0ce1b66cf2f8ad8e8892bf227416ab`,
+9,685,504 bytes, reverified the original retained VM107 workspace through the same
+ResultsStore/report services. New JSON/Markdown hashes are
+`89595a81dbfc4eac7cccb5a0e42f3267ef91cec99dc3bb6aa857f6538c7c6b6e` /
+`1d480982f1154ba77b73f9bc41b8787b823eefb737b9a4458a3510fd40382729`.
+`native-results-export-corrected.json` records exit0, two deterministic loads,
+all29 original retained files unchanged across both export sessions, private
+markers absent and zero reader assessment/provider calls. Only child rows expose
+descendant tokens. Publication remains separate.
+
+## Previous native transport assessment: 9384503
 
 Standing fixed-control authority covered this fresh assessment on unchanged VM107,
 existing non-admin console session1/Core7.6.9. The actual helper, all9 original
