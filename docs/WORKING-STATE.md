@@ -37,6 +37,13 @@ Kernel outcome is cancelled, evidence root absent and cleanup complete. No
 application observations or incompatibility claim are added. See the
 [cancellation record](SEVENZIP-NATIVE-ACCEPTANCE.md#native-owned-cancellation-at-593281a).
 
+Review corrections: missing/unholdable 7-Zip completion artifacts and held-file
+revalidation failures now record a terminal failed result after verified cleanup.
+Results includes 7-Zip in the application filter, excludes profiles without the
+selected archive function, and scopes the broader baseline gap when all four
+fixed baseline functions were measured. These are source corrections; they add
+no native application measurements. Focused regression tests cover these paths.
+
 ## Source, evidence and review
 
 [PR #106](https://github.com/nathanmcnulty/app-isolation-workbench/pull/106)

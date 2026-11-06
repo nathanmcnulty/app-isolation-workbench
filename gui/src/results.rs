@@ -176,6 +176,30 @@ fn project_row(report: &Value, row: &Value, index: usize) -> Value {
                     "unmeasured",
                 );
                 sevenzip = project_sevenzip(d);
+                // The aggregate gap concerns broader application coverage, not
+                // the receipt-verified fixed archive baseline shown in this row.
+                let baseline_measured = matches!(evidence_status, "verified" | "driverIncomplete")
+                    && ["create", "test", "extract", "verify"]
+                        .iter()
+                        .all(|function| {
+                            d["comparison"]["functions"].as_array().is_some_and(|rows| {
+                                rows.iter().any(|row| {
+                                    row["function"] == *function
+                                        && matches!(
+                                            row["baseline"].as_str(),
+                                            Some("passed" | "failed")
+                                        )
+                                })
+                            })
+                        });
+                if baseline_measured {
+                    for gap in &mut gaps {
+                        if gap == "ordinaryBaseline" {
+                            *gap = "Ordinary baseline beyond the fixed archive workflow".into();
+                        }
+                    }
+                }
+
                 gaps.push("GUI, shell, uninstall, registry/system changes, network/IPC/UI, all descendants and endpoint equivalence unmeasured".into());
                 (
                     "7-Zip 26.05",
@@ -355,6 +379,36 @@ fn project_sevenzip(detail: &Value) -> Value {
 #[cfg(test)]
 mod sevenzip_projection_tests {
     use super::*;
+    #[test]
+    fn sevenzip_baseline_gap_is_scoped_only_when_all_fixed_functions_are_measured() {
+        let mut report = json!({"missingEvidence":["ordinaryBaseline","descendantCoverage"],"entries":[{"source":{"kind":"windowsSandbox","evidence":{"profile":"sevenZip","result":{"kind":"sevenZip","report":{"evidenceStatus":"verified","comparison":{"functions":[
+            {"function":"create","baseline":"passed"},{"function":"test","baseline":"passed"},{"function":"extract","baseline":"passed"},{"function":"verify","baseline":"passed"}
+        ]}}}}}}]});
+        let gaps = project(&report).rows[0]["evidenceGaps"].clone();
+        assert!(
+            !gaps
+                .as_array()
+                .unwrap()
+                .contains(&json!("ordinaryBaseline"))
+        );
+        assert!(gaps.as_array().unwrap().contains(&json!(
+            "Ordinary baseline beyond the fixed archive workflow"
+        )));
+        assert!(
+            gaps.as_array()
+                .unwrap()
+                .contains(&json!("descendantCoverage"))
+        );
+        report["entries"][0]["source"]["evidence"]["result"]["report"]["comparison"]["functions"]
+            [3]["baseline"] = json!("unmeasured");
+        assert!(
+            project(&report).rows[0]["evidenceGaps"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("ordinaryBaseline"))
+        );
+    }
+
     #[test]
     fn sevenzip_results_keep_archive_functions_and_unknowns_without_private_fields() {
         let report = json!({"entries":[{"id":"private@example.invalid","functions":{"createArchive":true,"testArchive":false},"source":{"kind":"windowsSandbox","evidence":{"profile":"sevenZip","result":{"kind":"sevenZip","report":{

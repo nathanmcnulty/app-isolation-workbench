@@ -15,7 +15,7 @@
       (!filters.outcome || row.outcome === filters.outcome) &&
       (!filters.comparison || (row.paired && (filters.comparison === "eligible" ? row.paired.eligible === true : filters.comparison === "inconclusive" && row.paired.eligible !== true))) &&
       ((!filters.control && !filters.controlOutcome) || row.paired?.cases?.some(item => (!filters.control || item.case === filters.control) && (!filters.controlOutcome || item.outcome === filters.controlOutcome))) &&
-      (!filters.function || (filters.status ? row.functions[filters.function] === filters.status : row.functions[filters.function] !== "unmeasured")) &&
+      (!filters.function || (filters.status ? row.functions[filters.function] === filters.status : Object.hasOwn(row.functions, filters.function) && row.functions[filters.function] !== "unmeasured")) &&
       (filters.function || !filters.status || Object.values(row.functions).includes(filters.status)));
   }
   // Each controller serializes its native dialog/read/export. Epochs also reject stale completions.

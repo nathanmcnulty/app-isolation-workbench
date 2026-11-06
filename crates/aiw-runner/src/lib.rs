@@ -821,13 +821,7 @@ pub(crate) fn execute_wsb_golden_probe(
     }
     #[cfg(windows)]
     let seven_zip_output_custody = if request.seven_zip.is_some() {
-        let files = sevenzip_report_output::hold_sevenzip_output(&context.output_root)?;
-        if files.len() != 3 {
-            return Err(RunnerError::Receipt(
-                "7-Zip completion artifacts are missing".into(),
-            ));
-        }
-        Some(files)
+        Some(hold_complete_sevenzip_output(layout, &context.output_root)?)
     } else {
         None
     };
@@ -1040,9 +1034,12 @@ pub(crate) fn execute_wsb_golden_probe(
     };
     #[cfg(windows)]
     if let Some(files) = &seven_zip_output_custody {
-        for file in files {
-            file.revalidate().map_err(|_| RunnerError::Drift)?;
-        }
+        finish_cleaned_attempt(layout, || {
+            for file in files {
+                file.revalidate().map_err(|_| RunnerError::Drift)?;
+            }
+            Ok(())
+        })?;
     }
     let result = RunResult::new(
         context.plan.run_id.clone(),
@@ -2252,6 +2249,38 @@ fn record_prestart_failure(layout: &RunLayout, error: RunnerError) -> Result<(),
         ));
     }
     record_failure_result(layout, error, false)
+}
+
+#[cfg(windows)]
+fn hold_complete_sevenzip_output(
+    layout: &RunLayout,
+    output: &Path,
+) -> Result<Vec<aiw_windows_platform::HeldApplicationFile>, RunnerError> {
+    finish_cleaned_attempt(layout, || {
+        let files = sevenzip_report_output::hold_sevenzip_output(output)?;
+        if files.len() != 3 {
+            return Err(RunnerError::Receipt(
+                "7-Zip completion artifacts are missing".into(),
+            ));
+        }
+        Ok(files)
+    })
+}
+
+// Called only after exact-session absence and provider quiescence are verified.
+// Every subsequent verification error must leave a durable terminal result.
+#[cfg(any(windows, test))]
+fn finish_cleaned_attempt<T>(
+    layout: &RunLayout,
+    finish: impl FnOnce() -> Result<T, RunnerError>,
+) -> Result<T, RunnerError> {
+    match finish() {
+        Ok(value) => Ok(value),
+        Err(error) => {
+            record_terminal_failure(layout, error.clone())?;
+            Err(error)
+        }
+    }
 }
 
 fn record_terminal_failure(layout: &RunLayout, error: RunnerError) -> Result<(), RunnerError> {
@@ -3499,6 +3528,62 @@ mod tests {
         evidence.validate().unwrap();
         evidence
     }
+    #[cfg(windows)]
+    #[test]
+    fn sevenzip_missing_or_unholdable_output_records_cleaned_failure() {
+        for unholdable in [false, true] {
+            let (root, layout, _, _) = setup();
+            let output = root.0.join("output");
+            if unholdable {
+                fs::create_dir(output.join("completion.json")).unwrap();
+            }
+            let error = hold_complete_sevenzip_output(&layout, &output)
+                .err()
+                .unwrap();
+            assert!(if unholdable {
+                matches!(error, RunnerError::Drift)
+            } else {
+                matches!(error, RunnerError::Receipt(_))
+            });
+            let result = layout.read_result().unwrap();
+            assert_eq!(result.outcome, RunOutcome::Failed);
+            assert!(result.cleanup_complete);
+            assert!(result.evidence_root.is_none());
+            assert!(matches!(
+                layout.status().unwrap(),
+                aiw_orchestrator::RecoveryStatus::Terminal { .. }
+            ));
+        }
+    }
+
+    #[test]
+    fn post_cleanup_errors_record_terminal_failure_without_evidence() {
+        for error in [
+            RunnerError::Drift,
+            RunnerError::Receipt("7-Zip completion artifacts are missing".into()),
+            RunnerError::Cancelled,
+        ] {
+            let (_root, layout, _, _) = setup();
+            let result = finish_cleaned_attempt(&layout, || Err::<(), _>(error.clone()));
+            assert_eq!(result.unwrap_err().to_string(), error.to_string());
+            let result = layout.read_result().unwrap();
+            assert_eq!(
+                result.outcome,
+                if matches!(error, RunnerError::Cancelled) {
+                    RunOutcome::Cancelled
+                } else {
+                    RunOutcome::Failed
+                }
+            );
+            assert!(result.cleanup_complete);
+            assert!(result.evidence_root.is_none());
+            assert!(matches!(
+                layout.status().unwrap(),
+                aiw_orchestrator::RecoveryStatus::Terminal { .. }
+            ));
+        }
+    }
+
     fn setup() -> (
         Root,
         RunLayout,
