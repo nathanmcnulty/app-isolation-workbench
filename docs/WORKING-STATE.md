@@ -1,106 +1,78 @@
 # Working state
 
 Updated 2026-11-05 (America/Anchorage). Checkout `C:\aiw\app-isolation-workbench`,
-branch `codex/real-app-assessment`, starting from main `8aeeafc` (PR #105 merged).
-Current Results correction source
-`53ed71f6c204c4b64a909086ce10d7dc66162702`; native fixed-control execution source
-`3d60960bb1f957c446c477978ec4a390df5565b4`. Base main `53c02c8` includes PR #103.
-Start with `scripts/work-status.ps1` and [acceptance audit](RESULTS-ACCEPTANCE-AUDIT.md).
+branch `codex/real-app-assessment`, source `b7f17cfab74ebb98ebda6687643267c18de9b002`.
+Started from current main `8aeeafc` including merged PR #105. Working branch has not
+been pushed or published. Start with `scripts/work-status.ps1`.
 
-## Active real-application slice
+## Active real-application assessment
 
-Selected 7-Zip 26.05 x64: install, create/test/extract a fixed archive, and verify
-the exact extracted inventory and SHA-256 bytes as the same standard user in an
-ordinary baseline and classic AppContainer with zero capability SIDs. First prove
-the fixed driver in a disposable Sandbox on VM107; then integrate the supported
-path with existing approval, retained reporting and desktop Results. This is an
-active implementation, not completed application acceptance.
+Selected **7-Zip 26.05 x64, install/create/test/extract/verify**, ordinary standard
+user versus classic AppContainer with zero capabilities inside a disposable
+Sandbox on VM107. [Declared workflow](SEVENZIP-ASSESSMENT.md) records provenance,
+measurements and gaps. [MXC selection](MXC-ASSESSMENT-SELECTION.md) separately pins
+current release/main research across all four families; the old planning adapter
+has not advanced. MSIX alone and the outer Sandbox are not isolation proof.
 
-The default-off `research-sevenzip` examples now implement the bounded native
-driver and a protected, separate Prepare/Approve/Start Sandbox trial. Independent
-review fixes cover mapped-input custody, protected input/parent ACLs, non-mutating
-write/delete probes, atomic stage publication and error/cleanup retention.
-Six focused platform tests, two host marker/recovery tests, all-target feature
-Clippy, format/governance and static-CRT x64 release builds passed. Full logs are
-`C:/aiw/sevenzip-{final-platform-tests,host-tests,final-clippy,final-governance}.log`
-and `sevenzip-static-{helper,host}-build.log`. These are offline checks.
-Fresh inert package and independent byte pins are under
-`C:/aiw/sevenzip-assessment-20261105/Package` and adjacent `package-pins.json`.
-See [declared workflow and coverage](SEVENZIP-ASSESSMENT.md).
+Source b7f17cf adds default-off `research-sevenzip` guest and host examples, fixed
+mapped-input custody with strict local execution custody, process-driver controls
+before install, held app tokens, exact inventory/content verification, protected
+input/write/delete and outside-grant canaries, durable atomic stages, separate
+Prepare/Approve/Start and original-session cleanup/recovery. These are research
+observations, not production receipts or an implemented desktop application path.
+Independent consequential review fixes are complete, including the separately
+reviewed fixed VM107 staging wrapper's held ancestry/executable custody.
 
-Official `https://www.7-zip.org/download.html` links to the `ip7z/7zip` 26.05
-GitHub release. The downloaded `7z2605-x64.exe` has 1,663,506 bytes and SHA-256
-`fd99e86f57d8f429ef5ed045bf98315af962e2309b0f1ba87a147a44c71647d0`, matching
-GitHub's independently retrieved asset digest. Authenticode is NotSigned; vendor
-origin/digest are provenance observations, not a signature claim. Retained at
-`C:/aiw/sevenzip-assessment-20261105`; never executed on this host.
+Offline checks passed: six focused platform tests; two host marker/recovery tests;
+feature-enabled all-target Clippy with warnings denied; format/governance; static
+CRT x64 release builds. Logs `C:/aiw/sevenzip-final-platform-tests.log`,
+`sevenzip-host-tests.log`, `sevenzip-final-clippy.log`, `sevenzip-final-governance.log`,
+`sevenzip-static-helper-build.log`, `sevenzip-static-host-build.log`.
+Wrapper native custody compiled and five inert checks passed; see the private audit.
 
-Current browser inspection found the existing VM107 desktop responsive, with its
-completed Results command at the prompt. No guest command, installation, provider
-operation or VM change has occurred for this slice. The remoting certificate is
-historically expired; no bypass or access expansion is authorized by that fact.
+## Native access blocker — no application executed
 
-Current MXC release/family research is separate from the old planning adapter;
-see [candidate selection](MXC-ASSESSMENT-SELECTION.md). Classic AppContainer is
-selected for its existing measured authority, not an inference that MXC cannot
-run or that MSIX alone provides isolation.
+Private audit/package: `C:/aiw/sevenzip-assessment-20261105`.
+`Package/Trial.ps1` supports separate fixed Prepare/Approve/Start/Recover/Read;
+`package-pins.json`, `archive-pins.json`, `provenance.json`,
+`wrapper-custody-tests.json`, `access-readback.json` retain exact local observations.
+The inert archive `sevenzip-trial-b7f17cf.zip` is 2,486,236 bytes, SHA-256
+`3afefbc7ae241d02a697c1a77ab0bf84f8e4b20fc3303f308ec2902ac006bfa9`.
+Target package directory is `C:\AIW-SevenZip-Trial-20261105` on **VM107 only**.
+Do not infer successful staging from this proposed destination.
 
-## Completed merged milestone (PR #105)
+Fresh console readback verified UUID107, Core7.6.9, nonadmin `AIW\labadmin`, session1.
+The direct transfer failed before creating its destination. A large clipboard
+message disconnected the browser bridge; its restored connection had unreliable
+clipboard/key input. No numbered-parts receiver was executed. The final guest
+screen showed a clean prompt after reverting only our unexecuted input. No native
+helper/host EXE, installer, application, provider, approval or Start ran for this
+slice. Both temporary delivery servers are stopped. The owned trial console tab
+closed; cleanup of the local artifact browser tab could not be verified after a
+debugger error. The user's original Proxmox tab was preserved.
 
-Results Explorer implements explicit bounded retained selections, existing report
-verification, comparisons/filters/failure and evidence drill-down, separate historical
-cleanup and exclusive allowlisted JSON/Markdown export outside retained locations.
-Viewing has no assessment/provider/action route. Native dialogs and keyboard/focus
-proof, safe fixtures and labeled synthetic mixed-application examples are retained.
+A fresh normal TLS handshake to `192.168.1.174:5986` failed `NotTimeValid` without
+sending credentials. Enrolled certificate `BC14DCC4E37F83161EBB55AF8624E36A79E19256`
+expired `2026-11-05T08:49:10Z`. No TLS bypass, certificate renewal, firewall,
+network, authentication, VM or other security-setting change was made.
+User input is pending: reconnect Edge computer control or restore the existing
+trusted VM107 remoting route. On restoration, recheck identity and destination
+absence, stage the independently pinned archive, run **Prepare only**, inspect its
+actual typed proposal, and then use separate exact approval and Start. Do not guess
+plan hashes, repeat an old run, or treat transfer/driver failure as incompatibility.
 
-On Nov5, restored official computer control reached the user's existing Proxmox
-browser and VM107 console. Fresh identity/nonadmin session1/runtime/network/OS/provider
-and exact14 package pins passed. One fresh preparation, nine actual typed records,
-independent helper/scope review and presentation preceded one approval/Start.
-Run `paired-1793931286787802700`, canonical plan
-`bdea70e96abec6c66a0c5be8c14ff381de09a76b1df7c9f6f9bd3939a96bf02c`.
-Start PID12888/session1 exited0/123755ms. All six native observations, exact tokens,
-unchanged resource/ACL/fixture/launcher bindings, empty inner jobs/profile deletion
-and exact outer session cleanup were verified. Comparison: `fixedControlsObserved`.
-Generic core outcome remains `insufficientEvidence`; application functions and
-compatibility/isolation/production acceptance remain unmeasured.
+## Preserve the completed milestone
 
-Final review fixed a display defect in source53ed: file/registry rows no longer copy
-separate child-token fields. Four focused Rust regressions, desktop all-target offline
-Clippy, format, independent review and corrected desktop/reader builds passed.
-The corrected ResultsStore binary reverified the same original VM107 run twice and
-exported new `Exports-Corrected` summaries: 29 retained files unchanged, deterministic,
-private markers absent, zero reader execution/provider calls. Initial exports and
-all packages/runs remain preserved; no assessment repeat or recovery.
+PR #105 is merged. VM107 run `paired-1793931286787802700` completed all six fixed
+controls with exact cleanup; source53ed corrected Results exports were deterministic,
+preserved all29 retained files, and made zero reader execution/provider calls.
+Reuse the [native record](PAIRED-NATIVE-APPROVAL.md),
+[acceptance audit](RESULTS-ACCEPTANCE-AUDIT.md) and
+[Results documentation](RESULTS-EXPLORER.md). Original audit:
+`C:/aiw/paired-directory-sharing-native-65b084f3-5d85-4dda-83a1-12754bbda14f`.
+Preserve VM106, every old package/run, accidental `C:\Evidence` and unrelated work.
 
-## Review artifacts and validation
-
-Private audit `C:/aiw/paired-directory-sharing-native-65b084f3-5d85-4dda-83a1-12754bbda14f`:
-`consolidated-execution-scope.md`, `prepared-state.json`, `native-terminal-readback.json`,
-`native-results-export-corrected.json`, `summary-corrected.json`, `summary-corrected.md`.
-Corrected summary hashes: JSON
-`89595a81dbfc4eac7cccb5a0e42f3267ef91cec99dc3bb6aa857f6538c7c6b6e`;
-Markdown `1d480982f1154ba77b73f9bc41b8787b823eefb737b9a4458a3510fd40382729`.
-Current local desktop `gui/target/debug/aiw-desktop.exe`, source53ed, SHA256
-`14be8885cb720ca4ae6dc97e061ebf54d5579fc80123821301740d99362f42d9`.
-
-[Acceptance audit](RESULTS-ACCEPTANCE-AUDIT.md) retains source-scoped baseline/model/
-transport/Rust/Node checks; unchanged suites were not rerun or summed. Private
-console helper review fixed bounded same-byte reads, leaf no-follow and capped
-shared-deadline drains. Six inert-file checks passed; symbolic-link fixture creation
-required unavailable privilege, so that check was not claimed. No security change.
-
-## Boundary and remaining work
-
-No live build, assessment or observer remains. No further native run is needed for
-this milestone. No new application trial, PR #103 repeat, historical replay/recovery,
-installation, authentication, access/security/VM change, publication, push/PR creation,
-merge, signing or release occurred. Expired remoting was unused; existing noVNC
-clipboard transported reviewed pinned bytes without changing access.
-
-Full Benchmark 2 still needs its declared real-application candidate and broader
-measurements. Human screen-reader study/real production-data selection remain
-unperformed. W4/W5 and production acceptance stay open. Publication remains separate.
-See [native record](PAIRED-NATIVE-APPROVAL.md), [historical PR draft](PAIRED-DRAFT-PR.md) and
-[usage/demonstration](RESULTS-EXPLORER.md). Preserve VM106, all old retained runs,
-original packages, accidental `C:\Evidence` and unrelated work.
+Next after feasibility: production preparation/approval/session integration,
+cancellation/recovery, verified retained comparison and sanitized Results export,
+desktop entry, native validation and review. The requested full application flow,
+Benchmark2, W4/W5 and production acceptance remain **open**.
