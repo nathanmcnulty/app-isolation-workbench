@@ -32,6 +32,22 @@ admin needs, available platform capabilities, and retained evidence. Assessment,
 comparison, and packaging can inform one another; none requires completing every
 provider first. Community feedback is welcome but is not a development gate.
 
+## Choices for the next useful slice
+
+Fill these in when selecting the next experiment, using what the existing session
+has already established. These are prompts, not additional release gates.
+
+- **Application and workflow:** which administrator need, exact app/version, and
+  representative install-and-use tasks should the next slice assess?
+- **Coverage:** which steps can an agent or script exercise, which need a person,
+  and what will remain explicitly unmeasured?
+- **Isolation candidate:** which MXC family or complementary AppContainer/MSIX
+  path fits that workflow and is available on the chosen disposable worker?
+  State the intended restrictions before comparing outcomes.
+- **Useful output:** is an assessment report enough for this slice, or is a
+  reusable launch profile or package needed? Choose free tooling where feasible
+  and keep any commercial handoff optional.
+
 ## Current delivery sequence
 
 The first preview helps an administrator answer: **Does the supported workflow
