@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod sevenzip;
+pub mod sevenzip_artifacts;
 pub use sevenzip::{SevenZipComparison, SevenZipRequest, SevenZipResult};
 
 mod application_token;

@@ -200,6 +200,9 @@ pub struct SevenZipVariant {
     pub input_after: Option<SevenZipInventory>,
     pub extracted: Option<SevenZipInventory>,
     pub archive: Option<SevenZipFileDigest>,
+    /// Private investigatory bytes. Absent in historical v0alpha1 observations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifacts: Option<crate::sevenzip_artifacts::SevenZipArtifacts>,
 }
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -515,6 +518,18 @@ impl SevenZipResult {
                 if archive.size_bytes == 0 {
                     return Err("empty archive identity".into());
                 }
+            }
+            if let Some(artifacts) = &variant.artifacts {
+                artifacts.validate(
+                    variant
+                        .archive
+                        .as_ref()
+                        .ok_or("retained bytes without archive identity")?,
+                    variant
+                        .extracted
+                        .as_ref()
+                        .ok_or("retained bytes without extracted inventory")?,
+                )?;
             }
             validate_stage_order(variant)?;
         }
@@ -858,6 +873,7 @@ mod tests {
             extract: Some(process(first + 2, candidate)),
             input_after: Some(sevenzip_fixture_inventory()),
             extracted: Some(sevenzip_fixture_inventory()),
+            artifacts: None,
             archive: Some(SevenZipFileDigest {
                 sha256: if candidate {
                     "c".repeat(64)
@@ -1276,6 +1292,8 @@ mod tests {
         );
         let historical = serde_json::to_value(&result).unwrap();
         assert!(historical.get("driverDiagnostic").is_none());
+        assert!(historical["baseline"].get("artifacts").is_none());
+        assert!(historical["candidate"].get("artifacts").is_none());
         let (before, root) = evidence(historical.clone(), SEVENZIP_EVENT);
         let parsed: SevenZipResult = serde_json::from_value(historical.clone()).unwrap();
         assert_eq!(parsed.driver_diagnostic, None);

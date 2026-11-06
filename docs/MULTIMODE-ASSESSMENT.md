@@ -1,0 +1,68 @@
+# Multi-mode 7-Zip assessment
+
+Active work started 2026-11-06 from main `b27942a` (merged #106), branch
+`codex/multimode-assessment`. This document is an implementation/acceptance map,
+not proof that the new source has passed native acceptance.
+
+The deliverable is one administrator workflow comparing the same pinned 7-Zip
+installation and create/test/extract/content verification under an ordinary
+baseline, classic AppContainer and MXC ProcessContainer when available. Retained
+Results must distinguish function results, measured restrictions, unsupported
+requirements, missing evidence, coverage and owned cleanup across modes.
+
+## Required evidence
+
+| Requirement | Proof required before completion |
+|---|---|
+| MXC adoption | Official release/source/native asset identities, dependency and signature review; explicit approved acquisition/installation scope; exact request-aware capability observation in the actual worker |
+| Safe execution | Exact runtime, policy, environment and application binding; no implicit recovery, DACL mutation, weaker fallback or automatic grant widening; effective tier and supported restrictions measured |
+| Comparable workflow | Same vendor bytes and automated representative operations for all supported modes; unavailable/unsupported MXC remains explicit and does not block independent work |
+| Application tree | Actual root and descendant image/token identity with collection completeness and owned job boundaries; absence of observed children must not imply comprehensive capture without a validated mechanism |
+| Registry controls | Project-owned positive ordinary-user control and candidate denial, bound to the tested profile/process; no modification of unrelated registry keys |
+| Archive investigation | Retained bounded actual archives and extracted bytes plus relevant metadata; independent rehash and inspection, with byte equality separate from content equality and hypotheses separate from measured cause |
+| Repeatability | Repeated comparisons in fresh disposable environments on the new source; same policy/workflow/inputs and source-pinned outcomes, with differences retained |
+| Failure/recovery | Native interruption, invalid output, missing output and owned recovery on new source; useful failure evidence retained, unrelated resources preserved, recovery does not rerun the app |
+| Administrator flow | Review/Approve/Run, multi-mode function/control/coverage/cleanup/failure presentation, retained reopen and sanitized export with no app/provider execution |
+| Engineering finish | Focused regressions, authorized native proof, independent consequential review/fixes, concise documentation, clean branch and PR; criterion-by-criterion Benchmark 2 mapping with W4/W5 limits |
+
+Previous #106 native observations remain valid only for their recorded source,
+profile and environment. Reuse those records for context and historical Results
+compatibility, not as acceptance of this new source. Keep private raw records
+outside Git. Installers/application trials stay inside disposable workers. Ask
+before runtime installation or VM/security-setting changes.
+
+## Current implementation
+
+The first increment adds private bounded archive/extracted bytes and input
+FILETIME/attribute observations to new 7-Zip results. Historical results omit the
+optional fields without changing canonical serialization. Current source binds
+the new collector and validator into the approved workflow hash. This does not
+yet establish an archive-difference cause, new native acceptance, MXC execution,
+descendant completeness or registry enforcement.
+
+The existing MXC adapter remains the old non-executing pin until the new
+versioned native contract and artifact custody are reviewed. The official
+v1.0.1 CLI's startup recovery and typed SDK's omitted fallback policy require a
+direct-interface review; do not treat CLI `--probe` as a read-only operation.
+
+The default-off capability helper and host harness now use the exact JSON C ABI
+and existing owned Sandbox lease. They preserve separate Prepare/Approve/Start,
+bounded failed/partial observations, atomic final publication, exact cleanup and
+non-replaying recovery. They do not dispatch an MXC workload or 7-Zip, and cannot
+be imported as verified production application results. Runtime authorization
+and native validation remain pending.
+
+Process-tree and registry foundations are test-compiled only. The collector
+records an inherited debugger chain, not broker-created processes or invented
+parent edges; any gap requires the dedicated helper to fail-stop. The registry
+canary uses an exact newly-created key handle for deletion and suppresses hidden
+Drop retries after explicit cleanup. Registry-link/create-only semantics still
+need focused disposable-worker proof before production wiring; freshness of a
+dedicated account before application launch is a prerequisite, not proof of
+general race-safe registry creation. No parent registry ACL is changed.
+
+Private raw metadata contains full-width FILETIME/process/file identifiers.
+Audit it with Rust or another lossless JSON parser; ordinary JavaScript numbers
+cannot preserve these integers. Sanitized JSON/Markdown omits raw bytes and
+metadata. The old Node audit must not be reused on new raw events without
+lossless integer handling.

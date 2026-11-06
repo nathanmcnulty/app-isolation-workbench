@@ -620,6 +620,7 @@ fn run_variant(name: &str, profile: Option<PSID>, sid: &str) -> Result<bool> {
     let root = Path::new(WORK).join(name);
     let expected = fixture_inventory();
     let input_before = inventory(&root.join("Input"))?;
+    let input_before_metadata = fixture_metadata(&root.join("Input"));
     record(
         Path::new(WORK),
         &format!("{}-input-before", name.to_ascii_lowercase()),
@@ -644,17 +645,94 @@ fn run_variant(name: &str, profile: Option<PSID>, sid: &str) -> Result<bool> {
             return Ok(false);
         }
     }
+    verify_and_retain_variant(&root, Path::new(WORK), name, input_before_metadata)
+}
+
+fn verify_and_retain_variant(
+    root: &Path,
+    stages: &Path,
+    name: &str,
+    input_before_metadata: Result<
+        BTreeMap<String, aiw_provider_wsb::sevenzip_artifacts::SevenZipFileMetadata>,
+    >,
+) -> Result<bool> {
+    let expected = fixture_inventory();
     let actual = inventory(&root.join("Extracted"))?;
     let input_after = inventory(&root.join("Input"))?;
+    let archive_digest = inventory_one(&root.join("archive.7z"))?;
     let passed = actual == expected && input_after == expected;
+    // Publish independent verification facts before optional investigatory
+    // capture. Capture refusal/drift remains a driver issue, never erases facts
+    // already measured and never turns a missing payload into compatibility.
     record(
-        Path::new(WORK),
+        stages,
         &format!("{}-3", name.to_ascii_lowercase()),
-        &json!({
-        "function":"verify","passed":passed,"expected":expected,"actual":actual,"inputAfter":input_after,
-        "archive":inventory_one(&root.join("archive.7z"))?}),
+        &json!({"function":"verify","passed":passed,"expected":expected,
+            "actual":actual,"inputAfter":input_after,"archive":archive_digest}),
+    )?;
+    // Read actual bytes through held, single-link, no-reparse file identities.
+    // Fixed names only; the archive cannot nominate additional host paths.
+    let archive = HeldApplicationFile::open_bounded(
+        &root.join("archive.7z"),
+        aiw_provider_wsb::sevenzip_artifacts::MAX_SEVENZIP_ARCHIVE_BYTES as u64,
+    )?;
+    let archive_bytes = archive
+        .read_bounded(aiw_provider_wsb::sevenzip_artifacts::MAX_SEVENZIP_ARCHIVE_BYTES as u64)?;
+    let mut extracted_hex = BTreeMap::new();
+    for name in fixture_bytes().keys() {
+        let relative = name.replace('\\', "/");
+        if actual
+            .get(&relative)
+            .is_some_and(|entry| entry["sizeBytes"].as_u64().is_some_and(|size| size <= 4096))
+        {
+            let held = HeldApplicationFile::open_bounded(&root.join("Extracted").join(name), 4096)?;
+            extracted_hex.insert(relative, hex::encode(held.read_bounded(4096)?));
+            held.revalidate()?;
+        }
+    }
+    let extracted_capture_complete =
+        actual.keys().eq(expected.keys()) && extracted_hex.keys().eq(expected.keys());
+    let artifacts = aiw_provider_wsb::sevenzip_artifacts::SevenZipArtifacts {
+        archive_hex: hex::encode(&archive_bytes),
+        extracted_hex,
+        extracted_capture_complete,
+        input_before_metadata: input_before_metadata?,
+        input_after_metadata: fixture_metadata(&root.join("Input"))?,
+    };
+    artifacts.validate(
+        &serde_json::from_value(archive_digest)?,
+        &serde_json::from_value(json!(actual))?,
+    )?;
+    archive.revalidate()?;
+    record(
+        stages,
+        &format!("{}-artifacts", name.to_ascii_lowercase()),
+        &json!(artifacts),
     )?;
     Ok(passed)
+}
+
+fn fixture_metadata(
+    root: &Path,
+) -> Result<BTreeMap<String, aiw_provider_wsb::sevenzip_artifacts::SevenZipFileMetadata>> {
+    let mut entries = BTreeMap::new();
+    for name in fixture_bytes().keys() {
+        let held = HeldApplicationFile::open_bounded(&root.join(name), 4096)?;
+        // The held identity denies replacement; file times are observations, not
+        // custody identities or an explanation of encoded archive metadata.
+        let metadata = fs::metadata(root.join(name))?;
+        entries.insert(
+            name.replace('\\', "/"),
+            aiw_provider_wsb::sevenzip_artifacts::SevenZipFileMetadata {
+                creation_time: metadata.creation_time(),
+                last_access_time: metadata.last_access_time(),
+                last_write_time: metadata.last_write_time(),
+                attributes: metadata.file_attributes(),
+            },
+        );
+        held.revalidate()?;
+    }
+    Ok(entries)
 }
 
 fn fixture_inventory() -> BTreeMap<String, Value> {
@@ -841,6 +919,7 @@ fn collect_stages() -> Result<()> {
         "baseline-1",
         "baseline-2",
         "baseline-3",
+        "baseline-artifacts",
         "02-baseline",
         "03-candidate-not-reached",
         "03-boundary",
@@ -849,6 +928,7 @@ fn collect_stages() -> Result<()> {
         "candidate-1",
         "candidate-2",
         "candidate-3",
+        "candidate-artifacts",
         "04-profile-cleanup",
         "05-comparison",
         "06-code-binding",
@@ -1054,6 +1134,83 @@ impl Drop for DerivedProfileSid {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sevenzip_capture_preserves_verification_prefix_for_invalid_missing_and_oversized_outputs() {
+        for case in [
+            "missing",
+            "extra",
+            "oversized",
+            "metadata-error",
+            "malformed",
+        ] {
+            let root = std::env::temp_dir().join(format!(
+                "aiw-sevenzip-capture-{}-{case}",
+                std::process::id()
+            ));
+            fs::create_dir(&root).unwrap();
+            for leaf in ["Input", "Extracted"] {
+                fs::create_dir(root.join(leaf)).unwrap();
+                fs::create_dir(root.join(leaf).join("sub folder")).unwrap();
+                for (name, bytes) in fixture_bytes() {
+                    write_new(&root.join(leaf).join(name), &bytes).unwrap();
+                }
+            }
+            if case == "missing" {
+                fs::remove_file(root.join("Extracted/hello.txt")).unwrap();
+            }
+            if case == "extra" {
+                write_new(&root.join("Extracted/extra.txt"), b"extra").unwrap();
+            }
+            let archive = if case == "oversized" {
+                vec![0; aiw_provider_wsb::sevenzip_artifacts::MAX_SEVENZIP_ARCHIVE_BYTES + 1]
+            } else {
+                b"malformed archive bytes retained without format claim".to_vec()
+            };
+            write_new(&root.join("archive.7z"), &archive).unwrap();
+            let metadata = if case == "metadata-error" {
+                Err("injected metadata collection failure".into())
+            } else {
+                fixture_metadata(&root.join("Input"))
+            };
+            let result = verify_and_retain_variant(&root, &root, "fixture", metadata);
+            let verification: Value =
+                serde_json::from_slice(&fs::read(root.join("fixture-3.json")).unwrap()).unwrap();
+            assert_eq!(verification["passed"], !matches!(case, "missing" | "extra"));
+            assert_eq!(
+                verification["archive"],
+                inventory_one(&root.join("archive.7z")).unwrap()
+            );
+            if matches!(case, "oversized" | "metadata-error") {
+                assert!(result.is_err());
+                assert!(!root.join("fixture-artifacts.json").exists());
+            } else {
+                assert_eq!(result.unwrap(), case == "malformed");
+                let artifacts: aiw_provider_wsb::sevenzip_artifacts::SevenZipArtifacts =
+                    serde_json::from_slice(&fs::read(root.join("fixture-artifacts.json")).unwrap())
+                        .unwrap();
+                assert_eq!(hex::decode(&artifacts.archive_hex).unwrap(), archive);
+                assert_eq!(artifacts.extracted_capture_complete, case == "malformed");
+                assert!(!artifacts.extracted_hex.contains_key("extra.txt"));
+                fs::remove_file(root.join("fixture-artifacts.json")).unwrap();
+            }
+            for leaf in ["Input", "Extracted"] {
+                for name in fixture_bytes().keys() {
+                    let path = root.join(leaf).join(name);
+                    if path.exists() {
+                        fs::remove_file(path).unwrap();
+                    }
+                }
+                if leaf == "Extracted" && case == "extra" {
+                    fs::remove_file(root.join(leaf).join("extra.txt")).unwrap();
+                }
+                fs::remove_dir(root.join(leaf).join("sub folder")).unwrap();
+                fs::remove_dir(root.join(leaf)).unwrap();
+            }
+            fs::remove_file(root.join("archive.7z")).unwrap();
+            fs::remove_file(root.join("fixture-3.json")).unwrap();
+            fs::remove_dir(root).unwrap();
+        }
+    }
     #[test]
     fn sevenzip_fixture_verification_includes_empty_binary_nested_unicode_and_exact_inventory() {
         let bytes = fixture_bytes();

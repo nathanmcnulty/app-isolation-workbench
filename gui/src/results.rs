@@ -414,7 +414,8 @@ mod sevenzip_projection_tests {
         let report = json!({"entries":[{"id":"private@example.invalid","functions":{"createArchive":true,"testArchive":false},"source":{"kind":"windowsSandbox","evidence":{"profile":"sevenZip","result":{"kind":"sevenZip","report":{
             "evidenceStatus":"driverIncomplete","recordedOutcome":"insufficientEvidence","recordedCleanupVerified":true,
             "profile":{"origin":"nativeWorker","expectedWindows":{"private":"secret"}},
-            "observations":{"profileDeleted":false,"driverDiagnostic":"diagnostic-private C:\\private\\agent S-1-5-21-sensitive candidate compatible","launcherToken":{"userSid":"S-1-5-21-private","processId":555}},
+            "observations":{"profileDeleted":false,"driverDiagnostic":"diagnostic-private C:\\private\\agent S-1-5-21-sensitive candidate compatible","launcherToken":{"userSid":"S-1-5-21-private","processId":555},
+                "baseline":{"artifacts":{"archiveHex":"sensitive-archive-sentinel","extractedHex":{"hello.txt":"sensitive-content-sentinel"},"inputBeforeMetadata":{"hello.txt":{"creationTime":18446744073709551615_u64}}}}},
             "comparison":{"eligible":false,"reason":"baselineFailed","archiveBytesEqual":false,"selectedControlsVerified":null,
                 "functions":[{"function":"create","baseline":"passed","candidate":"notReached","private":"secret"},{"function":"test","baseline":"failed","candidate":"unmeasured"}],
                 "baselineArchive":{"sha256":"a".repeat(64),"sizeBytes":578,"path":"C:\\private\\archive"},"gaps":["raw secret"]}
@@ -426,7 +427,7 @@ mod sevenzip_projection_tests {
         assert_eq!(row["functions"]["testArchive"], "failed");
         assert_eq!(row["functions"]["extractArchive"], "unmeasured");
         assert_eq!(row["sevenzip"]["functions"][0]["candidate"], "notReached");
-        let output = serde_json::to_string(&summary).unwrap();
+        let output = format!("{}\n{}", serde_json::to_string(&summary).unwrap(), markdown(&summary));
         for private in [
             "private@example.invalid",
             "S-1-5-21-private",
@@ -436,6 +437,12 @@ mod sevenzip_projection_tests {
             "diagnostic-private",
             "S-1-5-21-sensitive",
             "candidate compatible",
+            "sensitive-archive-sentinel",
+            "sensitive-content-sentinel",
+            "archiveHex",
+            "extractedHex",
+            "inputBeforeMetadata",
+            "18446744073709551615",
             "\"secret\"",
         ] {
             assert!(!output.contains(private), "leaked {private}");

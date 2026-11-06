@@ -2,6 +2,20 @@
 
 use aiw_probe::WindowsSandboxReadiness;
 
+// Foundations are test-compiled only until the fixed supervisor/registry roles
+// and their receipt contracts are integrated and independently reviewed.
+#[cfg(all(windows, test))]
+#[allow(dead_code)]
+mod debug_tree;
+#[cfg(all(windows, test))]
+#[allow(dead_code)]
+mod sevenzip_registry;
+
+#[cfg(all(windows, feature = "research-mxc-process"))]
+mod mxc_process;
+#[cfg(all(windows, feature = "research-mxc-process"))]
+pub use mxc_process::run_fixed_probe as run_mxc_process_probe;
+
 #[cfg(all(windows, feature = "research-sevenzip"))]
 pub use control_appcontainer::research_sevenzip::run as run_sevenzip_research;
 

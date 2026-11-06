@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "aiw.dev/mxc-process-runtime-pin/v0alpha1",
+  "repository": "https://github.com/microsoft/mxc",
+  "release": "1.0.1",
+  "commit": "fda29ac63bc306b7f97f3b86b4b63d44f7f40cf2",
+  "contractVersion": "1.0.0",
+  "license": "MIT",
+  "integrationMode": "fixed-json-c-abi-capability-trial",
+  "releaseArchive": {
+    "url": "https://github.com/microsoft/mxc/releases/download/v1.0.1/mxc-release-binaries.zip",
+    "sizeBytes": 542051775,
+    "sha256": "0e832239454ba7fcd338ff56218a287eef4c0a01c1484084b869f55feff8abe9"
+  },
+  "runtime": {
+    "leaf": "mxc_ffi.dll",
+    "architecture": "x86_64",
+    "sizeBytes": 6123320,
+    "sha256": "bd45522f06dc9cc8001dcd5d7320bc2bf303fb08a39bf10f3404bd9a8001812c",
+    "acquisitionSignatureStatus": "Valid",
+    "signer": "Microsoft Corporation",
+    "signerThumbprint": "AB172913A2960A224809EE8A0C371CD47A079B72"
+  },
+  "reviewedOn": "2026-11-06",
+  "nativeValidation": "pending",
+  "limits": [
+    "Exact DLL/source/declarations are versioned together; C ABI is not generally stable.",
+    "No complete per-Windows-PE SBOM or reproducible-build proof.",
+    "No DLL load, runtime installation, creation or enforcement acceptance from inert provenance.",
+    "Legacy planning pin remains separate."
+  ]
+}

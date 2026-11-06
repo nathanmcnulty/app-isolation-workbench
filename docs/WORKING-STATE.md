@@ -1,91 +1,75 @@
 # Working state
 
-Updated 2026-11-06 (America/Anchorage). Checkout C:\aiw\app-isolation-workbench,
-branch codex/real-app-assessment; implementation head 5c12df0 followed by documentation. Exact native product
-executables are source 593281a64dda9b233a25e3f3262d7e1751c01a6b.
-Start with scripts/work-status.ps1 and the [administrator workflow](SEVENZIP-ASSESSMENT.md#administrator-workflow-for-the-tested-package).
+Updated 2026-11-06 (America/Anchorage). Checkout `C:\aiw\app-isolation-workbench`,
+fresh branch `codex/multimode-assessment` from current main `b27942a` after #106.
+Start with `scripts/work-status.ps1` and the active
+[multi-mode acceptance map](MULTIMODE-ASSESSMENT.md). The full multi-mode goal is
+active; neither implementation nor native acceptance is complete.
 
-## Demonstrated fixed application flow
+## Current increment
 
-The 593281a desktop package completed run sevenzip-1793956275430444300 on
-VM107 after independently reviewed exact-plan approval and a separate Start.
-Inside a fresh offline Sandbox, 7-Zip 26.05 installed and all four archive
-functions passed in both ordinary-user and zero-capability classic AppContainer
-modes. Held target tokens, selected file denials, unchanged code, profile/job
-cleanup and exact outer cleanup passed. Host/guest builds were x64
-10.0.26300.9711 / 10.0.26100.9711. Both archives are 579 bytes with different
-hashes; their byte-difference cause remains unmeasured.
+- New private bounded archive/extracted-byte and FILETIME/attribute observations
+  are bound into the 7-Zip source identity. Historical absent fields preserve
+  canonical serialization. Verification facts are durably published before
+  optional capture, so capture failure does not erase the measured prefix.
+- The official MXC v1.0.1 source and release ZIP were acquired inertly and reviewed.
+  Exact x64 `mxc_ffi.dll`: 6,123,320 bytes, SHA-256
+  `bd45522f06dc9cc8001dcd5d7320bc2bf303fb08a39bf10f3404bd9a8001812c`;
+  acquisition Authenticode Valid, Microsoft Corporation. Private provenance and
+  dependency/SBOM limits: `C:/aiw/mxc-multimode-20261106/PROCESSCONTAINER-INTEGRATION-REVIEW.md`.
+- A separate closed v1.0.1 ProcessContainer contract rejects DACL fallback,
+  non-native tiers, BFS, degradation and missing requested controls. The old
+  planning-only MXC pin is preserved separately. Probe success is capability
+  evidence, never enforcement or execution approval.
+- A default-off fixed native probe wrapper is being built/reviewed. It uses the
+  exact JSON C ABI in a dedicated standard-user guest helper; CLI startup recovery
+  and the typed SDK's omitted fallback setting are excluded. No MXC DLL has been
+  loaded, runtime installed, or VM/security setting changed. User authorization
+  is required before runtime staging/installation or affected native trials.
+- The separate host capability harness binds two payloads, exact policies and
+  embedded source/environment identities to Prepare/Approve/Start. It preserves
+  failed child/partial collection/cleanup facts and publishes guest markers
+  atomically without overwrite. Read and exact recovery cannot replay Start.
+- Creation-time debugger-chain and owned registry-canary foundations are
+  test-compiled only, with no production role wiring or native acceptance.
+  Registry deletion uses the exact retained key handle; debugger gaps require
+  the dedicated helper to fail-stop even if job accounting later reconciles.
 
-The receipt-bound comparison is workflowCompared; generic kernel outcome stays
-insufficientEvidence for broader isolation. Independent offline review passed
-482 assertions across exact approval/plan/request/profile/configuration, completion
-artifacts, evidence, journal and session-cleanup bindings. See the
-[native acceptance record](SEVENZIP-NATIVE-ACCEPTANCE.md#production-desktop-comparison-at-593281a).
+Focused checks so far: 11 provider retention tests, 9 existing/new 7-Zip native
+file tests, 7 preparation/retained-reader tests, 7 MXC contract tests, 7 probe/
+mapped-transport tests, 5 host marker/recovery tests, 5 debugger-state tests,
+4 pure registry tests and the GUI private-artifact JSON/Markdown projection test
+passed. Consequential independent review fixes include output-prefix preservation,
+normalized Unicode names, System32-only dependency search, actual loaded-module
+identity, atomic final markers and full emitted-shape parsing. Native tests are
+still pending. Logs are `C:/aiw/multimode-*.log`, outside Git.
+Raw FILETIME identifiers require lossless/Rust auditing; do not round them through
+JavaScript numbers. Registry-link/create-only native semantics remain open before
+production wiring, and explicit cleanup cannot trigger a hidden Drop retry.
 
-Actual Results opened the original selection twice and exported byte-identical
-JSON plus Markdown, with privacy checks passed. All 32 files, 43 entries and
-12,283,755 bytes remained unchanged, including provider diagnostics. The reader
-made no execution/provider call. Original native export hashes remain source-scoped;
-later Evidence status/required guest-version label corrections are presentation
-changes and were not in that tested package.
+## Required next work
 
-A separate approved run sevenzip-1793960096774082900 exercised native Cancel
-after the owned boot window appeared. Independent offline audit passed 304
-checks: exact approved plan/request/profile/import bindings, cancellation journal,
-four session snapshots, one owned start/stop and two post-stop empty lists.
-Kernel outcome is cancelled, evidence root absent and cleanup complete. No
-application observations or incompatibility claim are added. See the
-[cancellation record](SEVENZIP-NATIVE-ACCEPTANCE.md#native-owned-cancellation-at-593281a).
+Complete current focused tests and consequential reviews/fixes; preserve logs
+outside Git. Prepare a concrete pinned capability/control package before asking
+for runtime authorization. Verify actual guest creation/enforcement, not host
+build/API presence. Continue independently with shared application process-tree
+instrumentation, registry controls, fresh-environment repeats, retained archive
+investigation, new-source interruption/invalid/missing-output/recovery, desktop
+multi-mode Results and sanitized retained export. No weaker fallback or automatic
+permission widening. See the acceptance map for completion requirements.
 
-Review corrections: missing/unholdable 7-Zip completion artifacts and held-file
-revalidation failures now record a terminal failed result after verified cleanup.
-Results includes 7-Zip in the application filter, excludes profiles without the
-selected archive function, and scopes the broader baseline gap when all four
-fixed baseline functions were measured. These are source corrections; they add
-no native application measurements. Focused regression tests cover these paths.
+## Reuse and preserve
 
-## Source, evidence and review
+#106 native source `593281a` demonstrated the fixed baseline/AppContainer pair,
+Results reopen/export with all32 files unchanged, and separate owned cancellation.
+Its exact source/environment, earlier incomplete attempt and limits remain in
+[the native record](SEVENZIP-NATIVE-ACCEPTANCE.md). They are not acceptance of the
+new source. #105 six-control/29-file evidence is reused without repeating it.
+Private audits remain at `C:/aiw/sevenzip-assessment-20261105` and
+`C:/aiw/paired-directory-sharing-native-65b084f3-5d85-4dda-83a1-12754bbda14f`.
+Preserve VM106, VM107 original packages/runs, accidental `C:\Evidence` and unrelated
+work. Management TLS is expired; do not bypass it or change access settings.
 
-[PR #106](https://github.com/nathanmcnulty/app-isolation-workbench/pull/106)
-contains the application slice. All three hosted CI jobs passed at
-5c12df0dae756a427170e71b79220dd80fe7b491
-([run 42200833485](https://github.com/nathanmcnulty/app-isolation-workbench/actions/runs/42200833485)).
-The presentation correction passed 13 existing Rust Results tests, 17 Node UI
-tests, Clippy and governance checks. It adds no native application measurements.
-Source checks/review and static x64 release builds passed for their recorded
-revisions; hosted CI is separate from native acceptance and is not release signing.
-
-Private audit: C:/aiw/sevenzip-assessment-20261105. Start with
-production-593281a-pins.json, production-independent-audit-593281a.json,
-production-export-verification-593281a.json and
-vm107-production-results-integrity-593281a.json; raw before/after inventories
-and verified-exports-593281a remain beside them. Cancellation records include
-vm107-cancellation-after-593281a.json and
-cancellation-independent-audit-593281a.json. The private copied records
-cannot replace original protected workspace identities or be imported as a new run.
-
-Preserve the earlier 614bb0e run sevenzip-1793950517554284900: it retained
-DriverIncomplete, unmeasured application facts and verified outer cleanup. Its
-cause remains unknown; later success does not prove the old cause. Its retained
-JSON export preserved all 26 files. Preserve the separate b7f17cf research pair,
-its package and audit; it was not converted into production evidence or repeated.
-
-PR #105 is merged and its six-control/29-file corrected Results evidence is
-reused without execution. See [that native record](PAIRED-NATIVE-APPROVAL.md) and
-[Results audit](RESULTS-ACCEPTANCE-AUDIT.md). Preserve VM106, every old package/run,
-accidental C:\Evidence and unrelated work. Existing console access is used;
-expired management TLS was not bypassed and no access/security settings changed.
-
-## Remaining work
-
-The successful comparison and separate native cancellation both have verified
-cleanup and need no recovery; never replay or recover them to create acceptance
-evidence. Native forced-fault recovery remains unexercised. Recovery bindings
-and automated tests do not establish that native fault case. The tested native package remains 593281a.
-
-Required application-descendant evidence, registry denial for this profile,
-repeatability, network/IPC/UI and ordinary endpoint claims remain unmeasured.
-MXC's four-family [selection review](MXC-ASSESSMENT-SELECTION.md) and MSIX remain
-complementary; the old MXC adapter is still planning-only. Broad Benchmark 2,
-W4/W5 and production acceptance remain open; the [criteria mapping](SEVENZIP-ASSESSMENT.md#coverage-limits-and-acceptance)
-separates this working application slice from those broader gates.
+Broad Benchmark2, W4/W5 and production acceptance remain open. The native worker
+and package approvals must remain separate from read-only acquisition/research,
+source checks and build-only artifacts.

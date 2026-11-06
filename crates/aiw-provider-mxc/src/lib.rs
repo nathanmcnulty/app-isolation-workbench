@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub mod process_container;
+
 use std::collections::BTreeSet;
 
 use aiw_windows_command_line::join_arguments;

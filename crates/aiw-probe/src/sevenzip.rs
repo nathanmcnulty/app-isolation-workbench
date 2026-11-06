@@ -76,6 +76,7 @@ pub fn seven_zip_source_sha256() -> String {
     let sources = [
         include_str!("sevenzip.rs"),
         include_str!("../../aiw-provider-wsb/src/sevenzip.rs"),
+        include_str!("../../aiw-provider-wsb/src/sevenzip_artifacts.rs"),
         include_str!("../../aiw-windows-platform/src/control_appcontainer/research_sevenzip.rs"),
         include_str!("../../aiw-windows-platform/src/guest_document/paired_inputs/sevenzip.rs"),
         include_str!("../../aiw-windows-platform/src/control_appcontainer.rs"),

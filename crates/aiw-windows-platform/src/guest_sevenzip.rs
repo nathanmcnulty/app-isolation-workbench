@@ -235,6 +235,7 @@ impl Stages {
             input_after,
             extracted,
             archive,
+            artifacts: self.read(&format!("workflow-{name}-artifacts")),
         })
     }
 }

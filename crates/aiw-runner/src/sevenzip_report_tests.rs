@@ -264,6 +264,7 @@ fn variant(first: u32, candidate: bool) -> SevenZipVariant {
         extract: Some(process(first + 2, candidate)),
         input_after: Some(sevenzip_fixture_inventory()),
         extracted: Some(sevenzip_fixture_inventory()),
+        artifacts: None,
         archive: Some(SevenZipFileDigest {
             sha256: if candidate {
                 "c".repeat(64)
