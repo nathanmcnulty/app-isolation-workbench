@@ -588,6 +588,7 @@ pub const FIXED_PUBLICATION_OCCUPIED_BYTES: &[u8] =
 enum ResearchPublicationRole {
     Control,
     Capability,
+    Creation,
 }
 
 #[cfg(feature = "research-fixed-publication")]
@@ -605,6 +606,10 @@ fn research_publication_role(plan: &WindowsSandboxPlan) -> Option<ResearchPublic
         (r"C:\AIW\Tools\mxc_process_probe.exe", r"C:\AIW\MxcProbeOutput\RESULT.DAT") => (
             ResearchPublicationRole::Capability,
             r"C:\AIW\MxcProbeOutput",
+        ),
+        (r"C:\AIW\Tools\mxc_process_probe.exe", r"C:\AIW\MxcCreationOutput\RESULT.DAT") => (
+            ResearchPublicationRole::Creation,
+            r"C:\AIW\MxcCreationOutput",
         ),
         _ => return None,
     };
@@ -931,13 +936,23 @@ mod tests {
         plan.mappings[1].sandbox_folder = root.into();
         plan
     }
+    fn creation_plan() -> WindowsSandboxPlan {
+        let mut plan = publication_plan(true);
+        plan.probe.output = r"C:\AIW\MxcCreationOutput\RESULT.DAT".into();
+        plan.mappings[1].sandbox_folder = r"C:\AIW\MxcCreationOutput".into();
+        plan
+    }
 
     #[cfg(not(feature = "research-fixed-publication"))]
     #[test]
     fn research_publication_paths_remain_refused_without_the_feature() {
-        for capability in [false, true] {
+        for plan in [
+            publication_plan(false),
+            publication_plan(true),
+            creation_plan(),
+        ] {
             assert!(matches!(
-                validate_plan(&publication_plan(capability)),
+                validate_plan(&plan),
                 Err(WindowsSandboxPlanError::UnsafePath { .. })
             ));
         }
@@ -947,8 +962,11 @@ mod tests {
     #[cfg(feature = "research-fixed-publication")]
     #[test]
     fn research_publication_allows_only_exact_closed_pairs_and_mappings() {
-        for capability in [false, true] {
-            let plan = publication_plan(capability);
+        for plan in [
+            publication_plan(false),
+            publication_plan(true),
+            creation_plan(),
+        ] {
             let rendered = render_config(&plan).unwrap();
             assert!(rendered.xml.contains("RESULT.DAT"));
             for variant in 0..7 {
@@ -1027,7 +1045,16 @@ mod tests {
             validate_host_mappings(&capability),
             Err(WindowsSandboxPlanError::NonEmptyOutputFolder(_))
         ));
+        let mut creation = creation_plan();
+        creation.workspace_root = plan.workspace_root.clone();
+        creation.mappings[0].host_folder = plan.mappings[0].host_folder.clone();
+        creation.mappings[1].host_folder = plan.mappings[1].host_folder.clone();
+        assert!(matches!(
+            validate_host_mappings(&creation),
+            Err(WindowsSandboxPlanError::NonEmptyOutputFolder(_))
+        ));
         fs::remove_file(&seed).unwrap();
+        validate_host_mappings(&creation).unwrap();
         fs::write(output.join("occupy.dat"), FIXED_PUBLICATION_OCCUPIED_BYTES).unwrap();
         assert!(validate_host_mappings(&plan).is_err());
         fs::remove_file(output.join("occupy.dat")).unwrap();

@@ -55,7 +55,17 @@ Proxmox-console scripts. Parent runtime installation and VM/host security change
 are excluded. The first [native capability trial](MXC-PROBE-NATIVE-20261106.md)
 captured five native-tier support reports but failed the host output custody
 check; owned outer cleanup passed. No workload creation/enforcement or application
-acceptance is established. A corrected publication path needs fresh proof.
+acceptance is established. The corrected publication path subsequently passed
+its fresh first-party control, including stable custody across cleanup and Read.
+
+The default-off creation control now uses the exact Driver request and a
+cooperative first-party child. It requires ordinary positive file controls,
+same-account held child identity/token observations and an owner-held exact job
+check before a protected gate releases candidate controls. Fixed phase records
+survive later wait/free/cleanup failures. Its separate host profile retains raw
+bytes with an accepted-hash check, without turning research observations into
+product verdicts. Focused tests and consequential reviews passed; authorized
+native creation/enforcement remains pending. It never dispatches 7-Zip yet.
 
 Process-tree and registry foundations are test-compiled only. The collector
 records an inherited debugger chain, not broker-created processes or invented

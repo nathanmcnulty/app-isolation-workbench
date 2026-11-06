@@ -52,6 +52,14 @@ active; neither implementation nor native acceptance is complete.
   test-compiled only, with no production role wiring or native acceptance.
   Registry deletion uses the exact retained key handle; debugger gaps require
   the dedicated helper to fail-stop even if job accounting later reconciles.
+- The default-off creation control now dispatches only the fixed cooperative
+  Driver request. Matching ordinary filesystem positives precede spawn; an
+  ordinary held-process observation and an owner-held exact-job check precede
+  a protected release gate. It retains failure prefixes across SDK wait/free
+  and owned cleanup. A separate closed host profile binds its root/session,
+  Driver-only policy and raw retained output to approval. Independent execution
+  and custody reviews passed after fixes. Actual creation/enforcement is still
+  unmeasured: build and source checks do not establish Sandbox support.
 
 Focused checks so far: 11 provider retention tests, 9 existing/new 7-Zip native
 file tests, 7 preparation/retained-reader tests, 7 MXC contract tests, 7 probe/
@@ -67,15 +75,18 @@ Publication checks: 2 guest, 10 host (including the 5 prior capability host test
 passed, including physical seeded-output negatives. The R2 publication control
 passed in a fresh Sandbox; original outputs and independently audited private
 received envelopes remain outside Git. See the native record for pins and limits.
+Creation slice: 11 focused platform and 13 host tests, 101 default/102 research
+provider tests and all-target research Clippy passed. Logs: `C:/aiw/creation-*.log`.
 Raw FILETIME identifiers require lossless/Rust auditing; do not round them through
 JavaScript numbers. Registry-link/create-only native semantics remain open before
 production wiring, and explicit cleanup cannot trigger a hidden Drop retry.
 
 ## Required next work
 
-The corrected alias-free publisher has fresh native proof. Never repair/adopt or
-replay the failed capability run. Preserve native evidence outside Git. Verify actual guest
-creation/enforcement, not host build/API presence. Continue independently with
+Freeze/review a source-pinned creation package, then validate actual guest
+creation/enforcement under the existing Sandbox-only runtime authorization.
+Keep the outer watchdog/job unchanged and preserve exact failures without
+fallback. Never repair/adopt or replay the failed capability run. Continue with
 shared application process-tree
 instrumentation, registry controls, fresh-environment repeats, retained archive
 investigation, new-source interruption/invalid/missing-output/recovery, desktop

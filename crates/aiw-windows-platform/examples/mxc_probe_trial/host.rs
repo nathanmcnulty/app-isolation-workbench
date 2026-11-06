@@ -23,6 +23,38 @@ const EXPECTED_HOST: &str = "10.0.26300.9711/x86_64";
 const EXPECTED_GUEST: &str = "10.0.26100.9711/x86_64";
 const OUTPUT_BOUND: u64 = 1024 * 1024;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TrialProfile {
+    Capability,
+    Creation,
+}
+impl TrialProfile {
+    fn root(self) -> &'static str {
+        match self {
+            Self::Capability => ROOT,
+            Self::Creation => r"C:\AIW-Mxc-Creation-Trial-20261106",
+        }
+    }
+    fn session(self) -> &'static str {
+        match self {
+            Self::Capability => SESSION,
+            Self::Creation => "a135cfb1-65ed-4330-9123-079d5b12eb82",
+        }
+    }
+    fn schema(self) -> &'static str {
+        match self {
+            Self::Capability => SCHEMA,
+            Self::Creation => "aiw.dev/research/mxc-creation-host-trial/v0alpha1",
+        }
+    }
+    fn output(self) -> &'static str {
+        match self {
+            Self::Capability => r"C:\AIW\MxcProbeOutput",
+            Self::Creation => r"C:\AIW\MxcCreationOutput",
+        }
+    }
+}
+
 #[path = "publication.rs"]
 mod publication;
 
@@ -62,24 +94,32 @@ struct PolicyRequest {
     request: serde_json::Value,
 }
 
-fn fixed_requests() -> Result<Vec<PolicyRequest>> {
-    [
-        FixedOperation::Driver,
-        FixedOperation::Boundary,
-        FixedOperation::Create,
-        FixedOperation::Test,
-        FixedOperation::Extract,
-    ]
-    .into_iter()
-    .map(|operation| {
-        let request = FixedRequest::new(operation)?;
-        Ok(PolicyRequest {
-            operation,
-            request_sha256: request.sha256().into(),
-            request: serde_json::from_str(request.json())?,
+fn fixed_requests_for(profile: TrialProfile) -> Result<Vec<PolicyRequest>> {
+    let operations = if profile == TrialProfile::Creation {
+        vec![FixedOperation::Driver]
+    } else {
+        vec![
+            FixedOperation::Driver,
+            FixedOperation::Boundary,
+            FixedOperation::Create,
+            FixedOperation::Test,
+            FixedOperation::Extract,
+        ]
+    };
+    operations
+        .into_iter()
+        .map(|operation| {
+            let request = FixedRequest::new(operation)?;
+            Ok(PolicyRequest {
+                operation,
+                request_sha256: request.sha256().into(),
+                request: serde_json::from_str(request.json())?,
+            })
         })
-    })
-    .collect()
+        .collect()
+}
+fn fixed_requests() -> Result<Vec<PolicyRequest>> {
+    fixed_requests_for(TrialProfile::Capability)
 }
 
 fn aiw_source_hash() -> String {
@@ -94,6 +134,8 @@ fn aiw_source_hash() -> String {
         include_str!("../mxc_process_probe.rs"),
         include_str!("../../src/lib.rs"),
         include_str!("../../src/mxc_process.rs"),
+        include_str!("../../src/mxc_process/creation.rs"),
+        include_str!("../../src/guest_msi/mxc_child.rs"),
         include_str!("../../src/research_publication.rs"),
         include_str!("publication.rs"),
         include_str!("../publication_control_guest.rs"),
@@ -131,18 +173,165 @@ fn aiw_source_hash() -> String {
 fn digest(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
-fn recovery_allowed(record: Option<&serde_json::Value>, hash: &str, recovered: bool) -> bool {
+fn recovery_allowed_for(
+    record: Option<&serde_json::Value>,
+    hash: &str,
+    recovered: bool,
+    profile: TrialProfile,
+) -> bool {
     if recovered {
         return false;
     }
     record.is_none_or(|record| {
-        record["schemaVersion"] == SCHEMA
+        record["schemaVersion"] == profile.schema()
             && record["researchOnly"] == true
-            && record["capabilityOnly"] == true
+            && record["capabilityOnly"] == (profile == TrialProfile::Capability)
             && record["planSha256"] == hash
-            && record["sessionId"] == SESSION
+            && record["sessionId"] == profile.session()
             && record["outerCleanupVerified"] == false
     })
+}
+#[cfg(test)]
+fn recovery_allowed(record: Option<&serde_json::Value>, hash: &str, recovered: bool) -> bool {
+    recovery_allowed_for(record, hash, recovered, TrialProfile::Capability)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CreationTrial {
+    schema_version: String,
+    research_only: bool,
+    helper_sha256: String,
+    helper_size_bytes: u64,
+    dll_sha256: String,
+    windows: aiw_probe::WindowsVersionObservation,
+    held_worker_token: aiw_token::TokenEvidence,
+    standard_context: aiw_provider_wsb::StandardUserRuntimeContext,
+    handshake: Option<serde_json::Value>,
+    handshake_error: Option<String>,
+    worker: Option<serde_json::Value>,
+    worker_read_error: Option<String>,
+    owned_job_empty: bool,
+    cleanup_error: Option<String>,
+    validation_errors: Vec<String>,
+    application_execution_requested: bool,
+    selected_tier_attestation: String,
+    owner_observations: CreationOwnerObservations,
+    retained_prefixes: std::collections::BTreeMap<String, CreationPrefix>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CreationOwnerObservations {
+    owner_measured_child: Option<serde_json::Value>,
+    exact_outer_job_membership: Option<bool>,
+    release_gate_published: bool,
+    post_exit_binding_error: Option<String>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CreationPrefix {
+    value: Option<serde_json::Value>,
+    read_error: Option<String>,
+}
+const CREATION_PREFIXES: [&str; 16] = [
+    "baseline",
+    "probe",
+    "spawn",
+    "boundChild",
+    "warnings",
+    "ready",
+    "controls",
+    "containedFailure",
+    "spawnCall",
+    "completion",
+    "freeBegin",
+    "freeEnd",
+    "pollEnd",
+    "waitEnd",
+    "timeout",
+    "timeoutEnd",
+];
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CreationFailure {
+    schema_version: String,
+    research_only: bool,
+    error: String,
+    application_execution_requested: bool,
+}
+fn creation_marker_digest(
+    bytes: &[u8],
+    helper_sha256: &str,
+    helper_size_bytes: u64,
+) -> Result<String> {
+    if bytes.len() > OUTPUT_BOUND as usize {
+        return Err("creation output bound".into());
+    }
+    let value: serde_json::Value = serde_json::from_slice(bytes)?;
+    match value["schemaVersion"].as_str() {
+        Some("aiw.dev/mxc-creation-trial/v0alpha1") => {
+            let v: CreationTrial = serde_json::from_slice(bytes)?;
+            if v.schema_version != "aiw.dev/mxc-creation-trial/v0alpha1"
+                || !v.research_only
+                || v.application_execution_requested
+                || v.helper_sha256 != helper_sha256
+                || v.helper_size_bytes != helper_size_bytes
+                || v.dll_sha256 != contract::RUNTIME_DLL_SHA256
+                || windows_label(&v.windows) != EXPECTED_GUEST
+                || v.selected_tier_attestation != "unmeasured"
+                || v.held_worker_token.is_elevated
+                || v.held_worker_token.is_app_container
+                || v.owned_job_empty != v.cleanup_error.is_none()
+                || v.handshake.is_some() == v.handshake_error.is_some()
+                || v.worker.is_some() == v.worker_read_error.is_some()
+                || v.validation_errors.len() > 4
+                || v.validation_errors.iter().any(|s| s.len() > 8192)
+                || [&v.handshake_error, &v.worker_read_error, &v.cleanup_error]
+                    .into_iter()
+                    .flatten()
+                    .any(|s| s.len() > 8192)
+            {
+                return Err("creation observation envelope differs".into());
+            }
+            v.standard_context.validate_token(&v.held_worker_token)?;
+            let owner = &v.owner_observations;
+            if owner.owner_measured_child.is_some()
+                != (owner.exact_outer_job_membership == Some(true))
+                || (owner.release_gate_published && owner.owner_measured_child.is_none())
+                || owner
+                    .post_exit_binding_error
+                    .as_ref()
+                    .is_some_and(|s| s.len() > 8192)
+                || v.retained_prefixes.len() != CREATION_PREFIXES.len()
+                || CREATION_PREFIXES
+                    .iter()
+                    .any(|key| !v.retained_prefixes.contains_key(*key))
+                || v.retained_prefixes.values().any(|p| {
+                    p.value.is_some() == p.read_error.is_some()
+                        || p.read_error
+                            .as_ref()
+                            .is_some_and(|s| s.is_empty() || s.len() > 8192)
+                })
+            {
+                return Err("creation owner/prefix observation shape differs".into());
+            }
+            // Nested observations are retained research data. This reader does
+            // not turn successful custody into an enforcement/product verdict.
+        }
+        Some("aiw.dev/mxc-creation-setup-failure/v0alpha1") => {
+            let v: CreationFailure = serde_json::from_slice(bytes)?;
+            if v.schema_version != "aiw.dev/mxc-creation-setup-failure/v0alpha1"
+                || !v.research_only
+                || v.application_execution_requested
+                || v.error.is_empty()
+                || v.error.len() > 8192
+            {
+                return Err("creation setup failure differs".into());
+            }
+        }
+        _ => return Err("unknown creation research envelope".into()),
+    }
+    Ok(digest(bytes))
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -295,14 +484,45 @@ fn validate_probe_collection(value: &serde_json::Value, marker: &GuestSuccess) -
     }
     Ok(())
 }
-fn completed_marker(workspace: &HeldRunWorkspace, proposal: &Proposal) -> Result<String> {
+fn completed_marker(
+    workspace: &HeldRunWorkspace,
+    proposal: &Proposal,
+    profile: TrialProfile,
+) -> Result<String> {
     let bound = workspace.reopen_output_file_readonly("RESULT.DAT")?;
     let file = HeldApplicationFile::open_bounded(bound.final_path(), OUTPUT_BOUND)?;
     let bytes = file.read_bounded(OUTPUT_BOUND)?;
-    let hash = marker_digest(&bytes, &proposal.helper_sha256, proposal.helper_size_bytes)?;
+    let hash = if profile == TrialProfile::Creation {
+        creation_marker_digest(&bytes, &proposal.helper_sha256, proposal.helper_size_bytes)?
+    } else {
+        marker_digest(&bytes, &proposal.helper_sha256, proposal.helper_size_bytes)?
+    };
     bound.revalidate()?;
     file.revalidate()?;
     Ok(hash)
+}
+fn creation_output_hex(
+    workspace: &HeldRunWorkspace,
+    proposal: &Proposal,
+    expected_hash: &str,
+) -> Result<String> {
+    let bound = workspace.reopen_output_file_readonly("RESULT.DAT")?;
+    let file = HeldApplicationFile::open_bounded(bound.final_path(), OUTPUT_BOUND)?;
+    if file.observation().identity != *bound.identity() {
+        return Err("creation output identity differs".into());
+    }
+    let bytes = file.read_bounded(OUTPUT_BOUND)?;
+    require_same_output_bytes(&bytes, expected_hash)?;
+    creation_marker_digest(&bytes, &proposal.helper_sha256, proposal.helper_size_bytes)?;
+    bound.revalidate()?;
+    file.revalidate()?;
+    Ok(hex::encode(bytes))
+}
+fn require_same_output_bytes(bytes: &[u8], expected_hash: &str) -> Result<()> {
+    if digest(bytes) != expected_hash {
+        return Err("creation raw output changed since accepted retained hash".into());
+    }
+    Ok(())
 }
 fn marker_digest(bytes: &[u8], helper_sha256: &str, helper_size_bytes: u64) -> Result<String> {
     if bytes.len() > OUTPUT_BOUND as usize {
@@ -487,7 +707,7 @@ fn normalized(path: &Path) -> String {
         .unwrap_or(&path.to_string_lossy())
         .to_owned()
 }
-fn plan(workspace: &HeldRunWorkspace) -> WindowsSandboxPlan {
+fn plan(workspace: &HeldRunWorkspace, profile: TrialProfile) -> WindowsSandboxPlan {
     WindowsSandboxPlan {
         schema_version: aiw_provider_wsb::WINDOWS_SANDBOX_PLAN_SCHEMA_VERSION.into(),
         workspace_root: normalized(workspace.root_path()),
@@ -500,20 +720,28 @@ fn plan(workspace: &HeldRunWorkspace) -> WindowsSandboxPlan {
             MappedFolder {
                 purpose: MappingPurpose::Output,
                 host_folder: normalized(&workspace.output_path()),
-                sandbox_folder: r"C:\AIW\MxcProbeOutput".into(),
+                sandbox_folder: profile.output().into(),
             },
         ],
         probe: GoldenProbe {
             executable: r"C:\AIW\Tools\mxc_process_probe.exe".into(),
             request: None,
-            output: r"C:\AIW\MxcProbeOutput\RESULT.DAT".into(),
+            output: format!(r"{}\RESULT.DAT", profile.output()),
         },
         memory_mb: Some(2048),
     }
 }
-fn stage(workspace: &HeldRunWorkspace, name: &str, expected: &str) -> Result<u64> {
+fn stage(
+    workspace: &HeldRunWorkspace,
+    name: &str,
+    expected: &str,
+    profile: TrialProfile,
+) -> Result<u64> {
     let source = HeldApplicationFile::open_bounded(
-        Path::new(ROOT).join("Inputs").join(name).as_path(),
+        Path::new(profile.root())
+            .join("Inputs")
+            .join(name)
+            .as_path(),
         128 * 1024 * 1024,
     )?;
     if source.observation().sha256 != expected {
@@ -582,17 +810,41 @@ fn verify_tools(
     Ok(held)
 }
 pub fn run() -> Result<()> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let profile = if args.first().is_some_and(|a| a.starts_with("--creation-")) {
+        TrialProfile::Creation
+    } else {
+        TrialProfile::Capability
+    };
+    if profile == TrialProfile::Creation {
+        args[0] = match args[0].as_str() {
+            "--creation-prepare" => "--prepare",
+            "--creation-approve" => "--approve",
+            "--creation-start" => "--start",
+            "--creation-read" => "--read",
+            "--creation-recover" => "--recover",
+            _ => return Err("closed creation action required".into()),
+        }
+        .into();
+    }
+    let root = profile.root();
+    let schema = profile.schema();
+    let session = profile.session();
     let actor = fixed_os_and_actor()?;
     helper_hash()?;
     if args == ["--prepare"] {
-        let workspace = HeldRunWorkspace::create(Path::new(ROOT), "Trial")?;
-        let helper_size = stage(&workspace, "mxc_process_probe.exe", helper_hash()?)?;
-        stage(&workspace, "mxc_ffi.dll", contract::RUNTIME_DLL_SHA256)?;
-        let fixed_plan = plan(&workspace);
+        let workspace = HeldRunWorkspace::create(Path::new(root), "Trial")?;
+        let helper_size = stage(&workspace, "mxc_process_probe.exe", helper_hash()?, profile)?;
+        stage(
+            &workspace,
+            "mxc_ffi.dll",
+            contract::RUNTIME_DLL_SHA256,
+            profile,
+        )?;
+        let fixed_plan = plan(&workspace, profile);
         let rendered = aiw_provider_wsb::render_config(&fixed_plan)?;
         let proposal = Proposal {
-            schema_version: SCHEMA.into(),
+            schema_version: schema.into(),
             workspace: workspace.evidence().clone(),
             plan: fixed_plan,
             helper_sha256: helper_hash()?.into(),
@@ -605,17 +857,17 @@ pub fn run() -> Result<()> {
             expected_host: EXPECTED_HOST.into(),
             expected_guest: EXPECTED_GUEST.into(),
             worker_uuid: VM_UUID.into(),
-            fixed_requests: fixed_requests()?,
+            fixed_requests: fixed_requests_for(profile)?,
             rendered_config_sha256: rendered.sha256.clone(),
             provider_sha256: PROVIDER.into(),
-            session_id: SESSION.into(),
+            session_id: session.into(),
             operator_sid: actor,
         };
         publish(&workspace, "proposal.json", &proposal)?;
         println!(
             "{}",
             serde_json::to_string_pretty(
-                &json!({"researchOnly":true,"capabilityOnly":true,"noGeneralEnforcementAcceptance":true,"planSha256":digest(&serde_json::to_vec(&proposal)?),"proposal":proposal,"rendered":rendered,"effects":"Creates one fresh offline disposable Windows Sandbox; copies only the approved helper and pinned official MXC DLL to fixed guest-local storage; creates one guest-local standard account and owned-root ACLs; loads the DLL only as that standard guest user and probes five fixed request policies without spawning an MXC workload. No 7-Zip installer/application dispatch, host runtime loading, host security change or provider setting change. Exact owned session stop. Capability-only research: no general enforcement acceptance."})
+                &json!({"researchOnly":true,"capabilityOnly":profile==TrialProfile::Capability,"noGeneralEnforcementAcceptance":true,"planSha256":digest(&serde_json::to_vec(&proposal)?),"proposal":proposal,"rendered":rendered,"effects":if profile==TrialProfile::Creation {"One fresh offline owned Sandbox; pinned MXC DLL only in guest ordinary worker; one fixed cooperative first-party Driver ProcessContainer, with matching baseline file controls, same-account process binding and owner-held exact-job release gate. Guest-local test account/owned fixture ACLs only. No vendor application, fallback, parent runtime installation or VM/security-setting changes; exact owned cleanup; no replay."} else {"One fresh offline owned Sandbox; pinned helper and MXC DLL only in ordinary guest worker; five fixed capability probes; no workload/application dispatch; exact owned cleanup; no replay."}})
             )?
         );
         return Ok(());
@@ -631,15 +883,15 @@ pub fn run() -> Result<()> {
     // Bootstrap reads no executable authority; reopening the exact protected
     // workspace below re-reads this same proposal through bound held handles.
     let proposal_file = HeldApplicationFile::open_bounded(
-        &Path::new(ROOT).join(r"Trial\proposal.json"),
+        &Path::new(root).join(r"Trial\proposal.json"),
         1024 * 1024,
     )?;
     let proposal: Proposal = serde_json::from_slice(&proposal_file.read_bounded(1024 * 1024)?)?;
     let workspace = HeldRunWorkspace::reopen_bound(&proposal.workspace)?;
-    if normalized(workspace.root_path()) != format!(r"{ROOT}\Trial")
+    if normalized(workspace.root_path()) != format!(r"{root}\Trial")
         || proposal != read_protected::<Proposal>(&workspace, "proposal.json")?
-        || proposal.schema_version != SCHEMA
-        || proposal.plan != plan(&workspace)
+        || proposal.schema_version != schema
+        || proposal.plan != plan(&workspace, profile)
         || proposal.helper_sha256 != helper_hash()?
         || proposal.provider_sha256 != PROVIDER
         || proposal.dll_sha256 != contract::RUNTIME_DLL_SHA256
@@ -652,10 +904,10 @@ pub fn run() -> Result<()> {
         || proposal.expected_host != EXPECTED_HOST
         || proposal.expected_guest != EXPECTED_GUEST
         || proposal.worker_uuid != VM_UUID
-        || proposal.fixed_requests != fixed_requests()?
+        || proposal.fixed_requests != fixed_requests_for(profile)?
         || proposal.rendered_config_sha256
             != aiw_provider_wsb::render_config(&proposal.plan)?.sha256
-        || proposal.session_id != SESSION
+        || proposal.session_id != session
         || proposal.operator_sid != actor
     {
         return Err("proposal drift or foreign original workspace".into());
@@ -678,13 +930,28 @@ pub fn run() -> Result<()> {
                 );
             }
         }
-        let marker = completed_marker(&workspace, &proposal);
+        let marker = completed_marker(&workspace, &proposal, profile);
+        let raw = if profile == TrialProfile::Creation {
+            Some(match &marker {
+                Ok(hash) => creation_output_hex(&workspace, &proposal, hash),
+                Err(e) => Err(format!("creation marker refused: {e}").into()),
+            })
+        } else {
+            None
+        };
+        let retained_match = raw.as_ref().is_none_or(|r| r.is_ok())
+            && marker.as_ref().ok().is_some_and(|hash| {
+                records
+                    .get("host-result.json")
+                    .is_some_and(|v| v["outputSha256"] == *hash)
+            });
         println!(
             "{}",
-            serde_json::to_string_pretty(&json!({"schemaVersion":SCHEMA,
-            "researchOnly":true,"capabilityOnly":true,"noGeneralEnforcementAcceptance":true,
+            serde_json::to_string_pretty(&json!({"schemaVersion":schema,
+            "researchOnly":true,"capabilityOnly":profile==TrialProfile::Capability,"noGeneralEnforcementAcceptance":true,
             "readOnly":true,"providerCalls":0,"planSha256":hash,"proposal":proposal,
-            "hostRecords":records,"guestOutputSha256":marker.as_ref().ok(),
+            "hostRecords":records,"guestOutputSha256":marker.as_ref().ok(),"retainedOutputMatches":retained_match,
+            "guestOutputHex":raw.as_ref().and_then(|r|r.as_ref().ok()),"guestOutputHexError":raw.as_ref().and_then(|r|r.as_ref().err()).map(ToString::to_string),
             "guestOutputReadError":marker.as_ref().err().map(ToString::to_string)}))?
         );
         return Ok(());
@@ -701,7 +968,7 @@ pub fn run() -> Result<()> {
     if read_protected::<String>(&workspace, "approval.json")? != hash {
         return Err("matching approval required".into());
     }
-    let id = CanonicalSandboxId::parse(SESSION)?;
+    let id = CanonicalSandboxId::parse(session)?;
     if args[0] == "--recover" {
         let prior = if workspace
             .root_path()
@@ -728,12 +995,13 @@ pub fn run() -> Result<()> {
             None
         };
         if read_protected::<String>(&workspace, "start-intent.json")? != hash
-            || !recovery_allowed(
+            || !recovery_allowed_for(
                 prior.as_ref(),
                 &hash,
                 workspace.root_path().join("recovery.json").try_exists()?,
+                profile,
             )
-            || !recovery_allowed(cleanup.as_ref(), &hash, false)
+            || !recovery_allowed_for(cleanup.as_ref(), &hash, false, profile)
         {
             return Err("only unresolved original trial can be recovered once".into());
         }
@@ -742,7 +1010,7 @@ pub fn run() -> Result<()> {
         publish(&workspace, "recovery-intent.json", &hash)?;
         let mut lease = aiw_windows_platform::acquire_windows_sandbox_recovery(PROVIDER, id)?;
         let result = lease.reconcile()?;
-        let record = json!({"schemaVersion":SCHEMA,"researchOnly":true,"capabilityOnly":true,"noGeneralEnforcementAcceptance":true,"planSha256":hash,"sessionId":result.session_id,"outerCleanupVerified":true,"disposition":format!("{:?}",result.disposition),"providerDrifted":result.provider_drifted,"sessionIdsBefore":result.session_ids_before,"sessionIdsAfter":result.session_ids_after});
+        let record = json!({"schemaVersion":schema,"researchOnly":true,"capabilityOnly":profile==TrialProfile::Capability,"noGeneralEnforcementAcceptance":true,"planSha256":hash,"sessionId":result.session_id,"outerCleanupVerified":true,"disposition":format!("{:?}",result.disposition),"providerDrifted":result.provider_drifted,"sessionIdsBefore":result.session_ids_before,"sessionIdsAfter":result.session_ids_after});
         publish(&workspace, "recovery.json", &record)?;
         println!("{}", serde_json::to_string_pretty(&record)?);
         return Ok(());
@@ -751,7 +1019,7 @@ pub fn run() -> Result<()> {
     if std::fs::read_dir(workspace.output_path())?.next().is_some() {
         return Err("output must be empty; preserve existing evidence".into());
     }
-    if Path::new(ROOT).join(r"Trial\recovery.json").exists() {
+    if Path::new(root).join(r"Trial\recovery.json").exists() {
         return Err("recovered trial cannot Start".into());
     }
     let mut lease = aiw_windows_platform::acquire_windows_sandbox(PROVIDER)?;
@@ -761,7 +1029,7 @@ pub fn run() -> Result<()> {
     // Durable create-new transaction precedes the mutating call. Any interruption
     // requires exact recovery, never another installation attempt in this root.
     publish(&workspace, "start-intent.json", &hash)?;
-    let execution = (|| -> Result<()> {
+    let execution = (|| -> Result<String> {
         workspace.revalidate()?;
         for (bound, file) in &tools {
             bound.revalidate()?;
@@ -771,8 +1039,8 @@ pub fn run() -> Result<()> {
         lease.connect_owned()?;
         let deadline = Instant::now() + Duration::from_secs(420);
         while Instant::now() < deadline {
-            if completed_marker(&workspace, &proposal).is_ok() {
-                return Ok(());
+            if let Ok(hash) = completed_marker(&workspace, &proposal, profile) {
+                return Ok(hash);
             }
             std::thread::sleep(Duration::from_millis(500));
         }
@@ -787,21 +1055,85 @@ pub fn run() -> Result<()> {
     publish(
         &workspace,
         "cleanup-observation.json",
-        &json!({"schemaVersion":SCHEMA,"researchOnly":true,"capabilityOnly":true,"noGeneralEnforcementAcceptance":true,"planSha256":hash,"sessionId":SESSION,"outerCleanupVerified":cleanup_verified,"cleanupError":cleanup.as_ref().err().map(ToString::to_string)}),
+        &json!({"schemaVersion":schema,"researchOnly":true,"capabilityOnly":profile==TrialProfile::Capability,"noGeneralEnforcementAcceptance":true,"planSha256":hash,"sessionId":session,"outerCleanupVerified":cleanup_verified,"cleanupError":cleanup.as_ref().err().map(ToString::to_string)}),
     )?;
-    let output = completed_marker(&workspace, &proposal);
-    let record = json!({"schemaVersion":SCHEMA,"researchOnly":true,"capabilityOnly":true,"noGeneralEnforcementAcceptance":true,"planSha256":hash,"sessionId":SESSION,"guestMarkerObserved":execution.is_ok(),"executionError":execution.as_ref().err().map(ToString::to_string),"outerCleanupVerified":cleanup_verified,"cleanupError":cleanup.as_ref().err().map(ToString::to_string),"outputSha256":output.as_ref().ok(),"outputError":output.as_ref().err().map(ToString::to_string),"applicationExecutionRequested":false,"applicationCompatibility":"unmeasured","isolationVerdict":"unmeasured"});
+    let output = completed_marker(&workspace, &proposal, profile);
+    let observations_stable = matches!((&execution,&output),(Ok(a),Ok(b)) if a==b);
+    let record = json!({"schemaVersion":schema,"researchOnly":true,"capabilityOnly":profile==TrialProfile::Capability,"noGeneralEnforcementAcceptance":true,"planSha256":hash,"sessionId":session,"guestMarkerObserved":execution.is_ok(),"outputSha256BeforeCleanup":execution.as_ref().ok(),"observationsStable":observations_stable,"executionError":execution.as_ref().err().map(ToString::to_string),"outerCleanupVerified":cleanup_verified,"cleanupError":cleanup.as_ref().err().map(ToString::to_string),"outputSha256":output.as_ref().ok(),"outputError":output.as_ref().err().map(ToString::to_string),"applicationExecutionRequested":false,"applicationCompatibility":"unmeasured","isolationVerdict":"unmeasured"});
     publish(&workspace, "host-result.json", &record)?;
     println!("{}", serde_json::to_string_pretty(&record)?);
     execution?;
     cleanup?;
     output?;
+    if !observations_stable {
+        return Err("research marker changed across cleanup".into());
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn changed_raw_creation_bytes_cannot_be_exported_under_an_accepted_hash() {
+        let first = b"original accepted research marker";
+        let hash = digest(first);
+        require_same_output_bytes(first, &hash).unwrap();
+        assert!(require_same_output_bytes(b"different research marker", &hash).is_err());
+        assert!(require_same_output_bytes(first, "").is_err());
+    }
+    #[test]
+    fn creation_profile_is_driver_only_and_cannot_recover_a_capability_transaction() {
+        let requests = fixed_requests_for(TrialProfile::Creation).unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].operation, FixedOperation::Driver);
+        assert_eq!(requests[0].request["fallback"]["allowDaclMutation"], false);
+        assert_ne!(TrialProfile::Creation.root(), ROOT);
+        assert_ne!(TrialProfile::Creation.session(), SESSION);
+        let record = json!({"schemaVersion":SCHEMA,"researchOnly":true,"capabilityOnly":true,"planSha256":"a","sessionId":SESSION,"outerCleanupVerified":false});
+        assert!(!recovery_allowed_for(
+            Some(&record),
+            "a",
+            false,
+            TrialProfile::Creation
+        ));
+    }
+    #[test]
+    fn creation_retains_failed_prefix_without_accepting_a_production_verdict() {
+        let old = marker_fixture();
+        let hash = "a".repeat(64);
+        let mut marker = json!({"schemaVersion":"aiw.dev/mxc-creation-trial/v0alpha1","researchOnly":true,
+            "helperSha256":hash,"helperSizeBytes":100,"dllSha256":contract::RUNTIME_DLL_SHA256,
+            "windows":old["windows"],"standardContext":old["standardContext"],"heldWorkerToken":old["heldObserverToken"],
+            "handshake":null,"handshakeError":"worker watchdog after measured release","worker":null,"workerReadError":"missing",
+            "ownedJobEmpty":true,"cleanupError":null,"validationErrors":[],"applicationExecutionRequested":false,
+            "selectedTierAttestation":"unmeasured","ownerObservations":{"ownerMeasuredChild":{"processId":43},"exactOuterJobMembership":true,"releaseGatePublished":true},"retainedPrefixes":{}});
+        for key in CREATION_PREFIXES {
+            marker["retainedPrefixes"][key] =
+                json!({"value":null,"readError":"missing after interrupted worker"});
+        }
+        marker["retainedPrefixes"]["probe"] = json!({"value":{"ffiStatus":0},"readError":null});
+        let bytes = serde_json::to_vec(&marker).unwrap();
+        assert_eq!(
+            creation_marker_digest(&bytes, &hash, 100).unwrap(),
+            digest(&bytes)
+        );
+        for (field, value) in [
+            ("helperSha256", json!("b".repeat(64))),
+            ("selectedTierAttestation", json!("native-verified")),
+            ("applicationExecutionRequested", json!(true)),
+            ("unexpected", json!(true)),
+            ("handshake", json!({"unexpectedSuccess":true})),
+            ("cleanupError", json!("unresolved")),
+        ] {
+            let mut invalid = marker.clone();
+            invalid[field] = value;
+            assert!(
+                creation_marker_digest(&serde_json::to_vec(&invalid).unwrap(), &hash, 100).is_err(),
+                "{field}"
+            );
+        }
+    }
     fn marker_fixture() -> serde_json::Value {
         let hash = "a".repeat(64);
         let token = json!({"schemaVersion":"aiw.dev/token-evidence/v0alpha1","processId":42,

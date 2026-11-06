@@ -1,4 +1,5 @@
-//! Exact v1.0.1 C-ABI request probe. No CLI startup, spawn or recovery exports.
+//! Exact v1.0.1 C-ABI request probe and closed first-party creation control.
+//! No CLI startup or recovery exports; no vendor application is dispatched here.
 //! Loading vendor code is execution and requires the reviewed disposable-worker
 //! package/authorization. Merely compiling this module does not load the DLL.
 use aiw_provider_mxc::process_container::{self as contract, FixedOperation, FixedRequest};
@@ -16,6 +17,9 @@ use windows::Win32::System::LibraryLoader::{
     GetModuleFileNameW, GetProcAddress, LOAD_LIBRARY_SEARCH_SYSTEM32, LoadLibraryExW,
 };
 use windows::core::{PCSTR, PCWSTR};
+
+#[path = "mxc_process/creation.rs"]
+mod creation;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 // Strict holds apply to approved guest-local copies, never relaxed to accept
@@ -212,6 +216,9 @@ fn hold_fixed_ancestry() -> Result<Vec<fs::File>> {
 }
 
 pub fn run_fixed_probe() -> Result<()> {
+    if creation::is_creation_role() {
+        return creation::run();
+    }
     let exe = std::env::current_exe()?;
     let token = aiw_token::collect_current_process_token()?;
     let arguments = std::env::args_os().skip(1).collect::<Vec<_>>();

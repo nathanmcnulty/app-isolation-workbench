@@ -19,17 +19,20 @@ pub const PARTIAL_BYTES: &[u8] = b"AIW publication control: interrupted before p
 pub const LEGACY_BYTES: &[u8] = b"AIW publication control: legacy long name\n";
 const CAPABILITY_OUTPUT: &str = r"C:\AIW\MxcProbeOutput";
 pub(crate) const CAPABILITY_RESULT: &str = r"C:\AIW\MxcProbeOutput\RESULT.DAT";
+pub(crate) const CREATION_RESULT: &str = r"C:\AIW\MxcCreationOutput\RESULT.DAT";
 
 #[derive(Clone, Copy)]
 pub(crate) enum MappedPublication {
     Capability,
     Control,
+    Creation,
 }
 impl MappedPublication {
     fn output(self) -> &'static str {
         match self {
             Self::Capability => CAPABILITY_OUTPUT,
             Self::Control => CONTROL_OUTPUT,
+            Self::Creation => r"C:\AIW\MxcCreationOutput",
         }
     }
 }
