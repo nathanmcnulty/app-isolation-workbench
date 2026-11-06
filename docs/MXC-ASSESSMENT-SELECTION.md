@@ -14,8 +14,9 @@ The latest official release observed through GitHub's release API is
 stable `1.0.0` request schema. Its `mxc-release-binaries.zip` asset is 542051775
 bytes; the API advertises SHA-256
 `0e832239454ba7fcd338ff56218a287eef4c0a01c1484084b869f55feff8abe9`.
-This is an acquisition identity, not a local download, signature verification,
-complete native/dependency inventory, or execution acceptance.
+The local acquisition and signature checks are recorded below; this release
+identity alone does not establish a complete dependency inventory or execution
+acceptance.
 
 Current main was independently observed at
 [`40df784b2c32e764eaed51899a10ee936a2d7c0c`](https://github.com/microsoft/mxc/tree/40df784b2c32e764eaed51899a10ee936a2d7c0c),
@@ -39,9 +40,13 @@ The selected direct C ABI accepts full exact `1.0.0` request JSON, including
 `fallback.allowDaclMutation:false`. The CLI performs orphan recovery before its
 probe; the typed Rust v1 request omits fallback policy. A dedicated fixed guest
 helper therefore probes the signed pinned DLL directly with System32-only
-dependency search, after strict local-copy identity checks. No DLL has yet been
-loaded or runtime installed. Trial preparation, exact approval and Start remain
-separate; runtime staging/native trials await the user-required authorization.
+dependency search, after strict local-copy identity checks. Trial preparation,
+exact approval and Start remain
+separate. The user approved this pinned runtime for this goal's fresh Sandboxes
+on existing VM107 through reviewed Proxmox-console scripts; parent runtime
+installation and VM/host security changes are excluded. The first
+[native capability trial](MXC-PROBE-NATIVE-20261106.md) captured native-tier support
+reports inside a fresh guest, but its host marker failed custody validation.
 Probe support cannot prove effective creation/enforcement inside Sandbox.
 
 Sources: [exact JSON C ABI](https://github.com/microsoft/mxc/blob/fda29ac63bc306b7f97f3b86b4b63d44f7f40cf2/src/ffi/mxc_ffi/src/lib.rs),

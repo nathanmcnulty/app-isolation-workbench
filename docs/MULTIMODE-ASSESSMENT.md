@@ -49,8 +49,13 @@ The default-off capability helper and host harness now use the exact JSON C ABI
 and existing owned Sandbox lease. They preserve separate Prepare/Approve/Start,
 bounded failed/partial observations, atomic final publication, exact cleanup and
 non-replaying recovery. They do not dispatch an MXC workload or 7-Zip, and cannot
-be imported as verified production application results. Runtime authorization
-and native validation remain pending.
+be imported as verified production application results. The user approved the
+pinned runtime for this goal's fresh Sandboxes on existing VM107 through reviewed
+Proxmox-console scripts. Parent runtime installation and VM/host security changes
+are excluded. The first [native capability trial](MXC-PROBE-NATIVE-20261106.md)
+captured five native-tier support reports but failed the host output custody
+check; owned outer cleanup passed. No workload creation/enforcement or application
+acceptance is established. A corrected publication path needs fresh proof.
 
 Process-tree and registry foundations are test-compiled only. The collector
 records an inherited debugger chain, not broker-created processes or invented

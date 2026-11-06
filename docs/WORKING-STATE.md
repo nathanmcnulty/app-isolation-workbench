@@ -21,11 +21,16 @@ active; neither implementation nor native acceptance is complete.
   non-native tiers, BFS, degradation and missing requested controls. The old
   planning-only MXC pin is preserved separately. Probe success is capability
   evidence, never enforcement or execution approval.
-- A default-off fixed native probe wrapper is being built/reviewed. It uses the
-  exact JSON C ABI in a dedicated standard-user guest helper; CLI startup recovery
-  and the typed SDK's omitted fallback setting are excluded. No MXC DLL has been
-  loaded, runtime installed, or VM/security setting changed. User authorization
-  is required before runtime staging/installation or affected native trials.
+- The user approved this pinned runtime for the goal's fresh Sandboxes on VM107
+  through reviewed Proxmox-console scripts; parent runtime installation and
+  VM/host security changes remain excluded. The source `2e77e4f` capability trial
+  loaded MXC only as an ordinary guest user. All five captured probes reported
+  native-tier request support, independently audited, but host custody rejected
+  the marker's short-name alias (`RESULT~1.JSO`). Start failed at its deadline; owned
+  outer cleanup passed and retained Read made zero provider calls. Preserve this
+  failed run; no workload creation/enforcement was measured. The
+  [native record](MXC-PROBE-NATIVE-20261106.md) binds the packet, launcher correction,
+  authorization, source and evidence outside Git.
 - The separate host capability harness binds two payloads, exact policies and
   embedded source/environment identities to Prepare/Approve/Start. It preserves
   failed child/partial collection/cleanup facts and publishes guest markers
@@ -42,17 +47,18 @@ mapped-transport tests, 5 host marker/recovery tests, 5 debugger-state tests,
 passed. Consequential independent review fixes include output-prefix preservation,
 normalized Unicode names, System32-only dependency search, actual loaded-module
 identity, atomic final markers and full emitted-shape parsing. Native tests are
-still pending. Logs are `C:/aiw/multimode-*.log`, outside Git.
+pending for the application path. Logs are `C:/aiw/multimode-*.log`, outside Git.
 Raw FILETIME identifiers require lossless/Rust auditing; do not round them through
 JavaScript numbers. Registry-link/create-only native semantics remain open before
 production wiring, and explicit cleanup cannot trigger a hidden Drop retry.
 
 ## Required next work
 
-Complete current focused tests and consequential reviews/fixes; preserve logs
-outside Git. Prepare a concrete pinned capability/control package before asking
-for runtime authorization. Verify actual guest creation/enforcement, not host
-build/API presence. Continue independently with shared application process-tree
+Validate a corrected alias-free publisher in a fresh
+owned environment while preserving strict custody. Never repair/adopt or replay
+the failed run. Preserve native evidence outside Git. Verify actual guest
+creation/enforcement, not host build/API presence. Continue independently with
+shared application process-tree
 instrumentation, registry controls, fresh-environment repeats, retained archive
 investigation, new-source interruption/invalid/missing-output/recovery, desktop
 multi-mode Results and sanitized retained export. No weaker fallback or automatic
