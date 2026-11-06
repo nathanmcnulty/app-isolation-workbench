@@ -31,6 +31,19 @@ cargo test -p aiw-windows-platform unelevated_process_creates_and_acquires_globa
 
 That check asserts the process is unelevated before acquiring the mutex; an elevated invocation fails rather than claiming unelevated coverage. Disposal fixtures explicitly assign the token user as owner and retain the production protected/inherited ACL contract, independent of the runner's default token owner.
 
+## Hosted CI runtime
+
+`ci.yml` accepts any stable x64 Core **7.6.x** patch at the canonical machine path.
+It reuses a compatible installed runtime without downloading or reinstalling it.
+The reviewed 7.6.7 MSI/hash is only a fallback for an older or missing selected
+runtime after the trusted bootstrap is staged. Installation failures include the
+MSI exit code and log tail. A missing/broken initial Core bootstrap, prerelease,
+unexpected identity, or newer incompatible series requires a supported hosted
+image rather than a blind downgrade. This changes CI patch compatibility, not the
+application/VM runtime contract or the separate release-workflow pins.
+`scripts/test-ci-runtime-selection.ps1` checks the actual selection logic with
+inert download/install stubs.
+
 ## Reduce repeated reasoning
 
 - Update the short handoff at a milestone, with links to detailed evidence. Avoid rereading the entire roadmap and historical transcripts on every continuation.

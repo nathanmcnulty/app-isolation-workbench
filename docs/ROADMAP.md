@@ -1,10 +1,52 @@
 # Roadmap
 
-Reviewed 2026-10-07 against the implemented runner, publication controls, retained live evidence, and Microsoft's current MXC guidance. The release sequence below is authoritative; numbered capability benchmarks retain research acceptance criteria, not a serial release backlog. External platform research below is dated context and must be reverified before implementation. See the [containment trajectory review](MXC-TRAJECTORY-REVIEW-2026-10-07.md) for source identities, backend/scenario coverage and acceptance gates; it does not advance our MXC runtime pin.
+Direction and external examples updated 2026-11-06. This roadmap guides the next
+capabilities; benchmarks retain acceptance criteria, not a fixed implementation
+order or deadline. Completed evidence below keeps its original scope and date.
+The [October containment review](MXC-TRAJECTORY-REVIEW-2026-10-07.md) remains useful
+historical context; current source checks below do not advance our MXC runtime pin.
+Implementation continues in its existing session. This documentation update does
+not restart that work, change the active worker, or authorize installation.
 
-The goal is a free community tool that answers **which tested application functions work under which measured isolation configuration**, helps an administrator adapt the application, and produces a launch profile or package that passes the same tests. Workbench evolves into Studio when authoring is useful; this is one product.
+The goal is a free community tool for **IT administrators assessing their own
+applications**: what installation and normal use require, which tested functions
+work under which measured isolation configuration, and what remains unknown.
+**Workbench** is the assessment phase. **Wizard** adds guided adaptation and
+packaging while retaining assessment. Earlier documents call that later phase
+Studio; the clarified direction is Workbench -> Wizard, without a code or
+repository rename in this change.
 
-Deliver **Assess -> Adapt -> Package -> Validate** for a narrow application class before expanding every provider, collector, lifecycle, and UI. Community feedback is welcome whenever capabilities are usable, but a feedback round is not a development gate.
+Keep the **Assess -> Adapt -> Package -> Validate** loop, with useful assessment
+available before general packaging. Agents or reviewed scripts should be able to
+use the disposable computer through installation and representative application
+workflows, supplemented by the administrator for judgment or uncovered actions.
+Capture observed requirements, failures, and coverage gaps rather than relying
+only on installer metadata or a successful launch. Later, repeat the same workflow
+under a comparable baseline and isolation candidates. Automation must preserve
+bounded worker authority and approval; this is not permission for arbitrary host
+commands or model-generated security verdicts.
+
+Prioritize MXC research across all four isolation families, with classic
+AppContainer and MSIX work alongside it. Choose the next useful slice from actual
+admin needs, available platform capabilities, and retained evidence. Assessment,
+comparison, and packaging can inform one another; none requires completing every
+provider first. Community feedback is welcome but is not a development gate.
+
+## Choices for the next useful slice
+
+Fill these in when selecting the next experiment, using what the existing session
+has already established. These are prompts, not additional release gates.
+
+- **Application and workflow:** which administrator need, exact app/version, and
+  representative install-and-use tasks should the next slice assess?
+- **Coverage:** which steps can an agent or script exercise, which need a person,
+  and what will remain explicitly unmeasured?
+- **Isolation candidate:** which MXC family or complementary AppContainer/MSIX
+  path fits that workflow and is available on the chosen disposable worker?
+  State the intended restrictions before comparing outcomes.
+- **Useful output:** is an assessment report enough for this slice, or is a
+  reusable launch profile or package needed? Choose free tooling where feasible
+  and keep any commercial handoff optional.
 
 ## Current delivery sequence
 
@@ -82,7 +124,7 @@ analysis, closed offline recipe selection, package assembly and verified replay
 experience. Signed alpha `desktop-alpha-08dcc310aa30` now includes both slices;
 its [downloaded-package acceptance](PUBLIC-PACKAGING-ACCEPTANCE.md) is separate
 from unsigned development proof. This closes the first packaging component,
-not the broader isolation or Studio benchmarks.
+not the broader isolation or Wizard benchmarks.
 
 PR #93 extended that packaging component to the existing fixed Bambu Studio EXE
 recipe. Signed alpha `desktop-alpha-4e39c787e63a` passed fresh public-download
@@ -98,14 +140,15 @@ open. Review this shared foundation before expanding application coverage.
 [Notepad++ workflow](NOTEPAD-MSIX-LIFECYCLE.md) passed through normal uninstall and
 independent cleanup. The fixed VM107 production execution, desktop approval and
 shared assessment integration also passed; see [MSIX-EXECUTION.md](MSIX-EXECUTION.md).
-**Next security milestone:** prioritize Benchmark 2's real-application baseline/candidate comparison over
-additional packaging recipes. Complete the real classic AppContainer comparison
-using the existing control foundation. Independently review the exact MXC v1.0.0
-release/SDK without executing it; after its disposable controls pass, evaluate
-ProcessContainer against the same workflow. Record differences in effective tier
-and policy support rather than substituting one candidate's result for another.
-Keep delivery, function success and measured containment separate. Unsupported
-results remain useful outcomes; no silent backend downgrade or automatic grants.
+**Next direction:** broaden useful assessment of installation and actual use,
+prioritize current MXC feasibility across the four families below, and retain the
+classic AppContainer control and MSIX work as complementary paths. Benchmark 2's
+paired real-application comparison remains an intended outcome, not a reason to
+stall assessment or a useful packaging experiment. Review source/provenance and
+pass disposable controls before adopting a new runtime. Record effective tier
+and policy support separately for each candidate. Keep delivery, function success
+and measured containment separate; unsupported results are useful outcomes, with
+no silent backend downgrade or automatic grants.
 
 ## What is already working
 
@@ -134,13 +177,58 @@ Visual Studio Code was added as a planned test application on 2026-10-11, distin
 from Visual Studio Build Tools. Its [bounded candidate workflow](INSTALLER-CORPUS.md#planned-addition-visual-studio-code)
 starts with offline folder/edit/save and separately tests a fixed terminal child.
 Acquire and pin its payload before execution; it remains unsupported until its
-own acceptance evidence exists. Finish the current security milestone first.
+own acceptance evidence exists. Its timing follows the next useful assessment question.
 
 The [installer inventory](INSTALLER-CORPUS.md) now makes profile selection concrete: Notepad++ EXE/MSI controls, DriveManager for elevation/device dependencies, Bambu for a richer local-file workflow, and Signal/ChatGPT/Visual Studio for acquisition dependencies. Signal and ChatGPT are Store wrappers in this folder; DriveManager is an SK hynix disk utility. Do not select fixtures solely by installer size or apparent UI simplicity.
 
 [Bambu Studio export](BAMBU-STUDIO-PROFILE.md) is now the second production execution/reporting consumer: a separately typed EXE profile uses approved start, standard-user STL-to-3MF export, bounded package/geometry verification, and retained JSON/Markdown reports. Its information-query compiler remains metadata-only. [Mixed application report sets](REPORT-SETS.md) now preserve distinct function columns and explicit unavailable/failure evidence. The [project-owned control](CONTROL-FIXTURE.md) now passes repeated standard-user/ACL/child/failure development checks in fresh workers. Paired ordinary-user/AppContainer file, registry, and child controls now pass in fresh workers; real-application repeatability and approved control integration remain open. Slicing remains a later function with version-sensitive printer/material settings.
 
 The corpus exposed an intake requirement now addressed by [explicit download metadata archiving](DOWNLOAD-METADATA-INTAKE.md): all seven supplied files pass protected intake, with source identity and metadata unchanged. Retain this bounded policy when broadening profiles; arbitrary streams remain rejected. Separate networked payload acquisition from offline application assessment; bind downloaded payloads, not just launcher hashes. These are prerequisites for using the affected fixtures, not reasons to enable networking on the existing offline profile.
+
+## Examples to inspect as the project develops
+
+These are research examples, not AIW support claims or an installation queue.
+Sources were checked on 2026-11-06; pin the actual release and recheck behavior
+before any trial. No binaries were acquired or executed for this roadmap update.
+
+### Existing adopters of Windows command isolation
+
+- [Codex's native Windows sandbox](https://learn.chatgpt.com/docs/windows/windows-sandbox)
+  recommends MXC on compatible devices and documents legacy alternatives. Study
+  command/child-process containment, policy scope, and cleanup. This does not mean
+  the entire desktop app runs in an MXC sandbox.
+- [VS Code's agent-command sandbox](https://code.visualstudio.com/docs/agents/concepts/trust-and-safety)
+  uses MXC process containers on Windows for shell execution and descendants.
+  Built-in file tools have separate permission checks; MCP/LSP coverage depends
+  on configuration. It is not isolation of the VS Code GUI, and network access is
+  not automatically denied.
+- [Copilot CLI's local sandbox](https://docs.github.com/en/copilot/concepts/security-governance-and-network-settings/about-cloud-and-local-sandboxes)
+  uses MXC on Windows and is currently off by default. Shell/subprocess isolation
+  differs from best-effort policy checks in its unsandboxed built-in file tools.
+  Study the CLI, not a claim that the whole Copilot GUI is sandboxed.
+
+Use these to learn from real integrations and their limitations. Their adoption
+does not establish equivalent policies, arbitrary Windows GUI compatibility, or
+support for every MXC family in AIW.
+
+### Candidate application workflows
+
+| Candidate and vendor source | Useful first assessment question |
+|---|---|
+| [7-Zip](https://www.7-zip.org/download.html) | Install, create/extract a controlled archive, and inspect file access; shell integration is a separate test. |
+| [Notepad++ official releases](https://github.com/notepad-plus-plus/notepad-plus-plus/releases) | Reuse the retained install/open/edit/save/close evidence, then extend coverage deliberately; another release needs fresh provenance and validation. |
+| [Visual Studio Code](https://code.visualstudio.com/download) | Install, open a local folder, edit/save, and separately inspect a terminal child. Whole-editor isolation and its own agent sandbox are distinct questions. |
+| [Firefox from Mozilla](https://www.mozilla.org/en-US/firefox/windows/) | Install and exercise a fresh profile/local content; networked browsing, downloads, updates, and child processes need separately declared coverage. |
+
+Vendor entry points are verified source locations, not verified binary identities.
+Before installing, bind the selected version/architecture, final download source,
+hashes, and available publisher/signature evidence. Follow vendor-linked delivery
+locations, distinguish payloads from download wrappers, and keep acquisition apart
+from offline assessment. Install and inspect only in a disposable Windows
+Sandbox/VM, with human supplementation where automation cannot cover the workflow.
+No credentials, customer data, installers, or proprietary binaries belong in the
+repository. An application's existing internal sandbox is not proof that an
+additional selected boundary works.
 
 ## Benchmark 1 - comparable application evidence
 
@@ -161,17 +249,41 @@ General tracing, every installer type, printing, networking, updates, and reboot
 
 The bounded classic AppContainer feasibility control now passes a same-user file/registry/child comparison in two fresh disposable workers, using documented APIs in the native authority layer. Approved evidence integration and a real-application candidate remain next for this provider; they do not block the first Sandbox bundle. Unpackaged AppContainer launch is documented, so an MSIX converter need not precede this experiment. This is not a claim that Notepad++ will work unchanged. See [control proof and limits](CONTROL-FIXTURE.md), [Launch an AppContainer](https://learn.microsoft.com/en-us/windows/win32/secauthz/implementing-an-appcontainer), and [MSIX AppContainer apps](https://learn.microsoft.com/en-us/windows/msix/msix-container).
 
-Evaluate current MXC ProcessContainer as a bounded alternative implementation,
-using the [October 7 review](MXC-TRAJECTORY-REVIEW-2026-10-07.md#ordered-work-and-closure-gates).
-Our pinned `0.8.0-alpha` adapter is planning-only; current upstream SDK and native
-contracts need a source/provenance/side-effect review before adoption. Microsoft's
-process/session support now has servicing-build requirements and runtime feature
-checks. An OS marketing version or `processmodel.dll` export alone is inadequate.
-Record effective tier and the complete policy support, not merely backend name.
-Keep classic AppContainer as a reference; BaseContainer/PSEC must have its own
-effective-boundary evidence rather than being mislabeled AppContainer. Direct
-[CreateProcessInSandbox](https://learn.microsoft.com/en-us/windows/win32/secauthz/createprocessinsandbox)
-ABI research is conditional on a concrete SDK gap, not a parallel default adapter.
+### Evaluate all four MXC isolation families
+
+Microsoft's [June 2026 announcement](https://blogs.windows.com/windowsdeveloper/2026/06/02/windows-platform-security-for-ai-agents/)
+describes four families for **Microsoft Execution Containers (MXC)**. Evaluate
+all four as options; these are not four interchangeable SDK backend enum values.
+
+| Family | Evaluation scope and current caveat |
+|---|---|
+| Process isolation | Lightweight process-level resource controls. Evaluate `ProcessContainer`, effective security tier, child behavior, and supported file/network policy. It is not a VM. |
+| Session isolation | A separate Windows session/identity for separating agent activity from the user's desktop. Evaluate `IsolationSession`, including actual desktop/input/clipboard behavior; the announcement initially limited it to non-interactive sessions. |
+| Micro-VM | Hypervisor-backed isolation. Evaluate feasibility and workload fit; current `MicroVM`/`Hyperlight` paths are experimental, not assumed production options. |
+| Linux containers | `WSLc` provides a Linux-workload path through WSL. Evaluate it for relevant tools, not as a substitute for Windows GUI compatibility. |
+
+The [current platform support documentation](https://learn.microsoft.com/en-us/windows/apps/develop/mxc/platform-support)
+describes v1.0.0: Windows V1 SDK creation supports `ProcessContainer`,
+`IsolationSession`, and `WSLc`. `WindowsSandbox`, `MicroVM`, and `Hyperlight`
+remain experimental and unavailable through V1 creation APIs. Lifecycle and
+policy support also differ. Keep Windows Sandbox as an outer assessment worker
+distinct from an MXC Windows Sandbox backend; neither proves an inner boundary.
+
+Check the exact servicing build and runtime features against the current
+[process/session OS matrix](https://github.com/microsoft/mxc/blob/main/docs/backends/process-container/os-version-support.md).
+For WSLc, verify the documented [WSL runtime and component prerequisites](https://github.com/microsoft/mxc/blob/main/docs/backends/wslc/wsl-container-getting-started.md),
+currently WSL 3.0.3+ plus the required SDK/runtime components. Do not install or
+enable them implicitly. Host availability, SDK support, successful creation, and
+effective enforcement are separate findings; unavailable/experimental options
+stay in the evaluation record without blocking useful supported work.
+
+Our pinned `0.8.0-alpha` adapter remains planning-only. Review the exact proposed
+release, source/provenance, and side effects before adopting it. Record requested
+and effective backend/tier, host/SDK identity, policy gaps, and positive/negative
+controls for each trial. Keep classic AppContainer as a reference;
+BaseContainer/PSEC needs its own evidence rather than an AppContainer label.
+Direct [CreateProcessInSandbox](https://learn.microsoft.com/en-us/windows/win32/secauthz/createprocessinsandbox)
+ABI research remains conditional on a concrete SDK gap.
 
 End the feasibility slice with a recorded supported/unsupported result for the exact fixture and environment. If a real application cannot run, preserve the control-fixture evidence and identify whether the limitation is in the adapter, driver, or still unknown. Choose the next application/candidate explicitly; do not leave the whole roadmap waiting on one AppContainer experiment or silently fall back to a weaker mode.
 
@@ -220,7 +332,14 @@ The first reusable output can be a launch profile; it need not be an MSIX. Bind 
 
 **Deliverable:** one supported application can be packaged, installed on a clean worker, and pass its declared workflows under the selected runtime boundary.
 
-Start with deterministic assembly of an owned/portable payload or explicit recipe when sufficient. Use pinned Microsoft tooling for installer capture when needed; avoid building another general repackager. Reuse the disposable VM boundary for capture and validation. Microsoft's [Packaging Tool workflow](https://learn.microsoft.com/en-us/windows/msix/packaging-tool/create-app-package) supports clean local, remote, and Hyper-V conversion environments.
+Keep a free path where feasible, using deterministic assembly of an owned/portable
+payload or explicit recipe, and pinned Microsoft tooling for capture when needed.
+Optional commercial packaging tools can help without becoming a prerequisite for
+assessment or the only packaging path. Master Packager remains a manual
+export/import handoff; do not call or embed it without separate vendor
+authorization. Reuse the disposable VM boundary for capture and validation.
+Microsoft's [Packaging Tool workflow](https://learn.microsoft.com/en-us/windows/msix/packaging-tool/create-app-package)
+supports clean local, remote, and Hyper-V conversion environments.
 
 Keep delivery and runtime isolation separate. A full-trust MSIX is an intermediate packaging experiment, never an isolation result. Sign outside the untrusted worker, preserve upstream signatures, and bind the final signed hash to fresh validation. Reproducibility means declared semantic payload/manifest equivalence; do not promise byte-identical signed artifacts when timestamps/signatures differ.
 
@@ -230,8 +349,8 @@ Keep delivery and runtime isolation separate. A full-trust MSIX is an intermedia
 
 - Broaden the fixture corpus and MSI/EXE/portable profiles. New executable behavior is reviewed code with a bounded, hash-bound contract; community metadata cannot inject commands, scripts, arbitrary paths, or privileged verbs.
 - Add lifecycle functions and collectors for concrete application classes: persistence, update/uninstall, reboot, network, printing, shell/COM, services, and drivers. Each addition states the claim its evidence supports.
-- Evaluate Win32 app isolation/App Silo as an independent adaptation option. Classic AppContainer and Win32 app isolation are not interchangeable. The previously reviewed [overview](https://learn.microsoft.com/en-us/windows/win32/secauthz/app-isolation-overview) and [release notes](https://learn.microsoft.com/en-us/windows/win32/secauthz/app-isolation-release-notes) described preview status and full-trust fallback; reverify before implementation and reject that fallback for isolation claims. MXC ProcessContainer feasibility now belongs to Benchmark 2; it does not gate the accepted Sandbox packages.
-- Consider MXC IsolationSession for a concrete separated-desktop workflow, WSLC for Linux-first tools, and MicroVM/Hyperlight for a justified virtualization need. Track Bubblewrap/LXC/Seatbelt for future non-Windows workflows. Use the [backend/scenario matrix](MXC-TRAJECTORY-REVIEW-2026-10-07.md#backend-selection-and-scenario-coverage); a shared schema does not imply equivalent enforcement. Intune, Entra/Agent 365 and Windows 365 integration remain conditional on available contracts and administrator need.
+- Evaluate Win32 app isolation/App Silo as an independent adaptation option. Classic AppContainer and Win32 app isolation are not interchangeable. The previously reviewed [overview](https://learn.microsoft.com/en-us/windows/win32/secauthz/app-isolation-overview) and [release notes](https://learn.microsoft.com/en-us/windows/win32/secauthz/app-isolation-release-notes) described preview status and full-trust fallback; reverify before implementation and reject that fallback for isolation claims. All four MXC families belong to Benchmark 2's evaluation scope; unavailable paths do not gate the accepted Sandbox packages.
+- Deepen the four MXC evaluations as platform availability and application needs justify; use the current sources above rather than treating the older [backend/scenario matrix](MXC-TRAJECTORY-REVIEW-2026-10-07.md#backend-selection-and-scenario-coverage) as current support. A shared schema does not imply equivalent enforcement. Bubblewrap/LXC/Seatbelt and Intune, Entra/Agent 365 or Windows 365 integration remain conditional on platform contracts and administrator need.
 - Add Tauri flows over existing services as capabilities become stable: intake, run/recovery, function matrix, adaptation diff, and validated launch/package. UI work can accompany benchmarks; it need not wait for every provider.
 - Add opt-in sanitized evidence export and community profile/fixture contributions. No central service or automatic telemetry is required. Optional AI may summarize cited evidence or suggest a recipe, but never alter deterministic findings, grant permissions, or execute adaptations.
 
@@ -250,9 +369,9 @@ Finish public discard for actual retained workspace shapes as repeated runs requ
 Direct CreateProcessInSandbox ABI research without a demonstrated SDK gap;
 mandatory or all-backend MXC support; universal installer conversion; arbitrary
 PSF scripts; enterprise certificate/fleet services; centralized telemetry; broad
-OS/ARM64 support; automatic feature/provider installation; and a product rename.
+OS/ARM64 support; automatic feature/provider installation; and an immediate code/repository rename.
 The initial host target remains Windows 11 24H2+ x64, with exact servicing build
-and each actual provider capability checked independently. Bounded current-MXC
-review/control feasibility is prioritized for Benchmark 2, not deferred wholesale.
+and each actual provider capability checked independently. Evaluating all four MXC families
+is prioritized; implementing every backend is not a prerequisite for useful assessment.
 
 Master Packager remains a manual, provider-neutral handoff. Existing research and pinned adapter work are retained. Revisit deferred work when a concrete application need or verified platform capability justifies it.
