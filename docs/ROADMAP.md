@@ -251,14 +251,20 @@ The bounded classic AppContainer control and approved desktop/retained-evidence
 integration are merged in PR #105. VM107 completed the six file/registry/child
 observations, verified exact cleanup, and exported corrected summaries with all
 29 retained files unchanged and no reader execution/provider calls. See the
-[native record](PAIRED-NATIVE-APPROVAL.md). Reuse that evidence; a receipt-bound
-production application comparison remains necessary. The active slice selects 7-Zip 26.05 x64 and its fixed
-create/test/extract/verify workflow, first under an ordinary standard-user
-baseline and then classic AppContainer. The [native research pair](SEVENZIP-NATIVE-ACCEPTANCE.md)
+[native record](PAIRED-NATIVE-APPROVAL.md). Reuse that evidence. The fixed 7-Zip
+26.05 x64 create/test/extract/verify workflow now compares an ordinary standard-user
+baseline with classic AppContainer. The [native research pair](SEVENZIP-NATIVE-ACCEPTANCE.md)
 passed the selected functions and denial canaries with verified cleanup; its
-archive bytes differ while extracted contents match. Production desktop/Results
-integration is implemented; its first native attempt retained `DriverIncomplete`
-with verified outer cleanup, and fresh validation remains pending. See
+archive bytes differ while extracted contents match. The exact `593281a`
+production desktop package subsequently completed the receipt-bound comparison
+on VM107: all four functions pass in both modes, selected file denials and cleanup
+are verified, and native retained Results reload/export preserves all 32 files.
+Both production archives are 579 bytes with different hashes; the cause is
+unmeasured. The earlier `614bb0e` incomplete result remains preserved. Required
+application-descendant evidence, registry denial for this profile and repeatability
+remain open. A separate approved native cancellation now verifies exact owned
+stop and post-stop absence without application evidence; native forced-fault
+recovery remains unexercised. See
 [acceptance mapping](SEVENZIP-ASSESSMENT.md#coverage-limits-and-acceptance), [working state](WORKING-STATE.md) and current
 [MXC candidate selection](MXC-ASSESSMENT-SELECTION.md).
 

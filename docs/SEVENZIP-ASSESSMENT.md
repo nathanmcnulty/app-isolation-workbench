@@ -2,10 +2,11 @@
 
 Selected 2026-11-05 (America/Anchorage). The declared
 experiment completed its [native research trial](SEVENZIP-NATIVE-ACCEPTANCE.md).
-Production desktop/kernel/Results integration is implemented. Its first native
-attempt retained `DriverIncomplete`; fresh native validation of the follow-up
-source remains pending. Research success alone does not establish a supported
-desktop workflow or broad isolation verdict.
+Production desktop/kernel/Results integration is implemented. The exact
+`593281a` package completed the fixed application comparison and native retained
+Results reopen/export on VM107. The earlier `614bb0e` attempt remains a retained
+`DriverIncomplete` result. This is a demonstrated pinned workflow, not broad
+application compatibility or isolation certification.
 Start from [working state](WORKING-STATE.md); the [candidate review](MXC-ASSESSMENT-SELECTION.md)
 records the current MXC research and why classic AppContainer is selected first.
 
@@ -67,8 +68,9 @@ code 5. Separately probe candidate input-file write access, input-file delete
 access and input-directory delete access; each open must return code 5 without
 changing bytes or deleting objects. These checks measure the read-only input
 grant separately from the mutable candidate output. All four selected denial
-checks passed in the research pair; they remain unmeasured in the first
-production result. Verify the candidate profile is deleted and every owned job is empty.
+checks passed in the research pair and the successful `593281a` production pair;
+they remain unmeasured in the older incomplete result. Verify the candidate
+profile is deleted and every owned job is empty.
 The existing six-case control evidence remains separate: it cannot substitute
 for missing observations on this application or its children.
 
@@ -90,14 +92,77 @@ verified assessment/reporting services. The desktop prepares and starts it witho
 internal JSON authoring. Results reopens explicit retained runs and exports
 allowlisted sanitized JSON/Markdown. The first native attempt exercised the
 approval/Start and cleanup path, then retained an incomplete driver result;
-reopening and JSON export preserved that result. Successful native application
-comparison through this product path remains required before calling it supported.
+reopening and JSON export preserved that result. The later `593281a` native run
+completed all four application functions in both modes and reopened/exported the
+verified comparison. These source-specific records remain separately inspectable.
 
 Independent review and focused negative tests cover input/policy drift, partial
 or altered output, missing baseline measurements, failure prefixes, cancellation
 and cleanup uncertainty. Native acceptance remains source-specific. Retained reads
 must preserve source bytes and make zero execution/provider calls; the first
 production run's retained Results check establishes this for its incomplete result.
+The successful run additionally preserves all 32 retained files across two native
+Results opens and deterministic JSON/Markdown exports.
+
+## Administrator workflow for the tested package
+
+Only the pinned 7-Zip 26.05 x64 installer and compiled archive recipe are supported
+by this entry. It does not accept an arbitrary installer, command, input directory
+or policy. The package includes the verified vendor bytes; do not install 7-Zip
+directly on the controller or parent VM to use this workflow.
+
+The exact tested source is `593281a64dda9b233a25e3f3262d7e1751c01a6b`.
+Controller package: `C:\aiw\sevenzip-product-593281a`.
+Separately verified VM107 package: `C:\AIW-SevenZip-Product-593281a`.
+
+| Package identity | Recorded value |
+|---|---|
+| ZIP | 15,593,383 bytes; SHA-256 `06aa338e2138acc2eab579cfa0f2b09dea8f5ea886ec05e5e1d7abd5fa31b834` |
+| Receipt SHA-256 | `e2ac4e76611ceeb9253e8b7c7402c8b7311e0648c0125462f0b9b5dcca393dee` |
+| Guest agent SHA-256 | `b4601d5d7ade703654c1e6e9f669c05a40bd44384c20273649db06a913797eab` |
+| Workflow source SHA-256 | `e8a51b506de74442b22f7e9e7fd2c26ec4cf3d8a25f0feae11d9a4ad213ed2ff` |
+
+For the controller copy, this exact read-only verification checks the receipt,
+closed inventory, all file hashes, vendor pin and CLI workflow identity. It does
+not install or assess an application:
+
+```powershell
+& 'C:\aiw\app-isolation-workbench\scripts\verify-sevenzip-desktop-package.ps1' `
+  -PackageRoot 'C:\aiw\sevenzip-product-593281a' `
+  -ReceiptSha256 'e2ac4e76611ceeb9253e8b7c7402c8b7311e0648c0125462f0b9b5dcca393dee' `
+  -SourceRevision '593281a64dda9b233a25e3f3262d7e1751c01a6b' `
+  -CliExe 'C:\aiw\sevenzip-product-593281a\aiw.exe' `
+  -GuestAgentSha256 'b4601d5d7ade703654c1e6e9f669c05a40bd44384c20273649db06a913797eab' `
+  -WorkflowSourceSha256 'e8a51b506de74442b22f7e9e7fd2c26ec4cf3d8a25f0feae11d9a4ad213ed2ff'
+```
+
+On the supported VM107 controller, use the already verified package:
+
+1. Open `C:\AIW-SevenZip-Product-593281a\aiw-desktop.exe` and select **7-Zip archive assessment**.
+2. Choose an existing evidence parent with space for a fresh run, enter the operator identity and exact guest Windows version `10.0.26100.9711`, then **Prepare**. The tested host version is `10.0.26300.9711`; preparation records it separately. Do not substitute an OS marketing version or guess an unknown guest build.
+3. Review the fixed installer, archive workflow, AppContainer grants, data lifetime, exact environment commitments and plan. Confirm the displayed plan hash through **Approve**. This records approval without starting an assessment.
+4. Use the separate **Start** action. Installation, driver controls and archive use are automated inside one fresh offline Sandbox. Read any incomplete/failed result and cleanup status before considering another run; never replay an old approval to retry it.
+5. After completion, open **Results → Open selection…** and choose the generated `results-selection.json` in that run's evidence root. No internal JSON authoring is required. Inspect the four baseline/candidate rows, selected controls, separate historical cleanup, evidence status and explicit gaps.
+6. Export JSON and Markdown to new names in an existing folder outside every selected retained location. Existing files are refused. Reopen the same selection whenever needed; viewing/exporting does not Start, recover, reinstall or invoke a provider.
+
+The demonstrated success selection is
+`C:\AIW-SevenZip-Product-Transfer-593281a\sevenzip-1793956275430444300\results-selection.json`.
+Keep that original evidence and every earlier run. This completed run needs no
+recovery. During an active run, cancellation requests cleanup of its original
+owned session; if cleanup remains unresolved, use the separate owned recovery
+action for that exact run. A separate fresh approved `593281a` trial exercised
+Cancel after the owned boot window appeared: one exact-session stop, verified
+post-stop absence and kernel `cancelled` with no application evidence. Neither
+retained completed trial needs recovery. Native forced-fault recovery remains
+unexercised; see the [cancellation record](SEVENZIP-NATIVE-ACCEPTANCE.md#native-owned-cancellation-at-593281a).
+
+The [native record](SEVENZIP-NATIVE-ACCEPTANCE.md) identifies the exact tested
+bytes. Later documentation or presentation-label changes are not retroactive
+acceptance of a different package. The source is under review in
+[PR #106](https://github.com/nathanmcnulty/app-isolation-workbench/pull/106);
+the three CI jobs passed at `5c12df0dae756a427170e71b79220dd80fe7b491`
+([run 42200833485](https://github.com/nathanmcnulty/app-isolation-workbench/actions/runs/42200833485)).
+Those hosted checks do not replace the separate native record.
 
 ## Coverage limits and acceptance
 
@@ -116,6 +181,6 @@ desktop acceptance. W4/W5 and broad production acceptance remain open.
 
 | Acceptance scope | Advanced by this slice | Still open |
 |---|---|---|
-| [Benchmark 2](ROADMAP.md#benchmark-2---one-real-isolation-comparison) | One research pair has all four function results, held target tokens, selected file denials and verified inner/outer cleanup. The product has an approved native attempt and truthful retained failure reporting. | Successful receipt-bound product comparison; application required-descendant evidence, registry denial for this profile and fresh-instance repeatability. Network/IPC/UI and endpoint claims require their own measurements. |
-| [W4: secure export and diagnostics](https://github.com/nathanmcnulty/app-isolation-workbench/issues/9) | Receipt-bound facts, allowlisted summary exports and bounded private failure diagnostics; retained incomplete JSON export preserves source files. | Full sanitized assessment bundle and archive/signature-envelope round trip/tamper acceptance; deterministic recommendation and optional cited analyst flow with no verdict authority. Product-package checksums are not assessment-bundle acceptance. |
-| [W5: desktop and release hardening](https://github.com/nathanmcnulty/app-isolation-workbench/issues/10) | Fixed desktop preparation, separate approval/Start, owned cancellation/recovery services and retained comparison/export UI. | Successful new application loop, applicable native cancellation/recovery and accessibility acceptance, plus signed release, clean-machine acceptance and supported-host coverage for this profile. Earlier signed-alpha evidence retains its earlier recipe scope. |
+| [Benchmark 2](ROADMAP.md#benchmark-2---one-real-isolation-comparison) | The same approved fixed app/workflow now has a receipt-bound production matrix: all four functions passed in both modes, measured target tokens, selected file denials and verified inner/outer cleanup. Missing/broken-driver observations stay separate, as the earlier incomplete run demonstrates. | Application required-descendant evidence, registry denial for this profile and fresh-instance repeatability. Inner network/IPC/UI and endpoint claims require their own measurements. Archive bytes differ; the cause remains unmeasured. |
+| [W4: secure export and diagnostics](https://github.com/nathanmcnulty/app-isolation-workbench/issues/9) | Receipt-bound facts, bounded private failure diagnostics and actual allowlisted JSON/Markdown export. The successful Results reload/export is deterministic and preserves all 32 retained files; incomplete JSON export preserves its earlier 26 files. | Full sanitized assessment bundle and archive/signature-envelope round trip/tamper acceptance; deterministic recommendation and optional cited analyst flow with no verdict authority. Product-package checksums are not assessment-bundle acceptance. |
+| [W5: desktop and release hardening](https://github.com/nathanmcnulty/app-isolation-workbench/issues/10) | Actual fixed desktop preparation, exact-plan approval/separate Start, application comparison, retained reopen/export and truthful failed-driver handling. A separately approved native cancellation reaches exact owned cleanup without application findings; recovery services and bindings are implemented. | Native forced-fault recovery and accessibility acceptance, plus signed release, clean-machine acceptance and supported-host coverage for this profile. Earlier signed-alpha evidence retains its earlier recipe scope. |
