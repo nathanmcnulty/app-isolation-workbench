@@ -1,7 +1,10 @@
 # Fixed paired-control desktop workflow
 
-Status: local implementation and offline validation complete; see the final
-[handoff](PAIRED-IMPLEMENTATION-HANDOFF.md) for exact results. Native acceptance,
+Status: merged in PR #105. Native VM107 acceptance completed all six fixed controls;
+the corrected Results exports preserved all 29 retained files without execution
+or provider calls. See the [native record](PAIRED-NATIVE-APPROVAL.md) and
+[acceptance audit](RESULTS-ACCEPTANCE-AUDIT.md). The implementation notes and
+pending proposals below retain their historical scope. Real-application
 Benchmark 2 and remaining W4/W5 work remain open. No general application
 compatibility or effective-isolation verdict is established by these controls.
 

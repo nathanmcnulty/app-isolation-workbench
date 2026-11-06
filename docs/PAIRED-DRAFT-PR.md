@@ -1,4 +1,8 @@
-# Draft PR — not submitted
+# Historical draft for merged PR #105
+
+PR [#105](https://github.com/nathanmcnulty/app-isolation-workbench/pull/105)
+is merged at main `8aeeafc`. The text below records its review scope; it is not a
+pending publication request. Continue with [working state](WORKING-STATE.md).
 
 **Title:** Add offline Results Explorer and verified fixed paired controls
 

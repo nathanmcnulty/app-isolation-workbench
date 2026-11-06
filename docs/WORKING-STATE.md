@@ -1,12 +1,51 @@
 # Working state
 
 Updated 2026-11-05 (America/Anchorage). Checkout `C:\aiw\app-isolation-workbench`,
-branch `codex/paired-controls`. Current Results correction source
+branch `codex/real-app-assessment`, starting from main `8aeeafc` (PR #105 merged).
+Current Results correction source
 `53ed71f6c204c4b64a909086ce10d7dc66162702`; native fixed-control execution source
 `3d60960bb1f957c446c477978ec4a390df5565b4`. Base main `53c02c8` includes PR #103.
 Start with `scripts/work-status.ps1` and [acceptance audit](RESULTS-ACCEPTANCE-AUDIT.md).
 
-## Completed local milestone
+## Active real-application slice
+
+Selected 7-Zip 26.05 x64: install, create/test/extract a fixed archive, and verify
+the exact extracted inventory and SHA-256 bytes as the same standard user in an
+ordinary baseline and classic AppContainer with zero capability SIDs. First prove
+the fixed driver in a disposable Sandbox on VM107; then integrate the supported
+path with existing approval, retained reporting and desktop Results. This is an
+active implementation, not completed application acceptance.
+
+The default-off `research-sevenzip` examples now implement the bounded native
+driver and a protected, separate Prepare/Approve/Start Sandbox trial. Independent
+review fixes cover mapped-input custody, protected input/parent ACLs, non-mutating
+write/delete probes, atomic stage publication and error/cleanup retention.
+Six focused platform tests, two host marker/recovery tests, all-target feature
+Clippy, format/governance and static-CRT x64 release builds passed. Full logs are
+`C:/aiw/sevenzip-{final-platform-tests,host-tests,final-clippy,final-governance}.log`
+and `sevenzip-static-{helper,host}-build.log`. These are offline checks.
+Fresh inert package and independent byte pins are under
+`C:/aiw/sevenzip-assessment-20261105/Package` and adjacent `package-pins.json`.
+See [declared workflow and coverage](SEVENZIP-ASSESSMENT.md).
+
+Official `https://www.7-zip.org/download.html` links to the `ip7z/7zip` 26.05
+GitHub release. The downloaded `7z2605-x64.exe` has 1,663,506 bytes and SHA-256
+`fd99e86f57d8f429ef5ed045bf98315af962e2309b0f1ba87a147a44c71647d0`, matching
+GitHub's independently retrieved asset digest. Authenticode is NotSigned; vendor
+origin/digest are provenance observations, not a signature claim. Retained at
+`C:/aiw/sevenzip-assessment-20261105`; never executed on this host.
+
+Current browser inspection found the existing VM107 desktop responsive, with its
+completed Results command at the prompt. No guest command, installation, provider
+operation or VM change has occurred for this slice. The remoting certificate is
+historically expired; no bypass or access expansion is authorized by that fact.
+
+Current MXC release/family research is separate from the old planning adapter;
+see [candidate selection](MXC-ASSESSMENT-SELECTION.md). Classic AppContainer is
+selected for its existing measured authority, not an inference that MXC cannot
+run or that MSIX alone provides isolation.
+
+## Completed merged milestone (PR #105)
 
 Results Explorer implements explicit bounded retained selections, existing report
 verification, comparisons/filters/failure and evidence drill-down, separate historical
@@ -62,6 +101,6 @@ clipboard transported reviewed pinned bytes without changing access.
 Full Benchmark 2 still needs its declared real-application candidate and broader
 measurements. Human screen-reader study/real production-data selection remain
 unperformed. W4/W5 and production acceptance stay open. Publication remains separate.
-See [native record](PAIRED-NATIVE-APPROVAL.md), [draft PR](PAIRED-DRAFT-PR.md) and
+See [native record](PAIRED-NATIVE-APPROVAL.md), [historical PR draft](PAIRED-DRAFT-PR.md) and
 [usage/demonstration](RESULTS-EXPLORER.md). Preserve VM106, all old retained runs,
 original packages, accidental `C:\Evidence` and unrelated work.

@@ -181,7 +181,7 @@ own acceptance evidence exists. Its timing follows the next useful assessment qu
 
 The [installer inventory](INSTALLER-CORPUS.md) now makes profile selection concrete: Notepad++ EXE/MSI controls, DriveManager for elevation/device dependencies, Bambu for a richer local-file workflow, and Signal/ChatGPT/Visual Studio for acquisition dependencies. Signal and ChatGPT are Store wrappers in this folder; DriveManager is an SK hynix disk utility. Do not select fixtures solely by installer size or apparent UI simplicity.
 
-[Bambu Studio export](BAMBU-STUDIO-PROFILE.md) is now the second production execution/reporting consumer: a separately typed EXE profile uses approved start, standard-user STL-to-3MF export, bounded package/geometry verification, and retained JSON/Markdown reports. Its information-query compiler remains metadata-only. [Mixed application report sets](REPORT-SETS.md) now preserve distinct function columns and explicit unavailable/failure evidence. The [project-owned control](CONTROL-FIXTURE.md) now passes repeated standard-user/ACL/child/failure development checks in fresh workers. Paired ordinary-user/AppContainer file, registry, and child controls now pass in fresh workers; real-application repeatability and approved control integration remain open. Slicing remains a later function with version-sensitive printer/material settings.
+[Bambu Studio export](BAMBU-STUDIO-PROFILE.md) is now the second production execution/reporting consumer: a separately typed EXE profile uses approved start, standard-user STL-to-3MF export, bounded package/geometry verification, and retained JSON/Markdown reports. Its information-query compiler remains metadata-only. [Mixed application report sets](REPORT-SETS.md) now preserve distinct function columns and explicit unavailable/failure evidence. The [project-owned control](CONTROL-FIXTURE.md) now passes repeated standard-user/ACL/child/failure development checks in fresh workers. Paired ordinary-user/AppContainer file, registry, and child controls now pass in fresh workers; approved control integration is merged in PR #105; real-application repeatability remains open. Slicing remains a later function with version-sensitive printer/material settings.
 
 The corpus exposed an intake requirement now addressed by [explicit download metadata archiving](DOWNLOAD-METADATA-INTAKE.md): all seven supplied files pass protected intake, with source identity and metadata unchanged. Retain this bounded policy when broadening profiles; arbitrary streams remain rejected. Separate networked payload acquisition from offline application assessment; bind downloaded payloads, not just launcher hashes. These are prerequisites for using the affected fixtures, not reasons to enable networking on the existing offline profile.
 
@@ -247,7 +247,22 @@ General tracing, every installer type, printing, networking, updates, and reboot
 
 **Deliverable:** the same approved workflow under an ordinary baseline and one application-level isolation candidate, with an explainable function matrix.
 
-The bounded classic AppContainer feasibility control now passes a same-user file/registry/child comparison in two fresh disposable workers, using documented APIs in the native authority layer. Approved evidence integration and a real-application candidate remain next for this provider; they do not block the first Sandbox bundle. Unpackaged AppContainer launch is documented, so an MSIX converter need not precede this experiment. This is not a claim that Notepad++ will work unchanged. See [control proof and limits](CONTROL-FIXTURE.md), [Launch an AppContainer](https://learn.microsoft.com/en-us/windows/win32/secauthz/implementing-an-appcontainer), and [MSIX AppContainer apps](https://learn.microsoft.com/en-us/windows/msix/msix-container).
+The bounded classic AppContainer control and approved desktop/retained-evidence
+integration are merged in PR #105. VM107 completed the six file/registry/child
+observations, verified exact cleanup, and exported corrected summaries with all
+29 retained files unchanged and no reader execution/provider calls. See the
+[native record](PAIRED-NATIVE-APPROVAL.md). Reuse that evidence; a real-application
+candidate remains necessary. The active slice selects 7-Zip 26.05 x64 and its fixed
+create/test/extract/verify workflow, first under an ordinary standard-user
+baseline and then classic AppContainer. Its implementation and native acceptance
+remain in progress. See [working state](WORKING-STATE.md) and current
+[MXC candidate selection](MXC-ASSESSMENT-SELECTION.md).
+
+Unpackaged AppContainer launch is documented, so an MSIX converter need not
+precede this experiment. This is not a claim that an arbitrary application works
+unchanged. See [control proof and limits](CONTROL-FIXTURE.md),
+[Launch an AppContainer](https://learn.microsoft.com/en-us/windows/win32/secauthz/implementing-an-appcontainer),
+and [MSIX AppContainer apps](https://learn.microsoft.com/en-us/windows/msix/msix-container).
 
 ### Evaluate all four MXC isolation families
 

@@ -2,6 +2,9 @@
 
 use aiw_probe::WindowsSandboxReadiness;
 
+#[cfg(all(windows, feature = "research-sevenzip"))]
+pub use control_appcontainer::research_sevenzip::run as run_sevenzip_research;
+
 #[cfg(windows)]
 mod virtualization;
 
