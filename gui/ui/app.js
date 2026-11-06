@@ -44,6 +44,7 @@
     const paired = ["paired", "sevenzip"].includes(kind());
     show("installerField", !paired);
     show("pairedGuestWindowsField", paired);
+    text("pairedGuestWindowsRequirement", kind() === "sevenzip" ? "required" : "optional");
     show("documentField", kind() === "interactive");
     text("installerLabel", msix ? "Supported signed Notepad++ MSIX" : bambu ? "Supported Bambu Studio installer" : "Supported Notepad++ installer");
     text("chooseInstaller", msix ? "Choose MSIX" : bambu ? "Choose EXE" : "Choose MSI");

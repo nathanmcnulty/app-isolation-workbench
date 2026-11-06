@@ -754,7 +754,12 @@ fn markdown(summary: &Summary) -> String {
             None => "unmeasured",
         });
         text.push_str(&format!(
-            "\n\nFailure evidence: {}\n\n### Stage progress\n\n",
+            "\n\n{}: {}\n\n### Stage progress\n\n",
+            if row["sevenzip"].is_object() {
+                "Evidence status"
+            } else {
+                "Failure evidence"
+            },
             row["failureEvidence"].as_str().unwrap_or("unmeasured")
         ));
         for stage in row["stages"].as_array().into_iter().flatten() {

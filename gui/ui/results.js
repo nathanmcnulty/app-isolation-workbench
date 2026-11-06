@@ -61,7 +61,7 @@
     for (const row of filtered) {
       const tr = node("tr"), first = node("td"), details = node("details"), summary = node("summary", "Selection " + row.selection + (loaded.selectionLabels ? " · " + loaded.selectionLabels[row.selection - 1] : ""));
       details.append(summary);
-      details.append(node("p", "Failure evidence: " + row.failureEvidence));
+      details.append(node("p", (row.sevenzip ? "Evidence status: " : "Failure evidence: ") + row.failureEvidence));
       if (row.unavailableReason) details.append(node("p", "Unavailable: " + label(row.unavailableReason)));
       if (row.paired) {
         const paired = row.paired, tri = value => value === true ? "yes" : value === false ? "no" : "unmeasured";
