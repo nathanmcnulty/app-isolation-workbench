@@ -1,102 +1,83 @@
 # Working state
 
-Updated 2026-10-31 (America/Anchorage). Checkout `C:\aiw\app-isolation-workbench`,
-branch `codex/paired-controls`, atop local main `53c02c8` including PR #103.
-Start with `scripts/work-status.ps1`. Latest executed transport source is
-`9384503`; a directory-only sharing correction is being validated offline.
+Updated 2026-11-05 (America/Anchorage). Checkout `C:\aiw\app-isolation-workbench`,
+branch `codex/paired-controls`; implementation source
+`3d60960bb1f957c446c477978ec4a390df5565b4`, based on main `53c02c8` including PR #103.
+Documentation after that source does not change its staged binaries.
+Start with `scripts/work-status.ps1` and [acceptance audit](RESULTS-ACCEPTANCE-AUDIT.md).
 
 ## Authority and scope
 
-The user approved routine fixed-control VM107 testing/fixes without repeated
-approval questions. Continue autonomously with fresh reviewed source/agent/
-package/plan pins. Preserve every retained run. No blind Start retry, historical
-recovery, new application trial, PR #103 repeat, VM/security/access change,
-dependency installation, push, PR creation, merge, signing, release or publication.
-Native six-case acceptance is not achieved; full Benchmark 2 and W4/W5 remain
-open. No general compatibility, effective isolation or production acceptance.
+Standing user approval covers routine fixed-control VM107 testing/fixes without
+per-test questions, with fresh verified pins and one Start per fresh run. Preserve
+all retained inputs/packages. No blind retry, historical recovery, new application
+trial, PR #103 repeat, authentication/security/VM/access change, dependency install,
+push, PR creation, merge, signing, release or publication. The full goal remains
+active/incomplete. Native six-case acceptance, full Benchmark 2 and W4/W5 are open;
+no general compatibility, effective isolation or production acceptance.
 
-## Authoritative native outcomes
+## Current implementation and evidence
 
-All six cases remain unmeasured in every retained attempt below.
+Results Explorer is locally implemented: explicit bounded selections, existing
+verifiers, application/workflow/function/outcome/gap comparison, filters and
+failure/evidence drill-down, separate historical cleanup, and exclusive allowlisted
+JSON/Markdown exports outside retained locations. Viewing has no run-action route.
+[Acceptance audit](RESULTS-ACCEPTANCE-AUDIT.md) maps every original requirement to
+source, retained tests, demonstrations and limitations, including native/fake paths.
 
-| Run | Actual outcome |
-|---|---|
-| `paired-1793425345541054400` | Required provider-list timeout before dispatch. Ready/journal3, no session transaction/result. Preserve; never replay. |
-| `paired-1793435382044001000` | Native guest v1 driver failure; exact failing stage/inner actions unknown. Outer cleanup verified. |
-| `paired-1793482773445455100` | a033 v2 diagnostic identifies Windows equality guard; exact guest tuple was not retained. Outer cleanup verified. |
-| `paired-1793485650921721800` | 4f diagnostic: expected host `10.0.26300.9711`, observed guest `10.0.26100.9711`, both x64. PID9444 exited1/66500ms; cleanup verified. |
-| `paired-1793486681293548700` | f68 separates host/guest commitments and passes OS guard. PID8032 exited1/69186ms with unsupported `GetFileInformationByHandleEx(FileIdInfo)` / `0x80070032`. Exact role/open stage is unlocalized. Empty progress does not prove no setup/cases ran. Outer cleanup verified, journal6. |
-| `paired-1793489386127952000` | 3b localizes first mapped agent role's unsupported extended file-ID query, before account/resource setup/cases. PID5220 exited1/67237ms. Separate basic metadata was diagnostic only. Outer cleanup verified, journal6. |
-| `paired-1793491750791476500` | 938 transport ancestry open refused with NtCreateFile0xc0000043 (sharing); exact AIW/Tools component unknown. Before account/resource setup/cases. PID6368 exited1/66984ms. Outer cleanup verified, journal6. |
+Latest recorded native execution: source938, run `paired-1793491750791476500`,
+PID6368/session1 exited1/66984ms after ancestry sharing refusal0xc0000043, before
+account/resource setup/cases; exact AIW/Tools component was unknown. Exact outer
+cleanup verified, journal6. Source3b previously localized unsupported extended
+FileIdInfo on the first mapped agent. All six cases remain unmeasured in every
+recorded native attempt. See [native record](PAIRED-NATIVE-APPROVAL.md) for all pins
+and historical outcomes. Never replay an older run.
 
-No cancellation, explicit recovery, second Start or new application trial in
-these fresh diagnostic/model runs. Raw current audits:
-`C:/aiw/paired-windows-mismatch-native-ad02dba4-9067-42e1-b903-c3f7cc51a1db` and
-`C:/aiw/paired-host-guest-native-bb5252b6-29ee-448b-b9ae-b2a6ffd62d51`.
-Exact worker/package/plan/fixture pins, scope requests, receipts and outcomes:
-[consolidated native record](PAIRED-NATIVE-APPROVAL.md).
+Source3d adds directory-only READ|WRITE sharing with read-only access and no
+DELETE sharing; role files keep SHARE_READ, nonzero basic identity/link/size/hash
+checks and full held/named validation. Fresh protected local copies still require
+unchanged strict HAF. No generic fallback or case/policy/verdict change. Six affected
+module tests, workspace all-target Clippy, format/governance and independent review
+passed. Record `C:/aiw/paired-directory-sharing-validation.json`; current adapter
+hash matches. Unchanged source-scoped model/desktop/Node/baseline suites are reused.
 
-## Code, evidence and next step
+Native Results UI source3b proved Open/JSON/Markdown dialogs, focus return, keyboard
+filter/table/disclosure and byte-identical safe exports; three original local
+inputs stayed unchanged and the missing archive absent. Local input/export hashes
+still match on this resume. Audit
+`C:/aiw/paired-native-results-ui-b12be912-8a77-4a8b-b12a-92373809bc0e`.
+Only Results/get_state routes used; no systemwide native UI counter is claimed.
+Recorded native guest-driver failures separately exported deterministic summaries with
+29-file snapshots unchanged at each recorded observation and zero reader run/provider calls.
 
-Results Explorer is locally implemented and reviewed. Existing verifiers and
-field allowlists remain authoritative. Actual reader/export loaded all four
-native guest failures: deterministic summaries, each explicit29-file snapshot
-unchanged, private fields excluded and zero provider/assessment calls. Old v1/v2
-summaries also reproduced byte-for-byte with the model-fix reader.
+## Staged candidate and native access limitation
 
-f68 commits separate exact host/guest Windows tuples in versioned profiles,
-preserves legacy hashes/reporting/recovery, and keeps exact guest remeasurement
-and host drift checks. Its verified exact14 package remains preserved at
-`C:/aiw/paired-host-guest-package-f68f9e5-20261031`; never substitute binaries.
-Validation: affected Rust53 (admin13/CLI2/probe3/provider9/runner15/guest11),
-desktop22/4 opt-in ignored, Node7, workspace/desktop all-target Clippy, formats,
-governance and independent review passed. Logs `C:/aiw/paired-host-guest-*`.
-Broader unchanged workspace678/desktop20/Node28 evidence remains scoped to e2e44fe.
+Local package `C:/aiw/paired-directory-sharing-package-3d60960-20261031` was freshly
+reverified exact14 on Nov5. Receipt
+`4978d8980456958ef662206be94cc8bdae78b20936c29f3c0dc33058c1c00875`.
+VM107 staging at `C:\AIW-Paired-3d60960-20261031\Package` was last observed
+`2026-11-01T00:36:43Z`; current worker state is unobserved. No3d prepared-state,
+approval or Start was retrieved/recorded; do not infer current emptiness/readiness.
 
-The 3b diagnostic package/plan/helper were freshly pinned and independently
-reviewed before one native Start. Actual Results export was deterministic, all29
-retained files unchanged, private diagnostic excluded, provider/assessment calls0.
-Audit `C:/aiw/paired-role-context-native-2a622d10-7f5e-4f42-9f34-0fb47b11d74e`.
-It establishes the first mapped role as the blocker for this attempt only.
+TLS certificate `BC14DCC4E37F83161EBB55AF8624E36A79E19256` expired
+`2026-11-05T08:49:10Z`; no connection, renewal or validation bypass attempted.
+Official computer-use JS initialization fails with missing kernel-assets path
+(OS error3), including after its normal reset; workspace/Temp/bundled Node exist.
+No JS/UI/native action ran. Current native access cannot be verified through
+those routes. No alternate automation protocol or access expansion was attempted.
+Resume evidence:
+`C:/aiw/paired-resume-20261105-8b64bda5-f002-4e52-8c3d-9f58f15bd0aa/checkpoint.json`.
 
-The 938 repair keeps a separate closed Agent/Fixture/Launcher mapped transport:
-retained parent-relative ancestry/role handles, disk/nonzero basic identities,
-ordinary/reparse/link/size/hash checks and exact bounded copy from held inputs.
-Exclusive fresh local copies still require unchanged strict `HeldApplicationFile`
-before execution. No generic fallback, fabricated IDs or case/policy/verdict change.
-Five offline inert-file/fault tests passed; independent final source/docs review
-found no consequential issue. The first compile caught a namespace typo; then a
-positive test exposed directory-size growth0→4096 with stable identity. Corrected
-directory-only identity comparison preserves disk/type/reparse/nonzero checks,
-and all leaf checks remain intact. Original failed logs are retained. Probe3,
-workspace all-target Clippy, formats and governance passed. Logs
-`C:/aiw/paired-mapped-*`. Unchanged desktop/Node/model suites are reused at their
-recorded sources. Mapping-directory support remains unknown and fails closed.
-The native938 assessment refused while acquiring ancestry; it proves no mapped
-directory/role transport support. Audit
-`C:/aiw/paired-mapped-input-native-da71e403-621a-4d75-9a4c-bdb71c0a2810`.
-Its deterministic Results exports preserved all29 inputs, with zero provider/
-assessment calls from the reader.
-The current narrow correction allows directory read/write sharing with read-only
-access and no DELETE sharing, while role files retain SHARE_READ only. It adds
-component diagnostics and a real directory-writer/delete-refusal regression.
-Six module tests and workspace all-target Clippy passed; independent source/docs
-review reports no consequential issue. Unchanged probe/model/GUI/Node suites retain
-their recorded evidence. Unsupported DELETE-sharing requirements still refuse.
-Finish commit/new package pins, review fresh helper/scope, then one assessment.
-Reuse unchanged completed suites. Preserve every old run and source package.
+When an authorized route works: reverify VM107 UUID/MAC/IP/SID, non-admin console
+session/Core, exact OS/provider/runtime/package pins and destination. Create only
+the absent literal Evidence child after collision checks; prepare once with exact
+guest `10.0.26100.9711`. Retrieve actual9 documents and canonical plan/profile pins;
+run the reviewed generator/offline guard checks, independently review actual
+helper/scope, present it, then one Start under standing authority. Verify six cases,
+inner/outer cleanup and the exact retained Results/export flow. No new plan IDs
+or native results are invented while access is unavailable.
 
-Native Results UI proof at source3b also passed safe-fixture Open/JSON/Markdown
-dialogs, focus return, keyboard filtering/table/evidence disclosure. Both exports
-match prior verified summaries byte-for-byte; three original files unchanged,
-missing archive still absent and private fields excluded. Own UI closed normally.
-Audit `C:/aiw/paired-native-results-ui-b12be912-8a77-4a8b-b12a-92373809bc0e`.
-Only Results/get_state routes used; no systemwide runtime call counter claimed.
-
-VM107 only: UUID `e5cecc90-35c2-4831-bf9c-424be23f7d4e`, MAC `CC:34:21:B8:5A:31`,
-IP `192.168.1.174`, existing `AIW\labadmin`, non-admin console session1/Core7.6.9.
-Native CUA Edge window fallback recovered console access; no security/config or
-authentication change. Trusted HTTPS5986/Core certificate
-`BC14DCC4E37F83161EBB55AF8624E36A79E19256`; no TLS/compatibility/key fallback.
-Keep old `C:\Evidence` and empty reader staging file untouched. Never touch VM106,
-restore VM203 or replay historical MSIX runs. See [draft PR](PAIRED-DRAFT-PR.md).
+VM107 UUID `e5cecc90-35c2-4831-bf9c-424be23f7d4e`, MAC `CC:34:21:B8:5A:31`,
+IP `192.168.1.174`; existing `AIW\labadmin`. Never touch VM106, restore VM203,
+change old `C:\Evidence`, or replay historical MSIX trials. See
+[draft PR](PAIRED-DRAFT-PR.md) and [usage](RESULTS-EXPLORER.md).

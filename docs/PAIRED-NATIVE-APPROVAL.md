@@ -15,7 +15,51 @@ The approved execution record below and the latest standing test authority
 supersede older pending-proposal wording.
 Publication remains separate.
 
-## Latest native transport assessment: 9384503
+## Current staged candidate: 3d60960; fresh native verification pending
+
+Standing fixed-control test authority remains in effect; no per-test permission
+question is pending. The implementation is committed and independently reviewed.
+Six affected transport tests, workspace all-target Clippy, format/governance and
+source review passed; unchanged suites were reused. Complete requirement/path
+disposition: [acceptance audit](RESULTS-ACCEPTANCE-AUDIT.md).
+
+| Binding | Exact staged value |
+|---|---|
+| Implementation source | `3d60960bb1f957c446c477978ec4a390df5565b4` |
+| VM107 package | `C:\AIW-Paired-3d60960-20261031\Package` |
+| Receipt SHA-256 | `4978d8980456958ef662206be94cc8bdae78b20936c29f3c0dc33058c1c00875` |
+| CLI / desktop SHA-256 | `93434e3b669eb0b7abf41eb8d0821d05fb551f78d2cfd4f45a74314e585274ce` / `c2b25076dfaa31357a4b35c6a091b27110736988aeb1d6cb9b447386435259c1` |
+| Bundled agent / intended fixed role bytes | `e90bd1300201dfd3bc93c03248ff26897e179d35f469e601b5d0bb4e2eb5c9bc`, **6,068,224 bytes**, static-CRT x64 |
+| Fixed source / revision | `66994af3552e6482bf1c8c97e2f852c40a52415f0c644decb6eb5a927a00640e` / `aiw.dev/paired-file-registry-child/v0alpha2` |
+| Intended host / guest | `10.0.26300.9711` / `10.0.26100.9711`, both x64; fresh verification required |
+| Target | VM107, UUID `e5cecc90-35c2-4831-bf9c-424be23f7d4e`, MAC `CC:34:21:B8:5A:31`, IP `192.168.1.174`, existing `AIW\labadmin`, non-admin console session1/Core7.6.9; reverify before use |
+
+Local exact14 package verification was repeated as a freshness check on Nov5.
+VM staging was last observed `2026-11-01T00:36:43Z`; audit
+`C:/aiw/paired-directory-sharing-native-65b084f3-5d85-4dda-83a1-12754bbda14f`.
+Preparation must create and verify the fixture/launcher copies from those same
+bytes; new role copies are not claimed as observed. Current VM state is unobserved.
+No3d prepared-state/approval/Start record was
+retrieved; no run/plan/helper hash is invented or adopted from an old run.
+
+The existing remoting certificate expired `2026-11-05T08:49:10Z`, and the available
+official computer-use tool fails before initialization with missing kernel assets
+(OS error3), including after reset. No remoting connection, certificate renewal,
+validation bypass, UI/native action or access/security change was attempted.
+Checkpoint:
+`C:/aiw/paired-resume-20261105-8b64bda5-f002-4e52-8c3d-9f58f15bd0aa/checkpoint.json`.
+
+The current directory adapter permits READ|WRITE sharing with read-only access,
+denies DELETE sharing and leaves role SHARE_READ and strict local HAF unchanged.
+Native support remains unproven. Fixed effects, six case expectations, policy,
+limits and owned cleanup/stop conditions below remain unchanged. Once an authorized
+access route operates, reverify all current pins/destination, prepare once, retrieve
+the actual9 documents and immutable plan/profile, independently review the closed
+generated helper/scope, present that concrete scope, then use one Start. Existing
+standing approval covers the fixed test; it does not relax drift/cleanup guards.
+Positive six-case/inner-cleanup acceptance and full Benchmark 2 remain open.
+
+## Latest recorded native transport assessment: 9384503
 
 Standing fixed-control authority covered this fresh assessment on unchanged VM107,
 existing non-admin console session1/Core7.6.9. The actual helper, all9 original

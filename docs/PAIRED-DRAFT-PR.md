@@ -27,11 +27,13 @@ Model repair: affected Rust53, desktop22/4 opt-in ignored, Node7, workspace/desk
 Clippy, formats and governance passed; unchanged completed checks were reused.
 
 Native VM107 preparation/approval/Start/provider/guest failure/outer cleanup and
-actual Results export paths have been exercised. The latest diagnostic localizes
+actual Results export paths have been exercised. The earlier source3b diagnostic localizes
 an unsupported extended file-ID query on the first mapped agent input, before
 standard-user/resource setup. A separate closed mapped-input transport has passed
 five new inert-file/fault tests, probe3, workspace all-target Clippy, formats,
-governance and independent source review. Strict local executable custody remains
+governance and independent source review. The directory-sharing correction adds
+a sixth transport regression; its six affected tests, workspace all-target Clippy,
+format/governance and independent review passed. Strict local custody remains
 mandatory; native mapped-directory support remains unvalidated. All six native
 case outcomes remain unmeasured; positive case/token/inner-cleanup paths remain
 covered by explicitly synthetic/fake-provider tests. Each actual29-file retained
@@ -48,6 +50,13 @@ verified summaries byte-for-byte, and all original input files remain unchanged.
 
 Exact source/package/plan pins and native outcomes:
 [consolidated record](PAIRED-NATIVE-APPROVAL.md).
+Requirement-by-requirement disposition and exact native-versus-fake paths:
+[acceptance audit](RESULTS-ACCEPTANCE-AUDIT.md).
+Implementation source3d was packaged and staged; fresh local exact14 verification
+passed on Nov5. Its current native assessment remains pending: the remoting
+certificate expired and the official console-control tool cannot initialize.
+Current worker readiness and a new plan are unobserved. No access/security change
+or native result is inferred from historical staging.
 No application trial ran and PR #103 was not repeated. General compatibility,
 effective host isolation, full Benchmark 2, production acceptance and broader
 W4/W5 requirements remain open. Publication remains separate.

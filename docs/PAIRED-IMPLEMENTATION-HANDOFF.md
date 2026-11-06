@@ -2,9 +2,11 @@
 
 For the current checkout and native follow-up, start with
 [working state](WORKING-STATE.md) and the
-[source-pinned native record](PAIRED-NATIVE-APPROVAL.md). The evidence below is
+[source-pinned native record](PAIRED-NATIVE-APPROVAL.md). The
+[acceptance audit](RESULTS-ACCEPTANCE-AUDIT.md) distinguishes implemented, fake-only
+and native-verified paths and records the current access limitation. The evidence below is
 historical and retains its recorded source/scope; it is not a current native
-acceptance claim. Latest 3b diagnostic localizes the mapped-input FileIdInfo
+acceptance claim. The earlier source3b diagnostic localizes the mapped-input FileIdInfo
 blocker; six native cases remain unmeasured.
 
 Earlier follow-up: source `2ec65edfe749b73a13ddf0c923db973de1292fc8` improves
