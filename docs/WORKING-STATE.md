@@ -43,7 +43,11 @@ active; neither implementation nor native acceptance is complete.
   across cleanup and retained reads. Source `b66cf4e` staged but Prepare rejected
   `.DAT` under the generic JSON-only renderer; no proposal/provider/Sandbox ran.
   Preserve that partial root. A default-off exact-pair renderer/55-byte seed gate
-  now keeps all other modes unchanged; the next trial has a fresh R2 root/session.
+  now keeps all other modes unchanged. The fresh R2 trial at source `e702ec3`
+  passed strict marker/artifact acceptance, Win32 183 no-overwrite with original
+  occupied identity/bytes unchanged, partial-output retention and stable
+  observations across verified owned cleanup. Retained Read matched with zero
+  provider calls. No MXC or application ran in this publication control.
 - Creation-time debugger-chain and owned registry-canary foundations are
   test-compiled only, with no production role wiring or native acceptance.
   Registry deletion uses the exact retained key handle; debugger gaps require
@@ -60,17 +64,17 @@ pending for the application path. Logs are `C:/aiw/multimode-*.log`, outside Git
 Publication checks: 2 guest, 10 host (including the 5 prior capability host tests),
 7 MXC regressions and focused all-target Clippy passed. New logs are
 `C:/aiw/publication-*.log`. All 101 default and 102 research-feature provider tests
-passed, including physical seeded-output negatives. No publication control has
-run in a Sandbox yet.
+passed, including physical seeded-output negatives. The R2 publication control
+passed in a fresh Sandbox; original outputs and independently audited private
+received envelopes remain outside Git. See the native record for pins and limits.
 Raw FILETIME identifiers require lossless/Rust auditing; do not round them through
 JavaScript numbers. Registry-link/create-only native semantics remain open before
 production wiring, and explicit cleanup cannot trigger a hidden Drop retry.
 
 ## Required next work
 
-Validate a corrected alias-free publisher in a fresh
-owned environment while preserving strict custody. Never repair/adopt or replay
-the failed run. Preserve native evidence outside Git. Verify actual guest
+The corrected alias-free publisher has fresh native proof. Never repair/adopt or
+replay the failed capability run. Preserve native evidence outside Git. Verify actual guest
 creation/enforcement, not host build/API presence. Continue independently with
 shared application process-tree
 instrumentation, registry controls, fresh-environment repeats, retained archive

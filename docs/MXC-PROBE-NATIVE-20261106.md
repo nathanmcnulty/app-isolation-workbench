@@ -83,11 +83,47 @@ helper/output pairs, with no arbitrary `.DAT` output. Only the publication
 control permits one fixed 55-byte `OCCUPY.DAT` input; MXC capability and normal
 plans remain empty-output-only. The provider checks shape and bounded bytes;
 platform held-file identity, streams and alias checks remain authoritative.
-The next trial uses a new R2 root and session, not the partial prior root.
+The R2 trial used a new root and session, preserving the partial prior root.
 
-Keep the strict custody check. Validate a corrected publisher
-in a fresh owned environment before a new capability or creation trial; never
-repair and adopt this run. Then measure actual ProcessContainer creation and
+## Native publication control
+
+AIW source `e702ec31864596b71f2123b7fb5b7b98bff10610` passed the fresh
+publication-only Sandbox control on VM107. The embedded source hash was
+`d3f2c1160d94e21bc75bbcdf0ae5b21fea51e2b0c0793948a4595c37f4be1d93`;
+the six-file package ZIP hash was
+`601ebcfbf4131e9d656dd0b4371695299b05620374c0ce256da1731cb1aa6bff`.
+Independent source framing, package/PE review and actual lossless Prepare audit
+preceded separate Approve and one Start. The exact plan hash was
+`b349a65aa63a538c7854b8ecbc88919d1192de5d2f2e9a31dbfab98066128170`.
+Parent/guest Windows builds matched the earlier capability trial.
+
+Start returned 0. The unchanged strict reader accepted `RESULT.DAT` and the
+expected five-entry output inventory. The legacy long-name file remained a
+strict exact-entry refusal. Moving onto the preseeded occupied destination
+failed with Win32 183; its original identity and 55 bytes were unchanged.
+The pending and partial bytes were retained, with no partial final marker.
+All observations matched before and after verified owned Sandbox cleanup.
+Retained Read returned 0, made zero provider calls and matched those observations.
+
+This control ran the pinned first-party helper as the Sandbox's elevated user;
+it did not load MXC, create an account or execute an application. It establishes
+this publisher/reader path in this environment, not ProcessContainer enforcement.
+Original output remains on VM107. Private received Start and Read envelopes are
+outside Git under `C:/aiw/publication-control-20261106`, with respective SHA-256
+`edfcc5e120c31317aa1dbd8846c32096b007afb9928478651ce7a133f1bdf50a` and
+`e4076f75d04db4b2d1d149a36557aab3863b5800aefbb0db28d9863cd5c9c1a1`.
+These hashes identify received text with browser-normalized line endings.
+An independent lossless Start/Read audit matched the proposal, host result,
+separate cleanup record, known artifact hashes and reconstructed guest marker.
+Its private proof hash is
+`1733774ac1c2e311316190a6ad6dc8dde5797439dd35c3fb21d84781f89bb90b`.
+The audit did not separately observe directory entries or the guest process token;
+those facts remain reports accepted through the reviewed host path.
+The trial console, local transfer tab and two owned loopback servers were closed;
+the original Proxmox tab and unrelated worker windows were preserved.
+
+Keep the strict custody check and preserve the failed capability run without
+repair or adoption. Next measure actual ProcessContainer creation and
 requested restrictions before using it for the automated 7-Zip comparison.
 
 The [multi-mode acceptance map](MULTIMODE-ASSESSMENT.md), fresh comparisons,
