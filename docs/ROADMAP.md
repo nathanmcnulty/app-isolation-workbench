@@ -254,8 +254,10 @@ observations, verified exact cleanup, and exported corrected summaries with all
 [native record](PAIRED-NATIVE-APPROVAL.md). Reuse that evidence; a real-application
 candidate remains necessary. The active slice selects 7-Zip 26.05 x64 and its fixed
 create/test/extract/verify workflow, first under an ordinary standard-user
-baseline and then classic AppContainer. Its implementation and native acceptance
-remain in progress. See [working state](WORKING-STATE.md) and current
+baseline and then classic AppContainer. The [native research pair](SEVENZIP-NATIVE-ACCEPTANCE.md)
+passed the selected functions and denial canaries with verified cleanup; its
+archive bytes differ while extracted contents match. Production desktop/Results
+integration and its native acceptance remain in progress. See [working state](WORKING-STATE.md) and current
 [MXC candidate selection](MXC-ASSESSMENT-SELECTION.md).
 
 Unpackaged AppContainer launch is documented, so an MSIX converter need not

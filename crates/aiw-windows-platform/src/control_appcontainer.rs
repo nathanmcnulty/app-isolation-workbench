@@ -2,7 +2,6 @@
 //! entry point remains strict; the paired collector retains inconclusive native
 //! observations. Neither accepts a caller-supplied executable, argument or path.
 
-#[cfg(feature = "research-sevenzip")]
 pub(crate) mod research_sevenzip;
 
 use std::ffi::OsStr;

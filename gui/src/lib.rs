@@ -321,7 +321,13 @@ impl Controller {
         let value: serde_json::Value =
             serde_json::from_str(&run_json).map_err(|_| "Invalid paired context")?;
         if run_json.len() > 128 * 1024
-            || value["schemaVersion"] != "aiw.dev/paired-workflow-run/v0alpha1"
+            || !matches!(
+                value["schemaVersion"].as_str(),
+                Some(
+                    "aiw.dev/paired-workflow-run/v0alpha1"
+                        | "aiw.dev/sevenzip-workflow-run/v0alpha1"
+                )
+            )
             || value["planSha256"].as_str() != Some(plan_hash)
             || plan_hash.len() != 64
             || !plan_hash
@@ -604,6 +610,41 @@ mod tests {
                 .is_err()
         );
         assert!(!c.snapshot().paired_recovery_required);
+    }
+
+    #[test]
+    fn sevenzip_context_keeps_separate_approval_start_and_owned_cleanup() {
+        let controller = Controller::new("test".into());
+        let id = controller.begin().unwrap();
+        let hash = "a".repeat(64);
+        let context = serde_json::json!({"schemaVersion":"aiw.dev/sevenzip-workflow-run/v0alpha1","planSha256":hash}).to_string();
+        controller
+            .register_paired(&id, &hash, context.clone())
+            .unwrap();
+        assert!(controller.claim_paired_cancel(&id).is_err());
+        let approval = controller.offer_review(&id, review()).unwrap();
+        let challenge = controller.snapshot().review.unwrap();
+        controller
+            .approve(&id, &challenge.challenge_id, &challenge.exact_confirmation)
+            .unwrap();
+        approval.recv().unwrap();
+        assert!(controller.claim_paired_cancel(&id).is_err());
+        let start = controller.offer_start(&id).unwrap();
+        controller
+            .start(&id, &controller.snapshot().start_challenge_id.unwrap())
+            .unwrap();
+        assert!(start.recv().unwrap());
+        assert_eq!(controller.claim_paired_cancel(&id).unwrap(), context);
+        assert!(controller.claim_paired_cancel(&id).is_err());
+        controller.settle_paired(&id, &hash, true);
+        controller.finish(&id, Phase::Failed, None, None);
+        assert!(!controller.request_close());
+        assert!(controller.begin().is_err());
+        assert_eq!(controller.claim_paired_recovery(&id).unwrap(), context);
+        assert!(controller.claim_paired_recovery(&id).is_err());
+        controller.settle_paired(&id, &hash, false);
+        controller.finish(&id, Phase::Completed, None, None);
+        assert!(controller.request_close());
     }
 
     #[test]

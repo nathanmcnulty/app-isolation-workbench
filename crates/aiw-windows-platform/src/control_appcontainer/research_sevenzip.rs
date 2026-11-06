@@ -75,13 +75,58 @@ pub fn run() -> Result<u8> {
     }
 }
 
+/// Production secondary roles cannot enter the installer/setup entrypoint.
+pub(crate) fn run_production_role() -> Result<u8> {
+    let args: Vec<_> = std::env::args_os().skip(1).collect();
+    if args.len() != 1
+        || !matches!(
+            args[0].to_str(),
+            Some("--driver-control" | "--deadline-control" | "--boundary-control" | "--workflow")
+        )
+    {
+        return Err("fixed 7-Zip secondary role rejected".into());
+    }
+    run()
+}
+
+pub(crate) fn execute_production(
+    request: &aiw_provider_wsb::sevenzip::SevenZipRequest,
+) -> (bool, Result<u8>) {
+    // Raw on-worker stages are never mapped to the host or imported as receipts.
+    if let Err(error) = fs::create_dir(OUTPUT) {
+        return (false, Err(error.into()));
+    }
+    if let Err(error) = set_acl(
+        Path::new(OUTPUT),
+        "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+        false,
+    ) {
+        return (true, Err(error));
+    }
+    (
+        true,
+        setup_bound(Some((
+            &request.agent_sha256,
+            request.profile.agent_size_bytes,
+        ))),
+    )
+}
+
 fn setup() -> Result<u8> {
+    setup_bound(None)
+}
+fn setup_bound(expected_helper: Option<(&str, u64)>) -> Result<u8> {
     // Holding every named ancestor prevents root replacement; no recursive cleanup.
     let _output_dirs = hold_directory_chain(Path::new(OUTPUT))?;
     if fs::read_dir(OUTPUT)?.next().is_some() || Path::new(ROOT).try_exists()? {
         return Err("fresh empty output mapping and absent local research root required".into());
     }
     let mut inputs = FixedSevenZipInputs::open().map_err(fixed)?;
+    if let Some((hash, size)) = expected_helper
+        && (inputs.helper_hash() != hash || inputs.helper_size() != size)
+    {
+        return Err("production helper differs from approved agent bytes/size".into());
+    }
     fs::create_dir(ROOT)?;
     let _root = hold_directory_chain(Path::new(ROOT))?;
     for (path, is_installer) in [(INSTALLER, true), (HELPER, false)] {
@@ -143,6 +188,24 @@ fn setup() -> Result<u8> {
         "scope":"research observations; application functions are in workflow stage records; outer cleanup recorded only by host"}),
     )?;
     result
+}
+
+pub(crate) fn production_stage(name: &str) -> Result<Option<Vec<u8>>> {
+    if !name
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b))
+    {
+        return Err("invalid internal stage name".into());
+    }
+    let _ancestors = hold_directory_chain(Path::new(OUTPUT))?;
+    let path = Path::new(OUTPUT).join(format!("{name}.json"));
+    if !path.try_exists()? {
+        return Ok(None);
+    }
+    let held = HeldApplicationFile::open_bounded(&path, 128 * 1024)?;
+    let bytes = held.read_bounded(128 * 1024)?;
+    held.revalidate()?;
+    Ok(Some(bytes))
 }
 
 fn setup_inner(installer: &HeldApplicationFile, helper: &HeldApplicationFile) -> Result<u8> {
@@ -241,11 +304,21 @@ fn setup_inner(installer: &HeldApplicationFile, helper: &HeldApplicationFile) ->
         )?;
         let waited = child.wait_for_exit(Duration::from_secs(150));
         let exit = waited?;
+        image.revalidate()?;
+        dll.revalidate()?;
+        let after_image = HeldApplicationFile::open(Path::new(IMAGE))?;
+        let after_dll = HeldApplicationFile::open(Path::new(DLL))?;
         record(
             Path::new(OUTPUT),
             "05-workflow-exit",
             &json!({"exitCode":exit,
-        "heldToken":held_token,"imageSha256":image.observation().sha256,"dllSha256":dll.observation().sha256}),
+            "heldToken":held_token,"imageSha256":image.observation().sha256,"dllSha256":dll.observation().sha256,
+            "codeBinding":{
+                "imageBefore":{"sha256":image.observation().sha256,"sizeBytes":image.observation().size_bytes},
+                "dllBefore":{"sha256":dll.observation().sha256,"sizeBytes":dll.observation().size_bytes},
+                "imageAfter":{"sha256":after_image.observation().sha256,"sizeBytes":after_image.observation().size_bytes},
+                "dllAfter":{"sha256":after_dll.observation().sha256,"sizeBytes":after_dll.observation().size_bytes}
+            }}),
         )?;
         image.revalidate()?;
         dll.revalidate()?;
@@ -428,6 +501,18 @@ fn workflow_inner(token: &TokenEvidence) -> Result<u8> {
         };
     image.revalidate()?;
     dll.revalidate()?;
+    let after_image = HeldApplicationFile::open(Path::new(IMAGE))?;
+    let after_dll = HeldApplicationFile::open(Path::new(DLL))?;
+    record(
+        Path::new(WORK),
+        "06-code-binding",
+        &json!({
+            "imageBefore":{"sha256":image.observation().sha256,"sizeBytes":image.observation().size_bytes},
+            "dllBefore":{"sha256":dll.observation().sha256,"sizeBytes":dll.observation().size_bytes},
+            "imageAfter":{"sha256":after_image.observation().sha256,"sizeBytes":after_image.observation().size_bytes},
+            "dllAfter":{"sha256":after_dll.observation().sha256,"sizeBytes":after_dll.observation().size_bytes}
+        }),
+    )?;
     record(
         Path::new(WORK),
         "05-comparison",
@@ -496,7 +581,13 @@ fn fixture_bytes() -> BTreeMap<&'static str, Vec<u8>> {
 fn run_variant(name: &str, profile: Option<PSID>, sid: &str) -> Result<bool> {
     let root = Path::new(WORK).join(name);
     let expected = fixture_inventory();
-    if inventory(&root.join("Input"))? != expected {
+    let input_before = inventory(&root.join("Input"))?;
+    record(
+        Path::new(WORK),
+        &format!("{}-input-before", name.to_ascii_lowercase()),
+        &json!(input_before),
+    )?;
+    if input_before != expected {
         return Err("input fixture differs".into());
     }
     for (index, operation) in [Operation::Create, Operation::Test, Operation::Extract]
@@ -516,12 +607,13 @@ fn run_variant(name: &str, profile: Option<PSID>, sid: &str) -> Result<bool> {
         }
     }
     let actual = inventory(&root.join("Extracted"))?;
-    let passed = actual == expected && inventory(&root.join("Input"))? == expected;
+    let input_after = inventory(&root.join("Input"))?;
+    let passed = actual == expected && input_after == expected;
     record(
         Path::new(WORK),
         &format!("{}-3", name.to_ascii_lowercase()),
         &json!({
-        "function":"verify","passed":passed,"expected":expected,"actual":actual,
+        "function":"verify","passed":passed,"expected":expected,"actual":actual,"inputAfter":input_after,
         "archive":inventory_one(&root.join("archive.7z"))?}),
     )?;
     Ok(passed)
@@ -707,6 +799,7 @@ fn collect_stages() -> Result<()> {
         "01-deadline-control",
         "app-ready",
         "baseline-0",
+        "baseline-input-before",
         "baseline-1",
         "baseline-2",
         "baseline-3",
@@ -714,11 +807,13 @@ fn collect_stages() -> Result<()> {
         "03-candidate-not-reached",
         "03-boundary",
         "candidate-0",
+        "candidate-input-before",
         "candidate-1",
         "candidate-2",
         "candidate-3",
         "04-profile-cleanup",
         "05-comparison",
+        "06-code-binding",
         "99-driver-error",
     ];
     let mut missing = vec![];

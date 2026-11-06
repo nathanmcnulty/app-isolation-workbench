@@ -18,6 +18,7 @@ mod installer_inspection;
 pub mod msix;
 pub mod packaging;
 pub mod paired;
+pub mod sevenzip;
 
 const MAX_CONFIG_BYTES: u64 = 16 * 1024 * 1024;
 
@@ -81,6 +82,10 @@ pub struct ApprovalReview {
 }
 
 pub trait ApprovalGate {
+    fn sevenzip_prepared(&self, _run: &sevenzip::SevenZipRun) -> Result<()> {
+        Ok(())
+    }
+    fn sevenzip_finished(&self, _run: &sevenzip::SevenZipRun, _recovery_required: bool) {}
     fn paired_prepared(&self, _run: &paired::PairedRun) -> Result<()> {
         Ok(())
     }

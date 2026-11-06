@@ -52,6 +52,9 @@ impl FixedSevenZipInputs {
     pub(crate) fn helper_hash(&self) -> &str {
         &self.roles[1].hash
     }
+    pub(crate) fn helper_size(&self) -> u64 {
+        self.roles[1].size
+    }
     pub(crate) fn copy_installer(&mut self, output: &mut File) -> Result<(), String> {
         self.copy_role(0, output)
     }

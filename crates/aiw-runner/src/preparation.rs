@@ -7,9 +7,16 @@
 
 use std::path::Path;
 pub(crate) mod paired;
+pub(crate) mod sevenzip;
 #[cfg(windows)]
 pub use paired::prepare_windows_sandbox_paired_controls;
 pub use paired::{WsbPairedControls, build_wsb_paired_controls_preparation};
+#[cfg(windows)]
+pub use sevenzip::prepare_windows_sandbox_sevenzip_assessment;
+pub use sevenzip::{
+    WsbSevenZipAssessment, WsbSevenZipInstaller, build_wsb_sevenzip_preparation,
+    build_wsb_static_sevenzip_preparation,
+};
 
 use aiw_evidence::canonical_json_bytes;
 pub use aiw_orchestrator::WsbPlanningImportReceipt;
@@ -180,6 +187,8 @@ pub struct WsbPreparationReceipt {
     pub bambu: Option<WsbBambuApplication>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paired_controls: Option<WsbPairedControls>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seven_zip: Option<WsbSevenZipAssessment>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -393,7 +402,9 @@ impl WsbPreparationReceipt {
             os.validate().map_err(WsbPreparationError::Contract)?;
         }
         let deferred = self.provider_protocol_observation.is_some();
-        let expected_schema = if self.paired_controls.is_some() && deferred {
+        let expected_schema = if self.seven_zip.is_some() {
+            sevenzip::SEVENZIP_PREPARATION_SCHEMA
+        } else if self.paired_controls.is_some() && deferred {
             paired::PAIRED_STATIC_PREPARATION_SCHEMA
         } else if self.paired_controls.is_some() {
             paired::PAIRED_PREPARATION_SCHEMA
@@ -428,6 +439,7 @@ impl WsbPreparationReceipt {
             self.msi.is_some(),
             self.bambu.is_some(),
             self.paired_controls.is_some(),
+            self.seven_zip.is_some(),
         ]
         .iter()
         .filter(|v| **v)
@@ -444,7 +456,8 @@ impl WsbPreparationReceipt {
                 } else {
                     READINESS_SCHEMA
                 }
-            || (deferred && self.paired_controls.is_none())
+            || (deferred && self.paired_controls.is_none() && self.seven_zip.is_none())
+            || (self.seven_zip.is_some() && !deferred)
             || self.wsb_plan_relative_path != WSB_PLAN_FILE
             || self.run_plan_relative_path != RUN_PLAN_FILE
             || !self.approval_required
@@ -529,6 +542,18 @@ impl WsbPreparationReceipt {
         if let Some(bambu) = &self.bambu {
             bambu.validate(&self.workspace)?;
         }
+        if let Some(assessment) = &self.seven_zip {
+            if historical {
+                assessment.validate_historical(&self.workspace, &self.guest_agent)?;
+            } else {
+                assessment.validate(&self.workspace, &self.guest_agent)?;
+            }
+            if self.host_os_version.as_ref() != Some(assessment.profile.approved_host_windows()) {
+                return Err(WsbPreparationError::Contract(
+                    "7-Zip environment provenance differs".into(),
+                ));
+            }
+        }
         Ok(())
     }
 }
@@ -557,6 +582,7 @@ impl PreparedWsbArtifacts {
         if self.receipt.msi.is_some()
             || self.receipt.bambu.is_some()
             || self.receipt.paired_controls.is_some()
+            || self.receipt.seven_zip.is_some()
         {
             if profile_plan.probe.output != GUEST_MSI_RESULT {
                 return Err(WsbPreparationError::Contract(
@@ -575,6 +601,8 @@ impl PreparedWsbArtifacts {
                 != [
                     if let Some(msi) = &self.receipt.msi {
                         msi_trust_delta(msi)
+                    } else if self.receipt.seven_zip.is_some() {
+                        sevenzip::SEVENZIP_TRUST_DELTA.to_owned()
                     } else if self.receipt.paired_controls.is_some() {
                         paired::CONTROL_TRUST_DELTA.to_owned()
                     } else if self.receipt.bambu.is_some() {
@@ -611,6 +639,7 @@ impl PreparedWsbArtifacts {
                 self.receipt.msi.is_none()
                     && self.receipt.bambu.is_none()
                     && self.receipt.paired_controls.is_none()
+                    && self.receipt.seven_zip.is_none()
                     && sandbox_plan_sha256 == &self.receipt.wsb_plan_sha256
                     && provider_sha256 == &self.receipt.provider.sha256
                     && guest_agent_sha256 == &self.receipt.guest_agent.sha256
@@ -689,6 +718,30 @@ impl PreparedWsbArtifacts {
                         && workspace_identity_sha256 == &self.receipt.workspace_identity_sha256
                         && profile.as_ref() == &controls.profile
                 }),
+            [
+                PlannedAction::AssessHost,
+                PlannedAction::PrepareWorkspace,
+                PlannedAction::ExecuteWindowsSandboxSevenZipAssessment {
+                    sandbox_plan_sha256,
+                    provider_sha256,
+                    guest_agent_sha256,
+                    workspace,
+                    workspace_identity_sha256,
+                    import_receipt_sha256,
+                    application_sha256,
+                    profile,
+                },
+                PlannedAction::CollectEvidence,
+            ] => self.receipt.seven_zip.as_ref().is_some_and(|assessment| {
+                sandbox_plan_sha256 == &self.receipt.wsb_plan_sha256
+                    && provider_sha256 == &self.receipt.provider.sha256
+                    && guest_agent_sha256 == &self.receipt.guest_agent.sha256
+                    && workspace.as_ref() == &self.receipt.workspace
+                    && workspace_identity_sha256 == &self.receipt.workspace_identity_sha256
+                    && import_receipt_sha256 == &assessment.installer.import_receipt_sha256
+                    && application_sha256 == &assessment.installer.staged_payload.sha256
+                    && profile.as_ref() == &assessment.profile
+            }),
             _ => false,
         };
         if !matching_action {
@@ -853,6 +906,7 @@ fn build_preparation_identity(
         msi: None,
         bambu: None,
         paired_controls: None,
+        seven_zip: None,
     };
     let artifacts = PreparedWsbArtifacts {
         run_plan,
@@ -1194,7 +1248,7 @@ pub(crate) fn runtime_identity_matches_receipt(
 pub(crate) fn require_current_readiness_matches_receipt(
     receipt: &WsbPreparationReceipt,
 ) -> Result<(), WsbPreparationError> {
-    if receipt.paired_controls.is_some() {
+    if receipt.paired_controls.is_some() || receipt.seven_zip.is_some() {
         let identity = aiw_windows_platform::inspect_windows_sandbox_static()
             .map_err(WsbPreparationError::Readiness)?;
         return static_identity_matches_receipt(receipt, &identity);
@@ -1826,6 +1880,7 @@ enum ProviderInspectionMode {
     LegacyByProfile,
     StaticOnly,
     PairedStaticOnly,
+    SevenZipStaticOnly,
 }
 
 #[cfg(windows)]
@@ -1899,8 +1954,16 @@ fn open_verified_preparation_with_inspector(
             "This operation requires the fixed paired profile".into(),
         ));
     }
+    if mode == ProviderInspectionMode::SevenZipStaticOnly && receipt.seven_zip.is_none() {
+        return Err(WsbPreparationError::Contract(
+            "This operation requires the fixed 7-Zip assessment profile".into(),
+        ));
+    }
     if allow_revoking
-        && (receipt.msi.is_some() || receipt.bambu.is_some() || receipt.paired_controls.is_some())
+        && (receipt.msi.is_some()
+            || receipt.bambu.is_some()
+            || receipt.paired_controls.is_some()
+            || receipt.seven_zip.is_some())
     {
         return Err(WsbPreparationError::Contract(
             "private golden discard does not authorize imported application workspace deletion"
@@ -2021,6 +2084,17 @@ fn open_verified_preparation_with_inspector(
                     BAMBU_FILE,
                 )
             })
+        })
+        .or_else(|| {
+            receipt.seven_zip.as_ref().map(|assessment| {
+                (
+                    &assessment.installer.import_receipt,
+                    Ok(true),
+                    &assessment.installer.staged_identity,
+                    &assessment.installer.staged_payload,
+                    sevenzip::SEVENZIP_INSTALLER_FILE,
+                )
+            })
         }) {
         let intake = aiw_windows_platform::open_verified_application_file_import(import_receipt)
             .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
@@ -2087,7 +2161,9 @@ fn open_verified_preparation_with_inspector(
         )?;
     }
 
-    if mode != ProviderInspectionMode::LegacyByProfile || observed.receipt.paired_controls.is_some()
+    if mode != ProviderInspectionMode::LegacyByProfile
+        || observed.receipt.paired_controls.is_some()
+        || observed.receipt.seven_zip.is_some()
     {
         let identity = inspector
             .static_identity()
@@ -2189,6 +2265,40 @@ pub fn verify_windows_sandbox_paired_preparation(
 }
 
 #[cfg(windows)]
+pub fn import_windows_sandbox_sevenzip_preparation(
+    workspace_root: &Path,
+    project: &Project,
+    expected_guest_agent_sha256: &str,
+    imported_at: &str,
+) -> Result<WsbPlanningImportResult, WsbPreparationError> {
+    import_preparation_with_inspector(
+        workspace_root,
+        project,
+        expected_guest_agent_sha256,
+        imported_at,
+        ProviderInspectionMode::SevenZipStaticOnly,
+        &NativePreparationProviderInspector,
+    )
+}
+#[cfg(windows)]
+pub fn verify_windows_sandbox_sevenzip_preparation(
+    workspace_root: &Path,
+    project: &Project,
+    expected_guest_agent_sha256: &str,
+) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
+    Ok(open_verified_preparation_with_inspector(
+        workspace_root,
+        project,
+        expected_guest_agent_sha256,
+        false,
+        false,
+        ProviderInspectionMode::SevenZipStaticOnly,
+        &NativePreparationProviderInspector,
+    )?
+    .artifacts)
+}
+
+#[cfg(windows)]
 fn import_preparation_with_inspector(
     workspace_root: &Path,
     project: &Project,
@@ -2213,7 +2323,9 @@ fn import_preparation_with_inspector(
     )?;
     let run_id = held.artifacts.receipt.run_id.clone();
     let receipt = WsbPlanningImportReceipt {
-        schema_version: if held.artifacts.receipt.paired_controls.is_some() {
+        schema_version: if held.artifacts.receipt.seven_zip.is_some() {
+            aiw_orchestrator::WSB_SEVENZIP_IMPORT_SCHEMA
+        } else if held.artifacts.receipt.paired_controls.is_some() {
             aiw_orchestrator::WSB_PAIRED_CONTROL_IMPORT_SCHEMA
         } else if held.artifacts.receipt.bambu.is_some() {
             aiw_orchestrator::WSB_BAMBU_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION
@@ -3028,6 +3140,182 @@ pub(crate) mod tests {
             version: None,
             signature_status: ReadinessState::Unknown,
         }
+    }
+
+    fn sevenzip_artifacts() -> PreparedWsbArtifacts {
+        use aiw_probe::sevenzip::*;
+        let workspace = workspace();
+        let agent = guest();
+        let mut ready = readiness();
+        let windows = aiw_probe::paired_controls::parse_guest_windows("10.0.26100.2").unwrap();
+        ready.os_version = Some(windows.clone());
+        let mut import = fake_msi_application().import_receipt;
+        import.source_kind = aiw_probe::ApplicationInspectionKind::Exe;
+        import.sha256 = SEVENZIP_INSTALLER_SHA256.into();
+        import.size_bytes = SEVENZIP_INSTALLER_SIZE_BYTES;
+        import.source.sha256 = import.sha256.clone();
+        import.source.size_bytes = import.size_bytes;
+        let path = format!(
+            "{}\\{}",
+            workspace.tools.final_path,
+            sevenzip::SEVENZIP_INSTALLER_FILE
+        );
+        let installer = sevenzip::WsbSevenZipInstaller {
+            import_receipt_sha256: hex::encode(Sha256::digest(
+                serde_json::to_vec(&import).unwrap(),
+            )),
+            import_receipt: import,
+            staged_payload: BinaryIdentity {
+                canonical_path: path.clone(),
+                sha256: SEVENZIP_INSTALLER_SHA256.into(),
+                size_bytes: SEVENZIP_INSTALLER_SIZE_BYTES,
+                version: None,
+                signature_status: ReadinessState::Unknown,
+            },
+            staged_identity: identity(&path, 'a'),
+        };
+        let path = format!(
+            "{}\\{}",
+            workspace.tools.final_path,
+            sevenzip::SEVENZIP_LAUNCHER_FILE
+        );
+        let launcher = WsbMsiDocument {
+            staged_payload: BinaryIdentity {
+                canonical_path: path.clone(),
+                ..agent.clone()
+            },
+            staged_identity: identity(&path, 'b'),
+        };
+        let profile = aiw_probe::SevenZipProfile {
+            revision: SEVENZIP_PROFILE_REVISION.into(),
+            source_sha256: seven_zip_source_sha256(),
+            installer_sha256: SEVENZIP_INSTALLER_SHA256.into(),
+            installer_size_bytes: SEVENZIP_INSTALLER_SIZE_BYTES,
+            agent_sha256: agent.sha256.clone(),
+            agent_size_bytes: agent.size_bytes,
+            launcher_sha256: agent.sha256.clone(),
+            launcher_size_bytes: agent.size_bytes,
+            origin: aiw_probe::ControlEvidenceOrigin::SyntheticRehearsal,
+            expected_windows: windows.clone(),
+            expected_host_windows: windows,
+            policy:
+                aiw_probe::SevenZipPolicy::ClassicAppContainerNoCapabilitiesReadInputWriteOutput,
+        };
+        sevenzip::build_wsb_static_sevenzip_preparation(
+            "run-one",
+            &project(),
+            &synthetic::static_identity(&ready),
+            &workspace,
+            &agent,
+            "synthetic-time",
+            sevenzip::WsbSevenZipAssessment {
+                profile,
+                installer,
+                launcher,
+            },
+        )
+        .unwrap()
+    }
+    #[test]
+    fn sevenzip_static_preparation_binds_installer_import_roles_and_approval_without_execution() {
+        let artifacts = sevenzip_artifacts();
+        artifacts.validate().unwrap();
+        assert_eq!(
+            artifacts.receipt.schema_version,
+            sevenzip::SEVENZIP_PREPARATION_SCHEMA
+        );
+        assert_eq!(
+            artifacts.run_plan.schema,
+            aiw_orchestrator::SEVENZIP_RUN_PLAN_SCHEMA
+        );
+        assert!(
+            artifacts.receipt.approval_required
+                && !artifacts.receipt.provider_acquired
+                && !artifacts.receipt.provider_mutated
+        );
+        assert_eq!(
+            artifacts.receipt.provider_protocol_observation,
+            Some(ProviderProtocolObservation::RequiredAtStartNotObserved)
+        );
+        assert!(artifacts.receipt.provider.version.is_none());
+        let assessment = artifacts.receipt.seven_zip.as_ref().unwrap();
+        let PlannedAction::ExecuteWindowsSandboxSevenZipAssessment {
+            import_receipt_sha256,
+            application_sha256,
+            profile,
+            ..
+        } = &artifacts.run_plan.actions[2]
+        else {
+            panic!("fixed action")
+        };
+        assert_eq!(
+            import_receipt_sha256,
+            &assessment.installer.import_receipt_sha256
+        );
+        assert_eq!(
+            application_sha256,
+            &assessment.installer.staged_payload.sha256
+        );
+        assert_eq!(profile.as_ref(), &assessment.profile);
+        let mut legacy = build_wsb_preparation(
+            "run-one",
+            &project(),
+            &readiness(),
+            &workspace(),
+            &guest(),
+            "now",
+        )
+        .unwrap();
+        assert!(
+            serde_json::to_value(&legacy.receipt)
+                .unwrap()
+                .get("sevenZip")
+                .is_none()
+        );
+        legacy.receipt.seven_zip = artifacts.receipt.seven_zip.clone();
+        assert!(legacy.validate().is_err());
+    }
+    #[test]
+    fn sevenzip_preparation_rejects_role_import_environment_mismatch_and_preserves_historical_source()
+     {
+        let original = sevenzip_artifacts();
+        for case in 0..6 {
+            let mut changed = original.clone();
+            let value = changed.receipt.seven_zip.as_mut().unwrap();
+            match case {
+                0 => value.installer.import_receipt_sha256 = "0".repeat(64),
+                1 => {
+                    value.installer.import_receipt.source_kind =
+                        aiw_probe::ApplicationInspectionKind::Msi
+                }
+                2 => value
+                    .launcher
+                    .staged_payload
+                    .canonical_path
+                    .push_str(".other"),
+                3 => value.profile.expected_host_windows.revision += 1,
+                4 => value.installer.staged_identity.volume_serial_number = "0".repeat(16),
+                _ => value.profile.installer_size_bytes += 1,
+            }
+            assert!(changed.validate().is_err(), "case{case}");
+        }
+        let mut historical = original;
+        historical
+            .receipt
+            .seven_zip
+            .as_mut()
+            .unwrap()
+            .profile
+            .source_sha256 = "0".repeat(64);
+        let PlannedAction::ExecuteWindowsSandboxSevenZipAssessment { profile, .. } =
+            &mut historical.run_plan.actions[2]
+        else {
+            panic!("fixed action")
+        };
+        profile.source_sha256 = "0".repeat(64);
+        historical.receipt.run_plan_sha256 = historical.run_plan.hash().unwrap();
+        historical.validate_historical().unwrap();
+        assert!(historical.validate().is_err());
     }
 
     #[cfg(windows)]

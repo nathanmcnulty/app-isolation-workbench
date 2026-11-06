@@ -11,7 +11,11 @@ mod virtualization;
 #[cfg(windows)]
 mod guest_paired_controls;
 #[cfg(windows)]
+mod guest_sevenzip;
+#[cfg(windows)]
 pub use guest_paired_controls::{PairedGuestOutcome, execute_fixed_paired_controls};
+#[cfg(windows)]
+pub use guest_sevenzip::{execute_fixed_sevenzip, run_fixed_sevenzip_role};
 
 #[cfg(windows)]
 mod powershell;

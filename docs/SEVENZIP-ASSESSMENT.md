@@ -1,8 +1,9 @@
 # 7-Zip application assessment
 
-Active implementation, selected 2026-11-05 (America/Anchorage). This document
-declares the experiment before execution. It does not record application success,
-an isolation verdict, or a supported desktop feature until the evidence exists.
+Active implementation, selected 2026-11-05 (America/Anchorage). The declared
+experiment completed its [native research trial](SEVENZIP-NATIVE-ACCEPTANCE.md).
+Production integration is in progress; that trial alone does not establish a
+supported desktop feature or broad isolation verdict.
 Start from [working state](WORKING-STATE.md); the [candidate review](MXC-ASSESSMENT-SELECTION.md)
 records the current MXC research and why classic AppContainer is selected first.
 

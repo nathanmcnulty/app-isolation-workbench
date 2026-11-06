@@ -81,6 +81,7 @@ fn finish_paired_preparation(
     if base.receipt.msi.is_some()
         || base.receipt.bambu.is_some()
         || base.receipt.paired_controls.is_some()
+        || base.receipt.seven_zip.is_some()
         || base.receipt.host_os_version.as_ref() != Some(controls.profile.approved_host_windows())
     {
         return Err(WsbPreparationError::Contract(
@@ -138,6 +139,9 @@ pub(crate) fn open_control_files(
     workspace: &aiw_windows_platform::HeldRunWorkspace,
     receipt: &WsbPreparationReceipt,
 ) -> Result<HeldControlFiles, WsbPreparationError> {
+    if receipt.seven_zip.is_some() {
+        return super::sevenzip::open_sevenzip_files(workspace, receipt);
+    }
     let mut held = vec![];
     if let Some(controls) = &receipt.paired_controls {
         for (name, expected) in [
@@ -168,6 +172,9 @@ pub(crate) fn require_receipt_tools(
     path: &Path,
     receipt: &WsbPreparationReceipt,
 ) -> Result<(), WsbPreparationError> {
+    if receipt.seven_zip.is_some() {
+        return super::sevenzip::require_tools(path);
+    }
     if receipt.paired_controls.is_none() {
         return require_profile_tools_allowlist(
             path,
@@ -347,7 +354,7 @@ pub(super) fn prepare_paired_with_inspector(
     )
 }
 #[cfg(windows)]
-fn copy_agent_role(
+pub(super) fn copy_agent_role(
     workspace: &aiw_windows_platform::HeldRunWorkspace,
     name: &str,
     agent: &BinaryIdentity,

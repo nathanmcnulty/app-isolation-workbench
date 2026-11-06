@@ -18,6 +18,7 @@ pub enum ReportSetProfile {
     NotepadMsi,
     BambuExport,
     PairedControls,
+    SevenZip,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -71,6 +72,7 @@ pub enum WsbReportSetResult {
     NotepadMsi(WsbMsiReportSetResult),
     BambuExport(Box<WsbBambuRunReport>),
     PairedControls(Box<crate::PairedControlRunReport>),
+    SevenZip(Box<crate::SevenZipRunReport>),
     Unavailable(ReportSetUnavailableReason),
 }
 
@@ -87,6 +89,14 @@ pub struct ApplicationReportFunctions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub uninstall: Option<bool>,
     pub stl_to_3mf_export: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub create_archive: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub test_archive: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extract_archive: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verify_archive_content: Option<bool>,
 }
 
 impl WsbReportSetResult {
@@ -98,12 +108,56 @@ impl WsbReportSetResult {
             ) => Some((&s.run_id, &s.request_sha256)),
             Self::BambuExport(s) => Some((&s.run_id, &s.request_sha256)),
             Self::PairedControls(s) => Some((&s.run_id, &s.request_sha256)),
+            Self::SevenZip(s) => Some((&s.run_id, &s.request_sha256)),
             _ => None,
         }
     }
 
     fn functions(&self) -> ApplicationReportFunctions {
         match self {
+            Self::SevenZip(report) => {
+                use aiw_provider_wsb::sevenzip::{
+                    SevenZipFunction as F, SevenZipFunctionStatus as S,
+                };
+                let function = |name| {
+                    report.comparison.as_ref().and_then(|comparison| {
+                        comparison
+                            .functions
+                            .iter()
+                            .find(|row| row.function == name)
+                            .and_then(|row| match (row.baseline, row.candidate) {
+                                (S::Passed, S::Passed) => Some(true),
+                                (S::Failed, _) | (_, S::Failed) => Some(false),
+                                _ => None,
+                            })
+                    })
+                };
+                ApplicationReportFunctions {
+                    install: report
+                        .observations
+                        .as_ref()
+                        .and_then(|value| value.installation.as_ref())
+                        .and_then(|installation| {
+                            if installation.timed_out
+                                || installation.exit_code.is_some_and(|code| code != 0)
+                            {
+                                Some(false)
+                            } else if installation.exit_code == Some(0)
+                                && installation.job_empty == Some(true)
+                                && installation.files_after.is_some()
+                            {
+                                Some(true)
+                            } else {
+                                None
+                            }
+                        }),
+                    create_archive: function(F::Create),
+                    test_archive: function(F::Test),
+                    extract_archive: function(F::Extract),
+                    verify_archive_content: function(F::Verify),
+                    ..Default::default()
+                }
+            }
             Self::NotepadMsi(WsbMsiReportSetResult::CompletedScenario(s)) => {
                 ApplicationReportFunctions {
                     install: s.functions.install,
@@ -113,6 +167,7 @@ impl WsbReportSetResult {
                     close: s.functions.close,
                     uninstall: None,
                     stl_to_3mf_export: None,
+                    ..Default::default()
                 }
             }
             Self::BambuExport(s)
@@ -143,6 +198,22 @@ pub fn report_windows_sandbox_set(input: &WsbReportSetInput) -> Result<WsbReport
     for entry in &input.entries {
         let run = &entry.run;
         let mut result = match entry.profile {
+            ReportSetProfile::SevenZip => {
+                match crate::report_set::read_report_project(&run.project_path).and_then(
+                    |project| {
+                        crate::report_windows_sandbox_sevenzip(
+                            &run.workspace_root,
+                            &run.run_id,
+                            &project,
+                            &run.guest_agent_sha256,
+                        )
+                        .map_err(|_| ReportSetUnavailableReason::EvidenceRejected)
+                    },
+                ) {
+                    Ok(report) => WsbReportSetResult::SevenZip(Box::new(report)),
+                    Err(reason) => WsbReportSetResult::Unavailable(reason),
+                }
+            }
             ReportSetProfile::NotepadMsi => {
                 let set = crate::report_windows_sandbox_msi_set(&WsbMsiReportSetInput {
                     schema_version: WSB_MSI_REPORT_SET_INPUT_SCHEMA.into(),
@@ -235,6 +306,10 @@ impl WsbReportSet {
         let mut out = "# Retained application workflow results\n\nEach run is independently reverified. These are fixed workflow observations inside Windows Sandbox, not general compatibility or application-level isolation verdicts. Fixed paired controls apply only to their recorded cases. Application comparisons remain unmeasured. Cleanup is a historical record. Null or unavailable evidence never means a function passed.\n\n| Entry | Application | Result | Install | Launch | Open document | Edit/save | Close | STL to 3MF |\n|---|---|---|---|---|---|---|---|---|\n".to_owned();
         for row in &self.entries {
             let (app, status) = match &row.result {
+                WsbReportSetResult::SevenZip(s) => (
+                    "7-Zip 26.05",
+                    format!("Fixed archive comparison; evidence {:?}", s.evidence_status),
+                ),
                 WsbReportSetResult::NotepadMsi(WsbMsiReportSetResult::CompletedScenario(s)) => {
                     (s.application_name.as_str(), "Completed".to_owned())
                 }

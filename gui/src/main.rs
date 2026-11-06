@@ -48,6 +48,16 @@ mod desktop {
         workflow_name: String,
     }
     impl ApprovalGate for GuiGate {
+        fn sevenzip_prepared(&self, run: &service::sevenzip::SevenZipRun) -> Result<()> {
+            self.controller
+                .register_paired(&self.id, &run.plan_sha256, serde_json::to_string(run)?)
+                .map_err(anyhow::Error::msg)
+        }
+        fn sevenzip_finished(&self, run: &service::sevenzip::SevenZipRun, recovery_required: bool) {
+            self.controller
+                .settle_paired(&self.id, &run.plan_sha256, recovery_required);
+            self.controller.progress(&self.id,if recovery_required {"Exact worker cleanup is unresolved. Preserve the run and use its separate recovery action."} else {"Worker operation settled; reading the retained fixed-control evidence."});
+        }
         fn paired_prepared(&self, run: &service::paired::PairedRun) -> Result<()> {
             self.controller
                 .register_paired(&self.id, &run.plan_sha256, serde_json::to_string(run)?)
@@ -312,11 +322,13 @@ mod desktop {
     ) -> std::result::Result<(), String> {
         if !matches!(
             kind.as_str(),
-            "assessment" | "interactive" | "bambu" | "msix" | "paired"
+            "assessment" | "interactive" | "bambu" | "msix" | "paired" | "sevenzip"
         ) {
             return Err("Unsupported workflow.".into());
         }
-        if (kind != "paired" && package.is_none() && installer.is_empty())
+        if (!matches!(kind.as_str(), "paired" | "sevenzip")
+            && package.is_none()
+            && installer.is_empty())
             || evidence.is_empty()
             || operator_identity.trim().is_empty()
         {
@@ -324,7 +336,7 @@ mod desktop {
                 "Choose the supported installer, evidence folder, and operator identity.".into(),
             );
         }
-        if kind == "paired"
+        if matches!(kind.as_str(), "paired" | "sevenzip")
             && (!installer.is_empty() || document_input.is_some() || package.is_some())
         {
             return Err(
@@ -334,19 +346,27 @@ mod desktop {
         if kind == "interactive" && document_input.as_deref().is_none_or(str::is_empty) {
             return Err("Choose a UTF-8 text input.".into());
         }
-        if kind != "paired" && paired_guest_windows.is_some() {
+        if !matches!(kind.as_str(), "paired" | "sevenzip") && paired_guest_windows.is_some() {
             return Err("A guest-version commitment belongs only to fixed paired controls.".into());
         }
         let expected_guest_windows = paired_guest_windows
             .as_deref()
             .map(service::paired::parse_guest_windows)
             .transpose()?;
+        if kind == "sevenzip" && expected_guest_windows.is_none() {
+            return Err(
+                "7-Zip requires the exact guest Windows version shown in retained diagnostics."
+                    .into(),
+            );
+        }
         let c = c.inner().clone();
         let id = c.begin()?;
         let gate = GuiGate {
             controller: c.clone(),
             id: id.clone(),
-            workflow_name: if kind == "paired" {
+            workflow_name: if kind == "sevenzip" {
+                "7-Zip 26.05 baseline / AppContainer archive assessment"
+            } else if kind == "paired" {
                 "Fixed ordinary-user / classic AppContainer controls"
             } else if kind == "msix" {
                 "Signed Notepad++ MSIX on VM107"
@@ -360,6 +380,56 @@ mod desktop {
             .into(),
         };
         spawn_work(app, c, id, move || {
+            if kind == "sevenzip" {
+                let result = service::sevenzip::assess_with_gate(
+                    Path::new(&evidence),
+                    &operator_identity,
+                    expected_guest_windows.as_ref(),
+                    &gate,
+                )?;
+                let summary=result.report.as_ref().map(service::sevenzip::summary).unwrap_or_else(|| if result.start_requested {"No verified archive comparison is available. Preserve evidence; inspect exact session status before retrying.".into()} else {"Preparation retained; explicit approval/Start was cancelled. No provider was executed.".into()});
+                let summary = format!(
+                    "{summary}\n\nOpen Results and choose {} to reopen or export this assessment without rerunning it.",
+                    result
+                        .run
+                        .evidence_root
+                        .join("results-selection.json")
+                        .display()
+                );
+                let summary = match &result.operation_error {
+                    Some(error) => format!(
+                        "{summary}\n\nOperation stopped: {error}\nPreserve the retained evidence. Inspect this exact run's status; use recovery only when cleanup is unresolved. Do not repeat Start for this run."
+                    ),
+                    None => summary,
+                };
+                return Ok((
+                    if result.report.as_ref().is_some_and(|r| {
+                        r.recorded_outcome == Some(aiw_orchestrator::RunOutcome::Cancelled)
+                    }) && !result.recovery_required
+                    {
+                        Phase::Cancelled
+                    } else if result.recovery_required || result.operation_failed {
+                        Phase::Failed
+                    } else if result.start_requested {
+                        Phase::Completed
+                    } else {
+                        Phase::Cancelled
+                    },
+                    ResultView {
+                        outcome: if result.start_requested {
+                            ResultOutcome::Incomplete
+                        } else {
+                            ResultOutcome::NotRun
+                        },
+                        run_id: result.run.run_id.clone(),
+                        workspace: path_text(&result.run.workspace)?,
+                        evidence_root: path_text(&result.run.evidence_root)?,
+                        summary: summary.clone(),
+                        can_export_document: false,
+                        report_markdown: summary,
+                    },
+                ));
+            }
             if kind == "paired" {
                 let result = service::paired::assess_with_gate(
                     Path::new(&evidence),
@@ -621,6 +691,11 @@ mod desktop {
     ) -> std::result::Result<(), String> {
         let context = c.claim_paired_cancel(&workflow_id)?;
         let result = (|| -> Result<()> {
+            if serde_json::from_str::<serde_json::Value>(&context)?["schemaVersion"]
+                == "aiw.dev/sevenzip-workflow-run/v0alpha1"
+            {
+                return service::sevenzip::request_cancellation(&serde_json::from_str(&context)?);
+            }
             let run: service::paired::PairedRun = serde_json::from_str(&context)?;
             service::paired::request_cancellation(&run)
         })();
@@ -644,6 +719,33 @@ mod desktop {
         let controller = c.inner().clone();
         let id = workflow_id.clone();
         spawn_work(app, controller.clone(), workflow_id, move || {
+            if serde_json::from_str::<serde_json::Value>(&context)?["schemaVersion"]
+                == "aiw.dev/sevenzip-workflow-run/v0alpha1"
+            {
+                let run: service::sevenzip::SevenZipRun = serde_json::from_str(&context)?;
+                let needed = service::sevenzip::needs_recovery(&run)?;
+                let operation = if needed {
+                    service::sevenzip::recover_owned(&run).map(|_| ())
+                } else {
+                    Ok(())
+                };
+                let unresolved = service::sevenzip::needs_recovery(&run).unwrap_or(true);
+                controller.settle_paired(&id, &run.plan_sha256, unresolved);
+                operation?;
+                let summary=service::sevenzip::report(&run).as_ref().map(service::sevenzip::summary).unwrap_or_else(|_|if needed { "Exact recovery completed; no assessment was replayed. Inspect Results for retained evidence.".into() } else { "Retained status requires no recovery; no provider was acquired and no assessment was replayed. Inspect Results for retained evidence.".into() });
+                return Ok((
+                    Phase::Completed,
+                    ResultView {
+                        outcome: ResultOutcome::Incomplete,
+                        run_id: run.run_id.clone(),
+                        workspace: path_text(&run.workspace)?,
+                        evidence_root: path_text(&run.evidence_root)?,
+                        summary: summary.clone(),
+                        can_export_document: false,
+                        report_markdown: summary,
+                    },
+                ));
+            }
             let run: service::paired::PairedRun = serde_json::from_str(&context)?;
             let needed = service::paired::needs_recovery(&run)?;
             let operation = if needed {
@@ -765,7 +867,7 @@ mod desktop {
     ) -> std::result::Result<(), String> {
         if !matches!(
             kind.as_str(),
-            "assessment" | "interactive" | "bambu" | "msix" | "paired"
+            "assessment" | "interactive" | "bambu" | "msix" | "paired" | "sevenzip"
         ) || workspace.is_empty()
             || run_id.is_empty()
         {
@@ -776,6 +878,31 @@ mod desktop {
         let paired_controller = c.clone();
         let paired_id = id.clone();
         spawn_work(app, c, id, move || {
+            if kind == "sevenzip" {
+                let run = service::sevenzip::open_retained(Path::new(&workspace), &run_id)?;
+                paired_controller
+                    .register_paired(&paired_id, &run.plan_sha256, serde_json::to_string(&run)?)
+                    .map_err(anyhow::Error::msg)?;
+                paired_controller.settle_paired(
+                    &paired_id,
+                    &run.plan_sha256,
+                    service::sevenzip::native_recovery_required(&run).unwrap_or(true),
+                );
+                let report = service::sevenzip::report(&run)?;
+                let summary = service::sevenzip::summary(&report);
+                return Ok((
+                    Phase::Completed,
+                    ResultView {
+                        outcome: ResultOutcome::Incomplete,
+                        run_id,
+                        workspace,
+                        evidence_root: path_text(&run.evidence_root)?,
+                        summary: summary.clone(),
+                        can_export_document: false,
+                        report_markdown: summary,
+                    },
+                ));
+            }
             if kind == "paired" {
                 let run = service::paired::open_retained(Path::new(&workspace), &run_id)?;
                 paired_controller

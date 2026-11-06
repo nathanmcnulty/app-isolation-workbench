@@ -82,6 +82,7 @@ fn live_msi_interrupted_completion_rejects_foreign_request_and_recovers() {
         msi: artifacts.receipt.msi,
         bambu: None,
         paired_controls: None,
+        seven_zip: None,
     };
     let lease = aiw_windows_platform::acquire_windows_sandbox(&start.provider.sha256).unwrap();
     let readiness = lease.readiness().clone();
