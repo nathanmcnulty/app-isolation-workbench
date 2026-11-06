@@ -6,6 +6,7 @@ param(
     [Parameter(Mandatory)] [Alias('SourceHead')] [ValidatePattern('^[0-9a-f]{40}$')] [string]$SourceRevision,
     [Parameter(Mandatory)] [ValidateNotNullOrEmpty()] [string]$GuestAgent,
     [Parameter(Mandatory)] [ValidatePattern('^[0-9a-f]{64}$')] [string]$GuestAgentSha256,
+    [ValidatePattern('^[0-9a-f]{64}$')] [string]$GuestAgentControlSourceSha256,
     [switch]$KeepFailedBuild
 )
 
@@ -50,6 +51,7 @@ function Assert-LowerHash([string]$Value, [string]$Label) { if ($Value -notmatch
 function Invoke-Preview([string]$Destination, [string]$Product, [string]$GuestPath, [string]$GuestHash) {
     $previewParameters = @{ OutputDirectory = $Destination; Product = $Product }
     if ($GuestPath) { $previewParameters.GuestAgent = $GuestPath; $previewParameters.GuestAgentSha256 = $GuestHash }
+    if ($GuestAgentControlSourceSha256) { $previewParameters.GuestAgentControlSourceSha256 = $GuestAgentControlSourceSha256 }
     $targetDirectoryPath = 'Env:CARGO_TARGET_DIR'
     $hadTargetDirectory = Test-Path $targetDirectoryPath
     $originalTargetDirectory = if ($hadTargetDirectory) { (Get-Item $targetDirectoryPath).Value } else { $null }

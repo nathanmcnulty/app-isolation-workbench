@@ -11,6 +11,9 @@
     let source;
     try { source = typeof input === "string" ? JSON.parse(input) : input; } catch (_) { return null; }
     const prose = (value) => typeof value === "string" && value.trim().length > 0;
+    if (source && source.schemaVersion === "aiw.dev/admin-paired-recipe/v0alpha1" && prose(source.executionIdentity) && prose(source.dataLifetime) && prose(source.limits) && source.runPlan && Array.isArray(source.runPlan.trustDeltas) && source.runPlan.trustDeltas.every(prose)) {
+      return {execution:source.executionIdentity,changes:source.runPlan.trustDeltas.join("\n\n") + "\n\n" + source.limits,lifetime:source.dataLifetime};
+    }
     if (source && source.profile === "notepad-plus-plus-msix-vm107" && source.worker && source.worker.vmId === 107 && prose(source.workflow)) {
       return { execution: "Signed Notepad++ MSIX as a fresh standard user on dedicated VM107. " + source.workflow,
         changes: "VM107 is rebooted and connected to the lab network. Temporary automatic sign-in is cleared before the native control. A durable host lease prevents another trial until cold restore is verified. Medium full-trust package; broader isolation is not measured.",

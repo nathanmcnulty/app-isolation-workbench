@@ -26,6 +26,8 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+const PAIRED_LAUNCHER_OBSERVATION_PATH: &str = r"C:\AIW\Control\paired-launcher.json";
+const PAIRED_OUTPUT_ROOT: &str = r"C:\AIW\Output";
 const REQUEST_SCHEMA: &str = "aiw.dev/wsb-golden-probe-request/v0alpha1";
 const MAX_REQUEST_BYTES: u64 = 64 * 1024;
 const MAX_OUTPUT_ARTIFACT_BYTES: usize = 16 * 1024 * 1024;
@@ -57,9 +59,13 @@ enum GuestRequest {
     Golden(Box<GoldenProbeRequest>),
     ImportedMsi(Box<ImportedMsiGuestRequest>),
     ImportedBambu(Box<ImportedBambuGuestRequest>),
+    PairedControls(Box<aiw_provider_wsb::PairedControlsRequest>),
 }
 
 fn main() -> ExitCode {
+    if let Some(result) = fixed_control_role() {
+        return result;
+    }
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
@@ -69,10 +75,227 @@ fn main() -> ExitCode {
     }
 }
 
+// The two staged roles are exact copies of this approved agent. A role is
+// selected only by exact fixed arguments, current executable and native account
+// identity. No arbitrary mode/path/script can enter the measured guest driver.
+fn fixed_control_role() -> Option<ExitCode> {
+    let args: Vec<_> = std::env::args_os().skip(1).collect();
+    let role = classify_control_role(&args);
+    let role = restrict_role_executable(std::env::current_exe().ok().as_deref(), role);
+    match role {
+        ControlRole::None => None,
+        ControlRole::Rejected => Some(ExitCode::FAILURE),
+        role => Some(match run_fixed_control_role(role) {
+            Ok(code) => code,
+            Err(error) => {
+                eprintln!("AIW_FIXED_CONTROL_ROLE_FAILED: {error:#}");
+                ExitCode::FAILURE
+            }
+        }),
+    }
+}
+#[derive(Debug, PartialEq, Eq)]
+enum ControlRole {
+    None,
+    Rejected,
+    Fixture(String),
+    Launcher,
+}
+fn classify_control_role(args: &[std::ffi::OsString]) -> ControlRole {
+    if args == [std::ffi::OsString::from("--paired-control-launcher")] {
+        return ControlRole::Launcher;
+    }
+    if args.len() == 2 && args[0] == "--mode" {
+        return match args[1].to_str() {
+            Some(mode @ ("read-canary" | "read-registry" | "child" | "child-token")) => {
+                ControlRole::Fixture(mode.into())
+            }
+            _ => ControlRole::Rejected,
+        };
+    }
+    if args
+        .iter()
+        .any(|s| s == "--mode" || s == "--paired-control-launcher")
+    {
+        ControlRole::Rejected
+    } else {
+        ControlRole::None
+    }
+}
+fn restrict_role_executable(path: Option<&Path>, role: ControlRole) -> ControlRole {
+    let Some(path) = path.and_then(Path::to_str) else {
+        return ControlRole::Rejected;
+    };
+    // GetModuleFileName may preserve case/verbatim spelling. No filesystem
+    // canonicalization is required inside the low-integrity AppContainer.
+    // Other spellings, including short paths, fail closed rather than falling
+    // through to the normal request dispatcher.
+    let path = path.strip_prefix(r"\\?\").unwrap_or(path);
+    let expected = match &role {
+        ControlRole::None => r"C:\AIW\Tools\aiw-guest-agent.exe",
+        ControlRole::Fixture(_) => r"C:\AIW\Control\aiw-control-fixture.exe",
+        ControlRole::Launcher => r"C:\AIW\Control\aiw-control-appcontainer.exe",
+        ControlRole::Rejected => return ControlRole::Rejected,
+    };
+    if path.eq_ignore_ascii_case(expected) {
+        role
+    } else {
+        ControlRole::Rejected
+    }
+}
+#[cfg(windows)]
+fn run_fixed_control_role(role: ControlRole) -> Result<ExitCode> {
+    match role {
+        ControlRole::Fixture(mode) => {
+            aiw_windows_platform::validate_fixed_paired_fixture_role(&mode)?;
+            Ok(aiw_control_fixture::control_main())
+        }
+        ControlRole::Launcher => {
+            let result = aiw_windows_platform::execute_fixed_paired_control_launcher()?;
+            let path = Path::new(PAIRED_LAUNCHER_OBSERVATION_PATH);
+            let bytes = serde_json::to_vec(&result)?;
+            if bytes.len() > 64 * 1024 {
+                bail!("fixed paired helper observation exceeded bound");
+            }
+            write_new_bytes(path, &bytes)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        _ => bail!("fixed role rejected"),
+    }
+}
+#[cfg(not(windows))]
+fn run_fixed_control_role(_role: ControlRole) -> Result<ExitCode> {
+    bail!("fixed paired roles require the Windows guest")
+}
+
+#[cfg(windows)]
+fn execute_paired_controls_request(
+    request: &aiw_provider_wsb::PairedControlsRequest,
+) -> Result<()> {
+    request.validate().map_err(anyhow::Error::msg)?;
+    request.profile.validate().map_err(anyhow::Error::msg)?;
+    let root = Path::new(PAIRED_OUTPUT_ROOT);
+    ensure_output_root(root)?;
+    let (payload, kind, status) = match aiw_windows_platform::execute_fixed_paired_controls(request)
+    {
+        Ok(aiw_windows_platform::PairedGuestOutcome::Completed(result)) => {
+            result.compare(request, None).map_err(anyhow::Error::msg)?;
+            (
+                serde_json::to_value(result)?,
+                "pairedControls",
+                CompletionStatus::Succeeded,
+            )
+        }
+        Ok(aiw_windows_platform::PairedGuestOutcome::DriverIncomplete {
+            progress,
+            launcher_token,
+        }) => {
+            let mut result =
+                aiw_provider_wsb::paired_controls::PairedControlDriverFailure::for_request(request)
+                    .map_err(anyhow::Error::msg)?;
+            result.progress = progress;
+            result.launcher_token = Some(launcher_token);
+            result.validate(request).map_err(anyhow::Error::msg)?;
+            (
+                serde_json::to_value(result)?,
+                "pairedControlsDriverFailure",
+                CompletionStatus::Failed,
+            )
+        }
+        Err(error) => {
+            // Logon-command stderr is not retained by every native provider.
+            // Preserve bounded private diagnostics in the existing receipt-bound
+            // artifact, never as a measurement or an allowlisted summary field.
+            eprintln!("AIW_PAIRED_DRIVER_INCOMPLETE: {error}");
+            let mut result =
+                aiw_provider_wsb::paired_controls::PairedControlDriverFailure::for_request(request)
+                    .map_err(anyhow::Error::msg)?;
+            result.diagnostic = Some(bounded_diagnostic(&error));
+            result.validate(request).map_err(anyhow::Error::msg)?;
+            (
+                serde_json::to_value(result)?,
+                "pairedControlsDriverFailure",
+                CompletionStatus::Failed,
+            )
+        }
+    };
+    publish_paired_controls(request, root, payload, kind, status)
+}
+#[cfg(not(windows))]
+fn execute_paired_controls_request(
+    _request: &aiw_provider_wsb::PairedControlsRequest,
+) -> Result<()> {
+    bail!("paired controls require the Windows guest")
+}
+
+fn publish_paired_controls(
+    request: &aiw_provider_wsb::PairedControlsRequest,
+    root: &Path,
+    payload: serde_json::Value,
+    kind: &str,
+    status: CompletionStatus,
+) -> Result<()> {
+    let mut evidence = EvidenceLog::new();
+    evidence.append(EvidenceEvent {
+        observed_utc: "guest-agent-time-not-trusted".into(),
+        kind: kind.into(),
+        source: "aiw-guest-agent".into(),
+        payload: payload.clone(),
+    })?;
+    let bytes = evidence_bytes(&evidence)?;
+    let hash = evidence.manifest()?.root_hash;
+    if status == CompletionStatus::Succeeded {
+        let result = serde_json::from_value(payload.clone())?;
+        aiw_provider_wsb::paired_controls::verify_paired_controls_evidence(
+            &bytes, &hash, request, &result,
+        )
+        .map_err(anyhow::Error::msg)?;
+    } else {
+        let result = serde_json::from_value(payload.clone())?;
+        aiw_provider_wsb::paired_controls::verify_paired_driver_failure_evidence(
+            &bytes, &hash, request, &result,
+        )
+        .map_err(anyhow::Error::msg)?;
+    }
+    write_new_json(&root.join("scenario-result.json"), &payload)?;
+    write_new_bytes(&root.join("evidence.jsonl"), &bytes)?;
+    let receipt = WindowsSandboxCompletionReceipt {
+        schema_version: WINDOWS_SANDBOX_COMPLETION_RECEIPT_SCHEMA_VERSION.into(),
+        run_id: request.run_id.clone(),
+        sandbox_id: request.sandbox_id.clone(),
+        config_sha256: request.config_sha256.clone(),
+        request_sha256: request.request_sha256.clone(),
+        agent_sha256: request.agent_sha256.clone(),
+        status,
+        exit_code: if status == CompletionStatus::Succeeded {
+            0
+        } else {
+            1
+        },
+        evidence_root_hash: hash,
+        artifacts: vec![
+            completion_artifact(
+                &root.join("scenario-result.json"),
+                "scenario-result.json",
+                ArtifactRole::ScenarioResults,
+                "application/json",
+            )?,
+            completion_artifact(
+                &root.join("evidence.jsonl"),
+                "evidence.jsonl",
+                ArtifactRole::EvidenceLog,
+                "application/x-ndjson",
+            )?,
+        ],
+    };
+    write_new_json(&root.join("completion.json"), &receipt)
+}
+
 fn run() -> Result<()> {
     let cli = Cli::parse();
     let request = read_request(&cli.request)?;
     match request {
+        GuestRequest::PairedControls(request) => execute_paired_controls_request(&request),
         GuestRequest::Golden(request) => {
             validate_request(&request)?;
             if request.request_sha256 != request_hash(&request)? {
@@ -895,6 +1118,10 @@ fn read_request(path: &Path) -> Result<GuestRequest> {
         .get("schemaVersion")
         .and_then(serde_json::Value::as_str)
     {
+        Some(aiw_provider_wsb::PAIRED_CONTROL_REQUEST_SCHEMA) => serde_json::from_value(value)
+            .map(Box::new)
+            .map(GuestRequest::PairedControls)
+            .context("parse strict paired-controls request"),
         Some(REQUEST_SCHEMA) => serde_json::from_value(value)
             .map(Box::new)
             .map(GuestRequest::Golden)
@@ -1114,6 +1341,388 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         fs::create_dir(&root).unwrap();
         root
+    }
+
+    fn paired_request() -> (
+        aiw_provider_wsb::PairedControlsRequest,
+        aiw_provider_wsb::PairedControlResult,
+    ) {
+        use aiw_probe::paired_controls::{
+            PAIRED_CONTROL_REVISION, PairedControlPolicy, paired_control_source_sha256,
+        };
+        let mut result: aiw_provider_wsb::PairedControlResult = serde_json::from_str(include_str!(
+            "../../../fixtures/paired-controls/synthetic-result.json"
+        ))
+        .unwrap();
+        let profile = aiw_probe::PairedControlProfile {
+            revision: PAIRED_CONTROL_REVISION.into(),
+            source_sha256: paired_control_source_sha256(),
+            fixture_sha256: "a".repeat(64),
+            fixture_size_bytes: 7,
+            launcher_sha256: "a".repeat(64),
+            launcher_size_bytes: 7,
+            origin: aiw_probe::ControlEvidenceOrigin::SyntheticRehearsal,
+            expected_windows: result.windows.clone(),
+            expected_host_windows: Some(result.windows.clone()),
+            policy: PairedControlPolicy::ClassicAppContainerNoCapabilitiesFixedChildOutputGrant,
+        };
+        let request = aiw_provider_wsb::PairedControlsRequest::new(
+            "synthetic-agent-rehearsal",
+            &result.sandbox_id,
+            &"b".repeat(64),
+            &"a".repeat(64),
+            profile,
+        )
+        .unwrap();
+        result.run_id = request.run_id.clone();
+        result.request_sha256 = request.request_sha256.clone();
+        result.profile_sha256 = request.profile.hash().unwrap();
+        (request, result)
+    }
+    #[test]
+    fn paired_role_arguments_and_fixed_paths_are_closed_without_native_calls() {
+        let os = |args: &[&str]| {
+            args.iter()
+                .map(std::ffi::OsString::from)
+                .collect::<Vec<_>>()
+        };
+        for mode in ["read-canary", "read-registry", "child", "child-token"] {
+            assert_eq!(
+                classify_control_role(&os(&["--mode", mode])),
+                ControlRole::Fixture(mode.into())
+            );
+        }
+        for args in [
+            vec!["--mode", "round-trip"],
+            vec!["--mode", "read-canary", "extra"],
+            vec!["--paired-control-launcher", "--request", "x"],
+            vec!["--mode"],
+        ] {
+            assert_eq!(classify_control_role(&os(&args)), ControlRole::Rejected);
+        }
+        assert_eq!(
+            classify_control_role(&os(&["--paired-control-launcher"])),
+            ControlRole::Launcher
+        );
+        assert_eq!(
+            classify_control_role(&os(&["--request", "request.json"])),
+            ControlRole::None
+        );
+        let fixture = Path::new(r"C:\AIW\Control\aiw-control-fixture.exe");
+        let launcher = Path::new(r"C:\AIW\Control\aiw-control-appcontainer.exe");
+        assert_eq!(
+            restrict_role_executable(Some(fixture), ControlRole::None),
+            ControlRole::Rejected
+        );
+        assert_eq!(
+            restrict_role_executable(Some(launcher), ControlRole::None),
+            ControlRole::Rejected
+        );
+        assert_eq!(
+            restrict_role_executable(Some(fixture), ControlRole::Launcher),
+            ControlRole::Rejected
+        );
+        assert_eq!(
+            restrict_role_executable(Some(launcher), ControlRole::Fixture("child".into())),
+            ControlRole::Rejected
+        );
+
+        assert_eq!(
+            restrict_role_executable(None, ControlRole::None),
+            ControlRole::Rejected
+        );
+        assert_eq!(
+            restrict_role_executable(
+                Some(Path::new(r"C:\AIW\Tools\aiw-guest-agent.exe")),
+                ControlRole::None
+            ),
+            ControlRole::None
+        );
+        for path in [
+            r"c:\aiw\control\aiw-control-fixture.exe",
+            r"\\?\C:\AIW\Control\aiw-control-fixture.exe",
+            r"C:\AIW\CONTRO~1\AIW-CO~1.EXE",
+        ] {
+            assert_eq!(
+                restrict_role_executable(Some(Path::new(path)), ControlRole::None),
+                ControlRole::Rejected
+            );
+        }
+        let separator = char::from(92);
+        assert_eq!(
+            PAIRED_LAUNCHER_OBSERVATION_PATH,
+            ["C:", "AIW", "Control", "paired-launcher.json"].join(&separator.to_string())
+        );
+        assert_eq!(
+            PAIRED_OUTPUT_ROOT,
+            ["C:", "AIW", "Output"].join(&separator.to_string())
+        );
+        #[cfg(windows)]
+        {
+            assert!(Path::new(PAIRED_OUTPUT_ROOT).is_absolute());
+            assert!(Path::new(PAIRED_LAUNCHER_OBSERVATION_PATH).is_absolute());
+        }
+    }
+    #[test]
+    fn paired_request_dispatch_is_typed_and_does_not_execute() {
+        let root = test_root("paired-dispatch");
+        let (request, _) = paired_request();
+        let path = root.join("request.json");
+        fs::write(&path, serde_json::to_vec(&request).unwrap()).unwrap();
+        assert!(matches!(
+            read_request(&path).unwrap(),
+            GuestRequest::PairedControls(_)
+        ));
+        let mut value = serde_json::to_value(request).unwrap();
+        value["command"] = "hostile.exe".into();
+        fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+        assert!(read_request(&path).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn paired_publication_is_deterministic_and_receipt_last_without_execution() {
+        use aiw_provider_wsb::{
+            CompletionArtifactExpectation, WindowsSandboxCompletionExpectation,
+        };
+        let (request, result) = paired_request();
+        let a = test_root("paired-publish-a");
+        let b = test_root("paired-publish-b");
+        let payload = serde_json::to_value(&result).unwrap();
+        for root in [&a, &b] {
+            publish_paired_controls(
+                &request,
+                root,
+                payload.clone(),
+                "pairedControls",
+                CompletionStatus::Succeeded,
+            )
+            .unwrap();
+        }
+        let expectation = WindowsSandboxCompletionExpectation {
+            schema_version: aiw_provider_wsb::WINDOWS_SANDBOX_COMPLETION_EXPECTATION_SCHEMA_VERSION
+                .into(),
+            run_id: request.run_id.clone(),
+            sandbox_id: request.sandbox_id.clone(),
+            config_sha256: request.config_sha256.clone(),
+            request_sha256: request.request_sha256.clone(),
+            agent_sha256: request.agent_sha256.clone(),
+            receipt_path: "completion.json".into(),
+            evidence_log_path: "evidence.jsonl".into(),
+            content_declaration: aiw_evidence::ContentDeclaration::NoKnownSecrets,
+            artifacts: [
+                (
+                    "scenario-result.json",
+                    ArtifactRole::ScenarioResults,
+                    "application/json",
+                ),
+                (
+                    "evidence.jsonl",
+                    ArtifactRole::EvidenceLog,
+                    "application/x-ndjson",
+                ),
+            ]
+            .into_iter()
+            .map(|(path, role, media_type)| CompletionArtifactExpectation {
+                path: path.into(),
+                role,
+                media_type: media_type.into(),
+                sensitivity: aiw_evidence::DataSensitivity::Internal,
+                maximum_bytes: 64 * 1024,
+            })
+            .collect(),
+        };
+        assert!(
+            aiw_provider_wsb::verify_completion_receipt(&a, &expectation)
+                .unwrap()
+                .successful
+        );
+        let receipt: WindowsSandboxCompletionReceipt =
+            serde_json::from_slice(&fs::read(a.join("completion.json")).unwrap()).unwrap();
+        aiw_provider_wsb::paired_controls::verify_paired_controls_evidence(
+            &fs::read(a.join("evidence.jsonl")).unwrap(),
+            &receipt.evidence_root_hash,
+            &request,
+            &result,
+        )
+        .unwrap();
+        let before = ["scenario-result.json", "evidence.jsonl", "completion.json"]
+            .map(|leaf| fs::read(a.join(leaf)).unwrap());
+        assert!(
+            publish_paired_controls(
+                &request,
+                &a,
+                payload,
+                "pairedControls",
+                CompletionStatus::Succeeded
+            )
+            .is_err()
+        );
+        for (leaf, expected) in ["scenario-result.json", "evidence.jsonl", "completion.json"]
+            .into_iter()
+            .zip(before)
+        {
+            assert_eq!(fs::read(a.join(leaf)).unwrap(), expected);
+            assert_eq!(fs::read(b.join(leaf)).unwrap(), expected);
+        }
+        fs::write(a.join("scenario-result.json"), b"tampered").unwrap();
+        assert!(aiw_provider_wsb::verify_completion_receipt(&a, &expectation).is_err());
+        fs::remove_dir_all(a).unwrap();
+        fs::remove_dir_all(b).unwrap();
+    }
+    #[test]
+    fn paired_partial_progress_is_ordered_bounded_and_receipt_bound() {
+        use aiw_provider_wsb::paired_controls::{
+            FixedControlCase, NormalizedCase, PairedCaseProgress, PairedControlDriverFailure,
+            PairedVariantKind,
+        };
+        let (request, result) = paired_request();
+        let prefix = PairedCaseProgress {
+            variant: PairedVariantKind::Baseline,
+            case: FixedControlCase::File,
+            process: result.baseline.file_process.clone(),
+            observation: NormalizedCase {
+                read: Some(result.baseline.file.clone()),
+                child_id: None,
+                child_token: None,
+                child_stdout_bytes: None,
+                outcome: aiw_provider_wsb::ControlAccess::Success,
+            },
+        };
+        let mut failure = PairedControlDriverFailure::for_request(&request).unwrap();
+        failure.progress.push(prefix.clone());
+        failure.launcher_token = Some(result.launcher_token.clone());
+        failure.validate(&request).unwrap();
+        let root = test_root("paired-partial");
+        publish_paired_controls(
+            &request,
+            &root,
+            serde_json::to_value(&failure).unwrap(),
+            "pairedControlsDriverFailure",
+            CompletionStatus::Failed,
+        )
+        .unwrap();
+        let recorded: PairedControlDriverFailure =
+            serde_json::from_slice(&fs::read(root.join("scenario-result.json")).unwrap()).unwrap();
+        assert_eq!(recorded.progress, vec![prefix.clone()]);
+        let mut duplicate = failure.clone();
+        duplicate.progress.push(prefix.clone());
+        assert!(duplicate.validate(&request).is_err());
+        let mut skipped = failure.clone();
+        skipped.progress[0].case = FixedControlCase::Registry;
+        assert!(skipped.validate(&request).is_err());
+        let mut excessive = failure.clone();
+        excessive.progress = vec![prefix.clone(); 7];
+        assert!(excessive.validate(&request).is_err());
+        let mut token = failure.clone();
+        token.progress[0]
+            .process
+            .held_token
+            .as_mut()
+            .unwrap()
+            .is_elevated = true;
+        assert!(token.validate(&request).is_err());
+        let mut provenance = failure.clone();
+        provenance.launcher_token.as_mut().unwrap().user_sid = "S-1-5-21-8-8-8-1001".into();
+        assert!(provenance.validate(&request).is_err());
+        let mut alias = failure.clone();
+        alias.launcher_token.as_mut().unwrap().process_id = prefix.process.process_id;
+        assert!(alias.validate(&request).is_err());
+        let mut no_self = failure.clone();
+        no_self.progress[0].process.self_token = None;
+        assert!(no_self.validate(&request).is_err());
+        let mut timed = failure.clone();
+        timed.progress[0].process.timed_out = true;
+        assert!(timed.validate(&request).is_err());
+        let mut denial = failure;
+        denial.progress[0]
+            .observation
+            .read
+            .as_mut()
+            .unwrap()
+            .outcome = aiw_provider_wsb::ControlAccess::AccessDenied;
+        assert!(denial.validate(&request).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn paired_driver_failure_is_bound_and_has_no_fabricated_observations() {
+        let (request, _) = paired_request();
+        let root = test_root("paired-driver-failure");
+        let failure =
+            aiw_provider_wsb::paired_controls::PairedControlDriverFailure::for_request(&request)
+                .unwrap();
+        publish_paired_controls(
+            &request,
+            &root,
+            serde_json::to_value(&failure).unwrap(),
+            "pairedControlsDriverFailure",
+            CompletionStatus::Failed,
+        )
+        .unwrap();
+        let receipt: WindowsSandboxCompletionReceipt =
+            serde_json::from_slice(&fs::read(root.join("completion.json")).unwrap()).unwrap();
+        assert_eq!(receipt.status, CompletionStatus::Failed);
+        assert_eq!(receipt.exit_code, 1);
+        aiw_provider_wsb::paired_controls::verify_paired_driver_failure_evidence(
+            &fs::read(root.join("evidence.jsonl")).unwrap(),
+            &receipt.evidence_root_hash,
+            &request,
+            &failure,
+        )
+        .unwrap();
+        let mut other = request.clone();
+        other.run_id.push('x');
+        other.request_sha256 = other.hash().unwrap();
+        assert!(failure.validate(&other).is_err());
+        let value = serde_json::to_value(failure).unwrap();
+        assert_eq!(value.as_object().unwrap().len(), 9);
+        assert!(value["launcherToken"].is_null());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn paired_private_diagnostic_is_bounded_and_published_under_the_failed_receipt() {
+        let (request, _) = paired_request();
+        let root = test_root("paired-private-diagnostic");
+        let mut failure =
+            aiw_provider_wsb::paired_controls::PairedControlDriverFailure::for_request(&request)
+                .unwrap();
+        failure.diagnostic = Some(bounded_diagnostic(&format!(
+            "private-path-sentinel credential-sentinel\n{}",
+            "🧪".repeat(4096)
+        )));
+        let diagnostic = failure.diagnostic.as_deref().unwrap();
+        assert_eq!(
+            diagnostic.chars().count(),
+            aiw_provider_wsb::paired_controls::MAX_PAIRED_DRIVER_DIAGNOSTIC_CHARS
+        );
+        assert!(!diagnostic.chars().any(char::is_control));
+        failure.validate(&request).unwrap();
+        publish_paired_controls(
+            &request,
+            &root,
+            serde_json::to_value(&failure).unwrap(),
+            "pairedControlsDriverFailure",
+            CompletionStatus::Failed,
+        )
+        .unwrap();
+        let receipt: WindowsSandboxCompletionReceipt =
+            serde_json::from_slice(&fs::read(root.join("completion.json")).unwrap()).unwrap();
+        assert_eq!(receipt.status, CompletionStatus::Failed);
+        assert_eq!(receipt.artifacts.len(), 2);
+        let retained =
+            serde_json::from_slice(&fs::read(root.join("scenario-result.json")).unwrap()).unwrap();
+        aiw_provider_wsb::paired_controls::verify_paired_driver_failure_evidence(
+            &fs::read(root.join("evidence.jsonl")).unwrap(),
+            &receipt.evidence_root_hash,
+            &request,
+            &retained,
+        )
+        .unwrap();
+        assert_eq!(failure, retained);
+        assert!(retained.progress.is_empty());
+        assert!(retained.launcher_token.is_none());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

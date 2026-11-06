@@ -985,6 +985,22 @@ pub struct WindowsSandboxCliProtocol {
     pub list_schema: String,
 }
 
+pub const WINDOWS_SANDBOX_STATIC_IDENTITY_SCHEMA: &str =
+    "aiw.dev/windows-sandbox-static-identity/v0alpha1";
+/// Static trusted identity only. No CLI protocol, runtime feature or session observation.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WindowsSandboxStaticIdentity {
+    pub schema_version: String,
+    pub os_version: WindowsVersionObservation,
+    pub process_architecture: String,
+    pub virtualization: ReadinessState,
+    pub provider: BinaryIdentity,
+    pub package: WindowsPackageIdentity,
+    pub catalog: CatalogTrustIdentity,
+    pub file_identity: WindowsFileIdentity,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WindowsSandboxReadiness {
@@ -1964,3 +1980,9 @@ mod tests {
         assert_eq!(result.signature_status, ReadinessState::Unknown);
     }
 }
+
+pub mod paired_controls;
+pub use paired_controls::{
+    ControlEvidenceOrigin, PAIRED_CONTROL_PLAN_SCHEMA, PAIRED_CONTROL_REVISION,
+    PairedControlProfile,
+};

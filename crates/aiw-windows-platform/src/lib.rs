@@ -3,6 +3,14 @@
 use aiw_probe::WindowsSandboxReadiness;
 
 #[cfg(windows)]
+mod virtualization;
+
+#[cfg(windows)]
+mod guest_paired_controls;
+#[cfg(windows)]
+pub use guest_paired_controls::{PairedGuestOutcome, execute_fixed_paired_controls};
+
+#[cfg(windows)]
 mod powershell;
 #[cfg(windows)]
 pub use powershell::{HeldPowerShell, observe_machine_powershell};
@@ -47,7 +55,9 @@ pub use guest_bambu::{
 
 #[cfg(windows)]
 pub use control_appcontainer::{
-    ControlAppContainerError, ControlAppContainerObservation, execute_fixed_control_appcontainer,
+    ControlAppContainerError, ControlAppContainerObservation, PairedLauncherAttempt,
+    PairedLauncherObservation, execute_fixed_control_appcontainer,
+    execute_fixed_paired_control_launcher, validate_fixed_paired_fixture_role,
 };
 
 #[cfg(windows)]
@@ -220,6 +230,11 @@ mod portable_import;
 mod source_import;
 #[cfg(windows)]
 mod source_inspection;
+
+#[cfg(windows)]
+pub fn inspect_windows_sandbox_static() -> Result<aiw_probe::WindowsSandboxStaticIdentity, String> {
+    windows_platform::inspect_windows_sandbox_static()
+}
 
 #[must_use]
 pub fn assess_windows_sandbox() -> WindowsSandboxReadiness {

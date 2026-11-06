@@ -87,6 +87,7 @@ dependencies = [
 name = "aiw-probe"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "aiw-evidence",
  "hex",
  "schemars 1.2.2",
  "serde",

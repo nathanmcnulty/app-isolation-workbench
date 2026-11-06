@@ -1,0 +1,172 @@
+{
+  "demonstration": "SYNTHETIC projection examples; never retained authority and never accepted by open_results",
+  "missingEvidence": [
+    "ordinaryBaseline",
+    "independentHostMeasurements",
+    "captureCompleteness"
+  ],
+  "entries": [
+    {
+      "id": "SYNTHETIC-msi-failed",
+      "functions": {},
+      "source": {
+        "kind": "windowsSandbox",
+        "evidence": {
+          "profile": "notepadMsi",
+          "result": {
+            "kind": "notepadMsi",
+            "report": {
+              "status": "unsuccessfulAttempt",
+              "summary": {
+                "recordedOutcome": "failed",
+                "recordedCleanupVerified": true,
+                "failureEvidence": "verified",
+                "stageProgress": [
+                  {
+                    "stage": "install",
+                    "status": "passed"
+                  },
+                  {
+                    "stage": "launch",
+                    "status": "failed"
+                  },
+                  {
+                    "stage": "openDocument",
+                    "status": "notReached"
+                  },
+                  {
+                    "stage": "editSaveDocument",
+                    "status": "notReached"
+                  },
+                  {
+                    "stage": "close",
+                    "status": "notReached"
+                  }
+                ],
+                "receiptSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+                "diagnostic": "<script>alert(\"hostile synthetic text\")</script>",
+                "applicationName": "private-account-do-not-export"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "SYNTHETIC-bambu-export",
+      "functions": {
+        "install": true,
+        "launch": true,
+        "stlTo3mfExport": true
+      },
+      "source": {
+        "kind": "windowsSandbox",
+        "evidence": {
+          "profile": "bambuExport",
+          "result": {
+            "kind": "bambuExport",
+            "report": {
+              "outcome": "insufficientEvidence",
+              "recordedCleanupVerified": true,
+              "evidenceStatus": "verified",
+              "scenario": {
+                "completedStages": [
+                  "install",
+                  "prepareFixture",
+                  "export",
+                  "collectArtifact"
+                ],
+                "failedStage": null
+              },
+              "missingEvidence": [
+                "slicing, printer and cloud workflows",
+                "filesystem and registry changes"
+              ],
+              "receiptSha256": "2222222222222222222222222222222222222222222222222222222222222222"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "SYNTHETIC-bambu-failure",
+      "functions": {},
+      "source": {
+        "kind": "windowsSandbox",
+        "evidence": {
+          "profile": "bambuExport",
+          "result": {
+            "kind": "bambuExport",
+            "report": {
+              "outcome": "failed",
+              "recordedCleanupVerified": true,
+              "evidenceStatus": "verified",
+              "scenario": {
+                "completedStages": [
+                  "install"
+                ],
+                "failedStage": "prepareFixture"
+              },
+              "missingEvidence": [
+                "slicing, printer and cloud workflows"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "SYNTHETIC-missing-failure-evidence",
+      "functions": {},
+      "source": {
+        "kind": "windowsSandbox",
+        "evidence": {
+          "profile": "notepadMsi",
+          "result": {
+            "kind": "notepadMsi",
+            "report": {
+              "status": "unsuccessfulAttempt",
+              "summary": {
+                "recordedOutcome": "failed",
+                "recordedCleanupVerified": true,
+                "failureEvidence": "absent"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "SYNTHETIC-rejected-failure-evidence",
+      "functions": {},
+      "source": {
+        "kind": "windowsSandbox",
+        "evidence": {
+          "profile": "notepadMsi",
+          "result": {
+            "kind": "notepadMsi",
+            "report": {
+              "status": "unsuccessfulAttempt",
+              "summary": {
+                "recordedOutcome": "failed",
+                "recordedCleanupVerified": true,
+                "failureEvidence": "rejected"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "SYNTHETIC-partial-vm",
+      "functions": {},
+      "source": {
+        "kind": "vmMsix",
+        "evidence": {
+          "workflowVerified": false,
+          "cleanupComplete": false
+        }
+      }
+    }
+  ]
+}

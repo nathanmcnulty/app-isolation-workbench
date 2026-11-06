@@ -111,6 +111,17 @@ struct AdminArgs {
 
 #[derive(Debug, Subcommand)]
 enum AdminCommand {
+    /// Prepare the packaged fixed paired controls for review only. Never approves or starts.
+    PreparePaired {
+        #[arg(long)]
+        evidence: PathBuf,
+        #[arg(long)]
+        identity: String,
+        /// Exact previously observed guest version (major.minor.build.revision).
+        /// Omission requires the guest to match the separately recorded host version.
+        #[arg(long, value_parser = aiw_probe::paired_controls::parse_guest_windows)]
+        guest_windows: Option<aiw_probe::WindowsVersionObservation>,
+    },
     /// Assess supported application bytes through a packaged fixed workflow.
     Assess {
         /// Select one packaged fixed application workflow.
@@ -795,6 +806,8 @@ struct ProviderArgs {
 
 #[derive(Debug, Subcommand)]
 enum ProviderCommand {
+    /// Print only the compiled fixed-control revision/policy identity. No host probe or execution.
+    PairedControlIdentity,
     /// Compile the fixed Bambu STL-to-3MF scenario for separate preparation and approval.
     CompileBambuExportScenario {
         #[arg(long)]
@@ -1342,6 +1355,22 @@ fn main() -> ExitCode {
 fn run(command: Command) -> Result<()> {
     match command {
         Command::Admin(args) => match args.command {
+            AdminCommand::PreparePaired {
+                evidence,
+                identity,
+                guest_windows,
+            } => {
+                let review = admin_workflow::paired::prepare_for_review(
+                    &evidence,
+                    &identity,
+                    guest_windows.as_ref(),
+                )
+                .map_err(admin_workflow::public_error)?;
+                write_json(&review).map_err(|error| anyhow::anyhow!(
+                    "Paired preparation exists at {}; no approval or Start was requested. Preserve paired-review.json; output failed: {error}",
+                    review["run"]["evidenceRoot"].as_str().unwrap_or("the selected evidence parent")
+                ))
+            }
             AdminCommand::ExportDocument {
                 workspace,
                 run_id,
@@ -2718,6 +2747,9 @@ fn run(command: Command) -> Result<()> {
             }
         },
         Command::Provider(args) => match args.command {
+            ProviderCommand::PairedControlIdentity => write_json(
+                &serde_json::json!({"schemaVersion":"aiw.dev/paired-control-source-identity/v0alpha1","revision":aiw_probe::PAIRED_CONTROL_REVISION,"sourceSha256":aiw_probe::paired_controls::paired_control_source_sha256(),"policy":"classicAppContainerNoCapabilitiesFixedChildOutputGrant"}),
+            ),
             ProviderCommand::CompileBambuExportScenario { project, scenario } => {
                 let loaded = read_project(&project)?;
                 let scenario = aiw_provider_wsb::compile_bambu_studio_export_scenario(
@@ -3743,6 +3775,23 @@ fn emit_error(envelope: &impl Serialize) {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn paired_source_identity_is_closed_and_accepts_no_execution_arguments() {
+        use clap::Parser;
+        assert!(super::Cli::try_parse_from(["aiw", "provider", "paired-control-identity"]).is_ok());
+        for extra in ["--root", "--execute", "--provider", "--script"] {
+            assert!(
+                super::Cli::try_parse_from([
+                    "aiw",
+                    "provider",
+                    "paired-control-identity",
+                    extra,
+                    "untrusted"
+                ])
+                .is_err()
+            );
+        }
+    }
+    #[test]
     fn document_export_keeps_json_default_and_accepts_summary() {
         let arguments = [
             "aiw",
@@ -3822,6 +3871,54 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&export).unwrap()["outputSha256"],
             export.output_sha256
+        );
+    }
+
+    #[test]
+    fn paired_preparation_command_has_no_approval_start_or_executable_inputs() {
+        let base = [
+            "aiw",
+            "admin",
+            "prepare-paired",
+            "--evidence",
+            "fresh-parent",
+            "--identity",
+            "operator",
+        ];
+        assert!(Cli::try_parse_from(base).is_ok());
+        for version in ["10.0.26100.1", "10.0.26300.9711"] {
+            let mut args = base.to_vec();
+            args.extend(["--guest-windows", version]);
+            assert!(Cli::try_parse_from(args).is_ok());
+        }
+        for version in ["10.0.1", "10.0.65536.0", "10.0.1.0;Start", "10.0.1.0\n"] {
+            let mut args = base.to_vec();
+            args.extend(["--guest-windows", version]);
+            assert!(Cli::try_parse_from(args).is_err());
+        }
+        for forbidden in [
+            "--start",
+            "--approve",
+            "--guest-agent",
+            "--project",
+            "--installer",
+            "--policy",
+            "--recover",
+        ] {
+            let mut args = base.to_vec();
+            args.push(forbidden);
+            args.push("override");
+            assert!(Cli::try_parse_from(args).is_err(), "accepted {forbidden}");
+        }
+        assert!(
+            Cli::try_parse_from([
+                "aiw",
+                "admin",
+                "prepare-paired",
+                "--evidence",
+                "fresh-parent"
+            ])
+            .is_err()
         );
     }
 

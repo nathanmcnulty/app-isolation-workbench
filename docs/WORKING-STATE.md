@@ -1,67 +1,67 @@
 # Working state
 
-Updated 2026-10-28. Owning checkout `C:\aiw\app-isolation-workbench`, branch
-`codex/new-vm-handoff-20261021`, PR103 open and unmerged. Start with
-`scripts/work-status.ps1`. This file is a pointer, not execution authority.
+Updated 2026-11-05 (America/Anchorage). Checkout `C:\aiw\app-isolation-workbench`,
+branch `codex/paired-controls`. Current Results correction source
+`53ed71f6c204c4b64a909086ce10d7dc66162702`; native fixed-control execution source
+`3d60960bb1f957c446c477978ec4a390df5565b4`. Base main `53c02c8` includes PR #103.
+Start with `scripts/work-status.ps1` and [acceptance audit](RESULTS-ACCEPTANCE-AUDIT.md).
 
-## Current milestone
+## Completed local milestone
 
-The fresh input-ACL repair and stable Core7.6+ acceptance contract are retained
-from local2449. Its source/package/bounded native receipts apply to those exact
-bytes and the prior baseline. The bounded case passed; its queued condition was
-an injected regression rather than a native scheduler observation.
+Results Explorer implements explicit bounded retained selections, existing report
+verification, comparisons/filters/failure and evidence drill-down, separate historical
+cleanup and exclusive allowlisted JSON/Markdown export outside retained locations.
+Viewing has no assessment/provider/action route. Native dialogs and keyboard/focus
+proof, safe fixtures and labeled synthetic mixed-application examples are retained.
 
-Two later full-GUI preparations stopped before approval, Start, lease acquisition
-or application dispatch. Windows Update installed signed Core7.6.9 on VM107 after
-a reviewed7.6.7 cold reset, while remoting still selected a7.6.7 plugin directory.
-The human approved a bounded endpoint/new-baseline/provider amendment. The exact
-reviewed helper now points the existing PowerShell.7.6 endpoint to its signed
-canonical installed plugin, preserving security/listener/firewall/authentication
-and update policy. Fresh unchanged production Direct/WSMan proof passes7.6.9.
-No WinRM/guest restart was needed for that proof.
+On Nov5, restored official computer control reached the user's existing Proxmox
+browser and VM107 console. Fresh identity/nonadmin session1/runtime/network/OS/provider
+and exact14 package pins passed. One fresh preparation, nine actual typed records,
+independent helper/scope review and presentation preceded one approval/Start.
+Run `paired-1793931286787802700`, canonical plan
+`bdea70e96abec6c66a0c5be8c14ff381de09a76b1df7c9f6f9bd3939a96bf02c`.
+Start PID12888/session1 exited0/123755ms. All six native observations, exact tokens,
+unchanged resource/ACL/fixture/launcher bindings, empty inner jobs/profile deletion
+and exact outer session cleanup were verified. Comparison: `fixedControlsObserved`.
+Generic core outcome remains `insufficientEvidence`; application functions and
+compatibility/isolation/production acceptance remain unmeasured.
 
-The approved aiw-msix-worker107-core76plus-clean-r2 cold snapshot and matching
-provider deployment are complete. A fresh baseline-only cold restore/Clean proof
-passed independent review on signed Core7.6.9 with the canonical endpoint.
-Preserve all old snapshots and completed leases.
+Final review fixed a display defect in source53ed: file/registry rows no longer copy
+separate child-token fields. Four focused Rust regressions, desktop all-target offline
+Clippy, format, independent review and corrected desktop/reader builds passed.
+The corrected ResultsStore binary reverified the same original VM107 run twice and
+exported new `Exports-Corrected` summaries: 29 retained files unchanged, deterministic,
+private markers absent, zero reader execution/provider calls. Initial exports and
+all packages/runs remain preserved; no assessment repeat or recovery.
 
-Local source `35fde35` and its coherent package passed qualification and independent
-package review. Fresh native GUI run `msix-1793226013277315400` used separate typed
-approval and Start, then actual console document open/edit/save/close. The retained
-report verifies the fixed signed MSIX install/launch/document/payload/configuration/
-uninstall lifecycle. All 111 exported payloads, including 44 raw originals, were
-hash-verified before the final cold restore. Production Clean confirms automatic
-sign-in disabled and trial artifacts absent; the host lease is released. The GUI
-shows Supported workflow verified. A separately reviewed, fixed read-only
-post-release observation confirms legacy PowerShell disabled and same-session
-canonical registration unchanged. Full independent evidence review passed with
-no findings, bound to source `35fde35` and its exact package.
-Broader compatibility and isolation remain unmeasured. Detailed evidence is private;
-this documentation update does not change the tested source/package identities.
+## Review artifacts and validation
 
-The original failed full trial and exceptional recovery remain completed history;
-its missing raw evidence is not repaired by later tests. Never replay completed
-runs, preparations or nonces. No public push, new CI, merge or release is authorized.
+Private audit `C:/aiw/paired-directory-sharing-native-65b084f3-5d85-4dda-83a1-12754bbda14f`:
+`consolidated-execution-scope.md`, `prepared-state.json`, `native-terminal-readback.json`,
+`native-results-export-corrected.json`, `summary-corrected.json`, `summary-corrected.md`.
+Corrected summary hashes: JSON
+`89595a81dbfc4eac7cccb5a0e42f3267ef91cec99dc3bb6aa857f6538c7c6b6e`;
+Markdown `1d480982f1154ba77b73f9bc41b8787b823eefb737b9a4458a3510fd40382729`.
+Current local desktop `gui/target/debug/aiw-desktop.exe`, source53ed, SHA256
+`14be8885cb720ca4ae6dc97e061ebf54d5579fc80123821301740d99362f42d9`.
 
-## Coordinated dependency finding
+[Acceptance audit](RESULTS-ACCEPTANCE-AUDIT.md) retains source-scoped baseline/model/
+transport/Rust/Node checks; unchanged suites were not rerun or summed. Private
+console helper review fixed bounded same-byte reads, leaf no-follow and capped
+shared-deadline drains. Six inert-file checks passed; symbolic-link fixture creation
+required unavailable privilege, so that check was not claimed. No security change.
 
-Read the coordination index at `61b0536e4090b58fe610e04dcfe3aa6b83fc5b30` and
-AIW task at `431b9ba8e60c22ecca5bed0beb341b346c80420a` in private
-`nathanmcnulty/agent-coordination`. Pinned goal SHA256 matches
-`aabdd288e968fb689dfdd351ab4ee385551fe81d16343ec6803c491e4dd673bf`.
-The same owning checkout was reconciled at92b1ab7 with the in-progress changes.
-No active Python dependency cleanup blocker was established. Keep Rust, Tauri,
-the Core7.6+ contract and fail-closed retired stubs. No dependencies were added.
-The packet adds no native authority or acceptance clearance.
+## Boundary and remaining work
 
-## Preserved boundaries
+No live build, assessment or observer remains. No further native run is needed for
+this milestone. No new application trial, PR #103 repeat, historical replay/recovery,
+installation, authentication, access/security/VM change, publication, push/PR creation,
+merge, signing or release occurred. Expired remoting was unused; existing noVNC
+clipboard transported reviewed pinned bytes without changing access.
 
-VM107 only: UUID `e5cecc90-35c2-4831-bf9c-424be23f7d4e`, MAC
-`CC:34:21:B8:5A:31`, IP192.168.1.174. Never touch VM106 or restore VM203.
-Normal HTTPS certificate `BC14DCC4E37F83161EBB55AF8624E36A79E19256` remains
-required. No TLS bypass, legacy fallback, credential/key expansion, foreign lease
-adoption, automatic dispatch retry or merge. Keep migration release draft.
-
-Never replay/recover completed historical runs `msix-1792704525359564000` or
-`msix-bounded-1792816990610240800`. Their former-runtime evidence does not prove
-migrated acceptance. See docs/MSIX-EXECUTION.md for those retained records.
+Full Benchmark 2 still needs its declared real-application candidate and broader
+measurements. Human screen-reader study/real production-data selection remain
+unperformed. W4/W5 and production acceptance stay open. Publication remains separate.
+See [native record](PAIRED-NATIVE-APPROVAL.md), [draft PR](PAIRED-DRAFT-PR.md) and
+[usage/demonstration](RESULTS-EXPLORER.md). Preserve VM106, all old retained runs,
+original packages, accidental `C:\Evidence` and unrelated work.

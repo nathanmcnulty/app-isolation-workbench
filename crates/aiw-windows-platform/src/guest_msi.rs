@@ -1636,6 +1636,15 @@ impl GuestProcess {
         arguments: &[String],
         standard_user: &StandardUserSession,
     ) -> Result<Self, GuestMsiExecutionError> {
+        Self::start_standard_user_measured(path, arguments, standard_user)
+            .map(|(process, _)| process)
+    }
+
+    pub(crate) fn start_standard_user_measured(
+        path: &str,
+        arguments: &[String],
+        standard_user: &StandardUserSession,
+    ) -> Result<(Self, TokenEvidence), GuestMsiExecutionError> {
         let executable = Path::new(path);
         let parent = executable.parent().ok_or_else(|| {
             GuestMsiExecutionError::Process("fixed executable does not have a parent".to_owned())
@@ -1691,6 +1700,15 @@ impl GuestProcess {
                 "standard-user child token validation failed: {error}; cleanup={cleanup:?}"
             )));
         }
+        let held_token = match aiw_token::collect_process_token(process.as_handle()) {
+            Ok(token) => token,
+            Err(error) => {
+                let cleanup = terminate_unassigned_process(&process);
+                return Err(GuestMsiExecutionError::Process(format!(
+                    "held standard-user token failed: {error}; cleanup={cleanup:?}"
+                )));
+            }
+        };
         let desktop_access = standard_user.impersonate(|| {
             let name = wide("Default")?;
             // Read-only access preflight: no desktop switch or ACL mutation.
@@ -1728,13 +1746,16 @@ impl GuestProcess {
                 "ResumeThread returned unexpected suspend count {previous_suspend_count}; cleanup={cleanup:?}"
             )));
         }
-        Ok(Self {
-            job,
-            process,
-            process_id: information.dwProcessId,
-            initial_thread_id: information.dwThreadId,
-            initial_thread: thread,
-        })
+        Ok((
+            Self {
+                job,
+                process,
+                process_id: information.dwProcessId,
+                initial_thread_id: information.dwThreadId,
+                initial_thread: thread,
+            },
+            held_token,
+        ))
     }
 
     pub(crate) fn start(path: &str, arguments: &[String]) -> Result<Self, GuestMsiExecutionError> {

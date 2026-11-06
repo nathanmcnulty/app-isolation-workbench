@@ -46,6 +46,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+pub use aiw_probe::PAIRED_CONTROL_PLAN_SCHEMA;
+pub const WSB_PAIRED_CONTROL_IMPORT_SCHEMA: &str = "aiw.dev/wsb-planning-import-receipt/v0alpha4";
 pub const RUN_PLAN_SCHEMA_VERSION: &str = "aiw.dev/run-plan/v0alpha3";
 pub const IMPORTED_MSI_RUN_PLAN_SCHEMA_VERSION: &str = "aiw.dev/run-plan/v0alpha4";
 pub const IMPORTED_BAMBU_RUN_PLAN_SCHEMA_VERSION: &str = "aiw.dev/run-plan/v0alpha5";
@@ -99,6 +101,14 @@ pub enum RunLifecycleKind {
     deny_unknown_fields
 )]
 pub enum PlannedAction {
+    ExecuteWindowsSandboxPairedControls {
+        sandbox_plan_sha256: String,
+        provider_sha256: String,
+        guest_agent_sha256: String,
+        workspace: Box<WorkspaceBindingEvidence>,
+        workspace_identity_sha256: String,
+        profile: Box<aiw_probe::PairedControlProfile>,
+    },
     ExecuteVmMsix {
         binding: Box<VmMsixExecutionBinding>,
     },
@@ -232,6 +242,11 @@ impl RunPlan {
         let value = Self {
             schema: if actions
                 .iter()
+                .any(|a| matches!(a, PlannedAction::ExecuteWindowsSandboxPairedControls { .. }))
+            {
+                PAIRED_CONTROL_PLAN_SCHEMA.into()
+            } else if actions
+                .iter()
                 .any(|action| matches!(action, PlannedAction::ExecuteVmMsix { .. }))
             {
                 VM_MSIX_RUN_PLAN_SCHEMA.into()
@@ -276,6 +291,7 @@ impl RunPlan {
         if !matches!(
             schema,
             Some(RUN_PLAN_SCHEMA_VERSION)
+                | Some(PAIRED_CONTROL_PLAN_SCHEMA)
                 | Some(IMPORTED_MSI_RUN_PLAN_SCHEMA_VERSION)
                 | Some(IMPORTED_BAMBU_RUN_PLAN_SCHEMA_VERSION)
                 | Some(VM_MSIX_RUN_PLAN_SCHEMA)
@@ -2117,6 +2133,36 @@ impl RunLayout {
         })
     }
 
+    /// Reads retained plan/approval/status without locks, repair or file creation.
+    /// A concurrent lifecycle change rejects the snapshot rather than mixing eras.
+    pub fn retained_snapshot(&self) -> Result<RetainedRunSnapshot, AiwError> {
+        let status = self.status()?;
+        let plan = self.read_plan_locked()?;
+        let records = self.load_records(false)?;
+        self.verify_committed(&records)?;
+        let approval = if records
+            .iter()
+            .any(|record| record.event.kind == RunEventKind::ApprovalRecorded)
+        {
+            Some(self.read_approval_locked()?)
+        } else {
+            None
+        };
+        if self.status()? != status {
+            return Err(run_error(
+                "AIW_RUN_SNAPSHOT_CONFLICT",
+                "run lifecycle changed while reading retained evidence",
+                "snapshot",
+                &self.run_id,
+            ));
+        }
+        Ok(RetainedRunSnapshot {
+            plan,
+            approval,
+            status,
+        })
+    }
+
     /// Reads a terminal run without taking a lock, repairing a journal, or
     /// creating any missing storage.  The status is observed both before and
     /// after the artifact reads so a concurrent lifecycle change is reported
@@ -3655,6 +3701,14 @@ pub enum RecoveryStatus {
     },
 }
 
+/// Read-only retained state; an unsettled lifecycle makes cleanup unknown.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RetainedRunSnapshot {
+    pub plan: RunPlan,
+    pub approval: Option<ApprovalRecord>,
+    pub status: RecoveryStatus,
+}
+
 /// The immutable lifecycle artifacts for a run whose terminal journal commit
 /// is currently visible.  This is an in-process view only; callers that need
 /// a wire representation should serialize the individual validated artifacts.
@@ -3683,7 +3737,13 @@ fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
             PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
         )
     });
-    let expected_schema = if vm_count != 0 {
+    let has_pair_action = plan
+        .actions
+        .iter()
+        .any(|a| matches!(a, PlannedAction::ExecuteWindowsSandboxPairedControls { .. }));
+    let expected_schema = if has_pair_action {
+        PAIRED_CONTROL_PLAN_SCHEMA
+    } else if vm_count != 0 {
         VM_MSIX_RUN_PLAN_SCHEMA
     } else if has_bambu_action {
         IMPORTED_BAMBU_RUN_PLAN_SCHEMA_VERSION
@@ -3736,6 +3796,37 @@ fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
             wsb_action_count += 1;
         }
         match action {
+            PlannedAction::ExecuteWindowsSandboxPairedControls {
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+                profile,
+            } => {
+                profile.validate_historical().map_err(|detail| {
+                    run_error("AIW_PAIR_BINDING_INVALID", &detail, "plan", &plan.run_id)
+                })?;
+                if profile.fixture_sha256 != *guest_agent_sha256
+                    || [
+                        sandbox_plan_sha256,
+                        provider_sha256,
+                        guest_agent_sha256,
+                        workspace_identity_sha256,
+                    ]
+                    .iter()
+                    .any(|h| !is_hash(h))
+                    || workspace.validate().is_err()
+                    || hash_value(workspace)? != *workspace_identity_sha256
+                {
+                    return Err(run_error(
+                        "AIW_PAIR_BINDING_INVALID",
+                        "Paired workspace or executable bindings rejected",
+                        "plan",
+                        &plan.run_id,
+                    ));
+                }
+            }
             PlannedAction::ExecuteVmMsix { binding } => {
                 binding.validate().map_err(|detail| {
                     run_error("AIW_MSIX_BINDING_INVALID", &detail, "plan", &plan.run_id)
@@ -3887,6 +3978,7 @@ fn is_wsb_action(action: &PlannedAction) -> bool {
     matches!(
         action,
         PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. }
+            | PlannedAction::ExecuteWindowsSandboxPairedControls { .. }
             | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
             | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { .. }
     )
@@ -3925,6 +4017,7 @@ fn wsb_workspace(plan: &RunPlan) -> Result<&WorkspaceBindingEvidence, AiwError> 
     })?;
     match action {
         PlannedAction::ExecuteWindowsSandboxGoldenProbe { workspace, .. }
+        | PlannedAction::ExecuteWindowsSandboxPairedControls { workspace, .. }
         | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { workspace, .. }
         | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { workspace, .. } => {
             Ok(workspace.as_ref())
@@ -3995,6 +4088,21 @@ fn validate_wsb_import(receipt: &WsbPlanningImportReceipt, plan: &RunPlan) -> Re
             workspace,
             workspace_identity_sha256,
         ),
+        PlannedAction::ExecuteWindowsSandboxPairedControls {
+            sandbox_plan_sha256,
+            provider_sha256,
+            guest_agent_sha256,
+            workspace,
+            workspace_identity_sha256,
+            ..
+        } => (
+            WSB_PAIRED_CONTROL_IMPORT_SCHEMA,
+            sandbox_plan_sha256,
+            provider_sha256,
+            guest_agent_sha256,
+            workspace,
+            workspace_identity_sha256,
+        ),
         _ => unreachable!("wsb_action only returns WSB profile actions"),
     };
     if receipt.schema_version != receipt_schema
@@ -4053,6 +4161,7 @@ fn action_allowed(lifecycle: RunLifecycleKind, action: &PlannedAction) -> bool {
                 | PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. }
                 | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
                 | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { .. }
+                | PlannedAction::ExecuteWindowsSandboxPairedControls { .. }
                 | PlannedAction::CollectEvidence
                 | PlannedAction::ExecuteVmMsix { .. }
         ),
@@ -4066,7 +4175,9 @@ fn action_allowed(lifecycle: RunLifecycleKind, action: &PlannedAction) -> bool {
         ),
         RunLifecycleKind::Authoring => !matches!(
             action,
-            PlannedAction::LaunchValidatedProfile { .. } | PlannedAction::ExecuteVmMsix { .. }
+            PlannedAction::LaunchValidatedProfile { .. }
+                | PlannedAction::ExecuteVmMsix { .. }
+                | PlannedAction::ExecuteWindowsSandboxPairedControls { .. }
         ),
     }
 }
@@ -6224,6 +6335,68 @@ mod tests {
                 ..
             }
         ));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn retained_snapshot_requires_committed_approval_and_never_repairs_intents() {
+        let root = root();
+        let missing = layout(&root, "missing");
+        assert!(missing.retained_snapshot().is_err());
+        assert!(!root.join("runs").exists());
+        let pending = layout(&root, "run-one");
+        let pending_plan = plan("run-one");
+        pending.create(&pending_plan).unwrap();
+        let approval = ApprovalRecord::for_plan(&pending_plan, "admin", "now").unwrap();
+        {
+            let _lock = pending.acquire_lock("test").unwrap();
+            let hash = hash_value(&approval).unwrap();
+            pending
+                .append_record(
+                    artifact_event(RunEventKind::ApprovalIntent, "now", "intent", &hash).unwrap(),
+                )
+                .unwrap();
+            fs::write(
+                pending.approval_path(),
+                serde_json::to_vec(&approval).unwrap(),
+            )
+            .unwrap();
+        }
+        let before = tree_snapshot(&root, &root);
+        let snapshot = pending.retained_snapshot().unwrap();
+        assert!(snapshot.approval.is_none());
+        assert!(matches!(
+            snapshot.status,
+            RecoveryStatus::RecoveryRequired {
+                pending_event: RunEventKind::ApprovalIntent,
+                ..
+            }
+        ));
+        assert_eq!(tree_snapshot(&root, &root), before);
+        let approved = layout(&root, "run-two");
+        let approved_plan = plan("run-two");
+        approved.create(&approved_plan).unwrap();
+        approve(&approved, &approved_plan);
+        {
+            let _lock = approved.acquire_lock("test").unwrap();
+            let hash = hash_value(&success("run-two")).unwrap();
+            approved
+                .append_record(
+                    artifact_event(RunEventKind::TerminalIntent, "now", "intent", &hash).unwrap(),
+                )
+                .unwrap();
+        }
+        let before = tree_snapshot(&root, &root);
+        let snapshot = approved.retained_snapshot().unwrap();
+        assert!(snapshot.approval.is_some());
+        assert!(matches!(
+            snapshot.status,
+            RecoveryStatus::RecoveryRequired {
+                pending_event: RunEventKind::TerminalIntent,
+                ..
+            }
+        ));
+        assert_eq!(tree_snapshot(&root, &root), before);
         fs::remove_dir_all(root).unwrap();
     }
 

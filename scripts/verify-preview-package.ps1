@@ -157,6 +157,10 @@ if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
     throw 'Selected product manifest is missing'
 }
 $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+if (@($manifest.PSObject.Properties.Name) -ccontains 'guestAgentControlSourceSha256' -and
+    [string]$manifest.guestAgentControlSourceSha256 -cnotmatch '^[0-9a-f]{64}$') {
+    throw 'Optional guest control-source enrollment identity is invalid'
+}
 if ($manifest.schemaVersion -ne 'aiw.dev/admin-product-assets/v0alpha1' -or
     $manifest.productId -cne $receipt.productId -or
     $manifest.scenarioId -cne $scenarioId -or

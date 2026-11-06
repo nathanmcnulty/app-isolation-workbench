@@ -2,6 +2,8 @@ fn main() {
     #[cfg(windows)]
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
+            "open_results",
+            "export_results",
             "get_state",
             "choose_input",
             "analyze_package",
@@ -10,6 +12,8 @@ fn main() {
             "submit_approval",
             "start_approved_workflow",
             "cancel_pending",
+            "cancel_paired_workflow",
+            "recover_paired_workflow",
             "export_document",
             "load_retained_report",
             "recover_msix_worker",

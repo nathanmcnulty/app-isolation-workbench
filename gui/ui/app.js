@@ -3,7 +3,7 @@
 
   const $ = (id) => document.getElementById(id);
   const invoke = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
-  const state = { current: null, polling: false, timer: null, startedAt: null, reviewChallenge: null, busy: false, localError: null, analysis: null, analyzedPath: null, packageResult: null };
+  const state = { current: null, polling: false, pollPromise: null, epoch: 0, timer: null, startedAt: null, reviewChallenge: null, busy: false, localError: null, analysis: null, analyzedPath: null, packageResult: null };
   const clean = window.AiwDisplay.clean;
   const text = (id, value) => { $(id).textContent = clean(value); };
   const show = (id, visible) => $(id).classList.toggle("hidden", !visible);
@@ -41,11 +41,14 @@
   function renderMode() {
     const bambu = kind() === "bambu";
     const msix = kind() === "msix";
+    const paired = kind() === "paired";
+    show("installerField", !paired);
+    show("pairedGuestWindowsField", paired);
     show("documentField", kind() === "interactive");
     text("installerLabel", msix ? "Supported signed Notepad++ MSIX" : bambu ? "Supported Bambu Studio installer" : "Supported Notepad++ installer");
     text("chooseInstaller", msix ? "Choose MSIX" : bambu ? "Choose EXE" : "Choose MSI");
     $("installer").placeholder = msix ? "Choose the exact signed Notepad++ 8.9.8 MSIX" : bambu ? "Choose the exact supported EXE" : "Choose the exact supported MSI";
-    text("setupHint", msix ? "Uses enrolled VM107 with lab-network access. Creates a temporary standard session, requires console editing, then collects evidence and cold restores. Broader isolation remains unmeasured." : bambu
+    text("setupHint", paired ? "Uses only AIW's enrolled fixed control agent. No installer or application input is accepted. Review exact file/registry/child scope and separate approval/Start. No general compatibility or isolation verdict." : msix ? "Uses enrolled VM107 with lab-network access. Creates a temporary standard session, requires console editing, then collects evidence and cold restores. Broader isolation remains unmeasured." : bambu
       ? "Select the exact supported Bambu Studio EXE and identify the operator before preparing. The fixed STL input is package supplied."
       : "Select the exact supported MSI and identify the operator before preparing.");
     $("installer").value = "";
@@ -59,11 +62,11 @@
     text("errorDetail", "");
     text("errorLocation", "Check the current workflow state and retained evidence before retrying.");
     show("errorCard", true);
-    if (newlyVisible) $("errorCard").scrollIntoView({ block: "nearest" });
+    if (newlyVisible) { $("errorCard").scrollIntoView({ block: "nearest" }); $("errorCard").focus?.({ preventScroll: true }); }
   }
 
   function setBusy(busy) {
-    ["prepare", "approve", "start", "cancel", "chooseInstaller", "chooseDocument", "chooseEvidence", "chooseDestination", "chooseWorkspace", "operatorIdentity", "export", "loadRetained"].forEach((id) => { if ($(id)) $(id).disabled = busy; });
+    ["prepare", "approve", "start", "cancel", "chooseInstaller", "chooseDocument", "chooseEvidence", "chooseDestination", "chooseWorkspace", "operatorIdentity", "pairedGuestWindows", "export", "loadRetained", "recoverPaired"].forEach((id) => { if ($(id)) $(id).disabled = busy; });
     document.querySelectorAll("input[name=workflowKind]").forEach((radio) => { radio.disabled = busy; });
   }
 
@@ -71,16 +74,21 @@
     const phase = snapshot ? snapshot.phase : "idle";
     const editable = ["idle", "cancelled", "failed", "completed"].includes(phase);
     const pending = ["preparing", "review", "approved"].includes(phase);
-    const locked = busy || ["preparing", "running", "exporting", "analyzing", "packaging"].includes(phase);
-    ["chooseInstaller", "chooseDocument", "chooseEvidence", "operatorIdentity", "prepare"].forEach((id) => { $(id).disabled = locked || !editable; });
+    const locked = busy || !!snapshot?.pairedRecoveryRequired || ["preparing", "running", "exporting", "analyzing", "packaging"].includes(phase);
+    ["chooseInstaller", "chooseDocument", "chooseEvidence", "operatorIdentity", "pairedGuestWindows", "prepare"].forEach((id) => { $(id).disabled = locked || !editable; });
     $("chooseWorkspace").disabled = !!busy;
     $("loadRetained").disabled = !!busy;
     $("recoverMsix").disabled = locked || !editable || value("retainedKind") !== "msix";
     document.querySelectorAll("input[name=workflowKind]").forEach((radio) => { radio.disabled = locked || !editable; });
     $("approve").disabled = busy || phase !== "review";
     $("start").disabled = busy || phase !== "approved";
-    $("cancel").disabled = busy || !pending;
-    show("cancel", pending);
+    const liveCancel = phase === "running" && !!snapshot?.pairedCancelAvailable;
+    $("cancel").disabled = busy || (!pending && !liveCancel);
+    show("cancel", pending || liveCancel || !!snapshot?.pairedCancelRequested);
+    text("cancel", snapshot?.pairedCancelRequested ? "Cancellation requested; waiting for cleanup" : liveCancel ? "Cancel owned paired run" : "Cancel pending workflow");
+    $("recoverPaired").disabled = !!busy || phase === "running" || !snapshot?.pairedRecoveryRequired;
+    show("recoverPaired", !!snapshot?.pairedRecoveryRequired && phase !== "running");
+    show("pairedRecoveryHint", !!snapshot?.pairedRecoveryRequired && phase !== "running");
     $("export").disabled = busy || phase !== "completed" || !(snapshot && snapshot.result && snapshot.result.canExportDocument);
     $("chooseDestination").disabled = busy || phase !== "completed" || !(snapshot && snapshot.result && snapshot.result.canExportDocument);
     ["choosePackageInstaller", "choosePackageOutput", "choosePackageDocument", "packageProduct", "packageProfile", "packageIsolation"].forEach((id) => { $(id).disabled = locked || !editable; });
@@ -195,7 +203,7 @@
     show("progressCard", active || ["completed", "cancelled", "failed"].includes(snapshot.phase));
     show("progressTrack", ["preparing", "running", "exporting"].includes(snapshot.phase));
     const messages = { preparing: "Preparing or recording the reviewed plan.", review: "Review the exact plan and type the literal confirmation.", approved: "Approval recorded. Worker execution has not started; press Start when ready.", running: "Start accepted. The backend is validating and executing the workflow. Wait for the retained result and cleanup.", exporting: "Exporting the last verified document to the selected new file.", completed: "The workflow finished; inspect its retained result below.", cancelled: "The workflow was cancelled; inspect the retained state before retrying.", failed: "The workflow failed; inspect the retained diagnostic and remediation." };
-    text("progressSummary", (snapshot.phase === "running" && snapshot.progress) || messages[snapshot.phase] || "Ready.");
+    text("progressSummary", (["preparing", "running"].includes(snapshot.phase) && snapshot.progress) || messages[snapshot.phase] || "Ready.");
     const editing = snapshot.phase === "running" && snapshot.review && snapshot.review.workflowName === "Interactive Notepad++ document transfer";
     show("editingInstructions", editing);
     const running = snapshot.phase === "running";
@@ -223,17 +231,31 @@
     applyControls(snapshot, state.busy);
     if (previousPhase !== snapshot.phase && ![previousPhase, snapshot.phase].some((phase) => ["analyzing", "packaging"].includes(phase))) {
       const target = snapshot.error ? "errorCard" : snapshot.phase === "review" ? "reviewCard" : snapshot.phase === "approved" ? "startBox" : ["running", "exporting"].includes(snapshot.phase) ? "progressCard" : snapshot.result ? "resultCard" : null;
-      if (target) $(target).scrollIntoView({ block: "start" });
+      if (target) { $(target).scrollIntoView({ block: "start" }); $(target).focus?.({ preventScroll: true }); }
     }
-    if (snapshot.closeRefused && !previousCloseRefused) $("closeWarning").scrollIntoView({ block: "start" });
+    if (snapshot.closeRefused && !previousCloseRefused) { $("closeWarning").scrollIntoView({ block: "start" }); $("closeWarning").focus?.({ preventScroll: true }); }
   }
 
   async function poll() {
-    if (state.polling) return; state.polling = true;
-    try { render(await call("get_state")); } catch (error) { displayLocalError(error); } finally { state.polling = false; }
+    if (state.polling) return state.pollPromise;
+    state.polling = true;
+    const epoch = state.epoch;
+    state.pollPromise = (async () => {
+      try { const snapshot = await call("get_state"); if (epoch === state.epoch) render(snapshot); }
+      catch (error) { if (epoch === state.epoch) displayLocalError(error); }
+      finally { state.polling = false; }
+    })();
+    return state.pollPromise;
   }
 
-  async function action(name, args) { state.localError = null; state.busy = true; setBusy(true); try { await call(name, args); await poll(); } catch (error) { displayLocalError(error); } finally { state.busy = false; applyControls(state.current, false); } }
+  async function action(name, args) {
+    if (state.busy) return;
+    state.epoch += 1;
+    state.localError = null; state.busy = true; setBusy(true);
+    try { await call(name, args); if (state.polling) await state.pollPromise; await poll(); }
+    catch (error) { displayLocalError(error); }
+    finally { state.busy = false; applyControls(state.current, false); }
+  }
 
   function elapsed() { if (state.startedAt) { const seconds = Math.floor((Date.now() - state.startedAt) / 1000); text("elapsed", "Elapsed " + String(Math.floor(seconds / 60)).padStart(2, "0") + ":" + String(seconds % 60).padStart(2, "0")); } }
 
@@ -242,10 +264,11 @@
   $("chooseEvidence").addEventListener("click", () => choose("evidence", "evidence"));
   $("chooseDestination").addEventListener("click", () => choose("destination", "destination"));
   $("chooseWorkspace").addEventListener("click", () => choose("workspace", "retainedWorkspace"));
-  $("prepare").addEventListener("click", () => action("prepare_workflow", { kind: kind(), installer: value("installer"), documentInput: value("documentInput") || null, evidence: value("evidence"), operatorIdentity: value("operatorIdentity") }));
+  $("prepare").addEventListener("click", () => action("prepare_workflow", { kind: kind(), installer: kind() === "paired" ? "" : value("installer"), documentInput: kind() === "paired" ? null : value("documentInput") || null, evidence: value("evidence"), operatorIdentity: value("operatorIdentity"), pairedGuestWindows: kind() === "paired" ? value("pairedGuestWindows") || null : null }));
   $("approve").addEventListener("click", () => { const review = state.current && state.current.review; if (review) action("submit_approval", { workflowId: state.current.workflowId, challengeId: review.challengeId, confirmation: value("confirmation") }); });
   $("start").addEventListener("click", () => { const snapshot = state.current; if (snapshot) action("start_approved_workflow", { workflowId: snapshot.workflowId, challengeId: snapshot.startChallengeId }); });
-  $("cancel").addEventListener("click", () => { const snapshot = state.current; if (snapshot && ["preparing", "review", "approved"].includes(snapshot.phase)) action("cancel_pending", { workflowId: snapshot.workflowId }); });
+  $("cancel").addEventListener("click", () => { const snapshot = state.current; if (!snapshot || state.busy) return; if (["preparing", "review", "approved"].includes(snapshot.phase)) action("cancel_pending", { workflowId: snapshot.workflowId }); else if (snapshot.phase === "running" && snapshot.pairedCancelAvailable) action("cancel_paired_workflow", { workflowId: snapshot.workflowId }); });
+  $("recoverPaired").addEventListener("click", () => { const snapshot=state.current; if (snapshot?.pairedRecoveryRequired && snapshot.phase!=="running" && !state.busy) action("recover_paired_workflow", {workflowId:snapshot.workflowId}); });
   $("export").addEventListener("click", () => action("export_document", { destination: value("destination") }));
   $("recoverMsix").addEventListener("click", () => action("recover_msix_worker", { workspace: value("retainedWorkspace"), runId: value("retainedRunId") }));
   $("loadRetained").addEventListener("click", () => action("load_retained_report", { kind: value("retainedKind"), workspace: value("retainedWorkspace"), runId: value("retainedRunId") }));
@@ -271,5 +294,6 @@
   });
   ["packageProfile", "packageIsolation"].forEach((id) => $(id).addEventListener("change", () => { renderPackage(); applyControls(state.current, state.busy); }));
   document.querySelectorAll("input[name=workflowKind]").forEach((radio) => radio.addEventListener("change", renderMode));
+  renderMode();
   setInterval(poll, 1000); setInterval(elapsed, 1000); poll();
 }());

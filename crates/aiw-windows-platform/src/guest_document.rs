@@ -18,6 +18,8 @@ use std::os::windows::io::{AsRawHandle as _, FromRawHandle};
 use std::path::Path;
 
 mod acl_control;
+pub(crate) mod paired_controls;
+pub(crate) mod paired_inputs;
 pub(crate) use acl_control::FixedGuestAclControl;
 
 use aiw_provider_wsb::{DOCUMENT_EXPECTED_TEXT, DOCUMENT_INITIAL_TEXT};
