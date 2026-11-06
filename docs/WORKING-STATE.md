@@ -74,8 +74,7 @@ expired management TLS was not bypassed and no access/security settings changed.
 The successful comparison and separate native cancellation both have verified
 cleanup and need no recovery; never replay or recover them to create acceptance
 evidence. Native forced-fault recovery remains unexercised. Recovery bindings
-and automated tests do not establish that native fault case. Complete final
-review and documentation integration; the tested native package remains 593281a.
+and automated tests do not establish that native fault case. The tested native package remains 593281a.
 
 Required application-descendant evidence, registry denial for this profile,
 repeatability, network/IPC/UI and ordinary endpoint claims remain unmeasured.
