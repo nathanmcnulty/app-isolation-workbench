@@ -5,7 +5,7 @@
     fixtureUnchanged: "Fixture executable bytes unchanged", launcherUnchanged: "Launcher bytes unchanged", fileUnchanged: "Fixed file bytes unchanged", fileAclUnchanged: "Fixed file permissions unchanged", registryValueUnchanged: "Fixed registry bytes unchanged", registryAclUnchanged: "Fixed registry permissions unchanged",
     success: "Read / child completed", accessDenied: "Access denied", notFound: "Resource missing", timeout: "Timed out", failure: "Failed", baseline: "Ordinary-user baseline", candidate: "AppContainer candidate", file: "File read", registry: "Registry read (64-bit)", child: "Child process", driverIncomplete: "Driver incomplete", fixedControlsObserved: "Recorded fixed controls observed", baselineFailed: "Baseline failed", candidateFailed: "Candidate failed", cleanupUnknown: "Comparison cleanup / completion unestablished",
     insufficientEvidence: "Insufficient evidence", notReached: "Not reached", unmeasured: "Unmeasured", passed: "Passed", failed: "Failed", cancelled: "Cancelled", partial: "Partial", unavailable: "Unavailable",
-    install: "Install", launch: "Launch", openDocument: "Open document", editSaveDocument: "Edit / save document", close: "Close", uninstall: "Uninstall", stlTo3mfExport: "STL to 3MF export",
+    createArchive: "Create archive", testArchive: "Test archive", extractArchive: "Extract archive", verifyArchiveContent: "Verify archive content", install: "Install", launch: "Launch", openDocument: "Open document", editSaveDocument: "Edit / save document", close: "Close", uninstall: "Uninstall", stlTo3mfExport: "STL to 3MF export",
     beforeInstallCapture: "Capture before installation", afterInstallCapture: "Capture after installation", prepareDocument: "Prepare document", afterExerciseCapture: "Capture after use", prepareFixture: "Prepare fixture", export: "Export", collectArtifact: "Collect artifact",
     duplicateRun: "Duplicate run", evidenceRejected: "Missing or rejected evidence", projectUnreadable: "Project unavailable", projectInvalid: "Invalid project", interactiveSessionNotAssessment: "Interactive session is outside this assessment profile",
     ordinaryBaseline: "Ordinary baseline", independentHostMeasurements: "Independent host measurements", filesystemRegistryChanges: "Filesystem and registry changes", networkUiIpcObservations: "Network, UI and IPC observations", persistenceResidue: "Persistence residue", descendantCoverage: "Descendant coverage", offlineCanary: "Offline canary", effectiveBackendVerification: "Effective boundary verification", captureCompleteness: "Capture completeness", targetToken: "Target token"
@@ -15,7 +15,7 @@
       (!filters.outcome || row.outcome === filters.outcome) &&
       (!filters.comparison || (row.paired && (filters.comparison === "eligible" ? row.paired.eligible === true : filters.comparison === "inconclusive" && row.paired.eligible !== true))) &&
       ((!filters.control && !filters.controlOutcome) || row.paired?.cases?.some(item => (!filters.control || item.case === filters.control) && (!filters.controlOutcome || item.outcome === filters.controlOutcome))) &&
-      (!filters.function || (filters.status ? row.functions[filters.function] === filters.status : row.functions[filters.function] !== "unmeasured")) &&
+      (!filters.function || (filters.status ? row.functions[filters.function] === filters.status : Object.hasOwn(row.functions, filters.function) && row.functions[filters.function] !== "unmeasured")) &&
       (filters.function || !filters.status || Object.values(row.functions).includes(filters.status)));
   }
   // Each controller serializes its native dialog/read/export. Epochs also reject stale completions.
@@ -61,7 +61,7 @@
     for (const row of filtered) {
       const tr = node("tr"), first = node("td"), details = node("details"), summary = node("summary", "Selection " + row.selection + (loaded.selectionLabels ? " · " + loaded.selectionLabels[row.selection - 1] : ""));
       details.append(summary);
-      details.append(node("p", "Failure evidence: " + row.failureEvidence));
+      details.append(node("p", (row.sevenzip ? "Evidence status: " : "Failure evidence: ") + row.failureEvidence));
       if (row.unavailableReason) details.append(node("p", "Unavailable: " + label(row.unavailableReason)));
       if (row.paired) {
         const paired = row.paired, tri = value => value === true ? "yes" : value === false ? "no" : "unmeasured";
@@ -81,6 +81,15 @@
           controls.append(entry);
         }
         details.append(controls);
+      }
+      if (row.sevenzip) {
+        const comparison = row.sevenzip;
+        details.append(node("p", comparison.origin === "syntheticRehearsal" ? "SYNTHETIC example; not native acceptance." : "Recorded 7-Zip workflow; general compatibility and isolation remain unmeasured."));
+        details.append(node("p", "Comparison: " + label(comparison.reason) + "; eligible: " + String(comparison.eligible) + "; selected denial controls verified: " + String(comparison.selectedControlsVerified)));
+        const matrix = node("ul");
+        for (const row of comparison.functions || []) matrix.append(node("li", label(row.function) + ": baseline " + label(row.baseline) + "; AppContainer " + label(row.candidate)));
+        details.append(matrix);
+        details.append(node("p", "Archive bytes equal: " + String(comparison.archiveBytesEqual) + ". Extracted content verification is separate. Inner profile deletion: " + String(comparison.innerProfileDeleted)));
       }
       details.append(node("p", "Stage progress (separate from function results)"));
       const stages = node("ul");

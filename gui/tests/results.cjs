@@ -97,3 +97,13 @@ test('An unstarted native-worker profile is never labeled as native observations
   const walk=n=>[n.textContent||'',...n.children.flatMap(walk)].join(' ');const text=walk(d.get('resultsRows'));
   assert.match(text,/Native-worker profile; no verified fixed-control observations/);assert.doesNotMatch(text,/Verified native fixed-control observations/);
 });
+
+
+test('Archive filters exclude unrelated profiles and expose the 7-Zip application',()=>{
+  const rows=[{application:'Notepad++',functions:{install:'passed'}},{application:'Bambu Studio',functions:{stlTo3mfExport:'passed'}},{application:'Fixed AIW controls',functions:{}},{application:'7-Zip 26.05',functions:{createArchive:'passed',testArchive:'unmeasured'}}];
+  assert.deepEqual(api.filterRows(rows,{function:'createArchive'}),[rows[3]]);
+  assert.deepEqual(api.filterRows(rows,{function:'testArchive'}),[]);
+  assert.deepEqual(api.filterRows(rows,{function:'testArchive',status:'unmeasured'}),[rows[3]]);
+  assert.deepEqual(api.filterRows(rows,{application:'7-Zip 26.05'}),[rows[3]]);
+  assert.match(fs.readFileSync(require.resolve('../ui/index.html'),'utf8'),/<option>7-Zip 26.05<\/option>/);
+});

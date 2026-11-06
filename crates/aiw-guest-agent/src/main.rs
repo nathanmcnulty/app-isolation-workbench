@@ -31,6 +31,7 @@ const PAIRED_OUTPUT_ROOT: &str = r"C:\AIW\Output";
 const REQUEST_SCHEMA: &str = "aiw.dev/wsb-golden-probe-request/v0alpha1";
 const MAX_REQUEST_BYTES: u64 = 64 * 1024;
 const MAX_OUTPUT_ARTIFACT_BYTES: usize = 16 * 1024 * 1024;
+mod sevenzip;
 
 #[derive(Debug, Parser)]
 #[command(name = "aiw-guest-agent", about = "Emit only W1 golden token evidence")]
@@ -60,9 +61,13 @@ enum GuestRequest {
     ImportedMsi(Box<ImportedMsiGuestRequest>),
     ImportedBambu(Box<ImportedBambuGuestRequest>),
     PairedControls(Box<aiw_provider_wsb::PairedControlsRequest>),
+    SevenZip(Box<aiw_provider_wsb::sevenzip::SevenZipRequest>),
 }
 
 fn main() -> ExitCode {
+    if let Some(result) = sevenzip::fixed_role() {
+        return result;
+    }
     if let Some(result) = fixed_control_role() {
         return result;
     }
@@ -295,6 +300,7 @@ fn run() -> Result<()> {
     let cli = Cli::parse();
     let request = read_request(&cli.request)?;
     match request {
+        GuestRequest::SevenZip(request) => sevenzip::execute(&request),
         GuestRequest::PairedControls(request) => execute_paired_controls_request(&request),
         GuestRequest::Golden(request) => {
             validate_request(&request)?;
@@ -1118,6 +1124,10 @@ fn read_request(path: &Path) -> Result<GuestRequest> {
         .get("schemaVersion")
         .and_then(serde_json::Value::as_str)
     {
+        Some(aiw_provider_wsb::sevenzip::SEVENZIP_REQUEST_SCHEMA) => serde_json::from_value(value)
+            .map(Box::new)
+            .map(GuestRequest::SevenZip)
+            .context("parse strict fixed 7-Zip request"),
         Some(aiw_provider_wsb::PAIRED_CONTROL_REQUEST_SCHEMA) => serde_json::from_value(value)
             .map(Box::new)
             .map(GuestRequest::PairedControls)

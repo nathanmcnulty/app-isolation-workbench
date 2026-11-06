@@ -12,6 +12,13 @@
 #[cfg(all(windows, feature = "offline-rehearsal"))]
 pub mod offline_rehearsal;
 mod paired_report;
+mod sevenzip_report;
+mod sevenzip_report_output;
+#[cfg(test)]
+mod sevenzip_report_tests;
+#[cfg(windows)]
+pub use sevenzip_report::report_windows_sandbox_sevenzip;
+pub use sevenzip_report::{SevenZipReportEvidenceStatus, SevenZipRunReport};
 #[cfg(any(test, feature = "offline-rehearsal"))]
 mod synthetic_receipt;
 #[cfg(windows)]
@@ -99,12 +106,15 @@ pub use assessment_report::{
     export_windows_sandbox_msi_document, report_windows_sandbox_msi, report_windows_sandbox_msi_run,
 };
 pub use preparation::{
-    ProviderProtocolObservation, WsbPairedControls, build_wsb_paired_controls_preparation,
+    ProviderProtocolObservation, WsbPairedControls, WsbSevenZipAssessment, WsbSevenZipInstaller,
+    build_wsb_paired_controls_preparation, build_wsb_sevenzip_preparation,
+    build_wsb_static_sevenzip_preparation,
 };
 #[cfg(windows)]
 pub use preparation::{
-    import_windows_sandbox_paired_preparation, prepare_windows_sandbox_paired_controls,
-    verify_windows_sandbox_paired_preparation,
+    import_windows_sandbox_paired_preparation, import_windows_sandbox_sevenzip_preparation,
+    prepare_windows_sandbox_paired_controls, prepare_windows_sandbox_sevenzip_assessment,
+    verify_windows_sandbox_paired_preparation, verify_windows_sandbox_sevenzip_preparation,
 };
 mod session;
 
@@ -190,11 +200,15 @@ pub struct WsbGoldenProbeStart {
     pub bambu: Option<WsbBambuApplication>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paired_controls: Option<WsbPairedControls>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seven_zip: Option<preparation::WsbSevenZipAssessment>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WsbGoldenProbeExecution {
+    #[serde(skip)]
+    seven_zip_observation: Option<Box<aiw_provider_wsb::sevenzip::SevenZipResult>>,
     #[serde(skip)]
     paired_observation: Option<Box<aiw_provider_wsb::PairedControlResult>>,
     #[serde(skip)]
@@ -261,10 +275,19 @@ pub struct WsbImportedMsiExecution {
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum WsbApprovedExecution {
+    SevenZip(Box<WsbSevenZipExecution>),
     GoldenProbe(WsbGoldenProbeExecution),
     PairedControls(Box<WsbPairedControlExecution>),
     ImportedMsi(WsbImportedMsiExecution),
     ImportedBambu(Box<WsbBambuExecution>),
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WsbSevenZipExecution {
+    pub lifecycle: WsbGoldenProbeExecution,
+    pub observations: aiw_provider_wsb::sevenzip::SevenZipResult,
+    pub comparison: aiw_provider_wsb::sevenzip::SevenZipComparison,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -438,6 +461,12 @@ pub fn observe_wsb_session_status(layout: &RunLayout) -> Result<WsbSessionStatus
                 ..
             }
             | PlannedAction::ExecuteWindowsSandboxPairedControls {
+                provider_sha256,
+                workspace,
+                workspace_identity_sha256,
+                ..
+            }
+            | PlannedAction::ExecuteWindowsSandboxSevenZipAssessment {
                 provider_sha256,
                 workspace,
                 workspace_identity_sha256,
@@ -790,13 +819,24 @@ pub(crate) fn execute_wsb_golden_probe(
             }
         }
     }
+    #[cfg(windows)]
+    let seven_zip_output_custody = if request.seven_zip.is_some() {
+        Some(hold_complete_sevenzip_output(layout, &context.output_root)?)
+    } else {
+        None
+    };
     let verification = match bambu_verified {
         Some(verified) => Ok(verified),
         None => verify_completion_receipt(&context.output_root, &context.completion)
             .map_err(|error| RunnerError::Receipt(error.to_string())),
     };
     let verification = match verification {
-        Ok(value) if value.successful => value,
+        Ok(value)
+            if value.successful
+                || matches!(context.guest_request, ExecutionGuestRequest::SevenZip(_)) =>
+        {
+            value
+        }
         Ok(value) => {
             if let ExecutionGuestRequest::PairedControls(expected) = &context.guest_request {
                 let verified_failure = (|| {
@@ -835,6 +875,41 @@ pub(crate) fn execute_wsb_golden_probe(
         record_terminal_failure(layout, RunnerError::Cancelled)?;
         return Err(RunnerError::Cancelled);
     }
+    let seven_zip_observation =
+        if let ExecutionGuestRequest::SevenZip(expected) = &context.guest_request {
+            let verified = (|| {
+                let observed: aiw_provider_wsb::sevenzip::SevenZipResult = read_bounded_json(
+                    &context.output_root.join("scenario-result.json"),
+                    512 * 1024,
+                )?;
+                let bytes = read_bounded_bytes(
+                    &context.output_root.join("evidence.jsonl"),
+                    aiw_provider_wsb::MAX_APPLICATION_EVIDENCE_BYTES as u64,
+                )?;
+                aiw_provider_wsb::sevenzip::verify_sevenzip_evidence(
+                    &bytes,
+                    &verification.evidence_root_hash,
+                    expected,
+                    &observed,
+                )
+                .map_err(RunnerError::Receipt)?;
+                if verification.successful != observed.driver_error.is_none() {
+                    return Err(RunnerError::Receipt(
+                        "7-Zip completion status disagrees with driver facts".into(),
+                    ));
+                }
+                Ok::<_, RunnerError>(Box::new(observed))
+            })();
+            match verified {
+                Ok(value) => Some(value),
+                Err(error) => {
+                    record_terminal_failure(layout, error.clone())?;
+                    return Err(error);
+                }
+            }
+        } else {
+            None
+        };
     let paired_observation = if let ExecutionGuestRequest::PairedControls(expected) =
         &context.guest_request
     {
@@ -939,7 +1014,8 @@ pub(crate) fn execute_wsb_golden_probe(
             }
             ExecutionGuestRequest::Golden(_)
             | ExecutionGuestRequest::ImportedBambu(_)
-            | ExecutionGuestRequest::PairedControls(_) => (None, None, None, None, None, None),
+            | ExecutionGuestRequest::PairedControls(_)
+            | ExecutionGuestRequest::SevenZip(_) => (None, None, None, None, None, None),
         })
     })();
     let (
@@ -956,6 +1032,15 @@ pub(crate) fn execute_wsb_golden_probe(
             return Err(error);
         }
     };
+    #[cfg(windows)]
+    if let Some(files) = &seven_zip_output_custody {
+        finish_cleaned_attempt(layout, || {
+            for file in files {
+                file.revalidate().map_err(|_| RunnerError::Drift)?;
+            }
+            Ok(())
+        })?;
+    }
     let result = RunResult::new(
         context.plan.run_id.clone(),
         RunOutcome::InsufficientEvidence,
@@ -980,6 +1065,7 @@ pub(crate) fn execute_wsb_golden_probe(
         cleanup_complete: true,
         bambu_observation,
         paired_observation,
+        seven_zip_observation,
         scenario,
         application_token,
         behavior,
@@ -1012,7 +1098,8 @@ pub fn start_approved_windows_sandbox_golden_probe(
         WsbApprovedExecution::GoldenProbe(result) => Ok(result),
         WsbApprovedExecution::ImportedMsi(_)
         | WsbApprovedExecution::ImportedBambu(_)
-        | WsbApprovedExecution::PairedControls(_) => Err(RunnerError::ApprovalBinding),
+        | WsbApprovedExecution::PairedControls(_)
+        | WsbApprovedExecution::SevenZip(_) => Err(RunnerError::ApprovalBinding),
     }
 }
 
@@ -1108,7 +1195,8 @@ fn start_approved_windows_sandbox_inner(
     let artifacts = held.artifacts.clone();
     if (artifacts.receipt.msi.is_some()
         || artifacts.receipt.bambu.is_some()
-        || artifacts.receipt.paired_controls.is_some())
+        || artifacts.receipt.paired_controls.is_some()
+        || artifacts.receipt.seven_zip.is_some())
         && !allow_msi
     {
         return Err(RunnerError::ApprovalBinding);
@@ -1120,7 +1208,9 @@ fn start_approved_windows_sandbox_inner(
     }
 
     let request = WsbGoldenProbeStart {
-        schema_version: if artifacts.receipt.paired_controls.is_some() {
+        schema_version: if artifacts.receipt.seven_zip.is_some() {
+            "aiw.dev/wsb-sevenzip-start/v0alpha1"
+        } else if artifacts.receipt.paired_controls.is_some() {
             "aiw.dev/wsb-paired-controls-start/v0alpha1"
         } else if artifacts.receipt.msi.is_some() {
             "aiw.dev/wsb-imported-msi-start/v0alpha1"
@@ -1141,6 +1231,7 @@ fn start_approved_windows_sandbox_inner(
         msi: artifacts.receipt.msi.clone(),
         bambu: artifacts.receipt.bambu.clone(),
         paired_controls: artifacts.receipt.paired_controls.clone(),
+        seven_zip: artifacts.receipt.seven_zip.clone(),
     };
     let approval = layout.read_approval().map_err(journal_error)?;
     if !matches!(
@@ -1153,7 +1244,9 @@ fn start_approved_windows_sandbox_inner(
 
     crate::launch_profile::verify_bound_profile(&artifacts).map_err(RunnerError::Preparation)?;
 
-    if request.paired_controls.as_ref().is_some_and(|controls| {
+    if request.seven_zip.as_ref().is_some_and(|assessment| {
+        assessment.profile.origin != aiw_probe::ControlEvidenceOrigin::NativeWorker
+    }) || request.paired_controls.as_ref().is_some_and(|controls| {
         controls.profile.origin != aiw_probe::ControlEvidenceOrigin::NativeWorker
     }) {
         return Err(RunnerError::ApprovalBinding);
@@ -1187,6 +1280,30 @@ fn start_approved_windows_sandbox_inner(
         &AlreadyHeldProviderLease,
         held.workspace(),
     )?;
+    if let Some(assessment) = &request.seven_zip {
+        let observations = *result
+            .seven_zip_observation
+            .take()
+            .ok_or(RunnerError::Drift)?;
+        let expected = aiw_provider_wsb::sevenzip::SevenZipRequest::new(
+            &result.run_id,
+            &result.sandbox_id,
+            &result.config_sha256,
+            &request.guest_agent.sha256,
+            assessment.profile.clone(),
+        )
+        .map_err(RunnerError::Preparation)?;
+        let comparison = observations
+            .compare(&expected, Some(result.cleanup_complete))
+            .map_err(RunnerError::Receipt)?;
+        return Ok(WsbApprovedExecution::SevenZip(Box::new(
+            WsbSevenZipExecution {
+                lifecycle: result,
+                observations,
+                comparison,
+            },
+        )));
+    }
     if let Some(controls) = &request.paired_controls {
         let observations = *result.paired_observation.take().ok_or(RunnerError::Drift)?;
         let expected = aiw_provider_wsb::PairedControlsRequest::new(
@@ -1268,6 +1385,13 @@ pub fn recover_windows_sandbox(layout: &RunLayout) -> Result<WsbRecoveryResult, 
 
     // Synthetic rehearsals never establish authority over a real worker.
     let retained = layout.retained_snapshot().map_err(journal_error)?;
+    if retained.plan.actions.iter().any(|action| {
+        matches!(action,
+        PlannedAction::ExecuteWindowsSandboxSevenZipAssessment { profile, .. }
+        if profile.origin == aiw_probe::ControlEvidenceOrigin::SyntheticRehearsal)
+    }) {
+        return Err(RunnerError::ApprovalBinding);
+    }
     if retained.plan.actions.iter().any(|action|matches!(action,PlannedAction::ExecuteWindowsSandboxPairedControls{profile,..} if profile.origin==aiw_probe::ControlEvidenceOrigin::SyntheticRehearsal)) {
         return Err(RunnerError::ApprovalBinding);
     }
@@ -1467,6 +1591,12 @@ fn recovery_workspace(
                 ..
             }
             | PlannedAction::ExecuteWindowsSandboxPairedControls {
+                provider_sha256,
+                workspace,
+                workspace_identity_sha256,
+                ..
+            }
+            | PlannedAction::ExecuteWindowsSandboxSevenZipAssessment {
                 provider_sha256,
                 workspace,
                 workspace_identity_sha256,
@@ -1700,7 +1830,29 @@ fn prepare_execution(
     {
         return Err(RunnerError::Drift);
     }
-    let guest_request = if let Some(controls) = &request.paired_controls {
+    let guest_request = if let Some(assessment) = &request.seven_zip {
+        if require_empty_output {
+            assessment
+                .validate(&request.workspace, &request.guest_agent)
+                .map_err(|_| RunnerError::ApprovalBinding)?;
+            revalidate_identity(&assessment.installer.staged_payload)?;
+            revalidate_identity(&assessment.launcher.staged_payload)?;
+        } else {
+            assessment
+                .validate_historical(&request.workspace, &request.guest_agent)
+                .map_err(|_| RunnerError::ApprovalBinding)?;
+        }
+        ExecutionGuestRequest::SevenZip(Box::new(
+            aiw_provider_wsb::sevenzip::SevenZipRequest::from_retained_binding(
+                &plan.run_id,
+                &session_id,
+                &rendered.sha256,
+                &request.guest_agent.sha256,
+                assessment.profile.clone(),
+            )
+            .map_err(RunnerError::Preparation)?,
+        ))
+    } else if let Some(controls) = &request.paired_controls {
         if require_empty_output {
             controls
                 .validate(&request.workspace, &request.guest_agent)
@@ -1769,7 +1921,11 @@ fn prepare_execution(
         &request.guest_agent.sha256,
         guest_request.digest(),
     );
-    if request.msi.is_some() || request.bambu.is_some() || request.paired_controls.is_some() {
+    if request.msi.is_some()
+        || request.bambu.is_some()
+        || request.paired_controls.is_some()
+        || request.seven_zip.is_some()
+    {
         completion.artifacts[0].path = "scenario-result.json".to_owned();
         completion.artifacts[0].role = aiw_evidence::ArtifactRole::ScenarioResults;
         completion.artifacts[1].maximum_bytes =
@@ -1784,6 +1940,9 @@ fn prepare_execution(
     }
     if request.paired_controls.is_some() {
         completion.artifacts[0].maximum_bytes = 64 * 1024;
+    }
+    if request.seven_zip.is_some() {
+        completion.artifacts[0].maximum_bytes = 512 * 1024;
     }
     if request.bambu.is_some() {
         add_bambu_artifact_expectation(&mut completion);
@@ -2092,6 +2251,38 @@ fn record_prestart_failure(layout: &RunLayout, error: RunnerError) -> Result<(),
     record_failure_result(layout, error, false)
 }
 
+#[cfg(windows)]
+fn hold_complete_sevenzip_output(
+    layout: &RunLayout,
+    output: &Path,
+) -> Result<Vec<aiw_windows_platform::HeldApplicationFile>, RunnerError> {
+    finish_cleaned_attempt(layout, || {
+        let files = sevenzip_report_output::hold_sevenzip_output(output)?;
+        if files.len() != 3 {
+            return Err(RunnerError::Receipt(
+                "7-Zip completion artifacts are missing".into(),
+            ));
+        }
+        Ok(files)
+    })
+}
+
+// Called only after exact-session absence and provider quiescence are verified.
+// Every subsequent verification error must leave a durable terminal result.
+#[cfg(any(windows, test))]
+fn finish_cleaned_attempt<T>(
+    layout: &RunLayout,
+    finish: impl FnOnce() -> Result<T, RunnerError>,
+) -> Result<T, RunnerError> {
+    match finish() {
+        Ok(value) => Ok(value),
+        Err(error) => {
+            record_terminal_failure(layout, error.clone())?;
+            Err(error)
+        }
+    }
+}
+
 fn record_terminal_failure(layout: &RunLayout, error: RunnerError) -> Result<(), RunnerError> {
     record_failure_result(layout, error, true)
 }
@@ -2371,6 +2562,7 @@ struct GuestRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(untagged)]
 enum ExecutionGuestRequest {
+    SevenZip(Box<aiw_provider_wsb::sevenzip::SevenZipRequest>),
     Golden(Box<GuestRequest>),
     ImportedMsi(Box<aiw_provider_wsb::ImportedMsiGuestRequest>),
     ImportedBambu(Box<aiw_provider_wsb::ImportedBambuGuestRequest>),
@@ -2380,6 +2572,7 @@ enum ExecutionGuestRequest {
 impl ExecutionGuestRequest {
     fn digest(&self) -> &str {
         match self {
+            Self::SevenZip(v) => &v.request_sha256,
             Self::Golden(v) => &v.request_sha256,
             Self::ImportedMsi(v) => &v.request_sha256,
             Self::ImportedBambu(v) => &v.request_sha256,
@@ -2388,6 +2581,7 @@ impl ExecutionGuestRequest {
     }
     fn binding(&self) -> (&str, &str, &str) {
         match self {
+            Self::SevenZip(v) => (&v.run_id, &v.sandbox_id, &v.config_sha256),
             Self::Golden(v) => (&v.run_id, &v.sandbox_id, &v.config_sha256),
             Self::ImportedMsi(v) => (&v.run_id, &v.sandbox_id, &v.config_sha256),
             Self::ImportedBambu(v) => (&v.run_id, &v.sandbox_id, &v.config_sha256),
@@ -2396,6 +2590,7 @@ impl ExecutionGuestRequest {
     }
     fn validate(&self) -> Result<(), RunnerError> {
         match self {
+            Self::SevenZip(v) => v.validate().map_err(|_| RunnerError::Drift),
             Self::Golden(v) => {
                 if v.schema_version != GUEST_REQUEST_SCHEMA
                     || v.token_path != "token.json"
@@ -2470,7 +2665,8 @@ fn ensure_approval(
             PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. }
                 | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
                 | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { .. }
-                | PlannedAction::ExecuteWindowsSandboxPairedControls { .. },
+                | PlannedAction::ExecuteWindowsSandboxPairedControls { .. }
+                | PlannedAction::ExecuteWindowsSandboxSevenZipAssessment { .. },
             PlannedAction::CollectEvidence,
         ]
     ) {
@@ -2480,6 +2676,7 @@ fn ensure_approval(
         request.msi.is_some(),
         request.bambu.is_some(),
         request.paired_controls.is_some(),
+        request.seven_zip.is_some(),
     ]
     .iter()
     .filter(|v| **v)
@@ -2488,7 +2685,26 @@ fn ensure_approval(
     {
         return Err(RunnerError::ApprovalBinding);
     }
-    if let Some(controls) = &request.paired_controls {
+    if let Some(assessment) = &request.seven_zip {
+        let PlannedAction::ExecuteWindowsSandboxSevenZipAssessment {
+            profile,
+            import_receipt_sha256,
+            application_sha256,
+            ..
+        } = &plan.actions[2]
+        else {
+            return Err(RunnerError::ApprovalBinding);
+        };
+        if profile.as_ref() != &assessment.profile
+            || import_receipt_sha256 != &assessment.installer.import_receipt_sha256
+            || application_sha256 != &assessment.installer.staged_payload.sha256
+        {
+            return Err(RunnerError::ApprovalBinding);
+        }
+        assessment
+            .validate_historical(&request.workspace, &request.guest_agent)
+            .map_err(|_| RunnerError::ApprovalBinding)?;
+    } else if let Some(controls) = &request.paired_controls {
         let PlannedAction::ExecuteWindowsSandboxPairedControls { profile, .. } = &plan.actions[2]
         else {
             return Err(RunnerError::ApprovalBinding);
@@ -2567,6 +2783,14 @@ fn ensure_approval(
                 workspace_identity_sha256,
                 ..
             }
+            | PlannedAction::ExecuteWindowsSandboxSevenZipAssessment {
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+                ..
+            }
             | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario {
                 sandbox_plan_sha256,
                 provider_sha256,
@@ -2601,12 +2825,19 @@ fn validate_start(
     request: &WsbGoldenProbeStart,
     readiness: &WindowsSandboxReadiness,
 ) -> Result<(), RunnerError> {
+    if let Some(assessment) = &request.seven_zip
+        && readiness.os_version.as_ref() != Some(assessment.profile.approved_host_windows())
+    {
+        return Err(RunnerError::Drift);
+    }
     if let Some(controls) = &request.paired_controls
         && readiness.os_version.as_ref() != Some(controls.profile.approved_host_windows())
     {
         return Err(RunnerError::Drift);
     }
-    let schema = if request.paired_controls.is_some() {
+    let schema = if request.seven_zip.is_some() {
+        "aiw.dev/wsb-sevenzip-start/v0alpha1"
+    } else if request.paired_controls.is_some() {
         "aiw.dev/wsb-paired-controls-start/v0alpha1"
     } else if request.msi.is_some() {
         "aiw.dev/wsb-imported-msi-start/v0alpha1"
@@ -3297,6 +3528,62 @@ mod tests {
         evidence.validate().unwrap();
         evidence
     }
+    #[cfg(windows)]
+    #[test]
+    fn sevenzip_missing_or_unholdable_output_records_cleaned_failure() {
+        for unholdable in [false, true] {
+            let (root, layout, _, _) = setup();
+            let output = root.0.join("output");
+            if unholdable {
+                fs::create_dir(output.join("completion.json")).unwrap();
+            }
+            let error = hold_complete_sevenzip_output(&layout, &output)
+                .err()
+                .unwrap();
+            assert!(if unholdable {
+                matches!(error, RunnerError::Drift)
+            } else {
+                matches!(error, RunnerError::Receipt(_))
+            });
+            let result = layout.read_result().unwrap();
+            assert_eq!(result.outcome, RunOutcome::Failed);
+            assert!(result.cleanup_complete);
+            assert!(result.evidence_root.is_none());
+            assert!(matches!(
+                layout.status().unwrap(),
+                aiw_orchestrator::RecoveryStatus::Terminal { .. }
+            ));
+        }
+    }
+
+    #[test]
+    fn post_cleanup_errors_record_terminal_failure_without_evidence() {
+        for error in [
+            RunnerError::Drift,
+            RunnerError::Receipt("7-Zip completion artifacts are missing".into()),
+            RunnerError::Cancelled,
+        ] {
+            let (_root, layout, _, _) = setup();
+            let result = finish_cleaned_attempt(&layout, || Err::<(), _>(error.clone()));
+            assert_eq!(result.unwrap_err().to_string(), error.to_string());
+            let result = layout.read_result().unwrap();
+            assert_eq!(
+                result.outcome,
+                if matches!(error, RunnerError::Cancelled) {
+                    RunOutcome::Cancelled
+                } else {
+                    RunOutcome::Failed
+                }
+            );
+            assert!(result.cleanup_complete);
+            assert!(result.evidence_root.is_none());
+            assert!(matches!(
+                layout.status().unwrap(),
+                aiw_orchestrator::RecoveryStatus::Terminal { .. }
+            ));
+        }
+    }
+
     fn setup() -> (
         Root,
         RunLayout,
@@ -3369,6 +3656,7 @@ mod tests {
             msi: None,
             bambu: None,
             paired_controls: None,
+            seven_zip: None,
         };
         let mut plan = RunPlan::new(
             "w1-run",
@@ -4693,6 +4981,7 @@ mod tests {
             msi: None,
             bambu: None,
             paired_controls: None,
+            seven_zip: None,
         };
         let native = NativeWsbProcess {
             state: Mutex::new(NativeWsbState {

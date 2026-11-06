@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
 pub mod powershell;
+pub mod sevenzip;
+pub use sevenzip::{SevenZipPolicy, SevenZipProfile, seven_zip_source_sha256};
 
 mod msix_worker;
 pub use msix_worker::safe_run_id as valid_msix_run_id;

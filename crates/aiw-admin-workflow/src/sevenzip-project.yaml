@@ -1,0 +1,41 @@
+schemaVersion: aiw.dev/v0alpha2
+kind: AppIsolationProject
+metadata:
+  name: aiw-sevenzip-assessment
+  displayName: 7-Zip 26.05 archive assessment
+  owner: aiw
+application:
+  type: exe
+  path: tools/aiw-guest-agent.exe
+  sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  entryPoints:
+    - id: fixed-control
+      path: sevenzip_assessment.exe
+  architecture: x64
+  mayReboot: false
+isolationIntent:
+  runtimeBoundary: windowsSandbox
+  network: blocked
+  allowClipboard: false
+  allowHostFileAccess: false
+  allowHostRegistryAccess: false
+  requireDescendantCoverage: true
+executionProviders:
+  - type: windowsSandbox
+    id: windows-sandbox
+    version: planning-placeholder
+    executableSha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+candidates:
+  - id: fixed-pair-worker
+    type: isolationSession
+    config:
+      type: windowsSandbox
+      providerId: windows-sandbox
+      network: blocked
+scenarios:
+  - id: fixed-archive-pair
+    description: The typed 7-Zip action installs pinned vendor bytes and compares fixed archive functions inside the offline disposable worker.
+    required: true
+    steps:
+      - type: observeFile
+        path: SevenZip/Work/Baseline/archive.7z

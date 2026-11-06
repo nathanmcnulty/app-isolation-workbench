@@ -111,6 +111,15 @@ struct AdminArgs {
 
 #[derive(Debug, Subcommand)]
 enum AdminCommand {
+    /// Prepare the pinned 7-Zip archive comparison for review; never approve or Start.
+    PrepareSevenzip {
+        #[arg(long)]
+        evidence: PathBuf,
+        #[arg(long)]
+        identity: String,
+        #[arg(long, value_parser = aiw_probe::paired_controls::parse_guest_windows)]
+        guest_windows: aiw_probe::WindowsVersionObservation,
+    },
     /// Prepare the packaged fixed paired controls for review only. Never approves or starts.
     PreparePaired {
         #[arg(long)]
@@ -806,6 +815,8 @@ struct ProviderArgs {
 
 #[derive(Debug, Subcommand)]
 enum ProviderCommand {
+    /// Print the compiled closed 7-Zip source identity. No host probe or execution.
+    SevenzipIdentity,
     /// Print only the compiled fixed-control revision/policy identity. No host probe or execution.
     PairedControlIdentity,
     /// Compile the fixed Bambu STL-to-3MF scenario for separate preparation and approval.
@@ -1355,6 +1366,19 @@ fn main() -> ExitCode {
 fn run(command: Command) -> Result<()> {
     match command {
         Command::Admin(args) => match args.command {
+            AdminCommand::PrepareSevenzip {
+                evidence,
+                identity,
+                guest_windows,
+            } => {
+                let review = admin_workflow::sevenzip::prepare_for_review(
+                    &evidence,
+                    &identity,
+                    Some(&guest_windows),
+                )
+                .map_err(admin_workflow::public_error)?;
+                write_json(&review)
+            }
             AdminCommand::PreparePaired {
                 evidence,
                 identity,
@@ -2747,6 +2771,12 @@ fn run(command: Command) -> Result<()> {
             }
         },
         Command::Provider(args) => match args.command {
+            ProviderCommand::SevenzipIdentity => write_json(&serde_json::json!({
+                "schemaVersion":"aiw.dev/sevenzip-source-identity/v0alpha1",
+                "sourceSha256":aiw_probe::seven_zip_source_sha256(),
+                "installerSha256":aiw_probe::sevenzip::SEVENZIP_INSTALLER_SHA256,
+                "installerSizeBytes":aiw_probe::sevenzip::SEVENZIP_INSTALLER_SIZE_BYTES,
+            })),
             ProviderCommand::PairedControlIdentity => write_json(
                 &serde_json::json!({"schemaVersion":"aiw.dev/paired-control-source-identity/v0alpha1","revision":aiw_probe::PAIRED_CONTROL_REVISION,"sourceSha256":aiw_probe::paired_controls::paired_control_source_sha256(),"policy":"classicAppContainerNoCapabilitiesFixedChildOutputGrant"}),
             ),

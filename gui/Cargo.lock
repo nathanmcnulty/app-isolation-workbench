@@ -38,6 +38,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "aiw-core"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "aiw-evidence",
+ "aiw-schema",
+ "schemars 1.2.2",
+ "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "aiw-desktop"
 version = "0.1.0"
 dependencies = [
@@ -119,6 +130,7 @@ dependencies = [
 name = "aiw-runner"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "aiw-core",
  "aiw-evidence",
  "aiw-orchestrator",
  "aiw-probe",

@@ -41,14 +41,15 @@
   function renderMode() {
     const bambu = kind() === "bambu";
     const msix = kind() === "msix";
-    const paired = kind() === "paired";
+    const paired = ["paired", "sevenzip"].includes(kind());
     show("installerField", !paired);
     show("pairedGuestWindowsField", paired);
+    text("pairedGuestWindowsRequirement", kind() === "sevenzip" ? "required" : "optional");
     show("documentField", kind() === "interactive");
     text("installerLabel", msix ? "Supported signed Notepad++ MSIX" : bambu ? "Supported Bambu Studio installer" : "Supported Notepad++ installer");
     text("chooseInstaller", msix ? "Choose MSIX" : bambu ? "Choose EXE" : "Choose MSI");
     $("installer").placeholder = msix ? "Choose the exact signed Notepad++ 8.9.8 MSIX" : bambu ? "Choose the exact supported EXE" : "Choose the exact supported MSI";
-    text("setupHint", paired ? "Uses only AIW's enrolled fixed control agent. No installer or application input is accepted. Review exact file/registry/child scope and separate approval/Start. No general compatibility or isolation verdict." : msix ? "Uses enrolled VM107 with lab-network access. Creates a temporary standard session, requires console editing, then collects evidence and cold restores. Broader isolation remains unmeasured." : bambu
+    text("setupHint", kind() === "sevenzip" ? "Uses the bundled, pinned official 7-Zip 26.05 installer. Automates create/test/extract/content verification as a standard user and zero-capability AppContainer. Enter the exact guest Windows version, then review and separately approve/Start. GUI/shell and broader isolation remain unmeasured." : paired ? "Uses only AIW's enrolled fixed control agent. No installer or application input is accepted. Review exact file/registry/child scope and separate approval/Start. No general compatibility or isolation verdict." : msix ? "Uses enrolled VM107 with lab-network access. Creates a temporary standard session, requires console editing, then collects evidence and cold restores. Broader isolation remains unmeasured." : bambu
       ? "Select the exact supported Bambu Studio EXE and identify the operator before preparing. The fixed STL input is package supplied."
       : "Select the exact supported MSI and identify the operator before preparing.");
     $("installer").value = "";
@@ -85,7 +86,7 @@
     const liveCancel = phase === "running" && !!snapshot?.pairedCancelAvailable;
     $("cancel").disabled = busy || (!pending && !liveCancel);
     show("cancel", pending || liveCancel || !!snapshot?.pairedCancelRequested);
-    text("cancel", snapshot?.pairedCancelRequested ? "Cancellation requested; waiting for cleanup" : liveCancel ? "Cancel owned paired run" : "Cancel pending workflow");
+    text("cancel", snapshot?.pairedCancelRequested ? "Cancellation requested; waiting for cleanup" : liveCancel ? "Cancel owned run" : "Cancel pending workflow");
     $("recoverPaired").disabled = !!busy || phase === "running" || !snapshot?.pairedRecoveryRequired;
     show("recoverPaired", !!snapshot?.pairedRecoveryRequired && phase !== "running");
     show("pairedRecoveryHint", !!snapshot?.pairedRecoveryRequired && phase !== "running");
@@ -264,7 +265,7 @@
   $("chooseEvidence").addEventListener("click", () => choose("evidence", "evidence"));
   $("chooseDestination").addEventListener("click", () => choose("destination", "destination"));
   $("chooseWorkspace").addEventListener("click", () => choose("workspace", "retainedWorkspace"));
-  $("prepare").addEventListener("click", () => action("prepare_workflow", { kind: kind(), installer: kind() === "paired" ? "" : value("installer"), documentInput: kind() === "paired" ? null : value("documentInput") || null, evidence: value("evidence"), operatorIdentity: value("operatorIdentity"), pairedGuestWindows: kind() === "paired" ? value("pairedGuestWindows") || null : null }));
+  $("prepare").addEventListener("click", () => action("prepare_workflow", { kind: kind(), installer: ["paired", "sevenzip"].includes(kind()) ? "" : value("installer"), documentInput: ["paired", "sevenzip"].includes(kind()) ? null : value("documentInput") || null, evidence: value("evidence"), operatorIdentity: value("operatorIdentity"), pairedGuestWindows: ["paired", "sevenzip"].includes(kind()) ? value("pairedGuestWindows") || null : null }));
   $("approve").addEventListener("click", () => { const review = state.current && state.current.review; if (review) action("submit_approval", { workflowId: state.current.workflowId, challengeId: review.challengeId, confirmation: value("confirmation") }); });
   $("start").addEventListener("click", () => { const snapshot = state.current; if (snapshot) action("start_approved_workflow", { workflowId: snapshot.workflowId, challengeId: snapshot.startChallengeId }); });
   $("cancel").addEventListener("click", () => { const snapshot = state.current; if (!snapshot || state.busy) return; if (["preparing", "review", "approved"].includes(snapshot.phase)) action("cancel_pending", { workflowId: snapshot.workflowId }); else if (snapshot.phase === "running" && snapshot.pairedCancelAvailable) action("cancel_paired_workflow", { workflowId: snapshot.workflowId }); });

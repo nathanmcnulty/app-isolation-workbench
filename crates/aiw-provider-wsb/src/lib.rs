@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 
+pub mod sevenzip;
+pub use sevenzip::{SevenZipComparison, SevenZipRequest, SevenZipResult};
+
 mod application_token;
 mod bambu_artifact;
 pub use bambu_artifact::{BambuExportArtifact, verify_bambu_export};

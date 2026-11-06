@@ -88,6 +88,7 @@ fn project_row(report: &Value, row: &Value, index: usize) -> Value {
     let evidence = &source["evidence"];
     let kind = source["kind"].as_str().unwrap_or("");
     let mut paired = Value::Null;
+    let mut sevenzip = Value::Null;
     let is_paired = kind == "windowsSandbox" && evidence["profile"] == "pairedControls";
     let mut stages = vec![];
     let mut gaps = source_gaps(&report["missingEvidence"]);
@@ -161,6 +162,50 @@ fn project_row(report: &Value, row: &Value, index: usize) -> Value {
                     reason = known(&result["report"]["summary"], REASONS, "evidenceRejected");
                 }
                 ("Notepad++", "Sandbox MSI assessment", d)
+            } else if result["kind"] == "sevenZip" {
+                let d = &result["report"];
+                cleanup = json!(d["recordedCleanupVerified"].as_bool());
+                outcome = known(
+                    &d["recordedOutcome"],
+                    &["failed", "cancelled", "insufficientEvidence"],
+                    "partial",
+                );
+                evidence_status = known(
+                    &d["evidenceStatus"],
+                    &["verified", "driverIncomplete", "absent", "rejected"],
+                    "unmeasured",
+                );
+                sevenzip = project_sevenzip(d);
+                // The aggregate gap concerns broader application coverage, not
+                // the receipt-verified fixed archive baseline shown in this row.
+                let baseline_measured = matches!(evidence_status, "verified" | "driverIncomplete")
+                    && ["create", "test", "extract", "verify"]
+                        .iter()
+                        .all(|function| {
+                            d["comparison"]["functions"].as_array().is_some_and(|rows| {
+                                rows.iter().any(|row| {
+                                    row["function"] == *function
+                                        && matches!(
+                                            row["baseline"].as_str(),
+                                            Some("passed" | "failed")
+                                        )
+                                })
+                            })
+                        });
+                if baseline_measured {
+                    for gap in &mut gaps {
+                        if gap == "ordinaryBaseline" {
+                            *gap = "Ordinary baseline beyond the fixed archive workflow".into();
+                        }
+                    }
+                }
+
+                gaps.push("GUI, shell, uninstall, registry/system changes, network/IPC/UI, all descendants and endpoint equivalence unmeasured".into());
+                (
+                    "7-Zip 26.05",
+                    "Create / test / extract / verify; baseline / AppContainer",
+                    d,
+                )
             } else if result["kind"] == "pairedControls" {
                 let d = &result["report"];
                 cleanup = json!(d["recordedCleanupVerified"].as_bool());
@@ -228,6 +273,12 @@ fn project_row(report: &Value, row: &Value, index: usize) -> Value {
                         "Ordinary user / classic AppContainer",
                         &Value::Null,
                     )
+                } else if evidence["profile"] == "sevenZip" {
+                    (
+                        "7-Zip 26.05",
+                        "Create / test / extract / verify; baseline / AppContainer",
+                        &Value::Null,
+                    )
                 } else {
                     (
                         if bambu { "Bambu Studio" } else { "Notepad++" },
@@ -266,7 +317,25 @@ fn project_row(report: &Value, row: &Value, index: usize) -> Value {
     gaps.push("Effective isolation unmeasured".into());
     gaps.sort();
     gaps.dedup();
-    let functions: serde_json::Map<String, Value> = FUNCTIONS
+    let archive_functions = [
+        "createArchive",
+        "testArchive",
+        "extractArchive",
+        "verifyArchiveContent",
+    ];
+    let function_names: Vec<&str> = FUNCTIONS
+        .iter()
+        .copied()
+        .chain(
+            archive_functions
+                .into_iter()
+                .filter(|_| sevenzip.is_object()),
+        )
+        .collect();
+    if sevenzip["archiveBytesEqual"] == false {
+        gaps.push("Archive byte difference cause unmeasured".into());
+    }
+    let functions: serde_json::Map<String, Value> = function_names
         .iter()
         .map(|key| {
             (
@@ -283,7 +352,96 @@ fn project_row(report: &Value, row: &Value, index: usize) -> Value {
             )
         })
         .collect();
-    json!({"selection":index+1, "application":application, "workflow":workflow, "outcome":outcome, "unavailableReason":if outcome=="unavailable" {Some(reason)} else {None}, "functions":functions, "stages":stages, "failureEvidence":evidence_status, "historicalCleanupVerified":cleanup, "evidenceReferences":refs, "evidenceGaps":gaps,"paired":paired})
+    let mut result = json!({"selection":index+1, "application":application, "workflow":workflow, "outcome":outcome, "unavailableReason":if outcome=="unavailable" {Some(reason)} else {None}, "functions":functions, "stages":stages, "failureEvidence":evidence_status, "historicalCleanupVerified":cleanup, "evidenceReferences":refs, "evidenceGaps":gaps,"paired":paired});
+    if sevenzip.is_object() {
+        result["sevenzip"] = sevenzip;
+    }
+    result
+}
+fn project_sevenzip(detail: &Value) -> Value {
+    let comparison = &detail["comparison"];
+    let rows: Vec<_> = comparison["functions"].as_array().into_iter().flatten().take(4).map(|row|
+        json!({"function":known(&row["function"], &["create","test","extract","verify"], "unmeasured"),
+            "baseline":known(&row["baseline"], &["passed","failed","notReached","unmeasured"], "unmeasured"),
+            "candidate":known(&row["candidate"], &["passed","failed","notReached","unmeasured"], "unmeasured")})).collect();
+    let archive = |value: &Value| json!({"sha256":hash(&value["sha256"]),"sizeBytes":value["sizeBytes"].as_u64().filter(|v|*v<=32*1024*1024)});
+    let installation = &detail["observations"]["installation"];
+    json!({"origin":known(&detail["profile"]["origin"], &["nativeWorker","syntheticRehearsal"], "unmeasured"),
+        "installation":{"exitCode":installation["exitCode"].as_i64().filter(|code|(-2147483648..=2147483647).contains(code)),"timedOut":installation["timedOut"].as_bool(),"jobEmpty":installation["jobEmpty"].as_bool(),"installedFileCount":installation["filesAfter"].as_object().map(|files|files.len()).filter(|size|*size<=4096)},
+        "eligible":comparison["eligible"].as_bool(),
+        "reason":known(&comparison["reason"], &["workflowCompared","candidateFunctionFailed","baselineFailed","driverIncomplete","requiredMeasurementsMissing","boundaryControlsFailed","cleanupUnknown"], "unmeasured"),
+        "functions":rows,"selectedControlsVerified":comparison["selectedControlsVerified"].as_bool(),
+        "innerProfileDeleted":detail["observations"]["profileDeleted"].as_bool(),
+        "archiveBytesEqual":comparison["archiveBytesEqual"].as_bool(),
+        "baselineArchive":archive(&comparison["baselineArchive"]),"candidateArchive":archive(&comparison["candidateArchive"])})
+}
+
+#[cfg(test)]
+mod sevenzip_projection_tests {
+    use super::*;
+    #[test]
+    fn sevenzip_baseline_gap_is_scoped_only_when_all_fixed_functions_are_measured() {
+        let mut report = json!({"missingEvidence":["ordinaryBaseline","descendantCoverage"],"entries":[{"source":{"kind":"windowsSandbox","evidence":{"profile":"sevenZip","result":{"kind":"sevenZip","report":{"evidenceStatus":"verified","comparison":{"functions":[
+            {"function":"create","baseline":"passed"},{"function":"test","baseline":"passed"},{"function":"extract","baseline":"passed"},{"function":"verify","baseline":"passed"}
+        ]}}}}}}]});
+        let gaps = project(&report).rows[0]["evidenceGaps"].clone();
+        assert!(
+            !gaps
+                .as_array()
+                .unwrap()
+                .contains(&json!("ordinaryBaseline"))
+        );
+        assert!(gaps.as_array().unwrap().contains(&json!(
+            "Ordinary baseline beyond the fixed archive workflow"
+        )));
+        assert!(
+            gaps.as_array()
+                .unwrap()
+                .contains(&json!("descendantCoverage"))
+        );
+        report["entries"][0]["source"]["evidence"]["result"]["report"]["comparison"]["functions"]
+            [3]["baseline"] = json!("unmeasured");
+        assert!(
+            project(&report).rows[0]["evidenceGaps"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("ordinaryBaseline"))
+        );
+    }
+
+    #[test]
+    fn sevenzip_results_keep_archive_functions_and_unknowns_without_private_fields() {
+        let report = json!({"entries":[{"id":"private@example.invalid","functions":{"createArchive":true,"testArchive":false},"source":{"kind":"windowsSandbox","evidence":{"profile":"sevenZip","result":{"kind":"sevenZip","report":{
+            "evidenceStatus":"driverIncomplete","recordedOutcome":"insufficientEvidence","recordedCleanupVerified":true,
+            "profile":{"origin":"nativeWorker","expectedWindows":{"private":"secret"}},
+            "observations":{"profileDeleted":false,"driverDiagnostic":"diagnostic-private C:\\private\\agent S-1-5-21-sensitive candidate compatible","launcherToken":{"userSid":"S-1-5-21-private","processId":555}},
+            "comparison":{"eligible":false,"reason":"baselineFailed","archiveBytesEqual":false,"selectedControlsVerified":null,
+                "functions":[{"function":"create","baseline":"passed","candidate":"notReached","private":"secret"},{"function":"test","baseline":"failed","candidate":"unmeasured"}],
+                "baselineArchive":{"sha256":"a".repeat(64),"sizeBytes":578,"path":"C:\\private\\archive"},"gaps":["raw secret"]}
+        }}}}}]});
+        let summary = project(&report);
+        let row = &summary.rows[0];
+        assert_eq!(row["application"], "7-Zip 26.05");
+        assert_eq!(row["functions"]["createArchive"], "passed");
+        assert_eq!(row["functions"]["testArchive"], "failed");
+        assert_eq!(row["functions"]["extractArchive"], "unmeasured");
+        assert_eq!(row["sevenzip"]["functions"][0]["candidate"], "notReached");
+        let output = serde_json::to_string(&summary).unwrap();
+        for private in [
+            "private@example.invalid",
+            "S-1-5-21-private",
+            "555",
+            "C:\\\\private",
+            "raw secret",
+            "diagnostic-private",
+            "S-1-5-21-sensitive",
+            "candidate compatible",
+            "\"secret\"",
+        ] {
+            assert!(!output.contains(private), "leaked {private}");
+        }
+        assert!(output.contains("Archive byte difference cause unmeasured"));
+    }
 }
 fn project_paired(detail: &Value) -> Value {
     fn process(p: &Value) -> Value {
@@ -610,8 +768,34 @@ fn markdown(summary: &Summary) -> String {
             }
             text.push_str("\nOuter worker cleanup is separate. Missing evidence does not establish a denial or a stage not reached.\n\n");
         }
+        if row["sevenzip"].is_object() {
+            let comparison = &row["sevenzip"];
+            text.push_str(&format!("Archive comparison: {}. Eligible for this workflow: {}. Selected denial controls verified: {}.\n\n", comparison["reason"].as_str().unwrap_or("unmeasured"), comparison["eligible"], comparison["selectedControlsVerified"]));
+            if comparison["origin"] == "syntheticRehearsal" {
+                text.push_str("**SYNTHETIC example; not native acceptance.**\n\n");
+            }
+            text.push_str("| Archive function | Standard-user baseline | AppContainer candidate |\n|---|---|---|\n");
+            for item in comparison["functions"].as_array().into_iter().flatten() {
+                text.push_str(&format!(
+                    "| {} | {} | {} |\n",
+                    item["function"].as_str().unwrap_or("unmeasured"),
+                    item["baseline"].as_str().unwrap_or("unmeasured"),
+                    item["candidate"].as_str().unwrap_or("unmeasured")
+                ));
+            }
+            text.push_str(&format!("\nArchive bytes equal: {}. Content verification is separate. Inner profile deletion: {}.\n\n", comparison["archiveBytesEqual"], comparison["innerProfileDeleted"]));
+        }
         text.push_str("| Function | Observation |\n|---|---|\n");
-        for function in FUNCTIONS {
+        for function in FUNCTIONS.into_iter().chain(
+            [
+                "createArchive",
+                "testArchive",
+                "extractArchive",
+                "verifyArchiveContent",
+            ]
+            .into_iter()
+            .filter(|_| row["sevenzip"].is_object()),
+        ) {
             text.push_str(&format!(
                 "| {function} | {} |\n",
                 row["functions"][function].as_str().unwrap_or("unmeasured")
@@ -624,7 +808,12 @@ fn markdown(summary: &Summary) -> String {
             None => "unmeasured",
         });
         text.push_str(&format!(
-            "\n\nFailure evidence: {}\n\n### Stage progress\n\n",
+            "\n\n{}: {}\n\n### Stage progress\n\n",
+            if row["sevenzip"].is_object() {
+                "Evidence status"
+            } else {
+                "Failure evidence"
+            },
             row["failureEvidence"].as_str().unwrap_or("unmeasured")
         ));
         for stage in row["stages"].as_array().into_iter().flatten() {

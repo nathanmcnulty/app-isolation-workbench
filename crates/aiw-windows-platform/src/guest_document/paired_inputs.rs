@@ -5,6 +5,8 @@ use super::*;
 use std::io::{Seek, SeekFrom, Write};
 use windows::Win32::Storage::FileSystem::{FILE_TYPE_DISK, GetFileType};
 
+pub(crate) mod sevenzip;
+
 const MAX_BYTES: u64 = 128 * 1024 * 1024;
 // Read-only directory access, permitting other directory writers but never
 // delete/rename sharing. Role files continue to use SHARE_READ exclusively.

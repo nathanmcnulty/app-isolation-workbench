@@ -48,6 +48,8 @@ use sha2::{Digest, Sha256};
 
 pub use aiw_probe::PAIRED_CONTROL_PLAN_SCHEMA;
 pub const WSB_PAIRED_CONTROL_IMPORT_SCHEMA: &str = "aiw.dev/wsb-planning-import-receipt/v0alpha4";
+pub const SEVENZIP_RUN_PLAN_SCHEMA: &str = "aiw.dev/run-plan/v0alpha8";
+pub const WSB_SEVENZIP_IMPORT_SCHEMA: &str = "aiw.dev/wsb-planning-import-receipt/v0alpha5";
 pub const RUN_PLAN_SCHEMA_VERSION: &str = "aiw.dev/run-plan/v0alpha3";
 pub const IMPORTED_MSI_RUN_PLAN_SCHEMA_VERSION: &str = "aiw.dev/run-plan/v0alpha4";
 pub const IMPORTED_BAMBU_RUN_PLAN_SCHEMA_VERSION: &str = "aiw.dev/run-plan/v0alpha5";
@@ -101,6 +103,16 @@ pub enum RunLifecycleKind {
     deny_unknown_fields
 )]
 pub enum PlannedAction {
+    ExecuteWindowsSandboxSevenZipAssessment {
+        sandbox_plan_sha256: String,
+        provider_sha256: String,
+        guest_agent_sha256: String,
+        workspace: Box<WorkspaceBindingEvidence>,
+        workspace_identity_sha256: String,
+        import_receipt_sha256: String,
+        application_sha256: String,
+        profile: Box<aiw_probe::SevenZipProfile>,
+    },
     ExecuteWindowsSandboxPairedControls {
         sandbox_plan_sha256: String,
         provider_sha256: String,
@@ -240,7 +252,14 @@ impl RunPlan {
         trust_deltas: Vec<String>,
     ) -> Result<Self, AiwError> {
         let value = Self {
-            schema: if actions
+            schema: if actions.iter().any(|action| {
+                matches!(
+                    action,
+                    PlannedAction::ExecuteWindowsSandboxSevenZipAssessment { .. }
+                )
+            }) {
+                SEVENZIP_RUN_PLAN_SCHEMA.into()
+            } else if actions
                 .iter()
                 .any(|a| matches!(a, PlannedAction::ExecuteWindowsSandboxPairedControls { .. }))
             {
@@ -291,6 +310,7 @@ impl RunPlan {
         if !matches!(
             schema,
             Some(RUN_PLAN_SCHEMA_VERSION)
+                | Some(SEVENZIP_RUN_PLAN_SCHEMA)
                 | Some(PAIRED_CONTROL_PLAN_SCHEMA)
                 | Some(IMPORTED_MSI_RUN_PLAN_SCHEMA_VERSION)
                 | Some(IMPORTED_BAMBU_RUN_PLAN_SCHEMA_VERSION)
@@ -3741,7 +3761,15 @@ fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
         .actions
         .iter()
         .any(|a| matches!(a, PlannedAction::ExecuteWindowsSandboxPairedControls { .. }));
-    let expected_schema = if has_pair_action {
+    let has_sevenzip_action = plan.actions.iter().any(|action| {
+        matches!(
+            action,
+            PlannedAction::ExecuteWindowsSandboxSevenZipAssessment { .. }
+        )
+    });
+    let expected_schema = if has_sevenzip_action {
+        SEVENZIP_RUN_PLAN_SCHEMA
+    } else if has_pair_action {
         PAIRED_CONTROL_PLAN_SCHEMA
     } else if vm_count != 0 {
         VM_MSIX_RUN_PLAN_SCHEMA
@@ -3796,6 +3824,47 @@ fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
             wsb_action_count += 1;
         }
         match action {
+            PlannedAction::ExecuteWindowsSandboxSevenZipAssessment {
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+                import_receipt_sha256,
+                application_sha256,
+                profile,
+            } => {
+                profile.validate_historical().map_err(|detail| {
+                    run_error(
+                        "AIW_SEVENZIP_BINDING_INVALID",
+                        &detail,
+                        "plan",
+                        &plan.run_id,
+                    )
+                })?;
+                if profile.agent_sha256 != *guest_agent_sha256
+                    || profile.installer_sha256 != *application_sha256
+                    || [
+                        sandbox_plan_sha256,
+                        provider_sha256,
+                        guest_agent_sha256,
+                        workspace_identity_sha256,
+                        import_receipt_sha256,
+                        application_sha256,
+                    ]
+                    .iter()
+                    .any(|hash| !is_hash(hash))
+                    || workspace.validate().is_err()
+                    || hash_value(workspace)? != *workspace_identity_sha256
+                {
+                    return Err(run_error(
+                        "AIW_SEVENZIP_BINDING_INVALID",
+                        "7-Zip workspace, import or executable binding rejected",
+                        "plan",
+                        &plan.run_id,
+                    ));
+                }
+            }
             PlannedAction::ExecuteWindowsSandboxPairedControls {
                 sandbox_plan_sha256,
                 provider_sha256,
@@ -3978,6 +4047,7 @@ fn is_wsb_action(action: &PlannedAction) -> bool {
     matches!(
         action,
         PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. }
+            | PlannedAction::ExecuteWindowsSandboxSevenZipAssessment { .. }
             | PlannedAction::ExecuteWindowsSandboxPairedControls { .. }
             | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
             | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { .. }
@@ -4017,6 +4087,7 @@ fn wsb_workspace(plan: &RunPlan) -> Result<&WorkspaceBindingEvidence, AiwError> 
     })?;
     match action {
         PlannedAction::ExecuteWindowsSandboxGoldenProbe { workspace, .. }
+        | PlannedAction::ExecuteWindowsSandboxSevenZipAssessment { workspace, .. }
         | PlannedAction::ExecuteWindowsSandboxPairedControls { workspace, .. }
         | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { workspace, .. }
         | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { workspace, .. } => {
@@ -4082,6 +4153,21 @@ fn validate_wsb_import(receipt: &WsbPlanningImportReceipt, plan: &RunPlan) -> Re
             ..
         } => (
             WSB_BAMBU_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION,
+            sandbox_plan_sha256,
+            provider_sha256,
+            guest_agent_sha256,
+            workspace,
+            workspace_identity_sha256,
+        ),
+        PlannedAction::ExecuteWindowsSandboxSevenZipAssessment {
+            sandbox_plan_sha256,
+            provider_sha256,
+            guest_agent_sha256,
+            workspace,
+            workspace_identity_sha256,
+            ..
+        } => (
+            WSB_SEVENZIP_IMPORT_SCHEMA,
             sandbox_plan_sha256,
             provider_sha256,
             guest_agent_sha256,
@@ -4162,6 +4248,7 @@ fn action_allowed(lifecycle: RunLifecycleKind, action: &PlannedAction) -> bool {
                 | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
                 | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { .. }
                 | PlannedAction::ExecuteWindowsSandboxPairedControls { .. }
+                | PlannedAction::ExecuteWindowsSandboxSevenZipAssessment { .. }
                 | PlannedAction::CollectEvidence
                 | PlannedAction::ExecuteVmMsix { .. }
         ),
@@ -4178,6 +4265,7 @@ fn action_allowed(lifecycle: RunLifecycleKind, action: &PlannedAction) -> bool {
             PlannedAction::LaunchValidatedProfile { .. }
                 | PlannedAction::ExecuteVmMsix { .. }
                 | PlannedAction::ExecuteWindowsSandboxPairedControls { .. }
+                | PlannedAction::ExecuteWindowsSandboxSevenZipAssessment { .. }
         ),
     }
 }
@@ -5806,6 +5894,71 @@ mod tests {
             vec!["starts one exact Windows Sandbox session".into()],
         )
         .unwrap()
+    }
+
+    #[test]
+    fn sevenzip_approval_binds_profile_intake_and_exclusive_assessment_schema() {
+        let workspace = wsb_workspace("sevenzip-contract");
+        let profile = aiw_probe::SevenZipProfile {
+            revision: aiw_probe::sevenzip::SEVENZIP_PROFILE_REVISION.into(),
+            source_sha256: aiw_probe::seven_zip_source_sha256(),
+            installer_sha256: aiw_probe::sevenzip::SEVENZIP_INSTALLER_SHA256.into(),
+            installer_size_bytes: aiw_probe::sevenzip::SEVENZIP_INSTALLER_SIZE_BYTES,
+            agent_sha256: "c".repeat(64),
+            agent_size_bytes: 100,
+            launcher_sha256: "c".repeat(64),
+            launcher_size_bytes: 100,
+            origin: aiw_probe::ControlEvidenceOrigin::SyntheticRehearsal,
+            expected_windows: aiw_probe::paired_controls::parse_guest_windows("10.0.26100.1")
+                .unwrap(),
+            expected_host_windows: aiw_probe::paired_controls::parse_guest_windows("10.0.26300.1")
+                .unwrap(),
+            policy:
+                aiw_probe::SevenZipPolicy::ClassicAppContainerNoCapabilitiesReadInputWriteOutput,
+        };
+        let action = PlannedAction::ExecuteWindowsSandboxSevenZipAssessment {
+            sandbox_plan_sha256: "a".repeat(64),
+            provider_sha256: "b".repeat(64),
+            guest_agent_sha256: "c".repeat(64),
+            workspace_identity_sha256: hash_value(&workspace).unwrap(),
+            workspace: Box::new(workspace),
+            import_receipt_sha256: "d".repeat(64),
+            application_sha256: profile.installer_sha256.clone(),
+            profile: Box::new(profile),
+        };
+        let plan = RunPlan::new(
+            "sevenzip-contract",
+            "project.one",
+            "f".repeat(64),
+            RunLifecycleKind::Assessment,
+            "now",
+            vec![action],
+            vec!["Install pinned application inside disposable Sandbox".into()],
+        )
+        .unwrap();
+        assert_eq!(plan.schema, SEVENZIP_RUN_PLAN_SCHEMA);
+        let approval = ApprovalRecord::for_plan(&plan, "operator", "now").unwrap();
+        for field in [
+            "importReceiptSha256",
+            "applicationSha256",
+            "guestAgentSha256",
+            "workspaceIdentitySha256",
+        ] {
+            let mut value = serde_json::to_value(&plan).unwrap();
+            value["actions"][0][field] = serde_json::json!("e".repeat(64));
+            if let Ok(changed) = serde_json::from_value::<RunPlan>(value) {
+                assert!(validate_approval(&approval, &changed).is_err());
+            }
+        }
+        let mut invalid = plan.clone();
+        invalid.schema = RUN_PLAN_SCHEMA_VERSION.into();
+        assert!(validate_plan(&invalid).is_err());
+        invalid = plan.clone();
+        invalid.lifecycle = RunLifecycleKind::Launch;
+        assert!(validate_plan(&invalid).is_err());
+        invalid = plan.clone();
+        invalid.actions.push(wsb_plan("other").actions.remove(0));
+        assert!(validate_plan(&invalid).is_err());
     }
 
     #[test]

@@ -13,6 +13,7 @@ default = []
 offline-rehearsal = []
 
 [dependencies]
+aiw-core.workspace = true
 aiw-evidence.workspace = true
 aiw-orchestrator.workspace = true
 aiw-probe.workspace = true

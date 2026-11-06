@@ -1,67 +1,91 @@
 # Working state
 
-Updated 2026-11-05 (America/Anchorage). Checkout `C:\aiw\app-isolation-workbench`,
-branch `codex/paired-controls`. Current Results correction source
-`53ed71f6c204c4b64a909086ce10d7dc66162702`; native fixed-control execution source
-`3d60960bb1f957c446c477978ec4a390df5565b4`. Base main `53c02c8` includes PR #103.
-Start with `scripts/work-status.ps1` and [acceptance audit](RESULTS-ACCEPTANCE-AUDIT.md).
+Updated 2026-11-06 (America/Anchorage). Checkout C:\aiw\app-isolation-workbench,
+branch codex/real-app-assessment; implementation head 5c12df0 followed by documentation. Exact native product
+executables are source 593281a64dda9b233a25e3f3262d7e1751c01a6b.
+Start with scripts/work-status.ps1 and the [administrator workflow](SEVENZIP-ASSESSMENT.md#administrator-workflow-for-the-tested-package).
 
-## Completed local milestone
+## Demonstrated fixed application flow
 
-Results Explorer implements explicit bounded retained selections, existing report
-verification, comparisons/filters/failure and evidence drill-down, separate historical
-cleanup and exclusive allowlisted JSON/Markdown export outside retained locations.
-Viewing has no assessment/provider/action route. Native dialogs and keyboard/focus
-proof, safe fixtures and labeled synthetic mixed-application examples are retained.
+The 593281a desktop package completed run sevenzip-1793956275430444300 on
+VM107 after independently reviewed exact-plan approval and a separate Start.
+Inside a fresh offline Sandbox, 7-Zip 26.05 installed and all four archive
+functions passed in both ordinary-user and zero-capability classic AppContainer
+modes. Held target tokens, selected file denials, unchanged code, profile/job
+cleanup and exact outer cleanup passed. Host/guest builds were x64
+10.0.26300.9711 / 10.0.26100.9711. Both archives are 579 bytes with different
+hashes; their byte-difference cause remains unmeasured.
 
-On Nov5, restored official computer control reached the user's existing Proxmox
-browser and VM107 console. Fresh identity/nonadmin session1/runtime/network/OS/provider
-and exact14 package pins passed. One fresh preparation, nine actual typed records,
-independent helper/scope review and presentation preceded one approval/Start.
-Run `paired-1793931286787802700`, canonical plan
-`bdea70e96abec6c66a0c5be8c14ff381de09a76b1df7c9f6f9bd3939a96bf02c`.
-Start PID12888/session1 exited0/123755ms. All six native observations, exact tokens,
-unchanged resource/ACL/fixture/launcher bindings, empty inner jobs/profile deletion
-and exact outer session cleanup were verified. Comparison: `fixedControlsObserved`.
-Generic core outcome remains `insufficientEvidence`; application functions and
-compatibility/isolation/production acceptance remain unmeasured.
+The receipt-bound comparison is workflowCompared; generic kernel outcome stays
+insufficientEvidence for broader isolation. Independent offline review passed
+482 assertions across exact approval/plan/request/profile/configuration, completion
+artifacts, evidence, journal and session-cleanup bindings. See the
+[native acceptance record](SEVENZIP-NATIVE-ACCEPTANCE.md#production-desktop-comparison-at-593281a).
 
-Final review fixed a display defect in source53ed: file/registry rows no longer copy
-separate child-token fields. Four focused Rust regressions, desktop all-target offline
-Clippy, format, independent review and corrected desktop/reader builds passed.
-The corrected ResultsStore binary reverified the same original VM107 run twice and
-exported new `Exports-Corrected` summaries: 29 retained files unchanged, deterministic,
-private markers absent, zero reader execution/provider calls. Initial exports and
-all packages/runs remain preserved; no assessment repeat or recovery.
+Actual Results opened the original selection twice and exported byte-identical
+JSON plus Markdown, with privacy checks passed. All 32 files, 43 entries and
+12,283,755 bytes remained unchanged, including provider diagnostics. The reader
+made no execution/provider call. Original native export hashes remain source-scoped;
+later Evidence status/required guest-version label corrections are presentation
+changes and were not in that tested package.
 
-## Review artifacts and validation
+A separate approved run sevenzip-1793960096774082900 exercised native Cancel
+after the owned boot window appeared. Independent offline audit passed 304
+checks: exact approved plan/request/profile/import bindings, cancellation journal,
+four session snapshots, one owned start/stop and two post-stop empty lists.
+Kernel outcome is cancelled, evidence root absent and cleanup complete. No
+application observations or incompatibility claim are added. See the
+[cancellation record](SEVENZIP-NATIVE-ACCEPTANCE.md#native-owned-cancellation-at-593281a).
 
-Private audit `C:/aiw/paired-directory-sharing-native-65b084f3-5d85-4dda-83a1-12754bbda14f`:
-`consolidated-execution-scope.md`, `prepared-state.json`, `native-terminal-readback.json`,
-`native-results-export-corrected.json`, `summary-corrected.json`, `summary-corrected.md`.
-Corrected summary hashes: JSON
-`89595a81dbfc4eac7cccb5a0e42f3267ef91cec99dc3bb6aa857f6538c7c6b6e`;
-Markdown `1d480982f1154ba77b73f9bc41b8787b823eefb737b9a4458a3510fd40382729`.
-Current local desktop `gui/target/debug/aiw-desktop.exe`, source53ed, SHA256
-`14be8885cb720ca4ae6dc97e061ebf54d5579fc80123821301740d99362f42d9`.
+Review corrections: missing/unholdable 7-Zip completion artifacts and held-file
+revalidation failures now record a terminal failed result after verified cleanup.
+Results includes 7-Zip in the application filter, excludes profiles without the
+selected archive function, and scopes the broader baseline gap when all four
+fixed baseline functions were measured. These are source corrections; they add
+no native application measurements. Focused regression tests cover these paths.
 
-[Acceptance audit](RESULTS-ACCEPTANCE-AUDIT.md) retains source-scoped baseline/model/
-transport/Rust/Node checks; unchanged suites were not rerun or summed. Private
-console helper review fixed bounded same-byte reads, leaf no-follow and capped
-shared-deadline drains. Six inert-file checks passed; symbolic-link fixture creation
-required unavailable privilege, so that check was not claimed. No security change.
+## Source, evidence and review
 
-## Boundary and remaining work
+[PR #106](https://github.com/nathanmcnulty/app-isolation-workbench/pull/106)
+contains the application slice. All three hosted CI jobs passed at
+5c12df0dae756a427170e71b79220dd80fe7b491
+([run 42200833485](https://github.com/nathanmcnulty/app-isolation-workbench/actions/runs/42200833485)).
+The presentation correction passed 13 existing Rust Results tests, 17 Node UI
+tests, Clippy and governance checks. It adds no native application measurements.
+Source checks/review and static x64 release builds passed for their recorded
+revisions; hosted CI is separate from native acceptance and is not release signing.
 
-No live build, assessment or observer remains. No further native run is needed for
-this milestone. No new application trial, PR #103 repeat, historical replay/recovery,
-installation, authentication, access/security/VM change, publication, push/PR creation,
-merge, signing or release occurred. Expired remoting was unused; existing noVNC
-clipboard transported reviewed pinned bytes without changing access.
+Private audit: C:/aiw/sevenzip-assessment-20261105. Start with
+production-593281a-pins.json, production-independent-audit-593281a.json,
+production-export-verification-593281a.json and
+vm107-production-results-integrity-593281a.json; raw before/after inventories
+and verified-exports-593281a remain beside them. Cancellation records include
+vm107-cancellation-after-593281a.json and
+cancellation-independent-audit-593281a.json. The private copied records
+cannot replace original protected workspace identities or be imported as a new run.
 
-Full Benchmark 2 still needs its declared real-application candidate and broader
-measurements. Human screen-reader study/real production-data selection remain
-unperformed. W4/W5 and production acceptance stay open. Publication remains separate.
-See [native record](PAIRED-NATIVE-APPROVAL.md), [draft PR](PAIRED-DRAFT-PR.md) and
-[usage/demonstration](RESULTS-EXPLORER.md). Preserve VM106, all old retained runs,
-original packages, accidental `C:\Evidence` and unrelated work.
+Preserve the earlier 614bb0e run sevenzip-1793950517554284900: it retained
+DriverIncomplete, unmeasured application facts and verified outer cleanup. Its
+cause remains unknown; later success does not prove the old cause. Its retained
+JSON export preserved all 26 files. Preserve the separate b7f17cf research pair,
+its package and audit; it was not converted into production evidence or repeated.
+
+PR #105 is merged and its six-control/29-file corrected Results evidence is
+reused without execution. See [that native record](PAIRED-NATIVE-APPROVAL.md) and
+[Results audit](RESULTS-ACCEPTANCE-AUDIT.md). Preserve VM106, every old package/run,
+accidental C:\Evidence and unrelated work. Existing console access is used;
+expired management TLS was not bypassed and no access/security settings changed.
+
+## Remaining work
+
+The successful comparison and separate native cancellation both have verified
+cleanup and need no recovery; never replay or recover them to create acceptance
+evidence. Native forced-fault recovery remains unexercised. Recovery bindings
+and automated tests do not establish that native fault case. The tested native package remains 593281a.
+
+Required application-descendant evidence, registry denial for this profile,
+repeatability, network/IPC/UI and ordinary endpoint claims remain unmeasured.
+MXC's four-family [selection review](MXC-ASSESSMENT-SELECTION.md) and MSIX remain
+complementary; the old MXC adapter is still planning-only. Broad Benchmark 2,
+W4/W5 and production acceptance remain open; the [criteria mapping](SEVENZIP-ASSESSMENT.md#coverage-limits-and-acceptance)
+separates this working application slice from those broader gates.
