@@ -252,7 +252,7 @@ pub fn run_fixed_probe() -> Result<()> {
 }
 
 fn setup_arguments(arguments: &[std::ffi::OsString]) -> bool {
-    arguments == ["--output", r"C:\AIW\MxcProbeOutput\result.json"]
+    arguments == ["--output", crate::research_publication::CAPABILITY_RESULT]
 }
 
 fn collect_probe(token: &aiw_token::TokenEvidence) -> Result<serde_json::Value> {
@@ -379,7 +379,10 @@ fn setup_probe() -> Result<()> {
         "driverError":error.to_string().chars().take(2048).collect::<String>(),
         "requestedApplicationExecution":false,"enforcement":"unmeasured"})
     });
-    write_new_json(r"C:\AIW\MxcProbeOutput\result.json", &report)
+    crate::research_publication::publish_mapped_json(
+        crate::research_publication::MappedPublication::Capability,
+        &report,
+    )
 }
 
 fn require_guest_windows(windows: &aiw_probe::WindowsVersionObservation) -> Result<()> {
@@ -491,7 +494,7 @@ mod tests {
         assert!(unsafe { read_string(bytes.as_ptr().cast(), 2) }.is_err());
     }
     #[test]
-    fn setup_role_accepts_only_the_existing_renderer_fixed_output_spelling() {
+    fn setup_role_accepts_only_the_uppercase_fixed_publication_output() {
         let args = |items: &[&str]| {
             items
                 .iter()
@@ -500,11 +503,12 @@ mod tests {
         };
         assert!(setup_arguments(&args(&[
             "--output",
-            r"C:\AIW\MxcProbeOutput\result.json"
+            r"C:\AIW\MxcProbeOutput\RESULT.DAT"
         ])));
         for items in [
             &["--setup"][..],
             &["--output", r"C:\private\result.json"],
+            &["--output", r"C:\AIW\MxcProbeOutput\result.json"],
             &["--output", r"C:\AIW\MxcProbeOutput\result.json", "--probe"],
         ] {
             assert!(!setup_arguments(&args(items)));

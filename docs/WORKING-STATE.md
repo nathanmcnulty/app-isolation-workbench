@@ -35,6 +35,12 @@ active; neither implementation nor native acceptance is complete.
   embedded source/environment identities to Prepare/Approve/Start. It preserves
   failed child/partial collection/cleanup facts and publishes guest markers
   atomically without overwrite. Read and exact recovery cannot replay Start.
+- A default-off first-party publication control now tests the unchanged strict
+  reader against `RESULT.TMP` to `RESULT.DAT`, the old long-name alias, occupied
+  destination identity/bytes and incomplete output. Source framing includes the
+  exact-entry validator and token/schema/entry code. Independent review fixes
+  remove sharing-denial and dangling-entry confounders; observations must match
+  across cleanup and retained reads. Native validation is the next gate.
 - Creation-time debugger-chain and owned registry-canary foundations are
   test-compiled only, with no production role wiring or native acceptance.
   Registry deletion uses the exact retained key handle; debugger gaps require
@@ -48,6 +54,9 @@ passed. Consequential independent review fixes include output-prefix preservatio
 normalized Unicode names, System32-only dependency search, actual loaded-module
 identity, atomic final markers and full emitted-shape parsing. Native tests are
 pending for the application path. Logs are `C:/aiw/multimode-*.log`, outside Git.
+Publication checks: 2 guest, 9 host (including the 5 prior capability host tests),
+7 MXC regressions and focused all-target Clippy passed. New logs are
+`C:/aiw/publication-*.log`. No publication control has run in a Sandbox yet.
 Raw FILETIME identifiers require lossless/Rust auditing; do not round them through
 JavaScript numbers. Registry-link/create-only native semantics remain open before
 production wiring, and explicit cleanup cannot trigger a hidden Drop retry.

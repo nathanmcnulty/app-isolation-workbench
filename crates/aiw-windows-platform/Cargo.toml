@@ -22,6 +22,14 @@ name = "mxc_probe_sandbox_trial"
 required-features = ["research-mxc-process"]
 
 [[example]]
+name = "publication_control_guest"
+required-features = ["research-mxc-process"]
+
+[[example]]
+name = "publication_control_sandbox_trial"
+required-features = ["research-mxc-process"]
+
+[[example]]
 name = "sevenzip_assessment"
 required-features = ["research-sevenzip"]
 

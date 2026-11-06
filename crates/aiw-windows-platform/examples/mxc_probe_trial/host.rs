@@ -23,6 +23,14 @@ const EXPECTED_HOST: &str = "10.0.26300.9711/x86_64";
 const EXPECTED_GUEST: &str = "10.0.26100.9711/x86_64";
 const OUTPUT_BOUND: u64 = 1024 * 1024;
 
+#[path = "publication.rs"]
+mod publication;
+
+#[allow(dead_code)]
+pub fn run_publication() -> Result<()> {
+    publication::run()
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Proposal {
@@ -84,7 +92,12 @@ fn aiw_source_hash() -> String {
         include_str!("host.rs"),
         include_str!("../mxc_probe_sandbox_trial.rs"),
         include_str!("../mxc_process_probe.rs"),
+        include_str!("../../src/lib.rs"),
         include_str!("../../src/mxc_process.rs"),
+        include_str!("../../src/research_publication.rs"),
+        include_str!("publication.rs"),
+        include_str!("../publication_control_guest.rs"),
+        include_str!("../publication_control_sandbox_trial.rs"),
         include_str!("../../src/guest_document/paired_inputs/mxc_probe.rs"),
         include_str!("../../src/guest_document/paired_inputs.rs"),
         include_str!("../../src/guest_document.rs"),
@@ -93,6 +106,9 @@ fn aiw_source_hash() -> String {
         include_str!("../../src/source_inspection.rs"),
         include_str!("../../src/windows_platform.rs"),
         include_str!("../../src/workspace.rs"),
+        include_str!("../../src/exact_dispose.rs"),
+        include_str!("../../../aiw-token/src/lib.rs"),
+        include_str!("../../../aiw-probe/src/lib.rs"),
         include_str!("../../src/coordination.rs"),
         include_str!("../../src/powershell.rs"),
         include_str!("../../../aiw-provider-mxc/src/process_container.rs"),
@@ -279,7 +295,7 @@ fn validate_probe_collection(value: &serde_json::Value, marker: &GuestSuccess) -
     Ok(())
 }
 fn completed_marker(workspace: &HeldRunWorkspace, proposal: &Proposal) -> Result<String> {
-    let bound = workspace.reopen_output_file_readonly("result.json")?;
+    let bound = workspace.reopen_output_file_readonly("RESULT.DAT")?;
     let file = HeldApplicationFile::open_bounded(bound.final_path(), OUTPUT_BOUND)?;
     let bytes = file.read_bounded(OUTPUT_BOUND)?;
     let hash = marker_digest(&bytes, &proposal.helper_sha256, proposal.helper_size_bytes)?;
@@ -489,7 +505,7 @@ fn plan(workspace: &HeldRunWorkspace) -> WindowsSandboxPlan {
         probe: GoldenProbe {
             executable: r"C:\AIW\Tools\mxc_process_probe.exe".into(),
             request: None,
-            output: r"C:\AIW\MxcProbeOutput\result.json".into(),
+            output: r"C:\AIW\MxcProbeOutput\RESULT.DAT".into(),
         },
         memory_mb: Some(2048),
     }
