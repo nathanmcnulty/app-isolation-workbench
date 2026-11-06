@@ -1,7 +1,8 @@
 # Working state
 
 Updated 2026-11-05 (America/Anchorage). Checkout `C:\aiw\app-isolation-workbench`,
-branch `codex/real-app-assessment`; production integration source `614bb0e`.
+branch `codex/real-app-assessment`; current source `593281a` follows production
+integration `614bb0e`.
 Started from current main `8aeeafc` including merged PR #105. Working branch has not
 been pushed or published. Start with `scripts/work-status.ps1`.
 
@@ -76,8 +77,8 @@ sanitized Results projection and desktop approval/Start/cancel/recovery entry.
 Checks pass: eight profile/provider tests, nine guest/platform driver tests, ten
 approval/preparation/service/retained-reader tests, two desktop controller/projection
 tests, focused root and desktop all-target Clippy, format/governance, and seven
-inert package-verifier controls. Initial static release builds pass; the final
-package rebuild and production native proof are still in progress. Research ZIPs
+inert package-verifier controls. Static release builds and the follow-up package
+verification pass; production native proof remains pending. Research ZIPs
 cannot enter verified production Results.
 
 The exact nine-file `614bb0e` product package was staged and verified on VM107.
@@ -92,10 +93,19 @@ Follow-up source adds bounded private receipt-bound diagnostics and same-fixed-p
 Windows spelling handling. Focused tests and independent consequential review pass;
 static rebuild passes; fresh native validation is in progress. The old failure's
 cause is unknown. Worker console access recovered after a temporary browser
-disconnection; no security settings changed. Retained GUI and evidence remain on
-VM107.
+disconnection; no security settings changed. The completed desktop was closed;
+its retained package and evidence remain on VM107.
 
-Next: finish diagnostic package/checks, regain console access, preserve/reopen/export
-the failed attempt, then validate a fresh separately approved production plan.
-The requested full application flow,
-Benchmark2, W4/W5 and production acceptance remain **open**.
+The incomplete run was reopened in actual Results and exported as sanitized JSON
+with all 26 retained files unchanged; the [native record](SEVENZIP-NATIVE-ACCEPTANCE.md)
+retains its size/hash and scope. No reader execution/provider call occurred.
+
+The rebuilt `593281a` package is verified. Transfer to VM107 is in progress with
+41 of 42 parts acknowledged at this update. The receiver deadline expired while
+the final clipboard value was not delivered; all originals were preserved and
+verified by a bounded data-only resume helper. A smaller-fragment final-part
+resume is being prepared. No new application trial has run.
+Next: complete and verify that transfer, then validate a fresh separately approved
+production plan. Preserve the original failure and approval without another Start.
+The requested full application flow, Benchmark 2, W4/W5 and production acceptance
+remain **open**; see the [criteria mapping](SEVENZIP-ASSESSMENT.md#coverage-limits-and-acceptance).

@@ -251,13 +251,15 @@ The bounded classic AppContainer control and approved desktop/retained-evidence
 integration are merged in PR #105. VM107 completed the six file/registry/child
 observations, verified exact cleanup, and exported corrected summaries with all
 29 retained files unchanged and no reader execution/provider calls. See the
-[native record](PAIRED-NATIVE-APPROVAL.md). Reuse that evidence; a real-application
-candidate remains necessary. The active slice selects 7-Zip 26.05 x64 and its fixed
+[native record](PAIRED-NATIVE-APPROVAL.md). Reuse that evidence; a receipt-bound
+production application comparison remains necessary. The active slice selects 7-Zip 26.05 x64 and its fixed
 create/test/extract/verify workflow, first under an ordinary standard-user
 baseline and then classic AppContainer. The [native research pair](SEVENZIP-NATIVE-ACCEPTANCE.md)
 passed the selected functions and denial canaries with verified cleanup; its
 archive bytes differ while extracted contents match. Production desktop/Results
-integration and its native acceptance remain in progress. See [working state](WORKING-STATE.md) and current
+integration is implemented; its first native attempt retained `DriverIncomplete`
+with verified outer cleanup, and fresh validation remains pending. See
+[acceptance mapping](SEVENZIP-ASSESSMENT.md#coverage-limits-and-acceptance), [working state](WORKING-STATE.md) and current
 [MXC candidate selection](MXC-ASSESSMENT-SELECTION.md).
 
 Unpackaged AppContainer launch is documented, so an MSIX converter need not

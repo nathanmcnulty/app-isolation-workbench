@@ -3,13 +3,13 @@
 App Isolation Workbench (AIW) helps Windows administrators test supported application workflows inside Windows Sandbox and retain understandable, inspectable results. It is free research software in alpha development. The product is working toward two capability stages:
 
 1. **Workbench v1** assesses MSI, EXE, and portable-directory applications, compares ordinary and isolated execution, records inspectable evidence, makes deterministic recommendations, and replays validated profiles on demand.
-2. **Studio v1** retains Workbench and adds first-party MSIX/AppContainer authoring, narrowly scoped remediation, signing, and final-package validation.
+2. **Wizard v1** retains Workbench assessment and adds first-party MSIX/AppContainer authoring, narrowly scoped remediation, signing, and final-package validation.
 
 The delivery loop is `Assess -> Adapt -> Package -> Validate`. We will complete it for a narrow application class before expanding every provider and collector. The [roadmap](docs/ROADMAP.md) prioritizes a standard-user baseline, one measured isolation candidate, a reviewed adaptation and reusable launch, then the first validated package; experimental providers do not block that loop.
 
 ## Current status
 
-AIW has a [signed public Windows desktop alpha](https://github.com/nathanmcnulty/app-isolation-workbench/releases/tag/desktop-alpha-4e39c787e63a) and an experimental CLI. CI built and published the exact candidate; independent public-download checks verified provenance, publisher signatures, inventory, and receipt before dedicated-VM testing. Installer analysis, reusable Sandbox package assembly, fresh approved replay and independently verified package/run reports passed for both Notepad++ recipes and the fixed Bambu Studio STL-to-3MF recipe. Interactive Notepad++ edit/save/export and overwrite refusal also passed. The [public acceptance record](docs/BAMBU-PUBLIC-ACCEPTANCE.md) identifies the exact runs, verification methods and limits. General application coverage, broader isolation measurements, and Studio authoring remain future work. The [first administrator preview gates](docs/RELEASE-GATES.md) separate demonstrated capabilities from remaining release work. Projects use `aiw.dev/v0alpha2`; legacy `v0alpha1` projects remain readable and migrate non-destructively with an explicit review gate.
+AIW has a [signed public Windows desktop alpha](https://github.com/nathanmcnulty/app-isolation-workbench/releases/tag/desktop-alpha-4e39c787e63a) and an experimental CLI. CI built and published the exact candidate; independent public-download checks verified provenance, publisher signatures, inventory, and receipt before dedicated-VM testing. Installer analysis, reusable Sandbox package assembly, fresh approved replay and independently verified package/run reports passed for both Notepad++ recipes and the fixed Bambu Studio STL-to-3MF recipe. Interactive Notepad++ edit/save/export and overwrite refusal also passed. The [public acceptance record](docs/BAMBU-PUBLIC-ACCEPTANCE.md) identifies the exact runs, verification methods and limits. General application coverage, broader isolation measurements, and Wizard authoring remain future work. The [first administrator preview gates](docs/RELEASE-GATES.md) separate demonstrated capabilities from remaining release work. Projects use `aiw.dev/v0alpha2`; legacy `v0alpha1` projects remain readable and migrate non-destructively with an explicit review gate.
 
 ## Administrator quick start
 
@@ -56,7 +56,7 @@ The initial live target is Windows 11 24H2 (build 26100+) x64. Provider support 
 - Provider execution uses the shared run boundary: a typed hash-bound plan, exact approval, append-only journal, fail-closed recovery, and terminal cleanup evidence. Non-executing intake and preparation use explicit create-new commands and protected receipt-bound state; they do not grant execution authority.
 - Unsupported, degraded, incomplete, or ambiguous isolation remains `insufficientEvidence`, never success.
 - Workbench launches validated applications on demand; it is not a background application-management service.
-- Studio keeps delivery (`containedMsix`) separate from runtime boundary (`mediumIlFullTrust`, `appContainer`, or preview `appSiloPreview`). A converted full-trust MSIX is not an isolation claim.
+- Wizard keeps delivery (`containedMsix`) separate from runtime boundary (`mediumIlFullTrust`, `appContainer`, or preview `appSiloPreview`). A converted full-trust MSIX is not an isolation claim.
 - Master Packager is a manual export/import handoff. AIW will not call, embed, or automate it without a separate vendor authorization.
 
 ## Advanced CLI and developer examples

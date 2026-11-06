@@ -1,9 +1,11 @@
 # 7-Zip application assessment
 
-Active implementation, selected 2026-11-05 (America/Anchorage). The declared
+Selected 2026-11-05 (America/Anchorage). The declared
 experiment completed its [native research trial](SEVENZIP-NATIVE-ACCEPTANCE.md).
-Production integration is in progress; that trial alone does not establish a
-supported desktop feature or broad isolation verdict.
+Production desktop/kernel/Results integration is implemented. Its first native
+attempt retained `DriverIncomplete`; fresh native validation of the follow-up
+source remains pending. Research success alone does not establish a supported
+desktop workflow or broad isolation verdict.
 Start from [working state](WORKING-STATE.md); the [candidate review](MXC-ASSESSMENT-SELECTION.md)
 records the current MXC research and why classic AppContainer is selected first.
 
@@ -61,32 +63,41 @@ SID and capabilities before resuming them.
 
 Declare a project-owned readable canary outside candidate grants: the ordinary
 user must read the exact bytes; the candidate must report native access-denied
-code 5. Verify the candidate profile is deleted and every owned job is empty.
+code 5. Separately probe candidate input-file write access, input-file delete
+access and input-directory delete access; each open must return code 5 without
+changing bytes or deleting objects. These checks measure the read-only input
+grant separately from the mutable candidate output. All four selected denial
+checks passed in the research pair; they remain unmeasured in the first
+production result. Verify the candidate profile is deleted and every owned job is empty.
 The existing six-case control evidence remains separate: it cannot substitute
 for missing observations on this application or its children.
 
 ## Research versus the supported product
 
-The default-off `research-sevenzip` platform examples establish native feasibility
-before adapting the production runner. The fixed host driver prepares protected
+The default-off `research-sevenzip` platform examples established native feasibility
+before production integration. The fixed host driver prepares protected
 inputs and a proposal, records exact-hash approval, and requires a separate Start.
 It persists a preselected-session intent before provider mutation and uses the
 existing held Store provider, exclusive lease and exact-session cleanup. It never
 installs 7-Zip on the parent VM or development host. Guest records are untrusted
 research observations, not production receipts and not importable verified Results.
 
-Before calling the path supported, integrate the fixed application request with
-the existing production preparation/approval/session kernel, cancellation and
-owned recovery. Bind app bytes, workflow revision, environments, user and allowed
-candidate-policy differences. Use receipt-last publication and the existing
-verified assessment/reporting services. The desktop must start that supported
-workflow without internal JSON authoring, reopen explicit retained results without
-execution, and export allowlisted sanitized JSON/Markdown through Results.
+The implemented product path binds the fixed application request to the existing
+production preparation/approval/session kernel, cancellation and owned recovery.
+It binds app bytes, workflow revision, environments, user and allowed
+candidate-policy differences, with receipt-last publication and the existing
+verified assessment/reporting services. The desktop prepares and starts it without
+internal JSON authoring. Results reopens explicit retained runs and exports
+allowlisted sanitized JSON/Markdown. The first native attempt exercised the
+approval/Start and cleanup path, then retained an incomplete driver result;
+reopening and JSON export preserved that result. Successful native application
+comparison through this product path remains required before calling it supported.
 
-The native proof and production integration need independent review and focused
-negative tests, including input/policy drift, partial or altered output, missing
-baseline measurements, failure prefixes, cancellation and cleanup uncertainty.
-Retained reads must preserve source bytes and make zero execution/provider calls.
+Independent review and focused negative tests cover input/policy drift, partial
+or altered output, missing baseline measurements, failure prefixes, cancellation
+and cleanup uncertainty. Native acceptance remains source-specific. Retained reads
+must preserve source bytes and make zero execution/provider calls; the first
+production run's retained Results check establishes this for its incomplete result.
 
 ## Coverage limits and acceptance
 
@@ -102,3 +113,9 @@ required-descendant boundaries, selected denial canaries, verified cleanup and a
 explainable baseline/candidate matrix. Missing evidence blocks the relevant
 claims. Native research alone does not satisfy production approval/reporting or
 desktop acceptance. W4/W5 and broad production acceptance remain open.
+
+| Acceptance scope | Advanced by this slice | Still open |
+|---|---|---|
+| [Benchmark 2](ROADMAP.md#benchmark-2---one-real-isolation-comparison) | One research pair has all four function results, held target tokens, selected file denials and verified inner/outer cleanup. The product has an approved native attempt and truthful retained failure reporting. | Successful receipt-bound product comparison; application required-descendant evidence, registry denial for this profile and fresh-instance repeatability. Network/IPC/UI and endpoint claims require their own measurements. |
+| [W4: secure export and diagnostics](https://github.com/nathanmcnulty/app-isolation-workbench/issues/9) | Receipt-bound facts, allowlisted summary exports and bounded private failure diagnostics; retained incomplete JSON export preserves source files. | Full sanitized assessment bundle and archive/signature-envelope round trip/tamper acceptance; deterministic recommendation and optional cited analyst flow with no verdict authority. Product-package checksums are not assessment-bundle acceptance. |
+| [W5: desktop and release hardening](https://github.com/nathanmcnulty/app-isolation-workbench/issues/10) | Fixed desktop preparation, separate approval/Start, owned cancellation/recovery services and retained comparison/export UI. | Successful new application loop, applicable native cancellation/recovery and accessibility acceptance, plus signed release, clean-machine acceptance and supported-host coverage for this profile. Earlier signed-alpha evidence retains its earlier recipe scope. |

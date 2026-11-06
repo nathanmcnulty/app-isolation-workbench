@@ -41,8 +41,10 @@ alone does not demonstrate application isolation.
 
 The observed application functions and selected boundary checks advance Benchmark
 2 feasibility. Production approval/session receipts, cancellation/recovery,
-desktop entry, verified retained comparison and sanitized Results export still
-require integration and native validation. Broad Benchmark 2, W4/W5 and
+desktop entry, retained comparison and sanitized Results export are implemented;
+successful native application comparison through that product path remains
+unverified. See the [acceptance mapping](SEVENZIP-ASSESSMENT.md#coverage-limits-and-acceptance).
+Broad Benchmark 2, W4/W5 and
 production acceptance remain open. The earlier six-control/29-file Results
 milestone is reused without execution.
 
@@ -58,8 +60,19 @@ acceptance. The earlier successful research observations remain separate.
 
 The old fallback discarded private error text; its all-null result cannot
 establish whether failure occurred before installation or during final typed
-validation. The cause remains unknown. A follow-up fix adds bounded, receipt-bound
+validation. The cause remains unknown. Follow-up source `593281a` adds bounded, receipt-bound
 private failure text (excluded from sanitized exports) and accepts only casing
 and Win32 verbatim spelling differences for the same fixed executable paths.
 Historical records omit the new optional field and retain their original bytes.
 The old approval and workspace must not be reused for another Start.
+
+The actual Results view reopened this incomplete run and exported a new sanitized
+JSON summary: 3,186 bytes, SHA-256
+`95a0d53fd0a9a1527b2e4ab6fd36018e7e0cf109a8723f499dfb108c80489b58`.
+All 26 retained files remained unchanged. The export contains no private paths,
+SIDs, run IDs or account identifiers. Source review confirms the reader has no
+execution/provider route, and retained diagnostics were unchanged. This proves
+read/export behavior for the incomplete result; it adds no application measurements.
+
+Its rebuilt package is verified and transfer is in progress. No new application
+trial or proven cause for the earlier failure is claimed.
