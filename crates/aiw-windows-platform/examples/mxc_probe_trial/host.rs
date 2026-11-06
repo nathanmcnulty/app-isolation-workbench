@@ -113,6 +113,7 @@ fn aiw_source_hash() -> String {
         include_str!("../../src/powershell.rs"),
         include_str!("../../../aiw-provider-mxc/src/process_container.rs"),
         include_str!("../../../aiw-provider-wsb/src/lib.rs"),
+        include_str!("../../../aiw-provider-wsb/Cargo.toml"),
         include_str!("../../../aiw-provider-wsb/src/runtime_context.rs"),
         include_str!("../../../aiw-windows-command-line/src/lib.rs"),
         include_str!("../../Cargo.toml"),

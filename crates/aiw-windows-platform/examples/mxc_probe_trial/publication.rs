@@ -15,8 +15,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-const ROOT: &str = r"C:\AIW-Publication-Control-20261106";
-const SESSION: &str = "7b7e9b46-6bad-45d2-9d0f-d6140908fe47";
+const ROOT: &str = r"C:\AIW-Publication-Control-20261106-R2";
+const SESSION: &str = "5e622f23-656f-42fa-a6ae-57c48542a54d";
 const SCHEMA: &str = "aiw.dev/research/publication-host-trial/v0alpha1";
 const HELPER: &str = "publication_control_guest.exe";
 
@@ -77,18 +77,22 @@ fn helper_hash() -> Result<&'static str> {
 }
 
 fn plan(workspace: &HeldRunWorkspace) -> WindowsSandboxPlan {
+    fixed_plan(&normalized(workspace.root_path()))
+}
+
+fn fixed_plan(workspace_root: &str) -> WindowsSandboxPlan {
     WindowsSandboxPlan {
         schema_version: aiw_provider_wsb::WINDOWS_SANDBOX_PLAN_SCHEMA_VERSION.into(),
-        workspace_root: normalized(workspace.root_path()),
+        workspace_root: workspace_root.into(),
         mappings: vec![
             MappedFolder {
                 purpose: MappingPurpose::Tools,
-                host_folder: normalized(&workspace.tools_path()),
+                host_folder: format!(r"{workspace_root}\tools"),
                 sandbox_folder: r"C:\AIW\Tools".into(),
             },
             MappedFolder {
                 purpose: MappingPurpose::Output,
-                host_folder: normalized(&workspace.output_path()),
+                host_folder: format!(r"{workspace_root}\output"),
                 sandbox_folder: control::CONTROL_OUTPUT.into(),
             },
         ],
@@ -255,6 +259,9 @@ pub fn run() -> Result<()> {
     let actor = fixed_os_and_actor()?;
     helper_hash()?;
     if args == ["--prepare"] {
+        // Refuse an unsupported fixed renderer contract before creating any
+        // workspace objects. Actual bound paths are rendered again below.
+        aiw_provider_wsb::render_config(&fixed_plan(&format!(r"{ROOT}\Trial")))?;
         let workspace = HeldRunWorkspace::create(Path::new(ROOT), "Trial")?;
         let source = HeldApplicationFile::open_bounded(
             &Path::new(ROOT).join("Inputs").join(HELPER),
@@ -485,6 +492,15 @@ pub fn run() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn exact_publication_plan_renders_before_any_workspace_or_provider_effect() {
+        let rendered =
+            aiw_provider_wsb::render_config(&fixed_plan(&format!(r"{ROOT}\Trial"))).unwrap();
+        assert!(rendered.xml.contains(
+            r"publication_control_guest.exe --output C:\AIW\PublicationOutput\RESULT.DAT"
+        ));
+        assert!(rendered.xml.contains("<Networking>Disable</Networking>"));
+    }
     fn report_fixture() -> serde_json::Value {
         json!({"schemaVersion":control::CONTROL_SCHEMA,
             "windows":{"major":10,"minor":0,"build":26100,"revision":9711,"observerArchitecture":"x86_64"},

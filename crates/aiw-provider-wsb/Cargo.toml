@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
+[features]
+research-fixed-publication = []
+
 [dependencies]
 aiw-evidence.workspace = true
 aiw-probe.workspace = true

@@ -71,6 +71,20 @@ Private raw files, identities, scripts and audit logs remain outside Git under
 
 ## Required continuation
 
+The first publication-control package at AIW source `b66cf4e` staged successfully,
+but Prepare refused its `.DAT` marker because the generic renderer required
+`.json`. No proposal, provider Start, Sandbox, runtime or application execution
+followed. Its partially prepared root and six-file packet are retained. Source
+review also identified the normal empty-output requirement before Start; the
+control needs one preseeded occupied file to compare original identity/bytes.
+
+The correction is a default-off research provider feature for the two exact
+helper/output pairs, with no arbitrary `.DAT` output. Only the publication
+control permits one fixed 55-byte `OCCUPY.DAT` input; MXC capability and normal
+plans remain empty-output-only. The provider checks shape and bounded bytes;
+platform held-file identity, streams and alias checks remain authoritative.
+The next trial uses a new R2 root and session, not the partial prior root.
+
 Keep the strict custody check. Validate a corrected publisher
 in a fresh owned environment before a new capability or creation trial; never
 repair and adopt this run. Then measure actual ProcessContainer creation and

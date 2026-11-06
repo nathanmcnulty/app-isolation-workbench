@@ -525,6 +525,13 @@ pub fn validate_host_mappings(plan: &WindowsSandboxPlan) -> Result<(), WindowsSa
                 })?
                 .is_some()
             {
+                // This feature is enabled only by the default-off first-party
+                // publication trial. Its reviewed occupied-name control has one
+                // fixed bounded data input; other helpers/modes stay empty-only.
+                #[cfg(all(windows, feature = "research-fixed-publication"))]
+                if is_fixed_publication_seed(plan, path) {
+                    continue;
+                }
                 return Err(WindowsSandboxPlanError::NonEmptyOutputFolder(
                     mapping.host_folder.clone(),
                 ));
@@ -572,6 +579,121 @@ fn has_reparse_point(_metadata: &fs::Metadata) -> bool {
     false
 }
 
+#[cfg(feature = "research-fixed-publication")]
+pub const FIXED_PUBLICATION_OCCUPIED_BYTES: &[u8] =
+    b"AIW publication control: original occupied destination\n";
+
+#[cfg(feature = "research-fixed-publication")]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ResearchPublicationRole {
+    Control,
+    Capability,
+}
+
+#[cfg(feature = "research-fixed-publication")]
+fn research_publication_role(plan: &WindowsSandboxPlan) -> Option<ResearchPublicationRole> {
+    if plan.probe.request.is_some() || plan.mappings.len() != 2 {
+        return None;
+    }
+    let (role, output_root) = match (plan.probe.executable.as_str(), plan.probe.output.as_str()) {
+        (r"C:\AIW\Tools\publication_control_guest.exe", r"C:\AIW\PublicationOutput\RESULT.DAT") => {
+            (
+                ResearchPublicationRole::Control,
+                r"C:\AIW\PublicationOutput",
+            )
+        }
+        (r"C:\AIW\Tools\mxc_process_probe.exe", r"C:\AIW\MxcProbeOutput\RESULT.DAT") => (
+            ResearchPublicationRole::Capability,
+            r"C:\AIW\MxcProbeOutput",
+        ),
+        _ => return None,
+    };
+    if plan
+        .mappings
+        .iter()
+        .filter(|mapping| {
+            mapping.purpose == MappingPurpose::Tools && mapping.sandbox_folder == r"C:\AIW\Tools"
+        })
+        .count()
+        != 1
+        || plan
+            .mappings
+            .iter()
+            .filter(|mapping| {
+                mapping.purpose == MappingPurpose::Output && mapping.sandbox_folder == output_root
+            })
+            .count()
+            != 1
+    {
+        return None;
+    }
+    Some(role)
+}
+
+fn allows_research_publication_output(plan: &WindowsSandboxPlan) -> bool {
+    #[cfg(feature = "research-fixed-publication")]
+    {
+        research_publication_role(plan).is_some()
+    }
+    #[cfg(not(feature = "research-fixed-publication"))]
+    {
+        let _ = plan;
+        false
+    }
+}
+
+#[cfg(all(windows, feature = "research-fixed-publication"))]
+fn is_fixed_publication_seed(plan: &WindowsSandboxPlan, path: &Path) -> bool {
+    use std::io::Read;
+    use std::os::windows::fs::OpenOptionsExt;
+    if research_publication_role(plan) != Some(ResearchPublicationRole::Control) {
+        return false;
+    }
+    let Ok(mut entries) = fs::read_dir(path) else {
+        return false;
+    };
+    let Some(Ok(entry)) = entries.next() else {
+        return false;
+    };
+    if entries.next().is_some() || entry.file_name() != "OCCUPY.DAT" {
+        return false;
+    }
+    let Ok(metadata) = fs::symlink_metadata(entry.path()) else {
+        return false;
+    };
+    if !metadata.is_file()
+        || metadata.file_type().is_symlink()
+        || has_reparse_point(&metadata)
+        || metadata.len() != FIXED_PUBLICATION_OCCUPIED_BYTES.len() as u64
+    {
+        return false;
+    }
+    let Ok(file) = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(1)
+        .custom_flags(0x00200000) // FILE_FLAG_OPEN_REPARSE_POINT; no write/delete sharing.
+        .open(entry.path())
+    else {
+        return false;
+    };
+    let Ok(bound_metadata) = file.metadata() else {
+        return false;
+    };
+    if !bound_metadata.is_file()
+        || has_reparse_point(&bound_metadata)
+        || bound_metadata.len() != FIXED_PUBLICATION_OCCUPIED_BYTES.len() as u64
+    {
+        return false;
+    }
+    // Shape/bytes gate only. The research platform caller independently holds
+    // and verifies the approved file identity, streams, aliases and workspace.
+    let mut bytes = Vec::new();
+    file.take(FIXED_PUBLICATION_OCCUPIED_BYTES.len() as u64 + 1)
+        .read_to_end(&mut bytes)
+        .is_ok()
+        && bytes == FIXED_PUBLICATION_OCCUPIED_BYTES
+}
+
 pub fn validate_plan(plan: &WindowsSandboxPlan) -> Result<(), WindowsSandboxPlanError> {
     if plan.schema_version != WINDOWS_SANDBOX_PLAN_SCHEMA_VERSION {
         return Err(WindowsSandboxPlanError::UnsupportedSchemaVersion(
@@ -588,7 +710,8 @@ pub fn validate_plan(plan: &WindowsSandboxPlan) -> Result<(), WindowsSandboxPlan
     }
     validate_guest_path("probe.output", &plan.probe.output)?;
     if !plan.probe.executable.to_ascii_lowercase().ends_with(".exe")
-        || !plan.probe.output.to_ascii_lowercase().ends_with(".json")
+        || (!plan.probe.output.to_ascii_lowercase().ends_with(".json")
+            && !allows_research_publication_output(plan))
     {
         return Err(WindowsSandboxPlanError::UnsafePath {
             field: "probe".to_owned(),
@@ -788,6 +911,131 @@ mod tests {
         .join("\n");
         assert_eq!(rendered.xml, expected);
         assert_eq!(rendered.sha256.len(), 64);
+    }
+
+    fn publication_plan(capability: bool) -> WindowsSandboxPlan {
+        let mut plan = valid_plan();
+        let (helper, root) = if capability {
+            (
+                r"C:\AIW\Tools\mxc_process_probe.exe",
+                r"C:\AIW\MxcProbeOutput",
+            )
+        } else {
+            (
+                r"C:\AIW\Tools\publication_control_guest.exe",
+                r"C:\AIW\PublicationOutput",
+            )
+        };
+        plan.probe.executable = helper.into();
+        plan.probe.output = format!(r"{root}\RESULT.DAT");
+        plan.mappings[1].sandbox_folder = root.into();
+        plan
+    }
+
+    #[cfg(not(feature = "research-fixed-publication"))]
+    #[test]
+    fn research_publication_paths_remain_refused_without_the_feature() {
+        for capability in [false, true] {
+            assert!(matches!(
+                validate_plan(&publication_plan(capability)),
+                Err(WindowsSandboxPlanError::UnsafePath { .. })
+            ));
+        }
+        render_config(&valid_plan()).unwrap();
+    }
+
+    #[cfg(feature = "research-fixed-publication")]
+    #[test]
+    fn research_publication_allows_only_exact_closed_pairs_and_mappings() {
+        for capability in [false, true] {
+            let plan = publication_plan(capability);
+            let rendered = render_config(&plan).unwrap();
+            assert!(rendered.xml.contains("RESULT.DAT"));
+            for variant in 0..7 {
+                let mut invalid = plan.clone();
+                match variant {
+                    0 => invalid.probe.executable = r"C:\AIW\Tools\other.exe".into(),
+                    1 => {
+                        invalid.probe.output =
+                            invalid.probe.output.replace("RESULT.DAT", "result.dat")
+                    }
+                    2 => invalid.probe.output = r"C:\AIW\Output\RESULT.DAT".into(),
+                    3 => invalid.probe.request = Some(r"C:\AIW\Tools\request.json".into()),
+                    4 => invalid.mappings[0].sandbox_folder = r"C:\AIW".into(),
+                    5 => invalid.mappings[1].sandbox_folder = r"C:\AIW".into(),
+                    _ => invalid.mappings.push(MappedFolder {
+                        purpose: MappingPurpose::Input,
+                        host_folder: r"C:\AIW Host\Input".into(),
+                        sandbox_folder: r"C:\AIW\Input".into(),
+                    }),
+                }
+                assert!(validate_plan(&invalid).is_err(), "variant {variant}");
+            }
+        }
+    }
+
+    #[cfg(all(windows, feature = "research-fixed-publication"))]
+    #[test]
+    fn research_publication_seed_is_one_fixed_file_only_for_control() {
+        let root = std::env::temp_dir().join(format!(
+            "aiw-publication-mapping-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&root).unwrap();
+        let tools = root.join("tools");
+        let output = root.join("output");
+        fs::create_dir(&tools).unwrap();
+        fs::create_dir(&output).unwrap();
+        fs::write(
+            tools.join("publication_control_guest.exe"),
+            b"inert fixture",
+        )
+        .unwrap();
+        fs::write(tools.join("mxc_process_probe.exe"), b"inert fixture").unwrap();
+        let mut plan = publication_plan(false);
+        plan.workspace_root = root.to_string_lossy().into_owned();
+        plan.mappings[0].host_folder = tools.to_string_lossy().into_owned();
+        plan.mappings[1].host_folder = output.to_string_lossy().into_owned();
+        validate_host_mappings(&plan).unwrap();
+        let seed = output.join("OCCUPY.DAT");
+        fs::write(&seed, FIXED_PUBLICATION_OCCUPIED_BYTES).unwrap();
+        validate_host_mappings(&plan).unwrap();
+        for bytes in [
+            vec![b'x'; FIXED_PUBLICATION_OCCUPIED_BYTES.len()],
+            vec![b'x'; FIXED_PUBLICATION_OCCUPIED_BYTES.len() + 1],
+            vec![],
+        ] {
+            fs::write(&seed, bytes).unwrap();
+            assert!(matches!(
+                validate_host_mappings(&plan),
+                Err(WindowsSandboxPlanError::NonEmptyOutputFolder(_))
+            ));
+        }
+        fs::write(&seed, FIXED_PUBLICATION_OCCUPIED_BYTES).unwrap();
+        fs::write(output.join("EXTRA.DAT"), b"extra").unwrap();
+        assert!(validate_host_mappings(&plan).is_err());
+        fs::remove_file(output.join("EXTRA.DAT")).unwrap();
+        let mut capability = publication_plan(true);
+        capability.workspace_root = plan.workspace_root.clone();
+        capability.mappings[0].host_folder = plan.mappings[0].host_folder.clone();
+        capability.mappings[1].host_folder = plan.mappings[1].host_folder.clone();
+        assert!(matches!(
+            validate_host_mappings(&capability),
+            Err(WindowsSandboxPlanError::NonEmptyOutputFolder(_))
+        ));
+        fs::remove_file(&seed).unwrap();
+        fs::write(output.join("occupy.dat"), FIXED_PUBLICATION_OCCUPIED_BYTES).unwrap();
+        assert!(validate_host_mappings(&plan).is_err());
+        fs::remove_file(output.join("occupy.dat")).unwrap();
+        fs::remove_file(tools.join("publication_control_guest.exe")).unwrap();
+        fs::remove_file(tools.join("mxc_process_probe.exe")).unwrap();
+        fs::remove_dir(output).unwrap();
+        fs::remove_dir(tools).unwrap();
+        fs::remove_dir(root).unwrap();
     }
 
     #[test]
