@@ -77,17 +77,65 @@ fn validate_expectations(pid: u32, hash: &str, sid: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_token(pid: u32, sid: &str, token: &TokenEvidence) -> Result<()> {
-    if token.schema_version != aiw_token::TOKEN_EVIDENCE_SCHEMA_VERSION
-        || token.process_id != pid
-        || token.user_sid != sid
-        || token.token_type != TokenType::Primary
-        || token.is_elevated
-        || token.is_app_container
-    {
-        return Err("fixed ordinary MXC child primary token differs".into());
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ResearchMxcRootToken {
+    pub schema_version: String,
+    pub expected_process_id: u32,
+    pub expected_user_sid: String,
+    pub token: TokenEvidence,
+    pub validation_errors: Vec<String>,
+}
+
+impl ResearchMxcRootToken {
+    pub(crate) fn measure(pid: u32, sid: &str, token: TokenEvidence) -> Self {
+        // PSEC provenance comes from the exact SDK request/dispatch, not the
+        // TokenIsAppContainer flag. Retain that flag and all other token fields.
+        let validation_errors = [
+            (
+                token.schema_version != aiw_token::TOKEN_EVIDENCE_SCHEMA_VERSION,
+                "schemaVersion",
+            ),
+            (token.process_id != pid, "processId"),
+            (token.user_sid != sid, "userSid"),
+            (token.token_type != TokenType::Primary, "tokenType"),
+            (token.is_elevated, "isElevated"),
+        ]
+        .into_iter()
+        .filter(|(failed, _)| *failed)
+        .map(|(_, field)| field.into())
+        .collect();
+        Self {
+            schema_version: "aiw.dev/research-mxc-root-token/v0alpha1".into(),
+            expected_process_id: pid,
+            expected_user_sid: sid.into(),
+            token,
+            validation_errors,
+        }
     }
-    Ok(())
+
+    pub(crate) fn validate(&self) -> Result<()> {
+        if self.validation_errors.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "fixed MXC root token differs: {}",
+                self.validation_errors.join(", ")
+            ))
+        }
+    }
+}
+
+fn retain_then_validate_token(
+    measured: &ResearchMxcRootToken,
+    retain: impl FnOnce(&ResearchMxcRootToken) -> Result<()>,
+) -> Result<()> {
+    retain(measured)?;
+    measured.validate()
+}
+
+fn validate_token(pid: u32, sid: &str, token: &TokenEvidence) -> Result<()> {
+    ResearchMxcRootToken::measure(pid, sid, token.clone()).validate()
 }
 
 fn ancestry() -> Result<Vec<File>> {
@@ -156,7 +204,12 @@ impl<'owner> ResearchMxcChild<'owner> {
     /// Setup must retain its verified CONTROL_IMAGE copy across SDK creation.
     /// A queried image path plus the presently held file does not retrospectively
     /// attest loaded bytes if a caller allowed replacement before this open.
-    pub(crate) fn open(pid: u32, helper_sha256: &str, standard_sid: &str) -> Result<Self> {
+    pub(crate) fn open(
+        pid: u32,
+        helper_sha256: &str,
+        standard_sid: &str,
+        retain_token: impl FnOnce(&ResearchMxcRootToken) -> Result<()>,
+    ) -> Result<Self> {
         validate_expectations(pid, helper_sha256, standard_sid)?;
         let ancestors = ancestry()?;
         // SYNCHRONIZE is the standard access bit 0x00100000. Never request
@@ -185,7 +238,8 @@ impl<'owner> ResearchMxcChild<'owner> {
         }
         let token = collect_process_token(process.as_handle())
             .map_err(|e| format!("collect held MXC child token: {e}"))?;
-        validate_token(pid, standard_sid, &token)?;
+        let measured = ResearchMxcRootToken::measure(pid, standard_sid, token);
+        retain_then_validate_token(&measured, retain_token)?;
         let observation = ResearchMxcChildObservation {
             schema_version: SCHEMA.into(),
             process_id: pid,
@@ -197,7 +251,7 @@ impl<'owner> ResearchMxcChild<'owner> {
             image_attributes: facts.attributes,
             image_link_count: facts.link_count,
             image_only_unnamed_data_stream: facts.only_unnamed_data_stream,
-            token,
+            token: measured.token,
         };
         let holder = Self {
             process,
@@ -266,11 +320,12 @@ impl GuestProcess {
         pid: u32,
         helper_sha256: &str,
         standard_sid: &str,
+        retain_token: impl FnOnce(&ResearchMxcRootToken) -> Result<()>,
     ) -> Result<ResearchMxcChild<'_>> {
         if pid == self.process_id {
             return Err("SDK child cannot be its owning worker".into());
         }
-        let mut child = ResearchMxcChild::open(pid, helper_sha256, standard_sid)?;
+        let mut child = ResearchMxcChild::open(pid, helper_sha256, standard_sid, retain_token)?;
         child.owner_job = Some(&self.job);
         child.revalidate()?;
         child.require_running()?;
@@ -296,7 +351,7 @@ mod tests {
         }
     }
     #[test]
-    fn ordinary_token_binding_rejects_pid_actor_and_authority_drift() {
+    fn root_token_binding_retains_flags_and_rejects_each_identity_constraint() {
         let token: TokenEvidence = serde_json::from_value(serde_json::json!({
             "schemaVersion":aiw_token::TOKEN_EVIDENCE_SCHEMA_VERSION,"processId":42,"tokenType":"primary",
             "isAppContainer":false,"userSid":"S-1-5-21-1-2-3-1001","integrity":{"sid":"S-1-16-8192","rid":8192,"level":"medium"},
@@ -310,6 +365,43 @@ mod tests {
         assert!(validate_token(42, &token.user_sid, &elevated).is_err());
         let mut contained = token.clone();
         contained.is_app_container = true;
-        assert!(validate_token(42, &token.user_sid, &contained).is_err());
+        assert!(validate_token(42, &token.user_sid, &contained).is_ok());
+        for (field, value) in [
+            ("schemaVersion", serde_json::json!("wrong")),
+            ("processId", serde_json::json!(43)),
+            ("userSid", serde_json::json!("S-1-5-18")),
+            ("tokenType", serde_json::json!("impersonation")),
+            ("isElevated", serde_json::json!(true)),
+        ] {
+            let mut bad = serde_json::to_value(&token).unwrap();
+            bad[field] = value;
+            let measured = ResearchMxcRootToken::measure(
+                42,
+                &token.user_sid,
+                serde_json::from_value(bad).unwrap(),
+            );
+            assert_eq!(measured.validation_errors, [field]);
+            let mut retained = None;
+            let result = retain_then_validate_token(&measured, |actual| {
+                retained = Some(serde_json::to_value(actual).unwrap());
+                Ok(())
+            });
+            assert!(result.is_err());
+            assert_eq!(
+                retained.unwrap()["validationErrors"],
+                serde_json::json!([field])
+            );
+        }
+        let measured = ResearchMxcRootToken::measure(42, &token.user_sid, contained.clone());
+        let mut retained = None;
+        assert!(
+            retain_then_validate_token(&measured, |actual| {
+                retained = Some(actual.token.clone());
+                Ok(())
+            })
+            .is_ok()
+        );
+        assert_eq!(retained.unwrap(), contained);
+        assert!(retain_then_validate_token(&measured, |_| Err("retention failed".into())).is_err());
     }
 }

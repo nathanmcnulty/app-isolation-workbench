@@ -64,8 +64,12 @@ same-account held child identity/token observations and an owner-held exact job
 check before a protected gate releases candidate controls. Fixed phase records
 survive later wait/free/cleanup failures. Its separate host profile retains raw
 bytes with an accepted-hash check, without turning research observations into
-product verdicts. Focused tests and consequential reviews passed; authorized
-native creation/enforcement remains pending. It never dispatches 7-Zip yet.
+product verdicts. Source `55068e6` reached SDK spawn success in one
+[fresh native trial](MXC-CREATION-NATIVE-20261106.md), then refused at a combined
+token guard before retaining the actual child token. Ordinary positives and owned
+cleanup passed; the gate stayed closed and enforcement remains unmeasured.
+The correction retains token evidence and individual mismatches before refusal;
+new-source binding/enforcement acceptance remains pending. No 7-Zip ran yet.
 
 Process-tree and registry foundations are test-compiled only. The collector
 records an inherited debugger chain, not broker-created processes or invented

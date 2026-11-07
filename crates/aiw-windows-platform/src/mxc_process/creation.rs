@@ -2,7 +2,9 @@
 //! The outer owned GuestProcess is the watchdog for every potentially blocking
 //! vendor ABI call, including free. A successful ABI return is not job cleanup.
 use super::*;
-use crate::guest_msi::mxc_child::{ResearchMxcChild, ResearchMxcChildObservation};
+use crate::guest_msi::mxc_child::{
+    ResearchMxcChild, ResearchMxcChildObservation, ResearchMxcRootToken,
+};
 use serde::{Deserialize, Serialize};
 use std::ffi::c_void;
 use std::io::{Read, Write};
@@ -13,6 +15,7 @@ const WORKER_RESULT: &str = r"C:\AIW\MxcProbe\Data\CREATION.DAT";
 const GATE: &str = r"C:\AIW\SevenZip\Work\Mxc\Input\ALLOW.DAT";
 const CONTROL_RESULT: &str = r"C:\AIW\SevenZip\Work\Mxc\Output\CONTROL.DAT";
 const CONTROL_FAILURE: &str = r"C:\AIW\SevenZip\Work\Mxc\Output\FAILURE.DAT";
+const CONTROL_SELF: &str = r"C:\AIW\SevenZip\Work\Mxc\Output\SELF.DAT";
 const INPUT: &str = r"C:\AIW\SevenZip\Work\Mxc\Input\INPUT.DAT";
 const INPUT_BYTES: &[u8] = b"AIW fixed MXC input control\n";
 const DENIED_BYTES: &[u8] = b"AIW fixed MXC denied control\n";
@@ -46,10 +49,10 @@ pub(super) fn run() -> Result<()> {
     {
         return setup();
     }
-    if token.is_elevated || token.is_app_container || token.user_sid != ordinary_sid()? {
-        return Err("fixed ordinary creation role required; runtime not loaded".into());
-    }
     if a == ["--creation-worker"] && same(PROBE) {
+        if !ordinary_worker_token(&token, &ordinary_sid()?) {
+            return Err("fixed ordinary creation worker required; runtime not loaded".into());
+        }
         let report = worker(&token);
         let value = match &report {
             Ok(v) => v.clone(),
@@ -61,7 +64,20 @@ pub(super) fn run() -> Result<()> {
         return report.map(|_| ());
     }
     if a == ["--mxc-driver-control"] && same(contract::CONTROL_IMAGE) {
-        let result = contained();
+        let result = (|| -> Result<()> {
+            let sid = ordinary_sid();
+            // Preserve the actual self token even if account lookup or identity
+            // validation refuses the role. This file never authorizes release.
+            write_new_json(
+                CONTROL_SELF,
+                &serde_json::json!({
+                    "token":token,"expectedUserSid":sid.as_ref().ok(),
+                    "expectedUserSidReadError":sid.as_ref().err().map(bounded)
+                }),
+            )?;
+            ResearchMxcRootToken::measure(std::process::id(), &sid?, token).validate()?;
+            contained()
+        })();
         if let Err(error) = &result {
             let _ = write_new_json(
                 CONTROL_FAILURE,
@@ -71,6 +87,13 @@ pub(super) fn run() -> Result<()> {
         return result;
     }
     Err("closed creation image/arguments differ".into())
+}
+
+fn ordinary_worker_token(token: &aiw_token::TokenEvidence, sid: &str) -> bool {
+    !token.is_app_container
+        && ResearchMxcRootToken::measure(std::process::id(), sid, token.clone())
+            .validate()
+            .is_ok()
 }
 
 fn ordinary_sid() -> Result<String> {
@@ -404,7 +427,15 @@ fn worker(token: &aiw_token::TokenEvidence) -> Result<serde_json::Value> {
     )?;
     let hash = helper_hash()?;
     // Same-account failure refuses this trial. Owner inspection never rescues it.
-    let child = ResearchMxcChild::open(pid, &hash, &token.user_sid)?;
+    let child = ResearchMxcChild::open(pid, &hash, &token.user_sid, |measured| {
+        write_new_json(
+            &format!(r"{DATA}\TOKEN.DAT"),
+            &serde_json::json!({
+                "requestSha256":request.sha256(),"helperSha256":hash,"measured":measured
+            }),
+        )
+        .map_err(bounded)
+    })?;
     child.require_running()?;
     let ready = Ready {
         request_sha256: request.sha256().into(),
@@ -548,14 +579,23 @@ fn setup() -> Result<()> {
             {
                 return Err("creation readiness binding differs".into());
             }
-            let held =
-                child.observe_mxc_child(ready.child.process_id, inputs.helper_hash(), sid)?;
+            let held = child.observe_mxc_child(
+                ready.child.process_id,
+                inputs.helper_hash(),
+                sid,
+                |measured| {
+                    owner_observations["rootTokenMeasurement"] =
+                        serde_json::to_value(measured).map_err(bounded)?;
+                    Ok(())
+                },
+            )?;
             if held.observation() != &ready.child {
                 return Err("owner/ordinary root observations differ".into());
             }
             held.require_running()?;
             held.revalidate()?;
-            owner_observations = serde_json::json!({"ownerMeasuredChild":held.observation(),"exactOuterJobMembership":true,"releaseGatePublished":false});
+            owner_observations["ownerMeasuredChild"] = serde_json::to_value(held.observation())?;
+            owner_observations["exactOuterJobMembership"] = true.into();
             write_new_json(GATE, &serde_json::to_value(&ready)?)?;
             owner_observations["releaseGatePublished"] = true.into();
             let exit = child.wait_for_exit(deadline.saturating_duration_since(Instant::now()))?;
@@ -574,6 +614,8 @@ fn setup() -> Result<()> {
             ("baseline", format!(r"{DATA}\BASELINE.DAT")),
             ("probe", format!(r"{DATA}\PROBE.DAT")),
             ("spawn", format!(r"{DATA}\SPAWN.DAT")),
+            ("rootToken", format!(r"{DATA}\TOKEN.DAT")),
+            ("containedSelf", CONTROL_SELF.into()),
             ("boundChild", format!(r"{DATA}\BOUND.DAT")),
             ("warnings", format!(r"{DATA}\WARNINGS.DAT")),
             ("ready", WORKER_READY.into()),
@@ -621,6 +663,24 @@ fn setup() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ordinary_worker_still_refuses_appcontainer_and_identity_drift() {
+        let sid = "S-1-5-21-1-2-3-1001";
+        let mut token: aiw_token::TokenEvidence = serde_json::from_value(serde_json::json!({
+            "schemaVersion":aiw_token::TOKEN_EVIDENCE_SCHEMA_VERSION,
+            "processId":std::process::id(),"tokenType":"primary","isAppContainer":false,
+            "userSid":sid,"integrity":{"sid":"S-1-16-8192","rid":8192,"level":"medium"},
+            "elevationType":"default","isElevated":false,"capabilities":[],"restrictedSidCount":0
+        }))
+        .unwrap();
+        assert!(ordinary_worker_token(&token, sid));
+        token.is_app_container = true;
+        assert!(!ordinary_worker_token(&token, sid));
+        token.is_app_container = false;
+        assert!(!ordinary_worker_token(&token, "S-1-5-21-1-2-3-1002"));
+        token.is_elevated = true;
+        assert!(!ordinary_worker_token(&token, sid));
+    }
     #[test]
     fn official_empty_warnings_null_contract_is_success_but_status_and_bounds_still_refuse() {
         assert!(decode_warnings(0, Ok(None)).unwrap().is_empty());

@@ -32,13 +32,13 @@ impl TrialProfile {
     fn root(self) -> &'static str {
         match self {
             Self::Capability => ROOT,
-            Self::Creation => r"C:\AIW-Mxc-Creation-Trial-20261106",
+            Self::Creation => r"C:\AIW-Mxc-Creation-Token-Trial-20261106",
         }
     }
     fn session(self) -> &'static str {
         match self {
             Self::Capability => SESSION,
-            Self::Creation => "a135cfb1-65ed-4330-9123-079d5b12eb82",
+            Self::Creation => "602fb01c-f760-45aa-91d5-ee4f21598d34",
         }
     }
     fn schema(self) -> &'static str {
@@ -222,6 +222,7 @@ struct CreationTrial {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CreationOwnerObservations {
+    root_token_measurement: Option<serde_json::Value>,
     owner_measured_child: Option<serde_json::Value>,
     exact_outer_job_membership: Option<bool>,
     release_gate_published: bool,
@@ -233,10 +234,12 @@ struct CreationPrefix {
     value: Option<serde_json::Value>,
     read_error: Option<String>,
 }
-const CREATION_PREFIXES: [&str; 16] = [
+const CREATION_PREFIXES: [&str; 18] = [
     "baseline",
     "probe",
     "spawn",
+    "rootToken",
+    "containedSelf",
     "boundChild",
     "warnings",
     "ready",
@@ -298,6 +301,10 @@ fn creation_marker_digest(
             if owner.owner_measured_child.is_some()
                 != (owner.exact_outer_job_membership == Some(true))
                 || (owner.release_gate_published && owner.owner_measured_child.is_none())
+                || owner
+                    .root_token_measurement
+                    .as_ref()
+                    .is_some_and(|m| !m.is_object())
                 || owner
                     .post_exit_binding_error
                     .as_ref()
@@ -1117,6 +1124,16 @@ mod tests {
         assert_eq!(
             creation_marker_digest(&bytes, &hash, 100).unwrap(),
             digest(&bytes)
+        );
+        let mut refused = marker.clone();
+        refused["ownerObservations"] = json!({"releaseGatePublished":false,
+            "rootTokenMeasurement":{"token":{"isAppContainer":true},"validationErrors":["userSid"]}});
+        refused["retainedPrefixes"]["rootToken"] =
+            json!({"value":{"measured":{"validationErrors":["userSid"]}},"readError":null});
+        assert!(creation_marker_digest(&serde_json::to_vec(&refused).unwrap(), &hash, 100).is_ok());
+        refused["ownerObservations"]["rootTokenMeasurement"] = json!(true);
+        assert!(
+            creation_marker_digest(&serde_json::to_vec(&refused).unwrap(), &hash, 100).is_err()
         );
         for (field, value) in [
             ("helperSha256", json!("b".repeat(64))),

@@ -58,8 +58,14 @@ active; neither implementation nor native acceptance is complete.
   a protected release gate. It retains failure prefixes across SDK wait/free
   and owned cleanup. A separate closed host profile binds its root/session,
   Driver-only policy and raw retained output to approval. Independent execution
-  and custody reviews passed after fixes. Actual creation/enforcement is still
-  unmeasured: build and source checks do not establish Sandbox support.
+  and custody reviews passed after fixes. Source `55068e6` then completed one
+  [fresh native creation trial](MXC-CREATION-NATIVE-20261106.md): ordinary positives
+  passed and SDK spawn returned status 0/PID, but the combined token guard refused
+  before retaining the child token or releasing the gate. Actual mismatch and
+  candidate enforcement remain unmeasured. Owned worker/outer cleanup passed;
+  original marker bytes stayed stable and retained Read made zero provider calls.
+  Preserve this run. The observer correction retains full token evidence before
+  validation and individual mismatches; native acceptance of that fix is pending.
 
 Focused checks so far: 11 provider retention tests, 9 existing/new 7-Zip native
 file tests, 7 preparation/retained-reader tests, 7 MXC contract tests, 7 probe/
@@ -77,14 +83,19 @@ passed in a fresh Sandbox; original outputs and independently audited private
 received envelopes remain outside Git. See the native record for pins and limits.
 Creation slice: 11 focused platform and 13 host tests, 101 default/102 research
 provider tests and all-target research Clippy passed. Logs: `C:/aiw/creation-*.log`.
+Token-observer correction: 12 focused platform and 13 host tests passed; all-target
+research Clippy passed. Independent execution-boundary and native-record reviews
+found no remaining blockers. Logs: `C:/aiw/creation-token-*.log`. A fresh fixed
+creation root/session prevents adoption or replay of the previous trial.
 Raw FILETIME identifiers require lossless/Rust auditing; do not round them through
 JavaScript numbers. Registry-link/create-only native semantics remain open before
 production wiring, and explicit cleanup cannot trigger a hidden Drop retry.
 
 ## Required next work
 
-Freeze/review a source-pinned creation package, then validate actual guest
-creation/enforcement under the existing Sandbox-only runtime authorization.
+Finish focused checks and independent review of the token-observer correction,
+then freeze/review a new source-pinned package and validate actual guest
+binding/enforcement under the existing Sandbox-only runtime authorization.
 Keep the outer watchdog/job unchanged and preserve exact failures without
 fallback. Never repair/adopt or replay the failed capability run. Continue with
 shared application process-tree
