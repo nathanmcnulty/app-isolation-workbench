@@ -41,9 +41,16 @@ pub(crate) struct ExpectedBinding {
     pub token: TokenEvidence,
 }
 
-fn token_matches(actual: &TokenEvidence, expected: &TokenEvidence) -> bool {
-    actual.token_type == TokenType::Primary
+fn token_matches(actual: &TokenEvidence, expected: &TokenEvidence, process_id: u32) -> bool {
+    actual.schema_version == aiw_token::TOKEN_EVIDENCE_SCHEMA_VERSION
+        && expected.schema_version == aiw_token::TOKEN_EVIDENCE_SCHEMA_VERSION
+        && process_id != 0
+        && expected.process_id != 0
+        && actual.process_id == process_id
+        && actual.token_type == TokenType::Primary
         && expected.token_type == TokenType::Primary
+        && actual.impersonation_level.is_none()
+        && expected.impersonation_level.is_none()
         && !actual.is_elevated
         && !expected.is_elevated
         && actual.integrity.rid <= 0x2000
@@ -115,6 +122,7 @@ pub(crate) struct ProcessObservation {
     pub token_before_continue: Option<TokenEvidence>,
     pub image_before_continue: Option<ImageObservation>,
     pub exit_code: Option<u32>,
+    pub exit_event_sequence: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -140,8 +148,8 @@ pub(crate) struct DebugTreeReport {
 impl DebugTreeReport {
     fn new(root_process_id: u32) -> Self {
         Self {
-            schema_version: "aiw.dev/private-debug-tree/v0alpha1",
-            scope: "instrumented DEBUG_PROCESS inherited CreateProcess chain; not broker/all-host coverage",
+            schema_version: aiw_provider_wsb::sevenzip_process_tree::SEVENZIP_PROCESS_CHAIN_SCHEMA,
+            scope: aiw_provider_wsb::sevenzip_process_tree::SEVENZIP_PROCESS_CHAIN_SCOPE,
             root_process_id,
             events_processed: 0,
             processes: Vec::new(),
@@ -425,7 +433,7 @@ pub(crate) mod native {
             }
             let token =
                 collect_process_token(root.as_handle()).map_err(|e| format!("root_token:{e}"))?;
-            if !token_matches(&token, &expected.token) {
+            if !token_matches(&token, &expected.token, info.dwProcessId) {
                 return Err("root_token_binding_mismatch".into());
             }
             // SAFETY: same thread owns this debugging chain. Explicitly retain
@@ -545,6 +553,7 @@ pub(crate) mod native {
                                 token_before_continue: None,
                                 image_before_continue: None,
                                 exit_code: None,
+                                exit_event_sequence: None,
                             });
                             if event.dwProcessId == info.dwProcessId {
                                 root_create_seen = true;
@@ -566,7 +575,7 @@ pub(crate) mod native {
                                         .map_err(|e| format!("event_token:{e}"))?;
                                     report.processes[index].token_before_continue =
                                         Some(token.clone());
-                                    if !token_matches(&token, &expected.token) {
+                                    if !token_matches(&token, &expected.token, event.dwProcessId) {
                                         return Err("descendant_token_binding_mismatch".into());
                                     }
                                     report.processes[index].creation_time_100ns =
@@ -607,7 +616,11 @@ pub(crate) mod native {
                     // SAFETY: discriminant selects exit-process data.
                     let exit = unsafe { event.u.ExitProcess };
                     match state.exit(event.dwProcessId, exit.dwExitCode) {
-                        Ok(index) => report.processes[index].exit_code = Some(exit.dwExitCode),
+                        Ok(index) => {
+                            report.processes[index].exit_code = Some(exit.dwExitCode);
+                            report.processes[index].exit_event_sequence =
+                                Some(report.events_processed);
+                        }
                         Err(error) => report.gap(error),
                     }
                     initial_breakpoints.remove(&event.dwProcessId);
@@ -697,6 +710,7 @@ pub(crate) mod native {
                 p.token_before_continue.is_some()
                     && p.image_before_continue.is_some()
                     && p.exit_code.is_some()
+                    && p.exit_event_sequence.is_some()
             });
         report.requires_debugger_process_exit = report.requires_exit(&state, root_create_seen);
         report
@@ -744,25 +758,33 @@ mod tests {
         let expected = standard_token();
         let mut child = expected.clone();
         child.process_id = 101;
-        assert!(token_matches(&child, &expected));
+        assert!(token_matches(&child, &expected, child.process_id));
+        assert!(!token_matches(&child, &expected, child.process_id + 1));
+        let mut wrong_schema = child.clone();
+        wrong_schema.schema_version = "wrong".into();
+        assert!(!token_matches(
+            &wrong_schema,
+            &expected,
+            wrong_schema.process_id
+        ));
         child.is_elevated = true;
-        assert!(!token_matches(&child, &expected));
+        assert!(!token_matches(&child, &expected, child.process_id));
         child = expected.clone();
         child.user_sid = "S-1-5-18".into();
-        assert!(!token_matches(&child, &expected));
+        assert!(!token_matches(&child, &expected, child.process_id));
         child = expected.clone();
         child.capabilities.push(aiw_token::SidAndAttributes {
             sid: "S-1-15-3-1".into(),
             attributes: 4,
         });
-        assert!(!token_matches(&child, &expected));
+        assert!(!token_matches(&child, &expected, child.process_id));
         child = expected.clone();
         child.is_app_container = true;
         child.app_container_sid = Some("S-1-15-2-123".into());
-        assert!(!token_matches(&child, &expected));
+        assert!(!token_matches(&child, &expected, child.process_id));
         child = expected.clone();
         child.token_type = TokenType::Impersonation;
-        assert!(!token_matches(&child, &expected));
+        assert!(!token_matches(&child, &expected, child.process_id));
     }
 
     #[test]

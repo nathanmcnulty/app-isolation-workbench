@@ -108,7 +108,7 @@ losslessly by an independent audit. No parent runtime or VM settings changed.
 | Original guest marker, 11,105 bytes | `524b412eecc32f86a99993c7923df3f161f8d3aadd704bd03ae3a7bcee726469` |
 | Independent outcome audit | `b5895178dfc16052f6bee2df289f6662e974c2002ab62b94bed2baa100509c31` |
 
-## Contained entry correction, native acceptance pending
+## Contained entry correction at `53e1d9b`
 
 Before SELF publication, the contained role previously queried Windows through
 WinRT `AnalyticsInfo` and resolved the account with `LookupAccountNameW`. Either
@@ -116,7 +116,7 @@ may be unnecessary inside the restricted child; neither is established as the
 timeout's cause. Missing SELF also cannot exclude loader, Rust startup, argument/
 image retrieval, token-query or publication failures.
 
-The next correction routes only the exact contained image/arguments to an early
+Source `53e1d9b` routes only the exact contained image/arguments to an early
 ENTRY record, then actual SELF token diagnostics. These writes precede token and
 environment authorization and never authorize controls. Setup and the ordinary
 worker retain exact Windows/account checks before SDK dispatch. The contained
@@ -124,5 +124,62 @@ role delegates environment/actor authorization to their verified owner chain and
 must match the protected gate's full token, PID, creation time, helper and request
 hashes. It no longer repeats WinRT activation or account-name lookup inside PSEC.
 Missing or mismatched gates still refuse controls; policy, grants, deadlines and
-owned cleanup remain unchanged. This needs another separately reviewed fresh
-package/trial and does not retroactively validate either earlier run.
+owned cleanup remain unchanged. The separately reviewed fresh trial below does
+not retroactively validate either earlier run.
+
+The full eight-file package was retained on the controller. The smaller transport
+carried seven files; staging copied only the unchanged pinned runtime input bytes
+from the old package's `Inputs` directory through held no-follow, single-link
+custody. It checked the source hash before copying, used CreateNew, then checked
+the destination and source identity/hash and the full eight-file inventory.
+It never accessed the old Trial, session, approval or output. A reviewed R2
+PowerShell ancestry-array defect was corrected before use; only reviewed R3
+transport scripts ran. No parent runtime was loaded or installed.
+
+Ordinary positives passed. SDK spawn returned status `0` and PID `6644`.
+Ordinary and elevated-owner image/token/creation-time observations matched;
+exact outer-job membership and gate publication passed. The actual token was
+primary, unelevated, the expected standard-user SID, AppContainer flag true,
+low integrity RID `4096` and one capability. These properties do not establish
+backend provenance.
+
+The worker again reached its 30-second caller deadline, retaining timeout-kill
+status `0` and SDK free begin/return. Twelve of nineteen prefixes were present.
+ENTRY, SELF, CONTROL, contained FAILURE, completion, pollEnd and waitEnd were
+absent with missing-file errors. Owner post-exit image querying again returned
+HRESULT `0x8007001f`. Owned worker and outer cleanup passed; marker bytes stayed
+stable and retained Read matched with zero provider calls. No recovery was
+needed. Original guest bytes were independently reconstructed losslessly and
+retained outside Git.
+
+| Item | SHA-256 |
+|---|---|
+| Full `mxc-creation-53e1d9b-r1.zip`, 3,816,514 bytes | `8d63fe9d8e1ffab8b6ed96db9e4014669ae51d19da1c4e75a4bfc5a235ca1d9d` |
+| Seven-file transport, 1,541,812 bytes | `8401d0e4f532b918d068dc71b2dd143f375794cd29c3f7544b1e40422e98771c` |
+| Approved plan | `855cf6d25d80420bbf740d7227bb35bbff2659aa3138ac39ad5f599ff00dc385` |
+| Config | `b1dfdddc35025b3a2896ffb5173b8bf9f7709709ea2921ce7b0d63103d5867fe` |
+| Start received envelope | `63fe0a84c318a37a70e82a4c8f4365043112b1f097c6669ac106d127d613f101` |
+| Read received envelope | `4a1632fdc094ecc3afc8bfd0a2d17645eaa6d801c49e88c75ed3405a0284e8e3` |
+| Original guest marker, 11,253 bytes | `313672e3bc2fd5f422144fd3643538b7afb5575eacda8354d3425528c9272b54` |
+| Independent outcome audit | `72ae35d1be32b0101bfaa7e8cee54422adc274eb7a252c75e88b7631b037e4af` |
+
+Missing final ENTRY does not prove that the helper never entered user code.
+Publication first creates `.pending`, writes and flushes it, then renames it;
+this source retained only final JSON. A partial or invalid pending file could
+therefore be lost. SDK source rejects only a failed ResumeThread call, without
+retaining its previous suspend count, so spawn success also does not establish
+that the primary thread ran. Do not add an extra resume call or infer a cause.
+Contained entry, selected filesystem enforcement, SDK inner cleanup and
+application compatibility remain unmeasured. Retain bounded raw final/pending
+diagnostics before another diagnostic run, and continue the independent actual
+application comparison, process-tree, registry and recovery work.
+
+The subsequent source correction collects eight fixed final/pending diagnostic
+paths after owned child cleanup. Complete held-file bytes, digest and identity
+are retained within a 16 KiB per-file limit; failures remain explicit refusals.
+Parsed prefix and raw-byte collection are independent. Serialized prefix,
+worker, handshake, owner and fixed-envelope budgets preserve earlier facts and
+the actual post-exit binding error under the 1 MiB publication limit. Seventeen
+focused platform and fifteen host-harness tests, all-target research Clippy and
+independent review passed. This is a tested correction awaiting a fresh native
+trial, not additional evidence about the retained `53e1d9b` run.

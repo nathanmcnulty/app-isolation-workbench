@@ -218,11 +218,157 @@ struct CreationTrial {
     selected_tier_attestation: String,
     owner_observations: CreationOwnerObservations,
     retained_prefixes: std::collections::BTreeMap<String, CreationPrefix>,
+    raw_contained_diagnostics: std::collections::BTreeMap<String, RawContainedDiagnostic>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RawContainedDiagnostic {
+    capture_complete: bool,
+    disposition: RawDiagnosticDisposition,
+    raw_hex: Option<String>,
+    sha256: Option<String>,
+    size_bytes: Option<u64>,
+    identity: Option<aiw_probe::WindowsFileIdentity>,
+    read_error: Option<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum RawDiagnosticDisposition {
+    Captured,
+    Refused,
+}
+
+const RAW_DIAGNOSTIC_BOUND: usize = 16 * 1024;
+const RAW_DIAGNOSTIC_NAMES: [&str; 8] = [
+    "ENTRY.DAT",
+    "ENTRY.DAT.pending",
+    "SELF.DAT",
+    "SELF.DAT.pending",
+    "CONTROL.DAT",
+    "CONTROL.DAT.pending",
+    "FAILURE.DAT",
+    "FAILURE.DAT.pending",
+];
+
+fn validate_raw_contained_diagnostics(
+    records: &std::collections::BTreeMap<String, RawContainedDiagnostic>,
+) -> Result<()> {
+    if records.len() != RAW_DIAGNOSTIC_NAMES.len()
+        || RAW_DIAGNOSTIC_NAMES
+            .iter()
+            .any(|key| !records.contains_key(*key))
+    {
+        return Err("raw contained diagnostic inventory differs".into());
+    }
+    let lower_hex = |value: &str, length: usize| {
+        value.len() == length
+            && value
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    };
+    let mut total_hex_bytes = 0_usize;
+    for (name, record) in records {
+        if serde_json::to_vec(record)?.len() > 40 * 1024 {
+            return Err("raw diagnostic serialized record budget".into());
+        }
+        match record.disposition {
+            RawDiagnosticDisposition::Captured => {
+                let (Some(raw), Some(hash), Some(size), Some(identity)) = (
+                    record.raw_hex.as_ref(),
+                    record.sha256.as_ref(),
+                    record.size_bytes,
+                    record.identity.as_ref(),
+                ) else {
+                    return Err("complete raw diagnostic lacks held capture facts".into());
+                };
+                if !record.capture_complete
+                    || record.read_error.is_some()
+                    || size > RAW_DIAGNOSTIC_BOUND as u64
+                    || !lower_hex(raw, size as usize * 2)
+                    || !lower_hex(hash, 64)
+                    || !lower_hex(&identity.volume_serial_number, 16)
+                    || !lower_hex(&identity.file_id, 32)
+                    || !identity
+                        .final_path
+                        .strip_prefix(r"\\?\")
+                        .unwrap_or(&identity.final_path)
+                        .eq_ignore_ascii_case(&format!(r"C:\AIW\SevenZip\Work\Mxc\Output\{name}"))
+                {
+                    return Err("complete raw diagnostic shape/binding differs".into());
+                }
+                let bytes = hex::decode(raw)?;
+                if digest(&bytes) != *hash {
+                    return Err("complete raw diagnostic byte digest differs".into());
+                }
+                total_hex_bytes += raw.len();
+            }
+            RawDiagnosticDisposition::Refused => {
+                if record.capture_complete
+                    || record.raw_hex.is_some()
+                    || record.sha256.is_some()
+                    || record.size_bytes.is_some()
+                    || record.identity.is_some()
+                    || record
+                        .read_error
+                        .as_ref()
+                        .is_none_or(|s| s.is_empty() || s.len() > 2048)
+                {
+                    return Err("refused raw diagnostic claims captured facts".into());
+                }
+            }
+        }
+    }
+    if total_hex_bytes > 256 * 1024 {
+        return Err("raw contained diagnostic total bound".into());
+    }
+    Ok(())
+}
+
+fn validate_creation_serialized_budgets(value: &serde_json::Value) -> Result<()> {
+    let prefixes = value["retainedPrefixes"]
+        .as_object()
+        .ok_or("prefix map required")?;
+    let mut prefix_bytes = 0;
+    for record in prefixes.values() {
+        let bytes = serde_json::to_vec(record)?.len();
+        if bytes > 8 * 1024 {
+            return Err("parsed prefix serialized record budget".into());
+        }
+        prefix_bytes += bytes;
+    }
+    if prefix_bytes > 128 * 1024 {
+        return Err("parsed prefix aggregate serialized budget".into());
+    }
+    for field in ["worker", "handshake"] {
+        if serde_json::to_vec(&value[field])?.len() > 64 * 1024 {
+            return Err("ancillary serialized budget".into());
+        }
+    }
+    if serde_json::to_vec(&value["ownerObservations"])?.len() > 128 * 1024 {
+        return Err("owner serialized budget".into());
+    }
+    let mut fixed = value.clone();
+    for field in [
+        "retainedPrefixes",
+        "rawContainedDiagnostics",
+        "worker",
+        "handshake",
+        "ownerObservations",
+    ] {
+        fixed[field] = serde_json::Value::Null;
+    }
+    if serde_json::to_vec(&fixed)?.len() > 128 * 1024 {
+        return Err("fixed creation envelope serialized budget".into());
+    }
+    Ok(())
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CreationOwnerObservations {
     root_token_measurement: Option<serde_json::Value>,
+    root_token_measurement_read_error: Option<String>,
     owner_measured_child: Option<serde_json::Value>,
     exact_outer_job_membership: Option<bool>,
     release_gate_published: bool,
@@ -274,6 +420,7 @@ fn creation_marker_digest(
     let value: serde_json::Value = serde_json::from_slice(bytes)?;
     match value["schemaVersion"].as_str() {
         Some("aiw.dev/mxc-creation-trial/v0alpha1") => {
+            validate_creation_serialized_budgets(&value)?;
             let v: CreationTrial = serde_json::from_slice(bytes)?;
             if v.schema_version != "aiw.dev/mxc-creation-trial/v0alpha1"
                 || !v.research_only
@@ -298,6 +445,7 @@ fn creation_marker_digest(
                 return Err("creation observation envelope differs".into());
             }
             v.standard_context.validate_token(&v.held_worker_token)?;
+            validate_raw_contained_diagnostics(&v.raw_contained_diagnostics)?;
             let owner = &v.owner_observations;
             if owner.owner_measured_child.is_some()
                 != (owner.exact_outer_job_membership == Some(true))
@@ -306,6 +454,14 @@ fn creation_marker_digest(
                     .root_token_measurement
                     .as_ref()
                     .is_some_and(|m| !m.is_object())
+                || owner
+                    .root_token_measurement_read_error
+                    .as_ref()
+                    .is_some_and(|error| {
+                        error.is_empty()
+                            || error.len() > 2048
+                            || owner.root_token_measurement.is_some()
+                    })
                 || owner
                     .post_exit_binding_error
                     .as_ref()
@@ -1082,6 +1238,156 @@ pub fn run() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn refused_raw_diagnostics() -> serde_json::Value {
+        let mut records = serde_json::Map::new();
+        for name in RAW_DIAGNOSTIC_NAMES {
+            records.insert(
+                name.into(),
+                json!({"captureComplete":false,"disposition":"refused",
+                "rawHex":null,"sha256":null,"sizeBytes":null,"identity":null,
+                "readError":"complete capture refused; native reason not classified"}),
+            );
+        }
+        records.into()
+    }
+
+    fn raw_diagnostics_valid(value: &serde_json::Value) -> bool {
+        serde_json::from_value::<std::collections::BTreeMap<String, RawContainedDiagnostic>>(
+            value.clone(),
+        )
+        .is_ok_and(|records| validate_raw_contained_diagnostics(&records).is_ok())
+    }
+
+    #[test]
+    fn raw_diagnostics_preserve_complete_arbitrary_bytes_and_explicit_refusals() {
+        let mut value = refused_raw_diagnostics();
+        assert!(raw_diagnostics_valid(&value));
+        for bytes in [
+            vec![],
+            vec![0, 255, 128],
+            b"{malformed".to_vec(),
+            vec![42; 16384],
+        ] {
+            value["ENTRY.DAT.pending"] = json!({"captureComplete":true,"disposition":"captured",
+                "rawHex":hex::encode(&bytes),"sha256":digest(&bytes),"sizeBytes":bytes.len(),
+                "identity":{"finalPath":r"\\?\C:\AIW\SevenZip\Work\Mxc\Output\ENTRY.DAT.pending",
+                    "volumeSerialNumber":"1".repeat(16),"fileId":"2".repeat(32)},"readError":null});
+            assert!(raw_diagnostics_valid(&value));
+        }
+        let captured = value.clone();
+        let bytes = vec![0; RAW_DIAGNOSTIC_BOUND];
+        let mut maximum = refused_raw_diagnostics();
+        for name in RAW_DIAGNOSTIC_NAMES {
+            maximum[name] = json!({"captureComplete":true,"disposition":"captured",
+                "rawHex":hex::encode(&bytes),"sha256":digest(&bytes),"sizeBytes":bytes.len(),
+                "identity":{"finalPath":format!(r"C:\AIW\SevenZip\Work\Mxc\Output\{name}"),
+                    "volumeSerialNumber":"1".repeat(16),"fileId":"2".repeat(32)},"readError":null});
+        }
+        assert!(raw_diagnostics_valid(&maximum));
+        assert!(serde_json::to_vec(&maximum).unwrap().len() < 322 * 1024);
+        for (field, replacement) in [
+            ("rawHex", json!("00")),
+            ("sha256", json!("0".repeat(64))),
+            ("sizeBytes", json!(16385)),
+            ("captureComplete", json!(false)),
+            ("readError", json!("read failed")),
+            ("unexpected", json!(true)),
+        ] {
+            let mut changed = captured.clone();
+            changed["ENTRY.DAT.pending"][field] = replacement;
+            assert!(!raw_diagnostics_valid(&changed), "{field}");
+        }
+        let mut wrong_path = captured.clone();
+        wrong_path["ENTRY.DAT.pending"]["identity"]["finalPath"] =
+            json!(r"C:\other\ENTRY.DAT.pending");
+        assert!(!raw_diagnostics_valid(&wrong_path));
+        let mut missing = captured.clone();
+        missing.as_object_mut().unwrap().remove("SELF.DAT");
+        assert!(!raw_diagnostics_valid(&missing));
+        let mut extra = captured.clone();
+        extra["arbitrary-path"] = extra["SELF.DAT"].clone();
+        assert!(!raw_diagnostics_valid(&extra));
+        let mut invented = refused_raw_diagnostics();
+        invented["SELF.DAT"]["sizeBytes"] = json!(0);
+        assert!(!raw_diagnostics_valid(&invented));
+    }
+
+    #[test]
+    fn combined_creation_budget_fits_and_preserves_owner_error_and_binding() {
+        // Synthetic bounded nested research data tests custody parsing only;
+        // these strings are not assertions about an actual SDK execution.
+        let old = marker_fixture();
+        let hash = "a".repeat(64);
+        let mut marker = json!({"schemaVersion":"aiw.dev/mxc-creation-trial/v0alpha1","researchOnly":true,
+            "helperSha256":hash,"helperSizeBytes":100,"dllSha256":contract::RUNTIME_DLL_SHA256,
+            "windows":old["windows"],"standardContext":old["standardContext"],"heldWorkerToken":old["heldObserverToken"],
+            "handshake":{"diagnostic":"h".repeat(63000)},"handshakeError":null,
+            "worker":{"diagnostic":"w".repeat(63000)},"workerReadError":null,
+            "ownedJobEmpty":true,"cleanupError":null,"validationErrors":[],"applicationExecutionRequested":false,
+            "selectedTierAttestation":"unmeasured","ownerObservations":{
+                "ownerMeasuredChild":{"processId":43,"creationTime":42,"diagnostic":"c".repeat(63000)},
+                "exactOuterJobMembership":true,"releaseGatePublished":true,
+                "postExitBindingError":"QueryFullProcessImageNameW: hresult=0x8007001f",
+                "rootTokenMeasurement":null,"rootTokenMeasurementReadError":"duplicate token serialized budget exceeded"},
+            "retainedPrefixes":{},"rawContainedDiagnostics":{}});
+        for (index, key) in CREATION_PREFIXES.iter().enumerate() {
+            marker["retainedPrefixes"][*key] = if index < 16 {
+                json!({"value":{"processId":43,"diagnostic":"p".repeat(7950)},"readError":null})
+            } else {
+                json!({"value":null,"readError":"prefix aggregate budget exceeded"})
+            };
+        }
+        let raw = vec![0; RAW_DIAGNOSTIC_BOUND];
+        for key in RAW_DIAGNOSTIC_NAMES {
+            marker["rawContainedDiagnostics"][key] = json!({"captureComplete":true,"disposition":"captured",
+                "rawHex":hex::encode(&raw),"sha256":digest(&raw),"sizeBytes":raw.len(),
+                "identity":{"finalPath":format!(r"C:\AIW\SevenZip\Work\Mxc\Output\{key}"),
+                    "volumeSerialNumber":"1".repeat(16),"fileId":"2".repeat(32)},"readError":null});
+        }
+        let serialized = serde_json::to_vec(&marker).unwrap();
+        assert!(serialized.len() < 834 * 1024);
+        assert_eq!(
+            creation_marker_digest(&serialized, &hash, 100).unwrap(),
+            digest(&serialized)
+        );
+        assert_eq!(
+            marker["ownerObservations"]["ownerMeasuredChild"]["processId"],
+            43
+        );
+        assert_eq!(marker["ownerObservations"]["releaseGatePublished"], true);
+        assert!(
+            marker["ownerObservations"]["postExitBindingError"]
+                .as_str()
+                .unwrap()
+                .contains("0x8007001f")
+        );
+        for (field, text) in [
+            ("worker", "x".repeat(65536)),
+            ("handshake", "x".repeat(65536)),
+            ("ownerObservations", "x".repeat(131072)),
+        ] {
+            let mut oversized = marker.clone();
+            oversized[field] = json!({"diagnostic":text});
+            assert!(
+                creation_marker_digest(&serde_json::to_vec(&oversized).unwrap(), &hash, 100)
+                    .is_err()
+            );
+        }
+        let mut contradiction = marker.clone();
+        contradiction["ownerObservations"]["rootTokenMeasurement"] = json!({"token":"retained"});
+        assert!(
+            creation_marker_digest(&serde_json::to_vec(&contradiction).unwrap(), &hash, 100)
+                .is_err()
+        );
+        contradiction = marker;
+        contradiction["ownerObservations"]["rootTokenMeasurementReadError"] =
+            json!("😀".repeat(513));
+        assert!(
+            creation_marker_digest(&serde_json::to_vec(&contradiction).unwrap(), &hash, 100)
+                .is_err()
+        );
+    }
     #[test]
     fn changed_raw_creation_bytes_cannot_be_exported_under_an_accepted_hash() {
         let first = b"original accepted research marker";
@@ -1115,7 +1421,7 @@ mod tests {
             "windows":old["windows"],"standardContext":old["standardContext"],"heldWorkerToken":old["heldObserverToken"],
             "handshake":null,"handshakeError":"worker watchdog after measured release","worker":null,"workerReadError":"missing",
             "ownedJobEmpty":true,"cleanupError":null,"validationErrors":[],"applicationExecutionRequested":false,
-            "selectedTierAttestation":"unmeasured","ownerObservations":{"ownerMeasuredChild":{"processId":43},"exactOuterJobMembership":true,"releaseGatePublished":true},"retainedPrefixes":{}});
+            "selectedTierAttestation":"unmeasured","ownerObservations":{"ownerMeasuredChild":{"processId":43},"exactOuterJobMembership":true,"releaseGatePublished":true},"retainedPrefixes":{},"rawContainedDiagnostics":refused_raw_diagnostics()});
         for key in CREATION_PREFIXES {
             marker["retainedPrefixes"][key] =
                 json!({"value":null,"readError":"missing after interrupted worker"});
@@ -1125,6 +1431,21 @@ mod tests {
         assert_eq!(
             creation_marker_digest(&bytes, &hash, 100).unwrap(),
             digest(&bytes)
+        );
+        let canonical_owner = marker["ownerObservations"].clone();
+        let mut oversized = marker.clone();
+        oversized["retainedPrefixes"]["probe"] =
+            json!({"value":"\0".repeat(8192),"readError":null});
+        assert!(
+            creation_marker_digest(&serde_json::to_vec(&oversized).unwrap(), &hash, 100).is_err()
+        );
+        // Explicit refusal is valid without changing the canonical envelope,
+        // retained baseline/spawn fields or owner binding observations.
+        oversized["retainedPrefixes"]["probe"] =
+            json!({"value":null,"readError":"serialized prefix budget exceeded"});
+        assert_eq!(oversized["ownerObservations"], canonical_owner);
+        assert!(
+            creation_marker_digest(&serde_json::to_vec(&oversized).unwrap(), &hash, 100).is_ok()
         );
         let mut refused = marker.clone();
         refused["ownerObservations"] = json!({"releaseGatePublished":false,

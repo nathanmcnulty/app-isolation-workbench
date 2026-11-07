@@ -73,8 +73,17 @@ cross-observer identity/exact-job checks before gate release, then timed out
 without contained SELF or filesystem controls. Cleanup and retained Read passed;
 enforcement remains unmeasured. An early-entry diagnostic correction removes
 redundant contained WinRT/account lookups while preserving outside authorization
-and the full protected gate. New-source acceptance remains pending. No 7-Zip ran
-in these controls.
+and the full protected gate. Its fresh `53e1d9b` trial also timed out without
+final ENTRY/SELF/controls, despite matching outside identity/job checks and gate
+release. Cleanup and Read passed. Pending publication bytes were not collected,
+so neither timeout locates the failure or proves MXC unavailable. Bounded raw
+diagnostics now preserve complete bytes or explicit refusals for eight fixed
+final/pending names after owned child cleanup. Serialized component and aggregate
+budgets keep the combined report below the publisher limit while preserving
+earlier parsed facts and the actual owner binding error. This correction has
+focused negative tests and independent review; its native validation and the
+independent ordinary/classic application tree work remain next.
+No 7-Zip ran in these controls.
 
 Process-tree and registry foundations are test-compiled only. The collector
 records an inherited debugger chain, not broker-created processes or invented

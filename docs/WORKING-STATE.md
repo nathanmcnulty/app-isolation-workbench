@@ -52,6 +52,12 @@ active; neither implementation nor native acceptance is complete.
   test-compiled only, with no production role wiring or native acceptance.
   Registry deletion uses the exact retained key handle; debugger gaps require
   the dedicated helper to fail-stop even if job accounting later reconciles.
+- A bounded typed process-chain contract now validates create/exit sequences,
+  PID reuse intervals, externally supplied held-root token/image/time binding
+  and exact-job accounting. The test-only native collector emits exit-event
+  sequences and checks token schema/event PID. Both sources are now included
+  in the application source commitment. This foundation is not production wiring
+  or native descendant coverage; fast-child/grandchild proof remains required.
 - The default-off creation control now dispatches only the fixed cooperative
   Driver request. Matching ordinary filesystem positives precede spawn; an
   ordinary held-process observation and an owner-held exact-job check precede
@@ -69,8 +75,13 @@ active; neither implementation nor native acceptance is complete.
   then timed out without SELF or filesystem controls. Cleanup/Read custody passed;
   enforcement remains unmeasured. The contained-entry correction now publishes
   preauthorization diagnostics before token queries and delegates redundant
-  WinRT/account checks to the verified outside owner chain. Its native acceptance
-  is pending; neither earlier run may be replayed or retroactively accepted.
+  WinRT/account checks to the verified outside owner chain. Its fresh `53e1d9b`
+  trial again passed outside identity/job/gate checks but timed out without final
+  ENTRY/SELF or controls. Cleanup and Read custody passed. Final-only collection
+  misses pending/invalid publication bytes. The new collector retains all eight
+  fixed final/pending diagnostic files as complete bounded bytes or explicit
+  refusals, independently of parsed prefixes. No trial may be replayed, and neither timeout proves a cause,
+  MXC unavailability or application incompatibility.
 
 Focused checks so far: 11 provider retention tests, 9 existing/new 7-Zip native
 file tests, 7 preparation/retained-reader tests, 7 MXC contract tests, 7 probe/
@@ -94,16 +105,29 @@ found no remaining blockers. Logs: `C:/aiw/creation-token-*.log`. A fresh fixed
 creation root/session prevents adoption or replay of the previous trial.
 Contained-entry correction: 13 focused platform and 13 host tests and all-target
 research Clippy passed. Independent execution-boundary review found no remaining
-blockers. Logs: `C:/aiw/creation-entry-*.log`; fresh native acceptance is pending.
+blockers. Logs: `C:/aiw/creation-entry-*.log`; its fresh native trial is a retained
+partial result, not enforcement acceptance.
+Raw-diagnostic/process-chain foundation: 106 provider tests, 17 focused platform
+tests, 15 host-harness tests and all-target research Clippy passed. The earlier
+full platform run passed 216 tests with 10 ignored; subsequent budget changes
+were covered by the focused rerun. Independent reviews passed after fixes for
+serialized aggregate limits and preservation of the actual owner binding error.
+Logs: `C:/aiw/process-tree-provider-final-tests.log` and
+`C:/aiw/raw-diagnostic-*-final*.log`. New source framing contains 15 shared files;
+historical trial packages retain their original 13-file commitment. Raw capture
+and the process-chain contract still require their own disposable native proof.
 Raw FILETIME identifiers require lossless/Rust auditing; do not round them through
 JavaScript numbers. Registry-link/create-only native semantics remain open before
 production wiring, and explicit cleanup cannot trigger a hidden Drop retry.
 
 ## Required next work
 
-Finish focused checks and independent review of the contained-entry correction,
-then freeze/review a new source-pinned package and validate actual guest
-binding/enforcement under the existing Sandbox-only runtime authorization.
+Validate the new bounded raw final/pending MXC diagnostics without treating them
+as completion, and investigate a separately pinned minimal contained driver if
+needed. Continue the independent ordinary/classic application process-tree
+contract and native fast-child/grandchild proof; MXC startup must not become a
+gate on that work. Future trials still require fresh source-pinned proposals
+under the existing Sandbox-only runtime authorization.
 Keep the outer watchdog/job unchanged and preserve exact failures without
 fallback. Never repair/adopt or replay the failed capability run. Continue with
 shared application process-tree

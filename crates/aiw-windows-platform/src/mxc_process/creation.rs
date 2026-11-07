@@ -129,7 +129,91 @@ fn ordinary_sid() -> Result<String> {
     )?)
 }
 fn bounded(e: impl std::fmt::Display) -> String {
-    e.to_string().chars().take(4096).collect()
+    let text = e.to_string();
+    let mut end = text.len().min(2048);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text[..end].to_owned()
+}
+
+const PREFIX_RECORD_BOUND: usize = 8 * 1024;
+const PREFIX_TOTAL_BOUND: usize = 128 * 1024;
+const ANCILLARY_BOUND: usize = 64 * 1024;
+const OWNER_BOUND: usize = 128 * 1024;
+const FIXED_ENVELOPE_BOUND: usize = 128 * 1024;
+const MARKER_BOUND: usize = 1024 * 1024;
+
+fn prefix_record(
+    read: Result<serde_json::Value>,
+    used: &mut usize,
+    remaining: usize,
+) -> serde_json::Value {
+    let mut record = match read {
+        Ok(value) => serde_json::json!({"value":value,"readError":null}),
+        Err(error) => serde_json::json!({"value":null,"readError":bounded(error)}),
+    };
+    // Reserve one short explicit refusal for every later fixed key. Measure
+    // actual serialized bytes, including escaping and the wrapper itself.
+    let available = PREFIX_TOTAL_BOUND.saturating_sub(*used + remaining * 256);
+    let mut size = serde_json::to_vec(&record)
+        .expect("JSON Value serializes")
+        .len();
+    if size > PREFIX_RECORD_BOUND || size > available {
+        record = serde_json::json!({"value":null,"readError":"parsed prefix refused: serialized record or aggregate budget exceeded"});
+        size = serde_json::to_vec(&record)
+            .expect("JSON Value serializes")
+            .len();
+    }
+    *used += size;
+    record
+}
+
+fn bounded_creation_report(mut report: serde_json::Value) -> Result<serde_json::Value> {
+    if let Some(error) = report["ownerObservations"]["postExitBindingError"].as_str() {
+        let error = bounded(error);
+        report["ownerObservations"]["postExitBindingError"] = error.into();
+    }
+    // These ancillary records may duplicate prefixes. Refusal never removes
+    // baseline/probe/spawn/PID prefixes to make room for duplicated data.
+    for (field, error) in [
+        ("worker", "workerReadError"),
+        ("handshake", "handshakeError"),
+    ] {
+        if serde_json::to_vec(&report[field])?.len() > ANCILLARY_BOUND {
+            report[field] = serde_json::Value::Null;
+            report[error] = "ancillary observation refused: serialized budget exceeded".into();
+        }
+    }
+    if serde_json::to_vec(&report["ownerObservations"])?.len() > OWNER_BOUND {
+        // Preserve actual gate/child facts; the duplicate token has its own
+        // separately budgeted prefix. Never turn a published gate into false.
+        report["ownerObservations"]["rootTokenMeasurement"] = serde_json::Value::Null;
+        report["ownerObservations"]["rootTokenMeasurementReadError"] =
+            "duplicate owner token observation refused: serialized budget exceeded".into();
+        if serde_json::to_vec(&report["ownerObservations"])?.len() > OWNER_BOUND {
+            return Err("fixed owner child binding exceeds serialized contract".into());
+        }
+    }
+    // Actual whole-marker check, before entering the publication function.
+    // Prefixes128KiB + raw320KiB + worker/handshake2*64KiB + owner128KiB
+    // + fixed128KiB =832KiB, plus <2KiB closed-map overhead: <=834KiB.
+    let mut fixed = report.clone();
+    for field in [
+        "retainedPrefixes",
+        "rawContainedDiagnostics",
+        "worker",
+        "handshake",
+        "ownerObservations",
+    ] {
+        fixed[field] = serde_json::Value::Null;
+    }
+    if serde_json::to_vec(&fixed)?.len() > FIXED_ENVELOPE_BOUND
+        || serde_json::to_vec(&report)?.len() > MARKER_BOUND
+    {
+        return Err("fixed creation envelope exceeds bounded publication contract".into());
+    }
+    Ok(report)
 }
 fn read_json<T: serde::de::DeserializeOwned>(path: &str) -> Result<T> {
     let held = crate::HeldApplicationFile::open_bounded(Path::new(path), 65536)?;
@@ -141,6 +225,79 @@ fn helper_hash() -> Result<String> {
     let held =
         crate::HeldApplicationFile::open_bounded(&std::env::current_exe()?, 16 * 1024 * 1024)?;
     Ok(held.observation().sha256.clone())
+}
+
+const RAW_DIAGNOSTIC_BOUND: u64 = 16 * 1024;
+
+// Closed data-only paths. These bytes need not be JSON: interrupted publication
+// may leave an empty, malformed or binary .pending file worth preserving.
+fn raw_contained_diagnostics() -> serde_json::Value {
+    let mut records = serde_json::Map::new();
+    for (name, path) in [
+        ("ENTRY.DAT", CONTROL_ENTRY),
+        ("SELF.DAT", CONTROL_SELF),
+        ("CONTROL.DAT", CONTROL_RESULT),
+        ("FAILURE.DAT", CONTROL_FAILURE),
+    ] {
+        for suffix in ["", ".pending"] {
+            let captured = capture_raw_diagnostic(&format!("{path}{suffix}"));
+            records.insert(format!("{name}{suffix}"), captured);
+        }
+    }
+    records.into()
+}
+
+fn captured_raw_diagnostic(
+    bytes: &[u8],
+    identity: &aiw_probe::WindowsFileIdentity,
+    expected_sha256: &str,
+) -> Result<serde_json::Value> {
+    use sha2::{Digest, Sha256};
+    if bytes.len() as u64 > RAW_DIAGNOSTIC_BOUND {
+        return Err("raw diagnostic exceeds complete-capture bound".into());
+    }
+    let hash = hex::encode(Sha256::digest(bytes));
+    if hash != expected_sha256 {
+        return Err("raw diagnostic held-byte digest differs".into());
+    }
+    let record = serde_json::json!({"captureComplete":true,"disposition":"captured",
+        "rawHex":hex::encode(bytes),"sha256":hash,"sizeBytes":bytes.len(),
+        "identity":identity,"readError":null});
+    if serde_json::to_vec(&record)?.len() > 40 * 1024 {
+        return Err("raw diagnostic serialized record exceeds budget".into());
+    }
+    Ok(record)
+}
+
+fn capture_raw_diagnostic(path: &str) -> serde_json::Value {
+    let capture = (|| -> Result<serde_json::Value> {
+        // open_bounded checks size before hashing. No unbounded fallback or
+        // truncated prefix can masquerade as a complete diagnostic.
+        let held = crate::HeldApplicationFile::open_bounded(Path::new(path), RAW_DIAGNOSTIC_BOUND)?;
+        if !held
+            .observation()
+            .identity
+            .final_path
+            .strip_prefix(r"\\?\")
+            .unwrap_or(&held.observation().identity.final_path)
+            .eq_ignore_ascii_case(path)
+        {
+            return Err("raw diagnostic held path differs from fixed role".into());
+        }
+        let bytes = held.read_bounded(RAW_DIAGNOSTIC_BOUND)?;
+        let record = captured_raw_diagnostic(
+            &bytes,
+            &held.observation().identity,
+            &held.observation().sha256,
+        )?;
+        held.revalidate()?;
+        Ok(record)
+    })();
+    capture.unwrap_or_else(|error| {
+        serde_json::json!({"captureComplete":false,
+        "disposition":"refused","rawHex":null,"sha256":null,"sizeBytes":null,
+        "identity":null,"readError":bounded(error)})
+    })
 }
 
 // These opens never mutate Input or Denied data. The matching baseline has file
@@ -644,9 +801,11 @@ fn setup() -> Result<()> {
             )
         })();
         let cleanup = child.cleanup();
+        let raw_contained_diagnostics = raw_contained_diagnostics();
         let worker = read_json::<serde_json::Value>(WORKER_RESULT);
         let mut prefixes = serde_json::Map::new();
-        for (name, path) in [
+        let mut prefix_bytes = 0;
+        for (index, (name, path)) in [
             ("baseline", format!(r"{DATA}\BASELINE.DAT")),
             ("probe", format!(r"{DATA}\PROBE.DAT")),
             ("spawn", format!(r"{DATA}\SPAWN.DAT")),
@@ -666,9 +825,15 @@ fn setup() -> Result<()> {
             ("waitEnd", format!(r"{DATA}\WAIT_END.DAT")),
             ("timeout", format!(r"{DATA}\TIMEOUT.DAT")),
             ("timeoutEnd", format!(r"{DATA}\TIMEOUT_END.DAT")),
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
             let read = read_json::<serde_json::Value>(&path);
-            prefixes.insert(name.into(),serde_json::json!({"value":read.as_ref().ok(),"readError":read.as_ref().err().map(bounded)}));
+            prefixes.insert(
+                name.into(),
+                prefix_record(read, &mut prefix_bytes, 18 - index),
+            );
         }
         let validation = [
             helper.revalidate().map_err(bounded),
@@ -679,13 +844,14 @@ fn setup() -> Result<()> {
         .into_iter()
         .filter_map(std::result::Result::err)
         .collect::<Vec<_>>();
-        Ok(
+        bounded_creation_report(
             serde_json::json!({"schemaVersion":"aiw.dev/mxc-creation-trial/v0alpha1","researchOnly":true,
             "helperSha256":inputs.helper_hash(),"helperSizeBytes":inputs.helper_size(),"dllSha256":contract::RUNTIME_DLL_SHA256,
             "windows":windows,"heldWorkerToken":worker_token,"standardContext":standard.context(),
             "handshake":handshake.as_ref().ok(),"handshakeError":handshake.as_ref().err().map(bounded),
             "worker":worker.as_ref().ok(),"workerReadError":worker.as_ref().err().map(bounded),
             "ownerObservations":owner_observations,"retainedPrefixes":prefixes,
+            "rawContainedDiagnostics":raw_contained_diagnostics,
             "ownedJobEmpty":cleanup.is_ok(),"cleanupError":cleanup.err().map(bounded),"validationErrors":validation,
             "applicationExecutionRequested":false,"selectedTierAttestation":"unmeasured"}),
         )
@@ -700,6 +866,155 @@ fn setup() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn serialized_prefix_and_marker_budgets_preserve_earlier_facts() {
+        let mut used = 0;
+        let mut prefixes = serde_json::Map::new();
+        for index in 0..19 {
+            let value = if index < 3 {
+                serde_json::json!({"measured":true,"processId":42})
+            } else {
+                // Escaping expands these beyond the per-record budget.
+                serde_json::json!("\0".repeat(8192))
+            };
+            prefixes.insert(
+                index.to_string(),
+                prefix_record(Ok(value), &mut used, 18 - index),
+            );
+        }
+        assert_eq!(prefixes.len(), 19);
+        assert!(used <= PREFIX_TOTAL_BOUND);
+        for index in 0..3 {
+            assert_eq!(prefixes[&index.to_string()]["value"]["processId"], 42);
+        }
+        assert!(prefixes["3"]["value"].is_null());
+        let mut aggregate_used = 0;
+        let records = (0..19)
+            .map(|index| {
+                prefix_record(
+                    Ok(serde_json::json!("x".repeat(8000))),
+                    &mut aggregate_used,
+                    18 - index,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert!(aggregate_used <= PREFIX_TOTAL_BOUND);
+        assert!(records.iter().any(|record| record["value"].is_null()));
+        let report = serde_json::json!({"retainedPrefixes":prefixes,
+            "rawContainedDiagnostics":{},"worker":"x".repeat(70000),"workerReadError":null,
+            "handshake":"\0".repeat(70000),"handshakeError":null,
+            "ownerObservations":{"releaseGatePublished":true,"binding":{"processId":42}}});
+        let report = bounded_creation_report(report).unwrap();
+        assert!(report["worker"].is_null());
+        assert!(report["handshake"].is_null());
+        assert_eq!(report["ownerObservations"]["binding"]["processId"], 42);
+        assert_eq!(report["retainedPrefixes"]["0"]["value"]["processId"], 42);
+        assert!(serde_json::to_vec(&report).unwrap().len() <= 834 * 1024);
+    }
+
+    #[test]
+    fn diagnostic_errors_are_utf8_byte_bounded_without_split_characters() {
+        for error in [
+            "😀".repeat(1000),
+            "é".repeat(2000),
+            format!("{}😀", "a".repeat(2047)),
+        ] {
+            let bounded = bounded(error);
+            assert!(bounded.len() <= 2048);
+            assert!(std::str::from_utf8(bounded.as_bytes()).is_ok());
+            let mut used = 0;
+            let record = prefix_record(Err(bounded.into()), &mut used, 18);
+            assert!(serde_json::to_vec(&record).unwrap().len() <= PREFIX_RECORD_BOUND);
+        }
+    }
+
+    #[test]
+    fn combined_near_limit_report_keeps_raw_prefix_gate_and_post_exit_facts() {
+        use sha2::{Digest, Sha256};
+        let bytes = vec![0; RAW_DIAGNOSTIC_BOUND as usize];
+        let hash = hex::encode(Sha256::digest(&bytes));
+        let mut raw = serde_json::Map::new();
+        for name in ["ENTRY.DAT", "SELF.DAT", "CONTROL.DAT", "FAILURE.DAT"] {
+            for suffix in ["", ".pending"] {
+                let key = format!("{name}{suffix}");
+                let identity = aiw_probe::WindowsFileIdentity {
+                    final_path: format!(r"C:\AIW\SevenZip\Work\Mxc\Output\{key}"),
+                    volume_serial_number: "1".repeat(16),
+                    file_id: "2".repeat(32),
+                };
+                raw.insert(
+                    key,
+                    captured_raw_diagnostic(&bytes, &identity, &hash).unwrap(),
+                );
+            }
+        }
+        let mut used = 0;
+        let mut prefixes = serde_json::Map::new();
+        for index in 0..19 {
+            prefixes.insert(
+                index.to_string(),
+                prefix_record(
+                    Ok(serde_json::json!({"processId":42,"diagnostic":"x".repeat(7950)})),
+                    &mut used,
+                    18 - index,
+                ),
+            );
+        }
+        assert!(used > 120 * 1024 && used <= PREFIX_TOTAL_BOUND);
+        let post_exit = "QueryFullProcessImageNameW: hresult=0x8007001f";
+        let report = bounded_creation_report(serde_json::json!({
+            "retainedPrefixes":prefixes,"rawContainedDiagnostics":raw,
+            "worker":{"diagnostic":"w".repeat(63000)},"workerReadError":null,
+            "handshake":{"diagnostic":"h".repeat(63000)},"handshakeError":null,
+            "ownerObservations":{"ownerMeasuredChild":{"processId":42,"diagnostic":"c".repeat(63000)},
+                "exactOuterJobMembership":true,"releaseGatePublished":true,
+                "postExitBindingError":post_exit,"rootTokenMeasurement":{"diagnostic":"t".repeat(140000)}}
+        })).unwrap();
+        assert_eq!(
+            report["ownerObservations"]["postExitBindingError"],
+            post_exit
+        );
+        assert_eq!(report["ownerObservations"]["releaseGatePublished"], true);
+        assert_eq!(
+            report["ownerObservations"]["ownerMeasuredChild"]["processId"],
+            42
+        );
+        assert!(report["ownerObservations"]["rootTokenMeasurement"].is_null());
+        assert!(report["ownerObservations"]["rootTokenMeasurementReadError"].is_string());
+        assert_eq!(report["retainedPrefixes"]["0"]["value"]["processId"], 42);
+        assert_eq!(
+            report["rawContainedDiagnostics"].as_object().unwrap().len(),
+            8
+        );
+        assert!(!report["worker"].is_null() && !report["handshake"].is_null());
+        assert!(serde_json::to_vec(&report).unwrap().len() < 834 * 1024);
+    }
+
+    #[test]
+    fn raw_capture_preserves_empty_binary_malformed_and_exact_bound_bytes() {
+        use sha2::{Digest, Sha256};
+        let identity = aiw_probe::WindowsFileIdentity {
+            final_path: CONTROL_ENTRY.into(),
+            volume_serial_number: "1".repeat(16),
+            file_id: "2".repeat(32),
+        };
+        for bytes in [
+            vec![],
+            vec![0, 255, 128, b'{'],
+            b"{malformed".to_vec(),
+            vec![42; 16384],
+        ] {
+            let hash = hex::encode(Sha256::digest(&bytes));
+            let capture = captured_raw_diagnostic(&bytes, &identity, &hash).unwrap();
+            assert_eq!(capture["captureComplete"], true);
+            assert_eq!(capture["rawHex"], hex::encode(&bytes));
+            assert_eq!(capture["sizeBytes"], bytes.len());
+            assert_eq!(capture["identity"]["fileId"], identity.file_id);
+        }
+        assert!(captured_raw_diagnostic(&vec![0; 16385], &identity, "").is_err());
+        assert!(captured_raw_diagnostic(b"changed", &identity, &"0".repeat(64)).is_err());
+    }
     #[test]
     fn self_diagnostics_cannot_authorize_a_different_gate_actor_or_request() {
         let token: aiw_token::TokenEvidence = serde_json::from_value(serde_json::json!({
