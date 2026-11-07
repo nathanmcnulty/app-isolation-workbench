@@ -58,6 +58,14 @@ impl TrialProfile {
 #[path = "publication.rs"]
 mod publication;
 
+#[path = "tree.rs"]
+mod tree;
+
+#[allow(dead_code)]
+pub fn run_tree() -> Result<()> {
+    tree::run()
+}
+
 #[allow(dead_code)]
 pub fn run_publication() -> Result<()> {
     publication::run()
@@ -138,6 +146,10 @@ fn aiw_source_hash() -> String {
         include_str!("../../src/guest_msi/mxc_child.rs"),
         include_str!("../../src/research_publication.rs"),
         include_str!("publication.rs"),
+        include_str!("tree.rs"),
+        include_str!("tree_verify.rs"),
+        include_str!("../sevenzip_tree_sandbox_trial.rs"),
+        include_str!("../sevenzip_assessment.rs"),
         include_str!("../publication_control_guest.rs"),
         include_str!("../publication_control_sandbox_trial.rs"),
         include_str!("../../src/guest_document/paired_inputs/mxc_probe.rs"),

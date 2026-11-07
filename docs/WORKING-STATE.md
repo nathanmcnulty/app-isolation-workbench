@@ -59,7 +59,7 @@ active; neither implementation nor native acceptance is complete.
   sequences and checks token schema/event PID. Both sources are now included
   in the application source commitment. This foundation is not production wiring
   or native descendant coverage; fast-child/grandchild proof remains required.
-- A closed research-only `--tree-output` entry runs ordinary and classic
+- A closed research-only `--output C:\AIW\SevenZipOutput\RESULT.DAT` entry runs ordinary and classic
   first-party root/child/grandchild controls without vendor execution. The
   installer is held and staged inertly under existing intake rules. Suspended
   root token/time/image bindings are retained independently; PI/job ownership
@@ -68,8 +68,15 @@ active; neither implementation nor native acceptance is complete.
   Five-second collection plus three-second drain fits the unchanged preinstall
   owner watchdog. A trace exceeding the 128 KiB stage limit becomes a separate
   bounded refusal with exact serialized digest/size and actual cleanup facts,
-  never a truncated accepted trace. Host dispatch/custody integration and native
-  control proof remain next; this entry is not an administrator product flow.
+  never a truncated accepted trace. A separate fixed host harness now binds its
+  fresh session, exact two held inputs, source, environment and approval to
+  single-use execution and exact non-replaying recovery. Its marker embeds 17
+  fixed stage/data-error keys under actual serialized budgets. Read strict-opens
+  only `RESULT.DAT`; raw export must match the original full file identity, size
+  and digest. A Rust verifier recomputes positive root/chain/job/profile facts
+  without rounding full-width identifiers; custody and failed measurements stay
+  separate from verified control facts. Native positive/chain-reset-negative
+  proof remains next; this entry is not an administrator product flow.
 - The default-off creation control now dispatches only the fixed cooperative
   Driver request. Matching ordinary filesystem positives precede spawn; an
   ordinary held-process observation and an owner-held exact-job check precede
@@ -134,6 +141,13 @@ state tests, research all-target Clippy and default-feature all-target compilati
 passed. Independent execution/custody review passed after watchdog, control-only
 scope and serialized trace-limit fixes. Logs: `C:/aiw/process-tree-control-*.log`.
 No new native session or application trial ran for this increment.
+Tree-host custody/verification: 106 default and 107 research-feature provider
+tests, 20 focused platform tests, all 24 host-harness tests and all-target
+Clippy with both research features passed. Independent reviews passed after
+exact preexecution guest-version gating, cached owner context, escaped-error
+reserve and original-identity raw-export fixes. Logs:
+`C:/aiw/tree-harness-*.log`. Formatting/governance passed. This is build/test
+evidence; the new host profile has not yet run in a native Sandbox.
 Raw FILETIME identifiers require lossless/Rust auditing; do not round them through
 JavaScript numbers. Registry-link/create-only native semantics remain open before
 production wiring, and explicit cleanup cannot trigger a hidden Drop retry.
@@ -142,11 +156,12 @@ production wiring, and explicit cleanup cannot trigger a hidden Drop retry.
 
 Validate the new bounded raw final/pending MXC diagnostics without treating them
 as completion, and investigate a separately pinned minimal contained driver if
-needed. Complete the independent ordinary/classic tree-control host harness and
-native fast-child/grandchild proof, then wire application tracing to typed
-receipts/results. The harness needs a fresh source-bound root/session, one exact
-default-off renderer route and 8.3 terminal publication with bounded embedded
-observations (long JSON output names must not weaken strict custody).
+needed. Package and validate the independent ordinary/classic tree-control host
+harness in a fresh Sandbox, including native fast-child/grandchild and deliberate
+chain-reset-negative proof, then wire application tracing to typed receipts/results.
+The harness uses a fresh source-bound root/session, one exact default-off renderer
+route and 8.3 terminal publication with bounded embedded observations. Long JSON
+output names remain unadopted diagnostics; strict custody is unchanged.
 MXC startup must not become a
 gate on that work. Future trials still require fresh source-pinned proposals
 under the existing Sandbox-only runtime authorization.

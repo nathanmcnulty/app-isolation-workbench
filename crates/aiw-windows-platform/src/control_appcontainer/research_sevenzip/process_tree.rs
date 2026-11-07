@@ -7,6 +7,153 @@ use windows::Win32::Foundation::FILETIME;
 use windows::Win32::System::Threading::{GetCurrentThreadId, GetProcessTimes};
 
 const TRACE_STAGE_LIMIT: usize = 128 * 1024;
+const EMBEDDED_STAGE_LIMIT: usize = 768 * 1024;
+const MARKER_LIMIT: usize = 1024 * 1024;
+
+pub(super) fn validate_preexecution_windows(
+    windows: &aiw_probe::WindowsVersionObservation,
+) -> Result<()> {
+    windows.validate()?;
+    if (
+        windows.major,
+        windows.minor,
+        windows.build,
+        windows.revision,
+    ) != (10, 0, 26100, 9711)
+        || windows.observer_architecture != "x86_64"
+    {
+        return Err("tree-control guest Windows differs from the exact approved version; no account or control created".into());
+    }
+    Ok(())
+}
+
+fn insert_stage(
+    stages: &mut serde_json::Map<String, Value>,
+    errors: &mut serde_json::Map<String, Value>,
+    key: &str,
+    value: std::result::Result<Value, String>,
+) -> Result<()> {
+    let value = value.and_then(|value| {
+        let bytes = serde_json::to_vec_pretty(&value).map_err(|e| e.to_string())?;
+        if bytes.len() > TRACE_STAGE_LIMIT {
+            return Err("stage exceeds fixed 128 KiB serialized limit".into());
+        }
+        Ok(value)
+    });
+    match value {
+        Ok(value) => {
+            stages.insert(key.into(), value);
+            // Reserve space for all later missing/refused stage errors. Actual
+            // pretty serialization includes JSON escaping and nested indentation.
+            let bytes =
+                serde_json::to_vec_pretty(&json!({"stages":stages,"stageReadErrors":errors}))?;
+            if bytes.len() > EMBEDDED_STAGE_LIMIT - 64 * 1024 {
+                stages.remove(key);
+                errors.insert(
+                    key.into(),
+                    json!("aggregate stage budget refused this value; earlier facts retained"),
+                );
+            }
+        }
+        Err(error) => {
+            errors.insert(
+                key.into(),
+                json!(error.chars().take(512).collect::<String>()),
+            );
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn publish_terminal_tree(
+    result: &Result<u8>,
+    windows: &aiw_probe::WindowsVersionObservation,
+    observer_token: &TokenEvidence,
+) -> Result<()> {
+    let mut stages = serde_json::Map::new();
+    let mut errors = serde_json::Map::new();
+    // Root bindings and complete/partial traces have priority. Every fixed key
+    // appears exactly once as data or an explicit missing/refusal record.
+    for name in [
+        "tree-baseline-binding",
+        "tree-candidate-binding",
+        "tree-baseline",
+        "tree-candidate",
+        "tree-baseline-error",
+        "tree-candidate-error",
+        "tree-candidate-profile",
+        "tree-profile-cleanup",
+        "tree-complete",
+        "99-driver-error",
+    ] {
+        let key = if name == "99-driver-error" {
+            "workflow-99-driver-error"
+        } else {
+            name
+        };
+        let captured = (|| -> Result<Value> {
+            let file = HeldApplicationFile::open_bounded(
+                &Path::new(WORK).join(format!("{name}.json")),
+                TRACE_STAGE_LIMIT as u64,
+            )?;
+            let value = serde_json::from_slice(&file.read_bounded(TRACE_STAGE_LIMIT as u64)?)?;
+            file.revalidate()?;
+            Ok(value)
+        })();
+        insert_stage(
+            &mut stages,
+            &mut errors,
+            key,
+            captured.map_err(|e| e.to_string()),
+        )?;
+    }
+    for name in [
+        "00-start",
+        "01-context",
+        "02-launcher",
+        "05-workflow-exit",
+        "05-launcher-cleanup",
+        "06-final",
+        "99-driver-error",
+    ] {
+        let captured = (|| -> Result<Value> {
+            let file = HeldApplicationFile::open_bounded(
+                &Path::new(OUTPUT).join(format!("{name}.json")),
+                TRACE_STAGE_LIMIT as u64,
+            )?;
+            let value = serde_json::from_slice(&file.read_bounded(TRACE_STAGE_LIMIT as u64)?)?;
+            file.revalidate()?;
+            Ok(value)
+        })();
+        insert_stage(
+            &mut stages,
+            &mut errors,
+            &format!("owner-{name}"),
+            captured.map_err(|e| e.to_string()),
+        )?;
+    }
+    if serde_json::to_vec_pretty(&json!({"stages":stages,"stageReadErrors":errors}))?.len()
+        > EMBEDDED_STAGE_LIMIT
+    {
+        return Err("embedded stage envelope exceeds fixed budget".into());
+    }
+    let marker = json!({
+        "schemaVersion":"aiw.dev/research/sevenzip-tree-result/v0alpha1",
+        "windows":windows,"observerToken":observer_token,
+        "driverCompleted":result.is_ok(),
+        "error":result.as_ref().err().map(|e|e.to_string().chars().take(512).collect::<String>()),
+        "firstPartyControlsOnly":true,"vendorInstallerExecuted":false,"applicationExecuted":false,
+        "stages":stages,"stageReadErrors":errors
+    });
+    if serde_json::to_vec_pretty(&marker)?.len() > MARKER_LIMIT {
+        return Err("tree result exceeds fixed publisher limit".into());
+    }
+    publish_new(
+        &Path::new(OUTPUT).join("RESULT.TMP"),
+        &Path::new(OUTPUT).join("RESULT.DAT"),
+        &marker,
+    )
+}
 
 fn bounded_trace_record(value: Value) -> Result<(Value, bool)> {
     let bytes = serde_json::to_vec_pretty(&value)?;
@@ -303,6 +450,108 @@ pub(super) fn collect(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tree_preexecution_environment_refuses_wrong_revision_build_or_architecture() {
+        let expected: aiw_probe::WindowsVersionObservation = serde_json::from_value(json!({
+            "major":10,"minor":0,"build":26100,"revision":9711,"observerArchitecture":"x86_64"
+        }))
+        .unwrap();
+        validate_preexecution_windows(&expected).unwrap();
+        let mut wrong = expected.clone();
+        wrong.revision += 1;
+        assert!(validate_preexecution_windows(&wrong).is_err());
+        let mut wrong = expected.clone();
+        wrong.build = 26300;
+        assert!(validate_preexecution_windows(&wrong).is_err());
+        let mut wrong = expected;
+        wrong.observer_architecture = "aarch64".into();
+        assert!(validate_preexecution_windows(&wrong).is_err());
+    }
+
+    #[test]
+    fn embedded_stage_budget_preserves_prior_values_and_partitions_all_fixed_keys() {
+        let mut stages = serde_json::Map::new();
+        let mut errors = serde_json::Map::new();
+        for index in 0..17 {
+            insert_stage(
+                &mut stages,
+                &mut errors,
+                &format!("fixed-{index}"),
+                Ok(json!({"bytes":"x".repeat(120 * 1024)})),
+            )
+            .unwrap();
+        }
+        assert!(stages.contains_key("fixed-0"));
+        assert!(stages.len() < 17);
+        assert!(!errors.is_empty());
+        assert_eq!(stages.len() + errors.len(), 17);
+        for key in stages.keys() {
+            assert!(!errors.contains_key(key));
+        }
+        assert!(
+            serde_json::to_vec_pretty(&json!({"stages":stages,"stageReadErrors":errors}))
+                .unwrap()
+                .len()
+                <= EMBEDDED_STAGE_LIMIT
+        );
+    }
+
+    #[test]
+    fn embedded_stage_refusals_bound_unicode_errors_and_actual_escaped_values() {
+        let mut stages = serde_json::Map::new();
+        let mut errors = serde_json::Map::new();
+        insert_stage(
+            &mut stages,
+            &mut errors,
+            "failed",
+            Err("\u{1f600}".repeat(3000)),
+        )
+        .unwrap();
+        insert_stage(
+            &mut stages,
+            &mut errors,
+            "oversized",
+            Ok(json!("\u{0001}".repeat(TRACE_STAGE_LIMIT / 2))),
+        )
+        .unwrap();
+        assert!(stages.is_empty());
+        assert!(errors["failed"].as_str().unwrap().len() <= 2048);
+        assert_eq!(errors.len(), 2);
+        assert!(errors["oversized"].as_str().unwrap().contains("128 KiB"));
+    }
+
+    #[test]
+    fn near_limit_prefix_plus_all_escaped_errors_fits_the_marker_stage_budget() {
+        let mut stages = serde_json::Map::new();
+        let mut errors = serde_json::Map::new();
+        for index in 0..6 {
+            insert_stage(
+                &mut stages,
+                &mut errors,
+                &format!("prior-{index}"),
+                Ok(json!("x".repeat(115 * 1024))),
+            )
+            .unwrap();
+        }
+        for index in 0..17 {
+            insert_stage(
+                &mut stages,
+                &mut errors,
+                &format!("error-{index}"),
+                Err("\u{0001}".repeat(600)),
+            )
+            .unwrap();
+        }
+        assert!(stages.contains_key("prior-0"));
+        assert_eq!(errors.len(), 17);
+        assert!(
+            serde_json::to_vec_pretty(&json!({"stages":stages,"stageReadErrors":errors}))
+                .unwrap()
+                .len()
+                <= EMBEDDED_STAGE_LIMIT
+        );
+    }
 
     #[test]
     fn oversized_trace_is_an_explicit_bounded_refusal_with_actual_cleanup_facts() {

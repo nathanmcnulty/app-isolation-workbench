@@ -590,6 +590,7 @@ enum ResearchPublicationRole {
     Control,
     Capability,
     Creation,
+    SevenZipTree,
 }
 
 #[cfg(feature = "research-fixed-publication")]
@@ -611,6 +612,10 @@ fn research_publication_role(plan: &WindowsSandboxPlan) -> Option<ResearchPublic
         (r"C:\AIW\Tools\mxc_process_probe.exe", r"C:\AIW\MxcCreationOutput\RESULT.DAT") => (
             ResearchPublicationRole::Creation,
             r"C:\AIW\MxcCreationOutput",
+        ),
+        (r"C:\AIW\Tools\sevenzip_assessment.exe", r"C:\AIW\SevenZipOutput\RESULT.DAT") => (
+            ResearchPublicationRole::SevenZipTree,
+            r"C:\AIW\SevenZipOutput",
         ),
         _ => return None,
     };
@@ -943,6 +948,13 @@ mod tests {
         plan.mappings[1].sandbox_folder = r"C:\AIW\MxcCreationOutput".into();
         plan
     }
+    fn sevenzip_tree_plan() -> WindowsSandboxPlan {
+        let mut plan = creation_plan();
+        plan.probe.executable = r"C:\AIW\Tools\sevenzip_assessment.exe".into();
+        plan.probe.output = r"C:\AIW\SevenZipOutput\RESULT.DAT".into();
+        plan.mappings[1].sandbox_folder = r"C:\AIW\SevenZipOutput".into();
+        plan
+    }
 
     #[cfg(not(feature = "research-fixed-publication"))]
     #[test]
@@ -951,6 +963,7 @@ mod tests {
             publication_plan(false),
             publication_plan(true),
             creation_plan(),
+            sevenzip_tree_plan(),
         ] {
             assert!(matches!(
                 validate_plan(&plan),
@@ -967,6 +980,7 @@ mod tests {
             publication_plan(false),
             publication_plan(true),
             creation_plan(),
+            sevenzip_tree_plan(),
         ] {
             let rendered = render_config(&plan).unwrap();
             assert!(rendered.xml.contains("RESULT.DAT"));

@@ -100,7 +100,7 @@ pub fn run() -> Result<u8> {
     let exe = std::env::current_exe()?;
     let token = collect_current_process_token()?;
     #[cfg(feature = "research-sevenzip")]
-    if args == ["--tree-output", r"C:\AIW\SevenZipOutput\result.json"] {
+    if args == ["--output", r"C:\AIW\SevenZipOutput\RESULT.DAT"] {
         if !fixed_role_image(&exe, INPUT_HELPER)
             || !token.is_elevated
             || token.is_app_container
@@ -191,6 +191,20 @@ fn setup() -> Result<u8> {
     setup_bound(None, false)
 }
 fn setup_bound(expected_helper: Option<(&str, u64)>, tree_only: bool) -> Result<u8> {
+    // Cache context before trial execution. A late WinRT/token query must not
+    // erase already captured child/cleanup evidence at terminal publication.
+    let owner_context = if tree_only {
+        Some((
+            crate::observe_windows_version()?,
+            collect_current_process_token()?,
+        ))
+    } else {
+        None
+    };
+    #[cfg(feature = "research-sevenzip")]
+    if let Some((windows, _)) = &owner_context {
+        process_tree::validate_preexecution_windows(windows)?;
+    }
     #[cfg(not(feature = "research-sevenzip"))]
     if tree_only {
         return Err("tree proof requires the explicit research feature".into());
@@ -237,7 +251,9 @@ fn setup_bound(expected_helper: Option<(&str, u64)>, tree_only: bool) -> Result<
         &json!({
             "schemaVersion":"aiw.dev/research/sevenzip/v0alpha1", "productionEvidence":false,
             "installerSha256":INSTALLER_HASH,"installerSizeBytes":INSTALLER_SIZE,
-            "helperSha256":helper.observation().sha256,"windows":crate::observe_windows_version()?,
+            "helperSha256":helper.observation().sha256,"windows":match &owner_context {
+                Some((windows,_))=>windows.clone(),None=>crate::observe_windows_version()?
+            },
             "scope":if tree_only {"first-party process-tree driver controls; ordinary and classic AppContainer, zero capabilities; no vendor execution"}
               else {"7-Zip 26.05 CLI create/test/extract/integrity; classic AppContainer, zero capabilities"},
             "gaps":["general compatibility","GUI and shell integration","registry and system-wide installation changes",
@@ -246,7 +262,7 @@ fn setup_bound(expected_helper: Option<(&str, u64)>, tree_only: bool) -> Result<
     )?;
     let operation = setup_inner(&installer, &helper, tree_only);
     let revalidated = inputs.revalidate().map_err(fixed);
-    let result: Result<u8> = match (operation, revalidated) {
+    let mut result: Result<u8> = match (operation, revalidated) {
         (Ok(value), Ok(())) => Ok(value),
         (operation, revalidated) => Err(format!(
             "operation={operation:?}; mapped input revalidation={revalidated:?}"
@@ -254,12 +270,29 @@ fn setup_bound(expected_helper: Option<(&str, u64)>, tree_only: bool) -> Result<
         .into()),
     };
     if let Err(error) = &result {
-        record(
+        let failure_record = record(
             Path::new(OUTPUT),
             "99-driver-error",
             &json!({"driverError":error.to_string(),
             "productionEvidence":false,"action":"preserve this exact worker/session and prior stages; do not reinstall blindly"}),
-        )?;
+        );
+        if let Err(retention_error) = failure_record {
+            if !tree_only {
+                return Err(retention_error);
+            }
+            result = Err(format!(
+                "{error}; owner error-record publication failed: {retention_error}"
+            )
+            .into());
+        }
+    }
+    #[cfg(feature = "research-sevenzip")]
+    if tree_only {
+        let (windows, token) = owner_context
+            .as_ref()
+            .ok_or("missing cached tree owner context")?;
+        process_tree::publish_terminal_tree(&result, windows, token)?;
+        return result;
     }
     publish_terminal(
         &json!({"schemaVersion":"aiw.dev/research/sevenzip-result/v0alpha1",

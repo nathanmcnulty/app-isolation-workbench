@@ -10,7 +10,7 @@ rust-version.workspace = true
 [features]
 research-msix-control = []
 research-msix-lifecycle = []
-research-sevenzip = []
+research-sevenzip = ["aiw-provider-wsb/research-fixed-publication"]
 research-mxc-process = ["aiw-provider-wsb/research-fixed-publication"]
 
 [[example]]
@@ -36,6 +36,10 @@ required-features = ["research-sevenzip"]
 [[example]]
 name = "sevenzip_sandbox_trial"
 required-features = ["research-sevenzip"]
+
+[[example]]
+name = "sevenzip_tree_sandbox_trial"
+required-features = ["research-sevenzip", "research-mxc-process"]
 
 [[example]]
 name = "msix_standard_user_control"

@@ -93,8 +93,13 @@ atomically publishes traces before required helper fail-stop. Actual serialized
 traces are capped at the 128 KiB stage-reader limit; oversize becomes an explicit
 non-trace refusal preserving digest, byte count and actual cleanup facts.
 The collector's five-second control deadline and three-second drain fit the
-unchanged preinstall watchdog. The dedicated native host harness and disposable
-control proof are still pending; application tracing and product receipt wiring
+unchanged preinstall watchdog. The dedicated host harness now binds fresh
+session/source/environment/input identities and approval to one-shot Start and
+exact recovery. The 8.3 terminal marker embeds bounded fixed stages, preserving
+failed measurements independently. Retained Read makes no provider calls and
+requires the original full marker identity, size and digest before raw export.
+A Rust verifier recomputes positive control facts without rounding identifiers;
+native positives, deliberate chain-reset-negative proof, application tracing and product receipt wiring
 remain incomplete. The collector
 records an inherited debugger chain, not broker-created processes or invented
 parent edges; any gap requires the dedicated helper to fail-stop. The registry
