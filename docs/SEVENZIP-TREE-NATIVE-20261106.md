@@ -1,30 +1,15 @@
 # Native process-tree control, 2026-11-06
 
-## Next-source correction (native validation pending)
+## Follow-up correction recorded separately
 
-The next default-off control uses a fresh R2 root/session and `v0alpha2`
-host/guest envelopes. It keeps the existing process creation flags. Owner stages
-move to a freshly created guest-local, protected SY/BA-only journal, held through
-terminal capture. An exact local start-record read precedes worker dispatch.
-Separate ordinary and classic worker probes must fail opening that existing
-record with access-denied code 5; their tokens, output, exit and owned-job facts
-are retained and independently checked. Mapped output contains only `RESULT.DAT`.
-
-A separate fixed-control verifier admits three helper roles plus zero to three
-console-support processes. Before root creation, the driver holds the exact
-System32 image, pinned bytes/size and independently queried file identities on
-the exact approved guest OS. Every observed process still requires matching
-root-boundary token evidence, paired events and exact-job reconciliation. There
-is no filename-only allowance or token exception. Root exit must precede both
-the helper child's exit and the grandchild's creation. The historical
-exact-three verifier and the original trial's failure remain unchanged.
-
-The new workflow retains driver errors locally and records one explicit profile
-deletion attempt without a hidden Drop retry. These are implementation choices
-awaiting fresh disposable-worker proof; they do not establish native console
-support availability, journal enforcement, application compatibility or MXC
-enforcement. The full application assessment and negative/recovery work remain
-required.
+The reviewed owner-journal/console-support correction ran once at source
+`f27dda809a23ecd25934b2f74d6f8617d378e307`. Its local owner journal and ordinary
+read-denial probe were retained, but the new control refused differing preheld
+and debug-event console legacy identities. The candidate was not reached.
+See [the separate correction record](SEVENZIP-TREE-CORRECTION-NATIVE-20261106.md)
+for that partial result and the unresolved identity question. The observations,
+contract failure and original correction requirements below describe `191ac276`;
+no later verifier or evidence changes that historical result.
 
 ## Result and scope
 

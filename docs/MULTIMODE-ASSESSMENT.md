@@ -120,6 +120,13 @@ general custody and all observed process coverage, with fresh owner journaling,
 explicit code-bound support roles and new native proof; it cannot turn this
 historical failure into a pass.
 
+The `f27dda8` [correction trial](SEVENZIP-TREE-CORRECTION-NATIVE-20261106.md)
+retained all seven local owner stages and the ordinary code-5 journal denial.
+Its six-process ordinary trace was refused because preheld and debug-event
+console volume/file identities differ despite matching path, hash, size and exit.
+The candidate was not reached. Custody, outer cleanup and retained Read passed;
+the identity source remains under investigation, with no retrospective exception.
+
 Private raw metadata contains full-width FILETIME/process/file identifiers.
 Audit it with Rust or another lossless JSON parser; ordinary JavaScript numbers
 cannot preserve these integers. Sanitized JSON/Markdown omits raw bytes and
