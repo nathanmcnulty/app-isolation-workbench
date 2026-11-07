@@ -3,7 +3,7 @@
 //! vendor ABI call, including free. A successful ABI return is not job cleanup.
 use super::*;
 use crate::guest_msi::mxc_child::{
-    ResearchMxcChild, ResearchMxcChildObservation, ResearchMxcRootToken,
+    ResearchMxcChild, ResearchMxcChildObservation, ResearchMxcRootToken, self_token_errors,
 };
 use serde::{Deserialize, Serialize};
 use std::ffi::c_void;
@@ -16,6 +16,7 @@ const GATE: &str = r"C:\AIW\SevenZip\Work\Mxc\Input\ALLOW.DAT";
 const CONTROL_RESULT: &str = r"C:\AIW\SevenZip\Work\Mxc\Output\CONTROL.DAT";
 const CONTROL_FAILURE: &str = r"C:\AIW\SevenZip\Work\Mxc\Output\FAILURE.DAT";
 const CONTROL_SELF: &str = r"C:\AIW\SevenZip\Work\Mxc\Output\SELF.DAT";
+const CONTROL_ENTRY: &str = r"C:\AIW\SevenZip\Work\Mxc\Output\ENTRY.DAT";
 const INPUT: &str = r"C:\AIW\SevenZip\Work\Mxc\Input\INPUT.DAT";
 const INPUT_BYTES: &[u8] = b"AIW fixed MXC input control\n";
 const DENIED_BYTES: &[u8] = b"AIW fixed MXC denied control\n";
@@ -37,10 +38,13 @@ pub(super) fn is_creation_role() -> bool {
 
 pub(super) fn run() -> Result<()> {
     let a = std::env::args_os().skip(1).collect::<Vec<_>>();
-    let token = aiw_token::collect_current_process_token()?;
-    require_guest_windows(&crate::observe_windows_version()?)?;
     let exe = std::env::current_exe()?;
     let same = |p| crate::control_appcontainer::research_sevenzip::fixed_role_image(&exe, p);
+    if a == ["--mxc-driver-control"] && same(contract::CONTROL_IMAGE) {
+        return run_contained_role();
+    }
+    let token = aiw_token::collect_current_process_token()?;
+    require_guest_windows(&crate::observe_windows_version()?)?;
     if a == ["--output", crate::research_publication::CREATION_RESULT]
         && same(TRANSPORT_PROBE)
         && token.is_elevated
@@ -63,30 +67,53 @@ pub(super) fn run() -> Result<()> {
         write_new_json(WORKER_RESULT, &value)?;
         return report.map(|_| ());
     }
-    if a == ["--mxc-driver-control"] && same(contract::CONTROL_IMAGE) {
-        let result = (|| -> Result<()> {
-            let sid = ordinary_sid();
-            // Preserve the actual self token even if account lookup or identity
-            // validation refuses the role. This file never authorizes release.
-            write_new_json(
-                CONTROL_SELF,
-                &serde_json::json!({
-                    "token":token,"expectedUserSid":sid.as_ref().ok(),
-                    "expectedUserSidReadError":sid.as_ref().err().map(bounded)
-                }),
-            )?;
-            ResearchMxcRootToken::measure(std::process::id(), &sid?, token).validate()?;
-            contained()
-        })();
-        if let Err(error) = &result {
-            let _ = write_new_json(
-                CONTROL_FAILURE,
-                &serde_json::json!({"schemaVersion":"aiw.dev/mxc-contained-control-failure/v0alpha1","error":bounded(error),"controlsCompleted":false}),
-            );
-        }
-        return result;
-    }
     Err("closed creation image/arguments differ".into())
+}
+
+fn run_contained_role() -> Result<()> {
+    let result = (|| -> Result<()> {
+        // Exact image/argument dispatch only. These writes precede authorization
+        // and prove neither a token boundary nor successful candidate controls.
+        write_new_json(
+            CONTROL_ENTRY,
+            &serde_json::json!({
+                "schemaVersion":"aiw.dev/mxc-contained-entry/v0alpha1",
+                "identityAuthorization":"pendingOwnerGate","controlsCompleted":false
+            }),
+        )?;
+        let token = aiw_token::collect_current_process_token()?;
+        let errors = self_token_errors(std::process::id(), &token);
+        write_new_json(
+            CONTROL_SELF,
+            &serde_json::json!({
+                "token":token,"validationErrors":errors,
+                "identityAuthorization":"pendingOwnerGate",
+                "environmentAuthorization":"pendingVerifiedOwnerGate"
+            }),
+        )?;
+        if !errors.is_empty() {
+            return Err(format!(
+                "contained self token structure differs: {}",
+                errors.join(", ")
+            )
+            .into());
+        }
+        // Setup and ordinary worker check Windows before SDK dispatch. Do not
+        // repeat WinRT activation or account-name lookup inside PSEC. Actor and
+        // environment authorization require the independently verified owner
+        // gate; contained() compares the full token, not a self-SID assertion.
+        contained()
+    })();
+    if let Err(error) = &result {
+        let _ = write_new_json(
+            CONTROL_FAILURE,
+            &serde_json::json!({
+                "schemaVersion":"aiw.dev/mxc-contained-control-failure/v0alpha1",
+                "error":bounded(error),"controlsCompleted":false
+            }),
+        );
+    }
+    result
 }
 
 fn ordinary_worker_token(token: &aiw_token::TokenEvidence, sid: &str) -> bool {
@@ -178,13 +205,7 @@ fn contained() -> Result<()> {
         std::thread::sleep(Duration::from_millis(50));
     }
     let gate: Ready = read_json(GATE)?;
-    if gate.request_sha256 != request.sha256()
-        || gate.helper_sha256 != hash
-        || gate.child.process_id != std::process::id()
-        || gate.child.creation_time != creation_time
-        || gate.child.token != token
-        || gate.child.image_sha256 != hash
-    {
+    if !gate_matches(&gate, request.sha256(), &hash, &token, creation_time) {
         return Err("release gate differs from held contained identity/request".into());
     }
     // Owner/ordinary observers hold the image and process outside PSEC. The
@@ -193,6 +214,21 @@ fn contained() -> Result<()> {
         return Err("self creation identity changed".into());
     }
     write_new_json(CONTROL_RESULT, &controls(true)?)
+}
+
+fn gate_matches(
+    gate: &Ready,
+    request_hash: &str,
+    hash: &str,
+    token: &aiw_token::TokenEvidence,
+    creation_time: u64,
+) -> bool {
+    !(gate.request_sha256 != request_hash
+        || gate.helper_sha256 != hash
+        || gate.child.process_id != std::process::id()
+        || gate.child.creation_time != creation_time
+        || &gate.child.token != token
+        || gate.child.image_sha256 != hash)
 }
 
 fn self_creation_time() -> Result<u64> {
@@ -616,6 +652,7 @@ fn setup() -> Result<()> {
             ("spawn", format!(r"{DATA}\SPAWN.DAT")),
             ("rootToken", format!(r"{DATA}\TOKEN.DAT")),
             ("containedSelf", CONTROL_SELF.into()),
+            ("containedEntry", CONTROL_ENTRY.into()),
             ("boundChild", format!(r"{DATA}\BOUND.DAT")),
             ("warnings", format!(r"{DATA}\WARNINGS.DAT")),
             ("ready", WORKER_READY.into()),
@@ -663,6 +700,68 @@ fn setup() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn self_diagnostics_cannot_authorize_a_different_gate_actor_or_request() {
+        let token: aiw_token::TokenEvidence = serde_json::from_value(serde_json::json!({
+            "schemaVersion":aiw_token::TOKEN_EVIDENCE_SCHEMA_VERSION,
+            "processId":std::process::id(),"tokenType":"primary","isAppContainer":true,
+            "userSid":"S-1-5-21-1-2-3-1001","integrity":{"sid":"S-1-16-4096","rid":4096,"level":"low"},
+            "elevationType":"default","isElevated":false,"capabilities":[],"restrictedSidCount":0
+        })).unwrap();
+        assert!(self_token_errors(std::process::id(), &token).is_empty());
+        let mut ready: Ready = serde_json::from_value(serde_json::json!({
+            "requestSha256":"a".repeat(64),"helperSha256":"b".repeat(64),
+            "child":{"schemaVersion":"aiw.dev/research-mxc-child-observation/v0alpha1",
+                "processId":std::process::id(),"creationTime":42,"queriedImagePath":contract::CONTROL_IMAGE,
+                "imageIdentity":{"finalPath":contract::CONTROL_IMAGE,"volumeSerialNumber":"1","fileId":"2"},
+                "imageSha256":"b".repeat(64),"imageSizeBytes":1,"imageAttributes":32,"imageLinkCount":1,
+                "imageOnlyUnnamedDataStream":true,"token":token}
+        })).unwrap();
+        assert!(gate_matches(
+            &ready,
+            &"a".repeat(64),
+            &"b".repeat(64),
+            &token,
+            42
+        ));
+        for field in ["requestSha256", "helperSha256"] {
+            let mut bad = serde_json::to_value(&ready).unwrap();
+            bad[field] = "c".repeat(64).into();
+            assert!(!gate_matches(
+                &serde_json::from_value(bad).unwrap(),
+                &"a".repeat(64),
+                &"b".repeat(64),
+                &token,
+                42
+            ));
+        }
+        for (field, value) in [
+            ("processId", serde_json::json!(0)),
+            ("creationTime", serde_json::json!(43)),
+            ("imageSha256", serde_json::json!("c".repeat(64))),
+        ] {
+            let mut bad = serde_json::to_value(&ready).unwrap();
+            bad["child"][field] = value;
+            assert!(!gate_matches(
+                &serde_json::from_value(bad).unwrap(),
+                &"a".repeat(64),
+                &"b".repeat(64),
+                &token,
+                42
+            ));
+        }
+        ready.child.token.user_sid = "S-1-5-21-1-2-3-1002".into();
+        // Structure alone still passes; actor authorization requires equality
+        // with the full outside observation in the protected gate.
+        assert!(self_token_errors(std::process::id(), &ready.child.token).is_empty());
+        assert!(!gate_matches(
+            &ready,
+            &"a".repeat(64),
+            &"b".repeat(64),
+            &token,
+            42
+        ));
+    }
     #[test]
     fn ordinary_worker_still_refuses_appcontainer_and_identity_drift() {
         let sid = "S-1-5-21-1-2-3-1001";

@@ -64,8 +64,13 @@ active; neither implementation nor native acceptance is complete.
   before retaining the child token or releasing the gate. Actual mismatch and
   candidate enforcement remain unmeasured. Owned worker/outer cleanup passed;
   original marker bytes stayed stable and retained Read made zero provider calls.
-  Preserve this run. The observer correction retains full token evidence before
-  validation and individual mismatches; native acceptance of that fix is pending.
+  Preserve this run. The fresh `9093182` trial retained full token evidence,
+  passed ordinary/owner identity and exact-job checks and released the gate. It
+  then timed out without SELF or filesystem controls. Cleanup/Read custody passed;
+  enforcement remains unmeasured. The contained-entry correction now publishes
+  preauthorization diagnostics before token queries and delegates redundant
+  WinRT/account checks to the verified outside owner chain. Its native acceptance
+  is pending; neither earlier run may be replayed or retroactively accepted.
 
 Focused checks so far: 11 provider retention tests, 9 existing/new 7-Zip native
 file tests, 7 preparation/retained-reader tests, 7 MXC contract tests, 7 probe/
@@ -87,13 +92,16 @@ Token-observer correction: 12 focused platform and 13 host tests passed; all-tar
 research Clippy passed. Independent execution-boundary and native-record reviews
 found no remaining blockers. Logs: `C:/aiw/creation-token-*.log`. A fresh fixed
 creation root/session prevents adoption or replay of the previous trial.
+Contained-entry correction: 13 focused platform and 13 host tests and all-target
+research Clippy passed. Independent execution-boundary review found no remaining
+blockers. Logs: `C:/aiw/creation-entry-*.log`; fresh native acceptance is pending.
 Raw FILETIME identifiers require lossless/Rust auditing; do not round them through
 JavaScript numbers. Registry-link/create-only native semantics remain open before
 production wiring, and explicit cleanup cannot trigger a hidden Drop retry.
 
 ## Required next work
 
-Finish focused checks and independent review of the token-observer correction,
+Finish focused checks and independent review of the contained-entry correction,
 then freeze/review a new source-pinned package and validate actual guest
 binding/enforcement under the existing Sandbox-only runtime authorization.
 Keep the outer watchdog/job unchanged and preserve exact failures without

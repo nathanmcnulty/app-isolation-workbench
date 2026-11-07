@@ -91,20 +91,10 @@ impl ResearchMxcRootToken {
     pub(crate) fn measure(pid: u32, sid: &str, token: TokenEvidence) -> Self {
         // PSEC provenance comes from the exact SDK request/dispatch, not the
         // TokenIsAppContainer flag. Retain that flag and all other token fields.
-        let validation_errors = [
-            (
-                token.schema_version != aiw_token::TOKEN_EVIDENCE_SCHEMA_VERSION,
-                "schemaVersion",
-            ),
-            (token.process_id != pid, "processId"),
-            (token.user_sid != sid, "userSid"),
-            (token.token_type != TokenType::Primary, "tokenType"),
-            (token.is_elevated, "isElevated"),
-        ]
-        .into_iter()
-        .filter(|(failed, _)| *failed)
-        .map(|(_, field)| field.into())
-        .collect();
+        let mut validation_errors = self_token_errors(pid, &token);
+        if token.user_sid != sid {
+            validation_errors.push("userSid".into());
+        }
         Self {
             schema_version: "aiw.dev/research-mxc-root-token/v0alpha1".into(),
             expected_process_id: pid,
@@ -124,6 +114,24 @@ impl ResearchMxcRootToken {
             ))
         }
     }
+}
+
+/// Structural self checks do not authorize an actor. Outside observers supply
+/// the expected SID; the contained role must match their full protected gate.
+pub(crate) fn self_token_errors(pid: u32, token: &TokenEvidence) -> Vec<String> {
+    [
+        (
+            token.schema_version != aiw_token::TOKEN_EVIDENCE_SCHEMA_VERSION,
+            "schemaVersion",
+        ),
+        (token.process_id != pid, "processId"),
+        (token.token_type != TokenType::Primary, "tokenType"),
+        (token.is_elevated, "isElevated"),
+    ]
+    .into_iter()
+    .filter(|(failed, _)| *failed)
+    .map(|(_, field)| field.into())
+    .collect()
 }
 
 fn retain_then_validate_token(

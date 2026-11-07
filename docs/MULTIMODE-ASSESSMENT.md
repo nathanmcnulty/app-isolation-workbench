@@ -68,8 +68,13 @@ product verdicts. Source `55068e6` reached SDK spawn success in one
 [fresh native trial](MXC-CREATION-NATIVE-20261106.md), then refused at a combined
 token guard before retaining the actual child token. Ordinary positives and owned
 cleanup passed; the gate stayed closed and enforcement remains unmeasured.
-The correction retains token evidence and individual mismatches before refusal;
-new-source binding/enforcement acceptance remains pending. No 7-Zip ran yet.
+The fresh `9093182` correction retained actual token evidence and passed
+cross-observer identity/exact-job checks before gate release, then timed out
+without contained SELF or filesystem controls. Cleanup and retained Read passed;
+enforcement remains unmeasured. An early-entry diagnostic correction removes
+redundant contained WinRT/account lookups while preserving outside authorization
+and the full protected gate. New-source acceptance remains pending. No 7-Zip ran
+in these controls.
 
 Process-tree and registry foundations are test-compiled only. The collector
 records an inherited debugger chain, not broker-created processes or invented

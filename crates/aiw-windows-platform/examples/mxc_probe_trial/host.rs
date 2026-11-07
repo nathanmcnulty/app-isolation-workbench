@@ -32,13 +32,13 @@ impl TrialProfile {
     fn root(self) -> &'static str {
         match self {
             Self::Capability => ROOT,
-            Self::Creation => r"C:\AIW-Mxc-Creation-Token-Trial-20261106",
+            Self::Creation => r"C:\AIW-Mxc-Creation-Entry-Trial-20261106",
         }
     }
     fn session(self) -> &'static str {
         match self {
             Self::Capability => SESSION,
-            Self::Creation => "602fb01c-f760-45aa-91d5-ee4f21598d34",
+            Self::Creation => "a340ac6c-e056-47e7-9f24-a3b3fb401b98",
         }
     }
     fn schema(self) -> &'static str {
@@ -234,12 +234,13 @@ struct CreationPrefix {
     value: Option<serde_json::Value>,
     read_error: Option<String>,
 }
-const CREATION_PREFIXES: [&str; 18] = [
+const CREATION_PREFIXES: [&str; 19] = [
     "baseline",
     "probe",
     "spawn",
     "rootToken",
     "containedSelf",
+    "containedEntry",
     "boundChild",
     "warnings",
     "ready",
