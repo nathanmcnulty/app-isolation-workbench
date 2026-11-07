@@ -118,14 +118,44 @@ remain outside Git at `C:/aiw/sevenzip-tree-20261106`. This document omits raw
 process/account/file identities. Audit full-width values losslessly; never round
 them through ordinary JavaScript numbers or rewrite original bytes.
 
-## Next question and remaining acceptance
+## Read-only follow-up and next-source contract
 
-A bounded read-only host console-image identity probe is being prepared to
-investigate the mismatch. It has not yet established a cause or justified a
-source fix, alternate identity, copied-image policy or broader permission.
-Keep strict intake/custody, source/approval/session binding, watchdogs and exact
-owned cleanup unchanged. Any revised execution contract needs independent
-review and a fresh source-bound proposal/trial; neither old trial may be replayed.
+A separately reviewed read-only VM107 probe observed the fixed native host
+System32 console image. Both hashes, before/after metadata and named reopen
+agreed, with no API errors. Its path, code hash, size and legacy volume matched
+the prior console events; its legacy file index did not. It observed two links
+on that host file. This diagnostic did not change HAF's single-link rules or
+establish a common physical backing object. The trial's verdict remains failed.
+
+The original diagnostic is 2,477 bytes, SHA-256
+`a275d5c7e6ba612e6dacbdc2f2744fe83ca2ba6a9ba9dfbb002e8315443a58ee`.
+Its independent lossless comparison is
+`host-console-identity-comparison-f27dda8-r1.json`, SHA-256
+`23a2ff3c159a6e9a8440c5ddba311d071ac2456d324ef8340601426149272814`.
+Both remain private. Microsoft documents
+[shared immutable OS files](https://learn.microsoft.com/en-us/windows/security/application-security/application-isolation/windows-sandbox/windows-sandbox-architecture);
+that general architecture does not explain these particular identity differences.
+
+Two independent design reviews recommend a new explicit executable-content
+contract, retaining observed object identities separately and leaving physical
+equivalence unproved. This is not implemented or accepted yet. For the fixed
+control fixture, every CREATE image must match its independently approved
+path/hash/size before normal debug continuation, and the same event file handle
+must undergo bounded identity/content revalidation. Unknown code, missing
+handles, token drift or measurement failure must stop the owned job and preserve
+the failure. The current collector measures descendants before continuation but
+classifies helper/support content afterward; that producer gap must be fixed.
+Microsoft defines the event's
+[`hFile` as the process image handle](https://learn.microsoft.com/en-us/windows/win32/api/minwinbase/ns-minwinbase-create_process_debug_info).
+Neither this seam nor a code hash proves loaded-memory integrity or complete DLL
+provenance.
+
+Keep strict local intake/custody, all-process token checks, source/approval/session
+binding, watchdogs and exact owned cleanup unchanged. The new contract requires
+fresh schemas, substitution/mutation/continuation negatives, independent review
+and a fresh source-bound native trial. Neither old trial may be replayed or
+reclassified. Further physical-object diagnosis is optional; it must not replace
+progress into actual 7-Zip measurements.
 
 Fresh positive and deliberate chain-reset-negative native proof, actual 7-Zip
 process-tree/registry wiring, repeated three-mode comparisons, archive investigation,

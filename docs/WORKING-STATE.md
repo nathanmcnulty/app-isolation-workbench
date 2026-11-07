@@ -57,8 +57,11 @@ Private provenance and audits: `C:\aiw\mxc-multimode-20261106`.
 
 ## Next work and authorization
 
-A bounded read-only host console-image identity probe is being prepared. It has
-not explained the mismatch or justified a source fix or identity exception.
+A reviewed read-only host image probe found matching bytes/volume but a different
+file index; physical equivalence and cause remain unproved. Independent reviews
+recommend separating code content from observed object identities in a NEW
+contract, with every fixed-control image checked before continuation and bounded
+same-handle revalidation. This producer/verifier change is not implemented yet.
 Preserve strict HAF/intake, all-token checks, watchdogs and exact owned jobs.
 Then complete fresh positive/chain-reset-negative controls and actual application
 tracing. MXC startup is not a gate on independent application progress. Any new
