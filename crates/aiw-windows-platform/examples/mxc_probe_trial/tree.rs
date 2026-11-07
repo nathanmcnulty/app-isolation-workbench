@@ -21,9 +21,9 @@ type ToolHolds = Vec<(
     aiw_windows_platform::BoundWorkspaceFile,
     HeldApplicationFile,
 )>;
-const ROOT: &str = r"C:\AIW-SevenZip-Tree-Control-20261106-R2";
-const SESSION: &str = "087d885a-781e-4703-9d43-3e4929d6e072";
-const SCHEMA: &str = "aiw.dev/research/sevenzip-tree-host-trial/v0alpha2";
+const ROOT: &str = r"C:\AIW-SevenZip-Tree-Control-20261106-R3";
+const SESSION: &str = "b2c71f91-030a-43c7-9b05-906d91c313d1";
+const SCHEMA: &str = "aiw.dev/research/sevenzip-tree-host-trial/v0alpha3";
 const HELPER: &str = "sevenzip_assessment.exe";
 const INSTALLER: &str = "7z2605-x64.exe";
 const INSTALLER_SHA256: &str = "fd99e86f57d8f429ef5ed045bf98315af962e2309b0f1ba87a147a44c71647d0";
@@ -193,7 +193,7 @@ fn verify_tools(workspace: &HeldRunWorkspace, proposal: &Proposal) -> Result<Too
 fn validate_report(report: &GuestReport) -> Result<()> {
     report.windows.validate()?;
     let token = &report.observer_token;
-    if report.schema_version != "aiw.dev/research/sevenzip-tree-result/v0alpha2"
+    if report.schema_version != "aiw.dev/research/sevenzip-tree-result/v0alpha3"
         || windows_label(&report.windows) != EXPECTED_GUEST
         || !token.is_elevated
         || token.is_app_container
@@ -595,7 +595,7 @@ mod tests {
             .into_iter()
             .map(|key| (key.to_owned(), "not reached or capture refused".to_owned()))
             .collect::<BTreeMap<_, _>>();
-        json!({"schemaVersion":"aiw.dev/research/sevenzip-tree-result/v0alpha2",
+        json!({"schemaVersion":"aiw.dev/research/sevenzip-tree-result/v0alpha3",
             "windows":{"major":10,"minor":0,"build":26100,"revision":9711,"observerArchitecture":"x86_64"},
             "observerToken":{"schemaVersion":aiw_token::TOKEN_EVIDENCE_SCHEMA_VERSION,"processId":42,
                 "tokenType":"primary","isAppContainer":false,"userSid":"S-1-5-21-1-2-3-504",

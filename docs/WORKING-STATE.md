@@ -2,8 +2,8 @@
 
 Updated 2026-11-06 (America/Anchorage). Checkout `C:\aiw\app-isolation-workbench`,
 branch `codex/multimode-assessment`, from main `b27942a` after #106.
-Current native source: `f27dda809a23ecd25934b2f74d6f8617d378e307`; later handoffs may
-change docs only. Resume with `scripts/work-status.ps1` and
+Current native source: `f27dda809a23ecd25934b2f74d6f8617d378e307`; the new
+code-content contract is implemented/tested but not native-accepted. Resume with `scripts/work-status.ps1` and
 [the acceptance map](MULTIMODE-ASSESSMENT.md). The full multi-mode application goal
 remains active; no broad W4/W5, Benchmark 2 or production acceptance is complete.
 
@@ -61,7 +61,11 @@ A reviewed read-only host image probe found matching bytes/volume but a differen
 file index; physical equivalence and cause remain unproved. Independent reviews
 recommend separating code content from observed object identities in a NEW
 contract, with every fixed-control image checked before continuation and bounded
-same-handle revalidation. This producer/verifier change is not implemented yet.
+same-handle revalidation. The separate producer/verifier is now implemented and
+independently reviewed; its fresh R3 session has not run. Historical verifiers
+and failed trials are unchanged. Validation passed: 122 default/123 research
+provider tests, 236 platform tests (10 ignored), 25 host tests, research all-target
+Clippy, format and governance. No new Sandbox, vendor or runtime execution ran.
 Preserve strict HAF/intake, all-token checks, watchdogs and exact owned jobs.
 Then complete fresh positive/chain-reset-negative controls and actual application
 tracing. MXC startup is not a gate on independent application progress. Any new

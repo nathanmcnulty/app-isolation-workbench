@@ -2,7 +2,10 @@
 use super::*;
 use std::os::windows::io::IntoRawHandle;
 
-use aiw_provider_wsb::sevenzip_process_tree::{SevenZipExpectedRootBinding, SevenZipProcessChain};
+use aiw_provider_wsb::sevenzip_code_control::{
+    SEVENZIP_CODE_CONTROL_TRACE_SCHEMA, SevenZipCodeControlTrace, verify_code_control,
+};
+use aiw_provider_wsb::sevenzip_process_tree::SevenZipExpectedRootBinding;
 use windows::Win32::Foundation::FILETIME;
 use windows::Win32::System::Threading::{GetCurrentThreadId, GetProcessTimes};
 
@@ -143,7 +146,7 @@ pub(super) fn publish_terminal_tree(
         return Err("embedded stage envelope exceeds fixed budget".into());
     }
     let marker = json!({
-        "schemaVersion":"aiw.dev/research/sevenzip-tree-result/v0alpha2",
+        "schemaVersion":"aiw.dev/research/sevenzip-tree-result/v0alpha3",
         "windows":windows,"observerToken":observer_token,
         "driverCompleted":result.is_ok(),
         "error":result.as_ref().err().map(|e|e.to_string().chars().take(512).collect::<String>()),
@@ -168,19 +171,20 @@ fn bounded_trace_record(value: Value) -> Result<(Value, bool)> {
     // A refusal is distinct from a trace. Preserve bounded exact summary facts
     // and the digest/length of the complete serialization, never a truncated
     // value that could be accepted as complete process evidence.
+    let facts = value.get("chain").unwrap_or(&value);
     let refused = json!({
         "traceRefused":"serialized trace exceeds fixed 128 KiB stage limit",
         "completeSerializedSizeBytes":bytes.len(),"completeSerializedSha256":hex::encode(Sha256::digest(&bytes)),
         "completeTraceRetained":false,
-        "rootProcessId":value["rootProcessId"],"eventsProcessed":value["eventsProcessed"],
-        "observedProcessCount":value["processes"].as_array().map(Vec::len),
-        "gapCount":value["gaps"].as_array().map(Vec::len),
-        "timedOut":value["timedOut"],
-        "ownedJobTerminationRequested":value["ownedJobTerminationRequested"],
-        "ownedJobTerminationSucceeded":value["ownedJobTerminationSucceeded"],
-        "jobTotalProcesses":value["jobTotalProcesses"],"jobActiveProcesses":value["jobActiveProcesses"],
-        "jobLimitTerminatedProcesses":value["jobLimitTerminatedProcesses"],
-        "requiresDebuggerProcessExit":value["requiresDebuggerProcessExit"],
+        "rootProcessId":facts["rootProcessId"],"eventsProcessed":facts["eventsProcessed"],
+        "observedProcessCount":facts["processes"].as_array().map(Vec::len),
+        "gapCount":facts["gaps"].as_array().map(Vec::len),
+        "timedOut":facts["timedOut"],
+        "ownedJobTerminationRequested":facts["ownedJobTerminationRequested"],
+        "ownedJobTerminationSucceeded":facts["ownedJobTerminationSucceeded"],
+        "jobTotalProcesses":facts["jobTotalProcesses"],"jobActiveProcesses":facts["jobActiveProcesses"],
+        "jobLimitTerminatedProcesses":facts["jobLimitTerminatedProcesses"],
+        "requiresDebuggerProcessExit":facts["requiresDebuggerProcessExit"],
         "applicationIncompatibility":false
     });
     if serde_json::to_vec_pretty(&refused)?.len() > TRACE_STAGE_LIMIT {
@@ -469,10 +473,13 @@ pub(super) fn collect(
                 image_sha256: image.observation().sha256.clone(),
                 image_size_bytes: image.observation().size_bytes,
                 token: token.clone(),
+                console_support: Some(support.observation.clone()),
             },
         )
     };
-    let trace = bounded_trace_record(json!(report));
+    let envelope = json!({"schemaVersion":SEVENZIP_CODE_CONTROL_TRACE_SCHEMA,
+        "chain":&report,"codeEvidence":&report.code_evidence});
+    let trace = bounded_trace_record(envelope.clone());
     let refused = trace.as_ref().is_ok_and(|(_, refused)| *refused);
     let retained = trace.and_then(|(value, _)| record(Path::new(WORK), stage(profile), &value));
     if report.requires_debugger_process_exit {
@@ -487,9 +494,9 @@ pub(super) fn collect(
             "oversized trace explicitly refused; complete process evidence unmeasured".into(),
         );
     }
-    let typed: SevenZipProcessChain = serde_json::from_value(json!(report))?;
+    let typed: SevenZipCodeControlTrace = serde_json::from_value(envelope)?;
     support.revalidate()?;
-    aiw_provider_wsb::sevenzip_tree_control::verify_control(
+    verify_code_control(
         &typed,
         &SevenZipExpectedRootBinding {
             process_id: info.dwProcessId,
@@ -500,7 +507,7 @@ pub(super) fn collect(
             image_size_bytes: image.observation().size_bytes,
             expected_control_processes: None,
         },
-        &support.observation.expected_binding(),
+        &support.observation,
     )?;
     image.revalidate()?;
     output.sync_all()?;
@@ -642,7 +649,7 @@ mod tests {
         assert_eq!(record["requiresDebuggerProcessExit"], true);
         assert!(record.get("processes").is_none());
         assert!(serde_json::to_vec_pretty(&record).unwrap().len() < TRACE_STAGE_LIMIT);
-        assert!(serde_json::from_value::<SevenZipProcessChain>(record).is_err());
+        assert!(serde_json::from_value::<SevenZipCodeControlTrace>(record).is_err());
     }
 
     #[test]
@@ -653,5 +660,29 @@ mod tests {
         assert_eq!(record, original);
         let original = json!({"diagnostic":"\u{0001}".repeat(TRACE_STAGE_LIMIT / 2)});
         assert!(bounded_trace_record(original).unwrap().1);
+    }
+
+    #[test]
+    fn oversized_code_sidecar_retains_chain_cleanup_facts_without_faking_complete_evidence() {
+        let envelope = json!({"schemaVersion":SEVENZIP_CODE_CONTROL_TRACE_SCHEMA,
+            "chain":{"rootProcessId":42,"eventsProcessed":88,"processes":[{},{}],
+                "gaps":["measurement gap"],"timedOut":false,
+                "ownedJobTerminationRequested":true,"ownedJobTerminationSucceeded":false,
+                "jobTotalProcesses":2,"jobActiveProcesses":1,"jobLimitTerminatedProcesses":0,
+                "requiresDebuggerProcessExit":true},
+            "codeEvidence":[{"diagnostic":"x".repeat(TRACE_STAGE_LIMIT)}]});
+        let serialized = serde_json::to_vec_pretty(&envelope).unwrap();
+        let (refused, is_refused) = bounded_trace_record(envelope).unwrap();
+        assert!(is_refused);
+        assert_eq!(
+            refused["completeSerializedSha256"],
+            hex::encode(Sha256::digest(serialized))
+        );
+        assert_eq!(refused["rootProcessId"], 42);
+        assert_eq!(refused["observedProcessCount"], 2);
+        assert_eq!(refused["jobActiveProcesses"], 1);
+        assert_eq!(refused["ownedJobTerminationSucceeded"], false);
+        assert_eq!(refused["requiresDebuggerProcessExit"], true);
+        assert!(serde_json::from_value::<SevenZipCodeControlTrace>(refused).is_err());
     }
 }

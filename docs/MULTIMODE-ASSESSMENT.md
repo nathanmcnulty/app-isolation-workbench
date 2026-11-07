@@ -125,7 +125,10 @@ retained all seven local owner stages and the ordinary code-5 journal denial.
 Its six-process ordinary trace was refused because preheld and debug-event
 console volume/file identities differ despite matching path, hash, size and exit.
 The candidate was not reached. Custody, outer cleanup and retained Read passed;
-the identity source remains under investigation, with no retrospective exception.
+the identity source remains unproved, with no retrospective exception. A separate
+code-content contract now checks every fixed-control image before continuation
+and revalidates the same event handle at exit, reporting object identities
+separately. Independent review passed; fresh native proof remains pending.
 
 Private raw metadata contains full-width FILETIME/process/file identifiers.
 Audit it with Rust or another lossless JSON parser; ordinary JavaScript numbers

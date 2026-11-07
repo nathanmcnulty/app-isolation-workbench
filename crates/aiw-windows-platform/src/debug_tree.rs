@@ -1,10 +1,16 @@
 //! Private foundation for creation-time debugger-chain observations.
 //!
-//! Not integrated or native-validated. This is neither an arbitrary launcher nor
+//! Research control integration only; the code-content gate awaits native proof.
+//! This is neither an arbitrary launcher nor
 //! an all-host descendant census. DEBUG_PROCESS chains can be reset by children;
 //! broker/WMI creation is outside the supported CreateProcess-tree scope.
 use std::collections::BTreeMap;
 
+use aiw_provider_wsb::sevenzip_code_control::{
+    SevenZipControlCodeEvidence, classify_control_image,
+};
+use aiw_provider_wsb::sevenzip_process_tree::SevenZipImageObservation;
+use aiw_provider_wsb::sevenzip_tree_control::SevenZipConsoleSupportObservation;
 use aiw_token::{TokenEvidence, TokenType};
 use serde::Serialize;
 
@@ -39,6 +45,7 @@ pub(crate) struct ExpectedBinding {
     pub image_sha256: String,
     pub image_size_bytes: u64,
     pub token: TokenEvidence,
+    pub console_support: Option<SevenZipConsoleSupportObservation>,
 }
 
 fn token_matches(actual: &TokenEvidence, expected: &TokenEvidence, process_id: u32) -> bool {
@@ -101,7 +108,7 @@ impl TraceState {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ImageObservation {
     pub process_image_path: String,
@@ -109,6 +116,67 @@ pub(crate) struct ImageObservation {
     pub size_bytes: u64,
     pub volume_serial_number: u32,
     pub file_index: u64,
+}
+
+impl ImageObservation {
+    fn code_observation(&self) -> SevenZipImageObservation {
+        SevenZipImageObservation {
+            process_image_path: self.process_image_path.clone(),
+            sha256: self.sha256.clone(),
+            size_bytes: self.size_bytes,
+            volume_serial_number: self.volume_serial_number,
+            file_index: self.file_index,
+        }
+    }
+}
+
+fn root_event_image_matches(
+    ordinal: usize,
+    event_pid: u32,
+    root_pid: u32,
+    expected: &ExpectedBinding,
+    image: &ImageObservation,
+) -> bool {
+    ordinal != 0
+        || (event_pid == root_pid
+            && image
+                .process_image_path
+                .strip_prefix(r"\\?\")
+                .unwrap_or(&image.process_image_path)
+                .eq_ignore_ascii_case(expected.role.image())
+            && image.sha256 == expected.image_sha256
+            && image.size_bytes == expected.image_size_bytes)
+}
+
+fn validate_control_binding(expected: &ExpectedBinding) -> Result<(), String> {
+    if matches!(expected.role, RootRole::Control) {
+        expected
+            .console_support
+            .as_ref()
+            .ok_or("control_requires_independently_held_console_support")?
+            .validate_pinned()?;
+    }
+    Ok(())
+}
+
+fn classify_before_continue(
+    expected: &ExpectedBinding,
+    image: &ImageObservation,
+) -> Result<Option<aiw_provider_wsb::sevenzip_code_control::SevenZipControlCodeClass>, String> {
+    if !matches!(expected.role, RootRole::Control) {
+        return Ok(None);
+    }
+    let console = expected
+        .console_support
+        .as_ref()
+        .ok_or("control_requires_independently_held_console_support")?;
+    classify_control_image(
+        &image.code_observation(),
+        &expected.image_sha256,
+        expected.image_size_bytes,
+        console,
+    )
+    .map(Some)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -143,6 +211,9 @@ pub(crate) struct DebugTreeReport {
     pub debugger_chain_complete: bool,
     pub requires_debugger_process_exit: bool,
     pub gaps: Vec<String>,
+    // New contract evidence is deliberately outside the historical chain JSON.
+    #[serde(skip)]
+    pub code_evidence: Vec<SevenZipControlCodeEvidence>,
 }
 
 impl DebugTreeReport {
@@ -163,6 +234,7 @@ impl DebugTreeReport {
             debugger_chain_complete: false,
             requires_debugger_process_exit: true,
             gaps: Vec::new(),
+            code_evidence: Vec::new(),
         }
     }
 
@@ -177,6 +249,10 @@ impl DebugTreeReport {
             || !root_create_seen
             || !state.active.is_empty()
             || !self.job_accounting_reconciled
+    }
+
+    fn may_continue_pending_event(&self) -> bool {
+        !self.owned_job_termination_requested || self.owned_job_termination_succeeded
     }
 }
 
@@ -300,23 +376,66 @@ pub(crate) mod native {
         Ok((u64::from(c.dwHighDateTime) << 32) | u64::from(c.dwLowDateTime))
     }
 
-    fn image(process: HANDLE, file: &mut File) -> Result<ImageObservation, String> {
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct ImageFileIdentity {
+        attributes: u32,
+        links: u32,
+        volume: u32,
+        index: u64,
+        size: u64,
+        creation: u64,
+        last_write: u64,
+    }
+
+    fn file_identity(file: &File) -> Result<ImageFileIdentity, String> {
         let file_handle = HANDLE(file.as_raw_handle());
-        // SAFETY: file owns the exact event image handle; no path is reopened.
+        // SAFETY: file owns this exact event image handle; no path is reopened.
         if unsafe { GetFileType(file_handle) } != FILE_TYPE_DISK {
             return Err("non_disk_event_image".into());
         }
         let mut info = BY_HANDLE_FILE_INFORMATION::default();
-        // SAFETY: same held event file and writable output structure.
+        // SAFETY: live held file and correctly sized writable output.
         unsafe { GetFileInformationByHandle(file_handle, &mut info) }
             .map_err(|e| format!("event_image_identity:{e}"))?;
         if info.dwFileAttributes & 0x450 != 0 || info.nNumberOfLinks != 1 {
             return Err("event_image_type_or_links_rejected".into());
         }
-        let size_bytes = (u64::from(info.nFileSizeHigh) << 32) | u64::from(info.nFileSizeLow);
-        if size_bytes == 0 || size_bytes > MAX_IMAGE_BYTES {
+        let size = (u64::from(info.nFileSizeHigh) << 32) | u64::from(info.nFileSizeLow);
+        if size == 0 || size > MAX_IMAGE_BYTES {
             return Err("event_image_size_rejected".into());
         }
+        let index = (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow);
+        if info.dwVolumeSerialNumber == 0 || index == 0 {
+            return Err("zero_event_image_identity".into());
+        }
+        let time = |value: FILETIME| {
+            (u64::from(value.dwHighDateTime) << 32) | u64::from(value.dwLowDateTime)
+        };
+        Ok(ImageFileIdentity {
+            attributes: info.dwFileAttributes,
+            links: info.nNumberOfLinks,
+            volume: info.dwVolumeSerialNumber,
+            index,
+            size,
+            creation: time(info.ftCreationTime),
+            last_write: time(info.ftLastWriteTime),
+        })
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct ImageSnapshot {
+        image: ImageObservation,
+        identity: ImageFileIdentity,
+    }
+
+    // Private hook for deterministic same-stream mutation regression tests.
+    // Production supplies a no-op; no callback is exposed to callers.
+    fn image_snapshot_with(
+        file: &mut File,
+        process_image_path: &str,
+        after_read: impl FnOnce() -> Result<(), String>,
+    ) -> Result<ImageSnapshot, String> {
+        let before = file_identity(file)?;
         use std::io::{Read, Seek, SeekFrom};
         file.seek(SeekFrom::Start(0))
             .map_err(|e| format!("event_image_seek:{e}"))?;
@@ -331,17 +450,39 @@ pub(crate) mod native {
                 break;
             }
             read += count as u64;
-            if read > size_bytes {
+            if read > before.size {
                 return Err("event_image_changed_during_read".into());
             }
             hash.update(&buffer[..count]);
         }
-        if read != size_bytes {
+        if read != before.size {
             return Err("event_image_truncated".into());
         }
+        after_read()?;
+        let after = file_identity(file)?;
+        if before != after {
+            return Err("event_image_identity_changed_during_read".into());
+        }
+        Ok(ImageSnapshot {
+            image: ImageObservation {
+                process_image_path: process_image_path.into(),
+                sha256: hex::encode(hash.finalize()),
+                size_bytes: before.size,
+                volume_serial_number: before.volume,
+                file_index: before.index,
+            },
+            identity: before,
+        })
+    }
+
+    fn image_snapshot(file: &mut File, path: &str) -> Result<ImageSnapshot, String> {
+        image_snapshot_with(file, path, || Ok(()))
+    }
+
+    fn image_at_create(process: HANDLE, file: &mut File) -> Result<ImageSnapshot, String> {
         let mut path = vec![0_u16; 32768];
         let mut length = path.len() as u32;
-        // SAFETY: exact held process; output buffer and its length are valid.
+        // SAFETY: exact live event process; this query is never used at EXIT.
         unsafe {
             QueryFullProcessImageNameW(
                 process,
@@ -351,20 +492,15 @@ pub(crate) mod native {
             )
         }
         .map_err(|e| format!("event_process_image_name:{e}"))?;
-        let process_image_path = String::from_utf16(&path[..length as usize])
+        let path = String::from_utf16(&path[..length as usize])
             .map_err(|_| "event_process_image_name_not_unicode".to_string())?;
-        Ok(ImageObservation {
-            process_image_path,
-            sha256: hex::encode(hash.finalize()),
-            size_bytes,
-            volume_serial_number: info.dwVolumeSerialNumber,
-            file_index: (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
-        })
+        image_snapshot(file, &path)
     }
 
     struct LiveProcess {
         process: OwnedHandle,
-        _image: File,
+        image: File,
+        initial: ImageSnapshot,
     }
 
     /// Collect a process already created with DEBUG_PROCESS | CREATE_SUSPENDED.
@@ -414,6 +550,7 @@ pub(crate) mod native {
             {
                 return Err("invalid_expected_image_hash".into());
             }
+            validate_control_binding(&expected)?;
             in_job(handle(&root), &job)?;
             let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
             // SAFETY: exact owned job and correctly sized writable output.
@@ -481,6 +618,10 @@ pub(crate) mod native {
                 }
                 terminate(&job, &mut report);
                 draining_since = Some(Instant::now());
+            }
+            // A failed kill never permits another debuggee event to resume.
+            if !report.may_continue_pending_event() {
+                break;
             }
             if report.events_processed >= MAX_EVENTS
                 || draining_since.is_some_and(|t: Instant| t.elapsed() >= DRAIN_DEADLINE)
@@ -558,7 +699,14 @@ pub(crate) mod native {
                                 exit_code: None,
                                 exit_event_sequence: None,
                             });
-                            if event.dwProcessId == info.dwProcessId {
+                            report.code_evidence.push(SevenZipControlCodeEvidence {
+                                ordinal: index,
+                                process_id: event.dwProcessId,
+                                create_event_sequence: report.events_processed,
+                                code_class_before_continue: None,
+                                image_after_exit: None,
+                            });
+                            if index == 0 && event.dwProcessId == info.dwProcessId {
                                 root_create_seen = true;
                             }
                             if !root_create_seen {
@@ -584,26 +732,30 @@ pub(crate) mod native {
                                     report.processes[index].creation_time_100ns =
                                         Some(creation_time(handle(&process))?);
                                     let mut file = event_file.ok_or("missing_event_image_file")?;
-                                    let observed_image = image(handle(&process), &mut file)?;
-                                    let root_image_matches = event.dwProcessId != info.dwProcessId
-                                        || (observed_image
-                                            .process_image_path
-                                            .strip_prefix(r"\\?\")
-                                            .unwrap_or(&observed_image.process_image_path)
-                                            .eq_ignore_ascii_case(expected.role.image())
-                                            && observed_image.sha256 == expected.image_sha256
-                                            && observed_image.size_bytes
-                                                == expected.image_size_bytes);
+                                    let initial = image_at_create(handle(&process), &mut file)?;
+                                    let observed_image = &initial.image;
+                                    let root_image_matches = root_event_image_matches(
+                                        index,
+                                        event.dwProcessId,
+                                        info.dwProcessId,
+                                        &expected,
+                                        observed_image,
+                                    );
                                     report.processes[index].image_before_continue =
-                                        Some(observed_image);
+                                        Some(observed_image.clone());
                                     if !root_image_matches {
                                         return Err("root_event_image_binding_mismatch".into());
                                     }
+                                    // EVERY Control image is classified before
+                                    // its CREATE event may resume user execution.
+                                    report.code_evidence[index].code_class_before_continue =
+                                        classify_before_continue(&expected, observed_image)?;
                                     live.insert(
                                         event.dwProcessId,
                                         LiveProcess {
                                             process,
-                                            _image: file,
+                                            image: file,
+                                            initial,
                                         },
                                     );
                                     Ok(())
@@ -623,6 +775,25 @@ pub(crate) mod native {
                             report.processes[index].exit_code = Some(exit.dwExitCode);
                             report.processes[index].exit_event_sequence =
                                 Some(report.events_processed);
+                            if let Some(process) = live.get_mut(&event.dwProcessId) {
+                                // Rehash the SAME event file. The cached logical
+                                // path came from CREATE, never a dead PID query.
+                                match image_snapshot(
+                                    &mut process.image,
+                                    &process.initial.image.process_image_path,
+                                ) {
+                                    Ok(after) => {
+                                        report.code_evidence[index].image_after_exit =
+                                            Some(after.image.code_observation());
+                                        if after != process.initial {
+                                            report.gap("event_image_changed_before_exit");
+                                        }
+                                    }
+                                    Err(error) => report.gap(format!("exit_image:{error}")),
+                                }
+                            } else if draining_since.is_none() {
+                                report.gap("exit_without_held_event_image");
+                            }
                         }
                         Err(error) => report.gap(error),
                     }
@@ -658,6 +829,11 @@ pub(crate) mod native {
             if draining_since.is_none() && !report.gaps.is_empty() {
                 terminate(&job, &mut report);
                 draining_since = Some(Instant::now());
+            }
+            // Leave the pending event suspended and require dedicated debugger
+            // process fail-stop if the owned job could not be terminated.
+            if !report.may_continue_pending_event() {
+                break;
             }
             // SAFETY: same creator/debugger thread; exact event PID/TID pair.
             if let Err(error) =
@@ -718,11 +894,240 @@ pub(crate) mod native {
         report.requires_debugger_process_exit = report.requires_exit(&state, root_create_seen);
         report
     }
+
+    #[cfg(test)]
+    mod image_tests {
+        use super::*;
+        use std::io::{Seek, SeekFrom, Write};
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+
+        struct Fixture {
+            path: std::path::PathBuf,
+            file: Option<File>,
+        }
+        impl Fixture {
+            fn new(bytes: &[u8]) -> Self {
+                let path = std::env::temp_dir().join(format!(
+                    "aiw-debug-image-{}-{}-{}.dat",
+                    std::process::id(),
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_nanos(),
+                    NEXT.fetch_add(1, Ordering::Relaxed),
+                ));
+                let mut file = std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .create_new(true)
+                    .open(&path)
+                    .unwrap();
+                file.write_all(bytes).unwrap();
+                file.sync_all().unwrap();
+                Self {
+                    path,
+                    file: Some(file),
+                }
+            }
+            fn file(&mut self) -> &mut File {
+                self.file.as_mut().unwrap()
+            }
+        }
+        impl Drop for Fixture {
+            fn drop(&mut self) {
+                drop(self.file.take());
+                let _ = std::fs::remove_file(&self.path);
+            }
+        }
+
+        #[test]
+        fn same_event_stream_is_stable_then_detects_lifetime_byte_change() {
+            let mut fixture = Fixture::new(b"original bytes");
+            // Inert arbitrary bytes are data; no image is loaded or executed.
+            let initial = image_snapshot(fixture.file(), "fixed-logical-image").unwrap();
+            assert_eq!(
+                initial,
+                image_snapshot(fixture.file(), "fixed-logical-image").unwrap()
+            );
+            fixture.file().seek(SeekFrom::Start(0)).unwrap();
+            fixture.file().write_all(b"modified bytes").unwrap();
+            fixture.file().sync_all().unwrap();
+            let after = image_snapshot(fixture.file(), "fixed-logical-image").unwrap();
+            assert_eq!(initial.image.file_index, after.image.file_index);
+            assert_eq!(initial.image.size_bytes, after.image.size_bytes);
+            assert_ne!(initial.image.sha256, after.image.sha256);
+            assert_ne!(initial, after);
+        }
+
+        #[test]
+        fn revalidation_detects_change_after_read_before_snapshot_acceptance() {
+            let mut fixture = Fixture::new(b"original bytes");
+            let writer = fixture.file().try_clone().unwrap();
+            let result = image_snapshot_with(fixture.file(), "fixed-logical-image", || {
+                writer.set_len(2).map_err(|e| e.to_string())?;
+                writer.sync_all().map_err(|e| e.to_string())
+            });
+            assert_eq!(
+                result.unwrap_err(),
+                "event_image_identity_changed_during_read"
+            );
+        }
+
+        #[test]
+        fn empty_and_oversize_event_images_refuse_before_hashing() {
+            let mut fixture = Fixture::new(b"");
+            assert_eq!(
+                image_snapshot(fixture.file(), "fixed").unwrap_err(),
+                "event_image_size_rejected"
+            );
+            fixture.file().set_len(MAX_IMAGE_BYTES + 1).unwrap();
+            assert_eq!(
+                image_snapshot(fixture.file(), "fixed").unwrap_err(),
+                "event_image_size_rejected"
+            );
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn failed_termination_never_authorizes_continuing_a_pending_event() {
+        let mut report = DebugTreeReport::new(10);
+        assert!(report.may_continue_pending_event());
+        report.owned_job_termination_requested = true;
+        report.gap("terminate_owned_job:inert injected failure");
+        assert!(!report.may_continue_pending_event());
+        assert!(report.requires_exit(&TraceState::default(), true));
+        report.owned_job_termination_succeeded = true;
+        assert!(report.may_continue_pending_event());
+        // A successful kill allows exit-event draining, never a complete claim.
+        assert!(report.requires_exit(&TraceState::default(), true));
+    }
+
+    fn control_binding() -> ExpectedBinding {
+        use aiw_provider_wsb::sevenzip_tree_control::{
+            SEVENZIP_CONSOLE_SUPPORT_PATH, SEVENZIP_CONSOLE_SUPPORT_SCHEMA,
+            SEVENZIP_CONSOLE_SUPPORT_SHA256, SEVENZIP_CONSOLE_SUPPORT_SIZE,
+        };
+        ExpectedBinding {
+            creator_thread_id: 1,
+            role: RootRole::Control,
+            image_sha256: "a".repeat(64),
+            image_size_bytes: 100,
+            token: standard_token(),
+            console_support: Some(SevenZipConsoleSupportObservation {
+                schema_version: SEVENZIP_CONSOLE_SUPPORT_SCHEMA.into(),
+                windows: aiw_probe::WindowsVersionObservation {
+                    major: 10,
+                    minor: 0,
+                    build: 26100,
+                    revision: 9711,
+                    observer_architecture: "x86_64".into(),
+                },
+                canonical_path: SEVENZIP_CONSOLE_SUPPORT_PATH.into(),
+                identity: aiw_probe::WindowsFileIdentity {
+                    final_path: SEVENZIP_CONSOLE_SUPPORT_PATH.into(),
+                    volume_serial_number: "1111111111111111".into(),
+                    file_id: "11111111111111111111111111111111".into(),
+                },
+                sha256: SEVENZIP_CONSOLE_SUPPORT_SHA256.into(),
+                size_bytes: SEVENZIP_CONSOLE_SUPPORT_SIZE,
+                volume_serial_number: 1,
+                file_index: 2,
+            }),
+        }
+    }
+
+    #[test]
+    fn root_image_gate_binds_first_lifetime_without_rejecting_later_pid_reuse() {
+        let expected = control_binding();
+        let mut image = ImageObservation {
+            process_image_path: expected.role.image().into(),
+            sha256: expected.image_sha256.clone(),
+            size_bytes: expected.image_size_bytes,
+            volume_serial_number: 77,
+            file_index: 99,
+        };
+        assert!(root_event_image_matches(0, 10, 10, &expected, &image));
+        assert!(!root_event_image_matches(0, 11, 10, &expected, &image));
+        image.process_image_path = expected
+            .console_support
+            .as_ref()
+            .unwrap()
+            .canonical_path
+            .clone();
+        assert!(!root_event_image_matches(0, 10, 10, &expected, &image));
+        let mut state = TraceState::default();
+        assert_eq!(state.create(10), Ok(0));
+        state.exit(10, 31).unwrap();
+        let reused = state.create(10).unwrap();
+        assert_eq!(reused, 1);
+        // The independent per-CREATE classifier still checks this lifetime's code.
+        assert!(root_event_image_matches(reused, 10, 10, &expected, &image));
+        assert!(classify_before_continue(&expected, &image).is_err());
+        let support = expected.console_support.as_ref().unwrap();
+        image.sha256 = support.sha256.clone();
+        image.size_bytes = support.size_bytes;
+        assert!(classify_before_continue(&expected, &image).is_ok());
+    }
+
+    #[test]
+    fn control_requires_pinned_support_before_resume_and_classifies_every_create() {
+        use aiw_provider_wsb::sevenzip_code_control::SevenZipControlCodeClass;
+        let mut expected = control_binding();
+        validate_control_binding(&expected).unwrap();
+        let mut image = ImageObservation {
+            process_image_path: expected.role.image().into(),
+            sha256: expected.image_sha256.clone(),
+            size_bytes: expected.image_size_bytes,
+            volume_serial_number: 77,
+            file_index: 99,
+        };
+        assert_eq!(
+            classify_before_continue(&expected, &image).unwrap(),
+            Some(SevenZipControlCodeClass::RootCode)
+        );
+        let support = expected.console_support.as_ref().unwrap();
+        image.process_image_path = support.canonical_path.clone();
+        image.sha256 = support.sha256.clone();
+        image.size_bytes = support.size_bytes;
+        // Distinct independently observed object IDs do not imply equivalence.
+        assert_eq!(
+            classify_before_continue(&expected, &image).unwrap(),
+            Some(SevenZipControlCodeClass::ConsoleSupport)
+        );
+        image.sha256 = "b".repeat(64);
+        assert!(classify_before_continue(&expected, &image).is_err());
+        image.sha256 = support.sha256.clone();
+        image.process_image_path = r"C:\AIW\unexpected.exe".into();
+        assert!(classify_before_continue(&expected, &image).is_err());
+        expected.console_support.as_mut().unwrap().windows.build = 26300;
+        assert!(validate_control_binding(&expected).is_err());
+        expected.console_support = None;
+        assert!(validate_control_binding(&expected).is_err());
+        assert!(classify_before_continue(&expected, &image).is_err());
+        expected.role = RootRole::SevenZip;
+        assert_eq!(classify_before_continue(&expected, &image).unwrap(), None);
+    }
+
+    #[test]
+    fn new_code_sidecar_never_changes_historical_chain_serialization() {
+        let mut report = DebugTreeReport::new(10);
+        let before = serde_json::to_value(&report).unwrap();
+        report.code_evidence.push(SevenZipControlCodeEvidence {
+            ordinal: 0,
+            process_id: 10,
+            create_event_sequence: 1,
+            code_class_before_continue: None,
+            image_after_exit: None,
+        });
+        assert_eq!(before, serde_json::to_value(&report).unwrap());
+        assert!(before.get("codeEvidence").is_none());
+    }
     #[test]
     fn continuation_failure_requires_fail_stop_even_after_all_job_processes_exit() {
         let mut state = TraceState::default();

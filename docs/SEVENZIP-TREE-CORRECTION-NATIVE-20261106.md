@@ -136,24 +136,37 @@ Both remain private. Microsoft documents
 [shared immutable OS files](https://learn.microsoft.com/en-us/windows/security/application-security/application-isolation/windows-sandbox/windows-sandbox-architecture);
 that general architecture does not explain these particular identity differences.
 
-Two independent design reviews recommend a new explicit executable-content
+Two independent design reviews recommended a new explicit executable-content
 contract, retaining observed object identities separately and leaving physical
-equivalence unproved. This is not implemented or accepted yet. For the fixed
-control fixture, every CREATE image must match its independently approved
-path/hash/size before normal debug continuation, and the same event file handle
-must undergo bounded identity/content revalidation. Unknown code, missing
-handles, token drift or measurement failure must stop the owned job and preserve
-the failure. The current collector measures descendants before continuation but
-classifies helper/support content afterward; that producer gap must be fixed.
+equivalence unproved. The separate implementation now has a fresh trace schema
+and guest/host result schemas; native acceptance remains pending. Historical
+verifiers and the two failed trials retain their original contracts and verdicts.
+For the fixed control fixture, every CREATE image must match its independently
+approved path/hash/size before normal debug continuation. The collector holds
+that event file and repeats bounded content/identity checks before continuing
+its EXIT event. Metadata is checked around each read and across the lifetime.
+Unknown code, missing handles, token drift or measurement failure stops the owned
+job and preserves the failure. A failed termination leaves the pending event
+suspended and requires debugger-process fail-stop. A later reuse of the root's
+numeric PID does not replace ordinal-zero root binding or bypass code checking.
 Microsoft defines the event's
 [`hFile` as the process image handle](https://learn.microsoft.com/en-us/windows/win32/api/minwinbase/ns-minwinbase-create_process_debug_info).
 Neither this seam nor a code hash proves loaded-memory integrity or complete DLL
 provenance.
 
+The separate contract passed 122 default and 123 research provider tests, 236
+platform tests (10 ignored), 25 host tests, research all-target Clippy, format and
+governance. Negatives cover omitted/misassociated classes, post-exit code/object
+changes, unknown code, token/time/job gaps, full-width times and schema refusal;
+inert native file fixtures exercise mutation between reads and across a lifetime.
+Independent producer/caller and verifier/host reviews passed, including a follow-up
+review of ordinal-zero root binding and later PID reuse. These are regression and
+review results; the R3 Sandbox controls have not run and actual app tracing is open.
+
 Keep strict local intake/custody, all-process token checks, source/approval/session
 binding, watchdogs and exact owned cleanup unchanged. The new contract requires
-fresh schemas, substitution/mutation/continuation negatives, independent review
-and a fresh source-bound native trial. Neither old trial may be replayed or
+substitution/mutation/continuation negatives, independent review and a fresh
+source-bound native trial. Neither old trial may be replayed or
 reclassified. Further physical-object diagnosis is optional; it must not replace
 progress into actual 7-Zip measurements.
 

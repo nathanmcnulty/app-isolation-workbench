@@ -2,6 +2,7 @@
 
 pub mod sevenzip;
 pub mod sevenzip_artifacts;
+pub mod sevenzip_code_control;
 pub mod sevenzip_process_tree;
 pub mod sevenzip_tree_control;
 pub use sevenzip::{SevenZipComparison, SevenZipRequest, SevenZipResult};

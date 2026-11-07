@@ -1,7 +1,8 @@
 //! Pure interpretation of source-pinned first-party controls. Not launch authority.
 use aiw_provider_wsb::StandardUserRuntimeContext;
-use aiw_provider_wsb::sevenzip_process_tree::{SevenZipExpectedRootBinding, SevenZipProcessChain};
-use aiw_provider_wsb::sevenzip_tree_control::{SevenZipConsoleSupportObservation, verify_control};
+use aiw_provider_wsb::sevenzip_code_control::{SevenZipCodeControlTrace, verify_code_control};
+use aiw_provider_wsb::sevenzip_process_tree::SevenZipExpectedRootBinding;
+use aiw_provider_wsb::sevenzip_tree_control::SevenZipConsoleSupportObservation;
 use aiw_token::{IntegrityLevel, TokenEvidence, TokenType};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -224,9 +225,9 @@ pub(super) fn verify(
             context.validate_token(token)?;
         }
         binding.console_support.validate_pinned()?;
-        let chain: SevenZipProcessChain = decode(stages, name)?;
-        let verified = verify_control(
-            &chain,
+        let trace: SevenZipCodeControlTrace = decode(stages, name)?;
+        let verified = verify_code_control(
+            &trace,
             &SevenZipExpectedRootBinding {
                 process_id: binding.process_id,
                 creation_time_100ns: binding.creation_time_100ns,
@@ -236,7 +237,7 @@ pub(super) fn verify(
                 image_size_bytes: helper_size,
                 expected_control_processes: None,
             },
-            &binding.console_support.expected_binding(),
+            &binding.console_support,
         )?;
         let denied: Invocation = decode(
             stages,
@@ -268,9 +269,13 @@ pub(super) fn verify(
             "observedProcesses":verified.observed_processes,"pairedExits":verified.paired_exits,
             "helperProcesses":verified.helper_processes,"consoleSupportProcesses":verified.console_support_processes,
             "rootExitedBeforeChild":verified.root_exited_before_helper_child,
-            "rootExitedBeforeGrandchildCreate":true,
+            "rootExitedBeforeGrandchildCreate":verified.root_exited_before_grandchild_create,
             "independentRootBindingMatched":true,"sameBoundaryObservedBeforeContinue":true,
             "ownerJournalReadDeniedCode5":true,
+            "codeCheckedBeforeContinue":verified.code_checked_before_continue,
+            "sameEventImageRevalidated":verified.same_event_image_revalidated,
+            "consoleIdentityRelation":verified.console_identity_relation,
+            "physicalObjectEquivalence":verified.physical_object_equivalence,
             "exactJobReconciled":verified.exact_job_reconciled,"scope":verified.scope}),
         );
     }
@@ -283,6 +288,7 @@ pub(super) fn verify(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aiw_provider_wsb::sevenzip_code_control::SEVENZIP_CODE_CONTROL_TRACE_SCHEMA;
     use aiw_provider_wsb::sevenzip_process_tree::{
         SEVENZIP_PROCESS_CHAIN_SCHEMA, SEVENZIP_PROCESS_CHAIN_SCOPE,
     };
@@ -290,6 +296,18 @@ mod tests {
         SEVENZIP_CONSOLE_SUPPORT_PATH, SEVENZIP_CONSOLE_SUPPORT_SCHEMA,
         SEVENZIP_CONSOLE_SUPPORT_SHA256, SEVENZIP_CONSOLE_SUPPORT_SIZE,
     };
+
+    fn code_envelope(chain: Value) -> Value {
+        let evidence = chain["processes"].as_array().unwrap().iter().map(|process| {
+            json!({"ordinal":process["ordinal"],"processId":process["processId"],
+                "createEventSequence":process["createEventSequence"],
+                "codeClassBeforeContinue":if process["imageBeforeContinue"]["processImagePath"] == HELPER {
+                    "rootCode"
+                } else { "consoleSupport" },
+                "imageAfterExit":process["imageBeforeContinue"]})
+        }).collect::<Vec<_>>();
+        json!({"schemaVersion":SEVENZIP_CODE_CONTROL_TRACE_SCHEMA,"chain":chain,"codeEvidence":evidence})
+    }
 
     fn token(pid: u32, candidate: bool) -> Value {
         let rid = if candidate { 4096 } else { 8192 };
@@ -357,11 +375,11 @@ mod tests {
                 "tokenBeforeContinue":token(base+ordinal,candidate),"imageBeforeContinue":{
                     "processImagePath":HELPER,"sha256":"a".repeat(64),"sizeBytes":100,"volumeSerialNumber":1,"fileIndex":9},
                 "exitCode":ordinal+31})).collect::<Vec<_>>();
-            stages.insert(name.into(),json!({"schemaVersion":SEVENZIP_PROCESS_CHAIN_SCHEMA,"scope":SEVENZIP_PROCESS_CHAIN_SCOPE,
+            stages.insert(name.into(),code_envelope(json!({"schemaVersion":SEVENZIP_PROCESS_CHAIN_SCHEMA,"scope":SEVENZIP_PROCESS_CHAIN_SCOPE,
                 "rootProcessId":base,"eventsProcessed":16,"processes":processes,"timedOut":false,
                 "ownedJobTerminationRequested":false,"ownedJobTerminationSucceeded":false,
                 "jobTotalProcesses":3,"jobActiveProcesses":0,"jobLimitTerminatedProcesses":0,
-                "jobAccountingReconciled":true,"debuggerChainComplete":true,"requiresDebuggerProcessExit":false,"gaps":[]}));
+                "jobAccountingReconciled":true,"debuggerChainComplete":true,"requiresDebuggerProcessExit":false,"gaps":[]})));
         }
         stages
     }
@@ -378,6 +396,16 @@ mod tests {
     #[test]
     fn incomplete_or_contradictory_measurements_cannot_pass_using_summary_flags() {
         let mutations: Vec<fn(&mut BTreeMap<String, Value>)> = vec![
+            |s| {
+                s.get_mut("tree-baseline").unwrap()["codeEvidence"][0]["codeClassBeforeContinue"] =
+                    Value::Null
+            },
+            |s| {
+                s.get_mut("tree-baseline").unwrap()["codeEvidence"][0]["imageAfterExit"]["sha256"] =
+                    json!("b".repeat(64))
+            },
+            |s| s.get_mut("tree-baseline").unwrap()["codeEvidence"][0]["processId"] = json!(99),
+            |s| s.get_mut("tree-baseline").unwrap()["schemaVersion"] = json!("historical"),
             |s| {
                 s.remove("owner-00-start");
             },
@@ -413,15 +441,15 @@ mod tests {
                     json!("S-1-15-2-999")
             },
             |s| {
-                s.get_mut("tree-candidate").unwrap()["processes"][1]["tokenBeforeContinue"]["userSid"] =
-                    json!("S-1-5-21-1-2-3-9999")
+                s.get_mut("tree-candidate").unwrap()["chain"]["processes"][1]["tokenBeforeContinue"]
+                    ["userSid"] = json!("S-1-5-21-1-2-3-9999")
             },
-            |s| s.get_mut("tree-candidate").unwrap()["jobTotalProcesses"] = json!(4),
+            |s| s.get_mut("tree-candidate").unwrap()["chain"]["jobTotalProcesses"] = json!(4),
             |s| {
-                s.get_mut("tree-candidate").unwrap()["processes"][2]["exitEventSequence"] =
+                s.get_mut("tree-candidate").unwrap()["chain"]["processes"][2]["exitEventSequence"] =
                     Value::Null
             },
-            |s| s.get_mut("tree-baseline").unwrap()["processes"][1]["exitCode"] = json!(0),
+            |s| s.get_mut("tree-baseline").unwrap()["chain"]["processes"][1]["exitCode"] = json!(0),
             |s| {
                 s.insert(
                     "tree-baseline-error".into(),
@@ -491,6 +519,10 @@ mod tests {
         let mut stages = fixture();
         stages.get_mut("tree-baseline").unwrap()["unknown"] = json!(true);
         assert!(verify(&stages, true, &"a".repeat(64), 100).is_err());
+        let mut stages = fixture();
+        let historical = stages["tree-baseline"]["chain"].clone();
+        stages.insert("tree-baseline".into(), historical);
+        assert!(verify(&stages, true, &"a".repeat(64), 100).is_err());
     }
 
     #[test]
@@ -500,7 +532,8 @@ mod tests {
             ("tree-baseline", false, 100u32),
             ("tree-candidate", true, 200u32),
         ] {
-            let chain = stages.get_mut(name).unwrap();
+            let envelope = stages.get_mut(name).unwrap();
+            let chain = &mut envelope["chain"];
             let helpers = chain["processes"].as_array().unwrap().clone();
             let mut processes = vec![];
             for i in 0..3u32 {
@@ -519,26 +552,32 @@ mod tests {
                 support["creationTime100ns"] = json!((1u64 << 55) + 123 + u64::from(i * 2 + 1));
                 support["imageBeforeContinue"] = json!({"processImagePath":SEVENZIP_CONSOLE_SUPPORT_PATH,
                     "sha256":SEVENZIP_CONSOLE_SUPPORT_SHA256,"sizeBytes":SEVENZIP_CONSOLE_SUPPORT_SIZE,
-                    "volumeSerialNumber":7,"fileIndex":99});
+                    "volumeSerialNumber":8,"fileIndex":199});
                 support["exitCode"] = json!(0);
                 processes.push(support);
             }
             chain["processes"] = json!(processes);
             chain["eventsProcessed"] = json!(16);
             chain["jobTotalProcesses"] = json!(6);
+            let updated = chain.clone();
+            *envelope = code_envelope(updated);
         }
         let observed = verify(&stages, true, &"a".repeat(64), 100).unwrap();
         for mode in observed["modes"].as_array().unwrap() {
             assert_eq!(mode["observedProcesses"], 6);
             assert_eq!(mode["consoleSupportProcesses"], 3);
             assert_eq!(mode["ownerJournalReadDeniedCode5"], true);
+            assert_eq!(mode["codeCheckedBeforeContinue"], true);
+            assert_eq!(mode["sameEventImageRevalidated"], true);
+            assert_eq!(mode["consoleIdentityRelation"], "atLeastOnePairDifferent");
+            assert_eq!(mode["physicalObjectEquivalence"], "unproved");
         }
         let mut drift = stages.clone();
-        drift.get_mut("tree-candidate").unwrap()["processes"][3]["tokenBeforeContinue"] =
+        drift.get_mut("tree-candidate").unwrap()["chain"]["processes"][3]["tokenBeforeContinue"] =
             token(203, false);
         assert!(verify(&drift, true, &"a".repeat(64), 100).is_err());
         let mut drift = stages;
-        drift.get_mut("tree-baseline").unwrap()["processes"][3]["imageBeforeContinue"]["fileIndex"] =
+        drift.get_mut("tree-baseline").unwrap()["chain"]["processes"][3]["imageBeforeContinue"]["fileIndex"] =
             json!(100);
         assert!(verify(&drift, true, &"a".repeat(64), 100).is_err());
     }
