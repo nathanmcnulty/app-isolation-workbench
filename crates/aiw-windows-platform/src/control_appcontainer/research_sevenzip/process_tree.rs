@@ -6,6 +6,9 @@ use aiw_provider_wsb::sevenzip_process_tree::{SevenZipExpectedRootBinding, Seven
 use windows::Win32::Foundation::FILETIME;
 use windows::Win32::System::Threading::{GetCurrentThreadId, GetProcessTimes};
 
+mod console_support;
+pub(super) use console_support::HeldConsoleSupport;
+
 const TRACE_STAGE_LIMIT: usize = 128 * 1024;
 const EMBEDDED_STAGE_LIMIT: usize = 768 * 1024;
 const MARKER_LIMIT: usize = 1024 * 1024;
@@ -84,6 +87,8 @@ pub(super) fn publish_terminal_tree(
         "tree-candidate-profile",
         "tree-profile-cleanup",
         "tree-complete",
+        "tree-owner-baseline",
+        "tree-owner-candidate",
         "99-driver-error",
     ] {
         let key = if name == "99-driver-error" {
@@ -118,7 +123,7 @@ pub(super) fn publish_terminal_tree(
     ] {
         let captured = (|| -> Result<Value> {
             let file = HeldApplicationFile::open_bounded(
-                &Path::new(OUTPUT).join(format!("{name}.json")),
+                &Path::new(owner_journal::ROOT).join(format!("{name}.json")),
                 TRACE_STAGE_LIMIT as u64,
             )?;
             let value = serde_json::from_slice(&file.read_bounded(TRACE_STAGE_LIMIT as u64)?)?;
@@ -138,7 +143,7 @@ pub(super) fn publish_terminal_tree(
         return Err("embedded stage envelope exceeds fixed budget".into());
     }
     let marker = json!({
-        "schemaVersion":"aiw.dev/research/sevenzip-tree-result/v0alpha1",
+        "schemaVersion":"aiw.dev/research/sevenzip-tree-result/v0alpha2",
         "windows":windows,"observerToken":observer_token,
         "driverCompleted":result.is_ok(),
         "error":result.as_ref().err().map(|e|e.to_string().chars().take(512).collect::<String>()),
@@ -193,9 +198,27 @@ fn stage(profile: Option<PSID>) -> &'static str {
 }
 
 pub(super) fn workflow(token: &TokenEvidence) -> Result<u8> {
+    let result = workflow_inner(token);
+    if let Err(error) = &result
+        && let Err(retention) = record(
+            Path::new(WORK),
+            "99-driver-error",
+            &json!({
+                "driverError":error.to_string().chars().take(2048).collect::<String>(),
+                "applicationIncompatibility":false
+            }),
+        )
+    {
+        return Err(format!("{error}; workflow error retention failed: {retention}").into());
+    }
+    result
+}
+
+fn workflow_inner(token: &TokenEvidence) -> Result<u8> {
     verify_token(token, std::process::id(), None, &token.user_sid)?;
     let _root = hold_directory_chain(Path::new(ROOT))?;
     let _work = hold_directory_chain(Path::new(WORK))?;
+    owner_journal_control(None, &token.user_sid)?;
     control(None, &token.user_sid)?;
     let mut profile = AppContainerProfile::create(SEVENZIP_PROFILE)?;
     let candidate = (|| -> Result<()> {
@@ -211,9 +234,13 @@ pub(super) fn workflow(token: &TokenEvidence) -> Result<u8> {
                 "cleanup":"not yet attempted; abrupt debugger exit leaves deletion unverified"
             }),
         )?;
+        owner_journal_control(Some(profile.sid), &token.user_sid)?;
         control(Some(profile.sid), &token.user_sid)
     })();
     let cleanup = profile.delete();
+    // This new research path records exactly one deletion attempt. Suppress
+    // the legacy Drop retry even on failure; unknown cleanup stays unknown.
+    profile.deleted = true;
     record(
         Path::new(WORK),
         "tree-profile-cleanup",
@@ -233,6 +260,50 @@ pub(super) fn workflow(token: &TokenEvidence) -> Result<u8> {
         }),
     )?;
     Ok(0)
+}
+
+const OWNER_DENIED: &[u8] = b"owner-journal-denied-code5";
+
+pub(super) fn owner_journal_role() -> Result<u8> {
+    // The elevated owner verified this exact local file before workers start,
+    // then retains protected directory/ACL custody through terminal capture.
+    // Missing data is not evidence of access enforcement.
+    let result = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ.0)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
+        .open(Path::new(owner_journal::ROOT).join("00-start.json"));
+    match result {
+        Err(error) if error.raw_os_error() == Some(5) => {
+            std::io::stdout().write_all(OWNER_DENIED)?;
+            Ok(0)
+        }
+        Err(error) => {
+            Err(format!("owner journal read failed without access-denied proof: {error}").into())
+        }
+        Ok(_) => Err("worker unexpectedly opened protected owner journal".into()),
+    }
+}
+
+fn owner_journal_control(profile: Option<PSID>, sid: &str) -> Result<()> {
+    let invocation = launch(Operation::OwnerJournal, profile, Path::new(WORK), sid)?;
+    record(
+        Path::new(WORK),
+        if profile.is_some() {
+            "tree-owner-candidate"
+        } else {
+            "tree-owner-baseline"
+        },
+        &serde_json::to_value(&invocation)?,
+    )?;
+    if invocation.exit_code != Some(0)
+        || invocation.timed_out
+        || !invocation.job_empty
+        || invocation.output != OWNER_DENIED
+    {
+        return Err("owner journal protection control failed; no application verdict".into());
+    }
+    Ok(())
 }
 
 /// Stop this dedicated debugger after persisting its measurement. Never start
@@ -328,6 +399,7 @@ pub(super) fn collect(
     capture: &Path,
     profile: Option<PSID>,
     sid: &str,
+    support: HeldConsoleSupport,
 ) -> Result<Invocation> {
     let before = (|| -> Result<_> {
         let _ancestry = hold_directory_chain(Path::new(ROOT))?;
@@ -364,7 +436,7 @@ pub(super) fn collect(
                     "sizeBytes":image.observation().size_bytes,
                     "identity":image.observation().identity
                 },
-                "profileDeletion":"not yet attempted"
+                "profileDeletion":"not yet attempted","consoleSupport":support.observation
             }),
         )?;
         Ok((_ancestry, image, token, creation_time))
@@ -416,25 +488,20 @@ pub(super) fn collect(
         );
     }
     let typed: SevenZipProcessChain = serde_json::from_value(json!(report))?;
-    typed.verify_complete(&SevenZipExpectedRootBinding {
-        process_id: info.dwProcessId,
-        creation_time_100ns: creation_time,
-        held_token: &token,
-        fixed_image_path: HELPER,
-        image_sha256: &image.observation().sha256,
-        image_size_bytes: image.observation().size_bytes,
-        expected_control_processes: Some(3),
-    })?;
-    if typed
-        .processes
-        .iter()
-        .map(|p| p.exit_code)
-        .collect::<Vec<_>>()
-        != [Some(31), Some(32), Some(33)]
-        || typed.processes[0].exit_event_sequence >= typed.processes[1].exit_event_sequence
-    {
-        return Err("control role exits/root-first event order differ; preserve trace".into());
-    }
+    support.revalidate()?;
+    aiw_provider_wsb::sevenzip_tree_control::verify_control(
+        &typed,
+        &SevenZipExpectedRootBinding {
+            process_id: info.dwProcessId,
+            creation_time_100ns: creation_time,
+            held_token: &token,
+            fixed_image_path: HELPER,
+            image_sha256: &image.observation().sha256,
+            image_size_bytes: image.observation().size_bytes,
+            expected_control_processes: None,
+        },
+        &support.observation.expected_binding(),
+    )?;
     image.revalidate()?;
     output.sync_all()?;
     drop(output);
@@ -473,7 +540,7 @@ mod tests {
     fn embedded_stage_budget_preserves_prior_values_and_partitions_all_fixed_keys() {
         let mut stages = serde_json::Map::new();
         let mut errors = serde_json::Map::new();
-        for index in 0..17 {
+        for index in 0..19 {
             insert_stage(
                 &mut stages,
                 &mut errors,
@@ -483,9 +550,9 @@ mod tests {
             .unwrap();
         }
         assert!(stages.contains_key("fixed-0"));
-        assert!(stages.len() < 17);
+        assert!(stages.len() < 19);
         assert!(!errors.is_empty());
-        assert_eq!(stages.len() + errors.len(), 17);
+        assert_eq!(stages.len() + errors.len(), 19);
         for key in stages.keys() {
             assert!(!errors.contains_key(key));
         }
@@ -534,7 +601,7 @@ mod tests {
             )
             .unwrap();
         }
-        for index in 0..17 {
+        for index in 0..19 {
             insert_stage(
                 &mut stages,
                 &mut errors,
@@ -544,7 +611,7 @@ mod tests {
             .unwrap();
         }
         assert!(stages.contains_key("prior-0"));
-        assert_eq!(errors.len(), 17);
+        assert_eq!(errors.len(), 19);
         assert!(
             serde_json::to_vec_pretty(&json!({"stages":stages,"stageReadErrors":errors}))
                 .unwrap()

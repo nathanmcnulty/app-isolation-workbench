@@ -24,6 +24,8 @@ use windows::Win32::Storage::FileSystem::{
 };
 
 #[cfg(feature = "research-sevenzip")]
+mod owner_journal;
+#[cfg(feature = "research-sevenzip")]
 mod process_tree;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -86,6 +88,7 @@ mod image_spelling_tests {
             "--tree-root",
             "--tree-child",
             "--tree-grandchild",
+            "--owner-journal-control",
             "--output",
         ] {
             assert!(!production_role_allowed(role));
@@ -128,6 +131,8 @@ pub fn run() -> Result<u8> {
         return Err("fixed standard-user research role required".into());
     }
     match args[0].to_str() {
+        #[cfg(feature = "research-sevenzip")]
+        Some("--owner-journal-control") => process_tree::owner_journal_role(),
         #[cfg(feature = "research-sevenzip")]
         Some("--tree-root" | "--tree-child" | "--tree-grandchild") => {
             process_tree::run_fixed_role(args[0].to_str().unwrap())
@@ -190,6 +195,20 @@ pub(crate) fn execute_production(
 fn setup() -> Result<u8> {
     setup_bound(None, false)
 }
+
+fn owner_record(tree_only: bool, name: &str, value: &Value) -> Result<()> {
+    #[cfg(feature = "research-sevenzip")]
+    if tree_only {
+        let stage = owner_journal::Stage::parse(name)?;
+        return owner_journal::publish(stage, value);
+    }
+    #[cfg(not(feature = "research-sevenzip"))]
+    if tree_only {
+        return Err("tree owner journal requires the explicit research feature".into());
+    }
+    record(Path::new(OUTPUT), name, value)
+}
+
 fn setup_bound(expected_helper: Option<(&str, u64)>, tree_only: bool) -> Result<u8> {
     // Cache context before trial execution. A late WinRT/token query must not
     // erase already captured child/cleanup evidence at terminal publication.
@@ -222,6 +241,14 @@ fn setup_bound(expected_helper: Option<(&str, u64)>, tree_only: bool) -> Result<
     }
     fs::create_dir(ROOT)?;
     let _root = hold_directory_chain(Path::new(ROOT))?;
+    // Keep the protected local journal/ancestry alive through terminal snapshot.
+    // It precedes standard account establishment and every worker dispatch.
+    #[cfg(feature = "research-sevenzip")]
+    let _owner_journal = if tree_only {
+        Some(owner_journal::create()?)
+    } else {
+        None
+    };
     for (path, is_installer) in [(INSTALLER, true), (HELPER, false)] {
         let mut output = fs::OpenOptions::new()
             .write(true)
@@ -245,21 +272,22 @@ fn setup_bound(expected_helper: Option<(&str, u64)>, tree_only: bool) -> Result<
     if helper.observation().sha256 != inputs.helper_hash() {
         return Err("local helper differs from held mapped bytes".into());
     }
-    record(
-        Path::new(OUTPUT),
-        "00-start",
-        &json!({
-            "schemaVersion":"aiw.dev/research/sevenzip/v0alpha1", "productionEvidence":false,
-            "installerSha256":INSTALLER_HASH,"installerSizeBytes":INSTALLER_SIZE,
-            "helperSha256":helper.observation().sha256,"windows":match &owner_context {
-                Some((windows,_))=>windows.clone(),None=>crate::observe_windows_version()?
-            },
-            "scope":if tree_only {"first-party process-tree driver controls; ordinary and classic AppContainer, zero capabilities; no vendor execution"}
-              else {"7-Zip 26.05 CLI create/test/extract/integrity; classic AppContainer, zero capabilities"},
-            "gaps":["general compatibility","GUI and shell integration","registry and system-wide installation changes",
-              "network/IPC/UI enforcement","all descendant tokens","production evidence receipt","host endpoint equivalence"]
-        }),
-    )?;
+    let start = json!({
+        "schemaVersion":"aiw.dev/research/sevenzip/v0alpha1", "productionEvidence":false,
+        "installerSha256":INSTALLER_HASH,"installerSizeBytes":INSTALLER_SIZE,
+        "helperSha256":helper.observation().sha256,"windows":match &owner_context {
+            Some((windows,_))=>windows.clone(),None=>crate::observe_windows_version()?
+        },
+        "scope":if tree_only {"first-party process-tree driver controls; ordinary and classic AppContainer, zero capabilities; no vendor execution"}
+          else {"7-Zip 26.05 CLI create/test/extract/integrity; classic AppContainer, zero capabilities"},
+        "gaps":["general compatibility","GUI and shell integration","registry and system-wide installation changes",
+          "network/IPC/UI enforcement","all descendant tokens","production evidence receipt","host endpoint equivalence"]
+    });
+    owner_record(tree_only, "00-start", &start)?;
+    #[cfg(feature = "research-sevenzip")]
+    if tree_only {
+        owner_journal::verify_start(&start)?;
+    }
     let operation = setup_inner(&installer, &helper, tree_only);
     let revalidated = inputs.revalidate().map_err(fixed);
     let mut result: Result<u8> = match (operation, revalidated) {
@@ -270,8 +298,8 @@ fn setup_bound(expected_helper: Option<(&str, u64)>, tree_only: bool) -> Result<
         .into()),
     };
     if let Err(error) = &result {
-        let failure_record = record(
-            Path::new(OUTPUT),
+        let failure_record = owner_record(
+            tree_only,
             "99-driver-error",
             &json!({"driverError":error.to_string(),
             "productionEvidence":false,"action":"preserve this exact worker/session and prior stages; do not reinstall blindly"}),
@@ -349,7 +377,7 @@ fn setup_inner(
         &format!("D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GR;;;{sid})"),
         false,
     )?;
-    record(Path::new(OUTPUT), "01-context", &json!(standard.context()))?;
+    owner_record(tree_only, "01-context", &json!(standard.context()))?;
     #[cfg(feature = "research-sevenzip")]
     if tree_only {
         let package = DerivedProfileSid::new()?;
@@ -376,15 +404,11 @@ fn setup_inner(
         &standard,
     )?;
     let operation = (|| -> Result<i32> {
-        record(
-            Path::new(OUTPUT),
-            "02-launcher",
-            &json!({"heldToken":held_token}),
-        )?;
+        owner_record(tree_only, "02-launcher", &json!({"heldToken":held_token}))?;
         if tree_only {
             let exit = child.wait_for_exit(Duration::from_secs(60))?;
-            record(
-                Path::new(OUTPUT),
+            owner_record(
+                tree_only,
                 "05-workflow-exit",
                 &json!({
                     "exitCode":exit,"heldToken":held_token,"firstPartyTreeControlsOnly":true,
@@ -459,8 +483,8 @@ fn setup_inner(
         dll.revalidate()?;
         let after_image = HeldApplicationFile::open(Path::new(IMAGE))?;
         let after_dll = HeldApplicationFile::open(Path::new(DLL))?;
-        record(
-            Path::new(OUTPUT),
+        owner_record(
+            tree_only,
             "05-workflow-exit",
             &json!({"exitCode":exit,
             "heldToken":held_token,"imageSha256":image.observation().sha256,"dllSha256":dll.observation().sha256,
@@ -477,14 +501,14 @@ fn setup_inner(
     })();
     let cleanup = child.cleanup();
     // Never let output collection erase the original operation/cleanup failure.
-    let cleanup_record = record(
-        Path::new(OUTPUT),
+    let cleanup_record = owner_record(
+        tree_only,
         "05-launcher-cleanup",
         &json!({
         "jobEmpty":cleanup.is_ok(),"cleanupError":cleanup.as_ref().err().map(ToString::to_string),
         "operationError":operation.as_ref().err().map(ToString::to_string)}),
     );
-    let collection = collect_stages();
+    let collection: Result<()> = if tree_only { Ok(()) } else { collect_stages() };
     let exit=match (operation,cleanup,cleanup_record,collection) {
         (Ok(exit),Ok(()),Ok(()),Ok(()))=>exit,
         (operation,cleanup,record,collection)=>return Err(format!(
@@ -493,8 +517,8 @@ fn setup_inner(
     held_helper.revalidate()?;
     helper.revalidate()?;
     installer.revalidate()?;
-    record(
-        Path::new(OUTPUT),
+    owner_record(
+        tree_only,
         "06-final",
         &json!({"productionEvidence":false,
         "workflowDriverExitCode":exit,"outerCleanup":"owned by host, not measured by guest",
@@ -879,6 +903,8 @@ fn fixture_inventory() -> BTreeMap<String, Value> {
 #[derive(Clone, Copy)]
 enum Operation {
     #[cfg(feature = "research-sevenzip")]
+    OwnerJournal,
+    #[cfg(feature = "research-sevenzip")]
     Tree,
     Driver,
     Deadline,
@@ -891,6 +917,8 @@ impl Operation {
     fn label(self) -> &'static str {
         match self {
             #[cfg(feature = "research-sevenzip")]
+            Self::OwnerJournal => "owner-journal",
+            #[cfg(feature = "research-sevenzip")]
             Self::Tree => "tree",
             Self::Driver => "driver",
             Self::Deadline => "deadline",
@@ -902,6 +930,8 @@ impl Operation {
     }
     fn command(self) -> (&'static str, &'static [&'static str]) {
         match self {
+            #[cfg(feature = "research-sevenzip")]
+            Self::OwnerJournal => (HELPER, &["--owner-journal-control"]),
             #[cfg(feature = "research-sevenzip")]
             Self::Tree => (HELPER, &["--tree-root"]),
             Self::Driver => (HELPER, &["--driver-control"]),
@@ -933,6 +963,14 @@ fn launch(
     directory: &Path,
     sid: &str,
 ) -> Result<Invocation> {
+    // Hold the exact fixed console-support image before any process creation,
+    // including implicit OS support creation. Other launch modes do not enroll it.
+    #[cfg(feature = "research-sevenzip")]
+    let tree_support = if matches!(operation, Operation::Tree) {
+        Some(process_tree::HeldConsoleSupport::open()?)
+    } else {
+        None
+    };
     let (image, arguments) = operation.command();
     let capture = directory.join(format!(
         "{}-{}-capture.txt",
@@ -1008,7 +1046,13 @@ fn launch(
     }
     #[cfg(feature = "research-sevenzip")]
     if matches!(operation, Operation::Tree) {
-        return process_tree::collect(info, process, _thread, job, output, &capture, profile, sid);
+        let support = match tree_support {
+            Some(support) => support,
+            None => process_tree::fail_stop(profile, "missing precreation console support custody"),
+        };
+        return process_tree::collect(
+            info, process, _thread, job, output, &capture, profile, sid, support,
+        );
     }
     let observed = (|| -> Result<Invocation> {
         let token = collect_process_token(process.as_handle())?;

@@ -21,15 +21,15 @@ type ToolHolds = Vec<(
     aiw_windows_platform::BoundWorkspaceFile,
     HeldApplicationFile,
 )>;
-const ROOT: &str = r"C:\AIW-SevenZip-Tree-Control-20261106-R1";
-const SESSION: &str = "4656bd40-c62b-4b5b-8c77-f38942ddde7a";
-const SCHEMA: &str = "aiw.dev/research/sevenzip-tree-host-trial/v0alpha1";
+const ROOT: &str = r"C:\AIW-SevenZip-Tree-Control-20261106-R2";
+const SESSION: &str = "087d885a-781e-4703-9d43-3e4929d6e072";
+const SCHEMA: &str = "aiw.dev/research/sevenzip-tree-host-trial/v0alpha2";
 const HELPER: &str = "sevenzip_assessment.exe";
 const INSTALLER: &str = "7z2605-x64.exe";
 const INSTALLER_SHA256: &str = "fd99e86f57d8f429ef5ed045bf98315af962e2309b0f1ba87a147a44c71647d0";
 const INSTALLER_SIZE: u64 = 1_663_506;
 const MARKER_BOUND: u64 = 1024 * 1024;
-const STAGES: [&str; 17] = [
+const STAGES: [&str; 19] = [
     "owner-00-start",
     "owner-01-context",
     "owner-02-launcher",
@@ -39,6 +39,8 @@ const STAGES: [&str; 17] = [
     "owner-99-driver-error",
     "tree-baseline",
     "tree-candidate",
+    "tree-owner-baseline",
+    "tree-owner-candidate",
     "tree-baseline-binding",
     "tree-candidate-binding",
     "tree-baseline-error",
@@ -48,27 +50,7 @@ const STAGES: [&str; 17] = [
     "tree-complete",
     "workflow-99-driver-error",
 ];
-const OUTPUT_NAMES: [&str; 19] = [
-    "RESULT.DAT",
-    "00-start.json",
-    "01-context.json",
-    "02-launcher.json",
-    "05-workflow-exit.json",
-    "05-launcher-cleanup.json",
-    "06-final.json",
-    "99-driver-error.json",
-    "07-stage-collection.json",
-    "workflow-tree-baseline.json",
-    "workflow-tree-candidate.json",
-    "workflow-tree-baseline-binding.json",
-    "workflow-tree-candidate-binding.json",
-    "workflow-tree-baseline-error.json",
-    "workflow-tree-candidate-error.json",
-    "workflow-tree-candidate-profile.json",
-    "workflow-tree-profile-cleanup.json",
-    "workflow-tree-complete.json",
-    "workflow-99-driver-error.json",
-];
+const OUTPUT_NAMES: [&str; 1] = ["RESULT.DAT"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -211,7 +193,7 @@ fn verify_tools(workspace: &HeldRunWorkspace, proposal: &Proposal) -> Result<Too
 fn validate_report(report: &GuestReport) -> Result<()> {
     report.windows.validate()?;
     let token = &report.observer_token;
-    if report.schema_version != "aiw.dev/research/sevenzip-tree-result/v0alpha1"
+    if report.schema_version != "aiw.dev/research/sevenzip-tree-result/v0alpha2"
         || windows_label(&report.windows) != EXPECTED_GUEST
         || !token.is_elevated
         || token.is_app_container
@@ -273,11 +255,11 @@ fn capture_marker(workspace: &HeldRunWorkspace) -> Result<(FileFact, Vec<u8>, Gu
         return Err("tree output closed namespace differs".into());
     }
     for entry in entries {
-        // Diagnostic JSON names are never opened/adopted. Metadata is no-follow;
-        // a directory/reparse entry cannot hide behind an allowed filename.
+        // Only the terminal marker is allowed. Metadata is no-follow;
+        // a directory/reparse entry cannot hide behind that filename.
         let metadata = std::fs::symlink_metadata(entry.path())?;
         if !metadata.is_file() || metadata.file_attributes() & 0x400 != 0 {
-            return Err("tree diagnostic namespace contains nonordinary entry".into());
+            return Err("tree terminal-only namespace contains nonordinary entry".into());
         }
     }
     let bound = workspace.reopen_output_file_readonly("RESULT.DAT")?;
@@ -613,7 +595,7 @@ mod tests {
             .into_iter()
             .map(|key| (key.to_owned(), "not reached or capture refused".to_owned()))
             .collect::<BTreeMap<_, _>>();
-        json!({"schemaVersion":"aiw.dev/research/sevenzip-tree-result/v0alpha1",
+        json!({"schemaVersion":"aiw.dev/research/sevenzip-tree-result/v0alpha2",
             "windows":{"major":10,"minor":0,"build":26100,"revision":9711,"observerArchitecture":"x86_64"},
             "observerToken":{"schemaVersion":aiw_token::TOKEN_EVIDENCE_SCHEMA_VERSION,"processId":42,
                 "tokenType":"primary","isAppContainer":false,"userSid":"S-1-5-21-1-2-3-504",
@@ -709,12 +691,14 @@ mod tests {
 
     #[test]
     fn output_names_refuse_pending_unknown_wrong_case_and_duplicates() {
-        let names = vec![
-            std::ffi::OsString::from("RESULT.DAT"),
-            "workflow-tree-baseline.json".into(),
-        ];
+        let names = vec![std::ffi::OsString::from("RESULT.DAT")];
         assert!(exact_output_names(&names));
-        for name in ["RESULT.TMP", "result.dat", "arbitrary.json"] {
+        for name in [
+            "RESULT.TMP",
+            "result.dat",
+            "arbitrary.json",
+            "workflow-tree-baseline.json",
+        ] {
             assert!(!exact_output_names(&["RESULT.DAT".into(), name.into()]));
         }
         assert!(!exact_output_names(&[

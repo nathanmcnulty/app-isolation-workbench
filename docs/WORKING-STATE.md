@@ -2,7 +2,7 @@
 
 Updated 2026-11-06 (America/Anchorage). Checkout `C:\aiw\app-isolation-workbench`,
 branch `codex/multimode-assessment`, from main `b27942a` after #106.
-Current tested source milestone: `191ac27629b187b7f4b8f4a76fb491ef9809816a`.
+Current native evidence milestone: `191ac27629b187b7f4b8f4a76fb491ef9809816a`.
 Resume with `scripts/work-status.ps1` and [the acceptance map](MULTIMODE-ASSESSMENT.md).
 The full real-application, multi-mode assessment goal remains active.
 
@@ -57,8 +57,13 @@ Private provenance, original bytes and audits: `C:\aiw\mxc-multimode-20261106`.
 
 ## Next work and authorization
 
-First review the correction: a fresh guest-local SY/BA-only owner journal, strict
-local HAF snapshots, and a faithful console-host/control-fixture decision.
+The correction adds a fresh guest-local SY/BA-only owner journal, strict local
+HAF snapshots, worker denial probes and a separately bound console-support
+contract. Consequential producer/host review findings have been fixed; fresh
+native validation of these changes remains pending.
+Focused correction checks pass: 113 default/114 research provider tests,
+16 platform tests and 25 host tests. Private logs are in the same tree evidence
+root; the initial host-fixture compilation failure is preserved with the fix.
 Do not weaken general intake/custody or relabel the original six-process failure.
 Then validate fresh positive and deliberate chain-reset-negative controls and
 wire actual application tracing to typed receipts/results. MXC startup is not a

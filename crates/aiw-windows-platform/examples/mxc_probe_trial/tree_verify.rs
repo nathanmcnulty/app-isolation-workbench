@@ -1,6 +1,7 @@
 //! Pure interpretation of source-pinned first-party controls. Not launch authority.
 use aiw_provider_wsb::StandardUserRuntimeContext;
 use aiw_provider_wsb::sevenzip_process_tree::{SevenZipExpectedRootBinding, SevenZipProcessChain};
+use aiw_provider_wsb::sevenzip_tree_control::{SevenZipConsoleSupportObservation, verify_control};
 use aiw_token::{IntegrityLevel, TokenEvidence, TokenType};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -16,6 +17,16 @@ struct Binding {
     held_token: TokenEvidence,
     held_image: Image,
     profile_deletion: String,
+    console_support: SevenZipConsoleSupportObservation,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Invocation {
+    token: TokenEvidence,
+    exit_code: Option<u32>,
+    timed_out: bool,
+    job_empty: bool,
+    output: Vec<u8>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -74,6 +85,35 @@ pub(super) fn verify(
 ) -> Result<Value, String> {
     if !driver_completed {
         return Err("driver incomplete; controls are not accepted".into());
+    }
+    for (key, expected) in [
+        ("schemaVersion", json!("aiw.dev/research/sevenzip/v0alpha1")),
+        ("productionEvidence", json!(false)),
+        (
+            "installerSha256",
+            json!("fd99e86f57d8f429ef5ed045bf98315af962e2309b0f1ba87a147a44c71647d0"),
+        ),
+        ("installerSizeBytes", json!(1_663_506)),
+        ("helperSha256", json!(helper_hash)),
+        (
+            "scope",
+            json!(
+                "first-party process-tree driver controls; ordinary and classic AppContainer, zero capabilities; no vendor execution"
+            ),
+        ),
+    ] {
+        exact(stages, "owner-00-start", key, expected)?;
+    }
+    let windows: aiw_probe::WindowsVersionObservation =
+        serde_json::from_value(field(stages, "owner-00-start", "windows")?.clone())
+            .map_err(|e| format!("owner-00-start.windows: {e}"))?;
+    if windows.major != 10
+        || windows.minor != 0
+        || windows.build != 26100
+        || windows.revision != 9711
+        || windows.observer_architecture != "x86_64"
+    {
+        return Err("owner-00-start Windows environment differs".into());
     }
     let context: StandardUserRuntimeContext = decode(stages, "owner-01-context")?;
     context.validate()?;
@@ -183,31 +223,55 @@ pub(super) fn verify(
         } else {
             context.validate_token(token)?;
         }
+        binding.console_support.validate_pinned()?;
         let chain: SevenZipProcessChain = decode(stages, name)?;
-        chain.verify_complete(&SevenZipExpectedRootBinding {
-            process_id: binding.process_id,
-            creation_time_100ns: binding.creation_time_100ns,
-            held_token: token,
-            fixed_image_path: HELPER,
-            image_sha256: helper_hash,
-            image_size_bytes: helper_size,
-            expected_control_processes: Some(3),
-        })?;
-        if chain
-            .processes
-            .iter()
-            .map(|p| p.exit_code)
-            .collect::<Vec<_>>()
-            != [Some(31), Some(32), Some(33)]
-            || chain.processes[0].exit_event_sequence >= chain.processes[1].exit_event_sequence
+        let verified = verify_control(
+            &chain,
+            &SevenZipExpectedRootBinding {
+                process_id: binding.process_id,
+                creation_time_100ns: binding.creation_time_100ns,
+                held_token: token,
+                fixed_image_path: HELPER,
+                image_sha256: helper_hash,
+                image_size_bytes: helper_size,
+                expected_control_processes: None,
+            },
+            &binding.console_support.expected_binding(),
+        )?;
+        let denied: Invocation = decode(
+            stages,
+            if candidate {
+                "tree-owner-candidate"
+            } else {
+                "tree-owner-baseline"
+            },
+        )?;
+        if denied.token.process_id == 0
+            || denied.exit_code != Some(0)
+            || denied.timed_out
+            || !denied.job_empty
+            || denied.output != b"owner-journal-denied-code5"
         {
-            return Err(format!("{name} role exits/root-first order differs"));
+            return Err(format!("{name} protected owner journal denial incomplete"));
+        }
+        // These are separate invocations; PID reuse after an exit is legal.
+        // Compare all token boundary fields after normalizing only that PID.
+        let mut denied_boundary = denied.token;
+        denied_boundary.process_id = token.process_id;
+        if denied_boundary != *token {
+            return Err(format!(
+                "{name} owner journal observer token boundary differs"
+            ));
         }
         summaries.push(
             json!({"mode":if candidate {"classicAppContainer"} else {"ordinary"},
-            "observedProcesses":3,"pairedExits":3,"rootExitedBeforeChild":true,
+            "observedProcesses":verified.observed_processes,"pairedExits":verified.paired_exits,
+            "helperProcesses":verified.helper_processes,"consoleSupportProcesses":verified.console_support_processes,
+            "rootExitedBeforeChild":verified.root_exited_before_helper_child,
+            "rootExitedBeforeGrandchildCreate":true,
             "independentRootBindingMatched":true,"sameBoundaryObservedBeforeContinue":true,
-            "exactJobReconciled":true,"scope":chain.scope}),
+            "ownerJournalReadDeniedCode5":true,
+            "exactJobReconciled":verified.exact_job_reconciled,"scope":verified.scope}),
         );
     }
     Ok(json!({"fixedControlFactsVerified":true,"modes":summaries,
@@ -222,6 +286,10 @@ mod tests {
     use aiw_provider_wsb::sevenzip_process_tree::{
         SEVENZIP_PROCESS_CHAIN_SCHEMA, SEVENZIP_PROCESS_CHAIN_SCOPE,
     };
+    use aiw_provider_wsb::sevenzip_tree_control::{
+        SEVENZIP_CONSOLE_SUPPORT_PATH, SEVENZIP_CONSOLE_SUPPORT_SCHEMA,
+        SEVENZIP_CONSOLE_SUPPORT_SHA256, SEVENZIP_CONSOLE_SUPPORT_SIZE,
+    };
 
     fn token(pid: u32, candidate: bool) -> Value {
         let rid = if candidate { 4096 } else { 8192 };
@@ -234,6 +302,12 @@ mod tests {
     }
     fn fixture() -> BTreeMap<String, Value> {
         let mut stages = BTreeMap::new();
+        stages.insert("owner-00-start".into(),json!({
+            "schemaVersion":"aiw.dev/research/sevenzip/v0alpha1","productionEvidence":false,
+            "installerSha256":"fd99e86f57d8f429ef5ed045bf98315af962e2309b0f1ba87a147a44c71647d0",
+            "installerSizeBytes":1663506,"helperSha256":"a".repeat(64),
+            "windows":{"major":10,"minor":0,"build":26100,"revision":9711,"observerArchitecture":"x86_64"},
+            "scope":"first-party process-tree driver controls; ordinary and classic AppContainer, zero capabilities; no vendor execution"}));
         stages.insert("owner-01-context".into(),json!({"userSid":"S-1-5-21-1-2-3-1001",
             "profilePath":r"C:\Users\AiwStandardUser","roamingAppData":r"C:\Users\AiwStandardUser\AppData\Roaming",
             "localAppData":r"C:\Users\AiwStandardUser\AppData\Local","administratorsEnabled":false}));
@@ -268,15 +342,23 @@ mod tests {
             let created = (1u64 << 55) + 123;
             stages.insert(format!("{name}-binding"),json!({"processId":base,"creationTime100ns":created,
                 "heldToken":token(base,candidate),"profileDeletion":"not yet attempted",
+                "consoleSupport":{"schemaVersion":SEVENZIP_CONSOLE_SUPPORT_SCHEMA,
+                    "windows":{"major":10,"minor":0,"build":26100,"revision":9711,"observerArchitecture":"x86_64"},
+                    "canonicalPath":SEVENZIP_CONSOLE_SUPPORT_PATH,
+                    "identity":{"finalPath":SEVENZIP_CONSOLE_SUPPORT_PATH,"volumeSerialNumber":"0123456789abcdef","fileId":"0123456789abcdef0123456789abcdef"},
+                    "sha256":SEVENZIP_CONSOLE_SUPPORT_SHA256,"sizeBytes":SEVENZIP_CONSOLE_SUPPORT_SIZE,"volumeSerialNumber":7,"fileIndex":99},
                 "heldImage":{"canonicalPath":HELPER,"sha256":"a".repeat(64),"sizeBytes":100,
                     "identity":{"finalPath":HELPER,"volumeSerialNumber":"0123456789abcdef","fileId":"0123456789abcdef0123456789abcdef"}}}));
+            stages.insert(if candidate {"tree-owner-candidate"} else {"tree-owner-baseline"}.into(),
+                json!({"token":token(base+50,candidate),"exitCode":0,"timedOut":false,"jobEmpty":true,
+                    "output":b"owner-journal-denied-code5".as_slice()}));
             let processes=(0..3u32).map(|ordinal|json!({"ordinal":ordinal,"processId":base+ordinal,
-                "createEventSequence":ordinal+1,"exitEventSequence":ordinal+4,"creationTime100ns":created+u64::from(ordinal),
+                "createEventSequence":([1,3,8][ordinal as usize]),"exitEventSequence":([4,10,15][ordinal as usize]),"creationTime100ns":created+u64::from(ordinal),
                 "tokenBeforeContinue":token(base+ordinal,candidate),"imageBeforeContinue":{
                     "processImagePath":HELPER,"sha256":"a".repeat(64),"sizeBytes":100,"volumeSerialNumber":1,"fileIndex":9},
                 "exitCode":ordinal+31})).collect::<Vec<_>>();
             stages.insert(name.into(),json!({"schemaVersion":SEVENZIP_PROCESS_CHAIN_SCHEMA,"scope":SEVENZIP_PROCESS_CHAIN_SCOPE,
-                "rootProcessId":base,"eventsProcessed":6,"processes":processes,"timedOut":false,
+                "rootProcessId":base,"eventsProcessed":16,"processes":processes,"timedOut":false,
                 "ownedJobTerminationRequested":false,"ownedJobTerminationSucceeded":false,
                 "jobTotalProcesses":3,"jobActiveProcesses":0,"jobLimitTerminatedProcesses":0,
                 "jobAccountingReconciled":true,"debuggerChainComplete":true,"requiresDebuggerProcessExit":false,"gaps":[]}));
@@ -296,6 +378,26 @@ mod tests {
     #[test]
     fn incomplete_or_contradictory_measurements_cannot_pass_using_summary_flags() {
         let mutations: Vec<fn(&mut BTreeMap<String, Value>)> = vec![
+            |s| {
+                s.remove("owner-00-start");
+            },
+            |s| {
+                s.insert("owner-00-start".into(), json!({"stageRefused":true}));
+            },
+            |s| s.get_mut("owner-00-start").unwrap()["schemaVersion"] = json!("wrong"),
+            |s| s.get_mut("owner-00-start").unwrap()["productionEvidence"] = json!(true),
+            |s| s.get_mut("owner-00-start").unwrap()["installerSha256"] = json!("b".repeat(64)),
+            |s| s.get_mut("owner-00-start").unwrap()["installerSizeBytes"] = json!(1663507),
+            |s| s.get_mut("owner-00-start").unwrap()["helperSha256"] = json!("b".repeat(64)),
+            |s| s.get_mut("owner-00-start").unwrap()["scope"] = json!("ordinary app workflow"),
+            |s| s.get_mut("owner-00-start").unwrap()["windows"]["major"] = json!(11),
+            |s| s.get_mut("owner-00-start").unwrap()["windows"]["minor"] = json!(1),
+            |s| s.get_mut("owner-00-start").unwrap()["windows"]["build"] = json!(26101),
+            |s| s.get_mut("owner-00-start").unwrap()["windows"]["revision"] = json!(9712),
+            |s| {
+                s.get_mut("owner-00-start").unwrap()["windows"]["observerArchitecture"] =
+                    json!("aarch64")
+            },
             |s| {
                 s.remove("tree-baseline-binding");
             },
@@ -326,6 +428,44 @@ mod tests {
                     json!({"driverError":"retained"}),
                 );
             },
+            |s| {
+                s.remove("tree-owner-baseline");
+            },
+            |s| s.get_mut("tree-owner-candidate").unwrap()["output"] = json!([]),
+            |s| s.get_mut("tree-owner-candidate").unwrap()["exitCode"] = json!(1),
+            |s| s.get_mut("tree-owner-candidate").unwrap()["timedOut"] = json!(true),
+            |s| s.get_mut("tree-owner-candidate").unwrap()["jobEmpty"] = json!(false),
+            |s| {
+                s.get_mut("tree-owner-candidate").unwrap()["token"]["userSid"] =
+                    json!("S-1-5-21-1-2-3-9999")
+            },
+            |s| {
+                s.get_mut("tree-owner-candidate").unwrap()["token"]["isAppContainer"] = json!(false)
+            },
+            |s| s.get_mut("tree-owner-baseline").unwrap()["token"]["processId"] = json!(0),
+            |s| {
+                s.get_mut("tree-owner-candidate").unwrap()["token"]["appContainerSid"] =
+                    json!("S-1-15-2-999")
+            },
+            |s| {
+                s.get_mut("tree-candidate-binding").unwrap()["consoleSupport"]["sha256"] =
+                    json!("b".repeat(64))
+            },
+            |s| {
+                s.get_mut("tree-candidate-binding").unwrap()["consoleSupport"]["fileIndex"] =
+                    json!(0)
+            },
+            |s| {
+                s.get_mut("tree-candidate-binding").unwrap()["consoleSupport"]["windows"]["revision"] =
+                    json!(9712)
+            },
+            |s| {
+                s.get_mut("tree-candidate-binding")
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("consoleSupport");
+            },
         ];
         for (index, mutation) in mutations.into_iter().enumerate() {
             let mut stages = fixture();
@@ -351,5 +491,55 @@ mod tests {
         let mut stages = fixture();
         stages.get_mut("tree-baseline").unwrap()["unknown"] = json!(true);
         assert!(verify(&stages, true, &"a".repeat(64), 100).is_err());
+    }
+
+    #[test]
+    fn code_bound_console_support_is_counted_and_never_exempted_from_candidate_boundary() {
+        let mut stages = fixture();
+        for (name, candidate, base) in [
+            ("tree-baseline", false, 100u32),
+            ("tree-candidate", true, 200u32),
+        ] {
+            let chain = stages.get_mut(name).unwrap();
+            let helpers = chain["processes"].as_array().unwrap().clone();
+            let mut processes = vec![];
+            for i in 0..3u32 {
+                let mut helper = helpers[i as usize].clone();
+                helper["ordinal"] = json!(i * 2);
+                helper["processId"] = json!(base + i * 2);
+                helper["tokenBeforeContinue"] = token(base + i * 2, candidate);
+                helper["creationTime100ns"] = json!((1u64 << 55) + 123 + u64::from(i * 2));
+                processes.push(helper);
+                let mut support = helpers[0].clone();
+                support["ordinal"] = json!(i * 2 + 1);
+                support["processId"] = json!(base + i * 2 + 1);
+                support["tokenBeforeContinue"] = token(base + i * 2 + 1, candidate);
+                support["createEventSequence"] = json!([2, 6, 9][i as usize]);
+                support["exitEventSequence"] = json!([5, 11, 16][i as usize]);
+                support["creationTime100ns"] = json!((1u64 << 55) + 123 + u64::from(i * 2 + 1));
+                support["imageBeforeContinue"] = json!({"processImagePath":SEVENZIP_CONSOLE_SUPPORT_PATH,
+                    "sha256":SEVENZIP_CONSOLE_SUPPORT_SHA256,"sizeBytes":SEVENZIP_CONSOLE_SUPPORT_SIZE,
+                    "volumeSerialNumber":7,"fileIndex":99});
+                support["exitCode"] = json!(0);
+                processes.push(support);
+            }
+            chain["processes"] = json!(processes);
+            chain["eventsProcessed"] = json!(16);
+            chain["jobTotalProcesses"] = json!(6);
+        }
+        let observed = verify(&stages, true, &"a".repeat(64), 100).unwrap();
+        for mode in observed["modes"].as_array().unwrap() {
+            assert_eq!(mode["observedProcesses"], 6);
+            assert_eq!(mode["consoleSupportProcesses"], 3);
+            assert_eq!(mode["ownerJournalReadDeniedCode5"], true);
+        }
+        let mut drift = stages.clone();
+        drift.get_mut("tree-candidate").unwrap()["processes"][3]["tokenBeforeContinue"] =
+            token(203, false);
+        assert!(verify(&drift, true, &"a".repeat(64), 100).is_err());
+        let mut drift = stages;
+        drift.get_mut("tree-baseline").unwrap()["processes"][3]["imageBeforeContinue"]["fileIndex"] =
+            json!(100);
+        assert!(verify(&drift, true, &"a".repeat(64), 100).is_err());
     }
 }
