@@ -1,5 +1,8 @@
 //! Closed receipt-bound 7-Zip observations and fixed workflow normalization.
 //! This module never executes, widens grants, or produces a general isolation verdict.
+use crate::sevenzip_execution_trace::{
+    SevenZipExecutionPhase, SevenZipExecutionTrace, verify_execution_trace,
+};
 use aiw_probe::SevenZipProfile;
 use aiw_probe::paired_controls::{ControlEvidenceOrigin, control_digest, control_hash};
 use aiw_token::{IntegrityLevel, TokenEvidence, TokenType};
@@ -148,6 +151,8 @@ pub struct SevenZipInvocation {
     pub job_empty: Option<bool>,
     pub stdout_sha256: Option<String>,
     pub stdout_size_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_trace: Option<SevenZipExecutionTrace>,
 }
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -156,6 +161,9 @@ pub struct SevenZipInstallation {
     pub timed_out: bool,
     pub job_empty: Option<bool>,
     pub files_after: Option<SevenZipInventory>,
+    /// Elevated WDAG setup evidence; never candidate-isolated installation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_trace: Option<SevenZipExecutionTrace>,
 }
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -318,8 +326,9 @@ impl SevenZipResult {
         outer_cleanup: Option<bool>,
     ) -> Result<SevenZipComparison, String> {
         self.validate(request)?;
-        let baseline = normalize_variant(self.baseline.as_ref());
-        let candidate = normalize_variant(self.candidate.as_ref());
+        let current = request.profile.revision == aiw_probe::sevenzip::SEVENZIP_PROFILE_REVISION;
+        let baseline = normalize_variant(self.baseline.as_ref(), current);
+        let candidate = normalize_variant(self.candidate.as_ref(), current);
         let baseline_ok = baseline
             .iter()
             .all(|v| *v == SevenZipFunctionStatus::Passed);
@@ -337,7 +346,8 @@ impl SevenZipResult {
                 code.image_before == code.image_after && code.dll_before == code.dll_after
             })
             && self.windows.is_some()
-            && self.launcher_token.is_some();
+            && self.launcher_token.is_some()
+            && self.execution_trace_problem(request).is_none();
         let controls = self.canaries.as_ref().is_some_and(canaries_pass);
         let cleanup = outer_cleanup == Some(true)
             && self.profile_deleted == Some(true)
@@ -383,6 +393,13 @@ impl SevenZipResult {
         ];
         if archive_bytes_equal == Some(false) {
             gaps.push("archiveByteDifferenceCauseUnmeasured");
+        }
+        if request.profile.revision == aiw_probe::sevenzip::SEVENZIP_PROFILE_REVISION {
+            gaps.extend([
+                "brokerAndAllHostProcessCoverageUnmeasured",
+                "loadedMemoryAndDllIdentityUnmeasured",
+                "candidateIsolatedInstallationUnmeasured",
+            ]);
         }
         if !eligible {
             gaps.push("comparisonNotEligible");
@@ -470,10 +487,23 @@ impl SevenZipResult {
             } else {
                 None
             };
-            validate_invocation(invocation, user, package, &mut ids)?;
+            validate_invocation(
+                invocation,
+                user,
+                package,
+                &mut ids,
+                request.profile.revision == aiw_probe::sevenzip::SEVENZIP_PROFILE_REVISION,
+            )?;
         }
         if let Some(installation) = &self.installation {
-            if installation.timed_out && installation.exit_code.is_some() {
+            if let Some(trace) = &installation.execution_trace {
+                trace.validate_shape()?;
+            }
+            if installation.timed_out
+                && installation.exit_code.is_some()
+                && (installation.execution_trace.is_none()
+                    || request.profile.revision != aiw_probe::sevenzip::SEVENZIP_PROFILE_REVISION)
+            {
                 return Err("timed out installer carries exit code".into());
             }
             if let Some(files) = &installation.files_after {
@@ -554,6 +584,199 @@ impl SevenZipResult {
         }
         Ok(())
     }
+
+    /// Credit gate, not observation admission. Incomplete or semantically
+    /// contradictory bounded traces remain retainable as private evidence.
+    pub fn execution_trace_problem(&self, request: &SevenZipRequest) -> Option<String> {
+        if request.profile.revision == aiw_probe::sevenzip::SEVENZIP_LEGACY_PROFILE_REVISION {
+            return None;
+        }
+        self.check_execution_traces().err()
+    }
+
+    fn check_execution_traces(&self) -> Result<(), String> {
+        let installation = self
+            .installation
+            .as_ref()
+            .ok_or("installation trace missing")?;
+        let trace = installation
+            .execution_trace
+            .as_ref()
+            .ok_or("installation trace missing")?;
+        verify_execution_trace(
+            trace,
+            SevenZipExecutionPhase::InstallationSetup,
+            aiw_probe::sevenzip::SEVENZIP_INSTALLER_SHA256,
+            aiw_probe::sevenzip::SEVENZIP_INSTALLER_SIZE_BYTES,
+        )?;
+        let user = self
+            .launcher_token
+            .as_ref()
+            .ok_or("installation trace lacks guest user context")?;
+        let domain = user
+            .user_sid
+            .rsplit_once('-')
+            .ok_or("guest user SID malformed")?
+            .0;
+        if trace.root_binding.held_token.user_sid != format!("{domain}-504") {
+            return Err("installation root is not the guest's elevated WDAG setup account".into());
+        }
+        correlate_trace_exit(
+            trace,
+            installation.exit_code,
+            installation.timed_out,
+            installation.job_empty,
+        )?;
+        let code = self
+            .code_binding
+            .as_ref()
+            .ok_or("application trace lacks independently installed code binding")?;
+        for (label, variant) in [("baseline", &self.baseline), ("candidate", &self.candidate)] {
+            let Some(variant) = variant else {
+                continue;
+            };
+            for (phase, invocation) in [
+                (SevenZipExecutionPhase::Create, &variant.create),
+                (SevenZipExecutionPhase::Test, &variant.test),
+                (SevenZipExecutionPhase::Extract, &variant.extract),
+            ] {
+                let Some(invocation) = invocation else {
+                    continue;
+                };
+                let trace = invocation
+                    .execution_trace
+                    .as_ref()
+                    .ok_or_else(|| format!("{label} {phase:?} execution trace missing"))?;
+                if trace.root_binding.process_id != invocation.process_id
+                    || invocation.held_token.as_ref() != Some(&trace.root_binding.held_token)
+                {
+                    return Err(format!(
+                        "{label} {phase:?} trace root differs from held invocation"
+                    ));
+                }
+                verify_execution_trace(
+                    trace,
+                    phase,
+                    &code.image_before.sha256,
+                    code.image_before.size_bytes,
+                )?;
+                correlate_trace_exit(
+                    trace,
+                    invocation.exit_code,
+                    invocation.timed_out,
+                    invocation.job_empty,
+                )?;
+            }
+        }
+        self.check_invocation_lifetimes()?;
+        Ok(())
+    }
+
+    fn check_invocation_lifetimes(&self) -> Result<(), String> {
+        let mut observed = BTreeMap::<u32, Option<u64>>::new();
+        if let Some(token) = &self.launcher_token {
+            credit_lifetime(&mut observed, token.process_id, None)?;
+        }
+        if let Some(trace) = self
+            .installation
+            .as_ref()
+            .and_then(|v| v.execution_trace.as_ref())
+        {
+            credit_trace_lifetimes(&mut observed, trace)?;
+        }
+        // No process lifetime is fabricated for these untraced helper controls.
+        if let Some(controls) = &self.driver_controls {
+            for process in [&controls.capture, &controls.deadline] {
+                credit_lifetime(&mut observed, process.process_id, None)?;
+            }
+        }
+        if let Some(canaries) = &self.canaries {
+            for process in [&canaries.baseline_process, &canaries.candidate_process]
+                .into_iter()
+                .flatten()
+            {
+                credit_lifetime(&mut observed, process.process_id, None)?;
+            }
+        }
+        for variant in [&self.baseline, &self.candidate].into_iter().flatten() {
+            for process in [&variant.create, &variant.test, &variant.extract]
+                .into_iter()
+                .flatten()
+            {
+                let trace = process
+                    .execution_trace
+                    .as_ref()
+                    .ok_or("observed application invocation lacks a validated lifetime trace")?;
+                credit_trace_lifetimes(&mut observed, trace)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+fn credit_trace_lifetimes(
+    observed: &mut BTreeMap<u32, Option<u64>>,
+    trace: &SevenZipExecutionTrace,
+) -> Result<(), String> {
+    // Complete verification ran before this credit check. Register every actual
+    // chain lifetime, including installer/app descendants, and count the root
+    // only through its ordinal-zero chain entry (not its binding a second time).
+    for process in &trace.chain.processes {
+        credit_lifetime(
+            observed,
+            process.process_id,
+            Some(
+                process
+                    .creation_time_100ns
+                    .ok_or("validated chain lifetime lacks creation time")?,
+            ),
+        )?;
+    }
+    Ok(())
+}
+
+fn credit_lifetime(
+    observed: &mut BTreeMap<u32, Option<u64>>,
+    pid: u32,
+    time: Option<u64>,
+) -> Result<(), String> {
+    if let Some(prior) = observed.get(&pid) {
+        match (prior, time) {
+            (Some(prior), Some(time)) if time > *prior => {}
+            _ => {
+                return Err(
+                    "reused invocation PID has an ambiguous, duplicated or non-increasing lifetime"
+                        .into(),
+                );
+            }
+        }
+    }
+    observed.insert(pid, time);
+    Ok(())
+}
+
+fn correlate_trace_exit(
+    trace: &SevenZipExecutionTrace,
+    exit_code: Option<i32>,
+    timed_out: bool,
+    job_empty: Option<bool>,
+) -> Result<(), String> {
+    if trace
+        .chain
+        .processes
+        .first()
+        .and_then(|p| p.exit_code)
+        .map(|code| code as i32)
+        != exit_code
+        || trace.chain.timed_out != timed_out
+        || job_empty != Some(true)
+        || trace.chain.job_active_processes != Some(0)
+    {
+        return Err(
+            "execution trace and invocation exit/timeout/owned-job observations differ".into(),
+        );
+    }
+    Ok(())
 }
 
 fn validate_inventory(files: &SevenZipInventory) -> Result<(), String> {
@@ -631,10 +854,16 @@ fn validate_invocation(
     user: &str,
     package: Option<&str>,
     ids: &mut BTreeSet<u32>,
+    retain_partial_trace: bool,
 ) -> Result<(), String> {
+    if let Some(trace) = &value.execution_trace {
+        trace.validate_shape()?;
+    }
     if value.process_id == 0
-        || !ids.insert(value.process_id)
-        || value.timed_out && value.exit_code.is_some()
+        || (!ids.insert(value.process_id) && !retain_partial_trace)
+        || value.timed_out
+            && value.exit_code.is_some()
+            && (!retain_partial_trace || value.execution_trace.is_none())
         || value.stdout_sha256.is_some() != value.stdout_size_bytes.is_some()
         || value
             .stdout_sha256
@@ -682,7 +911,10 @@ fn process_measured(value: &SevenZipInvocation) -> bool {
 fn process_pass(value: &SevenZipInvocation) -> bool {
     process_measured(value) && value.exit_code == Some(0) && !value.timed_out
 }
-fn normalize_variant(value: Option<&SevenZipVariant>) -> [SevenZipFunctionStatus; 4] {
+fn normalize_variant(
+    value: Option<&SevenZipVariant>,
+    require_invocation_row: bool,
+) -> [SevenZipFunctionStatus; 4] {
     use SevenZipFunctionStatus::*;
     let Some(value) = value else {
         return [Unmeasured; 4];
@@ -702,6 +934,9 @@ fn normalize_variant(value: Option<&SevenZipVariant>) -> [SevenZipFunctionStatus
             continue;
         }
         rows[i] = match invocation {
+            // Trace-only fallback preserves actual exit facts without inventing
+            // a complete function observation or its missing output capture.
+            Some(p) if require_invocation_row && p.stdout_sha256.is_none() => Unmeasured,
             Some(p) if process_pass(p) => Passed,
             Some(p) if process_measured(p) => {
                 failed = true;
@@ -863,6 +1098,7 @@ mod tests {
             job_empty: Some(true),
             stdout_sha256: Some(SevenZipFileDigest::for_bytes(b"synthetic output").sha256),
             stdout_size_bytes: Some(16),
+            execution_trace: None,
         }
     }
     fn variant(first: u32, candidate: bool) -> SevenZipVariant {
@@ -886,7 +1122,8 @@ mod tests {
     }
     fn fixture() -> (SevenZipRequest, SevenZipResult) {
         let profile = SevenZipProfile {
-            revision: SEVENZIP_PROFILE_REVISION.into(),
+            // Historical alpha1 fixture deliberately has no process traces.
+            revision: aiw_probe::sevenzip::SEVENZIP_LEGACY_PROFILE_REVISION.into(),
             source_sha256: seven_zip_source_sha256(),
             installer_sha256: SEVENZIP_INSTALLER_SHA256.into(),
             installer_size_bytes: SEVENZIP_INSTALLER_SIZE_BYTES,
@@ -901,7 +1138,7 @@ mod tests {
                 .unwrap(),
             policy: SevenZipPolicy::ClassicAppContainerNoCapabilitiesReadInputWriteOutput,
         };
-        let request = SevenZipRequest::new(
+        let request = SevenZipRequest::from_retained_binding(
             "synthetic-sevenzip",
             "11111111-2222-3333-4444-555555555555",
             &"f".repeat(64),
@@ -923,6 +1160,7 @@ mod tests {
                 ("7z.exe".into(), image.clone()),
                 ("7z.dll".into(), dll.clone()),
             ])),
+            execution_trace: None,
         });
         result.code_binding = Some(SevenZipCodeBinding {
             image_before: image.clone(),
@@ -959,6 +1197,408 @@ mod tests {
         result.candidate = Some(variant(20, true));
         result.profile_deleted = Some(true);
         (request, result)
+    }
+
+    fn current_fixture() -> (SevenZipRequest, SevenZipResult) {
+        let (mut request, mut result) = fixture();
+        request.profile.revision = SEVENZIP_PROFILE_REVISION.into();
+        request.request_sha256 = request.hash().unwrap();
+        result.request_sha256 = request.request_sha256.clone();
+        result.profile_sha256 = request.profile.hash().unwrap();
+        (request, result)
+    }
+
+    fn measured_trace(
+        token: TokenEvidence,
+        phase: SevenZipExecutionPhase,
+        code: &SevenZipFileDigest,
+    ) -> SevenZipExecutionTrace {
+        use crate::sevenzip_execution_trace::{
+            SEVENZIP_EXECUTION_TRACE_SCHEMA, SevenZipExecutionRootBinding, SevenZipImageLifetime,
+        };
+        use crate::sevenzip_process_tree::{
+            SEVENZIP_PROCESS_CHAIN_SCHEMA, SEVENZIP_PROCESS_CHAIN_SCOPE, SevenZipImageObservation,
+            SevenZipProcessChain, SevenZipProcessObservation,
+        };
+        let pid = token.process_id;
+        let image = SevenZipImageObservation {
+            process_image_path: phase.fixed_image_path().into(),
+            sha256: code.sha256.clone(),
+            size_bytes: code.size_bytes,
+            volume_serial_number: 1,
+            file_index: 2,
+        };
+        SevenZipExecutionTrace {
+            schema_version: SEVENZIP_EXECUTION_TRACE_SCHEMA.into(),
+            phase,
+            root_binding: SevenZipExecutionRootBinding {
+                process_id: pid,
+                creation_time_100ns: (1u64 << 55) + 3,
+                held_token: token.clone(),
+            },
+            chain: SevenZipProcessChain {
+                schema_version: SEVENZIP_PROCESS_CHAIN_SCHEMA.into(),
+                scope: SEVENZIP_PROCESS_CHAIN_SCOPE.into(),
+                root_process_id: pid,
+                events_processed: 2,
+                processes: vec![SevenZipProcessObservation {
+                    ordinal: 0,
+                    process_id: pid,
+                    create_event_sequence: 1,
+                    creation_time_100ns: Some((1u64 << 55) + 3),
+                    token_before_continue: Some(token),
+                    image_before_continue: Some(image.clone()),
+                    exit_code: Some(0),
+                    exit_event_sequence: Some(2),
+                }],
+                timed_out: false,
+                owned_job_termination_requested: false,
+                owned_job_termination_succeeded: false,
+                job_total_processes: Some(1),
+                job_active_processes: Some(0),
+                job_limit_terminated_processes: Some(0),
+                job_accounting_reconciled: true,
+                debugger_chain_complete: true,
+                requires_debugger_process_exit: false,
+                gaps: vec![],
+            },
+            image_lifetimes: vec![SevenZipImageLifetime {
+                ordinal: 0,
+                process_id: pid,
+                create_event_sequence: 1,
+                image_after_exit: Some(image),
+            }],
+        }
+    }
+
+    fn add_complete_traces(result: &mut SevenZipResult) {
+        let mut installer = token(30, false);
+        installer.user_sid = format!("{}-504", USER.rsplit_once('-').unwrap().0);
+        installer.is_elevated = true;
+        installer.elevation_type = ElevationType::Default;
+        installer.integrity = IntegrityEvidence {
+            sid: "S-1-16-12288".into(),
+            rid: 12288,
+            level: IntegrityLevel::High,
+        };
+        result.installation.as_mut().unwrap().execution_trace = Some(measured_trace(
+            installer,
+            SevenZipExecutionPhase::InstallationSetup,
+            &SevenZipFileDigest {
+                sha256: SEVENZIP_INSTALLER_SHA256.into(),
+                size_bytes: SEVENZIP_INSTALLER_SIZE_BYTES,
+            },
+        ));
+        let code = result.code_binding.as_ref().unwrap().image_before.clone();
+        for variant in [&mut result.baseline, &mut result.candidate]
+            .into_iter()
+            .flatten()
+        {
+            for (phase, process) in [
+                (SevenZipExecutionPhase::Create, &mut variant.create),
+                (SevenZipExecutionPhase::Test, &mut variant.test),
+                (SevenZipExecutionPhase::Extract, &mut variant.extract),
+            ] {
+                let process = process.as_mut().unwrap();
+                process.execution_trace = Some(measured_trace(
+                    process.held_token.clone().unwrap(),
+                    phase,
+                    &code,
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn legacy_observation_bytes_omit_trace_and_keep_historical_credit() {
+        let (request, result) = fixture();
+        let bytes = serde_json::to_vec(&result).unwrap();
+        assert!(!String::from_utf8_lossy(&bytes).contains("executionTrace"));
+        let restored: SevenZipResult = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(bytes, serde_json::to_vec(&restored).unwrap());
+        assert!(restored.compare(&request, Some(true)).unwrap().eligible);
+        assert!(request.profile.validate().is_err());
+    }
+
+    #[test]
+    fn new_revision_requires_all_observed_execution_traces_before_compatibility_credit() {
+        let (request, mut result) = current_fixture();
+        assert_eq!(
+            result.compare(&request, Some(true)).unwrap().reason,
+            SevenZipComparisonReason::RequiredMeasurementsMissing
+        );
+        add_complete_traces(&mut result);
+        assert!(result.compare(&request, Some(true)).unwrap().eligible);
+        for mutate in [
+            |r: &mut SevenZipResult| r.installation.as_mut().unwrap().execution_trace = None,
+            |r: &mut SevenZipResult| {
+                r.baseline
+                    .as_mut()
+                    .unwrap()
+                    .create
+                    .as_mut()
+                    .unwrap()
+                    .execution_trace = None
+            },
+            |r: &mut SevenZipResult| {
+                r.candidate
+                    .as_mut()
+                    .unwrap()
+                    .test
+                    .as_mut()
+                    .unwrap()
+                    .execution_trace
+                    .as_mut()
+                    .unwrap()
+                    .root_binding
+                    .process_id += 1
+            },
+            |r: &mut SevenZipResult| {
+                r.candidate
+                    .as_mut()
+                    .unwrap()
+                    .extract
+                    .as_mut()
+                    .unwrap()
+                    .execution_trace
+                    .as_mut()
+                    .unwrap()
+                    .chain
+                    .gaps
+                    .push("partial".into())
+            },
+            |r: &mut SevenZipResult| {
+                r.installation
+                    .as_mut()
+                    .unwrap()
+                    .execution_trace
+                    .as_mut()
+                    .unwrap()
+                    .phase = SevenZipExecutionPhase::Create
+            },
+            |r: &mut SevenZipResult| {
+                r.installation
+                    .as_mut()
+                    .unwrap()
+                    .execution_trace
+                    .as_mut()
+                    .unwrap()
+                    .root_binding
+                    .held_token
+                    .user_sid = USER.into()
+            },
+            |r: &mut SevenZipResult| {
+                r.candidate
+                    .as_mut()
+                    .unwrap()
+                    .extract
+                    .as_mut()
+                    .unwrap()
+                    .execution_trace
+                    .as_mut()
+                    .unwrap()
+                    .image_lifetimes[0]
+                    .image_after_exit = None
+            },
+            |r: &mut SevenZipResult| {
+                r.candidate
+                    .as_mut()
+                    .unwrap()
+                    .extract
+                    .as_mut()
+                    .unwrap()
+                    .execution_trace
+                    .as_mut()
+                    .unwrap()
+                    .root_binding
+                    .creation_time_100ns += 1
+            },
+            |r: &mut SevenZipResult| {
+                let process = r.candidate.as_mut().unwrap().extract.as_mut().unwrap();
+                process.timed_out = true;
+                process.execution_trace.as_mut().unwrap().chain.timed_out = true;
+                let variant = r.candidate.as_mut().unwrap();
+                variant.input_after = None;
+                variant.extracted = None;
+                variant.archive = None;
+            },
+        ] {
+            let mut bad = result.clone();
+            mutate(&mut bad);
+            // Bounded partial facts survive validation and byte serialization.
+            bad.validate(&request).unwrap();
+            let bytes = serde_json::to_vec(&bad).unwrap();
+            let retained: SevenZipResult = serde_json::from_slice(&bytes).unwrap();
+            let comparison = retained.compare(&request, Some(true)).unwrap();
+            assert!(!comparison.eligible && !comparison.candidate_verified);
+            assert_eq!(
+                comparison.reason,
+                SevenZipComparisonReason::RequiredMeasurementsMissing
+            );
+        }
+        let mut nonzero = result;
+        let process = nonzero
+            .candidate
+            .as_mut()
+            .unwrap()
+            .extract
+            .as_mut()
+            .unwrap();
+        process.exit_code = Some(2);
+        nonzero.candidate.as_mut().unwrap().input_after = None;
+        nonzero.candidate.as_mut().unwrap().extracted = None;
+        nonzero.candidate.as_mut().unwrap().archive = None;
+        assert_eq!(
+            nonzero.compare(&request, Some(true)).unwrap().reason,
+            SevenZipComparisonReason::RequiredMeasurementsMissing
+        );
+        nonzero
+            .candidate
+            .as_mut()
+            .unwrap()
+            .extract
+            .as_mut()
+            .unwrap()
+            .execution_trace
+            .as_mut()
+            .unwrap()
+            .chain
+            .processes[0]
+            .exit_code = Some(2);
+        assert_eq!(
+            nonzero.compare(&request, Some(true)).unwrap().reason,
+            SevenZipComparisonReason::CandidateFunctionFailed
+        );
+    }
+
+    #[test]
+    fn trace_only_fallback_does_not_invent_a_passed_function() {
+        let (request, mut result) = current_fixture();
+        add_complete_traces(&mut result);
+        let process = result.candidate.as_mut().unwrap().extract.as_mut().unwrap();
+        process.stdout_sha256 = None;
+        process.stdout_size_bytes = None;
+        let comparison = result.compare(&request, Some(true)).unwrap();
+        assert_eq!(
+            comparison.functions[2].candidate,
+            SevenZipFunctionStatus::Unmeasured
+        );
+        assert!(!comparison.eligible);
+        assert_eq!(
+            comparison.reason,
+            SevenZipComparisonReason::RequiredMeasurementsMissing
+        );
+    }
+
+    fn replace_test_root_lifetime(result: &mut SevenZipResult, pid: u32, time: u64) {
+        let process = result.baseline.as_mut().unwrap().test.as_mut().unwrap();
+        process.process_id = pid;
+        process.held_token.as_mut().unwrap().process_id = pid;
+        let trace = process.execution_trace.as_mut().unwrap();
+        trace.root_binding.process_id = pid;
+        trace.root_binding.held_token.process_id = pid;
+        trace.root_binding.creation_time_100ns = time;
+        trace.chain.root_process_id = pid;
+        trace.chain.processes[0].process_id = pid;
+        trace.chain.processes[0]
+            .token_before_continue
+            .as_mut()
+            .unwrap()
+            .process_id = pid;
+        trace.chain.processes[0].creation_time_100ns = Some(time);
+        trace.image_lifetimes[0].process_id = pid;
+    }
+
+    #[test]
+    fn current_profile_retains_pid_reuse_and_credits_only_distinct_measured_lifetimes() {
+        let (request, mut result) = current_fixture();
+        add_complete_traces(&mut result);
+        // These differ by one above JavaScript's exact-integer range.
+        let original_time = (1u64 << 55) + 3;
+        replace_test_root_lifetime(&mut result, 10, original_time + 1);
+        result.validate(&request).unwrap();
+        assert!(result.compare(&request, Some(true)).unwrap().eligible);
+        for time in [original_time, original_time - 1] {
+            let mut duplicate = result.clone();
+            replace_test_root_lifetime(&mut duplicate, 10, time);
+            duplicate.validate(&request).unwrap();
+            let bytes = serde_json::to_vec(&duplicate).unwrap();
+            let retained: SevenZipResult = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(retained, duplicate);
+            let comparison = retained.compare(&request, Some(true)).unwrap();
+            assert!(!comparison.eligible);
+            assert_eq!(
+                comparison.reason,
+                SevenZipComparisonReason::RequiredMeasurementsMissing
+            );
+        }
+        let mut ambiguous = result;
+        let capture = &mut ambiguous.driver_controls.as_mut().unwrap().capture;
+        capture.process_id = 10;
+        capture.held_token.as_mut().unwrap().process_id = 10;
+        ambiguous.validate(&request).unwrap();
+        assert_eq!(
+            ambiguous.compare(&request, Some(true)).unwrap().reason,
+            SevenZipComparisonReason::RequiredMeasurementsMissing
+        );
+
+        let (legacy_request, mut legacy) = fixture();
+        let process = legacy.baseline.as_mut().unwrap().test.as_mut().unwrap();
+        process.process_id = 10;
+        process.held_token.as_mut().unwrap().process_id = 10;
+        assert!(legacy.validate(&legacy_request).is_err());
+    }
+
+    #[test]
+    fn earlier_descendant_cannot_be_recredited_as_a_later_root_lifetime() {
+        use crate::sevenzip_execution_trace::SevenZipImageLifetime;
+        let (request, mut result) = current_fixture();
+        add_complete_traces(&mut result);
+        let child_time = (1u64 << 55) + 4;
+        let trace = result
+            .baseline
+            .as_mut()
+            .unwrap()
+            .create
+            .as_mut()
+            .unwrap()
+            .execution_trace
+            .as_mut()
+            .unwrap();
+        let mut child = trace.chain.processes[0].clone();
+        child.ordinal = 1;
+        child.process_id = 11;
+        child.creation_time_100ns = Some(child_time);
+        child.token_before_continue.as_mut().unwrap().process_id = 11;
+        child.create_event_sequence = 2;
+        child.exit_event_sequence = Some(4);
+        let image = child.image_before_continue.as_mut().unwrap();
+        image.process_image_path = r"C:\Observed\application-child.exe".into();
+        image.sha256 = "b".repeat(64);
+        image.file_index = 3;
+        trace.image_lifetimes.push(SevenZipImageLifetime {
+            ordinal: 1,
+            process_id: 11,
+            create_event_sequence: 2,
+            image_after_exit: child.image_before_continue.clone(),
+        });
+        trace.chain.processes[0].exit_event_sequence = Some(3);
+        trace.chain.processes.push(child);
+        trace.chain.events_processed = 4;
+        trace.chain.job_total_processes = Some(2);
+        replace_test_root_lifetime(&mut result, 11, child_time + 1);
+        assert!(result.compare(&request, Some(true)).unwrap().eligible);
+        replace_test_root_lifetime(&mut result, 11, child_time);
+        result.validate(&request).unwrap();
+        let bytes = serde_json::to_vec(&result).unwrap();
+        let retained: SevenZipResult = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(retained, result);
+        let comparison = retained.compare(&request, Some(true)).unwrap();
+        assert!(!comparison.eligible);
+        assert_eq!(
+            comparison.reason,
+            SevenZipComparisonReason::RequiredMeasurementsMissing
+        );
     }
     #[test]
     fn sevenzip_success_matrix_uses_content_not_archive_byte_equality_and_never_claims_general_isolation()

@@ -905,7 +905,6 @@ struct Job {
     handle: OwnedHandle,
 }
 impl Job {
-    #[cfg(feature = "research-sevenzip")]
     fn into_owned_handle(self) -> OwnedHandle {
         self.handle
     }

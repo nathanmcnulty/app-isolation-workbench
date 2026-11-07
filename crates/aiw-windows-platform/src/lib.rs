@@ -2,9 +2,9 @@
 
 use aiw_probe::WindowsSandboxReadiness;
 
-// Debugger controls are default-off research only; application receipt wiring
-// and native acceptance remain open. Registry foundations are test-only.
-#[cfg(all(windows, any(test, feature = "research-sevenzip")))]
+// The fixed 7-Zip workflow observes its inherited debugger chains. Research
+// controls remain separate; registry foundations are still test-only.
+#[cfg(windows)]
 #[allow(dead_code)]
 mod debug_tree;
 #[cfg(all(windows, test))]

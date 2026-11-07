@@ -104,6 +104,45 @@ fn primary(token: &TokenEvidence, pid: u32) -> bool {
         && token.impersonation_level.is_none()
         && !token.is_elevated
 }
+
+/// Closed interpretation policy; callers cannot authorize elevation with a flag.
+#[derive(Clone, Copy)]
+enum CompletionPolicy {
+    ApplicationOrControl,
+    InstallationSetup,
+}
+impl CompletionPolicy {
+    fn primary(self, token: &TokenEvidence, pid: u32) -> bool {
+        match self {
+            Self::ApplicationOrControl => primary(token, pid),
+            Self::InstallationSetup => {
+                token.schema_version == aiw_token::TOKEN_EVIDENCE_SCHEMA_VERSION
+                    && token.process_id == pid
+                    && token.token_type == TokenType::Primary
+                    && token.impersonation_level.is_none()
+                    && token.is_elevated
+                    && !token.is_app_container
+                    && token.app_container_sid.is_none()
+                    && token.capabilities.is_empty()
+                    && token.integrity.level == aiw_token::IntegrityLevel::High
+                    && token.integrity.rid == 12288
+                    && token.integrity.sid == "S-1-16-12288"
+            }
+        }
+    }
+
+    fn root_path(self, path: &str) -> bool {
+        match self {
+            Self::ApplicationOrControl => [
+                r"C:\AIW\SevenZip\App\7z.exe",
+                r"C:\AIW\SevenZip\sevenzip_assessment.exe",
+            ]
+            .iter()
+            .any(|expected| same_path(path, expected)),
+            Self::InstallationSetup => same_path(path, r"C:\AIW\SevenZip\7z2605-x64.exe"),
+        }
+    }
+}
 fn same_boundary(actual: &TokenEvidence, expected: &TokenEvidence) -> bool {
     let mut normalized = actual.clone();
     normalized.process_id = expected.process_id;
@@ -156,23 +195,44 @@ impl SevenZipProcessChain {
         &self,
         expected: &SevenZipExpectedRootBinding<'_>,
     ) -> Result<(), String> {
+        self.verify_complete_with_policy(expected, CompletionPolicy::ApplicationOrControl)
+    }
+
+    /// Completeness for the single pinned elevated installation/setup phase.
+    /// This is not candidate-isolated installation or installation success.
+    /// The caller separately binds the held root to the approved Sandbox setup
+    /// actor/environment. Every observed token must retain that full boundary.
+    pub fn verify_installation_complete(
+        &self,
+        expected: &SevenZipExpectedRootBinding<'_>,
+    ) -> Result<(), String> {
+        if !same_path(expected.fixed_image_path, r"C:\AIW\SevenZip\7z2605-x64.exe")
+            || expected.image_sha256 != aiw_probe::sevenzip::SEVENZIP_INSTALLER_SHA256
+            || expected.image_size_bytes != aiw_probe::sevenzip::SEVENZIP_INSTALLER_SIZE_BYTES
+            || expected.expected_control_processes.is_some()
+        {
+            return Err("fixed official installer setup binding required".into());
+        }
+        self.verify_complete_with_policy(expected, CompletionPolicy::InstallationSetup)
+    }
+
+    fn verify_complete_with_policy(
+        &self,
+        expected: &SevenZipExpectedRootBinding<'_>,
+        policy: CompletionPolicy,
+    ) -> Result<(), String> {
         self.validate_shape()?;
         if expected.process_id == 0
             || expected.creation_time_100ns == 0
             || !token_shape(expected.held_token)
-            || !primary(expected.held_token, expected.process_id)
+            || !policy.primary(expected.held_token, expected.process_id)
             || !hash(expected.image_sha256)
             || expected.image_size_bytes == 0
             || expected.image_size_bytes > MAX_CHAIN_IMAGE_BYTES
             || expected.fixed_image_path.is_empty()
             || !bounded(expected.fixed_image_path, 32768)
             || expected.fixed_image_path.contains('\0')
-            || ![
-                r"C:\AIW\SevenZip\App\7z.exe",
-                r"C:\AIW\SevenZip\sevenzip_assessment.exe",
-            ]
-            .iter()
-            .any(|path| same_path(expected.fixed_image_path, path))
+            || !policy.root_path(expected.fixed_image_path)
             || !matches!(expected.expected_control_processes, None | Some(3))
             || (expected.expected_control_processes.is_some()
                 && !same_path(
@@ -226,7 +286,7 @@ impl SevenZipProcessChain {
                 || process.exit_code.is_none()
                 || !sequences.insert(process.create_event_sequence)
                 || !sequences.insert(exit)
-                || !primary(token, process.process_id)
+                || !policy.primary(token, process.process_id)
                 || !same_boundary(token, expected.held_token)
                 || time < expected.creation_time_100ns
                 || !hash(&image.sha256)

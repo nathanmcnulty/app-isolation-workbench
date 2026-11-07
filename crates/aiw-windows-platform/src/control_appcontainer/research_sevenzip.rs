@@ -23,6 +23,7 @@ use windows::Win32::Storage::FileSystem::{
     FILE_SHARE_WRITE,
 };
 
+mod application_trace;
 #[cfg(feature = "research-sevenzip")]
 mod owner_journal;
 #[cfg(feature = "research-sevenzip")]
@@ -123,6 +124,20 @@ pub fn run() -> Result<u8> {
         }
         return setup();
     }
+    if args == ["--installation-setup"] {
+        if !fixed_role_image(&exe, HELPER)
+            || token.user_sid != fixed_account_sid("WDAGUtilityAccount")?
+            || !crate::debug_tree::token_matches_for_role(
+                &token,
+                &token,
+                std::process::id(),
+                crate::debug_tree::RootRole::InstallationSetup,
+            )
+        {
+            return Err("fixed elevated Sandbox installer-debugger helper required".into());
+        }
+        return application_trace::installation_role();
+    }
     if !fixed_role_image(&exe, HELPER)
         || args.len() != 1
         || token.is_elevated
@@ -153,7 +168,7 @@ pub fn run() -> Result<u8> {
     }
 }
 
-/// Production secondary roles cannot enter the installer/setup entrypoint.
+/// Closed secondary roles include one separately guarded installer debugger.
 pub(crate) fn run_production_role() -> Result<u8> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.len() != 1 || !args[0].to_str().is_some_and(production_role_allowed) {
@@ -165,7 +180,11 @@ pub(crate) fn run_production_role() -> Result<u8> {
 fn production_role_allowed(role: &str) -> bool {
     matches!(
         role,
-        "--driver-control" | "--deadline-control" | "--boundary-control" | "--workflow"
+        "--driver-control"
+            | "--deadline-control"
+            | "--boundary-control"
+            | "--workflow"
+            | "--installation-setup"
     )
 }
 
@@ -436,18 +455,21 @@ fn setup_inner(
             &json!({"command":"fixed /S /D=C:\\AIW\\SevenZip\\App",
         "appRootBefore":"absent","installerSha256":INSTALLER_HASH}),
         )?;
-        let process = GuestProcess::start(INSTALLER, &["/S".into(), format!("/D={APP}")])?;
-        let install_exit = process.wait_for_exit(Duration::from_secs(90));
-        let install_cleanup = process.cleanup();
-        let exit = install_exit?;
-        install_cleanup?;
-        record(
+        // Debugger fail-stop must leave this receipt-producing agent alive.
+        let debugger = GuestProcess::start(HELPER, &["--installation-setup".into()])?;
+        let waited = debugger.wait_for_exit(Duration::from_secs(110));
+        let cleanup = debugger.cleanup();
+        let cleanup_record = record(
             Path::new(OUTPUT),
-            "04-install-exit",
-            &json!({"exitCode":exit,"jobEmpty":true}),
-        )?;
-        if exit != 0 {
-            return Err("installer failed; application comparison not reached".into());
+            "04-install-debugger-cleanup",
+            &json!({
+            "exitCode":waited.as_ref().ok(),"jobEmpty":cleanup.is_ok(),
+            "waitError":waited.as_ref().err().map(ToString::to_string),
+            "cleanupError":cleanup.as_ref().err().map(ToString::to_string)}),
+        );
+        match (waited, cleanup, cleanup_record) {
+            (Ok(0), Ok(()), Ok(())) => {},
+            (waited, cleanup, record) => return Err(format!("installer debugger incomplete; wait={waited:?}; cleanup={cleanup:?}; cleanup record={record:?}; preserve dedicated trace").into()),
         }
         record(
             Path::new(OUTPUT),
@@ -477,7 +499,9 @@ fn setup_inner(
             &json!({"imageSha256":image.observation().sha256,
         "dllSha256":dll.observation().sha256,"profileSid":sid_string(package.0)?}),
         )?;
-        let waited = child.wait_for_exit(Duration::from_secs(150));
+        // Six app25s+drain3s, driver25s, two boundary25s and bounded setup
+        // controls fit this closed budget. Installer90s is outside this wait.
+        let waited = child.wait_for_exit(Duration::from_secs(300));
         let exit = waited?;
         image.revalidate()?;
         dll.revalidate()?;
@@ -572,7 +596,7 @@ fn workflow_inner(token: &TokenEvidence) -> Result<u8> {
     record(Path::new(WORK), "01-deadline-control", &json!(deadline))?;
     wait_for_file(
         &Path::new(WORK).join("app-ready.json"),
-        Duration::from_secs(100),
+        Duration::from_secs(150),
     )?;
     let image = HeldApplicationFile::open(Path::new(IMAGE))?;
     let dll = HeldApplicationFile::open(Path::new(DLL))?;
@@ -914,6 +938,17 @@ enum Operation {
     Extract,
 }
 impl Operation {
+    fn execution_phase(
+        self,
+    ) -> Option<aiw_provider_wsb::sevenzip_execution_trace::SevenZipExecutionPhase> {
+        use aiw_provider_wsb::sevenzip_execution_trace::SevenZipExecutionPhase;
+        match self {
+            Self::Create => Some(SevenZipExecutionPhase::Create),
+            Self::Test => Some(SevenZipExecutionPhase::Test),
+            Self::Extract => Some(SevenZipExecutionPhase::Extract),
+            _ => None,
+        }
+    }
     fn label(self) -> &'static str {
         match self {
             #[cfg(feature = "research-sevenzip")]
@@ -955,6 +990,8 @@ struct Invocation {
     timed_out: bool,
     job_empty: bool,
     output: Vec<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    execution_trace: Option<aiw_provider_wsb::sevenzip_execution_trace::SevenZipExecutionTrace>,
 }
 
 fn launch(
@@ -963,6 +1000,11 @@ fn launch(
     directory: &Path,
     sid: &str,
 ) -> Result<Invocation> {
+    // Exact installed code is held before creation, separately from event files.
+    let execution_code = operation
+        .execution_phase()
+        .map(application_trace::HeldCode::open)
+        .transpose()?;
     // Hold the exact fixed console-support image before any process creation,
     // including implicit OS support creation. Other launch modes do not enroll it.
     #[cfg(feature = "research-sevenzip")]
@@ -1033,6 +1075,12 @@ fn launch(
     if let Err(error) = unsafe { AssignProcessToJobObject(job.handle(), info.hProcess) } {
         let stopped = unsafe { TerminateProcess(info.hProcess, 1) };
         let waited = wait(info.hProcess, Duration::from_secs(2));
+        if operation.execution_phase().is_some() {
+            application_trace::fail_stop(
+                Path::new(WORK),
+                &format!("app debug job assignment:{error};stopped={stopped:?};waited={waited:?}"),
+            );
+        }
         #[cfg(feature = "research-sevenzip")]
         if matches!(operation, Operation::Tree) {
             process_tree::fail_stop(
@@ -1052,6 +1100,11 @@ fn launch(
         };
         return process_tree::collect(
             info, process, _thread, job, output, &capture, profile, sid, support,
+        );
+    }
+    if let Some(code) = execution_code {
+        return application_trace::collect(
+            info, process, _thread, job, output, &capture, profile, sid, code,
         );
     }
     let observed = (|| -> Result<Invocation> {
@@ -1083,6 +1136,7 @@ fn launch(
             timed_out: !completed,
             job_empty: true,
             output: bytes,
+            execution_trace: None,
         })
     })();
     let cleanup = job.terminate_and_verify_empty();
@@ -1096,6 +1150,9 @@ fn launch(
 fn process_tree_creation_flags(
     operation: Operation,
 ) -> windows::Win32::System::Threading::PROCESS_CREATION_FLAGS {
+    if operation.execution_phase().is_some() {
+        return windows::Win32::System::Threading::DEBUG_PROCESS;
+    }
     #[cfg(feature = "research-sevenzip")]
     if matches!(operation, Operation::Tree) {
         return windows::Win32::System::Threading::DEBUG_PROCESS;
@@ -1131,6 +1188,12 @@ fn collect_stages() -> Result<()> {
         "baseline-2",
         "baseline-3",
         "baseline-artifacts",
+        "baseline-0-trace",
+        "baseline-1-trace",
+        "baseline-2-trace",
+        "baseline-0-binding",
+        "baseline-1-binding",
+        "baseline-2-binding",
         "02-baseline",
         "03-candidate-not-reached",
         "03-boundary",
@@ -1140,6 +1203,12 @@ fn collect_stages() -> Result<()> {
         "candidate-2",
         "candidate-3",
         "candidate-artifacts",
+        "candidate-0-trace",
+        "candidate-1-trace",
+        "candidate-2-trace",
+        "candidate-0-binding",
+        "candidate-1-binding",
+        "candidate-2-binding",
         "04-profile-cleanup",
         "05-comparison",
         "06-code-binding",

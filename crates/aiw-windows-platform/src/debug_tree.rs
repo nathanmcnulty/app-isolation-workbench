@@ -1,6 +1,6 @@
 //! Private foundation for creation-time debugger-chain observations.
 //!
-//! Research control integration only; the code-content gate awaits native proof.
+//! Fixed controls and application observations use separate root policies.
 //! This is neither an arbitrary launcher nor
 //! an all-host descendant census. DEBUG_PROCESS chains can be reset by children;
 //! broker/WMI creation is outside the supported CreateProcess-tree scope.
@@ -23,6 +23,7 @@ const COLLECTION_EVENTS: u32 = 3072;
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum RootRole {
     SevenZip,
+    InstallationSetup,
     Control,
 }
 
@@ -30,9 +31,48 @@ impl RootRole {
     fn image(self) -> &'static str {
         match self {
             Self::SevenZip => r"C:\AIW\SevenZip\App\7z.exe",
+            Self::InstallationSetup => r"C:\AIW\SevenZip\7z2605-x64.exe",
             Self::Control => r"C:\AIW\SevenZip\sevenzip_assessment.exe",
         }
     }
+
+    fn run_deadline(self) -> std::time::Duration {
+        std::time::Duration::from_secs(match self {
+            Self::Control => 5,
+            Self::SevenZip => 25,
+            Self::InstallationSetup => 90,
+        })
+    }
+}
+
+pub(crate) fn token_matches_for_role(
+    actual: &TokenEvidence,
+    expected: &TokenEvidence,
+    process_id: u32,
+    role: RootRole,
+) -> bool {
+    if !matches!(role, RootRole::InstallationSetup) {
+        return token_matches(actual, expected, process_id);
+    }
+    let high_setup = |token: &TokenEvidence, pid| {
+        token.schema_version == aiw_token::TOKEN_EVIDENCE_SCHEMA_VERSION
+            && token.process_id == pid
+            && pid != 0
+            && token.token_type == TokenType::Primary
+            && token.impersonation_level.is_none()
+            && token.is_elevated
+            && !token.is_app_container
+            && token.app_container_sid.is_none()
+            && token.integrity.rid == 0x3000
+            && token.integrity.sid == "S-1-16-12288"
+            && token.integrity.level == aiw_token::IntegrityLevel::High
+            && token.capabilities.is_empty()
+    };
+    let mut normalized = actual.clone();
+    normalized.process_id = expected.process_id;
+    high_setup(expected, expected.process_id)
+        && high_setup(actual, process_id)
+        && normalized == *expected
 }
 
 /// Construct only from the independently validated suspended root token.
@@ -292,10 +332,7 @@ pub(crate) mod native {
     use windows::core::PWSTR;
 
     const MAX_IMAGE_BYTES: u64 = 32 * 1024 * 1024;
-    // The first wired profile is the fixed fast-child driver control. Keep its
-    // full collection plus 3-second drain inside the existing preinstall owner
-    // watchdog. Actual application tracing needs its own reviewed budget.
-    const RUN_DEADLINE: Duration = Duration::from_secs(5);
+    // Closed role budgets preserve control5/app25/installer90 second bounds.
     const DRAIN_DEADLINE: Duration = Duration::from_secs(3);
 
     fn handle(value: &OwnedHandle) -> HANDLE {
@@ -573,7 +610,7 @@ pub(crate) mod native {
             }
             let token =
                 collect_process_token(root.as_handle()).map_err(|e| format!("root_token:{e}"))?;
-            if !token_matches(&token, &expected.token, info.dwProcessId) {
+            if !token_matches_for_role(&token, &expected.token, info.dwProcessId, expected.role) {
                 return Err("root_token_binding_mismatch".into());
             }
             // SAFETY: same thread owns this debugging chain. Explicitly retain
@@ -606,7 +643,7 @@ pub(crate) mod native {
         let mut initial_breakpoints = std::collections::BTreeSet::new();
         let mut root_create_seen = false;
         loop {
-            if draining_since.is_none() && started.elapsed() >= RUN_DEADLINE {
+            if draining_since.is_none() && started.elapsed() >= expected.role.run_deadline() {
                 report.timed_out = true;
                 report.gap("debug_tree_deadline");
             }
@@ -726,7 +763,12 @@ pub(crate) mod native {
                                         .map_err(|e| format!("event_token:{e}"))?;
                                     report.processes[index].token_before_continue =
                                         Some(token.clone());
-                                    if !token_matches(&token, &expected.token, event.dwProcessId) {
+                                    if !token_matches_for_role(
+                                        &token,
+                                        &expected.token,
+                                        event.dwProcessId,
+                                        expected.role,
+                                    ) {
                                         return Err("descendant_token_binding_mismatch".into());
                                     }
                                     report.processes[index].creation_time_100ns =
@@ -994,6 +1036,56 @@ pub(crate) mod native {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn elevated_setup_policy_never_relaxes_application_or_control_tokens() {
+        let mut setup = standard_token();
+        setup.is_elevated = true;
+        setup.elevation_type = aiw_token::ElevationType::Full;
+        setup.integrity.rid = 0x3000;
+        setup.integrity.sid = "S-1-16-12288".into();
+        setup.integrity.level = aiw_token::IntegrityLevel::High;
+        assert!(token_matches_for_role(
+            &setup,
+            &setup,
+            setup.process_id,
+            RootRole::InstallationSetup
+        ));
+        for role in [RootRole::Control, RootRole::SevenZip] {
+            assert!(!token_matches_for_role(
+                &setup,
+                &setup,
+                setup.process_id,
+                role
+            ));
+        }
+        let mut changed = setup.clone();
+        changed.user_sid = "S-1-5-18".into();
+        assert!(!token_matches_for_role(
+            &changed,
+            &setup,
+            changed.process_id,
+            RootRole::InstallationSetup
+        ));
+        changed = setup.clone();
+        changed.is_app_container = true;
+        assert!(!token_matches_for_role(
+            &changed,
+            &changed,
+            changed.process_id,
+            RootRole::InstallationSetup
+        ));
+        changed = setup.clone();
+        changed.integrity.sid = "S-1-16-4096".into();
+        assert!(!token_matches_for_role(
+            &changed,
+            &changed,
+            changed.process_id,
+            RootRole::InstallationSetup
+        ));
+        assert_eq!(RootRole::Control.run_deadline().as_secs(), 5);
+        assert_eq!(RootRole::SevenZip.run_deadline().as_secs(), 25);
+        assert_eq!(RootRole::InstallationSetup.run_deadline().as_secs(), 90);
+    }
     #[test]
     fn failed_termination_never_authorizes_continuing_a_pending_event() {
         let mut report = DebugTreeReport::new(10);

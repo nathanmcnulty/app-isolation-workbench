@@ -222,7 +222,12 @@ pub fn summary(report: &aiw_runner::SevenZipRunReport) -> String {
             c.archive_bytes_equal
         ));
     }
-    text.push_str("GUI/shell, uninstall, registry/system changes, network/IPC/UI, all descendants and endpoint equivalence remain unmeasured. No general isolation or production acceptance verdict.");
+    if report.profile.revision == aiw_probe::sevenzip::SEVENZIP_PROFILE_REVISION {
+        text.push_str("Broker/out-of-job processes, loaded DLL/memory integrity and candidate-isolated installation remain unmeasured. ");
+    } else {
+        text.push_str("All descendant tokens remain unmeasured under this retained profile. ");
+    }
+    text.push_str("GUI/shell, uninstall, registry/system changes, network/IPC/UI and endpoint equivalence remain unmeasured. No general isolation or production acceptance verdict.");
     text
 }
 
@@ -518,7 +523,7 @@ fn sevenzip_review(
         run_id: run.run_id.clone(),
         workspace: run.workspace.clone(),
         evidence_root: run.evidence_root.clone(),
-        recipe: serde_json::json!({"schemaVersion":"aiw.dev/admin-sevenzip-recipe/v0alpha1","vendorSource":"https://github.com/ip7z/7zip/releases/download/26.05/7z2605-x64.exe","installerProvenance":"Official project download links to ip7z/7zip; exact release-API digest and size pinned. Installer is unsigned; no publisher-signature assertion.","executionIdentity":"Install pinned 7-Zip 26.05 once in an offline disposable worker. Compare create, test, extract and exact content verification as the same standard user versus classic AppContainer with zero capabilities.","dataLifetime":"Fixed text, binary, empty and Unicode inputs and selected denial canaries are used. Original evidence is retained locally. Results summary exports exclude raw tokens, account identifiers and private paths.","limits":"Runtime CLI protocol, Sandbox feature readiness and current session availability are UNMEASURED during preparation. They are required and rechecked only after this exact approval and separate Start. No general compatibility, effective host isolation, network or production acceptance claim. Outer worker cleanup and inner profile/job cleanup are separate.","providerChecks":{"runtime":"requiredAtStartNotObserved","requiredProtocol":prepared.receipt.provider_protocol},"profile":profile,"runPlan":prepared.run_plan}),
+        recipe: serde_json::json!({"schemaVersion":"aiw.dev/admin-sevenzip-recipe/v0alpha1","vendorSource":"https://github.com/ip7z/7zip/releases/download/26.05/7z2605-x64.exe","installerProvenance":"Official project download links to ip7z/7zip; exact release-API digest and size pinned. Installer is unsigned; no publisher-signature assertion.","executionIdentity":"Install pinned 7-Zip 26.05 once with elevated guest setup in an offline disposable worker; installation is outside the candidate. Compare create, test, extract and exact content verification as the same standard user versus classic AppContainer with zero capabilities. Retain observed installer/application process lifetimes, measured tokens and event-image identities.","dataLifetime":"Fixed text, binary, empty and Unicode inputs and selected denial canaries are used. Original evidence is retained locally. Results summary exports exclude raw tokens, account identifiers and private paths.","limits":"Runtime CLI protocol, Sandbox feature readiness and current session availability are UNMEASURED during preparation. They are required and rechecked only after this exact approval and separate Start. No general compatibility, effective host isolation, network or production acceptance claim. Outer worker cleanup and inner profile/job cleanup are separate.","providerChecks":{"runtime":"requiredAtStartNotObserved","requiredProtocol":prepared.receipt.provider_protocol},"profile":profile,"runPlan":prepared.run_plan}),
         plan: prepared.run_plan.clone(),
         proposed_approval: ApprovalRecord::for_plan(
             &run.validate()?.read_plan()?,

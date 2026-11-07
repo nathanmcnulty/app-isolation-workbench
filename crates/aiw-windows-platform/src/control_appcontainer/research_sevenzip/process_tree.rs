@@ -518,6 +518,7 @@ pub(super) fn collect(
         timed_out: false,
         job_empty: true,
         output: read_bounded(capture, 128 * 1024)?,
+        execution_trace: None,
     })
 }
 

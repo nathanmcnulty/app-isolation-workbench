@@ -28,7 +28,7 @@ impl Fixture {
         ));
         fs::create_dir(&root).unwrap();
         let profile = aiw_probe::SevenZipProfile {
-            revision: SEVENZIP_PROFILE_REVISION.into(),
+            revision: SEVENZIP_LEGACY_PROFILE_REVISION.into(),
             source_sha256: seven_zip_source_sha256(),
             installer_sha256: SEVENZIP_INSTALLER_SHA256.into(),
             installer_size_bytes: SEVENZIP_INSTALLER_SIZE_BYTES,
@@ -43,7 +43,7 @@ impl Fixture {
                 .unwrap(),
             policy: SevenZipPolicy::ClassicAppContainerNoCapabilitiesReadInputWriteOutput,
         };
-        let request = SevenZipRequest::new(
+        let request = SevenZipRequest::from_retained_binding(
             "inert-sevenzip-report",
             "11111111-2222-3333-4444-555555555555",
             &"f".repeat(64),
@@ -57,6 +57,7 @@ impl Fixture {
         let image = SevenZipFileDigest::for_bytes(b"inert image bytes, never executed");
         let dll = SevenZipFileDigest::for_bytes(b"inert DLL bytes, never loaded");
         result.installation = Some(SevenZipInstallation {
+            execution_trace: None,
             exit_code: Some(0),
             timed_out: false,
             job_empty: Some(true),
@@ -247,6 +248,7 @@ fn process(pid: u32, candidate: bool) -> SevenZipInvocation {
     }
     let output = SevenZipFileDigest::for_bytes(b"inert capture");
     SevenZipInvocation {
+        execution_trace: None,
         process_id: pid,
         exit_code: Some(0),
         timed_out: false,

@@ -353,7 +353,9 @@ pub fn run() -> Result<()> {
         }
         lease.start(&id, &proposal.plan)?;
         lease.connect_owned()?;
-        let deadline = Instant::now() + Duration::from_secs(420);
+        // Installer90+drain3 and workflow300 remain inside a bounded outer
+        // observation window, including fresh Sandbox startup/publication.
+        let deadline = Instant::now() + Duration::from_secs(540);
         while Instant::now() < deadline {
             if completed_marker(&workspace).is_ok() {
                 return Ok(());

@@ -2,8 +2,9 @@
 
 Updated 2026-11-06 (America/Anchorage). Checkout `C:\aiw\app-isolation-workbench`,
 branch `codex/multimode-assessment`, from main `b27942a` after #106.
-Latest tested/native source: `1d966ca49ab843ad8213152767b6fe037ab3bff9`; later
-handoffs change docs only. Resume with `scripts/work-status.ps1` and
+Latest accepted native source: `1d966ca49ab843ad8213152767b6fe037ab3bff9`.
+Current implementation adds revision-2 actual installer/application tracing;
+native application validation on that code is pending. Resume with `scripts/work-status.ps1` and
 [the acceptance map](MULTIMODE-ASSESSMENT.md). The full application goal remains
 active; no broad W4/W5, Benchmark 2 or production acceptance is complete.
 
@@ -57,21 +58,33 @@ Private provenance/audits: `C:\aiw\mxc-multimode-20261106`.
 
 ## Next work and authorization
 
-Move into the existing real 7-Zip workflow. `run_variant` has three real process
-operations (create/test/extract); verify is first-party inventory/hash work.
-`launch` already creates suspended/exact-job processes, but only `Operation::Tree`
-routes through the debugger collector. Bind actual roots to independently held
-code/token/time and retain all observed process images/lifetimes; do not apply
-the fixed three-helper allowlist to application children or invent parent edges.
-Use explicit phase deadlines: controls use 5 seconds, existing app operations 25
-seconds and their enclosing workflow 150. Account for draining without weakening
-the watchdogs. Preserve strict HAF, exact jobs, gaps/fail-stop and source approval.
+Revision-2 tracing is implemented for the elevated common installer and all six
+actual create/test/extract roots. Verify remains first-party inventory/hash work.
+Roots bind to held code/token/full-width time; observed descendants retain paired
+events, event images, same-handle lifetime revalidation and exact job accounting.
+The installer debugger is a supervised fixed helper so fail-stop preserves the
+receipt-producing agent. Partial facts remain retainable before comparison
+credit, including numeric PID reuse; ambiguous/repeated lifetimes cannot pass.
+Legacy revision-1 reads keep their original contract. See
+[the implementation and acceptance status](SEVENZIP-APPLICATION-TRACING.md).
 
-Installation currently runs the SFX under elevated WDAG authority. Add an explicit
-installer role/policy and retain its evidence; never report common elevated setup
-as installation inside the candidate or relax ordinary/classic token checks.
-MXC startup is not a gate on independent app progress. Its request-bound PSEC
-policy must remain separate from the classic empty-capability collector contract.
+Current tracing checks passed: 135 default/136 publication-feature provider
+tests, 28 focused platform tests (including refusal retention), 13 debugger
+tests, 3 profile tests, 3 guest publication/role tests, 7 runner and 3 admin tests.
+Workspace all-target research Clippy, format and governance passed. The final
+diagnostic-only delta was retested in the 28 platform tests; unaffected component
+checks were reused. Independent producer/verifier/retention/scope reviews passed.
+Code snapshots remained stable during checks. Shared source framing now includes
+24 files. Private checks and framing proof: `C:\aiw\sevenzip-execution-20261106`.
+
+Next: build the fresh source-pinned package, then native
+install/use proof in a new disposable worker. No application-native acceptance
+has been established for revision 2. Fixed budgets are control 5s, app 25s,
+installer 90s, supervisor 110s, app readiness 150s and workflow 300s; collector
+drain stays 3s and admin outer wait stays 600s. Preserve strict HAF, exact jobs,
+gaps/fail-stop, receipt-last publication and approval. Common elevated setup is
+outside the candidate. MXC startup is not a gate on independent app progress;
+its request-bound PSEC policy stays separate from classic empty capabilities.
 New execution requires fresh source/proposal/session, exact audited approval and
 one-shot Start; no old trial may be adopted or replayed.
 
