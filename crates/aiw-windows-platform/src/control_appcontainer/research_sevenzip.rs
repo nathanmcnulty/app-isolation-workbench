@@ -23,6 +23,9 @@ use windows::Win32::Storage::FileSystem::{
     FILE_SHARE_WRITE,
 };
 
+#[cfg(feature = "research-sevenzip")]
+mod process_tree;
+
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 const ROOT: &str = r"C:\AIW\SevenZip";
 const INPUT_HELPER: &str = r"C:\AIW\Tools\sevenzip_assessment.exe";
@@ -74,6 +77,21 @@ mod image_spelling_tests {
             assert!(!fixed_role_image(Path::new(actual), expected));
         }
     }
+
+    #[test]
+    fn production_roles_refuse_every_research_debugger_entry() {
+        for role in [
+            "--tree-output",
+            "--tree-workflow",
+            "--tree-root",
+            "--tree-child",
+            "--tree-grandchild",
+            "--output",
+        ] {
+            assert!(!production_role_allowed(role));
+        }
+        assert!(production_role_allowed("--workflow"));
+    }
 }
 
 /// All accepted roles are compiled and bound to fixed on-worker paths/identity.
@@ -81,6 +99,17 @@ pub fn run() -> Result<u8> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     let exe = std::env::current_exe()?;
     let token = collect_current_process_token()?;
+    #[cfg(feature = "research-sevenzip")]
+    if args == ["--tree-output", r"C:\AIW\SevenZipOutput\result.json"] {
+        if !fixed_role_image(&exe, INPUT_HELPER)
+            || !token.is_elevated
+            || token.is_app_container
+            || token.user_sid != fixed_account_sid("WDAGUtilityAccount")?
+        {
+            return Err("fixed elevated Sandbox tree-control role required".into());
+        }
+        return setup_bound(None, true);
+    }
     if args == ["--output", r"C:\AIW\SevenZipOutput\result.json"] {
         if !fixed_role_image(&exe, INPUT_HELPER)
             || !token.is_elevated
@@ -99,6 +128,12 @@ pub fn run() -> Result<u8> {
         return Err("fixed standard-user research role required".into());
     }
     match args[0].to_str() {
+        #[cfg(feature = "research-sevenzip")]
+        Some("--tree-root" | "--tree-child" | "--tree-grandchild") => {
+            process_tree::run_fixed_role(args[0].to_str().unwrap())
+        }
+        #[cfg(feature = "research-sevenzip")]
+        Some("--tree-workflow") if !token.is_app_container => process_tree::workflow(&token),
         Some("--driver-control") => {
             std::io::stdout().write_all(DRIVER_BYTES)?;
             Ok(23)
@@ -116,15 +151,17 @@ pub fn run() -> Result<u8> {
 /// Production secondary roles cannot enter the installer/setup entrypoint.
 pub(crate) fn run_production_role() -> Result<u8> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() != 1
-        || !matches!(
-            args[0].to_str(),
-            Some("--driver-control" | "--deadline-control" | "--boundary-control" | "--workflow")
-        )
-    {
+    if args.len() != 1 || !args[0].to_str().is_some_and(production_role_allowed) {
         return Err("fixed 7-Zip secondary role rejected".into());
     }
     run()
+}
+
+fn production_role_allowed(role: &str) -> bool {
+    matches!(
+        role,
+        "--driver-control" | "--deadline-control" | "--boundary-control" | "--workflow"
+    )
 }
 
 pub(crate) fn execute_production(
@@ -143,17 +180,21 @@ pub(crate) fn execute_production(
     }
     (
         true,
-        setup_bound(Some((
-            &request.agent_sha256,
-            request.profile.agent_size_bytes,
-        ))),
+        setup_bound(
+            Some((&request.agent_sha256, request.profile.agent_size_bytes)),
+            false,
+        ),
     )
 }
 
 fn setup() -> Result<u8> {
-    setup_bound(None)
+    setup_bound(None, false)
 }
-fn setup_bound(expected_helper: Option<(&str, u64)>) -> Result<u8> {
+fn setup_bound(expected_helper: Option<(&str, u64)>, tree_only: bool) -> Result<u8> {
+    #[cfg(not(feature = "research-sevenzip"))]
+    if tree_only {
+        return Err("tree proof requires the explicit research feature".into());
+    }
     // Holding every named ancestor prevents root replacement; no recursive cleanup.
     let _output_dirs = hold_directory_chain(Path::new(OUTPUT))?;
     if fs::read_dir(OUTPUT)?.next().is_some() || Path::new(ROOT).try_exists()? {
@@ -197,12 +238,13 @@ fn setup_bound(expected_helper: Option<(&str, u64)>) -> Result<u8> {
             "schemaVersion":"aiw.dev/research/sevenzip/v0alpha1", "productionEvidence":false,
             "installerSha256":INSTALLER_HASH,"installerSizeBytes":INSTALLER_SIZE,
             "helperSha256":helper.observation().sha256,"windows":crate::observe_windows_version()?,
-            "scope":"7-Zip 26.05 CLI create/test/extract/integrity; classic AppContainer, zero capabilities",
+            "scope":if tree_only {"first-party process-tree driver controls; ordinary and classic AppContainer, zero capabilities; no vendor execution"}
+              else {"7-Zip 26.05 CLI create/test/extract/integrity; classic AppContainer, zero capabilities"},
             "gaps":["general compatibility","GUI and shell integration","registry and system-wide installation changes",
               "network/IPC/UI enforcement","all descendant tokens","production evidence receipt","host endpoint equivalence"]
         }),
     )?;
-    let operation = setup_inner(&installer, &helper);
+    let operation = setup_inner(&installer, &helper, tree_only);
     let revalidated = inputs.revalidate().map_err(fixed);
     let result: Result<u8> = match (operation, revalidated) {
         (Ok(value), Ok(())) => Ok(value),
@@ -223,7 +265,8 @@ fn setup_bound(expected_helper: Option<(&str, u64)>) -> Result<u8> {
         &json!({"schemaVersion":"aiw.dev/research/sevenzip-result/v0alpha1",
         "productionEvidence":false,"driverCompleted":result.is_ok(),
         "error":result.as_ref().err().map(ToString::to_string),
-        "scope":"research observations; application functions are in workflow stage records; outer cleanup recorded only by host"}),
+        "scope":if tree_only {"first-party tree controls only; vendor installer staged inertly, never launched; outer cleanup recorded only by host"}
+          else {"research observations; application functions are in workflow stage records; outer cleanup recorded only by host"}}),
     )?;
     result
 }
@@ -246,7 +289,11 @@ pub(crate) fn production_stage(name: &str) -> Result<Option<Vec<u8>>> {
     Ok(Some(bytes))
 }
 
-fn setup_inner(installer: &HeldApplicationFile, helper: &HeldApplicationFile) -> Result<u8> {
+fn setup_inner(
+    installer: &HeldApplicationFile,
+    helper: &HeldApplicationFile,
+    tree_only: bool,
+) -> Result<u8> {
     let standard = StandardUserSession::establish()?;
     let sid = &standard.context().user_sid;
     let _root = hold_directory_chain(Path::new(ROOT))?;
@@ -270,16 +317,49 @@ fn setup_inner(installer: &HeldApplicationFile, helper: &HeldApplicationFile) ->
         false,
     )?;
     record(Path::new(OUTPUT), "01-context", &json!(standard.context()))?;
+    #[cfg(feature = "research-sevenzip")]
+    if tree_only {
+        let package = DerivedProfileSid::new()?;
+        // Fixed ordinary/classic control permissions on newly owned test paths.
+        // No vendor code, denied canary or parent path is granted or launched.
+        for path in [ROOT, HELPER, WORK] {
+            grant_package_access(
+                Path::new(path),
+                package.0,
+                (GENERIC_READ | GENERIC_EXECUTE).0,
+            )?;
+        }
+    }
     // One-use standard credentials launch once. Child proves the fixed native
     // capture/deadline controls before the parent installs the vendor software.
-    let (child, held_token) =
-        GuestProcess::start_standard_user_measured(HELPER, &["--workflow".into()], &standard)?;
+    let (child, held_token) = GuestProcess::start_standard_user_measured(
+        HELPER,
+        &[if tree_only {
+            "--tree-workflow"
+        } else {
+            "--workflow"
+        }
+        .into()],
+        &standard,
+    )?;
     let operation = (|| -> Result<i32> {
         record(
             Path::new(OUTPUT),
             "02-launcher",
             &json!({"heldToken":held_token}),
         )?;
+        if tree_only {
+            let exit = child.wait_for_exit(Duration::from_secs(60))?;
+            record(
+                Path::new(OUTPUT),
+                "05-workflow-exit",
+                &json!({
+                    "exitCode":exit,"heldToken":held_token,"firstPartyTreeControlsOnly":true,
+                    "vendorInstallerExecuted":false,"applicationExecuted":false
+                }),
+            )?;
+            return Ok(exit);
+        }
         wait_for_file(
             &Path::new(WORK).join("01-deadline-control.json"),
             Duration::from_secs(20),
@@ -386,7 +466,9 @@ fn setup_inner(installer: &HeldApplicationFile, helper: &HeldApplicationFile) ->
         &json!({"productionEvidence":false,
         "workflowDriverExitCode":exit,"outerCleanup":"owned by host, not measured by guest",
         "launcherJobEmpty":true,
-        "installationAndHelperBindingsUnchanged":true,"localResearchRootRetainedForOuterWorkerDisposal":ROOT}),
+        "installationExecuted":!tree_only,"helperBindingsUnchanged":true,
+        "installationAndHelperBindingsUnchanged":if tree_only {Value::Null} else {json!(true)},
+        "localResearchRootRetainedForOuterWorkerDisposal":ROOT}),
     )?;
     if exit != 0 {
         return Err(
@@ -413,6 +495,8 @@ fn workflow(token: &TokenEvidence) -> Result<u8> {
 }
 
 fn workflow_inner(token: &TokenEvidence) -> Result<u8> {
+    #[cfg(feature = "research-sevenzip")]
+    process_tree::control(None, &token.user_sid)?;
     // Capture output/deadline/owned cleanup controls through the exact app process
     // authority, using a compiled self role rather than interpreting a script.
     let control = launch(Operation::Driver, None, Path::new(WORK), &token.user_sid)?;
@@ -467,6 +551,18 @@ fn workflow_inner(token: &TokenEvidence) -> Result<u8> {
         let expected = DerivedProfileSid::new()?;
         if profile.string_sid()? != sid_string(expected.0)? {
             return Err("fresh candidate profile differs".into());
+        }
+        #[cfg(feature = "research-sevenzip")]
+        {
+            record(
+                Path::new(WORK),
+                "tree-candidate-profile",
+                &json!({
+                    "ownedFreshProfileSid":profile.string_sid()?,
+                    "cleanup":"not yet attempted; abrupt debugger exit leaves deletion unverified"
+                }),
+            )?;
+            process_tree::control(Some(profile.sid), &token.user_sid)?;
         }
         let candidate_root = Path::new(WORK).join("Candidate");
         let package = profile.string_sid()?;
@@ -749,6 +845,8 @@ fn fixture_inventory() -> BTreeMap<String, Value> {
 
 #[derive(Clone, Copy)]
 enum Operation {
+    #[cfg(feature = "research-sevenzip")]
+    Tree,
     Driver,
     Deadline,
     Boundary,
@@ -759,6 +857,8 @@ enum Operation {
 impl Operation {
     fn label(self) -> &'static str {
         match self {
+            #[cfg(feature = "research-sevenzip")]
+            Self::Tree => "tree",
             Self::Driver => "driver",
             Self::Deadline => "deadline",
             Self::Boundary => "boundary",
@@ -769,6 +869,8 @@ impl Operation {
     }
     fn command(self) -> (&'static str, &'static [&'static str]) {
         match self {
+            #[cfg(feature = "research-sevenzip")]
+            Self::Tree => (HELPER, &["--tree-root"]),
             Self::Driver => (HELPER, &["--driver-control"]),
             Self::Deadline => (HELPER, &["--deadline-control"]),
             Self::Boundary => (HELPER, &["--boundary-control"]),
@@ -845,6 +947,7 @@ fn launch(
             None,
             true,
             CREATE_SUSPENDED
+                | process_tree_creation_flags(operation)
                 | CREATE_UNICODE_ENVIRONMENT
                 | EXTENDED_STARTUPINFO_PRESENT
                 | CREATE_NO_WINDOW,
@@ -859,9 +962,20 @@ fn launch(
     if let Err(error) = unsafe { AssignProcessToJobObject(job.handle(), info.hProcess) } {
         let stopped = unsafe { TerminateProcess(info.hProcess, 1) };
         let waited = wait(info.hProcess, Duration::from_secs(2));
+        #[cfg(feature = "research-sevenzip")]
+        if matches!(operation, Operation::Tree) {
+            process_tree::fail_stop(
+                profile,
+                &format!("assign app job: {error}; stopped={stopped:?}; waited={waited:?}"),
+            );
+        }
         return Err(
             format!("assign app job: {error}; stopped={stopped:?}; waited={waited:?}").into(),
         );
+    }
+    #[cfg(feature = "research-sevenzip")]
+    if matches!(operation, Operation::Tree) {
+        return process_tree::collect(info, process, _thread, job, output, &capture, profile, sid);
     }
     let observed = (|| -> Result<Invocation> {
         let token = collect_process_token(process.as_handle())?;
@@ -902,6 +1016,17 @@ fn launch(
     }
 }
 
+fn process_tree_creation_flags(
+    operation: Operation,
+) -> windows::Win32::System::Threading::PROCESS_CREATION_FLAGS {
+    #[cfg(feature = "research-sevenzip")]
+    if matches!(operation, Operation::Tree) {
+        return windows::Win32::System::Threading::DEBUG_PROCESS;
+    }
+    let _ = operation;
+    windows::Win32::System::Threading::PROCESS_CREATION_FLAGS(0)
+}
+
 fn record(root: &Path, name: &str, value: &Value) -> Result<()> {
     publish_new(
         &root.join(format!("{name}.pending")),
@@ -911,6 +1036,15 @@ fn record(root: &Path, name: &str, value: &Value) -> Result<()> {
 }
 fn collect_stages() -> Result<()> {
     let stages = [
+        "tree-baseline",
+        "tree-candidate",
+        "tree-baseline-binding",
+        "tree-candidate-binding",
+        "tree-baseline-error",
+        "tree-candidate-error",
+        "tree-candidate-profile",
+        "tree-profile-cleanup",
+        "tree-complete",
         "00-driver-control",
         "01-deadline-control",
         "app-ready",

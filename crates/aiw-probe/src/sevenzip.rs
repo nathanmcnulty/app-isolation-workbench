@@ -80,6 +80,9 @@ pub fn seven_zip_source_sha256() -> String {
         include_str!("../../aiw-provider-wsb/src/sevenzip_process_tree.rs"),
         include_str!("../../aiw-windows-platform/src/debug_tree.rs"),
         include_str!("../../aiw-windows-platform/src/control_appcontainer/research_sevenzip.rs"),
+        include_str!(
+            "../../aiw-windows-platform/src/control_appcontainer/research_sevenzip/process_tree.rs"
+        ),
         include_str!("../../aiw-windows-platform/src/guest_document/paired_inputs/sevenzip.rs"),
         include_str!("../../aiw-windows-platform/src/control_appcontainer.rs"),
         include_str!("../../aiw-windows-platform/src/guest_document/paired_inputs.rs"),

@@ -85,7 +85,17 @@ focused negative tests and independent review; its native validation and the
 independent ordinary/classic application tree work remain next.
 No 7-Zip ran in these controls.
 
-Process-tree and registry foundations are test-compiled only. The collector
+Process-tree controls are default-off research only; registry foundations remain
+test-compiled only. A closed tree-only entry runs fixed ordinary/classic
+root/child/grandchild roles without executing the staged vendor installer or
+application. It retains independently bound suspended-root measurements and
+atomically publishes traces before required helper fail-stop. Actual serialized
+traces are capped at the 128 KiB stage-reader limit; oversize becomes an explicit
+non-trace refusal preserving digest, byte count and actual cleanup facts.
+The collector's five-second control deadline and three-second drain fit the
+unchanged preinstall watchdog. The dedicated native host harness and disposable
+control proof are still pending; application tracing and product receipt wiring
+remain incomplete. The collector
 records an inherited debugger chain, not broker-created processes or invented
 parent edges; any gap requires the dedicated helper to fail-stop. The registry
 canary uses an exact newly-created key handle for deletion and suppresses hidden

@@ -2,9 +2,9 @@
 
 use aiw_probe::WindowsSandboxReadiness;
 
-// Foundations are test-compiled only until the fixed supervisor/registry roles
-// and their receipt contracts are integrated and independently reviewed.
-#[cfg(all(windows, test))]
+// Debugger controls are default-off research only; application receipt wiring
+// and native acceptance remain open. Registry foundations are test-only.
+#[cfg(all(windows, any(test, feature = "research-sevenzip")))]
 #[allow(dead_code)]
 mod debug_tree;
 #[cfg(all(windows, test))]

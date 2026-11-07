@@ -216,7 +216,10 @@ pub(crate) mod native {
     use windows::core::PWSTR;
 
     const MAX_IMAGE_BYTES: u64 = 32 * 1024 * 1024;
-    const RUN_DEADLINE: Duration = Duration::from_secs(30);
+    // The first wired profile is the fixed fast-child driver control. Keep its
+    // full collection plus 3-second drain inside the existing preinstall owner
+    // watchdog. Actual application tracing needs its own reviewed budget.
+    const RUN_DEADLINE: Duration = Duration::from_secs(5);
     const DRAIN_DEADLINE: Duration = Duration::from_secs(3);
 
     fn handle(value: &OwnedHandle) -> HANDLE {

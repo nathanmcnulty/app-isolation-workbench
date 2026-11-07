@@ -48,16 +48,28 @@ active; neither implementation nor native acceptance is complete.
   occupied identity/bytes unchanged, partial-output retention and stable
   observations across verified owned cleanup. Retained Read matched with zero
   provider calls. No MXC or application ran in this publication control.
-- Creation-time debugger-chain and owned registry-canary foundations are
-  test-compiled only, with no production role wiring or native acceptance.
+- Creation-time debugger-chain controls are now wired only behind the default-off
+  `research-sevenzip` feature; owned registry-canary foundations remain test-only.
+  Neither has production role wiring or native acceptance.
   Registry deletion uses the exact retained key handle; debugger gaps require
   the dedicated helper to fail-stop even if job accounting later reconciles.
 - A bounded typed process-chain contract now validates create/exit sequences,
   PID reuse intervals, externally supplied held-root token/image/time binding
-  and exact-job accounting. The test-only native collector emits exit-event
+  and exact-job accounting. The native collector emits exit-event
   sequences and checks token schema/event PID. Both sources are now included
   in the application source commitment. This foundation is not production wiring
   or native descendant coverage; fast-child/grandchild proof remains required.
+- A closed research-only `--tree-output` entry runs ordinary and classic
+  first-party root/child/grandchild controls without vendor execution. The
+  installer is held and staged inertly under existing intake rules. Suspended
+  root token/time/image bindings are retained independently; PI/job ownership
+  transfers once on the creator thread. Partial traces are published before
+  required helper fail-stop; profile deletion then stays explicitly unverified.
+  Five-second collection plus three-second drain fits the unchanged preinstall
+  owner watchdog. A trace exceeding the 128 KiB stage limit becomes a separate
+  bounded refusal with exact serialized digest/size and actual cleanup facts,
+  never a truncated accepted trace. Host dispatch/custody integration and native
+  control proof remain next; this entry is not an administrator product flow.
 - The default-off creation control now dispatches only the fixed cooperative
   Driver request. Matching ordinary filesystem positives precede spawn; an
   ordinary held-process observation and an owner-held exact-job check precede
@@ -113,9 +125,15 @@ full platform run passed 216 tests with 10 ignored; subsequent budget changes
 were covered by the focused rerun. Independent reviews passed after fixes for
 serialized aggregate limits and preservation of the actual owner binding error.
 Logs: `C:/aiw/process-tree-provider-final-tests.log` and
-`C:/aiw/raw-diagnostic-*-final*.log`. New source framing contains 15 shared files;
-historical trial packages retain their original 13-file commitment. Raw capture
+`C:/aiw/raw-diagnostic-*-final*.log`. That correction framed 15 shared files;
+the subsequent control-only module brings the current count to 16. Historical
+trial packages retain their original 13-file commitment. Raw capture
 and the process-chain contract still require their own disposable native proof.
+Control-only wiring: 2 profile tests, 16 focused 7-Zip/platform tests, 5 debugger
+state tests, research all-target Clippy and default-feature all-target compilation
+passed. Independent execution/custody review passed after watchdog, control-only
+scope and serialized trace-limit fixes. Logs: `C:/aiw/process-tree-control-*.log`.
+No new native session or application trial ran for this increment.
 Raw FILETIME identifiers require lossless/Rust auditing; do not round them through
 JavaScript numbers. Registry-link/create-only native semantics remain open before
 production wiring, and explicit cleanup cannot trigger a hidden Drop retry.
@@ -124,8 +142,12 @@ production wiring, and explicit cleanup cannot trigger a hidden Drop retry.
 
 Validate the new bounded raw final/pending MXC diagnostics without treating them
 as completion, and investigate a separately pinned minimal contained driver if
-needed. Continue the independent ordinary/classic application process-tree
-contract and native fast-child/grandchild proof; MXC startup must not become a
+needed. Complete the independent ordinary/classic tree-control host harness and
+native fast-child/grandchild proof, then wire application tracing to typed
+receipts/results. The harness needs a fresh source-bound root/session, one exact
+default-off renderer route and 8.3 terminal publication with bounded embedded
+observations (long JSON output names must not weaken strict custody).
+MXC startup must not become a
 gate on that work. Future trials still require fresh source-pinned proposals
 under the existing Sandbox-only runtime authorization.
 Keep the outer watchdog/job unchanged and preserve exact failures without
