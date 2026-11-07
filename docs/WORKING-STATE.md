@@ -2,8 +2,9 @@
 
 Updated 2026-11-06 (America/Anchorage). Checkout `C:\aiw\app-isolation-workbench`,
 branch `codex/multimode-assessment`, from main `b27942a` after #106.
-Current native source: `f27dda809a23ecd25934b2f74d6f8617d378e307`; the new
-code-content contract is implemented/tested but not native-accepted. Resume with `scripts/work-status.ps1` and
+Latest tested source: `1d966ca49ab843ad8213152767b6fe037ab3bff9`; latest native
+source: `f27dda809a23ecd25934b2f74d6f8617d378e307`. The new code-content
+contract is not native-accepted. Resume with `scripts/work-status.ps1` and
 [the acceptance map](MULTIMODE-ASSESSMENT.md). The full multi-mode application goal
 remains active; no broad W4/W5, Benchmark 2 or production acceptance is complete.
 
@@ -66,6 +67,11 @@ independently reviewed; its fresh R3 session has not run. Historical verifiers
 and failed trials are unchanged. Validation passed: 122 default/123 research
 provider tests, 236 platform tests (10 ignored), 25 host tests, research all-target
 Clippy, format and governance. No new Sandbox, vendor or runtime execution ran.
+The exact-source static build, PE, seven-member package and proposal/outcome
+auditors passed independent review/data checks. Native R3 is pending. Use the
+private `source-checkpoint-1d966ca-r3.json` for pins and the reviewed R3b transfer
+handoff. R3b's 24 frames fit the receiver/viewer cap and its proof names match
+both auditors. The initial R3 transfer set must not be used. Prior evidence stays.
 Preserve strict HAF/intake, all-token checks, watchdogs and exact owned jobs.
 Then complete fresh positive/chain-reset-negative controls and actual application
 tracing. MXC startup is not a gate on independent application progress. Any new

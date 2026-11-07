@@ -163,6 +163,25 @@ Independent producer/caller and verifier/host reviews passed, including a follow
 review of ordinal-zero root binding and later PID reuse. These are regression and
 review results; the R3 Sandbox controls have not run and actual app tracing is open.
 
+Tested source `1d966ca49ab843ad8213152767b6fe037ab3bff9` has a fresh offline
+static-CRT build. Source framing, PE imports/enrollment, all seven package members
+and the closed launcher were independently reviewed. The build now pins Cargo's
+target directory explicitly so an inherited output directory cannot enroll stale
+bytes. No packaged image was invoked while preparing or auditing the package.
+The full package is 3,308,438 bytes, SHA-256
+`0de1664ebfee46f4ac0842994dc7223e18bd91ed37e63df9b213da1ede0d8680`;
+manifest SHA-256 is
+`3c42fe4d3e652dd584ce75a547a8a3897a1dd093caad2bcd1307f4df69139a59`.
+Private proposal and lossless outcome auditors passed source/package-bound
+readiness checks, including 75 outcome tamper cases and 11 additional positive
+cases. Readiness is data-only and conveys no native control acceptance.
+Independent transport review caught a prefix/frame-cap mismatch before use;
+the initial R3 transfer files are preserved as provisional and must not be used.
+The fresh R3b correction passed peer review: all 24 frames fit both actual
+consumer limits, and its raw phase filenames match the frozen auditors. The
+private `source-checkpoint-1d966ca-r3.json` retains exact artifacts and next steps;
+no transfer service, console action or native trial ran during this preparation.
+
 Keep strict local intake/custody, all-process token checks, source/approval/session
 binding, watchdogs and exact owned cleanup unchanged. The new contract requires
 substitution/mutation/continuation negatives, independent review and a fresh
