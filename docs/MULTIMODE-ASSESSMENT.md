@@ -109,6 +109,17 @@ need focused disposable-worker proof before production wiring; freshness of a
 dedicated account before application launch is a prerequisite, not proof of
 general race-safe registry creation. No parent registry ACL is changed.
 
+The fresh source `191ac276` [native tree trial](SEVENZIP-TREE-NATIVE-20261106.md)
+retained an ordinary six-process trace: three helpers and three console hosts,
+with paired events and reconciled exact-job counts. It correctly failed the
+predeclared three-helper contract before the candidate. Seven mapped owner-stage
+reads separately returned unsupported FileIdInfo; local trace/binding records
+survived. Strict marker custody, owned outer cleanup and provider-zero retained
+Read passed. Preserve this partial result. The correction must keep strict
+general custody and all observed process coverage, with fresh owner journaling,
+explicit code-bound support roles and new native proof; it cannot turn this
+historical failure into a pass.
+
 Private raw metadata contains full-width FILETIME/process/file identifiers.
 Audit it with Rust or another lossless JSON parser; ordinary JavaScript numbers
 cannot preserve these integers. Sanitized JSON/Markdown omits raw bytes and
