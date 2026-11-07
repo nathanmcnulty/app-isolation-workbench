@@ -67,6 +67,12 @@ traces, phase/code/token/time/image/job contradictions, retained legacy evidence
 overflow and partial publication. Test/build results for a particular checkout
 are recorded in the working state and private logs.
 
+Implementation source `7fca63e` has passing focused checks, locked offline default
+release builds for the CLI/agent/desktop and independent package/transport-archive
+review. Its compiled source hash matches 24 independently reconstructed committed
+files. Artifact inspection does not prove reproducibility, loaded dependencies,
+receipt publication timing or native application behavior.
+
 **Native application acceptance on this source is pending.** The
 [earlier native positive controls](SEVENZIP-CODE-CONTROL-NATIVE-20261106.md)
 belong to source `1d966ca`; they do not prove this install/use path. Fresh native

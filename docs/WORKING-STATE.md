@@ -77,8 +77,20 @@ checks were reused. Independent producer/verifier/retention/scope reviews passed
 Code snapshots remained stable during checks. Shared source framing now includes
 24 files. Private checks and framing proof: `C:\aiw\sevenzip-execution-20261106`.
 
-Next: build the fresh source-pinned package, then native
-install/use proof in a new disposable worker. No application-native acceptance
+Implementation/build source is `7fca63e886d45cb3939bbae01d977fd11a997dac`;
+shared source SHA-256 is `2301eca7527c764365f6afe6cffa517b764596a180f0e4f69a265f354864250f`.
+Locked offline default release builds passed for CLI, agent and desktop; CLI
+identity matches the independent 24 committed source frames. Fresh package
+`C:\aiw\sevenzip-execution-20261106\package-7fca63e-r1` passed verification and
+independent artifact/ZIP review: eight payloads plus receipt, no MXC runtime.
+Receipt SHA-256 `37420f7afab368770a8fdc1b7f83682792f9b1d310b708d66afe964236baaf39`;
+ZIP SHA-256 `9c328929d763c29a92e116e73a615d1ad4f580fcc5b7b87b4940b599283680fc`.
+Private review `independent-package-review-7fca63e-r1.json` records limits.
+No package was staged on VM107 and no installer/runtime ran in this checkpoint.
+
+Next: prepare/review a fresh console transport and exact native plan, then native
+install/use proof in a new disposable worker. Existing fixed root/session scripts
+must not be reused as execution authority. No application-native acceptance
 has been established for revision 2. Fixed budgets are control 5s, app 25s,
 installer 90s, supervisor 110s, app readiness 150s and workflow 300s; collector
 drain stays 3s and admin outer wait stays 600s. Preserve strict HAF, exact jobs,
