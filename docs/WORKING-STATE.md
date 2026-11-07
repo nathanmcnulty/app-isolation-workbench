@@ -57,13 +57,14 @@ Private provenance, original bytes and audits: `C:\aiw\mxc-multimode-20261106`.
 
 ## Next work and authorization
 
-The correction adds a fresh guest-local SY/BA-only owner journal, strict local
-HAF snapshots, worker denial probes and a separately bound console-support
-contract. Consequential producer/host review findings have been fixed; fresh
-native validation of these changes remains pending.
-Focused correction checks pass: 113 default/114 research provider tests,
-16 platform tests and 25 host tests. Private logs are in the same tree evidence
-root; the initial host-fixture compilation failure is preserved with the fix.
+Correction source `f27dda809a23ecd25934b2f74d6f8617d378e307` adds a protected
+local owner journal, strict HAF snapshots, worker denial probes and a separately
+bound console-support contract. Consequential producer/host review fixes are in.
+Checks pass: 113 default/114 research provider tests, 16 platform tests, 25 host
+tests, research all-target Clippy, formatting and governance. Private logs,
+including initial failures and fixes, remain in the same tree evidence root.
+The reviewed static-CRT R2 package and 24-part transport are inert. No new native
+trial has started; fresh native validation of this correction remains pending.
 Do not weaken general intake/custody or relabel the original six-process failure.
 Then validate fresh positive and deliberate chain-reset-negative controls and
 wire actual application tracing to typed receipts/results. MXC startup is not a
