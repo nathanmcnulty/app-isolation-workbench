@@ -139,7 +139,8 @@ that general architecture does not explain these particular identity differences
 Two independent design reviews recommended a new explicit executable-content
 contract, retaining observed object identities separately and leaving physical
 equivalence unproved. The separate implementation now has a fresh trace schema
-and guest/host result schemas; native acceptance remains pending. Historical
+and guest/host result schemas; its later [positive-control trial](SEVENZIP-CODE-CONTROL-NATIVE-20261106.md)
+passed on source `1d966ca`. Historical
 verifiers and the two failed trials retain their original contracts and verdicts.
 For the fixed control fixture, every CREATE image must match its independently
 approved path/hash/size before normal debug continuation. The collector holds
@@ -161,7 +162,8 @@ changes, unknown code, token/time/job gaps, full-width times and schema refusal;
 inert native file fixtures exercise mutation between reads and across a lifetime.
 Independent producer/caller and verifier/host reviews passed, including a follow-up
 review of ordinal-zero root binding and later PID reuse. These are regression and
-review results; the R3 Sandbox controls have not run and actual app tracing is open.
+review results. R3 later passed the separate positive-control trial; actual app
+tracing remains open. None of those later facts changes this f27 verdict.
 
 Tested source `1d966ca49ab843ad8213152767b6fe037ab3bff9` has a fresh offline
 static-CRT build. Source framing, PE imports/enrollment, all seven package members
@@ -183,13 +185,15 @@ private `source-checkpoint-1d966ca-r3.json` retains exact artifacts and next ste
 no transfer service, console action or native trial ran during this preparation.
 
 Keep strict local intake/custody, all-process token checks, source/approval/session
-binding, watchdogs and exact owned cleanup unchanged. The new contract requires
-substitution/mutation/continuation negatives, independent review and a fresh
-source-bound native trial. Neither old trial may be replayed or
+binding, watchdogs and exact owned cleanup unchanged. The new contract's focused
+substitution/mutation/continuation tests, independent review and fresh positive
+trial are recorded separately; native chain-reset negatives remain required.
+Neither old trial may be replayed or
 reclassified. Further physical-object diagnosis is optional; it must not replace
 progress into actual 7-Zip measurements.
 
-Fresh positive and deliberate chain-reset-negative native proof, actual 7-Zip
+The separate positive control now has native proof. Deliberate chain-reset-negative
+native proof, actual 7-Zip
 process-tree/registry wiring, repeated three-mode comparisons, archive investigation,
 new-source faults/recovery and desktop Results/provider-zero retained export remain
 required by [the acceptance map](MULTIMODE-ASSESSMENT.md). Application compatibility,

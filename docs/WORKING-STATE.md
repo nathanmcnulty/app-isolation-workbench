@@ -2,45 +2,45 @@
 
 Updated 2026-11-06 (America/Anchorage). Checkout `C:\aiw\app-isolation-workbench`,
 branch `codex/multimode-assessment`, from main `b27942a` after #106.
-Latest tested source: `1d966ca49ab843ad8213152767b6fe037ab3bff9`; latest native
-source: `f27dda809a23ecd25934b2f74d6f8617d378e307`. The new code-content
-contract is not native-accepted. Resume with `scripts/work-status.ps1` and
-[the acceptance map](MULTIMODE-ASSESSMENT.md). The full multi-mode application goal
-remains active; no broad W4/W5, Benchmark 2 or production acceptance is complete.
+Latest tested/native source: `1d966ca49ab843ad8213152767b6fe037ab3bff9`; later
+handoffs change docs only. Resume with `scripts/work-status.ps1` and
+[the acceptance map](MULTIMODE-ASSESSMENT.md). The full application goal remains
+active; no broad W4/W5, Benchmark 2 or production acceptance is complete.
 
 ## Current evidence
 
-The default-off tree harness binds protected workspace, pinned inputs, source,
-environment, approval and owned session to one Start. Only first-party controls
-run; the official installer stays inert. Strict DAT custody is separate from
-positive-control verification. Source `f27dda8` passed 113 default/114 research
-provider tests, 16 platform tests, 25 host tests, research all-target Clippy,
-formatting and governance. Static-CRT source/PE/package reviews passed; these
-checks do not prove native controls or binary reproducibility.
+One fresh offline VM107 trial passed the new **bounded first-party positive
+controls**: ordinary six processes/186 debug events, classic six/196, each three
+helpers/three console supports and six paired lifetimes. Independent audit
+verified every full token/root/time binding, pre-continuation code class,
+same-event image revalidation, root-first ordering and exact job total 6/active
+0/limit-terminated 0, with no gaps. Both code-5 owner-journal denial probes passed.
+Source/event console object IDs still differ; physical equivalence is unproved.
+No 7-Zip installer, application or MXC runtime ran. Native chain-reset negative
+and actual application tracing are still open.
 
-One fresh f27 trial remains **partial; controls did not pass**. All seven local
-owner records survived and the ordinary journal read probe measured code-5
-access denial, exit 0/no timeout/empty job. The ordinary trace retained six
-processes (three helpers/three console supports), **182 debug events and six
-paired process lifetimes**, matching full tokens, root-first ordering, job total 6/active 0,
-no trace gaps and a complete collector flag. Console path/hash/size and exit 0
-matched, but legacy `volumeSerialNumber` and `fileIndex` differed from the
-independently held expectation. The contract refused; cause remains unknown.
-Candidate/profile were not reached and remain unmeasured, not failed cleanup.
-Guest launcher cleanup reports empty; outer cleanup, stable full marker custody
-and provider-zero retained Read passed. No recovery/replay ran. Owned console,
-transfer tab and two services were closed/stopped; ports free, evidence preserved.
-See [the correction record](SEVENZIP-TREE-CORRECTION-NATIVE-20261106.md).
+Profile, launcher and outer Sandbox cleanup passed. Fifteen success stages were
+retained, including six owner success records; four optional failure files were
+absent with native error 2. Full original 32,974-byte marker identity/bytes stayed
+stable through cleanup and provider-zero retained Read. No Recover/replay ran.
+Owned trial/diagnostic consoles, transfer tab and both services are closed/stopped;
+ports free, original user apps/tab and all evidence preserved. See
+[the native record](SEVENZIP-CODE-CONTROL-NATIVE-20261106.md).
 
-The [191ac276 record](SEVENZIP-TREE-NATIVE-20261106.md) remains unchanged: its six
-ordinary processes/188 debug events failed the exact-three-helper contract;
-seven mapped owner-stage HAF reads separately failed FileIdInfo `0x80070032`.
-Neither trial establishes classic control success or application incompatibility.
-Private originals/proofs: `C:\aiw\sevenzip-tree-20261106`, including
-`native-outcome-independent-f27dda8-r2.json`,
-`native-partial-trace-independent-f27dda8-r2.json`,
-`native-console-identity-comparison-f27dda8-r2.json` and owned-cleanup proof.
-Raw identities, times and original bytes stay outside Git; use lossless auditing.
+Source `1d966ca` passed 122 default/123 research provider tests, 236 platform tests
+(10 ignored), 25 host tests, research all-target Clippy, format and governance.
+Independent producer/verifier/build-fix/package/auditor/transport reviews passed.
+Static PE review does not prove reproducibility or dynamic DLL integrity.
+Private originals/proofs: `C:\aiw\sevenzip-tree-20261106`, especially
+`native-checkpoint-1d966ca-r3.json`, `native-outcome-code-control-1d966ca-r3.json`,
+`native-code-control-facts-1d966ca-r3.json` and `owned-cleanup-1d966ca-r3.json`.
+Audit full-width identifiers losslessly; raw identities/times/bytes stay outside Git.
+
+Historical [191ac276](SEVENZIP-TREE-NATIVE-20261106.md) and
+[f27dda8](SEVENZIP-TREE-CORRECTION-NATIVE-20261106.md) partial/failed results are
+unchanged. Never backfill them from the new content contract. The initial R3
+transport is preserved and NOT FOR USE; reviewed R3b was used successfully.
+Its session is complete: do not adopt, repair, replay or rerun it for context.
 
 ## MXC and reusable foundations
 
@@ -48,47 +48,43 @@ Official MXC v1.0.1 provenance is pinned; the old planning pin is preserved.
 The closed ProcessContainer policy forbids DACL fallback, weaker tiers, BFS,
 degradation and missing requested controls. Capability support is not execution
 or enforcement proof. See [the probe record](MXC-PROBE-NATIVE-20261106.md) and
-[the creation record](MXC-CREATION-NATIVE-20261106.md). The probe and creation trials
-`55068e6`, `9093182`, `53e1d9b` remain immutable and inconclusive; never backfill
-missing facts from later runs or infer a backend from token appearance.
-Bounded MXC raw final/pending diagnostics are tested/reviewed, native proof pending.
-Registry-canary foundations remain test-only; native create-only/link and cleanup
-semantics require proof before production wiring. No hidden cleanup retry.
-Private provenance and audits: `C:\aiw\mxc-multimode-20261106`.
+[the creation record](MXC-CREATION-NATIVE-20261106.md). The `55068e6`, `9093182`,
+`53e1d9b` trials remain immutable/inconclusive; never infer a backend from token
+appearance. Bounded MXC raw final/pending diagnostics are tested/reviewed, native
+proof pending. Registry-canary code remains test-only; native create-only/link
+and cleanup semantics need proof before production wiring. No hidden retry.
+Private provenance/audits: `C:\aiw\mxc-multimode-20261106`.
 
 ## Next work and authorization
 
-A reviewed read-only host image probe found matching bytes/volume but a different
-file index; physical equivalence and cause remain unproved. Independent reviews
-recommend separating code content from observed object identities in a NEW
-contract, with every fixed-control image checked before continuation and bounded
-same-handle revalidation. The separate producer/verifier is now implemented and
-independently reviewed; its fresh R3 session has not run. Historical verifiers
-and failed trials are unchanged. Validation passed: 122 default/123 research
-provider tests, 236 platform tests (10 ignored), 25 host tests, research all-target
-Clippy, format and governance. No new Sandbox, vendor or runtime execution ran.
-The exact-source static build, PE, seven-member package and proposal/outcome
-auditors passed independent review/data checks. Native R3 is pending. Use the
-private `source-checkpoint-1d966ca-r3.json` for pins and the reviewed R3b transfer
-handoff. R3b's 24 frames fit the receiver/viewer cap and its proof names match
-both auditors. The initial R3 transfer set must not be used. Prior evidence stays.
-Preserve strict HAF/intake, all-token checks, watchdogs and exact owned jobs.
-Then complete fresh positive/chain-reset-negative controls and actual application
-tracing. MXC startup is not a gate on independent application progress. Any new
-trial requires fresh source-bound proposal/session, separate exact approval and
-one-shot Start; no old trial may be repaired, adopted or replayed.
+Move into the existing real 7-Zip workflow. `run_variant` has three real process
+operations (create/test/extract); verify is first-party inventory/hash work.
+`launch` already creates suspended/exact-job processes, but only `Operation::Tree`
+routes through the debugger collector. Bind actual roots to independently held
+code/token/time and retain all observed process images/lifetimes; do not apply
+the fixed three-helper allowlist to application children or invent parent edges.
+Use explicit phase deadlines: controls use 5 seconds, existing app operations 25
+seconds and their enclosing workflow 150. Account for draining without weakening
+the watchdogs. Preserve strict HAF, exact jobs, gaps/fail-stop and source approval.
+
+Installation currently runs the SFX under elevated WDAG authority. Add an explicit
+installer role/policy and retain its evidence; never report common elevated setup
+as installation inside the candidate or relax ordinary/classic token checks.
+MXC startup is not a gate on independent app progress. Its request-bound PSEC
+policy must remain separate from the classic empty-capability collector contract.
+New execution requires fresh source/proposal/session, exact audited approval and
+one-shot Start; no old trial may be adopted or replayed.
 
 The user approved pinned official MXC 1.0.1 only inside fresh Sandboxes on existing
 VM107 through reviewed Proxmox-console scripts. No parent runtime installation,
 VM/host security changes, DACL fallback, permission widening or automatic weaker
 mode is authorized. Read-only acquisition/build artifacts do not approve execution.
 
-Complete the same real 7-Zip workflow across the three selected modes, including
-installation/use, observed restrictions and honest failure/unknown reporting.
-Finish registry controls, fresh-environment repeats, archive byte/metadata
-investigation, new-source interruption/invalid/missing-output and recovery proof,
-desktop Review/Approve/Run/Results/provider-zero reopen/export, independent review,
-admin docs, Benchmark 2 mapping and PR. No first-party control substitutes for this.
+Complete the same real install/use comparison across all three modes where
+supported. Finish native chain-reset negatives and registry controls, fresh repeats,
+archive bytes/metadata investigation, new-source interruption/invalid/missing-output
+and recovery proof, desktop Review/Approve/Run/Results/provider-zero reopen/export,
+independent review, admin docs, Benchmark 2 mapping and PR. Controls do not replace this.
 
 ## Reuse and preserve
 
@@ -96,8 +92,8 @@ Reuse #105's six-control/29-file evidence and #106's `593281a` baseline/AppConta
 pair, 32 unchanged retained files, Results reopen/export and owned cancellation.
 They validate their recorded source/environment, not new code. See
 [the application native record](SEVENZIP-NATIVE-ACCEPTANCE.md).
-Preserve private evidence at `C:\aiw\sevenzip-assessment-20261105` and
-`C:\aiw\paired-directory-sharing-native-65b084f3-5d85-4dda-83a1-12754bbda14f`.
-Preserve VM106, all original VM107 packages/runs, accidental `C:\Evidence`, and
-unrelated user apps/tabs/work. Management TLS is expired; do not bypass it or
-change access settings. Owned cleanup never authorizes deleting retained evidence.
+Preserve `C:\aiw\sevenzip-assessment-20261105`,
+`C:\aiw\paired-directory-sharing-native-65b084f3-5d85-4dda-83a1-12754bbda14f`,
+VM106, all original VM107 packages/runs, accidental `C:\Evidence`, and unrelated
+user apps/tabs/work. Management TLS is expired; never bypass it or change access.
+Owned cleanup never authorizes deleting retained evidence.

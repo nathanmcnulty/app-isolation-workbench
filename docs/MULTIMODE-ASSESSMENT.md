@@ -128,7 +128,11 @@ The candidate was not reached. Custody, outer cleanup and retained Read passed;
 the identity source remains unproved, with no retrospective exception. A separate
 code-content contract now checks every fixed-control image before continuation
 and revalidates the same event handle at exit, reporting object identities
-separately. Independent review passed; fresh native proof remains pending.
+separately. Source `1d966ca` passed a [fresh positive-control trial](SEVENZIP-CODE-CONTROL-NATIVE-20261106.md):
+ordinary six processes/186 debug events and classic six/196, complete paired
+lifetimes, code/token/root/job checks, owned cleanup and provider-zero retained
+Read. Physical equivalence stays unproved. Actual app tracing, native chain-reset
+negatives and the full application/registry/three-mode acceptance map remain open.
 
 Private raw metadata contains full-width FILETIME/process/file identifiers.
 Audit it with Rust or another lossless JSON parser; ordinary JavaScript numbers
