@@ -426,11 +426,20 @@ fn project_reviewed(
 #[cfg(test)]
 mod tests {
     use super::*;
-    const FIXTURE: &[u8] = include_bytes!("../../../fixtures/msix-lifecycle/worker107-r5.zip");
+    fn external_fixture() -> Vec<u8> {
+        let path = std::env::var_os("AIW_MSIX_RESEARCH_ARCHIVE")
+            .expect("set AIW_MSIX_RESEARCH_ARCHIVE to the original reviewed external archive");
+        let bytes = std::fs::read(path).expect("read external reviewed archive");
+        assert_eq!(bytes.len() as u64, ARCHIVE_BYTES);
+        assert_eq!(digest(&bytes), ARCHIVE_SHA);
+        bytes
+    }
 
     #[test]
+    #[ignore = "requires original external archive in AIW_MSIX_RESEARCH_ARCHIVE"]
     fn reviewed_archive_projects_real_observations_without_upgrading_research() {
-        let report = report_bytes(FIXTURE, MsixResearchProfile::Worker107NotepadR5).unwrap();
+        let fixture = external_fixture();
+        let report = report_bytes(&fixture, MsixResearchProfile::Worker107NotepadR5).unwrap();
         assert_eq!(report.archive_sha256, ARCHIVE_SHA);
         assert_eq!(
             report.package.full_name,
@@ -472,17 +481,20 @@ mod tests {
 
     #[test]
     fn changed_truncated_appended_and_success_shaped_archives_are_rejected() {
-        let mut changed = FIXTURE.to_vec();
+        // Same-size project-owned bytes must not pass the original artifact pin.
+        let fixture = vec![0u8; ARCHIVE_BYTES as usize];
+        assert!(report_bytes(&fixture, MsixResearchProfile::Worker107NotepadR5).is_err());
+        let mut changed = fixture.clone();
         changed[128] ^= 1;
         assert!(report_bytes(&changed, MsixResearchProfile::Worker107NotepadR5).is_err());
         assert!(
             report_bytes(
-                &FIXTURE[..FIXTURE.len() - 1],
+                &fixture[..fixture.len() - 1],
                 MsixResearchProfile::Worker107NotepadR5
             )
             .is_err()
         );
-        let mut appended = FIXTURE.to_vec();
+        let mut appended = fixture;
         appended.push(0);
         assert!(report_bytes(&appended, MsixResearchProfile::Worker107NotepadR5).is_err());
         assert!(
@@ -495,8 +507,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires original external archive in AIW_MSIX_RESEARCH_ARCHIVE"]
     fn projection_requires_terminal_native_and_privileged_cleanup_receipts() {
-        let original = read_zip(FIXTURE).unwrap();
+        let original = read_zip(&external_fixture()).unwrap();
         for name in [
             "worker/Trial.result.json",
             "worker/Control.result.json",

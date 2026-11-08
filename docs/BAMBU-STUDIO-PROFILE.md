@@ -1,5 +1,12 @@
 # Bambu Studio local-file profile
 
+Status as of 2026-11-08: this is a scoped fixed-workflow implementation or historical
+handoff record. Its evidence/contract remains valid only for the recorded source,
+inputs and observations. Follow the [current roadmap](ROADMAP.md) and
+[migration audit](APPLICATION-AGNOSTIC-MIGRATION.md) for new work; old product
+selections, future-tense tasks and operator commands are not current priorities,
+publication guidance or execution authorization.
+
 The second application profile targets the supplied Bambu Studio 02.08.02.60 EXE. A separately typed STL-to-3MF export now uses protected preparation, approved Sandbox execution, standard-user launch, artifact verification, and retained JSON/Markdown reporting. The original information-query compiler below remains metadata-only (`executionSupported: false`). Neither profile produces an application compatibility or effective-isolation verdict. [Mixed application report sets](REPORT-SETS.md) combine both production reporting profiles.
 
 ## Approved export and retained reporting

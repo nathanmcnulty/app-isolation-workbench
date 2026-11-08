@@ -1,5 +1,10 @@
 # Verified desktop archive handoff
 
+Historical fixed-application workflow: the [repository scope](REPOSITORY-SCOPE.md)
+takes precedence. This document is retained as a record of testing, not current
+publishing guidance. Hosted app-specific publication is retired or paused;
+remaining local fixed-app builders are part of the unfinished migration.
+
 Build and helper scripts now require stable x64 PowerShell Core 7.6+. Production MSIX execution selects `C:\Program Files\PowerShell\7\pwsh.exe` and requires the separately approved worker runtime, endpoint and baseline described in the [setup plan](handoffs/2026-10-24-powershell76/SETUP-AND-ACCEPTANCE.md). A verified archive alone does not establish native acceptance of that runtime migration.
 
 The desktop handoff now exports an already verified package and extracts it on

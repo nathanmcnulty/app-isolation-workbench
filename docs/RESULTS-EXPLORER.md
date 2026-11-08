@@ -1,5 +1,11 @@
 # Offline Results Explorer
 
+Migration status (2026-11-08): this describes retained implemented report paths,
+including fixed-product contracts. The [generic replacement](APPLICATION-AGNOSTIC-MIGRATION.md)
+will render application/workflow data without product dispatch. Preserve these
+historical verifiers and evidence meanings; their existence does not implement
+generic assessment or authorize a new run.
+
 The desktop **Results** view opens an explicit JSON selection using the existing
 `application-assessment-input/v0alpha1` contract documented in [REPORT-SETS.md](REPORT-SETS.md).
 There is no disk search, execution entry point, verdict engine or report-JSON import.
@@ -109,12 +115,14 @@ From `C:\aiw\app-isolation-workbench`:
 ```powershell
 cargo test --manifest-path C:\aiw\app-isolation-workbench\gui\Cargo.toml --locked --offline
 $env:AIW_RESULTS_DEMO='C:\aiw'
+# Set AIW_MSIX_RESEARCH_ARCHIVE to the absolute path of your independently retained original archive.
 cargo test --manifest-path C:\aiw\app-isolation-workbench\gui\Cargo.toml --locked --offline results::demo::demonstrate_results -- --ignored --exact --nocapture
 ```
 
 The opt-in test creates a **fresh UUID child** of that existing parent and prints
-`DEMONSTRATION=...`. It copies the pinned safe reviewed archive
-`fixtures/msix-lifecycle/worker107-r5.zip`, plus a deliberately corrupt copy. Its
+`DEMONSTRATION=...`. It copies the pinned, externally retained `worker107-r5.zip` archive, plus a deliberately corrupt copy.
+The original archive is no longer distributed; optional regression tests require
+`AIW_MSIX_RESEARCH_ARCHIVE`. Its
 `selection.json` explicitly selects the real fixture, a duplicate, a missing file
 and the corrupt copy. `verified-summary.json` and `.md` come from the real Rust
 ResultsStore exporter. Repeated loads must match, retained bytes stay unchanged,

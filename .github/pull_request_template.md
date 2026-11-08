@@ -28,4 +28,5 @@ Commands run:
 
 - [ ] I documented current limitations and did not claim runner, UI, or package execution exists unless proven.
 - [ ] The acceptance criteria and exit gate for the roadmap slice are satisfied.
-- [ ] No sensitive installer, customer evidence, credentials, private keys, or unredacted traces are included.
+- [ ] No third-party installers, application packages, extracted vendor content, customer evidence, credentials, private keys, or unredacted traces are committed or published.
+- [ ] Project-owned contributions may be released under the Unlicense; third-party dependency terms are preserved.

@@ -1,6 +1,6 @@
 # Supply chain, bundling, and signing
 
-AIW should ship as a small signed control plane plus independently governed content. A single signature over a large bundle is not enough because code, provider runtimes, models, knowledge, and test inputs have different owners, licenses, update cadences, and revocation needs.
+AIW should ship its own small signed control plane, not third-party applications or app-specific bundles. The [repository scope](REPOSITORY-SCOPE.md) takes precedence over historical packaging examples. Provider runtimes and optional model/knowledge content must be acquired and governed independently. A single signature over a large bundle is not enough because code, provider runtimes, models, knowledge, and test inputs have different owners, licenses, update cadences, and revocation needs.
 
 ## Recommended production layout
 
@@ -20,7 +20,8 @@ separately signed content packs
   knowledge pack: normalized documentation, source manifest, detached signature
 
 never bundled
-  private signing keys, customer installers/evidence, mutable credentials
+  third-party application installers, packages, extracted files or configuration
+  private signing keys, customer evidence, mutable credentials
 ```
 
 The current recommendation for public Windows distribution is Microsoft Azure Artifact Signing, formerly Trusted Signing. It provides managed key custody, role-separated signing access, audit history, and digest signing; private keys are not exported. Every PE and package signature should use SHA-256 and an RFC 3161 time-stamp. The signer role should be assigned only to a release workload identity, not developers' everyday identities.
@@ -31,7 +32,7 @@ Sources: [Artifact Signing overview](https://learn.microsoft.com/en-us/azure/art
 
 1. Build from a protected, immutable tag with a locked dependency graph.
 2. Run tests, Clippy, RustSec, PowerShell analysis, secret scanning, and the Windows containment test matrix.
-3. Generate a release manifest containing every artifact name, size, SHA-256, target triple, source commit, toolchain, and schema/provider pin. Generate SPDX or CycloneDX SBOMs.
+3. Generate a release manifest containing every artifact name, size, SHA-256, target triple, source commit, toolchain, and schema/provider pin. Generate SPDX or CycloneDX SBOMs for the exact target/features of both Rust workspaces. Review third-party dependency licenses, include required notices, and satisfy any covered-source obligations. RustSec vulnerability checks alone are not a license audit. The Unlicense covers only project-owned material.
 4. Sign each PE independently. Verify its chain, EKU, timestamp, expected publisher, and post-sign hash.
 5. Package the already-signed files. If MSIX is used, sign and timestamp the package or bundle as well; the manifest Publisher must match its certificate.
 6. Sign the release manifest with a release trust identity separate from the model/knowledge trust identities.

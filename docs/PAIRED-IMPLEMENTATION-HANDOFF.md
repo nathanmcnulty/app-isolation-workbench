@@ -1,5 +1,12 @@
 # Offline implementation handoff
 
+Status as of 2026-11-08: this is a scoped fixed-workflow implementation or historical
+handoff record. Its evidence/contract remains valid only for the recorded source,
+inputs and observations. Follow the [current roadmap](ROADMAP.md) and
+[migration audit](APPLICATION-AGNOSTIC-MIGRATION.md) for new work; old product
+selections, future-tense tasks and operator commands are not current priorities,
+publication guidance or execution authorization.
+
 For the current checkout and native follow-up, start with
 [working state](WORKING-STATE.md) and the
 [source-pinned native record](PAIRED-NATIVE-APPROVAL.md). The

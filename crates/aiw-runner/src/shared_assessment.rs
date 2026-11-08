@@ -296,13 +296,21 @@ mod tests {
                 id: "notepad-msix-r5".into(),
                 profile: MsixResearchProfile::Worker107NotepadR5,
                 archive: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .join("../../fixtures/msix-lifecycle/worker107-r5.zip"),
+                    .join("synthetic-missing-archive.zip"),
             }],
         }
     }
+    fn external_input() -> ApplicationAssessmentInput {
+        let mut input = input();
+        input.msix_research[0].archive = std::env::var_os("AIW_MSIX_RESEARCH_ARCHIVE")
+            .expect("set AIW_MSIX_RESEARCH_ARCHIVE to the original reviewed external archive")
+            .into();
+        input
+    }
     #[test]
+    #[ignore = "requires original external archive in AIW_MSIX_RESEARCH_ARCHIVE"]
     fn shared_assessment_uses_same_matrix_and_never_upgrades_overall_verdict() {
-        let report = report_application_assessment(&input()).unwrap();
+        let report = report_application_assessment(&external_input()).unwrap();
         assert_eq!(
             report.outcome,
             aiw_orchestrator::RunOutcome::InsufficientEvidence
@@ -324,8 +332,9 @@ mod tests {
         assert!(markdown.contains("insufficient evidence"));
     }
     #[test]
+    #[ignore = "requires original external archive in AIW_MSIX_RESEARCH_ARCHIVE"]
     fn missing_rejected_and_duplicate_archives_never_gain_functions() {
-        let mut selection = input();
+        let mut selection = external_input();
         let mut duplicate = selection.msix_research[0].clone();
         duplicate.id = "duplicate".into();
         selection.msix_research.push(duplicate);
@@ -353,6 +362,22 @@ mod tests {
                     .all(|v| v.is_null())
             );
         }
+    }
+    #[test]
+    fn unavailable_archive_never_gains_application_functions() {
+        let report = report_application_assessment(&input()).unwrap();
+        assert!(matches!(
+            report.entries[0].source,
+            ApplicationAssessmentSource::Unavailable(ReportSetUnavailableReason::EvidenceRejected)
+        ));
+        assert!(
+            serde_json::to_value(&report.entries[0].functions)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .values()
+                .all(serde_json::Value::is_null)
+        );
     }
     #[test]
     fn input_is_closed_bounded_and_checks_ids_across_sources() {
@@ -395,8 +420,56 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn mixed_sources_keep_rejected_sandbox_separate_from_accepted_msix() {
+    fn mixed_missing_sources_never_gain_application_functions() {
         let mut selection = input();
+        let absent = selection.msix_research[0]
+            .archive
+            .with_file_name("no-project.json");
+        selection.windows_sandbox = Some(WsbReportSetInput {
+            schema_version: crate::WSB_REPORT_SET_INPUT_SCHEMA.into(),
+            entries: vec![crate::WsbReportSetEntry {
+                profile: crate::ReportSetProfile::NotepadMsi,
+                run: crate::WsbMsiReportSetEntry {
+                    id: "sandbox-missing".into(),
+                    run_id: "retained".into(),
+                    project_path: absent.clone(),
+                    workspace_root: absent,
+                    guest_agent_sha256: "a".repeat(64),
+                },
+            }],
+        });
+        let report = report_application_assessment(&selection).unwrap();
+        assert_eq!(report.entries.len(), 2);
+        assert_eq!(report.entries[0].functions.install, None);
+        assert_eq!(report.entries[1].functions.install, None);
+        assert_eq!(report.entries[1].functions.uninstall, None);
+        assert_eq!(
+            report.outcome,
+            aiw_orchestrator::RunOutcome::InsufficientEvidence
+        );
+        assert!(matches!(
+            report.entries[1].source,
+            ApplicationAssessmentSource::Unavailable(ReportSetUnavailableReason::EvidenceRejected)
+        ));
+        for entry in &report.entries {
+            assert!(
+                serde_json::to_value(&entry.functions)
+                    .unwrap()
+                    .as_object()
+                    .unwrap()
+                    .values()
+                    .all(serde_json::Value::is_null)
+            );
+        }
+        let legacy = serde_json::to_value(&report.entries[0].functions).unwrap();
+        assert!(legacy.get("uninstall").is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "requires original external archive in AIW_MSIX_RESEARCH_ARCHIVE"]
+    fn mixed_sources_keep_rejected_sandbox_separate_from_accepted_msix() {
+        let mut selection = external_input();
         let absent = selection.msix_research[0]
             .archive
             .with_file_name("no-project.json");

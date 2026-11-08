@@ -1,5 +1,11 @@
 # Personal Artifact Signing
 
+Current release status (2026-11-08): desktop candidate jobs are paused. The
+[AIW-only distribution gate](RELEASE-GATES.md#aiw-only-distribution-gate) and
+[repository scope](REPOSITORY-SCOPE.md) supersede product-specific publication
+instructions below. Preserve the account/signing separation and historical proof;
+this record is not permission to resume publication or distribute vendor content.
+
 Nathan authorized this publisher/account on 2026-10-04 for this project's
 signing and future public-release CI. Use his personal Artifact Signing identity;
 do not substitute another publisher or create another signing account.

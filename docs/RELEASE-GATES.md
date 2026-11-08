@@ -1,145 +1,94 @@
-# First administrator preview: scope and remaining gates
+# Release gates
 
-The first release is a narrow, supported Windows Sandbox workflow, not a universal
-compatibility scanner or installer converter. An administrator should be able to
-assess the supported application, read which functions passed or failed, preserve
-a tested recipe, and replay it with explicit approval and drift checks.
+Updated 2026-11-08. These are the gates for the application-neutral recovery in
+[the roadmap](ROADMAP.md). Existing signed alphas and exact fixed-profile trials
+remain [historical evidence](RELEASE-GATES-HISTORY-2026-11-08.md), not proof these
+gates are complete. The desktop candidate workflow stays paused until its
+application-neutral distribution layout and publication checks are reviewed.
 
-The initial supported packaging path is Notepad++ MSI with the fixed document
-workflow and ephemeral local settings. Bambu's existing export assessment is a
-separate supported-profile candidate, not a reason to promise general EXE support.
+## Documentation and source integration
 
-## Progress that is already demonstrated
+A reviewed documentation/scope change may merge without claiming generic-engine
+or release acceptance. Require exact-head independent review, link/content checks,
+applicable repository governance and required hosted CI. A local unavailable tool
+or Windows-only check is a disclosed limitation, not a pass. Do not start another
+installer trial merely to rewrite historical findings.
 
-- Protected intake, fixed execution, approval, diagnostics, exact recovery, and
-  hash-bound retained reporting work.
-- Real Notepad++ and Bambu workflows have recorded evidence. The human document
-  edit/save/close/export trial passed.
-- Exact MSI bundles can be relocated, imported, and replayed in fresh Sandboxes.
-- Baseline, local-settings candidate, and relocated replay passed the fixed
-  document workflow and required guest standard-user file ACL controls.
-- A reusable profile can bind that retained comparison to fresh preparation.
+Distribution cleanup also changes scripts/tests/assets; apply their checks in
+addition to documentation checks. Preserve original native evidence and external
+fixture trust pins. Do not relabel synthetic test fixtures as native acceptance.
 
-The signed public alpha now distributes this fixed-workflow foundation through
-reviewed CI. [Original public acceptance](PUBLIC-ALPHA-ACCEPTANCE.md) and
-[packaging alpha acceptance](PUBLIC-PACKAGING-ACCEPTANCE.md) record exact download
-identities and fresh runtime results; historical unsigned trials are not substituted
-for those checks. Counts of commits, tests, or reports do not measure product utility.
+## First generic assessment release
 
-## Release-critical gates
+| Gate | Required evidence |
+| --- | --- |
+| Application-neutral authority | One shared plan/service/guest/report path. Unknown app names do not block supported mechanisms. Exact payload, inputs, operation/policy and environment bind approval. No product enum, compiled hash catalog or executable recipe plugin is needed for a new app. |
+| Useful assessment before packaging | Administrator supplies an app and declared workflows, inspects/reviews/approves the plan, separately starts a disposable worker, and receives observed requirements, functions, failures, gaps and safe next steps without first creating a package. |
+| Mechanism coverage | Actual completed ordinary-use workflows exercise MSI, reviewed EXE, portable, multiprocess and GUI/operator-assisted capabilities across the seven-fixture corpus. Every declared fixture is attempted through the same engine with per-stage outcomes; a table containing only blockers is not sufficient. Candidate incompatibility is a valid truthful result. |
+| Independent holdout | After implementation is fixed, select an app absent from the fixture corpus and complete a declared normal-use workflow through the released path using only intake/scenario data, without product production changes or rebuilding for identity. If a generic capability must change, review it and choose another holdout afterward. |
+| Meaningful comparison | At least one supported candidate runs the same generic workflow under comparable clean baseline/candidate conditions. Required target/descendant/policy controls, evidence completeness and cleanup support only the claims they measure. A broken baseline/driver cannot yield isolation incompatibility. |
+| Truthful results | Function, comparability, effective restrictions, collector completeness and cleanup remain separate. Failure, interruption, not-run and unmeasured cases retain valid observations. Retained viewing/export cannot execute, recover or mutate a run; historical evidence is not upgraded to new-schema proof. |
+| Safety and recovery | Negative tests cover unknown operations, unsafe/path-escaped input, substitution/drift, stale approval, missing evidence, unexpected descendants, cancellation, timeout and cleanup conflict. Exact ownership is preserved; no foreign-session stop, automatic widening or full-trust fallback. |
+| Product adapter retirement | Reviewed deletion checklist removes superseded new-execution product paths and fixed publication assets. Any retained product reader/recovery path has a documented historical purpose and cannot admit a new run. |
+| Usable GUI/CLI | Shared services implement intake -> plan -> review/approve -> separate Start -> run -> report/compare/export. Missing prerequisites, ambiguity and failure have understandable next actions. No compiler, internal JSON hand-editing or developer-specific paths are required for the normal UI flow. |
+| Repeatability and limits | Repeat representative MSI, EXE, portable and multiprocess cases on fresh workers, record declared time/resource budgets and nondeterminism, preserve interrupted attempts, and publish exact supported host/provider limits. No universal performance or compatibility claim. |
 
-| Gate | Concrete completion evidence |
-|---|---|
-| Approved profile replay — demonstrated | Profile identity is bound into approval; stripping/substitution/drift is rejected. The fresh worker at `fc22efb` completed the fixed workflow, required file ACL controls, and cleanup; report v0alpha11 identifies the approved profile. See [retained proof](VALIDATED-SANDBOX-LAUNCH.md#approved-replay-proof). |
-| Administrator workflow — demonstrated | The packaged `aiw admin assess` route completed protected intake, complete recipe display, operator exact-hash approval, profile-bound replay, retained JSON/Markdown reporting, and verified cleanup for run `admin-1789947096248087800`. The report records every fixed function as passed while retaining `insufficientEvidence` for broader isolation. Occupied-session, unsupported-input, cancellation, and profile/package drift controls are retained or covered by the exact package checks and tests. See [administrator workflow proof](ADMINISTRATOR-WORKFLOW.md#public-entry-proof). |
-| Clean-host distribution trial — demonstrated for the exact unsigned preview | A second operator freshly extracted and verified the `08ab440` package on the separate supported VM, approved the profile-bound recipe, and completed run `admin-1790485297308064300` with nine passed stages, saved-document and ACL controls, terminal cleanup, and no remaining Sandbox session. Unsupported input was rejected before intake or provider acquisition in `admin-1790486242125347900`. See [clean-host acceptance](CLEAN-HOST-PREVIEW.md#independent-operator-acceptance-for-this-package). Signing, publisher authentication, and broader isolation claims remain outside this proof. |
-| Windows GUI operator loop — demonstrated for the exact unsigned development preview | Package `343d380` completed fresh assessment and interactive edit/save/export through actual GUI selection, review, approval, and separate Start. Independent receipt/output/input and empty-provider checks passed, as did retained viewing, cancellation/closure before Start, and export refusals. The third fixed Bambu export mode also passed a fresh GUI trial and corrected retained-result verification; see [Bambu acceptance](BAMBU-ADMIN-ENTRY.md#completed-desktop-acceptance-2026-10-03). This is automated dedicated-VM acceptance, not another human trial or a signed public release. See [GUI acceptance](GUI-FIRST-FINISH-LINE.md#completed-packaged-gui-acceptance-2026-10-03). |
-| Signed public distribution — demonstrated for exact alpha | Reviewed CI run `37254512259` built, signed, assembled, attested and published `desktop-alpha-6c7873c4e80c` from exact main `6c7873c4e80c889394ec43b27138cc52fc7df1c2`. Independent public downloads passed exact-source GitHub provenance, timestamped personal signatures, inventory and receipt checks before fresh extraction and GUI execution on the dedicated VM. See [public acceptance](PUBLIC-ALPHA-ACCEPTANCE.md) for each runtime result and its separate limits. This is a prerelease, not general application or effective-isolation certification. |
+Acceptance evidence must identify source revision, tool/package hashes, acquired
+payload/input identities, OS/provider versions, approved plan, run/evidence roots,
+completed stages, gaps and cleanup. Fresh worker evidence is not endpoint-wide
+proof. Native Windows checks, project-owned controls, synthetic/unit tests and
+operator statements are reported separately.
 
-After approved profile replay, pause feature expansion for a focused quality
-review of approval/evidence bindings, historical reporting, recovery, and test
-reliability. Resolve release-blocking findings before moving to the administrator
-workflow. This is a review checkpoint with defined scope, not an open-ended
-requirement to finish every isolation experiment.
+## AIW-only distribution gate
 
-The [2026-09-20 focused review](QUALITY-REVIEW-2026-09-20.md) found a preflight
-guidance defect, corrected it, and confirmed the reviewed authority/recovery
-boundaries. Its finite follow-ups remain visible; it does not require restarting
-foundation work before the administrator milestone.
+Before resuming a public desktop workflow:
 
-## Administrator milestone acceptance cases
+- Replace fixed product assets/builders with an application-neutral inventory of
+  AIW binaries, generic contracts, project-owned controls and necessary dependency
+  notices. Runtime requires separately supplied app inputs; do not fetch/ship
+  installers, extracted vendor content/configuration or generated app packages.
+- Audit both tracked source and the assembled release archive. The repository
+  content check is useful but does not inspect every encoding, historical commit,
+  old release or generated artifact. Closed inventory/provenance checks remain
+  necessary. Do not delete prior releases/history as a side effect of this gate.
+- Resolve target/features in both Rust workspaces; review applicable dependency
+  licenses/notices and source obligations. The Unlicense applies only to original
+  project-owned material and does not relicense tested apps or earlier releases.
+- Build from a clean exact source revision, bind binaries/guest/contracts/verifier
+  identities, preserve upstream signatures and keep signing outside workers.
+  Verify signed published bytes, authenticated provenance and inventory before
+  claiming public-download acceptance.
+- Have an independent operator use the packaged generic workflow on a separate
+  supported clean environment with independently supplied app inputs. Cover one
+  real-use success, a useful blocked/failed result, cancellation, retained reopen,
+  export refusal and exact cleanup. Clearly label automation versus human evidence.
+- Publish capabilities, evidence limits, ephemeral data/export warnings, retention
+  and recovery instructions. Required integration CI must pass for the actual head;
+  successful assembly or signing alone is not runtime acceptance.
 
-The [desktop archive handoff](DESKTOP-DISTRIBUTION.md) now has native PowerShell
-5.1 export/extraction proof for the accepted unsigned package, with unchanged
-receipt bytes, trusted sidecar verifier selection, and negative path/hash controls.
-No application trial was repeated for that historical unsigned integrity control.
-Publisher signing and authenticated public distribution subsequently passed for
-the separate signed alpha identified in the table above.
+The first generic release is still experimental. A precise unsupported operation
+is acceptable; a product-name allowlist disguised as a capability check is not.
 
-- Starting with the distributed build and an operator-selected installer, show
-  whether an exact supported profile exists. Unsupported bytes or application
-  types produce an honest unsupported result and next step, never a guessed command.
-- Detect missing prerequisites or an occupied Sandbox before starting work; show
-  actionable diagnostics without stopping another task's session.
-- Present tested functions as passed, failed, not reached, or not measured,
-  separately from boundary measurements and requested settings. Identify the
-  application/version/hash and explain what `insufficientEvidence` means without
-  making successful function results look like an application failure.
-- Show the proposed recipe, runtime/data lifetime, explicit export behavior, and
-  approval changes before execution. Bind approval through existing services;
-  operators do not hand-author internal JSON or use developer evidence paths.
-- Complete assessment, retained report, recipe selection, and fresh approved
-  replay from the documented path without a compiler or coding assistant.
-- Exercise an unsupported input, a missing prerequisite, a failed/interrupted
-  attempt, and profile drift. Each must lead to a specific safe next action and
-  retained diagnostics; failed worker setup is not application incompatibility.
+## Optional replay and package gate
 
-For the clean-host gate, publish the exact supported host/provider and application
-versions, CLI/guest hashes, acquisition instructions, data contract, and known
-limits. Verify the target's capabilities rather than assuming every Windows 11
-24H2+ machine works. The operator must be able to retain evidence deliberately;
-automatic deletion is not required. Recreate same-host validation on the target
-when necessary instead of copying old paths or weakening environment checks.
+Assessment release does not require this gate. When delivering an administrator's
+replay profile or package, consume the same validated generic plan and require:
 
-The deterministic preview assembly is prepared with
-`scripts/build-preview-package.ps1 -OutputDirectory <new-directory>`. It builds
-the release CLI and static guest agent, copies the fixed Notepad++ project, and
-publishes a package-local manifest with exact project and guest hashes. A
-validated launch profile can be supplied with its canonical `profileSha256`
-identity. Profile-bound replay assembly may also supply the independently
-retained exact guest binary and SHA-256 that the profile binds; assembly rejects
-all profile/project/scenario/guest mismatches. `receipt.json`
-is written last and binds the package inventory; this assembles release inputs
-but does not prove clean-host installation, signing, or Sandbox execution.
+1. Exact app/agent/provider/policy/OS/input provenance and drift rejection, with
+   new run-specific approval and explicit lifetime/data/export behavior.
+2. Reviewed adaptation/grant differences and affected workflow/canary revalidation;
+   no automatic permission expansion or disabled application protections.
+3. Fresh-worker install, declared functions, data handling and uninstall for the
+   final output. Update/reboot and other lifecycle claims need their own evidence.
+4. Signing outside the untrusted worker and validation bound to final signed bytes.
+   Full-trust MSIX is packaging, not an isolation result. Semantic reproducibility
+   must state which differences are allowed.
+5. Local/private output outside the source and AIW releases. The administrator
+   obtains vendor inputs and is responsible for any redistribution rights.
 
-For the clean-host handoff, also supply `-ArchivePath`, the independently
-retained guest and hash, and the validated profile and hash. Archive mode
-requires a clean committed source tree, verifies the exact package inventory,
-and emits a ZIP plus companion distribution manifest with version, source,
-archive, receipt-file, receipt-core, and verifier identities. See
-[clean-host preview handoff](CLEAN-HOST-PREVIEW.md). These controls prepare the
-second-operator trial; the separate-host evidence remains the release gate.
+## What does not gate useful assessment
 
-The profile-bound package assembled on 2026-09-20 uses exact retained guest
-SHA-256 `121daa7e6b93212037813dea948675431d1a1680bbb106cd396a2647454cfee5`,
-profile `d8d7e4daddda76c535e6da1f897c210fa6b0798275640777747cea3df025d987`,
-and receipt `b29693291be6779d488bff5d5a8f8d6257a12851d124202ec74d667032b0118a`.
-Assembly rejected the current release guest because it did not match the
-validated profile before publishing a receipt.
-
-The public packaged route exercised the occupied-session acceptance case on
-2026-09-20. It returned `AIW_ADMIN_HOST_NOT_READY`, named the retained
-`host-readiness.json`, recorded session `8fd60024-30fd-41d7-8fa8-04571a405184`,
-and created no intake or run. AIW did not acquire, recover, or stop that session.
-The retained parent is
-`%LOCALAPPDATA%\Temp\aiw-admin-public-occupied-d3fef39ab1c742adbb8fbac9dd56725e`.
-
-The same package then completed the public profile-bound route after visible
-operator approval. Run `admin-1789947096248087800` retained the exact approval,
-execution, report, guest result, and clean terminal status under
-`%LOCALAPPDATA%\Temp\aiw-admin-public-replay-783a99b8f9a24fcb9c1f6d25cfe90ecf`.
-Installation and launch exited zero; the fixed document opened and saved the
-expected SHA-256; the application ran at medium integrity without elevation;
-the required guest file ACL control passed; and exact cleanup was verified. The
-provider reported no sessions afterward. The report's broader outcome remains
-`insufficientEvidence`, with its missing independent host, descendant, network,
-IPC, persistence, and effective-backend measurements listed explicitly.
-
-These are outcome gates, not a calendar or quota estimate. The narrow
-clean-host preview loop is demonstrated for the exact unsigned package; the
-subsequent signed public alpha has its own authenticated distribution and fresh
-runtime evidence. New application classes and isolation mechanisms are not evidence
-for this preview and require their own bounded validation.
-Update this table when evidence closes a gate rather than repeatedly labelling
-implementation slices as a release milestone.
-
-## Later capabilities, outside that first preview
-
-Broader application profiles; persistent application state; general MSI/MSIX
-conversion; update/uninstall/reboot coverage; arbitrary user-authored scenarios;
-and additional isolation providers. Add them for explicit application needs after
-the first usable loop is released.
-
-Fixed guest file ACL observations are not a verdict on host containment, network,
-registry boundaries, or descendants. The first release must communicate those
-limits; it need not claim measurements it does not have.
+Every app passing, every MXC/backend implemented, universal conversion, MSIX
+creation, a commercial tool, central telemetry, community feedback, broad tracing,
+fleet deployment and a repository rename are not release prerequisites. Only
+claim capabilities actually implemented and measured for that release.
