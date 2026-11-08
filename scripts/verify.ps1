@@ -43,7 +43,7 @@ try {
     }
 
     $readmeText = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'README.md')
-    foreach ($requiredTerm in @('Workbench', 'Studio', 'v0alpha2', 'Windows 11 24H2', 'no automatic telemetry')) {
+    foreach ($requiredTerm in @('Workbench', 'alpha', 'experimental', 'Windows 11 24H2', 'no automatic telemetry')) {
         if ($readmeText -notmatch [regex]::Escape($requiredTerm)) {
             throw "README.md is missing required product-status term: $requiredTerm"
         }
