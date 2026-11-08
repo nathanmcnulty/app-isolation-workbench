@@ -1008,10 +1008,12 @@ mod tests {
         json!({"schemaVersion":"aiw.dev/application-assessment-input/v0alpha1", "msixResearch":[{"id":"fixture", "profile":"worker107NotepadR5", "archive":root.join("worker107-r5.zip")} ]})
     }
     fn fixture() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../fixtures/msix-lifecycle/worker107-r5.zip")
-            .canonicalize()
-            .unwrap()
+        PathBuf::from(
+            std::env::var_os("AIW_MSIX_RESEARCH_ARCHIVE")
+                .expect("set AIW_MSIX_RESEARCH_ARCHIVE to the original reviewed external archive"),
+        )
+        .canonicalize()
+        .unwrap()
     }
     #[test]
     fn paired_projection_omits_private_fields_and_never_promotes_application_functions() {
@@ -1175,6 +1177,107 @@ mod tests {
     }
 
     #[test]
+    fn synthetic_rejected_flow_preserves_export_privacy_and_retained_inputs() {
+        let root = temp();
+        let inputs = root.join("private-path-sentinel");
+        std::fs::create_dir(&inputs).unwrap();
+        let original = vec![0u8; 285340];
+        std::fs::write(inputs.join("worker107-r5.zip"), &original).unwrap();
+        let mut manifest = selection(&inputs);
+        manifest["msixResearch"][0]["id"] = json!("private-account-sentinel");
+        let first = manifest["msixResearch"][0].clone();
+        let mut missing = first.clone();
+        missing["id"] = json!("missing");
+        missing["archive"] = json!(inputs.join("missing.zip"));
+        let mut tampered = first.clone();
+        tampered["id"] = json!("tampered");
+        tampered["archive"] = json!(inputs.join("tampered.zip"));
+        std::fs::write(inputs.join("tampered.zip"), b"not an archive").unwrap();
+        manifest["msixResearch"] = json!([first, missing, tampered]);
+        let path = root.join("selection.json");
+        std::fs::write(&path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        let manifest_before = std::fs::read(&path).unwrap();
+        let store = ResultsStore::default();
+        let one = store.load(&path).unwrap();
+        let two = store.load(&path).unwrap();
+        let bytes = serde_json::to_vec(&one.summary).unwrap();
+        assert_eq!(bytes, serde_json::to_vec(&two.summary).unwrap());
+        assert_eq!(two.summary.rows.len(), 3);
+        for row in &two.summary.rows {
+            assert_eq!(row["outcome"], "unavailable");
+            assert_eq!(row["unavailableReason"], "evidenceRejected");
+            for function in FUNCTIONS {
+                assert_eq!(row["functions"][function], "unmeasured");
+            }
+        }
+        assert!(
+            store
+                .export(&one.token, &root.join("stale.json"), "json")
+                .is_err()
+        );
+        assert!(
+            store
+                .export(&two.token, &inputs.join("blocked.json"), "json")
+                .is_err()
+        );
+        assert!(!inputs.join("blocked.json").exists());
+        assert!(
+            std::fs::rename(&inputs, root.join("moved-retained")).is_err(),
+            "selected retained location must stay pinned while loaded"
+        );
+        let output = root.join("summary.json");
+        store.export(&two.token, &output, "json").unwrap();
+        let exported = std::fs::read(&output).unwrap();
+        assert!(store.export(&two.token, &output, "json").is_err());
+        assert_eq!(exported, std::fs::read(&output).unwrap());
+        store
+            .export(&two.token, &root.join("summary.md"), "markdown")
+            .unwrap();
+        assert!(
+            store
+                .export(&two.token, &root.join("absent/summary.json"), "json")
+                .is_err()
+        );
+        assert!(
+            store
+                .export(&two.token, &root.join("bad.json:stream"), "json")
+                .is_err()
+        );
+        assert!(
+            store
+                .export(&two.token, &root.join("other"), "html")
+                .is_err()
+        );
+        assert_eq!(
+            original,
+            std::fs::read(inputs.join("worker107-r5.zip")).unwrap()
+        );
+        let text = String::from_utf8(exported).unwrap();
+        let markdown = std::fs::read_to_string(root.join("summary.md")).unwrap();
+        for secret in [
+            "workerUuid",
+            "observedUserSid",
+            "archiveEntry\"",
+            "runNonce",
+            "C:\\\\",
+            "fixture",
+            "private-path-sentinel",
+            "private-account-sentinel",
+        ] {
+            assert!(!text.contains(secret), "unexpected JSON {secret}");
+            assert!(!markdown.contains(secret), "unexpected Markdown {secret}");
+        }
+        assert_eq!(std::fs::read_dir(&inputs).unwrap().count(), 2);
+        assert_eq!(
+            std::fs::read(inputs.join("tampered.zip")).unwrap(),
+            b"not an archive"
+        );
+        assert_eq!(manifest_before, std::fs::read(&path).unwrap());
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    #[ignore = "requires original external archive in AIW_MSIX_RESEARCH_ARCHIVE"]
     fn fixture_flow_deterministic_unchanged_duplicate_missing_tampered_and_export() {
         let root = temp();
         let inputs = root.join("retained");
@@ -1559,15 +1662,17 @@ mod demo {
     }
 
     #[test]
-    #[ignore = "writes a fresh offline fixture demonstration to AIW_RESULTS_DEMO; never executes a run"]
+    #[ignore = "requires AIW_MSIX_RESEARCH_ARCHIVE and AIW_RESULTS_DEMO; never executes a run"]
     fn demonstrate_results() {
         let parent = std::env::var_os("AIW_RESULTS_DEMO").expect("explicit demo parent");
         let root = PathBuf::from(parent).join(format!("results-explorer-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&root).unwrap();
         let retained = root.join("retained");
         std::fs::create_dir(&retained).unwrap();
-        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../fixtures/msix-lifecycle/worker107-r5.zip");
+        let fixture = PathBuf::from(
+            std::env::var_os("AIW_MSIX_RESEARCH_ARCHIVE")
+                .expect("set AIW_MSIX_RESEARCH_ARCHIVE to the original reviewed external archive"),
+        );
         let original = std::fs::read(&fixture).unwrap();
         std::fs::write(retained.join("fixture.zip"), &original).unwrap();
         std::fs::write(retained.join("tampered.zip"), b"synthetic corrupted copy").unwrap();

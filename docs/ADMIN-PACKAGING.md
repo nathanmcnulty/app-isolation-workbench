@@ -1,5 +1,10 @@
 # Administrator packaging component
 
+Historical fixed-application workflow: the [repository scope](REPOSITORY-SCOPE.md)
+takes precedence. This document is retained as a record of testing, not current
+publishing guidance. Hosted app-specific publication is retired or paused;
+remaining local fixed-app builders are part of the unfinished migration.
+
 Goal: select a Notepad++ installer, analyze its identity and available supported
 recipes, select the isolation/workflow option, assemble a reusable package, then
 validate that package in a disposable worker. Analysis, assembly, approval and

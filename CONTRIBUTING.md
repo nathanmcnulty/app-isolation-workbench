@@ -1,12 +1,14 @@
 # Contributing to App Isolation Workbench
 
-Thank you for helping build evidence-first Windows application isolation tooling. This repository is pre-alpha research software. Contributions are welcome, but a change must preserve the distinction between a contract or plan and a live security claim.
+Thank you for helping build evidence-first Windows application isolation tooling. This repository is experimental alpha research software. Contributions are welcome, but a change must preserve the distinction between a contract or plan and a live security claim.
 
 ## Before you start
 
 - Read [SECURITY.md](SECURITY.md), the [architecture](docs/ARCHITECTURE.md), and [threat model](docs/THREAT-MODEL.md).
 - For a substantial change, open an issue describing the user outcome, affected trust boundaries, acceptance tests, and any required live Windows proof.
-- Do not include installers, customer evidence, credentials, private keys, unredacted traces, or proprietary binaries in issues or pull requests.
+- Do not include third-party installers, application packages, extracted application files, vendor configuration, customer evidence, credentials, private keys, or unredacted traces in this repository, issues, pull requests, releases, or CI artifacts. Obtain test applications separately and keep them outside the checkout.
+- Prefer project-owned synthetic fixtures. Do not add app-specific executable adapters, recipe code or product packaging; see [repository scope](docs/REPOSITORY-SCOPE.md).
+- Follow the [application-neutral migration](docs/APPLICATION-AGNOSTIC-MIGRATION.md): application facts may be validated declarative fixture data, not product-name/hash admission gates. Extend reusable mechanisms and preserve exact run identity/approval. The seven-fixture corpus is not a supported-app catalog.
 - Do not add arbitrary command, script, path, registry, URL, or query execution to a privileged helper.
 
 ## Development workflow
@@ -53,4 +55,6 @@ immediately. Repository administrators should enforce these checks on `main`;
 until then the explicit check is mandatory. A later successful run does not turn
 an earlier cancelled run into successful validation.
 
-By submitting a contribution, you agree that it is provided under the [Apache License 2.0](LICENSE). Third-party code and artifacts must retain their original licenses and be recorded in the appropriate supply-chain documentation.
+Contribute only material you have the right to release under the [Unlicense](LICENSE), including the public-domain dedication. By submitting an original contribution, you agree to provide it under those terms. Disclose copied material and ownership restrictions before submission; a contributor cannot dedicate someone else's rights. Substantial outside contributions should include an explicit dedication from their rights holder.
+
+Third-party dependencies keep their original licenses and notices. The project's license does not relicense them or grant redistribution rights to tested applications. See [license scope](docs/REPOSITORY-SCOPE.md#license-scope) and [supply-chain requirements](docs/SUPPLY-CHAIN-AND-SIGNING.md).

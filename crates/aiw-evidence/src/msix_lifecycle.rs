@@ -445,44 +445,29 @@ pub fn verify_notepad_msix_lifecycle(
 #[cfg(test)]
 mod fixture_tests {
     use super::*;
-    use std::{
-        collections::BTreeMap,
-        io::{Cursor, Read},
-    };
+    use std::collections::BTreeMap;
+
+    // Project-authored parser inputs only, not native execution evidence.
     fn fixture() -> (BTreeMap<String, Vec<u8>>, Value, String, u32) {
-        let mut archive = zip::ZipArchive::new(Cursor::new(include_bytes!(
-            "../../../fixtures/msix-lifecycle/worker107-r5.zip"
-        )))
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../fixtures/msix-lifecycle/synthetic-receipts.json"
+        ))
         .unwrap();
-        let mut files = BTreeMap::new();
-        let mut assembly = Value::Null;
-        for i in 0..archive.len() {
-            let mut entry = archive.by_index(i).unwrap();
-            let name = entry.name().unwrap().into_owned();
-            if entry.is_dir() {
-                continue;
-            }
-            let mut bytes = Vec::new();
-            entry.read_to_end(&mut bytes).unwrap();
-            if name == "worker/assembly.json" {
-                assembly = serde_json::from_slice(&bytes).unwrap();
-            }
-            if let Some(name) = name.strip_prefix("0/standard-user-lifecycle/") {
-                files.insert(name.to_owned(), bytes);
-            }
-        }
-        let worker: Value = serde_json::from_slice(
-            files["msix-lifecycle/worker.json"]
-                .strip_prefix(&[0xef, 0xbb, 0xbf])
-                .unwrap_or(&files["msix-lifecycle/worker.json"]),
+        let files = fixture["files"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(name, value)| (name.clone(), value.as_str().unwrap().as_bytes().to_vec()))
+            .collect();
+        (
+            files,
+            fixture["assembly"].clone(),
+            fixture["sid"].as_str().unwrap().to_owned(),
+            fixture["session"].as_u64().unwrap() as u32,
         )
-        .unwrap();
-        let sid = worker["operatorSid"].as_str().unwrap().to_owned();
-        let session = worker["sessionId"].as_u64().unwrap() as u32;
-        (files, assembly, sid, session)
     }
     #[test]
-    fn archived_native_lifecycle_still_verifies_through_shared_verifier() {
+    fn synthetic_receipts_exercise_shared_verifier_without_native_proof() {
         let (files, assembly, sid, session) = fixture();
         verify_notepad_msix_lifecycle(&files, &assembly, &sid, session).unwrap();
     }
@@ -533,5 +518,55 @@ mod fixture_tests {
             .unwrap()
             .push(b'!');
         assert!(verify_notepad_msix_lifecycle(&changed, &assembly, &sid, session).is_err());
+    }
+    #[test]
+    fn synthetic_receipts_reject_failure_and_cleanup_mutations() {
+        let (files, assembly, sid, session) = fixture();
+        verify_notepad_msix_lifecycle(&files, &assembly, &sid, session).unwrap();
+        for name in [
+            "native-child-failure.json",
+            "failure.json",
+            "msix-lifecycle/failure.json",
+        ] {
+            let mut changed = files.clone();
+            changed.insert(name.into(), b"{}".to_vec());
+            assert!(
+                verify_notepad_msix_lifecycle(&changed, &assembly, &sid, session).is_err(),
+                "{name}"
+            );
+        }
+        for (name, pointer, replacement) in [
+            ("cleanup.json", "/registrationAbsent", serde_json::json!(false)),
+            (
+                "cleanup.json",
+                "/applicationProcessesAbsent",
+                serde_json::json!(false),
+            ),
+            (
+                "uninstall-started.json",
+                "/packageFullName",
+                serde_json::json!("synthetic-wrong-package"),
+            ),
+            (
+                "package-processes-after-uninstall.json",
+                "/matches",
+                serde_json::json!([{"Pid": 123}]),
+            ),
+            (
+                "package-processes-after-close.json",
+                "/globalAbsenceVerified",
+                serde_json::json!(true),
+            ),
+        ] {
+            let mut changed = files.clone();
+            let key = format!("msix-lifecycle/{name}");
+            let mut receipt = read_receipt(&files, &key).unwrap();
+            *receipt.pointer_mut(pointer).unwrap() = replacement;
+            changed.insert(key, serde_json::to_vec(&receipt).unwrap());
+            assert!(
+                verify_notepad_msix_lifecycle(&changed, &assembly, &sid, session).is_err(),
+                "{name}{pointer}"
+            );
+        }
     }
 }

@@ -1,5 +1,65 @@
 # Installer corpus
 
+The current corpus follows [issue #108](https://github.com/nathanmcnulty/app-isolation-workbench/issues/108)
+and [roadmap R5](ROADMAP.md#r5---prove-generality-and-retire-fixed-execution).
+Applications are regression data, never an admission list or product-code roadmap.
+Users acquire and pin their own inputs; no vendor payloads belong in this repository
+or AIW releases. Listing a fixture is not a download, execution or compatibility result.
+
+## Application-neutral recovery corpus
+
+The manifests below were inspected for #108 at Microsoft's
+[winget-pkgs commit 041009ec9ce158c716313f615e940e8564a3d141](https://github.com/microsoft/winget-pkgs/tree/041009ec9ce158c716313f615e940e8564a3d141)
+on 2026-11-08. Versions identify that research snapshot, not the latest available
+version or authorization to use a later payload. Use x64 initially and validate
+actual installed architecture separately from installer-wrapper architecture.
+
+| Fixture / exact WinGet ID | Inspected manifest | Declared first workflow and useful variation |
+| --- | --- | --- |
+| 7-Zip / `7zip.7zip` | [26.06, EXE and MSI](https://github.com/microsoft/winget-pkgs/blob/041009ec9ce158c716313f615e940e8564a3d141/manifests/7/7zip/7zip/26.06/7zip.7zip.installer.yaml) | Create/list/extract controlled archive, verify contents; CLI and output assertions. Existing 26.05 evidence remains separate. |
+| GIMP / `GIMP.GIMP` | [3.2.6, Inno EXE](https://github.com/microsoft/winget-pkgs/blob/041009ec9ce158c716313f615e940e8564a3d141/manifests/g/GIMP/GIMP/3.2.6/GIMP.GIMP.installer.yaml) | Open synthetic image, edit, save/export, reopen; GUI, graphics, profile state, user/machine scope. |
+| LibreOffice / `TheDocumentFoundation.LibreOffice` | [26.8.2.2, MSI](https://github.com/microsoft/winget-pkgs/blob/041009ec9ce158c716313f615e940e8564a3d141/manifests/t/TheDocumentFoundation/LibreOffice/26.8.2.2/TheDocumentFoundation.LibreOffice.installer.yaml) | Writer open/edit/save and PDF export; multiple entry points and declared VC runtime dependencies. |
+| Firefox / `Mozilla.Firefox` | [159.0, Nullsoft EXE](https://github.com/microsoft/winget-pkgs/blob/041009ec9ce158c716313f615e940e8564a3d141/manifests/m/Mozilla/Firefox/159.0/Mozilla.Firefox.installer.yaml) | Fresh profile, project-owned local HTML/assets, navigation/close; multiprocess and first run. |
+| Chrome / `Google.Chrome` | [157.0.8103.39, enterprise MSI](https://github.com/microsoft/winget-pkgs/blob/041009ec9ce158c716313f615e940e8564a3d141/manifests/g/Google/Chrome/157.0.8103.39/Google.Chrome.installer.yaml) | Repeat local-content browser workflow; another engine/process model. Installer-created components are not all tested functions. |
+| VLC / `VideoLAN.VLC` | [3.0.24, EXE/MSI/portable ZIP](https://github.com/microsoft/winget-pkgs/blob/041009ec9ce158c716313f615e940e8564a3d141/manifests/v/VideoLAN/VLC/3.0.24/VideoLAN.VLC.installer.yaml) | Play/seek/close synthetic local media; include portable-directory input and observable playback checks. |
+| Notepad++ / `Notepad++.Notepad++` | [8.9.9, EXE/MSI/portable ZIP](https://github.com/microsoft/winget-pkgs/blob/041009ec9ce158c716313f615e940e8564a3d141/manifests/n/Notepad%2B%2B/Notepad%2B%2B/8.9.9/Notepad%2B%2B.Notepad%2B%2B.installer.yaml) | Open/edit/save/reopen controlled text; regression transfer from the separately pinned 8.9.8 reference. |
+
+The matrix must exercise actual MSI, reviewed EXE, portable, multiprocess and
+GUI/operator-assisted capabilities. Attempt every fixture through the same path,
+retain useful failed/blocked results, and do not require every isolation candidate
+to succeed. A matrix made only of blockers does not prove a useful engine.
+Choose an additional holdout after implementation is fixed and complete a declared
+normal-use workflow without product-specific production changes or a rebuild for
+identity. See [release gates](RELEASE-GATES.md#first-generic-assessment-release).
+
+### Acquisition and test boundary
+
+Record package ID/version, source/manifest revision, final URL, architecture,
+locale, installer type/scope, payload SHA-256, signature observations, dependencies
+and input-fixture hashes. WinGet supplies acquisition metadata, not execution
+permission. Review resolved install behavior; do not trust a manifest command
+string, silently install dependencies or enable network access. Chrome's rolling
+URLs require exact hash verification; drift requires a newly reviewed record.
+
+Keep acquisition separate from offline execution and record actual payloads from
+bootstrappers. Stage portable archives safely into a validated directory; archive
+availability does not mean the executor already supports it. Use project-owned
+images, documents, HTML and media. No personal accounts or proprietary user data
+are required for these initial workflows.
+
+Internet browsing, account sign-in, updates, downloads, printing, extensions,
+plugins, shell integration, long-running services and physical devices are separate
+coverage. Do not disable browser/application sandboxes to obtain a pass. Existing
+Bambu evidence is a regression asset, not another required production product path.
+Earlier VS Code/device/bootstrapper interests below remain potential generic data
+scenarios; they do not justify new app adapters or restore the old profile sequence.
+
+## Historical local inventory and plans
+
+The remainder preserves the 2026-09-07 inventory and later scoped observations.
+Its profile sequencing and later future-tense instructions are historical; the
+recovery corpus above and current roadmap set implementation order.
+
 Read-only inventory on 2026-09-07 of the user-supplied `%USERPROFILE%\Downloads\installers` folder. No installer was executed, downloaded, unblocked, copied, or modified. These are candidate fixtures, not supported application profiles or successful installation results. Passive fingerprints below are not protected intake receipts.
 
 Subsequent [Bambu feasibility trials](BAMBU-STUDIO-PROFILE.md) and [signed public acceptance](BAMBU-PUBLIC-ACCEPTANCE.md) supersede the inventory's original untested status. Approved standard-user local STL-to-3MF export, reporting, package assembly/replay and cleanup have retained acceptance evidence. The original installers were not executed on the host.

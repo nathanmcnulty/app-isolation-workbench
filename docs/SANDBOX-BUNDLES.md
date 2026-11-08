@@ -1,5 +1,12 @@
 # Reusable Sandbox application bundles
 
+Status as of 2026-11-08: this is a scoped fixed-workflow implementation or historical
+handoff record. Its evidence/contract remains valid only for the recorded source,
+inputs and observations. Follow the [current roadmap](ROADMAP.md) and
+[migration audit](APPLICATION-AGNOSTIC-MIGRATION.md) for new work; old product
+selections, future-tense tasks and operator commands are not current priorities,
+publication guidance or execution authorization.
+
 The first packaging target is the fixed Notepad++ MSI workflow. A directory bundle carries `app.msi`, `project.aiw`, and `manifest.aiw` (the latter two contain JSON). These 8.3-compatible names avoid secondary DOS aliases when copied on Windows. It is a reusable input to Workbench's approved Sandbox execution path. The automated document profile and the separately typed [scratch-only interactive profile](INTERACTIVE-SANDBOX.md) have distinct scenario hashes and data contracts. This is not an MSIX, a host installer, or an AppContainer compatibility certificate.
 
 The manifest identifies the exact payload, project, scenario, and runtime/data contract. Export requires a verified protected application intake. The bundle carries provenance, not an approval or a completed execution result. Preserve the manifest hash returned by export separately; a recipient supplies that expected hash when verifying or importing.

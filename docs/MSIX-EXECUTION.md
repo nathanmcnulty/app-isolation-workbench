@@ -1,5 +1,10 @@
 # Production VM MSIX execution
 
+Historical fixed-application workflow: the [repository scope](REPOSITORY-SCOPE.md)
+takes precedence. This document is retained as a record of testing, not current
+publishing guidance. Hosted app-specific publication is retired or paused;
+remaining local fixed-app builders are part of the unfinished migration.
+
 Current execution requires an observed stable x64 Core 7.6+ machine runtime on controller and worker, the explicit `PowerShell.7.6` HTTPS endpoint, and a new approved cold baseline containing both. Preparations and receipts bind those runtime identities. See the [setup and acceptance plan](handoffs/2026-10-24-powershell76/SETUP-AND-ACCEPTANCE.md); the historical baseline and completed trials below do not establish acceptance of this migration.
 
 Validated 2026-10-22: the production desktop drove a fresh approved run on VM107,

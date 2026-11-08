@@ -1,37 +1,34 @@
 # App Isolation Workbench
 
-App Isolation Workbench (AIW) is a free, open-source project for evaluating Windows applications for readiness to be packaged using application isolation technologies. The goal is to assess any administrator-selected application, then help with adaptation, packaging, and testing where practical. It is intended to be application-agnostic, without a fixed catalog of supported products.
+App Isolation Workbench (AIW) is a free, open-source testing workbench for Windows applications. Its goal is to help administrators evaluate an application they supply, compare ordinary and isolated behavior, and understand what would be needed to adapt, package, and validate it.
 
-## Who it is for
-
-AIW is intended for IT administrators, application packagers, and security practitioners evaluating applications they manage. The current builds are experimental and best suited to lab testing and contributors comfortable with early software.
+The workbench is intended to be application-agnostic. It is not an application store or a collection of repackaged third-party applications.
 
 ## Goals
 
 - Observe installation and real application use, including requirements and failures.
 - Compare the same workflow with and without selected isolation restrictions.
-- Keep results understandable, backed by inspectable evidence, and clear about what was not tested.
-- Over time, help administrators adapt applications and create reusable launch profiles or packages, then validate them.
+- Keep results understandable, backed by inspectable evidence, and explicit about what was not tested.
+- Provide useful assessment before optional adaptation, launch profiles, or packaging.
+
+Users obtain applications from their publishers and keep installers, application files, and generated packages outside this repository. AIW does not grant redistribution rights for those applications.
 
 ## Current state
 
-AIW is in alpha development, with a Windows desktop app and an experimental CLI.
+AIW is experimental alpha software with a Windows desktop app and CLI. General-purpose assessment and packaging are unfinished: the existing implementation still relies on fixed application-specific adapters. The [recovery roadmap](docs/ROADMAP.md) replaces them with one capability-based workflow, then retires their execution paths. Unknown application names must not become gates, and exact payloads still bind each approved run. This migration is not yet implemented; [repository scope](docs/REPOSITORY-SCOPE.md) records the distribution boundary.
 
-- The signed public alpha uses Notepad++ editing and Bambu Studio export as reference test cases for Windows Sandbox workflows.
-- Recent development builds add a 7-Zip archive test case comparing ordinary-user and AppContainer execution inside Sandbox. Results can be reopened and exported for review.
-- Automated coverage is limited to these implemented test cases today. They are development fixtures, not a supported-application catalog.
-- Testing targets Windows 11 24H2 or later on x64, with Windows Sandbox enabled. End-to-end evidence remains specific to the tested versions and workflows.
+Testing has included Notepad++, Bambu Studio, and 7-Zip. These are historical test subjects, not products distributed or endorsed by this project and not a supported-application catalog. Previous results apply only to their recorded versions, inputs, and workflows.
 
-General application assessment, broader isolation measurements, and general-purpose packaging remain unfinished. A passing workflow does not establish that an application is safe or that every isolation boundary is effective. Treat the current builds as research software, not a production-ready application isolation solution.
-
-Execution requires explicit approval. There is no automatic telemetry.
+Testing targets Windows 11 24H2 or later on x64. Execution requires explicit approval and disposable Windows workers. There is no automatic telemetry. A passing workflow is not proof that an application is safe or that every isolation boundary is effective.
 
 ## Learn more
 
-- [Public alpha download](https://github.com/nathanmcnulty/app-isolation-workbench/releases/tag/desktop-alpha-4e39c787e63a): follow the included `START-HERE.md` for verification and setup. This release predates the newer development work described above.
-- [Roadmap](docs/ROADMAP.md): direction and remaining work.
+- [Roadmap](docs/ROADMAP.md): intended administrator journey, staged recovery, and acceptance criteria.
+- [Documentation guide](docs/README.md): current plans and historical evidence.
 - [Architecture](docs/ARCHITECTURE.md) and [threat model](docs/THREAT-MODEL.md): design and security boundaries.
 - [Development guide](docs/DEVELOPMENT-WORKFLOW.md) and [contributing](CONTRIBUTING.md): working on the project.
 - [Security policy](SECURITY.md): reporting vulnerabilities privately.
 
-Licensed under the [Apache License 2.0](LICENSE).
+## License
+
+Project-owned code and assets are released under the [Unlicense](LICENSE). Third-party dependencies retain their own licenses. This does not relicense external applications, their content, or earlier releases; see the [license scope](docs/REPOSITORY-SCOPE.md#license-scope).
