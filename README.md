@@ -1,6 +1,6 @@
 # App Isolation Workbench
 
-App Isolation Workbench (AIW) is a free, open-source project for assessing Windows applications and exploring how they behave under isolation. It aims to help administrators understand what an application needs, which everyday tasks still work with restrictions, and where testing leaves unanswered questions.
+App Isolation Workbench (AIW) is a free, open-source project for evaluating Windows applications for readiness to be packaged using application isolation technologies. The goal is to assess any administrator-selected application, then help with adaptation, packaging, and testing where practical. It is intended to be application-agnostic, without a fixed catalog of supported products.
 
 ## Who it is for
 
@@ -17,11 +17,12 @@ AIW is intended for IT administrators, application packagers, and security pract
 
 AIW is in alpha development, with a Windows desktop app and an experimental CLI.
 
-- The signed public alpha supports a small set of fixed Windows Sandbox workflows, including Notepad++ editing and Bambu Studio export.
-- Recent development builds also compare a fixed 7-Zip archive workflow as an ordinary user and in AppContainer, both inside Sandbox. Results can be reopened and exported for review.
-- Testing targets Windows 11 24H2 or later on x64, with Windows Sandbox enabled. Support remains specific to the tested application versions and workflows.
+- The signed public alpha uses Notepad++ editing and Bambu Studio export as reference test cases for Windows Sandbox workflows.
+- Recent development builds add a 7-Zip archive test case comparing ordinary-user and AppContainer execution inside Sandbox. Results can be reopened and exported for review.
+- Automated coverage is limited to these implemented test cases today. They are development fixtures, not a supported-application catalog.
+- Testing targets Windows 11 24H2 or later on x64, with Windows Sandbox enabled. End-to-end evidence remains specific to the tested versions and workflows.
 
-Broader application coverage, isolation measurements, and general-purpose packaging remain unfinished. A passing workflow does not establish that an application is safe or that every isolation boundary is effective. Treat the current builds as research software, not a production-ready application isolation solution.
+General application assessment, broader isolation measurements, and general-purpose packaging remain unfinished. A passing workflow does not establish that an application is safe or that every isolation boundary is effective. Treat the current builds as research software, not a production-ready application isolation solution.
 
 Execution requires explicit approval. There is no automatic telemetry.
 
