@@ -536,7 +536,11 @@ mod fixture_tests {
             );
         }
         for (name, pointer, replacement) in [
-            ("cleanup.json", "/registrationAbsent", serde_json::json!(false)),
+            (
+                "cleanup.json",
+                "/registrationAbsent",
+                serde_json::json!(false),
+            ),
             (
                 "cleanup.json",
                 "/applicationProcessesAbsent",
