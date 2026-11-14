@@ -25,7 +25,17 @@ Common elevated installation setup is outside the candidate. See
 Reporting checks passed: 137 provider, 7 retained-reader, 27 desktop Rust tests
 (4 existing manual/replay cases ignored), all 30 desktop JavaScript tests,
 provider/runner and desktop all-target Clippy, format and governance. Independent
-review passed before the main integration; merged-source checks remain pending.
+review passed before the main integration; independent merge review also passed.
+Merged source `d31de7e` passed full local `scripts/verify.ps1` (workspace: 800
+passed, 33 ignored, zero failed) and both dependency audits after an initial
+advisory-database fetch failure. Audits report zero vulnerabilities with allowed
+informational warnings. All three [hosted CI jobs](https://github.com/nathanmcnulty/app-isolation-workbench/actions/runs/43642939286)
+passed on PR merge `a49db17` for head `d31de7e` / base `04be2ce`: full verification,
+audit, desktop (27 Rust tests, 5 ignored), and Rust 1.88/desktop 1.90 compatibility.
+[Draft PR #111](https://github.com/nathanmcnulty/app-isolation-workbench/pull/111)
+remains incomplete for native acceptance; private integration logs use prefix
+`main-integration-*20261114` below. These checks do not validate an old compiled
+payload as this source, run an application trial, or complete the full goal.
 A full build drive interrupted the first desktop link; Cargo's
 package-scoped development-artifact cleanup enabled a passing retry. No new
 application-native acceptance. Private logs/review: `coverage-*20261114*` below.
