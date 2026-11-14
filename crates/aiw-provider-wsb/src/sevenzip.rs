@@ -1,7 +1,8 @@
 //! Closed receipt-bound 7-Zip observations and fixed workflow normalization.
 //! This module never executes, widens grants, or produces a general isolation verdict.
 use crate::sevenzip_execution_trace::{
-    SevenZipExecutionPhase, SevenZipExecutionTrace, verify_execution_trace,
+    SevenZipExecutionCoverage, SevenZipExecutionPhase, SevenZipExecutionTrace,
+    verify_execution_trace,
 };
 use aiw_probe::SevenZipProfile;
 use aiw_probe::paired_controls::{ControlEvidenceOrigin, control_digest, control_hash};
@@ -592,6 +593,58 @@ impl SevenZipResult {
             return None;
         }
         self.check_execution_traces().err()
+    }
+
+    /// Safe presentation facts only after the same complete request-sensitive
+    /// trace gate used for comparison credit, including cross-trace lifetimes.
+    /// A measured nonzero exit or a separate driver error is not erased. This
+    /// does not authorize execution or establish compatibility/cleanup/isolation.
+    pub fn verified_execution_coverage(
+        &self,
+        request: &SevenZipRequest,
+    ) -> Option<SevenZipExecutionCoverage> {
+        if request.profile.revision != aiw_probe::sevenzip::SEVENZIP_PROFILE_REVISION {
+            return None;
+        }
+        self.validate(request).ok()?;
+        self.check_execution_traces().ok()?;
+        let installation = self.installation.as_ref()?.execution_trace.as_ref()?;
+        let installation_setup = verify_execution_trace(
+            installation,
+            SevenZipExecutionPhase::InstallationSetup,
+            aiw_probe::sevenzip::SEVENZIP_INSTALLER_SHA256,
+            aiw_probe::sevenzip::SEVENZIP_INSTALLER_SIZE_BYTES,
+        )
+        .ok()?;
+        let code = &self.code_binding.as_ref()?.image_before;
+        let summarize = |variant: Option<&SevenZipVariant>| {
+            let mut summaries = Vec::new();
+            if let Some(variant) = variant {
+                for (phase, invocation) in [
+                    (SevenZipExecutionPhase::Create, &variant.create),
+                    (SevenZipExecutionPhase::Test, &variant.test),
+                    (SevenZipExecutionPhase::Extract, &variant.extract),
+                ] {
+                    if let Some(invocation) = invocation {
+                        summaries.push(
+                            verify_execution_trace(
+                                invocation.execution_trace.as_ref()?,
+                                phase,
+                                &code.sha256,
+                                code.size_bytes,
+                            )
+                            .ok()?,
+                        );
+                    }
+                }
+            }
+            Some(summaries)
+        };
+        Some(SevenZipExecutionCoverage {
+            installation_setup,
+            baseline: summarize(self.baseline.as_ref())?,
+            candidate: summarize(self.candidate.as_ref())?,
+        })
     }
 
     fn check_execution_traces(&self) -> Result<(), String> {
@@ -1312,6 +1365,7 @@ mod tests {
     #[test]
     fn legacy_observation_bytes_omit_trace_and_keep_historical_credit() {
         let (request, result) = fixture();
+        assert!(result.verified_execution_coverage(&request).is_none());
         let bytes = serde_json::to_vec(&result).unwrap();
         assert!(!String::from_utf8_lossy(&bytes).contains("executionTrace"));
         let restored: SevenZipResult = serde_json::from_slice(&bytes).unwrap();
@@ -1323,6 +1377,7 @@ mod tests {
     #[test]
     fn new_revision_requires_all_observed_execution_traces_before_compatibility_credit() {
         let (request, mut result) = current_fixture();
+        assert!(result.verified_execution_coverage(&request).is_none());
         assert_eq!(
             result.compare(&request, Some(true)).unwrap().reason,
             SevenZipComparisonReason::RequiredMeasurementsMissing
@@ -1429,6 +1484,7 @@ mod tests {
             bad.validate(&request).unwrap();
             let bytes = serde_json::to_vec(&bad).unwrap();
             let retained: SevenZipResult = serde_json::from_slice(&bytes).unwrap();
+            assert!(retained.verified_execution_coverage(&request).is_none());
             let comparison = retained.compare(&request, Some(true)).unwrap();
             assert!(!comparison.eligible && !comparison.candidate_verified);
             assert_eq!(
@@ -1510,6 +1566,98 @@ mod tests {
     }
 
     #[test]
+    fn verified_coverage_is_safe_fixed_order_and_preserves_observed_nonzero_exit() {
+        let (request, mut result) = current_fixture();
+        add_complete_traces(&mut result);
+        let process = result.candidate.as_mut().unwrap().extract.as_mut().unwrap();
+        process.exit_code = Some(-1); // The invocation API retains the signed view of these bits.
+        process.execution_trace.as_mut().unwrap().chain.processes[0].exit_code = Some(u32::MAX);
+        let candidate = result.candidate.as_mut().unwrap();
+        candidate.input_after = None;
+        candidate.extracted = None;
+        candidate.archive = None;
+        let coverage = result.verified_execution_coverage(&request).unwrap();
+        assert_eq!(
+            coverage.installation_setup.phase,
+            SevenZipExecutionPhase::InstallationSetup
+        );
+        for summaries in [&coverage.baseline, &coverage.candidate] {
+            assert_eq!(
+                summaries.iter().map(|v| v.phase).collect::<Vec<_>>(),
+                [
+                    SevenZipExecutionPhase::Create,
+                    SevenZipExecutionPhase::Test,
+                    SevenZipExecutionPhase::Extract,
+                ]
+            );
+            assert!(summaries.iter().all(|v| v.observed_processes == 1
+                && v.paired_exits == 1
+                && v.lifetime_images_revalidated
+                && v.exact_job_reconciled));
+        }
+        assert_eq!(coverage.candidate[2].root_exit_code, u32::MAX);
+        let bytes = serde_json::to_vec(&coverage).unwrap();
+        let text = std::str::from_utf8(&bytes).unwrap();
+        for forbidden in [
+            "processId",
+            "userSid",
+            "creationTime",
+            "fileIndex",
+            "volumeSerial",
+            "imageBefore",
+            "imageAfter",
+            "S-1-",
+            r"C:\",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "raw identity leaked: {forbidden}"
+            );
+        }
+        let roundtrip: SevenZipExecutionCoverage = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(roundtrip, coverage);
+        let mut extra = serde_json::to_value(&coverage).unwrap();
+        extra["rawTrace"] = serde_json::json!({});
+        assert!(serde_json::from_value::<SevenZipExecutionCoverage>(extra).is_err());
+        // This summary is measured coverage, independent of unknown cleanup or
+        // a separate driver failure; neither becomes compatibility credit.
+        result.driver_error = Some(SevenZipDriverError::DriverIncomplete);
+        assert_eq!(result.verified_execution_coverage(&request), Some(coverage));
+        assert!(!result.compare(&request, None).unwrap().eligible);
+        let mut wrong_request = request;
+        wrong_request.run_id.push_str("-different");
+        assert!(result.verified_execution_coverage(&wrong_request).is_none());
+    }
+
+    #[test]
+    fn verified_coverage_omits_missing_operations_instead_of_inventing_not_reached() {
+        let (request, mut result) = current_fixture();
+        add_complete_traces(&mut result);
+        result.candidate = None;
+        let baseline = result.baseline.as_mut().unwrap();
+        baseline.test = None;
+        baseline.extract = None;
+        baseline.input_after = None;
+        baseline.extracted = None;
+        baseline.archive = None;
+        result.driver_error = Some(SevenZipDriverError::DriverIncomplete);
+        let coverage = result.verified_execution_coverage(&request).unwrap();
+        assert!(coverage.candidate.is_empty());
+        assert_eq!(coverage.baseline.len(), 1);
+        assert_eq!(coverage.baseline[0].phase, SevenZipExecutionPhase::Create);
+        // An observed invocation missing its trace invalidates ALL coverage.
+        result
+            .baseline
+            .as_mut()
+            .unwrap()
+            .create
+            .as_mut()
+            .unwrap()
+            .execution_trace = None;
+        assert!(result.verified_execution_coverage(&request).is_none());
+    }
+
+    #[test]
     fn current_profile_retains_pid_reuse_and_credits_only_distinct_measured_lifetimes() {
         let (request, mut result) = current_fixture();
         add_complete_traces(&mut result);
@@ -1517,6 +1665,7 @@ mod tests {
         let original_time = (1u64 << 55) + 3;
         replace_test_root_lifetime(&mut result, 10, original_time + 1);
         result.validate(&request).unwrap();
+        assert!(result.verified_execution_coverage(&request).is_some());
         assert!(result.compare(&request, Some(true)).unwrap().eligible);
         for time in [original_time, original_time - 1] {
             let mut duplicate = result.clone();
@@ -1525,6 +1674,7 @@ mod tests {
             let bytes = serde_json::to_vec(&duplicate).unwrap();
             let retained: SevenZipResult = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(retained, duplicate);
+            assert!(retained.verified_execution_coverage(&request).is_none());
             let comparison = retained.compare(&request, Some(true)).unwrap();
             assert!(!comparison.eligible);
             assert_eq!(
@@ -1537,6 +1687,7 @@ mod tests {
         capture.process_id = 10;
         capture.held_token.as_mut().unwrap().process_id = 10;
         ambiguous.validate(&request).unwrap();
+        assert!(ambiguous.verified_execution_coverage(&request).is_none());
         assert_eq!(
             ambiguous.compare(&request, Some(true)).unwrap().reason,
             SevenZipComparisonReason::RequiredMeasurementsMissing
@@ -1587,12 +1738,14 @@ mod tests {
         trace.chain.events_processed = 4;
         trace.chain.job_total_processes = Some(2);
         replace_test_root_lifetime(&mut result, 11, child_time + 1);
+        assert!(result.verified_execution_coverage(&request).is_some());
         assert!(result.compare(&request, Some(true)).unwrap().eligible);
         replace_test_root_lifetime(&mut result, 11, child_time);
         result.validate(&request).unwrap();
         let bytes = serde_json::to_vec(&result).unwrap();
         let retained: SevenZipResult = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(retained, result);
+        assert!(retained.verified_execution_coverage(&request).is_none());
         let comparison = retained.compare(&request, Some(true)).unwrap();
         assert!(!comparison.eligible);
         assert_eq!(

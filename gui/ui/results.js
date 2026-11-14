@@ -90,6 +90,16 @@
         for (const row of comparison.functions || []) matrix.append(node("li", label(row.function) + ": baseline " + label(row.baseline) + "; AppContainer " + label(row.candidate)));
         details.append(matrix);
         details.append(node("p", "Archive bytes equal: " + String(comparison.archiveBytesEqual) + ". Extracted content verification is separate. Inner profile deletion: " + String(comparison.innerProfileDeleted)));
+        details.append(node("p", "Retained process coverage — common installation setup is outside the candidate. Counts include the root and observed descendants; validated capture is separate from function success. Brokers, loaded memory and all-host activity remain unmeasured."));
+        const coverage = node("ul");
+        for (const item of comparison.executionCoverage || []) {
+          const variant = item.variant === "installationSetup" ? "Common elevated setup (outside candidate)" : label(item.variant);
+          const phase = item.phase === "installationSetup" ? "Installation" : label(item.phase);
+          const measured = item.status === "verified" && Number.isInteger(item.observedProcesses) && item.observedProcesses >= 1 && item.observedProcesses <= 64 && item.pairedExits === item.observedProcesses && Number.isInteger(item.rootExitCode) && item.rootExitCode >= 0 && item.rootExitCode <= 4294967295;
+          coverage.append(node("li", variant + " / " + phase + ": " + (measured ? item.observedProcesses + " processes; " + item.pairedExits + " paired exits; root exit " + item.rootExitCode + "; lifetime images and owned job validated." : "Unmeasured; no completeness or not-reached inference.")));
+        }
+        if (!(comparison.executionCoverage || []).length) coverage.append(node("li", "Execution coverage unmeasured in this retained report."));
+        details.append(coverage);
       }
       details.append(node("p", "Stage progress (separate from function results)"));
       const stages = node("ul");

@@ -37,6 +37,10 @@ pub struct SevenZipRunReport {
     pub observations: Option<SevenZipResult>,
     pub comparison: Option<SevenZipComparison>,
     pub function_deltas: Option<aiw_core::ComparisonReport>,
+    /// Safe request-verified counts only; absent for legacy or incomplete traces.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_coverage:
+        Option<aiw_provider_wsb::sevenzip_execution_trace::SevenZipExecutionCoverage>,
     pub evidence_gaps: Vec<String>,
 }
 

@@ -78,6 +78,18 @@ pub struct SevenZipExecutionTraceSummary {
     pub scope: String,
 }
 
+/// Request-verified summaries of actually observed operations, without raw
+/// identities or a compatibility, cleanup or effective-isolation verdict.
+/// Installation is common elevated setup, outside the isolation candidate.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SevenZipExecutionCoverage {
+    pub installation_setup: SevenZipExecutionTraceSummary,
+    /// Present invocations only, in Create/Test/Extract order. No invented rows.
+    pub baseline: Vec<SevenZipExecutionTraceSummary>,
+    pub candidate: Vec<SevenZipExecutionTraceSummary>,
+}
+
 fn bounded(value: &str, chars: usize) -> bool {
     value.chars().count() <= chars && value.len() <= chars * 4
 }

@@ -33,6 +33,19 @@ before runtime installation or VM/security-setting changes.
 
 ## Current implementation
 
+Retained 7-Zip reports now carry optional, verified execution coverage for
+common elevated installation setup and the observed baseline/candidate
+create/test/extract invocations. The runner publishes these summaries only
+after receipt/evidence admission and the existing request-sensitive trace gate,
+including cross-trace process lifetimes. Results and sanitized JSON/Markdown
+exports expose counts and unsigned root exits, without raw identities, paths,
+tokens or investigatory bytes. Missing or rejected summaries stay unmeasured;
+they do not establish that an operation was not reached or had no descendants.
+Validated capture does not imply a successful function. Common installation is
+outside the candidate, and brokers, loaded memory and all-host activity remain
+unmeasured. This reporting increment does not establish native acceptance or
+add MXC execution support.
+
 The first increment adds private bounded archive/extracted bytes and input
 FILETIME/attribute observations to new 7-Zip results. Historical results omit the
 optional fields without changing canonical serialization. Current source binds

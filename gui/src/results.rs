@@ -373,12 +373,145 @@ fn project_sevenzip(detail: &Value) -> Value {
         "functions":rows,"selectedControlsVerified":comparison["selectedControlsVerified"].as_bool(),
         "innerProfileDeleted":detail["observations"]["profileDeleted"].as_bool(),
         "archiveBytesEqual":comparison["archiveBytesEqual"].as_bool(),
-        "baselineArchive":archive(&comparison["baselineArchive"]),"candidateArchive":archive(&comparison["candidateArchive"])})
+        "baselineArchive":archive(&comparison["baselineArchive"]),"candidateArchive":archive(&comparison["candidateArchive"]),
+        "executionCoverage":project_sevenzip_execution_coverage(detail)})
+}
+
+// Consume only the runner's verified count DTO, never private raw traces or
+// their self-reported completeness flags. Missing summaries do not mean that a
+// command was not reached, that no descendants existed, or that isolation held.
+fn project_sevenzip_execution_coverage(detail: &Value) -> Vec<Value> {
+    let accepted = matches!(
+        detail["evidenceStatus"].as_str(),
+        Some("verified" | "driverIncomplete")
+    );
+    let coverage = &detail["executionCoverage"];
+    let mut rows = vec![];
+    for (variant, phases) in [
+        ("installationSetup", &["installationSetup"][..]),
+        ("baseline", &["create", "test", "extract"][..]),
+        ("candidate", &["create", "test", "extract"][..]),
+    ] {
+        for phase in phases {
+            let source = if variant == "installationSetup" {
+                Some(&coverage[variant])
+            } else {
+                coverage[variant]
+                    .as_array()
+                    .filter(|items| items.len() <= 3)
+                    .and_then(|items| {
+                        let mut matching = items.iter().filter(|item| item["phase"] == *phase);
+                        let first = matching.next();
+                        if matching.next().is_some() {
+                            None
+                        } else {
+                            first
+                        }
+                    })
+            };
+            let source = source.filter(|item| {
+                accepted
+                    && item["schemaVersion"] == "aiw.dev/sevenzip-execution-trace-summary/v0alpha1"
+                    && item["phase"] == *phase
+                    && item["observedProcesses"]
+                        .as_u64()
+                        .is_some_and(|n| (1..=64).contains(&n))
+                    && item["pairedExits"] == item["observedProcesses"]
+                    && item["rootExitCode"]
+                        .as_u64()
+                        .is_some_and(|n| n <= u32::MAX as u64)
+                    && item["lifetimeImagesRevalidated"] == true
+                    && item["exactJobReconciled"] == true
+            });
+            rows.push(json!({"variant":variant,"phase":phase,
+                "status":if source.is_some() {"verified"} else {"unmeasured"},
+                "observedProcesses":source.and_then(|s|s["observedProcesses"].as_u64()),
+                "pairedExits":source.and_then(|s|s["pairedExits"].as_u64()),
+                "rootExitCode":source.and_then(|s|s["rootExitCode"].as_u64())}));
+        }
+    }
+    rows
 }
 
 #[cfg(test)]
 mod sevenzip_projection_tests {
     use super::*;
+    #[test]
+    fn execution_coverage_whitelists_only_accepted_summaries_and_keeps_unknown_rows() {
+        let summary = json!({"schemaVersion":"aiw.dev/sevenzip-execution-trace-summary/v0alpha1",
+            "phase":"create","observedProcesses":3,"pairedExits":3,"rootExitCode":4294967295_u64,
+            "lifetimeImagesRevalidated":true,"exactJobReconciled":true,
+            "scope":"private-scope-sentinel","processId":555,"userSid":"private-sid-sentinel"});
+        let mut detail = json!({"evidenceStatus":"driverIncomplete",
+            "executionCoverage":{"baseline":[summary]},
+            "observations":{"candidate":{"create":{"executionTrace":{"chain":{"processes":[{},{},{}],"debuggerChainComplete":true}}}}}});
+        let rows = project_sevenzip_execution_coverage(&detail);
+        assert_eq!(rows.len(), 7);
+        assert_eq!(rows[1]["status"], "verified");
+        assert_eq!(rows[1]["rootExitCode"], 4294967295_u64);
+        assert_eq!(rows[4]["status"], "unmeasured"); // Raw trace cannot grant credit.
+        let text = serde_json::to_string(&rows).unwrap();
+        for private in [
+            "private-scope-sentinel",
+            "private-sid-sentinel",
+            "555",
+            "processId",
+            "debuggerChainComplete",
+        ] {
+            assert!(!text.contains(private));
+        }
+        let report = json!({"entries":[{"source":{"kind":"windowsSandbox","evidence":{"profile":"sevenZip","result":{"kind":"sevenZip","report":detail}}}}]});
+        let exported = markdown(&project(&report));
+        assert!(
+            exported
+                .contains("| Ordinary-user baseline | create | verified | 3 | 3 | 4294967295 |")
+        );
+        assert!(exported.contains("Common elevated installation setup is outside the candidate"));
+        assert!(exported.contains("Missing summaries remain unmeasured"));
+        assert!(!exported.contains("private-scope-sentinel"));
+        assert!(!exported.contains("private-sid-sentinel"));
+        for status in ["absent", "rejected", "unmeasured"] {
+            detail["evidenceStatus"] = json!(status);
+            assert!(
+                project_sevenzip_execution_coverage(&detail)
+                    .iter()
+                    .all(|r| r["status"] == "unmeasured" && r["observedProcesses"].is_null())
+            );
+        }
+        detail["evidenceStatus"] = json!("verified");
+        for (key, value) in [
+            ("observedProcesses", json!(65)),
+            ("pairedExits", json!(2)),
+            ("rootExitCode", json!(4294967296_u64)),
+            ("exactJobReconciled", json!(false)),
+            ("lifetimeImagesRevalidated", json!(false)),
+            ("phase", json!("extract")),
+            ("schemaVersion", json!("unsupported")),
+        ] {
+            let mut bad = detail.clone();
+            bad["executionCoverage"]["baseline"][0][key] = value;
+            assert_eq!(
+                project_sevenzip_execution_coverage(&bad)[1]["status"],
+                "unmeasured",
+                "{key}"
+            );
+        }
+        let duplicate = detail["executionCoverage"]["baseline"][0].clone();
+        detail["executionCoverage"]["baseline"]
+            .as_array_mut()
+            .unwrap()
+            .push(duplicate);
+        assert_eq!(
+            project_sevenzip_execution_coverage(&detail)[1]["status"],
+            "unmeasured"
+        );
+        assert!(
+            project_sevenzip_execution_coverage(&json!({}))
+                .iter()
+                .all(|r| r["status"] == "unmeasured")
+        );
+    }
+
     #[test]
     fn sevenzip_baseline_gap_is_scoped_only_when_all_fixed_functions_are_measured() {
         let mut report = json!({"missingEvidence":["ordinaryBaseline","descendantCoverage"],"entries":[{"source":{"kind":"windowsSandbox","evidence":{"profile":"sevenZip","result":{"kind":"sevenZip","report":{"evidenceStatus":"verified","comparison":{"functions":[
@@ -427,7 +560,11 @@ mod sevenzip_projection_tests {
         assert_eq!(row["functions"]["testArchive"], "failed");
         assert_eq!(row["functions"]["extractArchive"], "unmeasured");
         assert_eq!(row["sevenzip"]["functions"][0]["candidate"], "notReached");
-        let output = format!("{}\n{}", serde_json::to_string(&summary).unwrap(), markdown(&summary));
+        let output = format!(
+            "{}\n{}",
+            serde_json::to_string(&summary).unwrap(),
+            markdown(&summary)
+        );
         for private in [
             "private@example.invalid",
             "S-1-5-21-private",
@@ -791,6 +928,35 @@ fn markdown(summary: &Summary) -> String {
                 ));
             }
             text.push_str(&format!("\nArchive bytes equal: {}. Content verification is separate. Inner profile deletion: {}.\n\n", comparison["archiveBytesEqual"], comparison["innerProfileDeleted"]));
+            text.push_str("Retained process coverage includes the root and observed descendants in the instrumented child-creation chain. Common elevated installation setup is outside the candidate. Validated capture is separate from function success. Brokers, loaded memory and all-host activity remain unmeasured.\n\n| Context | Phase | Capture | Processes | Paired exits | Root exit |\n|---|---|---|---|---|---|\n");
+            for item in comparison["executionCoverage"]
+                .as_array()
+                .into_iter()
+                .flatten()
+            {
+                text.push_str(&format!(
+                    "| {} | {} | {} | {} | {} | {} |\n",
+                    if item["variant"] == "installationSetup" {
+                        "Common elevated setup (outside candidate)"
+                    } else if item["variant"] == "baseline" {
+                        "Ordinary-user baseline"
+                    } else {
+                        "AppContainer candidate"
+                    },
+                    item["phase"].as_str().unwrap_or("unmeasured"),
+                    item["status"].as_str().unwrap_or("unmeasured"),
+                    item["observedProcesses"]
+                        .as_u64()
+                        .map_or_else(|| "unmeasured".into(), |v| v.to_string()),
+                    item["pairedExits"]
+                        .as_u64()
+                        .map_or_else(|| "unmeasured".into(), |v| v.to_string()),
+                    item["rootExitCode"]
+                        .as_u64()
+                        .map_or_else(|| "unmeasured".into(), |v| v.to_string())
+                ));
+            }
+            text.push_str("\nMissing summaries remain unmeasured; they do not establish that a command was not reached or that no descendants existed.\n\n");
         }
         text.push_str("| Function | Observation |\n|---|---|\n");
         for function in FUNCTIONS.into_iter().chain(
