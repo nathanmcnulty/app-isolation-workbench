@@ -40,11 +40,16 @@ A full build drive interrupted the first desktop link; Cargo's
 package-scoped development-artifact cleanup enabled a passing retry. No new
 application-native acceptance. Private logs/review: `coverage-*20261114*` below.
 
-Frozen release payloads remain source `7fca63e886d45cb3939bbae01d977fd11a997dac`,
-shared 24-file source SHA `2301eca7527c764365f6afe6cffa517b764596a180f0e4f69a265f354864250f`.
-Locked offline CLI/agent/desktop builds and independent package review passed for
-that source. Private package, validation and framing proofs are under
-`C:\aiw\sevenzip-execution-20261106`; they do not validate later source changes.
+Fresh private AIW-only release artifacts are source `c0357ca`: locked offline
+CLI/agent and desktop builds passed, with identical before/after tracked-source
+bytes. Compiled CLI identity matches the independently reconstructed 24-file
+source SHA `4aeb6d58f9eee106f79b3ee64f690e6a130eaa1fe4597c62162a5f91d841adf2`.
+Independent source/build/PE/ZIP review passed. `build-c0357ca` and
+`owned-tools-c0357ca-r1` below contain records and AIW tools, without vendor
+installer, MXC runtime or trial scripts. CLI and agent import `VCRUNTIME140.dll`;
+fresh Sandbox availability remains unmeasured. No prerequisite installation is
+authorized by this build. Preserve the older `7fca63e` package and partial
+transport; neither is current-source native application proof.
 
 Latest accepted native source is `1d966ca49ab843ad8213152767b6fe037ab3bff9`:
 bounded first-party ordinary/classic controls, six paired lifetimes each, exact
@@ -55,23 +60,37 @@ not its completed session. Older partial/failed results remain immutable.
 
 ## Native continuation boundary
 
-The new application package transfer last acknowledged part 95. Part 96's browser
-frame matched its pin but had no observed native acknowledgment. Both receivers
-returned at their fixed deadlines; no staging, CLI, installer or app trial was
-started. Preserve all parts and roots; never restart execution from a timeout.
-Private transport checkpoints and exact artifacts are in
-`C:\aiw\sevenzip-execution-20261106\native-transport-r1`.
+The November 14 reviewed read-only continuity preflight executed once after the
+user restored console readiness. Original JSON is retained unchanged: 22,175
+bytes, SHA `00c919b119c87885e4f4b8b2cd5bcd1946795487410a4409b1c011e97b2f1846`.
+Independent lossless audit passed. It confirms the existing VM, ordinary actor,
+fresh Core 7.6.10 console and registry build/UBR `26300/9974`. Old trial guards
+pin `26300/9711`; do not reuse them or the retired console bindings. Actual fresh
+guest servicing and loader prerequisites are still unmeasured.
 
-On November 14 the old parent transport-service PIDs were absent, and the console
-showed a different desktop state. Do not reuse PID 8516 or its birth-bound commands.
-New independently reviewed read-only preflight/viewer files and proof are under
-`C:\aiw\sevenzip-execution-20261106`, prefix `preflight-...20261114-r1`.
-No new preflight result has been observed. Direct browser access was unavailable;
-native Computer Use stopped because it could not confidently determine the URL
-during a console-page reconnect. Its outcome is unconfirmed. Revalidate the actual
-VM/actor/Core/console, retained parts and target state before any continuation.
-Windows Run truncates long commands: use only the short Core launcher there;
-reviewed bounded script wrappers belong in the owned console.
+All 96 historical parts 0–95 match their original size/hash pins and remained
+held/stable; part 96 was not observed. The old target directory open returned
+Win32 code 2 and staging remains unproven. The retained installer verified.
+This establishes historical `7fca63e` transfer continuity only: no adoption,
+resume, provider, vendor application or MXC runtime execution. Preserve all parts,
+roots and old failed attempts; never restart execution from an observation timeout.
+
+Private base: `C:\aiw\sevenzip-execution-20261106`; see
+`native-preflight-original-20261114-r1.json`, its admission record and
+`native-preflight-independent-audit-20261114-r1.json`. Capture R1's origin refusal
+and R2's validation refusal are retained. The parent transcribed 22,175 as 22,775;
+the diagnostic copy matched the native digest, the printed length was reobserved,
+and unchanged bytes were admitted without replay. Raw copies and receipts remain
+immutable. Both owned loopback helpers exited after identity checks; the owned
+local tab closed, and the original console/tab remain. Revalidate the raw record's
+actual console identity before any new command. Long wrappers belong in the
+console, never Windows Run (which truncates long input).
+
+Next native prerequisite: a fresh static-CRT first-party environment probe using
+the existing held workspace, exact session lease and bounded lifecycle. Measure
+host/guest versions before preparing an application plan; observe prerequisites
+without vendor/MXC loads. A dependency file's presence is not loader proof.
+Keep any refused measurement unknown and do not install runtimes automatically.
 
 ## Authorization and remaining work
 

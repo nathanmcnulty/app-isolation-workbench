@@ -41,6 +41,16 @@ before runtime installation or VM/security-setting changes.
 
 ## Current implementation
 
+Private AIW-only artifacts from `c0357ca` have passing locked offline release
+builds and independent source/byte/PE/ZIP review; they include no vendor input or
+MXC runtime. CLI/agent dynamic CRT prerequisites in a fresh Sandbox remain
+unmeasured. A one-shot read-only VM107 preflight verified the old transfer prefix
+and installer, while observing newer host servicing (`26300/9974` registry data).
+It is historical continuity evidence, not application acceptance of these
+artifacts. Old `9711` trial guards remain unusable. Fresh host/guest environment
+measurement is required before an exact new application plan; no version guessing,
+runtime installation, weaker fallback or implicit adoption is authorized.
+
 Retained 7-Zip reports now carry optional, verified execution coverage for
 common elevated installation setup and the observed baseline/candidate
 create/test/extract invocations. The runner publishes these summaries only
