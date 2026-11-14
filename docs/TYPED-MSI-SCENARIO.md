@@ -1,5 +1,12 @@
 # Typed MSI scenario integration
 
+Status as of 2026-11-08: this is a scoped fixed-workflow implementation or historical
+handoff record. Its evidence/contract remains valid only for the recorded source,
+inputs and observations. Follow the [current roadmap](ROADMAP.md) and
+[migration audit](APPLICATION-AGNOSTIC-MIGRATION.md) for new work; old product
+selections, future-tense tasks and operator commands are not current priorities,
+publication guidance or execution authorization.
+
 The fixed Notepad++ MSI profile now connects protected intake, preparation, separate import and approval, Windows Sandbox execution, completion verification, and exact-session cleanup. The pure compiler remains available through `provider compile-msi-scenario`; compilation alone grants no execution authority.
 
 ## Supported profile

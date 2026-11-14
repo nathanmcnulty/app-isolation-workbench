@@ -1,5 +1,10 @@
 # 7-Zip application assessment
 
+Historical fixed-application workflow: the [repository scope](REPOSITORY-SCOPE.md)
+takes precedence. This document is retained as a record of testing, not current
+publishing guidance. Hosted app-specific publication is retired or paused;
+remaining local fixed-app builders are part of the unfinished migration.
+
 Selected 2026-11-05 (America/Anchorage). The declared
 experiment completed its [native research trial](SEVENZIP-NATIVE-ACCEPTANCE.md).
 Production desktop/kernel/Results integration is implemented. The exact
@@ -181,6 +186,6 @@ desktop acceptance. W4/W5 and broad production acceptance remain open.
 
 | Acceptance scope | Advanced by this slice | Still open |
 |---|---|---|
-| [Benchmark 2](ROADMAP.md#benchmark-2---one-real-isolation-comparison) | The same approved fixed app/workflow now has a receipt-bound production matrix: all four functions passed in both modes, measured target tokens, selected file denials and verified inner/outer cleanup. Missing/broken-driver observations stay separate, as the earlier incomplete run demonstrates. | Application required-descendant evidence, registry denial for this profile and fresh-instance repeatability. Inner network/IPC/UI and endpoint claims require their own measurements. Archive bytes differ; the cause remains unmeasured. |
+| [Benchmark 2](ROADMAP-HISTORY-2026-11-06.md#benchmark-2---one-real-isolation-comparison) | The same approved fixed app/workflow now has a receipt-bound production matrix: all four functions passed in both modes, measured target tokens, selected file denials and verified inner/outer cleanup. Missing/broken-driver observations stay separate, as the earlier incomplete run demonstrates. | Application required-descendant evidence, registry denial for this profile and fresh-instance repeatability. Inner network/IPC/UI and endpoint claims require their own measurements. Archive bytes differ; the cause remains unmeasured. |
 | [W4: secure export and diagnostics](https://github.com/nathanmcnulty/app-isolation-workbench/issues/9) | Receipt-bound facts, bounded private failure diagnostics and actual allowlisted JSON/Markdown export. The successful Results reload/export is deterministic and preserves all 32 retained files; incomplete JSON export preserves its earlier 26 files. | Full sanitized assessment bundle and archive/signature-envelope round trip/tamper acceptance; deterministic recommendation and optional cited analyst flow with no verdict authority. Product-package checksums are not assessment-bundle acceptance. |
 | [W5: desktop and release hardening](https://github.com/nathanmcnulty/app-isolation-workbench/issues/10) | Actual fixed desktop preparation, exact-plan approval/separate Start, application comparison, retained reopen/export and truthful failed-driver handling. A separately approved native cancellation reaches exact owned cleanup without application findings; recovery services and bindings are implemented. | Native forced-fault recovery and accessibility acceptance, plus signed release, clean-machine acceptance and supported-host coverage for this profile. Earlier signed-alpha evidence retains its earlier recipe scope. |

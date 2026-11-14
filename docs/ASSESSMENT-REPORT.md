@@ -1,5 +1,11 @@
 # Retained MSI assessment report
 
+Migration status (2026-11-08): this describes retained implemented report paths,
+including fixed-product contracts. The [generic replacement](APPLICATION-AGNOSTIC-MIGRATION.md)
+will render application/workflow data without product dispatch. Preserve these
+historical verifiers and evidence meanings; their existence does not implement
+generic assessment or authorize a new run.
+
 Bambu Studio's separate approved STL-to-3MF export uses `run report-wsb-bambu-run`; see [the Bambu profile](BAMBU-STUDIO-PROFILE.md) for its artifact verifier, retained evidence, and JSON/Markdown commands. Its export result does not inherit MSI editor or file/registry observations. [Mixed application report sets](REPORT-SETS.md) combine both profiles with distinct function columns.
 
 `run report-wsb-msi` rebuilds a deterministic JSON report from a completed Windows Sandbox MSI workspace. It returns the verified scenario, guest root-process token observation, and available functional and filesystem observations, the original project requirements, unmeasured scenarios, and missing assessment evidence. The outcome remains `insufficientEvidence`; successful application function observations do not produce a compatibility recommendation or containment verdict.

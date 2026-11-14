@@ -77,7 +77,7 @@ boundary; do not introduce a parallel execution abstraction solely for this revi
 
 ## Next milestone and stopping rule
 
-Complete the [administrator acceptance cases](RELEASE-GATES.md#administrator-milestone-acceptance-cases),
+Complete the [administrator acceptance cases](RELEASE-GATES-HISTORY-2026-11-08.md#administrator-milestone-acceptance-cases),
 then stop for the clean-host/second-operator trial. Record unsupported inputs,
 setup failures, evidence gaps, data lifetime/export, and actionable recovery as
 part of the product. Same-host profiles require accessible original evidence;

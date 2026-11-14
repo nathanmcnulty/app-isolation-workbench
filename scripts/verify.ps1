@@ -24,6 +24,7 @@ try {
         'README.md',
         'docs\ARCHITECTURE.md',
         'docs\ROADMAP.md',
+        'docs\REPOSITORY-SCOPE.md',
         'docs\THREAT-MODEL.md',
         '.github\workflows\ci.yml',
         '.github\pull_request_template.md',
@@ -38,12 +39,19 @@ try {
     }
 
     $licenseText = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'LICENSE')
-    if ($licenseText -notmatch 'Apache License' -or $licenseText -notmatch 'Version 2\.0') {
-        throw 'LICENSE does not contain the Apache License 2.0 text'
+    if ($licenseText -notmatch 'This is free and unencumbered software released into the public domain\.' -or $licenseText -notmatch 'https://unlicense\.org/') {
+        throw 'LICENSE does not contain the Unlicense text'
     }
+    foreach ($manifest in @('Cargo.toml', 'gui/Cargo.toml')) {
+        if ((Get-Content -Raw -LiteralPath (Join-Path $repoRoot $manifest)) -notmatch '(?m)^license = "Unlicense"\r?$') {
+            throw "Project license metadata differs: $manifest"
+        }
+    }
+    & (Join-Path $PSScriptRoot 'verify-repository-content.ps1') | ConvertFrom-Json | Out-Null
+    & (Join-Path $PSScriptRoot 'test-repository-content.ps1') | ConvertFrom-Json | Out-Null
 
     $readmeText = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'README.md')
-    foreach ($requiredTerm in @('Workbench', 'Studio', 'v0alpha2', 'Windows 11 24H2', 'no automatic telemetry')) {
+    foreach ($requiredTerm in @('Workbench', 'alpha', 'experimental', 'Windows 11 24H2', 'no automatic telemetry')) {
         if ($readmeText -notmatch [regex]::Escape($requiredTerm)) {
             throw "README.md is missing required product-status term: $requiredTerm"
         }

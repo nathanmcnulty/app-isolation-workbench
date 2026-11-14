@@ -1,10 +1,10 @@
-name: Signed desktop candidate
+name: Signed desktop candidate (paused for scope cleanup)
 
 on:
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish a public alpha after the candidate and CI review
+        description: Paused until an app-neutral distribution is implemented and reviewed
         type: boolean
         default: false
 
@@ -17,7 +17,8 @@ concurrency:
 
 jobs:
   build:
-    if: github.repository == 'nathanmcnulty/app-isolation-workbench' && github.ref == 'refs/heads/main' && github.actor == 'nathanmcnulty' && github.triggering_actor == 'nathanmcnulty'
+    # Publication paused; preserve original owner/main gates for later review.
+    if: false && github.repository == 'nathanmcnulty/app-isolation-workbench' && github.ref == 'refs/heads/main' && github.actor == 'nathanmcnulty' && github.triggering_actor == 'nathanmcnulty'
     runs-on: windows-2025
     timeout-minutes: 40
     outputs:
@@ -114,7 +115,8 @@ jobs:
           retention-days: 7
 
   sign:
-    if: github.repository == 'nathanmcnulty/app-isolation-workbench' && github.ref == 'refs/heads/main' && github.actor == 'nathanmcnulty' && github.triggering_actor == 'nathanmcnulty'
+    # Publication paused; preserve original owner/main gates for later review.
+    if: false && github.repository == 'nathanmcnulty/app-isolation-workbench' && github.ref == 'refs/heads/main' && github.actor == 'nathanmcnulty' && github.triggering_actor == 'nathanmcnulty'
     needs: build
     runs-on: windows-2025
     timeout-minutes: 15
@@ -226,6 +228,7 @@ jobs:
           retention-days: 7
 
   assemble:
+    if: ${{ false }} # Publication paused: docs/REPOSITORY-SCOPE.md
     needs: [build, sign]
     runs-on: windows-2025
     timeout-minutes: 15
@@ -379,7 +382,8 @@ jobs:
 
   publish:
     needs: assemble
-    if: inputs.publish && github.event.repository.private == false && github.repository == 'nathanmcnulty/app-isolation-workbench' && github.ref == 'refs/heads/main' && github.actor == 'nathanmcnulty' && github.triggering_actor == 'nathanmcnulty'
+    # Publication paused; preserve original owner/main gates for later review.
+    if: false && inputs.publish && github.event.repository.private == false && github.repository == 'nathanmcnulty/app-isolation-workbench' && github.ref == 'refs/heads/main' && github.actor == 'nathanmcnulty' && github.triggering_actor == 'nathanmcnulty'
     runs-on: windows-2025
     timeout-minutes: 15
     environment: public-release

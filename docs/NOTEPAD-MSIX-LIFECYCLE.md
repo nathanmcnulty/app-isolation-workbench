@@ -1,5 +1,10 @@
 # First real application MSIX lifecycle
 
+Historical fixed-application workflow: the [repository scope](REPOSITORY-SCOPE.md)
+takes precedence. This document is retained as a record of testing, not current
+publishing guidance. Hosted app-specific publication is retired or paused;
+remaining local fixed-app builders are part of the unfinished migration.
+
 This is the next repackaging milestone after the accepted Sandbox bundles.
 Produce a reproducible, signed Notepad++ package, then install, activate, edit/save
 and uninstall that exact output on a fresh disposable worker. Research results
@@ -665,8 +670,11 @@ The first hosted signing research run `37710593027` stopped before assembly or
 signing because the runner's installed SDK differed from the approved tool. The
 fixed NuGet archive provides the same approved tool without accepting runner drift;
 SDK mismatch diagnostics now include the observed hash and version.
-`notepad-msix-research.yml` is a manual owner/main-only assembly/signing workflow;
-it has no public-release permission and never installs or executes the application.
+The former `notepad-msix-research.yml` was a manual owner/main-only assembly/signing
+workflow. It uploaded application packages as CI artifacts despite having no
+public-release permission. The workflow and its app-specific assembly builder
+are removed under the [repository scope](REPOSITORY-SCOPE.md); this paragraph
+records prior work, not a current publication path.
 Owner gates require both the original `github.actor` and the current
 `github.triggering_actor` on assembly and signing, including reruns. The existing
 personal signing control and desktop candidate use the same direct signing gate;

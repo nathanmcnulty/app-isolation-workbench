@@ -2,7 +2,7 @@
 
 ## Current status
 
-App Isolation Workbench is pre-alpha, free and open-source research software under the [Apache License 2.0](LICENSE). It must not be treated as a production security boundary, application allowlisting system, packaging authority, or evidence attestation service. The initial target is Windows 11 24H2 x64; live provider support is not present in the current release.
+App Isolation Workbench is experimental alpha, free and open-source research software. Project-owned material is released under the [Unlicense](LICENSE); dependencies and external applications retain their own terms. It must not be treated as a production security boundary, application allowlisting system, packaging authority, or evidence attestation service. The testing target is Windows 11 24H2 or later on x64. Historical fixed-workflow results do not establish general application support or effective isolation.
 
 ## Reporting a vulnerability
 
@@ -10,7 +10,7 @@ Please report suspected vulnerabilities privately through GitHub's private vulne
 
 ## Non-negotiable boundaries
 
-- Never commit signing keys, certificates containing private keys, customer installers, ETL/EVTX captures, secrets, or unredacted evidence bundles.
+- Never commit or publish third-party installers, application packages or extracted content, signing keys, certificates containing private keys, ETL/EVTX captures, secrets, or unredacted evidence bundles.
 - Never add an arbitrary command, script, path, registry, URL, or query execution verb to a privileged helper.
 - Treat project files, installer metadata, evidence fields, model output, and knowledge-pack content as untrusted input.
 - Do not make an AI provider part of an authorization, assertion, signing, installation, or deployment decision.

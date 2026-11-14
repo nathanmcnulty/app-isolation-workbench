@@ -9,6 +9,12 @@ Get-Content ./docs/WORKING-STATE.md
 
 The status helper uses the checkout containing the script, caps changed-file output at 30 entries, and performs no fetch or provider calls. Upstream counts are based on local refs and may be stale; null means no configured upstream. Add `-IncludeWorktrees` only when locating a different checkout is necessary.
 
+For the current recovery, use the [roadmap](ROADMAP.md),
+[migration audit](APPLICATION-AGNOSTIC-MIGRATION.md) and
+[execution packets](EXECUTION-PLAN.md). No new named-application adapter or compiled
+installer allowlist belongs in the generic path. Keep fixtures declarative and
+legacy readers separate from new execution.
+
 Choose a concrete slice and the checks relevant to its changes. Run selected checks once the code is ready:
 
 ```powershell

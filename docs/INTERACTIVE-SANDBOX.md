@@ -1,5 +1,12 @@
 # Scratch-only interactive Notepad++
 
+Status as of 2026-11-08: this is a scoped fixed-workflow implementation or historical
+handoff record. Its evidence/contract remains valid only for the recorded source,
+inputs and observations. Follow the [current roadmap](ROADMAP.md) and
+[migration audit](APPLICATION-AGNOSTIC-MIGRATION.md) for new work; old product
+selections, future-tense tasks and operator commands are not current priorities,
+publication guidance or execution authorization.
+
 ## Administrator preview entry
 
 The fixed `NotepadPlusPlusInteractive` preview package exposes

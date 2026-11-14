@@ -1,5 +1,10 @@
 # Bambu Studio reusable Sandbox package
 
+Historical fixed-application workflow: the [repository scope](REPOSITORY-SCOPE.md)
+takes precedence. This document is retained as a record of testing, not current
+publishing guidance. Hosted app-specific publication is retired or paused;
+remaining local fixed-app builders are part of the unfinished migration.
+
 ## Delivery contract
 
 The next milestone is a reusable bundle for the existing Bambu Studio 2.8.2.60

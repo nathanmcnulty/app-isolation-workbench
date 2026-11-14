@@ -1,5 +1,11 @@
 # Retained application report sets
 
+Migration status (2026-11-08): this describes retained implemented report paths,
+including fixed-product contracts. The [generic replacement](APPLICATION-AGNOSTIC-MIGRATION.md)
+will render application/workflow data without product dispatch. Preserve these
+historical verifiers and evidence meanings; their existence does not implement
+generic assessment or authorize a new run.
+
 The desktop [Results Explorer](RESULTS-EXPLORER.md) opens explicit shared assessment selections, compares retained observations, and exports privacy-limited local summaries without executing a run.
 
 `run report-wsb-set` combines verified Notepad++ MSI and Bambu Studio export runs. Each entry selects an explicit `notepadMsi` or `bambuExport` profile and contains a `run` selector. The reader calls that profile's existing retained verifier; it never detects or executes an application from caller-supplied commands.
@@ -109,15 +115,21 @@ MSIX currently accepts only profile `worker107NotepadR5`, whose exact archive
 SHA-256 is compiled into the reader:
 `768e9ade771bbc3345067c82745c15f2d7c0ed31c4c8e281d437d14a27c321b3`.
 This is the independently verified 285340-byte/118-entry archive described in
-[NOTEPAD-MSIX-LIFECYCLE.md](NOTEPAD-MSIX-LIFECYCLE.md). A copy is retained in
-`fixtures/msix-lifecycle/worker107-r5.zip` for reproducible offline reporting and
-negative tests. Its lab identities are historical, not current credentials or
+[NOTEPAD-MSIX-LIFECYCLE.md](NOTEPAD-MSIX-LIFECYCLE.md). Offline reporting and
+optional historical regression tests require an externally retained
+`worker107-r5.zip`, which is no longer distributed in this repository. Its lab identities are historical, not current credentials or
 execution authority. New archives, including recompressed copies, are rejected;
 caller-supplied hashes cannot enroll an unreviewed run. Future profiles require
 separate review of provenance and terminal receipts. This does not create a
 production MSIX launcher or accept arbitrary worker output.
 
-From this checkout on VM203:
+Optional historical reporting only: `examples/msix-research-assessment.json` uses
+`C:\AIW\ExternalEvidence\worker107-r5.zip` as an external-path example, not a
+file shipped with this checkout. Copy the example outside the repository and set
+`archive` to your independently retained original archive before use. Without it,
+the report contains an unavailable row; no historical success is inferred.
+
+For an appropriately edited example on the historical VM203 checkout:
 
 ```powershell
 cargo run --locked --offline -p aiw-cli -- run report-assessment --input C:\aiw\app-isolation-workbench\examples\msix-research-assessment.json --format json

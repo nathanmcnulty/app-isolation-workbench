@@ -1,5 +1,12 @@
 # Clean-host preview handoff
 
+Status as of 2026-11-08: this is a scoped fixed-workflow implementation or historical
+handoff record. Its evidence/contract remains valid only for the recorded source,
+inputs and observations. Follow the [current roadmap](ROADMAP.md) and
+[migration audit](APPLICATION-AGNOSTIC-MIGRATION.md) for new work; old product
+selections, future-tense tasks and operator commands are not current priorities,
+publication guidance or execution authorization.
+
 Current source requires stable x64 PowerShell Core 7.6 or later at the machine-wide path. Use the [runtime setup and acceptance plan](handoffs/2026-10-24-powershell76/SETUP-AND-ACCEPTANCE.md) before creating a new VM107 baseline or running a migrated trial. Prior preview observations below retain their original runtime provenance.
 
 This is the release-candidate handoff for the first supported administrator

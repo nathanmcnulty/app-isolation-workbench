@@ -13,6 +13,19 @@
 *.msixbundle
 *.appx
 *.appxbundle
+# Applications and generated packages belong outside the repository.
+*.exe
+*.dll
+*.msi
+*.msp
+*.cab
+*.zip
+*.7z
+*.rar
+*.nupkg
+*.tar
+*.tar.gz
+*.tgz
 *.aiwmodel
 *.aiwknowledge
 /.idea/

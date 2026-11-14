@@ -6,6 +6,15 @@ branch `codex/multimode-assessment`, from main `b27942a` after #106. Start with
 The full three-mode application goal remains active; W4/W5, Benchmark 2 and
 production acceptance are incomplete.
 
+Integration includes main `04be2ce` and its application-neutral roadmap, repository
+scope and dependency updates. The fixed 7-Zip work below is a bounded legacy
+assessment/evidence increment, not the generic engine or a new supported-product
+catalog. Follow [the migration audit](APPLICATION-AGNOSTIC-MIGRATION.md) for new
+generic work. Keep vendor inputs external; the installer-bundling desktop builder
+is retired and desktop publication stays paused. Preserve original evidence and
+its exact-source readers. The user-authorized private VM107 trials remain scoped
+to this goal; a roadmap is not additional execution authority.
+
 ## Current source and evidence
 
 Current reporting work exposes verified execution-coverage summaries in retained
@@ -16,7 +25,8 @@ Common elevated installation setup is outside the candidate. See
 Reporting checks passed: 137 provider, 7 retained-reader, 27 desktop Rust tests
 (4 existing manual/replay cases ignored), all 30 desktop JavaScript tests,
 provider/runner and desktop all-target Clippy, format and governance. Independent
-review passed. A full build drive interrupted the first desktop link; Cargo's
+review passed before the main integration; merged-source checks remain pending.
+A full build drive interrupted the first desktop link; Cargo's
 package-scoped development-artifact cleanup enabled a passing retry. No new
 application-native acceptance. Private logs/review: `coverage-*20261114*` below.
 

@@ -1,5 +1,12 @@
 # Bambu Studio administrator entry: acceptance boundary
 
+Status as of 2026-11-08: this is a scoped fixed-workflow implementation or historical
+handoff record. Its evidence/contract remains valid only for the recorded source,
+inputs and observations. Follow the [current roadmap](ROADMAP.md) and
+[migration audit](APPLICATION-AGNOSTIC-MIGRATION.md) for new work; old product
+selections, future-tense tasks and operator commands are not current priorities,
+publication guidance or execution authorization.
+
 The next supported application candidate is the exact Bambu Studio 02.08.02.60
 EXE already covered by the fixed STL-to-3MF export profile. This is a second
 application workflow, not general EXE support. The existing [Bambu profile](BAMBU-STUDIO-PROFILE.md)

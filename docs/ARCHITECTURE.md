@@ -1,101 +1,204 @@
 # Architecture
 
+Updated 2026-11-08 against main `b27942a` and the repository-scope cleanup.
+The [roadmap](ROADMAP.md) defines the recovery sequence; the
+[source migration audit](APPLICATION-AGNOSTIC-MIGRATION.md) names coupling and
+removal work. Proposed generic contracts below are not implemented merely by
+being documented. Historical evidence remains bound to its original source.
+
 ## Product shape
 
-AIW is an administrator-led comparison laboratory that evolves into application adaptation and authoring. Workbench will compare the same typed workflows across an ordinary in-worker baseline and isolation candidates. Scoped function results, boundary verification, and capture completeness remain separate. Evidence can support a reviewed recipe experiment before a complete isolation verdict exists; a package or launch profile becomes validated only after its own required checks pass. Studio is the evolution of this product, not a separate project. See the [current delivery sequence](ROADMAP.md#current-delivery-sequence) for implementation order; later capability benchmarks do not all gate the first preview.
+AIW is an administrator-led laboratory for application installation/use assessment,
+comparison and optional adaptation/authoring. **Workbench -> Wizard** is the
+product progression; older records use Studio for the latter. Assessment must
+stand alone before general packaging. A Windows desktop and CLI already exist,
+but their end-to-end application workflows remain product-specific.
+
+The target architecture is one capability-selected path for an administrator's
+application, not one adapter per application. Extend existing typed concepts and
+services. Names are descriptive; exact payload identities bind authority. A known
+product name or compiled installer hash must not be admission to the new engine.
+Unsupported operations produce specific blockers without discarding useful evidence.
 
 ```text
-CLI / PowerShell / future Tauri UI (ordinary user)
-                         |
-                 aiw-orchestrator
-          /          |          |           \
-   read-only probe  evidence  approvals   provider adapters
-                                             |
-                                  disposable worker boundary
-                                             |
-                              measured guest agent + untrusted app
+Windows desktop / CLI / PowerShell
+                |
+       shared application services
+      /          |             \
+protected     verified      plan/review/approval
+intake        reporting           |
+                          orchestrator + runner
+                                  |
+                      disposable Windows worker
+                                  |
+                    typed guest operations + untrusted app
+                                  |
+                      bounded evidence and terminal receipts
 ```
 
-The shared `aiw-orchestrator` application-service crate is the boundary used by both the current CLI and future Tauri backend. It currently owns strict file-backed run creation, approval, cancellation, recovery, lifecycle/event journaling, terminal results, and cross-file validation. Generic creation rejects Windows Sandbox actions; those plans can enter authoritative state only through the narrow atomic preparation-import operation, which publishes the plan, import receipt, genesis event, and journal head together. The UI will call services directly rather than automate the CLI as a subprocess. The Windows Sandbox golden-probe and fixed imported-MSI executors are capability-gated. The current MSI profile exercises Notepad++ document open/edit/save/close and records scoped file changes and stage progress. UI work and other provider execution remain unimplemented.
+The outer worker and selected application-level isolation are separate. An ordinary
+process in Sandbox is an in-worker baseline, not ordinary execution on every endpoint.
+
+## Current components and limits
+
+| Component | Implemented role | Recovery work / explicit limit |
+| --- | --- | --- |
+| `aiw-schema` | Typed project source (`msi`, `exe`, `portableDirectory`), entry points, intent, scenarios and versioned migration. | Schema recognition is broader than runtime support. Compile/validate supported operations coherently rather than introduce a parallel project format. |
+| `aiw-probe`, `aiw-token`, `aiw-windows-platform` | Host/token/source observations; protected native intake and held-object authority; Windows execution helpers. | Generic source import is not generic installation. Product workflow code is mixed with reusable native mechanisms and must be extracted carefully. |
+| `aiw-orchestrator` | Plans, approvals, lifecycle/event journals, cancellation, results, cross-file validation and recovery authority. | It does not itself execute providers. Windows Sandbox authority enters through validated preparation/import, not generic caller-created state. |
+| `aiw-runner`, `aiw-provider-wsb` | Preparation, import, exact provider sessions, receipt verification, fixed app/control execution and recovery; retained reports, bundles and profiles. | Fixed MSI/Bambu/7-Zip and other closed paths must become generic capability-selected preparation/operations; do not generalize by accepting arbitrary commands. |
+| `aiw-admin-workflow` | Shared operator services, complete approval review, separate Start, progress, fixed assessment/packaging and export workflows. | Replace product assets/recipe selection with one reviewed generic application plan while keeping authoritative services shared by GUI/CLI. |
+| `aiw-guest-agent`, native helpers | Measured guest execution, stage observations, process/token/output checks and receipt-last completion for closed workloads. | Product request variants and workflow-specific executors remain. Target one typed operation protocol with explicit evidence and limits. |
+| `aiw-core`, `aiw-evidence` | Comparison/evidence primitives, canonical identity and verification support. | Reuse them behind verified evidence. Existing core statuses include `Passed`, `Failed`, `Skipped`, `Incomplete`; broader result semantics require explicit version/mapping, not a new unreviewed verdict engine. |
+| `aiw-control-fixture`, `aiw-control-appcontainer`, `aiw-golden-probe` | Project-owned controls and scoped token/file/registry/child boundary evidence. | Validate collection/enforcement mechanisms; do not substitute controls for a vendor application's own target/descendant observations. |
+| `aiw-cli`, `powershell`, `gui` | CLI/PowerShell and actual Tauri desktop surfaces; offline retained Results browsing/export. | Product selections/projections remain. Offline Results opens verified selections, not trusted caller report JSON, and does not execute/recover runs. |
+| `aiw-msix-worker`, VM helpers | Fixed MSIX worker lifecycle and retained report integration. | Fixed lifecycle evidence is not arbitrary conversion or a containment verdict. Generic packaging is optional later work. |
+| `aiw-provider-mxc` | Non-executing, pinned MXC dry-run/planning adapter. | No MXC execution acceptance; current upstream contracts require a separately reviewed pin/adapter migration before adoption. |
+
+Source details and deletion criteria are in the [migration audit](APPLICATION-AGNOSTIC-MIGRATION.md).
+Retained implemented behavior is documented in [reports](ASSESSMENT-REPORT.md),
+[Results](RESULTS-EXPLORER.md), [paired controls](PAIRED-NATIVE-APPROVAL.md),
+[7-Zip assessment](SEVENZIP-ASSESSMENT.md) and [MSIX execution](MSIX-EXECUTION.md).
+Their limits are not relaxed by this architecture.
 
 ## Lifecycles and contracts
 
-The current code separates the product into three explicit lifecycles:
+Keep three conceptual lifecycles distinct:
 
-- `AssessmentRun`: intake, baseline, isolated candidate, scenarios, canaries, evidence, comparison, and recommendation.
-- `LaunchRun`: replay of a previously validated profile after application, provider, OS, and policy drift checks.
-- `AuthoringRun`: Studio recipe approval, disposable capture, adaptation, package inspection, signing, and final validation.
+- **Assessment:** source/intake, reviewed installation/use, optional baseline and
+  candidate, observations, comparison and recommendations.
+- **Replay:** drift-checked execution of a validated plan/profile with fresh
+  run-specific approval and explicit runtime/data lifetime.
+- **Authoring:** reviewed adaptations/capture, package inspection, signing outside
+  the worker and validation of the final artifact. Packaging is not required to assess.
 
-The `aiw.dev/v0alpha2` project contract implements typed `ApplicationSource` (`msi`, `exe`, `portableDirectory`), `IsolationIntent`, versioned `ExecutionProvider`, typed `Scenario`, immutable hash-bound `RunPlan`, `ApprovalRecord`, append-only `RunEvent`, and `RunResult`. Existing `v0alpha1` projects remain readable through a non-destructive migrator that writes a new revision and requires review before planning. Candidate configuration is typed; namespaced extensions cannot control privileged or executable behavior. The current `aiw.dev/run-plan/v0alpha3` contract binds the canonical validated project revision hash and, for the Windows Sandbox action, the complete inspectable workspace evidence plus its canonical hash. The former unbound `v0alpha1` and workspace-unbound `v0alpha2` plan shapes remain published for offline inspection and fail closed if supplied for mutation. `run status` is observational, while `run recover` is the explicit journal-repair operation. Retained `WsbMsiAssessmentReport` and `WsbMsiRunReport` contracts are implemented. The provider-neutral paired report, `ValidatedLaunchProfile`, and recipe/receipt family remain later slices.
+These are architectural responsibilities, not a claim that one generic
+`AssessmentRun`, `LaunchRun` or `AuthoringRun` type implements the whole journey.
 
-Authoritative state is file-based and inspectable: immutable project revisions, one directory per run, hash-bound plan/approval files, append-only event/evidence JSONL, content-addressed artifacts, and terminal receipts/reports. A disposable local index may accelerate the UI but is never authoritative.
+Existing `aiw.dev/v0alpha2` projects use typed `ApplicationSource`, `IsolationIntent`,
+`ExecutionProvider` and `Scenario`. Legacy projects migrate non-destructively into
+new reviewed revisions. The `aiw.dev/run-plan/v0alpha3` contract binds the canonical
+project revision and WSB workspace evidence; earlier unbound plans remain readable
+but cannot authorize mutation. Namespaced metadata/extensions cannot execute code
+or control privileged behavior.
 
-On Windows, WSB import and revocation publication use the held workspace authority rather than path-created descendants. Revocation is deliberately two-phase: the owner-scoped outer coordination lease and inner run lock are acquired before preparation descendants are reopened, then recovery and publication of the revocation artifact, event journal, and heads are performed relative to those revalidated handles. The generic path-backed orchestrator methods remain for portable contract tests and non-WSB callers; they are not the Windows runner authority.
+The generic extension must bind source identity, supported install mechanism,
+entry-point discovery/review, argument vector, working directory, user context,
+inputs, output assertions, requested boundary, observation scopes, budgets and
+cleanup. Discovery may produce candidates but cannot grant new authority. Resolve
+ambiguity and bind newly selected executable/policy authority before launch.
 
-The private checkpoint-bound depublish transaction is complete. It classifies the checkpoint-bound root as exact `Original`, `Tombstone`, `Absent`, `Foreign`, or `Ambiguous`; writes and flushes an immutable external commit before the exact non-replacing handle-relative root rename; then flushes the commit file and strictly reopens it. Recovery validates the commit and handles either the pre-rename or post-rename state, preserving foreign and ambiguous states and failing closed. The child-first disposition phase covers all 19 fixed objects: each exact object is authorized by an immutable external canonical pre-disposition record hash-chained from the depublish commit and published before handle-only deletion. Recovery accepts only a contiguous published prefix with at most one pending record and the exact physical prefix; root absence after ordinal 19 is not terminal cleanup. No provider, CLI, `RunResult`, or public cleanup UX is exposed; the terminal receipt is limited to this exact workspace transaction. File flush is provided, but no parent-directory flush or power-loss durability guarantee is made.
+Authoritative state remains inspectable files: immutable project revisions,
+hash-bound plans/approvals, append-only events/evidence, artifacts and terminal
+receipts. Any UI index is disposable, never authority. Preserve held-file identity,
+exact plan/session binding, complete provenance and receipt-last publication.
 
-After the exact 19-record published chain and physical absence are proven, the private terminal workspace-cleanup transaction creates a canonical owner/SYSTEM-protected receipt in a create-new deterministic pending name, self-bound to its parent/file identity, flushes and strictly reopens it, and publishes the final receipt. An exact retry must reuse the same operator-supplied completion timestamp; all intermediate authority files remain retained. The receipt distinguishes absent original name from an unrelated replacement and never deletes that replacement. No provider, CLI, `RunResult`, or public cleanup UX is exposed, and this is not a broad cleanup-complete claim.
+## Execution and recovery boundary
 
-## Current components
+Installers and applications run only in approved disposable Windows Sandbox/VM
+workers. The host performs protected intake, planning, review, reporting and
+bounded orchestration. Do not expose a general privileged shell, script/path/query
+verb or persistent SYSTEM service to implement the generic workflow.
 
-The current public execution boundary is `aiw run start` for imported-and-approved Windows Sandbox golden-probe or fixed Notepad++ MSI profiles. Executables, mappings, plan, workspace, approval, and deterministic session identity are persisted-derived. Live proof includes MSI install/open/edit/save/close, stage observations, scoped file snapshots, receipt verification, and exact cleanup. Caught MSI failures can publish a failed receipt with bound stage progress; neither those observations nor a successful function run establish a complete containment verdict. Public provider recovery reconciles the persisted exact session. General caller-defined application execution is not exposed.
+Use reusable MSI/reviewed EXE/portable mechanisms. Unknown install semantics require
+a bounded operator checkpoint or a capability blocker, not guessed flags. Catalog
+metadata, scripts, application output, AI text and window titles are untrusted data.
+Acquisition/dependencies/network/device permissions are separate explicit inputs.
 
-The current v5 MSI profile separates elevated installation from a fresh standard-user application runtime inside the guest. It verifies the suspended child token before resume and binds profile/AppData observations to that account. The v5 profile also binds scoped registry observations to that account, with incomplete scopes excluded from diffs. Historical v4 standard-user and v3 elevated configurations remain separately readable. For comparison, an ordinary process inside a disposable worker is an in-worker baseline; it is not a measured ordinary endpoint run. An inner AppContainer candidate and the outer worker boundary must be identified separately.
+Keep native process image/handle checks, safe shell-free argument quoting, bounded
+output, deadlines, job ownership and exact cleanup. A driver control must prove
+exit/output/timeout behavior before vendor trials. Fresh controlled state is needed
+for each comparison role. Cancellation or recovery may act only on the exact owned
+session, never another session with a similar name.
 
-A future comparison adapter will bind the exact pair of approved run revisions, common app/scenario/environment inputs, and intentional policy differences before calling existing `aiw-core` comparison primitives. Whole-project hashes may differ because the candidate changes; uncontrolled environment/driver differences invalidate attribution. Optional normalized indexes remain rebuildable and cannot authorize execution.
+Windows mutations use held workspace authority and owner/SYSTEM-protected
+coordination. Preserve lock/lease ordering and persisted provider transactions.
+Read-only `run status`/reporting must not repair state; `run recover` is explicit.
+Legacy recovery remains limited to the authority its original version recorded.
 
-- `aiw-schema`: strict project/model-pack parsing and semantic validation.
-- `aiw-evidence`: canonical JSON, append-only hash chains, and deterministic allowlisted assessment manifests.
-- `aiw-core`: legal state transitions, deterministic comparison, conservative canary evaluation, and advisory-report validation.
-- `aiw-probe`: read-only environment and executable discovery, conservative Windows Sandbox readiness, and bounded non-executing application-source snapshots. Application inspection uses an explicit MSI/EXE/portable kind, reads PE architecture, and exposes strict file and portable-directory authority evidence contracts.
-- `aiw-windows-platform` source authority: holds an absolute fixed-volume MSI/EXE without write/delete sharing, rejects reparse files, hard links, unsupported named streams, remote/non-ACL volumes, and content/identity drift, and records the final path plus volume/file ID. Portable traversal retains the root and every descendant handle, enumerates and opens children relative to held parents, rejects ambiguous or unsafe namespace features, and revalidates object identities, content, streams, links, attributes, and directory entries. The CLI keeps these handles through final comparison and JSON publication. Directory namespace additions remain possible after the final enumeration, so this is read-only assessment evidence—not protected import, signer trust, compatibility, containment, or execution authority.
-- `aiw-windows-platform` protected file import: accepts only an extension-matched held MSI/EXE authority, creates a new owner-and-SYSTEM-protected intake root and descendants handle-relative, copies from the retained source handle, flushes and verifies the destination, and writes the bounded receipt last. Verification holds strict read-only/no-write-share handles, requires the exact root/source allowlists, verifies protected ACLs, stable identities, conservative attributes, and v0alpha2 receipt-bound semantic EA names/flags/value lengths/value hashes for the root, source directory, and payload (excluding only the kernel file-hash cache as described below), then rehashes the single-link unnamed-stream payload. The self-describing receipt file's kernel EAs are constrained to the exact allowed sets but are not bound into its own bytes. Receipt absence is definitively incomplete; receipt presence is still untrusted until its bytes match the externally returned authority and read-only verification succeeds. Partial or conflicting roots are preserved, never adopted, repaired, or removed; retry requires a new intake ID until an explicit recovery transaction exists. File flush is provided, but parent-directory and power-loss durability are not claimed. The external receipt remains the caller's drift authority and import does not imply signer trust, compatibility, containment, or permission to execute.
-- Download metadata intake: the opt-in [archive policy](DOWNLOAD-METADATA-INTAKE.md) permits only bounded `Zone.Identifier` and `SmartScreen` source streams. Retained stream handles bind names, sizes and hashes to the same underlying file identity. A v0alpha3 import receipt binds protected metadata sidecars and explicitly normalizes the payload for later approved Sandbox execution. Legacy unnamed-stream receipts retain their v0alpha2 serialization. Staging, workspace verification and cleanup retain their strict unnamed-stream-only policy.
-- `aiw-windows-platform` protected portable import: preflights a retained handle-relative source plan against stricter destination-name, entry, aggregate-path, final-path, total-byte, and 16 MiB receipt bounds before creating anything. It creates `source/payload` and every descendant relative to protected held parents, copies files by bounded positional reads from retained source handles, closes destination writers, binds the exact manifest and per-object identity/hash/link/stream/ACL/EA evidence, writes the receipt last, and independently verifies through read-only/no-write-share parent and child handles. Source EAs are not copied. Missing, partial, conflicting, drifted, or oversized state is preserved and never adopted, repaired, resumed, or removed; retry requires a new intake ID.
-- `aiw-token`: audited native Win32 target-token evidence boundary.
-- `aiw-golden-probe`: fixed in-target token evidence probe used by the narrow live W1 mapping/logon proof.
-- `aiw-provider-wsb`: hardened `.wsb` rendering, lifecycle planning, and completion-receipt verification.
-- `aiw-guest-agent`: fixed-function golden token probe and imported-MSI scenario executor. The MSI path records token, document, scoped file, and stage observations; caught native failures can publish a strict failed-attempt artifact and matching evidence event. Its requests do not expose arbitrary commands/scripts, and completion is published last. See [report semantics](ASSESSMENT-REPORT.md).
-- `aiw-runner`: fail-closed W1 preparation, import, lifecycle, and recovery kernel. Preparation validates the project and trusted empty provider state before creating a protected workspace, holds an explicitly expected-hash guest-agent source through staging, binds provider/workspace/agent identities into fixed WSB and run plans, and writes the strict preparation receipt last. Import reopens and retains the exact workspace, receipt, plans, and agent while the orchestrator atomically publishes a provenance-bound pristine `PendingApproval` run. On Windows every mutating `RunLayout` operation first acquires an owner-and-SYSTEM-only Global kernel mutex bound to the canonical original root and run ID, then checks external discard control before opening the inspectable descendant lock file. The private discard workflow retains the exact intent handle and outer coordination, then holds a read-only tree snapshot that blocks writes, delete, and rename through publication. It materializes and verifies a portable semantic inventory of exactly 19 objects and publishes a deterministic protected external checkpoint beside the workspace. The checkpoint schema binds the v2 revocation record, exact inventory and hashes, checkpoint parent/file identity, cleanup ID, and tombstone. It uses create-new deterministic pending publication, write-through/flush, strict reopen, non-replacing handle-relative rename, and final flush/reopen. Exact pending/final recovery preserves partial, conflicting, hardlinked, and drifted state and fails closed. There is no parent-directory flush or power-loss durability claim, and no run-tree, journal/head, provider, CLI, `RunResult`, or public cleanup UX; child-first disposition is bounded to the 19 fixed objects. The execution kernel uses a strict persisted provider-session transaction, exact-ID recovery, and a private native test adapter. Its native launcher creates the exact verified provider image suspended, restricts inherited handles, assigns the CLI process to a kill-on-close job before resume, and enforces bounded output, an invocation deadline, and a fixed cleanup allowance. The live proof covers start, exact-session reconciliation, connect-triggered user logon, receipt verification, stop, and absence. Public provider start is limited to the imported and explicitly approved golden-probe or fixed MSI profile. A verified W1 receipt remains insufficient evidence for a containment verdict.
-- `aiw-runner` recovery: new `v0alpha3` transactions bind the complete workspace evidence, request path relative to the held tools directory, and pinned provider protocol into each transition hash. `aiw run recover` reopens that exact workspace, rereads unchanged transaction authority while its handles are held, independently validates the current Store provider, and performs only list/optional exact-stop/list reconciliation. Legacy `v0alpha2` records remain readable for exact provider cleanup but cannot authorize request deletion. General caller-defined application execution remains unimplemented; fixed golden-probe/MSI start and exact-session recovery are available.
-- `aiw-windows-platform` fixed-tree inventory and checkpoint: a crate-private read-only primitive holds the exact tree snapshot through publication, blocking tree writes, delete, and rename, and materializes a portable semantic inventory for exactly 19 objects. It records stable IDs, canonical paths, types, ACL/link/stream/attribute policy, file sizes and hashes, and EA names/flags/lengths/hashes; unstable queried-byte counts are excluded. A deterministic protected external checkpoint beside the workspace binds the v2 revocation record, exact inventory/hashes, parent/file identity, cleanup ID, and `.aiw-discarded-v1-<cleanupId>` tombstone. Create-new pending, write-through/flush, strict reopen, non-replacing handle-relative rename, final flush/reopen, and exact pending/final recovery preserve partial, conflicting, hardlinked, or drifted state and fail closed. No parent-directory flush or power-loss durability claim is made; no run-tree, journal/head, provider, CLI, `RunResult`, or public cleanup UX is present; child-first disposition is bounded to the 19 fixed objects.
-- `aiw-provider-mxc`: pinned non-executing MXC dry-run/execution plans; it does not run MXC.
-- `aiw-orchestrator`: strict run-plan, approval, journal, cancellation, recovery, result, and on-disk transaction boundary; it does not execute provider actions.
-- `aiw-windows-command-line`: shell-free Windows argument quoting.
-- `aiw-cli`: stable JSON command surface consumed by PowerShell; the future UI will call Rust services directly. `run prepare-wsb`, `run verify-prepared-wsb`, and `run import-prepared-wsb` expose the non-provider preparation boundary; approval remains an explicit later step, and `run start` executes the imported and approved golden-probe or fixed MSI profile. MSI preparation and both retained-report commands expose the implemented application benchmark.
+The private discard proof is still bounded to an exact 19-object tree: protected
+external checkpoint, immutable depublish commit, exact non-replacing rename,
+hash-chained pre-disposition records, handle-only deletion and terminal receipt.
+Foreign/ambiguous state is preserved. Root absence alone is not complete cleanup.
+File flushes do not establish parent-directory/power-loss durability. Do not expose
+that proof as general workspace deletion; public discard and real retained workspace
+shapes need their own design and verification.
 
-## Planned execution boundary
+## Evidence and comparison rules
 
-```text
-ordinary-user orchestrator
-        |
-        +-- short-lived elevated helper (fixed typed verbs only)
-        |      owner-bound IPC, caller validation, canonical handles
-        |
-        +-- Windows Sandbox provider or checkpointed Hyper-V authoring worker
-                 |
-                 +-- fixed-function guest agent
-                 +-- untrusted installer/application
-```
+Keep raw artifacts, normalized observations, function assertions, boundary checks
+and recommendations distinct. The report must answer independently:
 
-The helper will be launched only for an approved fixed operation, use bounded messages, and exit after the operation. There will be no persistent SYSTEM service, arbitrary shell/script/path/registry/query verb, or automatic Windows feature/provider installation. A fresh workspace and provider lease are required for every mutating run; cancellation, crash recovery, reboot continuation (when declared), and idempotent cleanup are first-class states.
+- Which exact app/input/workflow was exercised, and what passed, failed or did not run?
+- Were baseline and candidate comparable, and which differences were intentional?
+- What boundary/policy was requested, and what was actually measured on the target
+  and required descendants? Which allowed/denied controls support each claim?
+- Which collectors/scopes were available, incomplete, missing or inapplicable?
+- What lifecycle/cleanup was observed, and what remains to recover or preserve?
+- If requested, what adaptation/package is feasible and what additional checks remain?
 
-## Evidence and provider rules
+Hash/receipt consistency is not authenticity against an administrator inside the
+guest. State collector trust and corroboration limits; independently observed
+process/boundary evidence is still required for claims the guest cannot establish.
 
-Provider configuration is intent, not proof. A complete result must correlate host observations with guest evidence and record requested/effective backend, provider and OS provenance, target and descendant process tokens, policy/configuration hash, trace completeness, scenario results, boundary canaries, terminal receipt, and cleanup. Missing evidence, fallback, timeout, drift, or incomplete cleanup invalidates an isolation conclusion.
+Do not compress these into an `isolation-ready` boolean. A function pass does not
+prove safety, a file change does not prove a dependency, and an absent event does
+not prove denied access when capture is incomplete. UI/operator statements are
+not automatically verified output assertions. Preserve valid completed observations
+when another stage fails. Never infer incompatibility from driver/preflight failure.
 
-The implemented outer test boundary is Windows Sandbox. The next proposed application-level candidate is a bounded classic AppContainer implementation, first proven inside a disposable worker. Native launch feasibility must be established before claiming support for a real application. MXC remains planning-only; MXC, preview Win32 app isolation/App Silo, and CreateProcessInSandbox do not gate the first validated launch/package. Each adapter needs its own effective-boundary, descendant, canary, and cleanup proof. This replaces the former requirement to finish both Windows Sandbox and MXC before releasing useful Workbench capabilities.
+Version semantic extensions explicitly and map historical fields conservatively.
+Keep old evidence verifiable without changing its bytes or filling missing
+observations. Legacy readers may project historical facts but cannot authorize
+new execution or satisfy a new claim absent from the old evidence.
 
-## Intake receipt version boundary
+## Provider and packaging boundaries
 
-File and portable-directory intake receipts now emit `v0alpha2`. After validating the complete native EA set, intake excludes only the kernel-managed `$KERNEL.PURGE.SEC.FILEHASH` cache from canonical EA authority. The cache can appear or change independently of the held payload content; AIW verifies the content SHA-256 itself. All other allowed EA values, file identities, ACLs, names, streams, and payload hashes remain authoritative. Unknown EAs and standalone FILEHASH on directories are rejected. `v0alpha1` receipts require a fresh import and are not reinterpreted under the new policy. The fixed-tree discard contract retains exact cache binding and does not use this intake projection.
+Direct Windows Sandbox is the implemented outer worker. Classic AppContainer,
+MXC ProcessContainer/BaseContainer/PSEC, MXC IsolationSession, Linux/WSLc and
+experimental micro-VM backends have different capabilities; a shared schema does
+not make them interchangeable. An unavailable or wrong-OS provider is a useful
+capability result, not an app failure. [Selection research](MXC-ASSESSMENT-SELECTION.md)
+and the [roadmap](ROADMAP.md#provider-research-and-later-expansion) explain the scope.
 
-## Studio boundary
+Declare minimum claim-specific controls before running. Preserve requested and
+effective tier/policy, target/descendant evidence, denial/allowed controls,
+completeness and cleanup. No silent fallback, automatic host-DACL mutation or
+capability widening may produce an isolation pass. Outer offline Sandbox settings
+do not prove inner network enforcement.
 
-Package authoring will use disposable workers and pinned Microsoft tooling for capture when needed, with deterministic payload/recipe assembly where capture is unnecessary. A checkpointed Hyper-V worker can serve baseline, capture, and clean final-validation roles, but each run needs fresh controlled state. It keeps `deliveryModel: containedMsix` separate from `runtimeBoundary: mediumIlFullTrust | appContainer | appSiloPreview`. A converted full-trust MSIX is a packaging baseline, not an isolation verdict. A scoped assessment may justify a recipe experiment while isolation evidence is incomplete; it cannot justify a validated package claim until the final required checks pass. Capability Profiler output and narrowly scoped PSF remediation are proposals requiring explicit review and a complete Workbench revalidation. Signing occurs outside the untrusted worker, never exposes private-key material, and binds the final package hash to the final validation receipt. Master Packager is manual export/import only.
+MSIX delivery is separate from `mediumIlFullTrust`, classic AppContainer and preview
+App Silo runtime boundaries. Full-trust fallback cannot satisfy an isolation claim.
+Optional package capture uses approved disposable workers and pinned tooling;
+include capture drivers and other setup side effects in the plan. Reviewed PSF
+remediation is not arbitrary script authority. Master Packager is manual handoff
+only. Sign outside the untrusted worker and bind final signed bytes to fresh
+validation. Outputs and third-party content stay outside this repository/releases.
 
-## Local AI and telemetry
+## Intake version boundary
 
-An optional host-side Analyst consumes bounded verified evidence and returns cited plain text. It has no tools, credentials, network, execution, signing, deployment, or authority to alter deterministic findings. Model, runtime, and knowledge artifacts are separate trust classes, signed/hashed/versioned when introduced, and independently revocable. AIW has no automatic telemetry.
+File and portable-directory intake receipts emit `v0alpha2`. After validating the
+complete native EA set, intake excludes only the kernel-managed
+`$KERNEL.PURGE.SEC.FILEHASH` cache from canonical EA authority and independently
+verifies payload SHA-256. Other allowed EA values, identities, ACLs, names, streams
+and payload hashes remain authoritative. Unknown EAs and standalone FILEHASH on
+directories are rejected. `v0alpha1` requires fresh import, not reinterpretation.
+The fixed-tree discard contract retains exact cache binding. Download-stream
+normalization has its own [versioned policy](DOWNLOAD-METADATA-INTAKE.md).
 
-The initial supported host target is Windows 11 24H2/build 26100+ x64. Windows 10, ARM64, enterprise compliance certification, fleet management, and background application management are outside the first release.
+## Local AI, distribution and host scope
+
+Optional local analysis consumes bounded verified evidence and returns cited
+advisory text. It has no authority to change deterministic results, execute an
+adaptation, grant permissions, sign or deploy. No automatic telemetry is required.
+If a chosen dependency/provider has diagnostics behavior, review its exact version
+and disclose it before adoption; a roadmap does not opt the user in.
+
+Publish AIW tools, contracts, project-owned controls and applicable dependency
+notices, not vendor applications/configuration or generated product bundles.
+The [repository scope](REPOSITORY-SCOPE.md) and [release gates](RELEASE-GATES.md)
+apply to source and built artifacts. Current desktop publication remains paused.
+
+The initial host target is Windows 11 24H2+ x64, with exact servicing build/runtime
+and request-specific capability checks. Windows 10, broad ARM64, fleet management
+and enterprise compliance certification are outside the first generic release.

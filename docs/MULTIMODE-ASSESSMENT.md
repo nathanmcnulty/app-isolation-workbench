@@ -4,6 +4,14 @@ Active work started 2026-11-06 from main `b27942a` (merged #106), branch
 `codex/multimode-assessment`. This document is an implementation/acceptance map,
 not proof that the new source has passed native acceptance.
 
+Main `04be2ce` subsequently established the application-neutral recovery roadmap.
+This fixed-path increment is legacy assessment and retained-evidence work, not
+generic application support. Follow [repository scope](REPOSITORY-SCOPE.md) and
+[the migration audit](APPLICATION-AGNOSTIC-MIGRATION.md): keep vendor inputs
+external, do not restore installer-bundling publication, and transfer reusable
+safety behavior before retiring legacy execution. Historical acceptance is not
+upgraded by this integration.
+
 The deliverable is one administrator workflow comparing the same pinned 7-Zip
 installation and create/test/extract/content verification under an ordinary
 baseline, classic AppContainer and MXC ProcessContainer when available. Retained

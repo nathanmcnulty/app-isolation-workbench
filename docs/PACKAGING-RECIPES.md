@@ -1,5 +1,12 @@
 # Inspectable MSI packaging recipes
 
+Status as of 2026-11-08: this is a scoped fixed-workflow implementation or historical
+handoff record. Its evidence/contract remains valid only for the recorded source,
+inputs and observations. Follow the [current roadmap](ROADMAP.md) and
+[migration audit](APPLICATION-AGNOSTIC-MIGRATION.md) for new work; old product
+selections, future-tense tasks and operator commands are not current priorities,
+publication guidance or execution authorization.
+
 `package inspect-wsb-msi-recipe` exposes the fixed Notepad++ preparation as a
 read-only recipe snapshot before execution. It is the inspection foundation for
 Roadmap Benchmark 3. The fixed local-settings experiment below adds one narrow

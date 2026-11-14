@@ -4,7 +4,7 @@
     GUID = '8f8a7a85-09e0-4d1f-b19e-c6f401f9243c'
     Author = 'Nathan McNulty'
     CompanyName = 'Community'
-    Copyright = '(c) 2026 Nathan McNulty. All rights reserved.'
+    Copyright = 'Project-owned code is dedicated to the public domain under the Unlicense.'
     Description = 'Thin PowerShell administration surface for the App Isolation Workbench CLI.'
     PowerShellVersion = '7.6'
     CompatiblePSEditions = @('Core')

@@ -1,5 +1,12 @@
 # Resume on the dedicated VM
 
+Status as of 2026-11-08: this is a scoped fixed-workflow implementation or historical
+handoff record. Its evidence/contract remains valid only for the recorded source,
+inputs and observations. Follow the [current roadmap](ROADMAP.md) and
+[migration audit](APPLICATION-AGNOSTIC-MIGRATION.md) for new work; old product
+selections, future-tense tasks and operator commands are not current priorities,
+publication guidance or execution authorization.
+
 Prepared 2026-10-21 from code head `5688db4eb681fdc9a7e3987bb091b89de941d1bd`.
 Branch `codex/new-vm-handoff-20261021` contains that entire development history
 plus this handoff. This is a migration checkpoint, not MSIX lifecycle acceptance.
