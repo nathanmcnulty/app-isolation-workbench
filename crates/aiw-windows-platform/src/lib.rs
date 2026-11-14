@@ -11,9 +11,14 @@ mod debug_tree;
 #[allow(dead_code)]
 mod sevenzip_registry;
 
+#[cfg(all(windows, feature = "research-environment"))]
+pub mod environment_probe;
 #[cfg(all(windows, feature = "research-mxc-process"))]
 mod mxc_process;
-#[cfg(all(windows, feature = "research-mxc-process"))]
+#[cfg(all(
+    windows,
+    any(feature = "research-mxc-process", feature = "research-environment")
+))]
 pub mod research_publication;
 #[cfg(all(windows, feature = "research-mxc-process"))]
 pub use mxc_process::run_fixed_probe as run_mxc_process_probe;

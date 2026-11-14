@@ -587,38 +587,59 @@ fn has_reparse_point(_metadata: &fs::Metadata) -> bool {
 pub const FIXED_PUBLICATION_OCCUPIED_BYTES: &[u8] =
     b"AIW publication control: original occupied destination\n";
 
-#[cfg(feature = "research-fixed-publication")]
+#[cfg(any(
+    feature = "research-fixed-publication",
+    feature = "research-environment"
+))]
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ResearchPublicationRole {
+    #[cfg(feature = "research-fixed-publication")]
     Control,
+    #[cfg(feature = "research-fixed-publication")]
     Capability,
+    #[cfg(feature = "research-fixed-publication")]
     Creation,
+    #[cfg(feature = "research-fixed-publication")]
     SevenZipTree,
+    #[cfg(feature = "research-environment")]
+    Environment,
 }
 
-#[cfg(feature = "research-fixed-publication")]
+#[cfg(any(
+    feature = "research-fixed-publication",
+    feature = "research-environment"
+))]
 fn research_publication_role(plan: &WindowsSandboxPlan) -> Option<ResearchPublicationRole> {
     if plan.probe.request.is_some() || plan.mappings.len() != 2 {
         return None;
     }
     let (role, output_root) = match (plan.probe.executable.as_str(), plan.probe.output.as_str()) {
+        #[cfg(feature = "research-fixed-publication")]
         (r"C:\AIW\Tools\publication_control_guest.exe", r"C:\AIW\PublicationOutput\RESULT.DAT") => {
             (
                 ResearchPublicationRole::Control,
                 r"C:\AIW\PublicationOutput",
             )
         }
+        #[cfg(feature = "research-fixed-publication")]
         (r"C:\AIW\Tools\mxc_process_probe.exe", r"C:\AIW\MxcProbeOutput\RESULT.DAT") => (
             ResearchPublicationRole::Capability,
             r"C:\AIW\MxcProbeOutput",
         ),
+        #[cfg(feature = "research-fixed-publication")]
         (r"C:\AIW\Tools\mxc_process_probe.exe", r"C:\AIW\MxcCreationOutput\RESULT.DAT") => (
             ResearchPublicationRole::Creation,
             r"C:\AIW\MxcCreationOutput",
         ),
+        #[cfg(feature = "research-fixed-publication")]
         (r"C:\AIW\Tools\sevenzip_assessment.exe", r"C:\AIW\SevenZipOutput\RESULT.DAT") => (
             ResearchPublicationRole::SevenZipTree,
             r"C:\AIW\SevenZipOutput",
+        ),
+        #[cfg(feature = "research-environment")]
+        (r"C:\AIW\Tools\environment_probe.exe", r"C:\AIW\EnvironmentOutput\RESULT.DAT") => (
+            ResearchPublicationRole::Environment,
+            r"C:\AIW\EnvironmentOutput",
         ),
         _ => return None,
     };
@@ -645,11 +666,17 @@ fn research_publication_role(plan: &WindowsSandboxPlan) -> Option<ResearchPublic
 }
 
 fn allows_research_publication_output(plan: &WindowsSandboxPlan) -> bool {
-    #[cfg(feature = "research-fixed-publication")]
+    #[cfg(any(
+        feature = "research-fixed-publication",
+        feature = "research-environment"
+    ))]
     {
         research_publication_role(plan).is_some()
     }
-    #[cfg(not(feature = "research-fixed-publication"))]
+    #[cfg(not(any(
+        feature = "research-fixed-publication",
+        feature = "research-environment"
+    )))]
     {
         let _ = plan;
         false
@@ -957,6 +984,40 @@ mod tests {
         plan.probe.output = r"C:\AIW\SevenZipOutput\RESULT.DAT".into();
         plan.mappings[1].sandbox_folder = r"C:\AIW\SevenZipOutput".into();
         plan
+    }
+
+    fn environment_plan() -> WindowsSandboxPlan {
+        let mut plan = valid_plan();
+        plan.probe.executable = r"C:\AIW\Tools\environment_probe.exe".into();
+        plan.probe.request = None;
+        plan.probe.output = r"C:\AIW\EnvironmentOutput\RESULT.DAT".into();
+        plan.mappings[1].sandbox_folder = r"C:\AIW\EnvironmentOutput".into();
+        plan
+    }
+
+    #[test]
+    fn environment_role_requires_its_own_feature_and_exact_pair() {
+        let plan = environment_plan();
+        assert_eq!(
+            render_config(&plan).is_ok(),
+            cfg!(feature = "research-environment")
+        );
+        for variant in 0..6 {
+            let mut invalid = plan.clone();
+            match variant {
+                0 => invalid.probe.executable = r"C:\AIW\Tools\other.exe".into(),
+                1 => invalid.probe.output = r"C:\AIW\EnvironmentOutput\result.dat".into(),
+                2 => invalid.probe.request = Some(r"C:\AIW\Tools\request.json".into()),
+                3 => invalid.mappings[0].sandbox_folder = r"C:\AIW".into(),
+                4 => invalid.mappings[1].sandbox_folder = r"C:\AIW\Output".into(),
+                _ => invalid.mappings.push(MappedFolder {
+                    purpose: MappingPurpose::Input,
+                    host_folder: r"C:\AIW Host\Input".into(),
+                    sandbox_folder: r"C:\AIW\Input".into(),
+                }),
+            }
+            assert!(render_config(&invalid).is_err(), "variant {variant}");
+        }
     }
 
     #[cfg(not(feature = "research-fixed-publication"))]

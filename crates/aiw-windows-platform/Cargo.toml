@@ -12,6 +12,15 @@ research-msix-control = []
 research-msix-lifecycle = []
 research-sevenzip = ["aiw-provider-wsb/research-fixed-publication"]
 research-mxc-process = ["aiw-provider-wsb/research-fixed-publication"]
+research-environment = ["aiw-provider-wsb/research-environment"]
+
+[[example]]
+name = "environment_probe"
+required-features = ["research-environment"]
+
+[[example]]
+name = "environment_sandbox_trial"
+required-features = ["research-environment"]
 
 [[example]]
 name = "mxc_process_probe"

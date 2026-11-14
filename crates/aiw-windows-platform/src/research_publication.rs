@@ -1,8 +1,10 @@
 //! Closed, default-off mapped-output publication control. No alias repair.
-use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::fs::{File, OpenOptions};
+use std::io::Write;
 use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
 use std::path::Path;
+#[cfg(feature = "research-mxc-process")]
+use std::{fs, io::Read};
 use windows::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
     FILE_SHARE_READ, FILE_SHARE_WRITE, MOVE_FILE_FLAGS, MoveFileExW,
@@ -10,29 +12,49 @@ use windows::Win32::Storage::FileSystem::{
 use windows::core::PCWSTR;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+#[cfg(feature = "research-mxc-process")]
 pub const CONTROL_OUTPUT: &str = r"C:\AIW\PublicationOutput";
+#[cfg(feature = "research-mxc-process")]
 pub const CONTROL_RESULT: &str = r"C:\AIW\PublicationOutput\RESULT.DAT";
+#[cfg(feature = "research-mxc-process")]
 pub const CONTROL_SCHEMA: &str = "aiw.dev/publication-control/v0alpha1";
+#[cfg(feature = "research-mxc-process")]
 pub const OCCUPIED_BYTES: &[u8] = aiw_provider_wsb::FIXED_PUBLICATION_OCCUPIED_BYTES;
+#[cfg(feature = "research-mxc-process")]
 pub const PENDING_BYTES: &[u8] = b"AIW publication control: rejected replacement retained\n";
+#[cfg(feature = "research-mxc-process")]
 pub const PARTIAL_BYTES: &[u8] = b"AIW publication control: interrupted before publication\n";
+#[cfg(feature = "research-mxc-process")]
 pub const LEGACY_BYTES: &[u8] = b"AIW publication control: legacy long name\n";
+#[cfg(feature = "research-mxc-process")]
 const CAPABILITY_OUTPUT: &str = r"C:\AIW\MxcProbeOutput";
+#[cfg(feature = "research-mxc-process")]
 pub(crate) const CAPABILITY_RESULT: &str = r"C:\AIW\MxcProbeOutput\RESULT.DAT";
+#[cfg(feature = "research-mxc-process")]
 pub(crate) const CREATION_RESULT: &str = r"C:\AIW\MxcCreationOutput\RESULT.DAT";
 
 #[derive(Clone, Copy)]
 pub(crate) enum MappedPublication {
+    #[cfg(feature = "research-mxc-process")]
     Capability,
+    #[cfg(feature = "research-mxc-process")]
     Control,
+    #[cfg(feature = "research-mxc-process")]
     Creation,
+    #[cfg(feature = "research-environment")]
+    Environment,
 }
 impl MappedPublication {
     fn output(self) -> &'static str {
         match self {
+            #[cfg(feature = "research-mxc-process")]
             Self::Capability => CAPABILITY_OUTPUT,
+            #[cfg(feature = "research-mxc-process")]
             Self::Control => CONTROL_OUTPUT,
+            #[cfg(feature = "research-mxc-process")]
             Self::Creation => r"C:\AIW\MxcCreationOutput",
+            #[cfg(feature = "research-environment")]
+            Self::Environment => r"C:\AIW\EnvironmentOutput",
         }
     }
 }
@@ -103,10 +125,12 @@ pub(crate) fn publish_mapped_json(
     move_no_replace(&root.join("RESULT.TMP"), &root.join("RESULT.DAT"))
 }
 
+#[cfg(feature = "research-mxc-process")]
 fn exact_arguments(arguments: &[std::ffi::OsString]) -> bool {
     arguments == ["--output", CONTROL_RESULT]
 }
 
+#[cfg(feature = "research-mxc-process")]
 fn held_bytes(path: &Path, bound: usize) -> Result<(File, Vec<u8>)> {
     let mut file = OpenOptions::new()
         .read(true)
@@ -128,6 +152,7 @@ fn held_bytes(path: &Path, bound: usize) -> Result<(File, Vec<u8>)> {
     Ok((file, bytes))
 }
 
+#[cfg(feature = "research-mxc-process")]
 fn namespace_absent(path: &Path) -> std::io::Result<bool> {
     match fs::symlink_metadata(path) {
         Ok(_) => Ok(false),
@@ -136,6 +161,7 @@ fn namespace_absent(path: &Path) -> std::io::Result<bool> {
     }
 }
 
+#[cfg(feature = "research-mxc-process")]
 pub fn run_control() -> Result<()> {
     let arguments = std::env::args_os().skip(1).collect::<Vec<_>>();
     let token = aiw_token::collect_current_process_token()?;
@@ -203,7 +229,7 @@ pub fn run_control() -> Result<()> {
     publish_mapped_json(MappedPublication::Control, &report)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "research-mxc-process"))]
 mod tests {
     use super::*;
     #[test]

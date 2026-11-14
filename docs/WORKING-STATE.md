@@ -91,6 +91,14 @@ the existing held workspace, exact session lease and bounded lifecycle. Measure
 host/guest versions before preparing an application plan; observe prerequisites
 without vendor/MXC loads. A dependency file's presence is not loader proof.
 Keep any refused measurement unknown and do not install runtimes automatically.
+The [default-off environment feature](SANDBOX-ENVIRONMENT-PROBE.md) now implements
+that closed transaction, with separate prepare/approve/start, retained read and
+dispatch-bound recovery. Focused checks passed: 138 environment-provider tests,
+5 guest-contract tests, 4 host-transaction tests, 139 older publication-role
+regression tests, 138 default provider tests, all-research and environment-only
+Clippy, Rust 1.88 feature checks, format and governance. Independent code and
+CI/documentation reviews passed after fixes. New static artifacts and native proof remain
+pending; the earlier `c0357ca` artifacts do not contain this feature.
 
 ## Authorization and remaining work
 

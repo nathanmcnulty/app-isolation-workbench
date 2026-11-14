@@ -9,6 +9,7 @@ rust-version.workspace = true
 
 [features]
 research-fixed-publication = []
+research-environment = []
 
 [dependencies]
 aiw-evidence.workspace = true
