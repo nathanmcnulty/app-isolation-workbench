@@ -1714,8 +1714,7 @@ fn remove_recovery_request(
         return Ok(());
     }
     ensure_ordinary_file(&path)?;
-    let current: ExecutionGuestRequest = read_bounded_json(&path, 64 * 1024)?;
-    current.validate()?;
+    let current = read_execution_request(&path)?;
     let (run_id, sandbox_id, config_sha256) = current.binding();
     if current.digest() != transaction.request_sha256
         || request_hash(&current)? != transaction.request_sha256
@@ -2512,13 +2511,14 @@ fn prepare_request_artifact(
     expected: &ExecutionGuestRequest,
 ) -> Result<(), RunnerError> {
     expected.validate()?;
+    validate_request_family(path, expected)?;
     let pending = request_pending_path(path)?;
     if pending.exists() {
         validate_staging_file(&pending)?;
         fs::remove_file(&pending).map_err(|_| RunnerError::Drift)?;
     }
     if path.exists() {
-        let current: ExecutionGuestRequest = read_bounded_json(path, 64 * 1024)?;
+        let current = read_execution_request(path)?;
         if current != *expected || request_hash(&current)? != current.digest() {
             return Err(RunnerError::Drift);
         }
@@ -2535,7 +2535,8 @@ fn publish_request(
 ) -> Result<(), RunnerError> {
     let mut bytes = serde_json::to_vec(expected).map_err(|_| RunnerError::Drift)?;
     bytes.push(b'\n');
-    if bytes.len() > 64 * 1024 {
+    validate_request_family(path, expected)?;
+    if bytes.len() as u64 > request_artifact_limit(path, false) {
         return Err(RunnerError::Drift);
     }
     let mut file = OpenOptions::new()
@@ -2552,6 +2553,7 @@ fn publish_request(
 }
 
 fn remove_owned_request(path: &Path, expected: &ExecutionGuestRequest) -> Result<(), RunnerError> {
+    validate_request_family(path, expected)?;
     let pending = request_pending_path(path)?;
     if pending.exists() {
         validate_staging_file(&pending)?;
@@ -2561,7 +2563,7 @@ fn remove_owned_request(path: &Path, expected: &ExecutionGuestRequest) -> Result
         return Ok(());
     }
     ensure_ordinary_file(path)?;
-    let current: ExecutionGuestRequest = read_bounded_json(path, 64 * 1024)?;
+    let current = read_execution_request(path)?;
     if current != *expected || request_hash(&current)? != current.digest() {
         return Err(RunnerError::Drift);
     }
@@ -2579,10 +2581,48 @@ fn request_pending_path(path: &Path) -> Result<PathBuf, RunnerError> {
 fn validate_staging_file(path: &Path) -> Result<(), RunnerError> {
     ensure_ordinary_file(path)?;
     let metadata = fs::metadata(path).map_err(|_| RunnerError::Drift)?;
-    if metadata.len() > 64 * 1024 {
+    if metadata.len() > request_artifact_limit(path, true) {
         return Err(RunnerError::Drift);
     }
     Ok(())
+}
+
+fn application_request_path(path: &Path, pending: bool) -> bool {
+    let name = if pending {
+        "assessment-request.json.pending"
+    } else {
+        "assessment-request.json"
+    };
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|actual| actual.eq_ignore_ascii_case(name))
+}
+
+fn request_artifact_limit(path: &Path, pending: bool) -> u64 {
+    if application_request_path(path, pending) {
+        aiw_provider_wsb::assessment_request::APPLICATION_ASSESSMENT_REQUEST_MAX_BYTES
+    } else {
+        64 * 1024
+    }
+}
+
+fn validate_request_family(
+    path: &Path,
+    request: &ExecutionGuestRequest,
+) -> Result<(), RunnerError> {
+    if application_request_path(path, false)
+        != matches!(request, ExecutionGuestRequest::ApplicationAssessment(_))
+    {
+        return Err(RunnerError::Drift);
+    }
+    Ok(())
+}
+
+fn read_execution_request(path: &Path) -> Result<ExecutionGuestRequest, RunnerError> {
+    let request = read_bounded_json(path, request_artifact_limit(path, false))?;
+    validate_request_family(path, &request)?;
+    request.validate()?;
+    Ok(request)
 }
 
 fn read_bounded_json<T: for<'de> Deserialize<'de>>(

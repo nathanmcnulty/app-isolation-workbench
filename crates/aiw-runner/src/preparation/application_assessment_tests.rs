@@ -266,3 +266,91 @@ fn mappings_and_legacy_profiles_cannot_borrow_generic_preparation_authority() {
     wrong.receipt.schema_version = WSB_PREPARATION_RECEIPT_SCHEMA_VERSION.into();
     assert!(wrong.validate().is_err());
 }
+
+fn large_request() -> super::super::ExecutionGuestRequest {
+    let (mut project, assessment, _) = fixture();
+    for _ in 0..6 {
+        project.scenarios[0].steps.extend([
+            aiw_schema::ScenarioStep::Launch {
+                entrypoint: "main".into(),
+                arguments: vec!["x".repeat(4_000); 3],
+            },
+            aiw_schema::ScenarioStep::ExpectExitCode { value: 0 },
+        ]);
+    }
+    let compiled = compile_assessment(
+        &project,
+        &assessment.compiled.settings,
+        &assessment.intake_receipt.source_manifest,
+    )
+    .unwrap();
+    let request = aiw_provider_wsb::assessment_request::ApplicationAssessmentGuestRequest::new(
+        "request-size-run".into(),
+        "89a0192b-477c-4fa6-9d75-5a63e6685bd7".into(),
+        "1".repeat(64),
+        "2".repeat(64),
+        project_revision_hash(&project).unwrap(),
+        compiled,
+    )
+    .unwrap();
+    super::super::ExecutionGuestRequest::ApplicationAssessment(Box::new(request))
+}
+
+fn request_test_directory() -> std::path::PathBuf {
+    let directory = std::env::temp_dir().join(format!(
+        "aiw-generic-request-bound-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir(&directory).unwrap();
+    directory
+}
+
+#[test]
+fn generic_request_above_legacy_bound_is_published_read_and_cleaned_without_execution() {
+    use super::super::{
+        prepare_request_artifact, read_execution_request, remove_owned_request,
+        request_pending_path, validate_staging_file,
+    };
+    let expected = large_request();
+    let bytes = serde_json::to_vec(&expected).unwrap();
+    assert!(bytes.len() > 64 * 1024 && bytes.len() < 2 * 1024 * 1024);
+    let directory = request_test_directory();
+    let path = directory.join("assessment-request.json");
+    let pending = request_pending_path(&path).unwrap();
+    std::fs::write(&pending, vec![b'x'; 70_000]).unwrap();
+    validate_staging_file(&pending).unwrap();
+    prepare_request_artifact(&path, &expected).unwrap();
+    assert!(!pending.exists());
+    assert_eq!(read_execution_request(&path).unwrap(), expected);
+    // Recovery/retry uses the same bounded typed reader, not a legacy 64KiB path.
+    prepare_request_artifact(&path, &expected).unwrap();
+    assert_eq!(read_execution_request(&path).unwrap(), expected);
+    remove_owned_request(&path, &expected).unwrap();
+    assert!(!path.exists() && !pending.exists());
+    std::fs::remove_dir(&directory).unwrap();
+}
+
+#[test]
+fn generic_request_cannot_expand_legacy_names_or_pending_file_limits() {
+    use super::super::{
+        prepare_request_artifact, read_execution_request, request_pending_path,
+        validate_staging_file,
+    };
+    let expected = large_request();
+    let directory = request_test_directory();
+    let legacy = directory.join("request.json");
+    assert!(prepare_request_artifact(&legacy, &expected).is_err());
+    assert!(!legacy.exists());
+    let pending = request_pending_path(&legacy).unwrap();
+    std::fs::write(&pending, vec![b'x'; 70_000]).unwrap();
+    assert!(validate_staging_file(&pending).is_err());
+    std::fs::write(&legacy, serde_json::to_vec(&expected).unwrap()).unwrap();
+    assert!(read_execution_request(&legacy).is_err());
+    std::fs::remove_file(&legacy).unwrap();
+    std::fs::remove_file(&pending).unwrap();
+    std::fs::remove_dir(&directory).unwrap();
+}
