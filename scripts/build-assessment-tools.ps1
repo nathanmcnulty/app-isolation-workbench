@@ -15,19 +15,27 @@ function Assert-Source {
     $status=@(& git -C $repo status --porcelain=v1 --untracked-files=all)
     if ($LASTEXITCODE -ne 0 -or $status.Count) { throw 'Exact clean source required' }
 }
-function Measure-Cache([string]$Path) {
-    $bytes=0L;$files=0L
+function Measure-Cache([string]$Path,[switch]$AllowTransientIO) {
+    $bytes=0L;$files=0L;$incomplete=0
     if (Test-Path -LiteralPath $Path) {
         $queue=[Collections.Generic.Queue[string]]::new();$queue.Enqueue($Path)
         while($queue.Count) {
-            foreach($entry in [IO.Directory]::EnumerateFileSystemEntries($queue.Dequeue())) {
-                $attributes=[IO.File]::GetAttributes($entry)
+            try {
+                $directory=$queue.Dequeue();$attributes=[IO.File]::GetAttributes($directory)
                 if($attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Build cache contains a reparse point'}
-                if($attributes -band [IO.FileAttributes]::Directory){$queue.Enqueue($entry)}else{$bytes+=([IO.FileInfo]::new($entry)).Length;$files++}
-            }
+                foreach($entry in [IO.Directory]::EnumerateFileSystemEntries($directory)) {
+                    try {
+                        $attributes=[IO.File]::GetAttributes($entry)
+                        if($attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Build cache contains a reparse point'}
+                        if($attributes -band [IO.FileAttributes]::Directory){$queue.Enqueue($entry)}else{$bytes+=([IO.FileInfo]::new($entry)).Length;$files++}
+                    } catch [IO.FileNotFoundException] { } catch [IO.DirectoryNotFoundException] { }
+                    catch [UnauthorizedAccessException] {if(-not $AllowTransientIO){throw};$incomplete++}
+                }
+            } catch [IO.FileNotFoundException] { } catch [IO.DirectoryNotFoundException] { }
+            catch [UnauthorizedAccessException] {if(-not $AllowTransientIO){throw};$incomplete++}
         }
     }
-    [ordered]@{bytes=$bytes;files=$files;freeBytes=[IO.DriveInfo]::new([IO.Path]::GetPathRoot($Path)).AvailableFreeSpace}
+    [ordered]@{bytes=$bytes;files=$files;freeBytes=[IO.DriveInfo]::new([IO.Path]::GetPathRoot($Path)).AvailableFreeSpace;incompleteEntriesDuringSample=$incomplete}
 }
 function Source-Digest {
     $names=@(& git -C $repo ls-files)
@@ -74,7 +82,7 @@ try {
         $timer=[Diagnostics.Stopwatch]::StartNew()
         $cargoPath=(Get-Command cargo -CommandType Application).Source
         $passArguments=if($pass -eq 3){$arguments+@('--release')}else{$arguments}
-        $entry=[ordered]@{pass=$pass;profile=if($pass -eq 3){'release'}else{'dev'};arguments=$passArguments;started=$false;rootProcessId=$null;rootBirthUtc=$null;rootExitObserved=$false;exitCode=$null;killRequested=$false;primaryError=$null;cleanupError=$null;seconds=$null;cache=$null;peakSampledCacheBytes=$before.bytes;compiler=$null;artifacts=@()}
+        $entry=[ordered]@{pass=$pass;profile=if($pass -eq 3){'release'}else{'dev'};arguments=$passArguments;started=$false;rootProcessId=$null;rootBirthUtc=$null;rootExitObserved=$false;exitCode=$null;killRequested=$false;primaryError=$null;cleanupError=$null;seconds=$null;cache=$null;peakSampledCacheBytes=$before.bytes;incompleteSamplingEvents=0;compiler=$null;artifacts=@()}
         $passes.Add($entry);$process=$null
         # Start-Process owns redirection handles; the held process object is the
         # only root this watchdog may terminate, including its build children.
@@ -84,7 +92,8 @@ try {
             $entry.started=$true;$entry.rootProcessId=$process.Id;$entry.rootBirthUtc=$process.StartTime.ToUniversalTime().ToString('o')
             [IO.File]::WriteAllText((Join-Path $report "build-$pass-start.json"),($entry|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
             while(-not $process.WaitForExit(5000)) {
-                $sample=Measure-Cache $policy.targetDirectory
+                $sample=Measure-Cache $policy.targetDirectory -AllowTransientIO
+                $entry.incompleteSamplingEvents+=$sample.incompleteEntriesDuringSample
                 $entry.peakSampledCacheBytes=[Math]::Max($entry.peakSampledCacheBytes,$sample.bytes)
                 if($sample.bytes -gt $policy.maximumCacheBytes -or $sample.freeBytes -lt 2GB -or $timer.Elapsed.TotalMinutes -gt 20 -or ([IO.FileInfo]::new($stdout)).Length -gt 8MB -or ([IO.FileInfo]::new($stderr)).Length -gt 8MB){throw 'Owned build exceeded cache, free-space, time or diagnostic budget'}
             }
