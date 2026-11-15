@@ -243,6 +243,7 @@ fn protected_pair_rehearsal(unknown_cleanup: bool) {
         bambu: None,
         paired_controls: artifacts.receipt.paired_controls.clone(),
         seven_zip: None,
+        application_assessment: None,
     };
     assert_eq!(
         start.run_root, artifacts.receipt.workspace.root.final_path,

@@ -50,6 +50,10 @@ pub use aiw_probe::PAIRED_CONTROL_PLAN_SCHEMA;
 pub const WSB_PAIRED_CONTROL_IMPORT_SCHEMA: &str = "aiw.dev/wsb-planning-import-receipt/v0alpha4";
 pub const SEVENZIP_RUN_PLAN_SCHEMA: &str = "aiw.dev/run-plan/v0alpha8";
 pub const WSB_SEVENZIP_IMPORT_SCHEMA: &str = "aiw.dev/wsb-planning-import-receipt/v0alpha5";
+pub const APPLICATION_ASSESSMENT_RUN_PLAN_SCHEMA: &str =
+    "aiw.dev/run-plan/application-assessment/v1";
+pub const WSB_APPLICATION_ASSESSMENT_IMPORT_SCHEMA: &str =
+    "aiw.dev/wsb-planning-import-receipt/application-assessment/v1";
 pub const RUN_PLAN_SCHEMA_VERSION: &str = "aiw.dev/run-plan/v0alpha3";
 pub const IMPORTED_MSI_RUN_PLAN_SCHEMA_VERSION: &str = "aiw.dev/run-plan/v0alpha4";
 pub const IMPORTED_BAMBU_RUN_PLAN_SCHEMA_VERSION: &str = "aiw.dev/run-plan/v0alpha5";
@@ -103,6 +107,19 @@ pub enum RunLifecycleKind {
     deny_unknown_fields
 )]
 pub enum PlannedAction {
+    /// Application identity and workflow are reviewed run inputs, not a product profile.
+    /// The runner must reverify protected intake and the compiled assessment before
+    /// this action can acquire a provider. A plan hash alone is not that proof.
+    ExecuteWindowsSandboxApplicationAssessment {
+        sandbox_plan_sha256: String,
+        provider_sha256: String,
+        guest_agent_sha256: String,
+        workspace: Box<WorkspaceBindingEvidence>,
+        workspace_identity_sha256: String,
+        intake_receipt_sha256: String,
+        source_manifest_sha256: String,
+        assessment_sha256: String,
+    },
     ExecuteWindowsSandboxSevenZipAssessment {
         sandbox_plan_sha256: String,
         provider_sha256: String,
@@ -167,6 +184,76 @@ pub enum PlannedAction {
     InspectPackage,
     SignPackage,
     ValidatePackage,
+}
+
+/// Common read-only binding view. It is not an executable request or approval.
+pub struct WindowsSandboxActionBinding<'a> {
+    pub sandbox_plan_sha256: &'a str,
+    pub provider_sha256: &'a str,
+    pub guest_agent_sha256: &'a str,
+    pub workspace: &'a WorkspaceBindingEvidence,
+    pub workspace_identity_sha256: &'a str,
+}
+
+impl PlannedAction {
+    pub fn windows_sandbox_binding(&self) -> Option<WindowsSandboxActionBinding<'_>> {
+        match self {
+            Self::ExecuteWindowsSandboxApplicationAssessment {
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+                ..
+            }
+            | Self::ExecuteWindowsSandboxGoldenProbe {
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+            }
+            | Self::ExecuteWindowsSandboxImportedMsiScenario {
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+                ..
+            }
+            | Self::ExecuteWindowsSandboxImportedBambuScenario {
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+                ..
+            }
+            | Self::ExecuteWindowsSandboxPairedControls {
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+                ..
+            }
+            | Self::ExecuteWindowsSandboxSevenZipAssessment {
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+                ..
+            } => Some(WindowsSandboxActionBinding {
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+            }),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -255,6 +342,13 @@ impl RunPlan {
             schema: if actions.iter().any(|action| {
                 matches!(
                     action,
+                    PlannedAction::ExecuteWindowsSandboxApplicationAssessment { .. }
+                )
+            }) {
+                APPLICATION_ASSESSMENT_RUN_PLAN_SCHEMA.into()
+            } else if actions.iter().any(|action| {
+                matches!(
+                    action,
                     PlannedAction::ExecuteWindowsSandboxSevenZipAssessment { .. }
                 )
             }) {
@@ -310,6 +404,7 @@ impl RunPlan {
         if !matches!(
             schema,
             Some(RUN_PLAN_SCHEMA_VERSION)
+                | Some(APPLICATION_ASSESSMENT_RUN_PLAN_SCHEMA)
                 | Some(SEVENZIP_RUN_PLAN_SCHEMA)
                 | Some(PAIRED_CONTROL_PLAN_SCHEMA)
                 | Some(IMPORTED_MSI_RUN_PLAN_SCHEMA_VERSION)
@@ -3740,6 +3835,12 @@ pub struct CompletedRunSnapshot {
 }
 
 fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
+    let has_application_assessment = plan.actions.iter().any(|action| {
+        matches!(
+            action,
+            PlannedAction::ExecuteWindowsSandboxApplicationAssessment { .. }
+        )
+    });
     let vm_count = plan
         .actions
         .iter()
@@ -3767,7 +3868,9 @@ fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
             PlannedAction::ExecuteWindowsSandboxSevenZipAssessment { .. }
         )
     });
-    let expected_schema = if has_sevenzip_action {
+    let expected_schema = if has_application_assessment {
+        APPLICATION_ASSESSMENT_RUN_PLAN_SCHEMA
+    } else if has_sevenzip_action {
         SEVENZIP_RUN_PLAN_SCHEMA
     } else if has_pair_action {
         PAIRED_CONTROL_PLAN_SCHEMA
@@ -3824,6 +3927,38 @@ fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
             wsb_action_count += 1;
         }
         match action {
+            PlannedAction::ExecuteWindowsSandboxApplicationAssessment {
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+                intake_receipt_sha256,
+                source_manifest_sha256,
+                assessment_sha256,
+            } => {
+                for (field, hash) in [
+                    ("sandboxPlanSha256", sandbox_plan_sha256),
+                    ("providerSha256", provider_sha256),
+                    ("guestAgentSha256", guest_agent_sha256),
+                    ("workspaceIdentitySha256", workspace_identity_sha256),
+                    ("intakeReceiptSha256", intake_receipt_sha256),
+                    ("sourceManifestSha256", source_manifest_sha256),
+                    ("assessmentSha256", assessment_sha256),
+                ] {
+                    validate_hash(hash, field, &plan.run_id)?;
+                }
+                if workspace.validate().is_err()
+                    || hash_value(workspace)? != *workspace_identity_sha256
+                {
+                    return Err(run_error(
+                        "AIW_APPLICATION_ASSESSMENT_BINDING_INVALID",
+                        "application assessment workspace does not match its reviewed binding",
+                        "plan",
+                        &plan.run_id,
+                    ));
+                }
+            }
             PlannedAction::ExecuteWindowsSandboxSevenZipAssessment {
                 sandbox_plan_sha256,
                 provider_sha256,
@@ -4044,14 +4179,7 @@ fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
 }
 
 fn is_wsb_action(action: &PlannedAction) -> bool {
-    matches!(
-        action,
-        PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. }
-            | PlannedAction::ExecuteWindowsSandboxSevenZipAssessment { .. }
-            | PlannedAction::ExecuteWindowsSandboxPairedControls { .. }
-            | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
-            | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { .. }
-    )
+    action.windows_sandbox_binding().is_some()
 }
 
 fn has_wsb_action(plan: &RunPlan) -> bool {
@@ -4087,6 +4215,7 @@ fn wsb_workspace(plan: &RunPlan) -> Result<&WorkspaceBindingEvidence, AiwError> 
     })?;
     match action {
         PlannedAction::ExecuteWindowsSandboxGoldenProbe { workspace, .. }
+        | PlannedAction::ExecuteWindowsSandboxApplicationAssessment { workspace, .. }
         | PlannedAction::ExecuteWindowsSandboxSevenZipAssessment { workspace, .. }
         | PlannedAction::ExecuteWindowsSandboxPairedControls { workspace, .. }
         | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { workspace, .. }
@@ -4115,6 +4244,21 @@ fn validate_wsb_import(receipt: &WsbPlanningImportReceipt, plan: &RunPlan) -> Re
         workspace,
         workspace_identity_sha256,
     ) = match action {
+        PlannedAction::ExecuteWindowsSandboxApplicationAssessment {
+            sandbox_plan_sha256,
+            provider_sha256,
+            guest_agent_sha256,
+            workspace,
+            workspace_identity_sha256,
+            ..
+        } => (
+            WSB_APPLICATION_ASSESSMENT_IMPORT_SCHEMA,
+            sandbox_plan_sha256,
+            provider_sha256,
+            guest_agent_sha256,
+            workspace,
+            workspace_identity_sha256,
+        ),
         PlannedAction::ExecuteWindowsSandboxGoldenProbe {
             sandbox_plan_sha256,
             provider_sha256,
@@ -4242,6 +4386,7 @@ fn action_allowed(lifecycle: RunLifecycleKind, action: &PlannedAction) -> bool {
         RunLifecycleKind::Assessment => matches!(
             action,
             PlannedAction::AssessHost
+                | PlannedAction::ExecuteWindowsSandboxApplicationAssessment { .. }
                 | PlannedAction::PrepareWorkspace
                 | PlannedAction::ExecuteScenario { .. }
                 | PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. }
@@ -4263,6 +4408,7 @@ fn action_allowed(lifecycle: RunLifecycleKind, action: &PlannedAction) -> bool {
         RunLifecycleKind::Authoring => !matches!(
             action,
             PlannedAction::LaunchValidatedProfile { .. }
+                | PlannedAction::ExecuteWindowsSandboxApplicationAssessment { .. }
                 | PlannedAction::ExecuteVmMsix { .. }
                 | PlannedAction::ExecuteWindowsSandboxPairedControls { .. }
                 | PlannedAction::ExecuteWindowsSandboxSevenZipAssessment { .. }
@@ -5896,6 +6042,82 @@ mod tests {
         .unwrap()
     }
 
+    fn application_assessment_plan() -> RunPlan {
+        let workspace = wsb_workspace("application-contract");
+        RunPlan::new(
+            "application-contract",
+            "administrator.application",
+            "f".repeat(64),
+            RunLifecycleKind::Assessment,
+            "2026-11-14T00:00:00Z",
+            vec![PlannedAction::ExecuteWindowsSandboxApplicationAssessment {
+                sandbox_plan_sha256: "a".repeat(64),
+                provider_sha256: "b".repeat(64),
+                guest_agent_sha256: "c".repeat(64),
+                workspace_identity_sha256: hash_value(&workspace).unwrap(),
+                workspace: Box::new(workspace),
+                intake_receipt_sha256: "d".repeat(64),
+                source_manifest_sha256: "e".repeat(64),
+                assessment_sha256: "1".repeat(64),
+            }],
+            vec!["Run the reviewed application in one disposable worker".into()],
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn application_assessment_approval_cannot_survive_identity_or_workflow_drift() {
+        let plan = application_assessment_plan();
+        assert_eq!(plan.schema, APPLICATION_ASSESSMENT_RUN_PLAN_SCHEMA);
+        let approval = ApprovalRecord::for_plan(&plan, "operator", "now").unwrap();
+        let mut import = wsb_import(&plan);
+        import.schema_version = WSB_APPLICATION_ASSESSMENT_IMPORT_SCHEMA.into();
+        validate_wsb_import(&import, &plan).unwrap();
+        for field in [
+            "sandboxPlanSha256",
+            "providerSha256",
+            "guestAgentSha256",
+            "intakeReceiptSha256",
+            "sourceManifestSha256",
+            "assessmentSha256",
+        ] {
+            let mut wire = serde_json::to_value(&plan).unwrap();
+            wire["actions"][0][field] = serde_json::json!("9".repeat(64));
+            let changed = RunPlan::from_value(wire).unwrap();
+            assert!(validate_approval(&approval, &changed).is_err(), "{field}");
+            assert!(validate_wsb_import(&import, &changed).is_err(), "{field}");
+        }
+        let mut wire = serde_json::to_value(&plan).unwrap();
+        wire["actions"][0]["workspaceIdentitySha256"] = serde_json::json!("9".repeat(64));
+        assert!(RunPlan::from_value(wire).is_err());
+    }
+
+    #[test]
+    fn application_assessment_cannot_borrow_legacy_or_packaging_authority() {
+        let plan = application_assessment_plan();
+        let mut legacy_import = wsb_import(&plan);
+        legacy_import.schema_version = WSB_PLANNING_IMPORT_RECEIPT_SCHEMA_VERSION.into();
+        assert!(validate_wsb_import(&legacy_import, &plan).is_err());
+        legacy_import.schema_version = WSB_APPLICATION_ASSESSMENT_IMPORT_SCHEMA.into();
+        validate_wsb_import(&legacy_import, &plan).unwrap();
+        for lifecycle in [RunLifecycleKind::Launch, RunLifecycleKind::Authoring] {
+            let mut changed = plan.clone();
+            changed.lifecycle = lifecycle;
+            assert!(validate_plan(&changed).is_err());
+        }
+        for schema in [RUN_PLAN_SCHEMA_VERSION, SEVENZIP_RUN_PLAN_SCHEMA] {
+            let mut changed = plan.clone();
+            changed.schema = schema.into();
+            assert!(validate_plan(&changed).is_err());
+        }
+        let mut mixed = plan.clone();
+        mixed.actions.push(wsb_plan("other").actions.remove(0));
+        assert!(validate_plan(&mixed).is_err());
+        let mut wire = serde_json::to_value(&plan).unwrap();
+        wire["actions"][0]["shell"] = serde_json::json!("unapproved command");
+        assert!(RunPlan::from_value(wire).is_err());
+    }
+
     #[test]
     fn sevenzip_approval_binds_profile_intake_and_exclusive_assessment_schema() {
         let workspace = wsb_workspace("sevenzip-contract");
@@ -6101,6 +6323,21 @@ mod tests {
             workspace,
             workspace_identity_sha256,
         ) = match &plan.actions[0] {
+            PlannedAction::ExecuteWindowsSandboxApplicationAssessment {
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+                ..
+            } => (
+                WSB_APPLICATION_ASSESSMENT_IMPORT_SCHEMA,
+                sandbox_plan_sha256,
+                provider_sha256,
+                guest_agent_sha256,
+                workspace,
+                workspace_identity_sha256,
+            ),
             PlannedAction::ExecuteWindowsSandboxGoldenProbe {
                 sandbox_plan_sha256,
                 provider_sha256,

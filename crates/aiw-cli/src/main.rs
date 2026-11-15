@@ -339,6 +339,86 @@ enum PackageCommand {
 
 #[derive(Debug, Subcommand)]
 enum ApplicationCommand {
+    /// Compile administrator-supplied workflow data without provider calls or application execution.
+    PlanAssessment {
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        settings: PathBuf,
+        #[arg(long)]
+        source: PathBuf,
+    },
+    /// Create a fresh protected assessment and review data. Never approves or starts it.
+    PrepareAssessment {
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        settings: PathBuf,
+        #[arg(long)]
+        source: PathBuf,
+        /// JSON object mapping reviewed input IDs to administrator-supplied files.
+        #[arg(long)]
+        inputs: PathBuf,
+        #[arg(long)]
+        guest_agent: PathBuf,
+        #[arg(long)]
+        guest_agent_sha256: String,
+        #[arg(long)]
+        evidence_parent: PathBuf,
+        #[arg(long)]
+        operator: String,
+    },
+    /// Reopen a retained generic report without a provider or application execution.
+    ReportAssessment {
+        #[arg(long)]
+        workspace: PathBuf,
+        #[arg(long)]
+        run_id: String,
+    },
+    /// Compare independently verified retained baseline/candidate workflows without running either.
+    CompareAssessments {
+        #[arg(long)]
+        baseline_workspace: PathBuf,
+        #[arg(long)]
+        baseline_run_id: String,
+        #[arg(long)]
+        candidate_workspace: PathBuf,
+        #[arg(long)]
+        candidate_run_id: String,
+    },
+    /// Copy the reviewed external workflow and bytes into a fresh data-only replay package.
+    ExportAssessmentPackage {
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        settings: PathBuf,
+        #[arg(long)]
+        source: PathBuf,
+        #[arg(long)]
+        inputs: PathBuf,
+        #[arg(long)]
+        output_parent: PathBuf,
+        #[arg(long)]
+        package_id: String,
+    },
+    /// Verify a data-only replay package. Does not import, approve or run it.
+    VerifyAssessmentPackage {
+        #[arg(long)]
+        package: PathBuf,
+    },
+    /// Revalidate a replay package and create fresh review data; never reuse approval or session authority.
+    PrepareAssessmentPackage {
+        #[arg(long)]
+        package: PathBuf,
+        #[arg(long)]
+        guest_agent: PathBuf,
+        #[arg(long)]
+        guest_agent_sha256: String,
+        #[arg(long)]
+        evidence_parent: PathBuf,
+        #[arg(long)]
+        operator: String,
+    },
     /// Inspect source identity without executing, copying, or trusting it.
     Inspect {
         #[arg(long)]
@@ -887,6 +967,12 @@ struct SchemaArgs {
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum SchemaKind {
+    AssessmentSettings,
+    CompiledAssessment,
+    ApplicationAssessmentGuestRequest,
+    ApplicationAssessmentResult,
+    VerifiedAssessmentEvidence,
+    GenericApplicationRunReport,
     ImportedMsiGuestRequest,
     ImportedMsiScenarioResult,
     WsbApprovedExecution,
@@ -1792,6 +1878,194 @@ fn run(command: Command) -> Result<()> {
             }
         },
         Command::Application(args) => match args.command {
+            ApplicationCommand::PlanAssessment {
+                project,
+                settings,
+                source,
+            } => {
+                let project = read_project(&project)?;
+                let settings = read_document(&settings, MAX_CONFIG_BYTES)?;
+                write_json(&aiw_admin_workflow::application_assessment::preview(
+                    &project.project,
+                    &settings,
+                    &source,
+                )?)
+            }
+            ApplicationCommand::PrepareAssessment {
+                project,
+                settings,
+                source,
+                inputs,
+                guest_agent,
+                guest_agent_sha256,
+                evidence_parent,
+                operator,
+            } => {
+                let project = read_project(&project)?;
+                let settings: aiw_provider_wsb::assessment::AssessmentSettings =
+                    read_document(&settings, MAX_CONFIG_BYTES)?;
+                let inputs: std::collections::BTreeMap<String, PathBuf> =
+                    read_document(&inputs, MAX_CONFIG_BYTES)?;
+                #[cfg(windows)]
+                {
+                    let prepared = aiw_admin_workflow::application_assessment::prepare_for_review(
+                        &project.project,
+                        &settings,
+                        &source,
+                        &inputs,
+                        &guest_agent,
+                        &guest_agent_sha256,
+                        &evidence_parent,
+                        &operator,
+                    )?;
+                    write_json(
+                        &serde_json::json!({"run":prepared.run,"recipe":prepared.review.recipe,"plan":prepared.review.plan,"proposedApproval":prepared.review.proposed_approval,"approvalRecorded":false,"executionStarted":false}),
+                    )
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (
+                        project,
+                        settings,
+                        source,
+                        inputs,
+                        guest_agent,
+                        guest_agent_sha256,
+                        evidence_parent,
+                        operator,
+                    );
+                    bail!(
+                        "protected assessment preparation requires Windows; no application was executed"
+                    )
+                }
+            }
+            ApplicationCommand::ReportAssessment { workspace, run_id } => {
+                #[cfg(windows)]
+                {
+                    let run = aiw_admin_workflow::application_assessment::open_retained(
+                        &workspace, &run_id,
+                    )?;
+                    write_json(&aiw_admin_workflow::application_assessment::report(&run)?)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (workspace, run_id);
+                    bail!("protected retained assessment read requires Windows")
+                }
+            }
+            ApplicationCommand::CompareAssessments {
+                baseline_workspace,
+                baseline_run_id,
+                candidate_workspace,
+                candidate_run_id,
+            } => {
+                #[cfg(windows)]
+                {
+                    let baseline = aiw_admin_workflow::application_assessment::open_retained(
+                        &baseline_workspace,
+                        &baseline_run_id,
+                    )?;
+                    let candidate = aiw_admin_workflow::application_assessment::open_retained(
+                        &candidate_workspace,
+                        &candidate_run_id,
+                    )?;
+                    write_json(
+                        &aiw_admin_workflow::application_assessment::compare_retained(
+                            &baseline, &candidate,
+                        )?,
+                    )
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (
+                        baseline_workspace,
+                        baseline_run_id,
+                        candidate_workspace,
+                        candidate_run_id,
+                    );
+                    bail!("protected retained comparison requires Windows")
+                }
+            }
+            ApplicationCommand::ExportAssessmentPackage {
+                project,
+                settings,
+                source,
+                inputs,
+                output_parent,
+                package_id,
+            } => {
+                let project = read_project(&project)?;
+                let settings: aiw_provider_wsb::assessment::AssessmentSettings =
+                    read_document(&settings, MAX_CONFIG_BYTES)?;
+                let inputs: std::collections::BTreeMap<String, PathBuf> =
+                    read_document(&inputs, MAX_CONFIG_BYTES)?;
+                #[cfg(windows)]
+                {
+                    let destination = aiw_admin_workflow::application_package::export_package(
+                        &project.project,
+                        &settings,
+                        &source,
+                        &inputs,
+                        &output_parent,
+                        &package_id,
+                    )?;
+                    write_json(
+                        &serde_json::json!({"package":destination,"approvalIncluded":false,"applicationExecutions":0}),
+                    )
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (project, settings, source, inputs, output_parent, package_id);
+                    bail!("protected package export requires Windows")
+                }
+            }
+            ApplicationCommand::VerifyAssessmentPackage { package } => {
+                #[cfg(windows)]
+                {
+                    let verified =
+                        aiw_admin_workflow::application_package::verify_package(&package)?;
+                    verified.revalidate()?;
+                    write_json(&verified.package)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = package;
+                    bail!("protected package verification requires Windows")
+                }
+            }
+            ApplicationCommand::PrepareAssessmentPackage {
+                package,
+                guest_agent,
+                guest_agent_sha256,
+                evidence_parent,
+                operator,
+            } => {
+                #[cfg(windows)]
+                {
+                    let prepared =
+                        aiw_admin_workflow::application_assessment::prepare_package_for_review(
+                            &package,
+                            &guest_agent,
+                            &guest_agent_sha256,
+                            &evidence_parent,
+                            &operator,
+                        )?;
+                    write_json(
+                        &serde_json::json!({"run":prepared.run,"recipe":prepared.review.recipe,"plan":prepared.review.plan,"proposedApproval":prepared.review.proposed_approval,"approvalRecorded":false,"executionStarted":false}),
+                    )
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (
+                        package,
+                        guest_agent,
+                        guest_agent_sha256,
+                        evidence_parent,
+                        operator,
+                    );
+                    bail!("protected package preparation requires Windows")
+                }
+            }
             ApplicationCommand::Inspect { source, kind } => {
                 #[cfg(windows)]
                 let held_file = matches!(kind, ApplicationKindArg::Msi | ApplicationKindArg::Exe)
@@ -2843,6 +3117,24 @@ fn run(command: Command) -> Result<()> {
             ProviderCommand::MxcProbe { binary } => write_json(&plan_capability_probe(&binary)?),
         },
         Command::Schema(args) => match args.kind {
+            SchemaKind::AssessmentSettings => write_json(&schema_for!(
+                aiw_provider_wsb::assessment::AssessmentSettings
+            )),
+            SchemaKind::CompiledAssessment => write_json(&schema_for!(
+                aiw_provider_wsb::assessment::CompiledAssessment
+            )),
+            SchemaKind::ApplicationAssessmentGuestRequest => write_json(&schema_for!(
+                aiw_provider_wsb::assessment_request::ApplicationAssessmentGuestRequest
+            )),
+            SchemaKind::ApplicationAssessmentResult => write_json(&schema_for!(
+                aiw_provider_wsb::assessment_observation::ApplicationAssessmentResult
+            )),
+            SchemaKind::VerifiedAssessmentEvidence => write_json(&schema_for!(
+                aiw_provider_wsb::assessment_evidence::VerifiedAssessmentEvidence
+            )),
+            SchemaKind::GenericApplicationRunReport => {
+                write_json(&schema_for!(aiw_runner::GenericApplicationRunReport))
+            }
             SchemaKind::ImportedMsiGuestRequest => {
                 write_json(&schema_for!(aiw_provider_wsb::ImportedMsiGuestRequest))
             }

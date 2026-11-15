@@ -901,11 +901,11 @@ fn grant_package_access(
     Ok(())
 }
 
-struct Job {
+pub(crate) struct Job {
     handle: OwnedHandle,
 }
 impl Job {
-    fn create() -> Result<Self, ControlAppContainerError> {
+    pub(crate) fn create() -> Result<Self, ControlAppContainerError> {
         let handle = unsafe { CreateJobObjectW(None, PCWSTR::null()) }
             .map_err(|error| fixed(format!("create fixture job failed: {error}")))?;
         let handle = unsafe { OwnedHandle::from_raw_handle(handle.0) };
@@ -922,7 +922,7 @@ impl Job {
         .map_err(|error| fixed(format!("configure fixture job failed: {error}")))?;
         Ok(Self { handle })
     }
-    fn handle(&self) -> HANDLE {
+    pub(crate) fn handle(&self) -> HANDLE {
         HANDLE(self.handle.as_raw_handle() as isize as *mut _)
     }
     fn terminate(&self) -> Result<(), ControlAppContainerError> {
@@ -943,7 +943,7 @@ impl Job {
         .map_err(|error| fixed(format!("query fixture job failed: {error}")))?;
         Ok(accounting.ActiveProcesses)
     }
-    fn terminate_and_verify_empty(&self) -> Result<(), ControlAppContainerError> {
+    pub(crate) fn terminate_and_verify_empty(&self) -> Result<(), ControlAppContainerError> {
         if self.active_processes()? > 0 {
             self.terminate()?;
         }
@@ -973,12 +973,12 @@ fn wait_completion(handle: HANDLE, timeout: Duration) -> Result<bool, ControlApp
         _ => Err(fixed("wait fixed fixture failed")),
     }
 }
-struct Attributes {
-    list: LPPROC_THREAD_ATTRIBUTE_LIST,
+pub(crate) struct Attributes {
+    pub(crate) list: LPPROC_THREAD_ATTRIBUTE_LIST,
     _storage: Vec<usize>,
 }
 impl Attributes {
-    fn new(count: usize) -> Result<Self, ControlAppContainerError> {
+    pub(crate) fn new(count: usize) -> Result<Self, ControlAppContainerError> {
         let mut size = 0;
         unsafe {
             let _ = InitializeProcThreadAttributeList(None, count as u32, None, &mut size);
@@ -995,7 +995,7 @@ impl Attributes {
             _storage: storage,
         })
     }
-    fn handles(&mut self, handles: &[HANDLE]) -> Result<(), ControlAppContainerError> {
+    pub(crate) fn handles(&mut self, handles: &[HANDLE]) -> Result<(), ControlAppContainerError> {
         unsafe {
             UpdateProcThreadAttribute(
                 self.list,
@@ -1009,7 +1009,7 @@ impl Attributes {
         }
         .map_err(|error| fixed(format!("set fixed fixture handle list failed: {error}")))
     }
-    fn security_capabilities(
+    pub(crate) fn security_capabilities(
         &mut self,
         capabilities: &mut SECURITY_CAPABILITIES,
     ) -> Result<(), ControlAppContainerError> {

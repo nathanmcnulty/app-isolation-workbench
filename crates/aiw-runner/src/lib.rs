@@ -9,9 +9,13 @@
 //! exact-ID `connect`, and exact-ID `stop` argument arrays. It has no shell, elevation, command,
 //! script, URL, or arbitrary policy API.
 
+mod application_report;
 #[cfg(all(windows, feature = "offline-rehearsal"))]
 pub mod offline_rehearsal;
 mod paired_report;
+pub use application_report::GenericApplicationRunReport;
+#[cfg(windows)]
+pub use application_report::report_windows_sandbox_application_assessment;
 mod sevenzip_report;
 mod sevenzip_report_output;
 #[cfg(test)]
@@ -105,16 +109,18 @@ pub use assessment_report::{
 pub use assessment_report::{
     export_windows_sandbox_msi_document, report_windows_sandbox_msi, report_windows_sandbox_msi_run,
 };
-pub use preparation::{
-    ProviderProtocolObservation, WsbPairedControls, WsbSevenZipAssessment, WsbSevenZipInstaller,
-    build_wsb_paired_controls_preparation, build_wsb_sevenzip_preparation,
-    build_wsb_static_sevenzip_preparation,
-};
 #[cfg(windows)]
 pub use preparation::{
-    import_windows_sandbox_paired_preparation, import_windows_sandbox_sevenzip_preparation,
+    ApplicationAssessmentPreparationInput, import_windows_sandbox_paired_preparation,
+    import_windows_sandbox_sevenzip_preparation, prepare_windows_sandbox_application_assessment,
     prepare_windows_sandbox_paired_controls, prepare_windows_sandbox_sevenzip_assessment,
     verify_windows_sandbox_paired_preparation, verify_windows_sandbox_sevenzip_preparation,
+};
+pub use preparation::{
+    ProviderProtocolObservation, WsbApplicationAssessment, WsbAssessmentInput, WsbPairedControls,
+    WsbSevenZipAssessment, WsbSevenZipInstaller, build_wsb_application_assessment_preparation,
+    build_wsb_paired_controls_preparation, build_wsb_sevenzip_preparation,
+    build_wsb_static_sevenzip_preparation,
 };
 mod session;
 
@@ -202,11 +208,16 @@ pub struct WsbGoldenProbeStart {
     pub paired_controls: Option<WsbPairedControls>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seven_zip: Option<preparation::WsbSevenZipAssessment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub application_assessment: Option<WsbApplicationAssessment>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WsbGoldenProbeExecution {
+    #[serde(skip)]
+    application_observation:
+        Option<Box<aiw_provider_wsb::assessment_evidence::VerifiedAssessmentEvidence>>,
     #[serde(skip)]
     seven_zip_observation: Option<Box<aiw_provider_wsb::sevenzip::SevenZipResult>>,
     #[serde(skip)]
@@ -275,11 +286,19 @@ pub struct WsbImportedMsiExecution {
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum WsbApprovedExecution {
+    ApplicationAssessment(Box<WsbApplicationAssessmentExecution>),
     SevenZip(Box<WsbSevenZipExecution>),
     GoldenProbe(WsbGoldenProbeExecution),
     PairedControls(Box<WsbPairedControlExecution>),
     ImportedMsi(WsbImportedMsiExecution),
     ImportedBambu(Box<WsbBambuExecution>),
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WsbApplicationAssessmentExecution {
+    pub lifecycle: WsbGoldenProbeExecution,
+    pub evidence: aiw_provider_wsb::assessment_evidence::VerifiedAssessmentEvidence,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -447,42 +466,13 @@ pub fn observe_wsb_session_status(layout: &RunLayout) -> Result<WsbSessionStatus
     let provider_bindings: Vec<(&str, &WorkspaceBindingEvidence, &str)> = plan
         .actions
         .iter()
-        .filter_map(|action| match action {
-            PlannedAction::ExecuteWindowsSandboxGoldenProbe {
-                provider_sha256,
-                workspace,
-                workspace_identity_sha256,
-                ..
-            }
-            | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
-                provider_sha256,
-                workspace,
-                workspace_identity_sha256,
-                ..
-            }
-            | PlannedAction::ExecuteWindowsSandboxPairedControls {
-                provider_sha256,
-                workspace,
-                workspace_identity_sha256,
-                ..
-            }
-            | PlannedAction::ExecuteWindowsSandboxSevenZipAssessment {
-                provider_sha256,
-                workspace,
-                workspace_identity_sha256,
-                ..
-            }
-            | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario {
-                provider_sha256,
-                workspace,
-                workspace_identity_sha256,
-                ..
-            } => Some((
-                provider_sha256.as_str(),
-                workspace.as_ref(),
-                workspace_identity_sha256.as_str(),
-            )),
-            _ => None,
+        .filter_map(PlannedAction::windows_sandbox_binding)
+        .map(|binding| {
+            (
+                binding.provider_sha256,
+                binding.workspace,
+                binding.workspace_identity_sha256,
+            )
         })
         .collect();
     let binding_matches = match provider_bindings.as_slice() {
@@ -825,15 +815,33 @@ pub(crate) fn execute_wsb_golden_probe(
     } else {
         None
     };
+    #[cfg(windows)]
+    let application_output_custody = if request.application_assessment.is_some() {
+        Some(finish_cleaned_attempt(layout, || {
+            hold_application_output(&context.output_root)
+        })?)
+    } else {
+        None
+    };
+    let mut completion = context.completion.clone();
+    if request.application_assessment.is_some() {
+        finish_cleaned_attempt(layout, || {
+            add_application_progress_expectation(&context.output_root, &mut completion)
+        })?;
+    }
     let verification = match bambu_verified {
         Some(verified) => Ok(verified),
-        None => verify_completion_receipt(&context.output_root, &context.completion)
+        None => verify_completion_receipt(&context.output_root, &completion)
             .map_err(|error| RunnerError::Receipt(error.to_string())),
     };
     let verification = match verification {
         Ok(value)
             if value.successful
-                || matches!(context.guest_request, ExecutionGuestRequest::SevenZip(_)) =>
+                || matches!(
+                    context.guest_request,
+                    ExecutionGuestRequest::SevenZip(_)
+                        | ExecutionGuestRequest::ApplicationAssessment(_)
+                ) =>
         {
             value
         }
@@ -910,6 +918,35 @@ pub(crate) fn execute_wsb_golden_probe(
         } else {
             None
         };
+    let application_observation = if let ExecutionGuestRequest::ApplicationAssessment(expected) =
+        &context.guest_request
+    {
+        Some(finish_cleaned_attempt(layout, || {
+            let observed: aiw_provider_wsb::assessment_observation::ApplicationAssessmentResult =
+                read_bounded_json(
+                    &context.output_root.join("assessment-result.json"),
+                    16 * 1024 * 1024,
+                )?;
+            let bytes =
+                read_bounded_bytes(&context.output_root.join("evidence.jsonl"), 1024 * 1024)?;
+            let evidence = aiw_provider_wsb::assessment_evidence::verify_assessment_evidence(
+                &bytes,
+                &verification.evidence_root_hash,
+                expected,
+                &observed,
+            )
+            .map_err(RunnerError::Receipt)?;
+            verify_application_progress_output(&context.output_root, expected, &observed)?;
+            if verification.successful != observed.native.driver_completed {
+                return Err(RunnerError::Receipt(
+                    "assessment completion status disagrees with driver facts".into(),
+                ));
+            }
+            Ok(Box::new(evidence))
+        })?)
+    } else {
+        None
+    };
     let paired_observation = if let ExecutionGuestRequest::PairedControls(expected) =
         &context.guest_request
     {
@@ -1012,7 +1049,8 @@ pub(crate) fn execute_wsb_golden_probe(
                     product_registration,
                 )
             }
-            ExecutionGuestRequest::Golden(_)
+            ExecutionGuestRequest::ApplicationAssessment(_)
+            | ExecutionGuestRequest::Golden(_)
             | ExecutionGuestRequest::ImportedBambu(_)
             | ExecutionGuestRequest::PairedControls(_)
             | ExecutionGuestRequest::SevenZip(_) => (None, None, None, None, None, None),
@@ -1032,6 +1070,15 @@ pub(crate) fn execute_wsb_golden_probe(
             return Err(error);
         }
     };
+    #[cfg(windows)]
+    if let Some(files) = &application_output_custody {
+        finish_cleaned_attempt(layout, || {
+            for file in files {
+                file.revalidate().map_err(|_| RunnerError::Drift)?;
+            }
+            Ok(())
+        })?;
+    }
     #[cfg(windows)]
     if let Some(files) = &seven_zip_output_custody {
         finish_cleaned_attempt(layout, || {
@@ -1066,6 +1113,7 @@ pub(crate) fn execute_wsb_golden_probe(
         bambu_observation,
         paired_observation,
         seven_zip_observation,
+        application_observation,
         scenario,
         application_token,
         behavior,
@@ -1096,7 +1144,8 @@ pub fn start_approved_windows_sandbox_golden_probe(
         false,
     )? {
         WsbApprovedExecution::GoldenProbe(result) => Ok(result),
-        WsbApprovedExecution::ImportedMsi(_)
+        WsbApprovedExecution::ApplicationAssessment(_)
+        | WsbApprovedExecution::ImportedMsi(_)
         | WsbApprovedExecution::ImportedBambu(_)
         | WsbApprovedExecution::PairedControls(_)
         | WsbApprovedExecution::SevenZip(_) => Err(RunnerError::ApprovalBinding),
@@ -1196,7 +1245,8 @@ fn start_approved_windows_sandbox_inner(
     if (artifacts.receipt.msi.is_some()
         || artifacts.receipt.bambu.is_some()
         || artifacts.receipt.paired_controls.is_some()
-        || artifacts.receipt.seven_zip.is_some())
+        || artifacts.receipt.seven_zip.is_some()
+        || artifacts.receipt.application_assessment.is_some())
         && !allow_msi
     {
         return Err(RunnerError::ApprovalBinding);
@@ -1208,7 +1258,9 @@ fn start_approved_windows_sandbox_inner(
     }
 
     let request = WsbGoldenProbeStart {
-        schema_version: if artifacts.receipt.seven_zip.is_some() {
+        schema_version: if artifacts.receipt.application_assessment.is_some() {
+            "aiw.dev/wsb-application-assessment-start/v0alpha1"
+        } else if artifacts.receipt.seven_zip.is_some() {
             "aiw.dev/wsb-sevenzip-start/v0alpha1"
         } else if artifacts.receipt.paired_controls.is_some() {
             "aiw.dev/wsb-paired-controls-start/v0alpha1"
@@ -1232,6 +1284,7 @@ fn start_approved_windows_sandbox_inner(
         bambu: artifacts.receipt.bambu.clone(),
         paired_controls: artifacts.receipt.paired_controls.clone(),
         seven_zip: artifacts.receipt.seven_zip.clone(),
+        application_assessment: artifacts.receipt.application_assessment.clone(),
     };
     let approval = layout.read_approval().map_err(journal_error)?;
     if !matches!(
@@ -1280,6 +1333,18 @@ fn start_approved_windows_sandbox_inner(
         &AlreadyHeldProviderLease,
         held.workspace(),
     )?;
+    if request.application_assessment.is_some() {
+        let evidence = *result
+            .application_observation
+            .take()
+            .ok_or(RunnerError::Drift)?;
+        return Ok(WsbApprovedExecution::ApplicationAssessment(Box::new(
+            WsbApplicationAssessmentExecution {
+                lifecycle: result,
+                evidence,
+            },
+        )));
+    }
     if let Some(assessment) = &request.seven_zip {
         let observations = *result
             .seven_zip_observation
@@ -1577,42 +1642,13 @@ fn recovery_workspace(
     let bindings: Vec<(&str, &WorkspaceBindingEvidence, &str)> = plan
         .actions
         .iter()
-        .filter_map(|action| match action {
-            PlannedAction::ExecuteWindowsSandboxGoldenProbe {
-                provider_sha256,
-                workspace,
-                workspace_identity_sha256,
-                ..
-            }
-            | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
-                provider_sha256,
-                workspace,
-                workspace_identity_sha256,
-                ..
-            }
-            | PlannedAction::ExecuteWindowsSandboxPairedControls {
-                provider_sha256,
-                workspace,
-                workspace_identity_sha256,
-                ..
-            }
-            | PlannedAction::ExecuteWindowsSandboxSevenZipAssessment {
-                provider_sha256,
-                workspace,
-                workspace_identity_sha256,
-                ..
-            }
-            | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario {
-                provider_sha256,
-                workspace,
-                workspace_identity_sha256,
-                ..
-            } => Some((
-                provider_sha256.as_str(),
-                workspace.as_ref(),
-                workspace_identity_sha256.as_str(),
-            )),
-            _ => None,
+        .filter_map(PlannedAction::windows_sandbox_binding)
+        .map(|binding| {
+            (
+                binding.provider_sha256,
+                binding.workspace,
+                binding.workspace_identity_sha256,
+            )
         })
         .collect();
     let [(provider_sha256, workspace, workspace_hash)] = bindings.as_slice() else {
@@ -1830,7 +1866,22 @@ fn prepare_execution(
     {
         return Err(RunnerError::Drift);
     }
-    let guest_request = if let Some(assessment) = &request.seven_zip {
+    let guest_request = if let Some(assessment) = &request.application_assessment {
+        assessment
+            .validate(&request.workspace)
+            .map_err(|error| RunnerError::Preparation(error.to_string()))?;
+        ExecutionGuestRequest::ApplicationAssessment(Box::new(
+            aiw_provider_wsb::assessment_request::ApplicationAssessmentGuestRequest::new(
+                plan.run_id.clone(),
+                session_id.clone(),
+                rendered.sha256.clone(),
+                request.guest_agent.sha256.clone(),
+                plan.project_revision_hash.clone(),
+                assessment.compiled.clone(),
+            )
+            .map_err(RunnerError::Preparation)?,
+        ))
+    } else if let Some(assessment) = &request.seven_zip {
         if require_empty_output {
             assessment
                 .validate(&request.workspace, &request.guest_agent)
@@ -1946,6 +1997,12 @@ fn prepare_execution(
     }
     if request.bambu.is_some() {
         add_bambu_artifact_expectation(&mut completion);
+    }
+    if request.application_assessment.is_some() {
+        completion.artifacts[0].path = "assessment-result.json".into();
+        completion.artifacts[0].role = aiw_evidence::ArtifactRole::ScenarioResults;
+        completion.artifacts[0].maximum_bytes = 16 * 1024 * 1024;
+        completion.artifacts[1].maximum_bytes = 1024 * 1024;
     }
     let binding = SessionBinding {
         run_id: plan.run_id.clone(),
@@ -2269,7 +2326,6 @@ fn hold_complete_sevenzip_output(
 
 // Called only after exact-session absence and provider quiescence are verified.
 // Every subsequent verification error must leave a durable terminal result.
-#[cfg(any(windows, test))]
 fn finish_cleaned_attempt<T>(
     layout: &RunLayout,
     finish: impl FnOnce() -> Result<T, RunnerError>,
@@ -2281,6 +2337,87 @@ fn finish_cleaned_attempt<T>(
             Err(error)
         }
     }
+}
+
+fn add_application_progress_expectation(
+    output: &Path,
+    expectation: &mut WindowsSandboxCompletionExpectation,
+) -> Result<(), RunnerError> {
+    match fs::symlink_metadata(output.join("assessment-progress.jsonl")) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
+            expectation
+                .artifacts
+                .push(aiw_provider_wsb::CompletionArtifactExpectation {
+                    path: "assessment-progress.jsonl".into(),
+                    role: aiw_evidence::ArtifactRole::DiagnosticLog,
+                    sensitivity: aiw_evidence::DataSensitivity::Confidential,
+                    media_type: "application/x-ndjson".into(),
+                    maximum_bytes: 16 * 1024 * 1024,
+                });
+            Ok(())
+        }
+        _ => Err(RunnerError::Drift),
+    }
+}
+
+fn verify_application_progress_output(
+    output: &Path,
+    request: &aiw_provider_wsb::assessment_request::ApplicationAssessmentGuestRequest,
+    observed: &aiw_provider_wsb::assessment_observation::ApplicationAssessmentResult,
+) -> Result<(), RunnerError> {
+    let path = output.join("assessment-progress.jsonl");
+    match fs::symlink_metadata(&path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let native = &observed.native;
+            if native.driver_completed
+                || !native.steps.is_empty()
+                || !native.assertions.is_empty()
+                || native.standard_context.is_some()
+                || native.windows.is_some()
+                || native.profile_sid.is_some()
+                || !native.collector_access_denials.is_empty()
+            {
+                return Err(RunnerError::Receipt(
+                    "assessment facts lack their durable progress journal".into(),
+                ));
+            }
+            Ok(())
+        }
+        Ok(_) => {
+            let bytes = read_bounded_bytes(&path, 16 * 1024 * 1024)?;
+            aiw_provider_wsb::assessment_evidence::verify_assessment_progress(
+                &bytes, request, observed,
+            )
+            .map(|_| ())
+            .map_err(RunnerError::Receipt)
+        }
+        Err(_) => Err(RunnerError::Drift),
+    }
+}
+
+#[cfg(windows)]
+fn hold_application_output(
+    output: &Path,
+) -> Result<Vec<aiw_windows_platform::HeldApplicationFile>, RunnerError> {
+    let mut files = Vec::new();
+    for (leaf, maximum) in [
+        ("completion.json", 1024 * 1024),
+        ("assessment-result.json", 16 * 1024 * 1024),
+        ("evidence.jsonl", 1024 * 1024),
+        ("assessment-progress.jsonl", 16 * 1024 * 1024),
+    ] {
+        if leaf == "assessment-progress.jsonl"
+            && matches!(fs::symlink_metadata(output.join(leaf)), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+        {
+            continue;
+        }
+        files.push(
+            aiw_windows_platform::HeldApplicationFile::open_bounded(&output.join(leaf), maximum)
+                .map_err(|_| RunnerError::Drift)?,
+        );
+    }
+    Ok(files)
 }
 
 fn record_terminal_failure(layout: &RunLayout, error: RunnerError) -> Result<(), RunnerError> {
@@ -2562,6 +2699,9 @@ struct GuestRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(untagged)]
 enum ExecutionGuestRequest {
+    ApplicationAssessment(
+        Box<aiw_provider_wsb::assessment_request::ApplicationAssessmentGuestRequest>,
+    ),
     SevenZip(Box<aiw_provider_wsb::sevenzip::SevenZipRequest>),
     Golden(Box<GuestRequest>),
     ImportedMsi(Box<aiw_provider_wsb::ImportedMsiGuestRequest>),
@@ -2572,6 +2712,7 @@ enum ExecutionGuestRequest {
 impl ExecutionGuestRequest {
     fn digest(&self) -> &str {
         match self {
+            Self::ApplicationAssessment(v) => &v.request_sha256,
             Self::SevenZip(v) => &v.request_sha256,
             Self::Golden(v) => &v.request_sha256,
             Self::ImportedMsi(v) => &v.request_sha256,
@@ -2581,6 +2722,7 @@ impl ExecutionGuestRequest {
     }
     fn binding(&self) -> (&str, &str, &str) {
         match self {
+            Self::ApplicationAssessment(v) => (&v.run_id, &v.sandbox_id, &v.config_sha256),
             Self::SevenZip(v) => (&v.run_id, &v.sandbox_id, &v.config_sha256),
             Self::Golden(v) => (&v.run_id, &v.sandbox_id, &v.config_sha256),
             Self::ImportedMsi(v) => (&v.run_id, &v.sandbox_id, &v.config_sha256),
@@ -2590,6 +2732,7 @@ impl ExecutionGuestRequest {
     }
     fn validate(&self) -> Result<(), RunnerError> {
         match self {
+            Self::ApplicationAssessment(v) => v.validate().map_err(RunnerError::Preparation),
             Self::SevenZip(v) => v.validate().map_err(|_| RunnerError::Drift),
             Self::Golden(v) => {
                 if v.schema_version != GUEST_REQUEST_SCHEMA
@@ -2663,6 +2806,7 @@ fn ensure_approval(
             PlannedAction::AssessHost,
             PlannedAction::PrepareWorkspace,
             PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. }
+                | PlannedAction::ExecuteWindowsSandboxApplicationAssessment { .. }
                 | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
                 | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { .. }
                 | PlannedAction::ExecuteWindowsSandboxPairedControls { .. }
@@ -2677,6 +2821,7 @@ fn ensure_approval(
         request.bambu.is_some(),
         request.paired_controls.is_some(),
         request.seven_zip.is_some(),
+        request.application_assessment.is_some(),
     ]
     .iter()
     .filter(|v| **v)
@@ -2685,7 +2830,29 @@ fn ensure_approval(
     {
         return Err(RunnerError::ApprovalBinding);
     }
-    if let Some(assessment) = &request.seven_zip {
+    if let Some(assessment) = &request.application_assessment {
+        let PlannedAction::ExecuteWindowsSandboxApplicationAssessment {
+            intake_receipt_sha256,
+            source_manifest_sha256,
+            assessment_sha256,
+            ..
+        } = &plan.actions[2]
+        else {
+            return Err(RunnerError::ApprovalBinding);
+        };
+        assessment
+            .validate(&request.workspace)
+            .map_err(|_| RunnerError::ApprovalBinding)?;
+        if intake_receipt_sha256 != &assessment.intake_receipt_sha256
+            || source_manifest_sha256 != &assessment.compiled.portable_manifest_sha256
+            || assessment_sha256
+                != &assessment
+                    .assessment_sha256()
+                    .map_err(|_| RunnerError::ApprovalBinding)?
+        {
+            return Err(RunnerError::ApprovalBinding);
+        }
+    } else if let Some(assessment) = &request.seven_zip {
         let PlannedAction::ExecuteWindowsSandboxSevenZipAssessment {
             profile,
             import_receipt_sha256,
@@ -2759,61 +2926,23 @@ fn ensure_approval(
     let exact = plan
         .actions
         .iter()
-        .filter_map(|action| match action {
-            PlannedAction::ExecuteWindowsSandboxGoldenProbe {
-                sandbox_plan_sha256,
-                provider_sha256,
-                guest_agent_sha256,
-                workspace,
-                workspace_identity_sha256,
-            }
-            | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
-                sandbox_plan_sha256,
-                provider_sha256,
-                guest_agent_sha256,
-                workspace,
-                workspace_identity_sha256,
-                ..
-            }
-            | PlannedAction::ExecuteWindowsSandboxPairedControls {
-                sandbox_plan_sha256,
-                provider_sha256,
-                guest_agent_sha256,
-                workspace,
-                workspace_identity_sha256,
-                ..
-            }
-            | PlannedAction::ExecuteWindowsSandboxSevenZipAssessment {
-                sandbox_plan_sha256,
-                provider_sha256,
-                guest_agent_sha256,
-                workspace,
-                workspace_identity_sha256,
-                ..
-            }
-            | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario {
-                sandbox_plan_sha256,
-                provider_sha256,
-                guest_agent_sha256,
-                workspace,
-                workspace_identity_sha256,
-                ..
-            } => Some((
-                sandbox_plan_sha256,
-                provider_sha256,
-                guest_agent_sha256,
-                workspace,
-                workspace_identity_sha256,
-            )),
-            _ => None,
+        .filter_map(PlannedAction::windows_sandbox_binding)
+        .map(|binding| {
+            (
+                binding.sandbox_plan_sha256,
+                binding.provider_sha256,
+                binding.guest_agent_sha256,
+                binding.workspace,
+                binding.workspace_identity_sha256,
+            )
         })
         .collect::<Vec<_>>();
     if exact.len() != 1
-        || exact[0].0 != &wsb_hash
-        || exact[0].1 != &request.provider.sha256
-        || exact[0].2 != &request.guest_agent.sha256
-        || exact[0].3.as_ref() != &request.workspace
-        || exact[0].4 != &workspace_hash
+        || exact[0].0 != wsb_hash.as_str()
+        || exact[0].1 != request.provider.sha256.as_str()
+        || exact[0].2 != request.guest_agent.sha256.as_str()
+        || exact[0].3 != &request.workspace
+        || exact[0].4 != workspace_hash.as_str()
         || request.workspace_identity_sha256 != workspace_hash
     {
         return Err(RunnerError::ApprovalBinding);
@@ -2835,7 +2964,9 @@ fn validate_start(
     {
         return Err(RunnerError::Drift);
     }
-    let schema = if request.seven_zip.is_some() {
+    let schema = if request.application_assessment.is_some() {
+        "aiw.dev/wsb-application-assessment-start/v0alpha1"
+    } else if request.seven_zip.is_some() {
         "aiw.dev/wsb-sevenzip-start/v0alpha1"
     } else if request.paired_controls.is_some() {
         "aiw.dev/wsb-paired-controls-start/v0alpha1"
@@ -3657,6 +3788,7 @@ mod tests {
             bambu: None,
             paired_controls: None,
             seven_zip: None,
+            application_assessment: None,
         };
         let mut plan = RunPlan::new(
             "w1-run",
@@ -4982,6 +5114,7 @@ mod tests {
             bambu: None,
             paired_controls: None,
             seven_zip: None,
+            application_assessment: None,
         };
         let native = NativeWsbProcess {
             state: Mutex::new(NativeWsbState {

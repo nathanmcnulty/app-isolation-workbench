@@ -1,10 +1,16 @@
 # Roadmap
 
-Updated 2026-11-08. This is the current product direction and delivery order.
+Updated 2026-11-14. This is the current product direction and delivery order.
 [Issue #108](https://github.com/nathanmcnulty/app-isolation-workbench/issues/108)
 tracks the application-neutral recovery. [Repository scope](REPOSITORY-SCOPE.md)
 sets publication and licensing boundaries. This plan does not implement the
 capabilities below, authorize live trials, or change a provider/runtime pin.
+
+The [first generic CLI slice](APPLICATION-ASSESSMENT.md) now implements portable
+offline planning, protected preparation, shared execution/report contracts and
+data-only replay packaging. Two different external workflows pass the unchanged
+intake/compiler/package path; disposable-worker acceptance is pending. This does
+not satisfy the broader corpus, installer, desktop or release gates below.
 
 ## Product decision
 

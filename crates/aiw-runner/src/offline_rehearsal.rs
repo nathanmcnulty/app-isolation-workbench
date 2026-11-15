@@ -99,6 +99,7 @@ impl Fixture {
             bambu: None,
             paired_controls: artifacts.receipt.paired_controls.clone(),
             seven_zip: None,
+            application_assessment: None,
         };
         Self {
             parent,

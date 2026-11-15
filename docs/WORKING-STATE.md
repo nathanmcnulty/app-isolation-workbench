@@ -1,23 +1,65 @@
 # Working state
 
-Updated 2026-11-08. Current slice: align the application-neutral recovery plan and
-repository/publication scope. Start with `scripts/work-status.ps1`,
+Updated 2026-11-14 (America/Anchorage). Active goal is #108: one generic assessment
+and packaging path, demonstrated by two different external fixtures with no
+product-specific code changes. Worktree `C:\aiw\app-isolation-workbench-108`,
+branch `codex/application-neutral-assessment`, starts from freshly fetched main
+`04be2cefb9e9e4ffff73408e960efee6d30ea9d8`. Start with `scripts/work-status.ps1`,
 [roadmap](ROADMAP.md), [migration audit](APPLICATION-AGNOSTIC-MIGRATION.md) and
-[release gates](RELEASE-GATES.md). The work layers on local cleanup `df6f329`,
-README PR #107 head `30abe101`, and main `b27942a`; verify current remote state
-before integration. These are source references, not assumptions about today's HEAD.
+[release gates](RELEASE-GATES.md). The local `origin/main` ref is stale because
+fetch configuration tracks another branch; use the recorded fetched commit.
 
 ## Current boundary and next work
 
-Generic assessment is not implemented. Product-specific execution remains in the
-CLI, desktop, guest, platform, runner and packaging paths. The recovery is one
-capability-selected plan/engine with exact per-run source identity, useful
-assessment before optional packaging, a diverse corpus plus independent holdout,
-and retirement of fixed execution after equivalent regression coverage transfers.
+The generic CLI/shared service path now covers held intake, compilation, protected
+preparation, review/approval and separate Start, typed guest execution, retained
+reports/comparison and data-only replay packaging. The elevated collector creates
+ordinary-user or classic AppContainer roots suspended, observes image/token/job
+facts and flushes progress before resume. Collector mutation-denial gates precede
+application dispatch. Interrupted progress remains diagnostic. See
+[the implementation boundary](APPLICATION-ASSESSMENT.md).
 
-Next implementation: R1's generic plan/capability contract using existing
-`ApplicationSource`, `ScenarioStep` and intake/approval concepts. Begin with inert
-validation and unknown-app/unsupported-operation tests, not another product adapter.
+Native acceptance is still pending. Before vendor trials, prove this changed
+driver with the project-owned control in fresh Sandboxes on existing VM107.
+Collector launch privileges are an unmeasured prerequisite; a refusal is a driver
+blocker, not application incompatibility. Synchronous setup/I/O is bounded by the
+outer worker watchdog, not hard real-time cancellation. No fallback, privilege
+grant, runtime installation, VM or host-security change is authorized here.
+
+Checks so far: schema 17, orchestrator 62, provider 126, guest 17, runner 143 plus
+four generic preparation tests, 13 focused Windows native contracts, held intake
+custody, and two package round-trip/drift tests passed. CLI 56 passed with one
+historical-archive test ignored; runner's nine live tests were not invoked.
+Existing admin regression cases passed; its two new fixture-construction failures
+were corrected and their focused rerun passed. Workspace all-target Clippy and
+governance passed. Final checks must cover subsequent changes.
+
+One unchanged CLI binary compiled ordinary/classic plans and exported/reverified
+packages for both real external fixtures. Semantic hashes matched across policy
+selection and survived packaging. This was metadata/copy work only: zero provider
+calls or fixture executions. Private proof:
+`C:\aiw\generic-assessment-108\host-input-checks-r1\proof.json`.
+Consequential native review found and closed ACL inheritance, total-budget and
+FFI-lifetime issues. Private review receipts and test logs are under
+`C:\aiw\generic-assessment-108`; no native acceptance follows from source review.
+
+The first path is portable offline CLI execution, with exact argv/cwd, inputs,
+bounded capture, exit checks and work-file assertions. Other mechanisms and
+required evidence scopes remain explicit blockers until implemented. External
+fixture choices are a stateless JSON CLI and a stateful database CLI; their names,
+payloads, arguments and expected results remain private run inputs, never product
+gates or distributed assets. Desktop intake, installer/GUI mechanisms and the
+broader seven-fixture/holdout matrix remain open. Legacy execution remains until
+equivalent generic regression coverage transfers; its readers/evidence stay intact.
+
+Draft [#111](https://github.com/nathanmcnulty/app-isolation-workbench/pull/111)
+is paused by user direction. Preserve its checkout at
+`C:\aiw\app-isolation-workbench`, branch and all private evidence. Its in-flight
+diagnostic build was stopped through its verified owned process tree; partial
+artifacts/logs remain and no diagnostic ran in VM107. Private pause receipt:
+`C:\aiw\environment-probe-20261114\legacy-pause-build-reconciliation-r1.json`.
+Do not continue legacy 7-Zip adapters, MXC research or diagnostics for their own
+sake. Reuse tracing or a Windows probe only where the generic path needs it.
 See [execution packets](EXECUTION-PLAN.md). The roadmap does not authorize a live
 trial, authentication, dependency install, runtime pin change or provider setup.
 
@@ -42,9 +84,8 @@ or alter retained evidence merely to align documentation.
 
 ## Integration checks
 
-The documentation change needs link/content/governance review and independent
-exact-head review. The underlying cleanup also changes scripts/tests/assets and
-requires their applicable checks plus required hosted CI before integration.
-This Linux executor can run inert checks with the existing PowerShell runtime;
-Windows-only/native and Rust toolchain checks must be reported separately, not
-inferred from static success. Update this handoff when integration actually lands.
+Run applicable contract, Rust, desktop and governance checks and consequential
+independent review. Native acceptance requires approved disposable-worker proof;
+synthetic tests, compilation and downloads do not establish it. Complete one
+draft PR for this generic slice, with precise remaining limitations. Do not
+claim all of #108, W4/W5 or production acceptance complete without evidence.

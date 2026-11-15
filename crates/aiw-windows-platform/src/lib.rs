@@ -2,6 +2,11 @@
 
 use aiw_probe::WindowsSandboxReadiness;
 
+#[cfg(windows)]
+mod guest_assessment;
+#[cfg(windows)]
+pub use guest_assessment::{execute_assessment, publish_assessment_completion};
+
 #[cfg(all(windows, feature = "research-sevenzip"))]
 pub use control_appcontainer::research_sevenzip::run as run_sevenzip_research;
 
@@ -92,7 +97,8 @@ pub use workspace::{
 
 #[cfg(windows)]
 pub use portable_import::{
-    PortableImportError, import_portable_directory, verify_portable_directory_import,
+    HeldVerifiedPortableDirectoryImport, PortableImportError, import_portable_directory,
+    open_verified_portable_directory_import, verify_portable_directory_import,
 };
 #[cfg(windows)]
 pub use source_import::{

@@ -363,6 +363,28 @@ impl HeldApplicationFile {
         &self.observation
     }
 
+    /// Native execution-header inspection only. Reads a bounded prefix from
+    /// the SAME retained image handle, with full custody revalidation around
+    /// the read. This is not an alternate intake or execution authority.
+    pub(crate) fn read_execution_header(&self) -> Result<Vec<u8>, SourceInspectionError> {
+        self.revalidate()?;
+        let length = self.observation.size_bytes.min(128 * 1024) as usize;
+        let mut bytes = vec![0; length];
+        let mut offset = 0;
+        while offset < length {
+            let count = self
+                .file
+                .seek_read(&mut bytes[offset..], offset as u64)
+                .map_err(native)?;
+            if count == 0 {
+                return Err(SourceInspectionError::Drift);
+            }
+            offset += count;
+        }
+        self.revalidate()?;
+        Ok(bytes)
+    }
+
     pub fn revalidate(&self) -> Result<(), SourceInspectionError> {
         let current_path = final_path(&self.file).map_err(native)?;
         if !same_path(&current_path, &self.source_path) {

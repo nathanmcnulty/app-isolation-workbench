@@ -11,6 +11,8 @@ use aiw_probe::{ApplicationInspectionKind, ReadinessState};
 use aiw_schema::{ApplicationSource, Project, validate_project_for_planning};
 
 mod admin_progress;
+pub mod application_assessment;
+pub mod application_package;
 pub mod approval_review;
 #[cfg(windows)]
 mod installer_inspection;

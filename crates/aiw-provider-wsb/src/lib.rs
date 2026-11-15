@@ -1,5 +1,11 @@
 #![forbid(unsafe_code)]
 
+pub mod assessment_request;
+
+pub mod assessment;
+pub mod assessment_evidence;
+pub mod assessment_observation;
+
 pub mod sevenzip;
 pub use sevenzip::{SevenZipComparison, SevenZipRequest, SevenZipResult};
 

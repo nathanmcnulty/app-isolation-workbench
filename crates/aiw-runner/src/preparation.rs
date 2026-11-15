@@ -6,6 +6,16 @@
 //! or recover a Windows Sandbox provider lease.
 
 use std::path::Path;
+pub(crate) mod application_assessment;
+#[cfg(test)]
+mod application_assessment_tests;
+#[cfg(windows)]
+pub use application_assessment::{
+    ApplicationAssessmentPreparationInput, prepare_windows_sandbox_application_assessment,
+};
+pub use application_assessment::{
+    WsbApplicationAssessment, WsbAssessmentInput, build_wsb_application_assessment_preparation,
+};
 pub(crate) mod paired;
 pub(crate) mod sevenzip;
 #[cfg(windows)]
@@ -189,6 +199,8 @@ pub struct WsbPreparationReceipt {
     pub paired_controls: Option<WsbPairedControls>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seven_zip: Option<WsbSevenZipAssessment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub application_assessment: Option<WsbApplicationAssessment>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -402,7 +414,9 @@ impl WsbPreparationReceipt {
             os.validate().map_err(WsbPreparationError::Contract)?;
         }
         let deferred = self.provider_protocol_observation.is_some();
-        let expected_schema = if self.seven_zip.is_some() {
+        let expected_schema = if self.application_assessment.is_some() {
+            application_assessment::APPLICATION_ASSESSMENT_PREPARATION_SCHEMA
+        } else if self.seven_zip.is_some() {
             sevenzip::SEVENZIP_PREPARATION_SCHEMA
         } else if self.paired_controls.is_some() && deferred {
             paired::PAIRED_STATIC_PREPARATION_SCHEMA
@@ -440,6 +454,7 @@ impl WsbPreparationReceipt {
             self.bambu.is_some(),
             self.paired_controls.is_some(),
             self.seven_zip.is_some(),
+            self.application_assessment.is_some(),
         ]
         .iter()
         .filter(|v| **v)
@@ -456,8 +471,13 @@ impl WsbPreparationReceipt {
                 } else {
                     READINESS_SCHEMA
                 }
-            || (deferred && self.paired_controls.is_none() && self.seven_zip.is_none())
+            || (deferred
+                && self.paired_controls.is_none()
+                && self.seven_zip.is_none()
+                && self.application_assessment.is_none())
             || (self.seven_zip.is_some() && !deferred)
+            || (self.application_assessment.is_some() && !deferred)
+            || (self.application_assessment.is_some() && self.host_os_version.is_none())
             || self.wsb_plan_relative_path != WSB_PLAN_FILE
             || self.run_plan_relative_path != RUN_PLAN_FILE
             || !self.approval_required
@@ -515,6 +535,9 @@ impl WsbPreparationReceipt {
             ));
         }
         require_pinned_protocol(&self.provider_protocol)?;
+        if let Some(assessment) = &self.application_assessment {
+            assessment.validate(&self.workspace)?;
+        }
         if let Some(msi) = &self.msi {
             msi.validate(&self.workspace)?;
             if let Some(profile) = &msi.launch_profile
@@ -577,6 +600,9 @@ impl PreparedWsbArtifacts {
             self.receipt.validate_historical()?;
         } else {
             self.receipt.validate()?;
+        }
+        if self.receipt.application_assessment.is_some() {
+            return application_assessment::validate_application_artifacts(self);
         }
         let mut profile_plan = self.wsb_plan.clone();
         if self.receipt.msi.is_some()
@@ -907,6 +933,7 @@ fn build_preparation_identity(
         bambu: None,
         paired_controls: None,
         seven_zip: None,
+        application_assessment: None,
     };
     let artifacts = PreparedWsbArtifacts {
         run_plan,
@@ -1801,6 +1828,7 @@ pub(crate) struct HeldVerifiedWsbPreparation {
         aiw_windows_platform::BoundWorkspaceFile,
         aiw_windows_platform::HeldApplicationFile,
     )>,
+    held_assessment: Option<application_assessment::HeldApplicationAssessmentFiles>,
     workspace: aiw_windows_platform::HeldRunWorkspace,
 }
 
@@ -1816,6 +1844,9 @@ impl HeldVerifiedWsbPreparation {
             .map_err(|error| WsbPreparationError::Workspace(error.to_string()))?;
         ensure_empty_directory(&self.workspace.output_path())?;
         paired::require_receipt_tools(&self.workspace.tools_path(), &self.artifacts.receipt)?;
+        if let Some(assessment) = &self.held_assessment {
+            assessment.revalidate()?;
+        }
         for (file, observed) in &self.held_controls {
             file.revalidate()
                 .map_err(|e| WsbPreparationError::Workspace(e.to_string()))?;
@@ -1840,7 +1871,7 @@ impl HeldVerifiedWsbPreparation {
                 .revalidate()
                 .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
         }
-        require_workspace_allowlist(self.workspace.root_path(), state)?;
+        require_workspace_for_receipt(self.workspace.root_path(), state, &self.artifacts.receipt)?;
         let receipt: WsbPreparationReceipt = read_json_bounded(&mut self.receipt_file)?;
         let run_plan: RunPlan = read_json_bounded(&mut self.run_plan_file)?;
         let wsb_plan: WindowsSandboxPlan = read_json_bounded(&mut self.wsb_plan_file)?;
@@ -1963,7 +1994,8 @@ fn open_verified_preparation_with_inspector(
         && (receipt.msi.is_some()
             || receipt.bambu.is_some()
             || receipt.paired_controls.is_some()
-            || receipt.seven_zip.is_some())
+            || receipt.seven_zip.is_some()
+            || receipt.application_assessment.is_some())
     {
         return Err(WsbPreparationError::Contract(
             "private golden discard does not authorize imported application workspace deletion"
@@ -2023,7 +2055,7 @@ fn open_verified_preparation_with_inspector(
     } else {
         PreparationWorkspaceState::Prepared
     };
-    require_workspace_allowlist(workspace.root_path(), state)?;
+    require_workspace_for_receipt(workspace.root_path(), state, &receipt)?;
 
     let mut run_plan_file = open_bundle_file(&workspace.root_path().join(RUN_PLAN_FILE))?;
     let mut wsb_plan_file = open_bundle_file(&workspace.root_path().join(WSB_PLAN_FILE))?;
@@ -2150,6 +2182,9 @@ fn open_verified_preparation_with_inspector(
         receipt,
     };
     observed.validate()?;
+    if let Some(assessment) = &observed.receipt.application_assessment {
+        assessment.validate_project(project)?;
+    }
     if matches!(
         state,
         PreparationWorkspaceState::Imported | PreparationWorkspaceState::Revoking
@@ -2164,6 +2199,7 @@ fn open_verified_preparation_with_inspector(
     if mode != ProviderInspectionMode::LegacyByProfile
         || observed.receipt.paired_controls.is_some()
         || observed.receipt.seven_zip.is_some()
+        || observed.receipt.application_assessment.is_some()
     {
         let identity = inspector
             .static_identity()
@@ -2183,6 +2219,14 @@ fn open_verified_preparation_with_inspector(
             ));
         }
     }
+    let held_assessment = if observed.receipt.application_assessment.is_some() {
+        Some(application_assessment::open_application_files(
+            &workspace,
+            &observed.receipt,
+        )?)
+    } else {
+        None
+    };
     let mut held = HeldVerifiedWsbPreparation {
         artifacts: observed,
         receipt_file,
@@ -2192,6 +2236,7 @@ fn open_verified_preparation_with_inspector(
         held_application,
         held_controls,
         held_document,
+        held_assessment,
         workspace,
     };
     held.revalidate(state)?;
@@ -2323,7 +2368,9 @@ fn import_preparation_with_inspector(
     )?;
     let run_id = held.artifacts.receipt.run_id.clone();
     let receipt = WsbPlanningImportReceipt {
-        schema_version: if held.artifacts.receipt.seven_zip.is_some() {
+        schema_version: if held.artifacts.receipt.application_assessment.is_some() {
+            aiw_orchestrator::WSB_APPLICATION_ASSESSMENT_IMPORT_SCHEMA
+        } else if held.artifacts.receipt.seven_zip.is_some() {
             aiw_orchestrator::WSB_SEVENZIP_IMPORT_SCHEMA
         } else if held.artifacts.receipt.paired_controls.is_some() {
             aiw_orchestrator::WSB_PAIRED_CONTROL_IMPORT_SCHEMA
@@ -2810,7 +2857,11 @@ fn complete_bundle(
     artifacts: &PreparedWsbArtifacts,
     staged: StagedPreparationFiles,
 ) -> Result<(), WsbPreparationError> {
-    require_workspace_allowlist(workspace.root_path(), PreparationWorkspaceState::Building)?;
+    require_workspace_for_receipt(
+        workspace.root_path(),
+        PreparationWorkspaceState::Building,
+        &artifacts.receipt,
+    )?;
     let _held_plans = staged;
     // This create-new, synced receipt is the final fallible publication step.
     // Any earlier error leaves no completeness marker; an interrupted final
@@ -2908,6 +2959,19 @@ fn write_json_new(
         ));
     }
     Ok(file)
+}
+
+#[cfg(windows)]
+fn require_workspace_for_receipt(
+    root: &Path,
+    state: PreparationWorkspaceState,
+    receipt: &WsbPreparationReceipt,
+) -> Result<(), WsbPreparationError> {
+    if receipt.application_assessment.is_some() {
+        application_assessment::require_application_workspace(root, state)
+    } else {
+        require_workspace_allowlist(root, state)
+    }
 }
 
 #[cfg(windows)]
@@ -3104,7 +3168,7 @@ pub(crate) mod tests {
         serde_yaml::from_str(include_str!("../../../examples/minimal.aiw.yaml")).unwrap()
     }
 
-    fn identity(path: &str, id: char) -> WindowsFileIdentity {
+    pub(super) fn identity(path: &str, id: char) -> WindowsFileIdentity {
         WindowsFileIdentity {
             final_path: path.to_owned(),
             volume_serial_number: "1".repeat(16),
@@ -3112,7 +3176,7 @@ pub(crate) mod tests {
         }
     }
 
-    fn workspace() -> WorkspaceBindingEvidence {
+    pub(super) fn workspace() -> WorkspaceBindingEvidence {
         let owner = "S-1-5-21-1";
         WorkspaceBindingEvidence {
             schema_version: WINDOWS_WORKSPACE_SCHEMA_VERSION.to_owned(),
@@ -3132,7 +3196,7 @@ pub(crate) mod tests {
         super::synthetic::readiness()
     }
 
-    fn guest() -> BinaryIdentity {
+    pub(super) fn guest() -> BinaryIdentity {
         BinaryIdentity {
             canonical_path: r"C:\AIW\run-one\tools\aiw-guest-agent.exe".to_owned(),
             sha256: "b".repeat(64),
@@ -3861,7 +3925,7 @@ pub(crate) mod tests {
         }
     }
 
-    fn fake_msi_application() -> WsbMsiApplication {
+    pub(super) fn fake_msi_application() -> WsbMsiApplication {
         let project = msi_project();
         let scenario = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
             &project,
