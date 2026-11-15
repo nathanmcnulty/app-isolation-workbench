@@ -57,6 +57,11 @@ cache budget, a 2 GiB running free-space floor, 20-minute deadline and 8 MiB log
 bounds. These are sampled limits, not filesystem quotas. The same bounds are
 checked after exit. Failure records retain root exit/termination facts and keep
 primary and cleanup errors separate. This does not run a fixture or a provider.
+Warm passes are accepted without forcing a cold rebuild; they report zero
+compiler invocations, not new effective-setting observations. Use a retained
+cold compiler trace for that separate proof. MSVC PDBs can retain backtrace
+symbols even with debug information disabled; their measured bytes count toward
+the cache budget and their existence alone is not a debug-profile verdict.
 
 Inspect cache usage at milestones and before moving to another revision. Rust incremental directories and compiled
 dependencies can be rebuilt; retained evidence, source, protected intake and
