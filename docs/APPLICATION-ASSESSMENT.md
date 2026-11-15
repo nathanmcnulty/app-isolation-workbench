@@ -26,6 +26,15 @@ Unknown fields and verbs fail closed. This first capability uses a bounded ASCII
 Windows-relative path domain and refuses ambiguous device/stream/traversal names
 and aliases instead of claiming general filesystem normalization.
 
+Portable intake also rejects short-name aliases observed during directory
+enumeration, including aliases assigned by Windows to otherwise ordinary long
+filenames. This inherited policy can block an administrator's source before any
+application runs. Choose supported source names as explicit run inputs and
+reinspect their actual filesystem metadata; a filename that looks like 8.3 is
+not proof of admission. Changing a source name changes its manifest and requires
+fresh preparation and approval. Do not remove aliases or change volume policy to
+reuse an old approval.
+
 The compiler validates the whole manifest and resolves entry points to exact
 content. A semantic workflow hash excludes display labels, host roots and the
 selected policy. It aids comparison, not execution authority. Full approval binds
@@ -125,6 +134,12 @@ Use `schema assessment-settings`, `compiled-assessment`,
 versioned contracts. Application metadata and exact argv are private run inputs;
 sanitized reports omit raw captures, paths, process IDs, SIDs and free-form native
 diagnostics. Those remain in protected evidence for diagnosis.
+
+Typed Windows Sandbox preparation failures retain their existing category and
+stage through the generic CLI path. Public details are static and omit native
+error text; direct service failures do not infer a run ID. Other unclassified
+admin failures can still return the generic CLI error. A category identifies the
+failed requirement, not its native cause or whether cleanup completed.
 
 The monotonic workflow budget includes setup and prevents late application
 dispatch. Synchronous filesystem/profile/native calls can overrun that budget;

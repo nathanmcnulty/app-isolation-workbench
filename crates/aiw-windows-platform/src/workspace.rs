@@ -1660,14 +1660,12 @@ pub(crate) fn create_owner_system_file(
 }
 
 fn open_held_directory(path: &Path) -> Result<File, WorkspaceError> {
+    // Workspace reopen and revalidation only observe this directory. Requesting
+    // child-creation rights here conflicts with a held intake's read-only parent
+    // lease, even though the observation itself needs no write authority.
     let file = OpenOptions::new()
         .access_mode(
-            FILE_READ_ATTRIBUTES.0
-                | FILE_LIST_DIRECTORY.0
-                | FILE_ADD_FILE.0
-                | FILE_ADD_SUBDIRECTORY.0
-                | READ_CONTROL.0
-                | SYNCHRONIZE.0,
+            FILE_READ_ATTRIBUTES.0 | FILE_LIST_DIRECTORY.0 | READ_CONTROL.0 | SYNCHRONIZE.0,
         )
         .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0)
         .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
@@ -2226,6 +2224,77 @@ mod tests {
         let path = workspace.root_path().to_owned();
         drop(workspace);
         std::fs::remove_dir_all(path).unwrap();
+    }
+
+    fn exercise_workspace_with_readonly_intake(suffix: &str, reopen_persisted: bool) {
+        use crate::portable_import::{
+            import_portable_directory, open_verified_portable_directory_import,
+        };
+        use crate::source_inspection::HeldPortableDirectory;
+
+        let source_path = parent().join(leaf(&format!("{suffix}-source")));
+        std::fs::create_dir(&source_path).unwrap();
+        std::fs::write(
+            source_path.join("app.exe"),
+            b"first-party inert intake bytes",
+        )
+        .unwrap();
+        let source = HeldPortableDirectory::open(&source_path).unwrap();
+        let workspace = HeldRunWorkspace::create(&parent(), &leaf(suffix)).unwrap();
+        let receipt = import_portable_directory(workspace.root_path(), "intake", &source).unwrap();
+        let intake = open_verified_portable_directory_import(&receipt).unwrap();
+        intake.revalidate().unwrap();
+
+        // This remains a real write-denying lease. The compatibility fix must
+        // not weaken it to let fresh write-authority opens coexist.
+        assert!(
+            OpenOptions::new()
+                .access_mode(FILE_ADD_FILE.0 | FILE_ADD_SUBDIRECTORY.0)
+                .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0)
+                .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
+                .open(workspace.root_path())
+                .is_err()
+        );
+        let app = intake.payload_path().join("app.exe");
+        assert!(OpenOptions::new().write(true).open(&app).is_err());
+        assert!(std::fs::rename(&app, intake.payload_path().join("other.exe")).is_err());
+
+        let workspace = if reopen_persisted {
+            let reopened = HeldRunWorkspace::reopen_bound(workspace.evidence()).unwrap();
+            drop(workspace);
+            reopened
+        } else {
+            workspace
+        };
+        workspace.revalidate().unwrap();
+        let fixtures = workspace.create_root_directory_new("fixtures").unwrap();
+        let mut fixture = fixtures.create_file_new("input.txt").unwrap();
+        fixture.as_file_mut().write_all(b"inert fixture").unwrap();
+        fixture.as_file().sync_all().unwrap();
+        drop(fixture);
+        drop(fixtures);
+        let mut tool = workspace.create_tools_file_new("bound.json").unwrap();
+        tool.as_file_mut().write_all(b"{}").unwrap();
+        tool.as_file().sync_all().unwrap();
+        drop(tool);
+        workspace.revalidate().unwrap();
+        intake.revalidate().unwrap();
+        assert!(OpenOptions::new().write(true).open(&app).is_err());
+        assert!(std::fs::rename(&app, intake.payload_path().join("other.exe")).is_err());
+        drop(intake);
+        drop(source);
+        remove_test_workspace(workspace);
+        std::fs::remove_dir_all(source_path).unwrap();
+    }
+
+    #[test]
+    fn readonly_intake_custody_allows_workspace_revalidation_and_staging() {
+        exercise_workspace_with_readonly_intake("intake-revalidate", false);
+    }
+
+    #[test]
+    fn readonly_intake_custody_allows_persisted_workspace_reopen_and_staging() {
+        exercise_workspace_with_readonly_intake("intake-reopen", true);
     }
 
     #[test]
