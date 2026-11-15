@@ -97,15 +97,20 @@ passed. Both static helpers passed independent PE/build review; their compiled
 source commitment matches independent reconstruction. No external CRT, vendor
 or delay imports were found. These artifacts do not replace the earlier tools.
 
-The reviewed AIW-only environment packet has 17 fixed parts. Its first receiver
-reached the 20-minute deadline after acknowledging parts 0–4 (350,000 bytes),
-then returned to the existing ordinary Core prompt. All five files are preserved;
-post-exit prefix custody still needs an audit before any explicit continuation.
-Browser automation did not reliably focus the native clipboard controls; native
-copy/paste delivered the acknowledged parts. No staging, helper launch, provider
-call or fresh Sandbox occurred. Guest servicing, dependency availability and
-loader compatibility remain unmeasured. Private records use
-`C:\aiw\environment-probe-20261114`; start with `receiver-ui-outcome-r1.json`.
+The reviewed AIW-only environment packet is fully transferred and staged. After
+the first receiver's deadline at parts 0–4, a reviewed continuation verified and
+held that prefix, accepted only parts 5–16, then reverified all 17. The separate
+data-only stager verified the complete ZIP and five members before its receipt.
+The first `--inspect-host` invocation then exited with `0xc0000005`; both retained
+streams are complete and empty. No watchdog kill, provider acquisition or fresh
+Sandbox occurred. The failing call and descendant cleanup remain unmeasured;
+do not classify this as candidate incompatibility or silently replay it.
+An existing-event read returned no usable facts; its refined diagnostic reached
+the native cmdlet and returned `NoMatchingEventsFound` for the fixed query window.
+No faulting module, offset or cause was obtained, and the helper was not replayed.
+Guest servicing, dependency availability and loader compatibility remain
+unmeasured. Private records use `C:\aiw\environment-probe-20261114`; see
+[the probe record](SANDBOX-ENVIRONMENT-PROBE.md) for exact evidence pins.
 
 ## Authorization and remaining work
 

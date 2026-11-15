@@ -4,7 +4,7 @@ The default-off `research-environment` feature is a first-party prerequisite
 measurement for the private multi-mode assessment. A fresh worker's Windows
 version and dependency observations must precede a new application plan after
 host servicing changes. It is not an application assessment or MXC support test.
-Native execution of this new probe is pending.
+The first native host inspection failed; fresh guest execution is pending.
 
 Source `404c837` passed all three [hosted CI jobs](https://github.com/nathanmcnulty/app-isolation-workbench/actions/runs/43654996049).
 Independent reviews covered the execution boundary, fixes, static builds, direct
@@ -22,8 +22,48 @@ Both PE images are AMD64 with no external CRT, vendor or delay imports. All 487
 tracked source files matched before/after each build and the reviewed checkout.
 This establishes build/source consistency, not reproducibility or native loading.
 The first data receiver timed out after acknowledging five of seventeen parts.
-Those files remain intact; post-exit prefix validation and reviewed continuation
-are pending. No staging, native helper invocation or fresh Sandbox occurred.
+A separately reviewed continuation held and verified that prefix before accepting
+only parts 5–16, then rehashed all 17. The data-only stager verified the complete
+archive and five members before publishing its receipt. Original failures and
+parts remain retained; this was an explicit data continuation, not execution
+recovery or an application replay.
+
+The static host helper's first native `--inspect-host` invocation on VM107 exited
+with signed code `-1073741819` (`0xc0000005`). The root exit was observed without
+timeout or watchdog kill. Both retained output streams are complete, settled and
+zero bytes. No provider acquisition, Sandbox or application execution was
+requested. Descendant cleanup remains unmeasured. Output begins only after the
+inspection operations, so empty output does not locate the failing call or prove
+entry. Source review identified no proven cause; a COM factory/apartment lifetime
+hypothesis remains untested. Do not infer an isolation incompatibility, loader
+result or successful prerequisite observation.
+
+A bounded read of existing Application Error events, limited to the failed
+image's path, PID and time window, returned no matching facts with a generic
+query-error/no-records state. A refined read retained bounded stage/exception
+facts: native module resolution and its guard passed, and the cmdlet returned
+`NoMatchingEventsFound` for that same fixed query. This supplies no faulting
+module, offset or cause and makes no claim about other logs or time windows.
+The helper has not been rerun. Private originals are under
+`C:\aiw\environment-probe-20261114`:
+
+| Record | Original bytes | SHA256 |
+|---|---:|---|
+| `native-prefix-audit-original-r2.json` | 1,911 | `d5a04dbe8800208b1e1d08394276f1e4b2f67c5a341a2e0cc02434e379c93ada` |
+| `native-stage-receipt-original-r1.json` | 715 | `411162be231ecb5f43f73489252066373fb3acdc26f9b5219fab84dd279d147b` |
+| `native-inspection-metadata-original-r2.json` | 1,417 | `0ef35225d56ca4260a9edf67b6c54b12e77283a4356aa1a770bcf9c735ccc297` |
+| `native-inspection-stdout-original-r2.bin` and `native-inspection-stderr-original-r2.bin` (each) | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
+| `native-application-error-events-original-r1.json` | 1,495 | `c2c6dbcd0ff8ba517e70c83fb5eaaadfc3013ca43e3a665077b22adea25f443b` |
+| `native-application-error-events-original-r2.json` | 2,446 | `dd471d7d6cb9ba889f6d090c9bc36dd295d6a85ec3c8e3c686710253d2000a5e` |
+
+Original JSON and stream bytes were captured from bounded native clipboard
+output (with Base64 frames decoded) and matched separately observed native
+length/digest markers. They were not reserialized. The staging digest
+transcription refusal was resolved by
+reobserving the marker and admitting the unchanged quarantined bytes, without
+rerunning staging. The complete-transfer observation has separate admission
+`native-transfer-completion-admission-r2.json`, SHA
+`9c0268422ac8bca78cdd6500f991d843c9a8b1848aa0663a9acc19f42d8cc684`.
 
 The provider accepts only `environment_probe.exe`, its fixed output argument,
 one read-only tools mapping and one writable output mapping. This feature does
