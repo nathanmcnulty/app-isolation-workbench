@@ -29,6 +29,29 @@ Each invocation writes a fresh `%TEMP%\aiw-local-checks-<uuid>` directory contai
 
 The helper deliberately does not perform live installation, start Sandbox, manage worktrees, commit, push, or trigger CI. Existing `scripts/verify.ps1` remains the full repository verification entry point, and meaningful live/retained-fixture tests remain necessary where the change requires them.
 
+## Build storage
+
+Core and desktop are separate Cargo workspaces. Both disable incremental
+compilation and debug symbols for routine dev/test builds. Test assertions and
+overflow checks keep their existing defaults; release profiles are unchanged.
+Full symbols can be enabled deliberately with `CARGO_PROFILE_DEV_DEBUG=2` and
+`CARGO_PROFILE_TEST_DEBUG=2` for a debugging session. Remove those overrides
+afterward; changing profiles/targets/flags creates additional compiled variants.
+
+`check-local.ps1` refuses compilation checks when the target volume has less
+than 10 GiB free. Formatting and governance checks still work under that floor.
+Check space before direct Cargo commands and bulk artifact creation too. Reuse
+one stable cache per required target/flag set rather than one per revision.
+
+Inspect cache usage at milestones. Rust incremental directories and compiled
+dependencies can be rebuilt; retained evidence, source, protected intake and
+pinned trial binaries have a different retention requirement. Before cleanup,
+verify exact paths, absence of reparse traversal, and that all sessions have
+released compilers, tests and artifact consumers. Do not run Cargo clean against
+an active shared target; a target filter can also remove host artifacts. Record
+what was removed and the measured space recovered. There is no automatic
+evidence deletion or cache quota claim.
+
 The ordinary Windows suite verifies global mutex acquisition with the current process token. Hosted Windows runners can be elevated, so they cannot prove unelevated acquisition. Run the separate environment-specific check from an unelevated PowerShell session:
 
 ```powershell

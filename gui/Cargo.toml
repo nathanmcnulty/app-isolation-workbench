@@ -9,6 +9,15 @@ description = "Local administrator surface for verified Windows Sandbox workflow
 # Keep desktop dependencies separate from the core workspace's Rust 1.88 contract.
 [workspace]
 
+# This is a separate workspace, so it needs the same bounded local defaults.
+[profile.dev]
+debug = 0
+incremental = false
+
+[profile.test]
+debug = 0
+incremental = false
+
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
@@ -29,9 +38,6 @@ windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging", "W
 
 [target.'cfg(windows)'.build-dependencies]
 tauri-build = "=2.7.0"
-
-[profile.dev]
-debug = 0
 
 [profile.release]
 strip = true

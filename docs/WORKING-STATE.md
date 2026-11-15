@@ -11,6 +11,13 @@ fetch configuration tracks another branch; use the recorded fetched commit.
 
 ## Current boundary and next work
 
+Storage work takes priority before more native trials. The idle shared debug
+incremental cache measured 32.15 GiB; compiled dependencies measured 10.06 GiB.
+Automatic approval review blocked removal of the verified incremental cache,
+so no space recovery is claimed. Dev/test defaults now disable incremental
+output and debug symbols in both workspaces, with a 10 GiB pre-build floor in
+`check-local.ps1`. Do not resume builds or bulk staging below that floor.
+
 The generic CLI/shared service path now covers held intake, compilation, protected
 preparation, review/approval and separate Start, typed guest execution, retained
 reports/comparison and data-only replay packaging. The elevated collector creates

@@ -53,6 +53,15 @@ try {
         $previousTmp = $env:TMP
         $testTemp = $null
         try {
+            if ($program -eq 'cargo' -and $name -ne 'Format') {
+                $targetRoot = if ($env:CARGO_TARGET_DIR) {
+                    [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR, $repoRoot)
+                } else { Join-Path $repoRoot 'target' }
+                $targetVolume = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($targetRoot))
+                if ($targetVolume.AvailableFreeSpace -lt 10GB) {
+                    throw ('Build not started: target volume has {0:N2} GiB free; 10 GiB required. Reclaim verified idle build cache before retrying. Target: {1}' -f ($targetVolume.AvailableFreeSpace / 1GB), $targetRoot)
+                }
+            }
             if ($program -eq 'cargo' -and $arguments[0] -eq 'test') {
                 # Native parent-entry checks are bounded. Unrelated files in a
                 # long-lived user TEMP must not determine whether fixtures work.
