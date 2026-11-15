@@ -2,6 +2,9 @@
 //! agent's fixed imported-MSI profile.  This is deliberately not a general
 //! process-launch API.
 
+#[cfg(feature = "research-mxc-process")]
+pub(crate) mod mxc_child;
+
 use std::ffi::OsStr;
 use std::ffi::c_void;
 use std::fs::{File, OpenOptions};

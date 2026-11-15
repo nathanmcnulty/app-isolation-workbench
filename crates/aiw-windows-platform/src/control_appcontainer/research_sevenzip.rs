@@ -23,6 +23,12 @@ use windows::Win32::Storage::FileSystem::{
     FILE_SHARE_WRITE,
 };
 
+mod application_trace;
+#[cfg(feature = "research-sevenzip")]
+mod owner_journal;
+#[cfg(feature = "research-sevenzip")]
+mod process_tree;
+
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 const ROOT: &str = r"C:\AIW\SevenZip";
 const INPUT_HELPER: &str = r"C:\AIW\Tools\sevenzip_assessment.exe";
@@ -74,6 +80,22 @@ mod image_spelling_tests {
             assert!(!fixed_role_image(Path::new(actual), expected));
         }
     }
+
+    #[test]
+    fn production_roles_refuse_every_research_debugger_entry() {
+        for role in [
+            "--tree-output",
+            "--tree-workflow",
+            "--tree-root",
+            "--tree-child",
+            "--tree-grandchild",
+            "--owner-journal-control",
+            "--output",
+        ] {
+            assert!(!production_role_allowed(role));
+        }
+        assert!(production_role_allowed("--workflow"));
+    }
 }
 
 /// All accepted roles are compiled and bound to fixed on-worker paths/identity.
@@ -81,6 +103,17 @@ pub fn run() -> Result<u8> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     let exe = std::env::current_exe()?;
     let token = collect_current_process_token()?;
+    #[cfg(feature = "research-sevenzip")]
+    if args == ["--output", r"C:\AIW\SevenZipOutput\RESULT.DAT"] {
+        if !fixed_role_image(&exe, INPUT_HELPER)
+            || !token.is_elevated
+            || token.is_app_container
+            || token.user_sid != fixed_account_sid("WDAGUtilityAccount")?
+        {
+            return Err("fixed elevated Sandbox tree-control role required".into());
+        }
+        return setup_bound(None, true);
+    }
     if args == ["--output", r"C:\AIW\SevenZipOutput\result.json"] {
         if !fixed_role_image(&exe, INPUT_HELPER)
             || !token.is_elevated
@@ -91,6 +124,20 @@ pub fn run() -> Result<u8> {
         }
         return setup();
     }
+    if args == ["--installation-setup"] {
+        if !fixed_role_image(&exe, HELPER)
+            || token.user_sid != fixed_account_sid("WDAGUtilityAccount")?
+            || !crate::debug_tree::token_matches_for_role(
+                &token,
+                &token,
+                std::process::id(),
+                crate::debug_tree::RootRole::InstallationSetup,
+            )
+        {
+            return Err("fixed elevated Sandbox installer-debugger helper required".into());
+        }
+        return application_trace::installation_role();
+    }
     if !fixed_role_image(&exe, HELPER)
         || args.len() != 1
         || token.is_elevated
@@ -99,6 +146,14 @@ pub fn run() -> Result<u8> {
         return Err("fixed standard-user research role required".into());
     }
     match args[0].to_str() {
+        #[cfg(feature = "research-sevenzip")]
+        Some("--owner-journal-control") => process_tree::owner_journal_role(),
+        #[cfg(feature = "research-sevenzip")]
+        Some("--tree-root" | "--tree-child" | "--tree-grandchild") => {
+            process_tree::run_fixed_role(args[0].to_str().unwrap())
+        }
+        #[cfg(feature = "research-sevenzip")]
+        Some("--tree-workflow") if !token.is_app_container => process_tree::workflow(&token),
         Some("--driver-control") => {
             std::io::stdout().write_all(DRIVER_BYTES)?;
             Ok(23)
@@ -113,18 +168,24 @@ pub fn run() -> Result<u8> {
     }
 }
 
-/// Production secondary roles cannot enter the installer/setup entrypoint.
+/// Closed secondary roles include one separately guarded installer debugger.
 pub(crate) fn run_production_role() -> Result<u8> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() != 1
-        || !matches!(
-            args[0].to_str(),
-            Some("--driver-control" | "--deadline-control" | "--boundary-control" | "--workflow")
-        )
-    {
+    if args.len() != 1 || !args[0].to_str().is_some_and(production_role_allowed) {
         return Err("fixed 7-Zip secondary role rejected".into());
     }
     run()
+}
+
+fn production_role_allowed(role: &str) -> bool {
+    matches!(
+        role,
+        "--driver-control"
+            | "--deadline-control"
+            | "--boundary-control"
+            | "--workflow"
+            | "--installation-setup"
+    )
 }
 
 pub(crate) fn execute_production(
@@ -143,17 +204,49 @@ pub(crate) fn execute_production(
     }
     (
         true,
-        setup_bound(Some((
-            &request.agent_sha256,
-            request.profile.agent_size_bytes,
-        ))),
+        setup_bound(
+            Some((&request.agent_sha256, request.profile.agent_size_bytes)),
+            false,
+        ),
     )
 }
 
 fn setup() -> Result<u8> {
-    setup_bound(None)
+    setup_bound(None, false)
 }
-fn setup_bound(expected_helper: Option<(&str, u64)>) -> Result<u8> {
+
+fn owner_record(tree_only: bool, name: &str, value: &Value) -> Result<()> {
+    #[cfg(feature = "research-sevenzip")]
+    if tree_only {
+        let stage = owner_journal::Stage::parse(name)?;
+        return owner_journal::publish(stage, value);
+    }
+    #[cfg(not(feature = "research-sevenzip"))]
+    if tree_only {
+        return Err("tree owner journal requires the explicit research feature".into());
+    }
+    record(Path::new(OUTPUT), name, value)
+}
+
+fn setup_bound(expected_helper: Option<(&str, u64)>, tree_only: bool) -> Result<u8> {
+    // Cache context before trial execution. A late WinRT/token query must not
+    // erase already captured child/cleanup evidence at terminal publication.
+    let owner_context = if tree_only {
+        Some((
+            crate::observe_windows_version()?,
+            collect_current_process_token()?,
+        ))
+    } else {
+        None
+    };
+    #[cfg(feature = "research-sevenzip")]
+    if let Some((windows, _)) = &owner_context {
+        process_tree::validate_preexecution_windows(windows)?;
+    }
+    #[cfg(not(feature = "research-sevenzip"))]
+    if tree_only {
+        return Err("tree proof requires the explicit research feature".into());
+    }
     // Holding every named ancestor prevents root replacement; no recursive cleanup.
     let _output_dirs = hold_directory_chain(Path::new(OUTPUT))?;
     if fs::read_dir(OUTPUT)?.next().is_some() || Path::new(ROOT).try_exists()? {
@@ -167,6 +260,14 @@ fn setup_bound(expected_helper: Option<(&str, u64)>) -> Result<u8> {
     }
     fs::create_dir(ROOT)?;
     let _root = hold_directory_chain(Path::new(ROOT))?;
+    // Keep the protected local journal/ancestry alive through terminal snapshot.
+    // It precedes standard account establishment and every worker dispatch.
+    #[cfg(feature = "research-sevenzip")]
+    let _owner_journal = if tree_only {
+        Some(owner_journal::create()?)
+    } else {
+        None
+    };
     for (path, is_installer) in [(INSTALLER, true), (HELPER, false)] {
         let mut output = fs::OpenOptions::new()
             .write(true)
@@ -190,21 +291,25 @@ fn setup_bound(expected_helper: Option<(&str, u64)>) -> Result<u8> {
     if helper.observation().sha256 != inputs.helper_hash() {
         return Err("local helper differs from held mapped bytes".into());
     }
-    record(
-        Path::new(OUTPUT),
-        "00-start",
-        &json!({
-            "schemaVersion":"aiw.dev/research/sevenzip/v0alpha1", "productionEvidence":false,
-            "installerSha256":INSTALLER_HASH,"installerSizeBytes":INSTALLER_SIZE,
-            "helperSha256":helper.observation().sha256,"windows":crate::observe_windows_version()?,
-            "scope":"7-Zip 26.05 CLI create/test/extract/integrity; classic AppContainer, zero capabilities",
-            "gaps":["general compatibility","GUI and shell integration","registry and system-wide installation changes",
-              "network/IPC/UI enforcement","all descendant tokens","production evidence receipt","host endpoint equivalence"]
-        }),
-    )?;
-    let operation = setup_inner(&installer, &helper);
+    let start = json!({
+        "schemaVersion":"aiw.dev/research/sevenzip/v0alpha1", "productionEvidence":false,
+        "installerSha256":INSTALLER_HASH,"installerSizeBytes":INSTALLER_SIZE,
+        "helperSha256":helper.observation().sha256,"windows":match &owner_context {
+            Some((windows,_))=>windows.clone(),None=>crate::observe_windows_version()?
+        },
+        "scope":if tree_only {"first-party process-tree driver controls; ordinary and classic AppContainer, zero capabilities; no vendor execution"}
+          else {"7-Zip 26.05 CLI create/test/extract/integrity; classic AppContainer, zero capabilities"},
+        "gaps":["general compatibility","GUI and shell integration","registry and system-wide installation changes",
+          "network/IPC/UI enforcement","all descendant tokens","production evidence receipt","host endpoint equivalence"]
+    });
+    owner_record(tree_only, "00-start", &start)?;
+    #[cfg(feature = "research-sevenzip")]
+    if tree_only {
+        owner_journal::verify_start(&start)?;
+    }
+    let operation = setup_inner(&installer, &helper, tree_only);
     let revalidated = inputs.revalidate().map_err(fixed);
-    let result: Result<u8> = match (operation, revalidated) {
+    let mut result: Result<u8> = match (operation, revalidated) {
         (Ok(value), Ok(())) => Ok(value),
         (operation, revalidated) => Err(format!(
             "operation={operation:?}; mapped input revalidation={revalidated:?}"
@@ -212,18 +317,36 @@ fn setup_bound(expected_helper: Option<(&str, u64)>) -> Result<u8> {
         .into()),
     };
     if let Err(error) = &result {
-        record(
-            Path::new(OUTPUT),
+        let failure_record = owner_record(
+            tree_only,
             "99-driver-error",
             &json!({"driverError":error.to_string(),
             "productionEvidence":false,"action":"preserve this exact worker/session and prior stages; do not reinstall blindly"}),
-        )?;
+        );
+        if let Err(retention_error) = failure_record {
+            if !tree_only {
+                return Err(retention_error);
+            }
+            result = Err(format!(
+                "{error}; owner error-record publication failed: {retention_error}"
+            )
+            .into());
+        }
+    }
+    #[cfg(feature = "research-sevenzip")]
+    if tree_only {
+        let (windows, token) = owner_context
+            .as_ref()
+            .ok_or("missing cached tree owner context")?;
+        process_tree::publish_terminal_tree(&result, windows, token)?;
+        return result;
     }
     publish_terminal(
         &json!({"schemaVersion":"aiw.dev/research/sevenzip-result/v0alpha1",
         "productionEvidence":false,"driverCompleted":result.is_ok(),
         "error":result.as_ref().err().map(ToString::to_string),
-        "scope":"research observations; application functions are in workflow stage records; outer cleanup recorded only by host"}),
+        "scope":if tree_only {"first-party tree controls only; vendor installer staged inertly, never launched; outer cleanup recorded only by host"}
+          else {"research observations; application functions are in workflow stage records; outer cleanup recorded only by host"}}),
     )?;
     result
 }
@@ -246,7 +369,11 @@ pub(crate) fn production_stage(name: &str) -> Result<Option<Vec<u8>>> {
     Ok(Some(bytes))
 }
 
-fn setup_inner(installer: &HeldApplicationFile, helper: &HeldApplicationFile) -> Result<u8> {
+fn setup_inner(
+    installer: &HeldApplicationFile,
+    helper: &HeldApplicationFile,
+    tree_only: bool,
+) -> Result<u8> {
     let standard = StandardUserSession::establish()?;
     let sid = &standard.context().user_sid;
     let _root = hold_directory_chain(Path::new(ROOT))?;
@@ -269,17 +396,46 @@ fn setup_inner(installer: &HeldApplicationFile, helper: &HeldApplicationFile) ->
         &format!("D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GR;;;{sid})"),
         false,
     )?;
-    record(Path::new(OUTPUT), "01-context", &json!(standard.context()))?;
+    owner_record(tree_only, "01-context", &json!(standard.context()))?;
+    #[cfg(feature = "research-sevenzip")]
+    if tree_only {
+        let package = DerivedProfileSid::new()?;
+        // Fixed ordinary/classic control permissions on newly owned test paths.
+        // No vendor code, denied canary or parent path is granted or launched.
+        for path in [ROOT, HELPER, WORK] {
+            grant_package_access(
+                Path::new(path),
+                package.0,
+                (GENERIC_READ | GENERIC_EXECUTE).0,
+            )?;
+        }
+    }
     // One-use standard credentials launch once. Child proves the fixed native
     // capture/deadline controls before the parent installs the vendor software.
-    let (child, held_token) =
-        GuestProcess::start_standard_user_measured(HELPER, &["--workflow".into()], &standard)?;
+    let (child, held_token) = GuestProcess::start_standard_user_measured(
+        HELPER,
+        &[if tree_only {
+            "--tree-workflow"
+        } else {
+            "--workflow"
+        }
+        .into()],
+        &standard,
+    )?;
     let operation = (|| -> Result<i32> {
-        record(
-            Path::new(OUTPUT),
-            "02-launcher",
-            &json!({"heldToken":held_token}),
-        )?;
+        owner_record(tree_only, "02-launcher", &json!({"heldToken":held_token}))?;
+        if tree_only {
+            let exit = child.wait_for_exit(Duration::from_secs(60))?;
+            owner_record(
+                tree_only,
+                "05-workflow-exit",
+                &json!({
+                    "exitCode":exit,"heldToken":held_token,"firstPartyTreeControlsOnly":true,
+                    "vendorInstallerExecuted":false,"applicationExecuted":false
+                }),
+            )?;
+            return Ok(exit);
+        }
         wait_for_file(
             &Path::new(WORK).join("01-deadline-control.json"),
             Duration::from_secs(20),
@@ -299,18 +455,21 @@ fn setup_inner(installer: &HeldApplicationFile, helper: &HeldApplicationFile) ->
             &json!({"command":"fixed /S /D=C:\\AIW\\SevenZip\\App",
         "appRootBefore":"absent","installerSha256":INSTALLER_HASH}),
         )?;
-        let process = GuestProcess::start(INSTALLER, &["/S".into(), format!("/D={APP}")])?;
-        let install_exit = process.wait_for_exit(Duration::from_secs(90));
-        let install_cleanup = process.cleanup();
-        let exit = install_exit?;
-        install_cleanup?;
-        record(
+        // Debugger fail-stop must leave this receipt-producing agent alive.
+        let debugger = GuestProcess::start(HELPER, &["--installation-setup".into()])?;
+        let waited = debugger.wait_for_exit(Duration::from_secs(110));
+        let cleanup = debugger.cleanup();
+        let cleanup_record = record(
             Path::new(OUTPUT),
-            "04-install-exit",
-            &json!({"exitCode":exit,"jobEmpty":true}),
-        )?;
-        if exit != 0 {
-            return Err("installer failed; application comparison not reached".into());
+            "04-install-debugger-cleanup",
+            &json!({
+            "exitCode":waited.as_ref().ok(),"jobEmpty":cleanup.is_ok(),
+            "waitError":waited.as_ref().err().map(ToString::to_string),
+            "cleanupError":cleanup.as_ref().err().map(ToString::to_string)}),
+        );
+        match (waited, cleanup, cleanup_record) {
+            (Ok(0), Ok(()), Ok(())) => {},
+            (waited, cleanup, record) => return Err(format!("installer debugger incomplete; wait={waited:?}; cleanup={cleanup:?}; cleanup record={record:?}; preserve dedicated trace").into()),
         }
         record(
             Path::new(OUTPUT),
@@ -340,14 +499,16 @@ fn setup_inner(installer: &HeldApplicationFile, helper: &HeldApplicationFile) ->
             &json!({"imageSha256":image.observation().sha256,
         "dllSha256":dll.observation().sha256,"profileSid":sid_string(package.0)?}),
         )?;
-        let waited = child.wait_for_exit(Duration::from_secs(150));
+        // Six app25s+drain3s, driver25s, two boundary25s and bounded setup
+        // controls fit this closed budget. Installer90s is outside this wait.
+        let waited = child.wait_for_exit(Duration::from_secs(300));
         let exit = waited?;
         image.revalidate()?;
         dll.revalidate()?;
         let after_image = HeldApplicationFile::open(Path::new(IMAGE))?;
         let after_dll = HeldApplicationFile::open(Path::new(DLL))?;
-        record(
-            Path::new(OUTPUT),
+        owner_record(
+            tree_only,
             "05-workflow-exit",
             &json!({"exitCode":exit,
             "heldToken":held_token,"imageSha256":image.observation().sha256,"dllSha256":dll.observation().sha256,
@@ -364,14 +525,14 @@ fn setup_inner(installer: &HeldApplicationFile, helper: &HeldApplicationFile) ->
     })();
     let cleanup = child.cleanup();
     // Never let output collection erase the original operation/cleanup failure.
-    let cleanup_record = record(
-        Path::new(OUTPUT),
+    let cleanup_record = owner_record(
+        tree_only,
         "05-launcher-cleanup",
         &json!({
         "jobEmpty":cleanup.is_ok(),"cleanupError":cleanup.as_ref().err().map(ToString::to_string),
         "operationError":operation.as_ref().err().map(ToString::to_string)}),
     );
-    let collection = collect_stages();
+    let collection: Result<()> = if tree_only { Ok(()) } else { collect_stages() };
     let exit=match (operation,cleanup,cleanup_record,collection) {
         (Ok(exit),Ok(()),Ok(()),Ok(()))=>exit,
         (operation,cleanup,record,collection)=>return Err(format!(
@@ -380,13 +541,15 @@ fn setup_inner(installer: &HeldApplicationFile, helper: &HeldApplicationFile) ->
     held_helper.revalidate()?;
     helper.revalidate()?;
     installer.revalidate()?;
-    record(
-        Path::new(OUTPUT),
+    owner_record(
+        tree_only,
         "06-final",
         &json!({"productionEvidence":false,
         "workflowDriverExitCode":exit,"outerCleanup":"owned by host, not measured by guest",
         "launcherJobEmpty":true,
-        "installationAndHelperBindingsUnchanged":true,"localResearchRootRetainedForOuterWorkerDisposal":ROOT}),
+        "installationExecuted":!tree_only,"helperBindingsUnchanged":true,
+        "installationAndHelperBindingsUnchanged":if tree_only {Value::Null} else {json!(true)},
+        "localResearchRootRetainedForOuterWorkerDisposal":ROOT}),
     )?;
     if exit != 0 {
         return Err(
@@ -413,6 +576,8 @@ fn workflow(token: &TokenEvidence) -> Result<u8> {
 }
 
 fn workflow_inner(token: &TokenEvidence) -> Result<u8> {
+    #[cfg(feature = "research-sevenzip")]
+    process_tree::control(None, &token.user_sid)?;
     // Capture output/deadline/owned cleanup controls through the exact app process
     // authority, using a compiled self role rather than interpreting a script.
     let control = launch(Operation::Driver, None, Path::new(WORK), &token.user_sid)?;
@@ -431,7 +596,7 @@ fn workflow_inner(token: &TokenEvidence) -> Result<u8> {
     record(Path::new(WORK), "01-deadline-control", &json!(deadline))?;
     wait_for_file(
         &Path::new(WORK).join("app-ready.json"),
-        Duration::from_secs(100),
+        Duration::from_secs(150),
     )?;
     let image = HeldApplicationFile::open(Path::new(IMAGE))?;
     let dll = HeldApplicationFile::open(Path::new(DLL))?;
@@ -467,6 +632,18 @@ fn workflow_inner(token: &TokenEvidence) -> Result<u8> {
         let expected = DerivedProfileSid::new()?;
         if profile.string_sid()? != sid_string(expected.0)? {
             return Err("fresh candidate profile differs".into());
+        }
+        #[cfg(feature = "research-sevenzip")]
+        {
+            record(
+                Path::new(WORK),
+                "tree-candidate-profile",
+                &json!({
+                    "ownedFreshProfileSid":profile.string_sid()?,
+                    "cleanup":"not yet attempted; abrupt debugger exit leaves deletion unverified"
+                }),
+            )?;
+            process_tree::control(Some(profile.sid), &token.user_sid)?;
         }
         let candidate_root = Path::new(WORK).join("Candidate");
         let package = profile.string_sid()?;
@@ -620,6 +797,7 @@ fn run_variant(name: &str, profile: Option<PSID>, sid: &str) -> Result<bool> {
     let root = Path::new(WORK).join(name);
     let expected = fixture_inventory();
     let input_before = inventory(&root.join("Input"))?;
+    let input_before_metadata = fixture_metadata(&root.join("Input"));
     record(
         Path::new(WORK),
         &format!("{}-input-before", name.to_ascii_lowercase()),
@@ -644,17 +822,94 @@ fn run_variant(name: &str, profile: Option<PSID>, sid: &str) -> Result<bool> {
             return Ok(false);
         }
     }
+    verify_and_retain_variant(&root, Path::new(WORK), name, input_before_metadata)
+}
+
+fn verify_and_retain_variant(
+    root: &Path,
+    stages: &Path,
+    name: &str,
+    input_before_metadata: Result<
+        BTreeMap<String, aiw_provider_wsb::sevenzip_artifacts::SevenZipFileMetadata>,
+    >,
+) -> Result<bool> {
+    let expected = fixture_inventory();
     let actual = inventory(&root.join("Extracted"))?;
     let input_after = inventory(&root.join("Input"))?;
+    let archive_digest = inventory_one(&root.join("archive.7z"))?;
     let passed = actual == expected && input_after == expected;
+    // Publish independent verification facts before optional investigatory
+    // capture. Capture refusal/drift remains a driver issue, never erases facts
+    // already measured and never turns a missing payload into compatibility.
     record(
-        Path::new(WORK),
+        stages,
         &format!("{}-3", name.to_ascii_lowercase()),
-        &json!({
-        "function":"verify","passed":passed,"expected":expected,"actual":actual,"inputAfter":input_after,
-        "archive":inventory_one(&root.join("archive.7z"))?}),
+        &json!({"function":"verify","passed":passed,"expected":expected,
+            "actual":actual,"inputAfter":input_after,"archive":archive_digest}),
+    )?;
+    // Read actual bytes through held, single-link, no-reparse file identities.
+    // Fixed names only; the archive cannot nominate additional host paths.
+    let archive = HeldApplicationFile::open_bounded(
+        &root.join("archive.7z"),
+        aiw_provider_wsb::sevenzip_artifacts::MAX_SEVENZIP_ARCHIVE_BYTES as u64,
+    )?;
+    let archive_bytes = archive
+        .read_bounded(aiw_provider_wsb::sevenzip_artifacts::MAX_SEVENZIP_ARCHIVE_BYTES as u64)?;
+    let mut extracted_hex = BTreeMap::new();
+    for name in fixture_bytes().keys() {
+        let relative = name.replace('\\', "/");
+        if actual
+            .get(&relative)
+            .is_some_and(|entry| entry["sizeBytes"].as_u64().is_some_and(|size| size <= 4096))
+        {
+            let held = HeldApplicationFile::open_bounded(&root.join("Extracted").join(name), 4096)?;
+            extracted_hex.insert(relative, hex::encode(held.read_bounded(4096)?));
+            held.revalidate()?;
+        }
+    }
+    let extracted_capture_complete =
+        actual.keys().eq(expected.keys()) && extracted_hex.keys().eq(expected.keys());
+    let artifacts = aiw_provider_wsb::sevenzip_artifacts::SevenZipArtifacts {
+        archive_hex: hex::encode(&archive_bytes),
+        extracted_hex,
+        extracted_capture_complete,
+        input_before_metadata: input_before_metadata?,
+        input_after_metadata: fixture_metadata(&root.join("Input"))?,
+    };
+    artifacts.validate(
+        &serde_json::from_value(archive_digest)?,
+        &serde_json::from_value(json!(actual))?,
+    )?;
+    archive.revalidate()?;
+    record(
+        stages,
+        &format!("{}-artifacts", name.to_ascii_lowercase()),
+        &json!(artifacts),
     )?;
     Ok(passed)
+}
+
+fn fixture_metadata(
+    root: &Path,
+) -> Result<BTreeMap<String, aiw_provider_wsb::sevenzip_artifacts::SevenZipFileMetadata>> {
+    let mut entries = BTreeMap::new();
+    for name in fixture_bytes().keys() {
+        let held = HeldApplicationFile::open_bounded(&root.join(name), 4096)?;
+        // The held identity denies replacement; file times are observations, not
+        // custody identities or an explanation of encoded archive metadata.
+        let metadata = fs::metadata(root.join(name))?;
+        entries.insert(
+            name.replace('\\', "/"),
+            aiw_provider_wsb::sevenzip_artifacts::SevenZipFileMetadata {
+                creation_time: metadata.creation_time(),
+                last_access_time: metadata.last_access_time(),
+                last_write_time: metadata.last_write_time(),
+                attributes: metadata.file_attributes(),
+            },
+        );
+        held.revalidate()?;
+    }
+    Ok(entries)
 }
 
 fn fixture_inventory() -> BTreeMap<String, Value> {
@@ -671,6 +926,10 @@ fn fixture_inventory() -> BTreeMap<String, Value> {
 
 #[derive(Clone, Copy)]
 enum Operation {
+    #[cfg(feature = "research-sevenzip")]
+    OwnerJournal,
+    #[cfg(feature = "research-sevenzip")]
+    Tree,
     Driver,
     Deadline,
     Boundary,
@@ -679,8 +938,23 @@ enum Operation {
     Extract,
 }
 impl Operation {
+    fn execution_phase(
+        self,
+    ) -> Option<aiw_provider_wsb::sevenzip_execution_trace::SevenZipExecutionPhase> {
+        use aiw_provider_wsb::sevenzip_execution_trace::SevenZipExecutionPhase;
+        match self {
+            Self::Create => Some(SevenZipExecutionPhase::Create),
+            Self::Test => Some(SevenZipExecutionPhase::Test),
+            Self::Extract => Some(SevenZipExecutionPhase::Extract),
+            _ => None,
+        }
+    }
     fn label(self) -> &'static str {
         match self {
+            #[cfg(feature = "research-sevenzip")]
+            Self::OwnerJournal => "owner-journal",
+            #[cfg(feature = "research-sevenzip")]
+            Self::Tree => "tree",
             Self::Driver => "driver",
             Self::Deadline => "deadline",
             Self::Boundary => "boundary",
@@ -691,6 +965,10 @@ impl Operation {
     }
     fn command(self) -> (&'static str, &'static [&'static str]) {
         match self {
+            #[cfg(feature = "research-sevenzip")]
+            Self::OwnerJournal => (HELPER, &["--owner-journal-control"]),
+            #[cfg(feature = "research-sevenzip")]
+            Self::Tree => (HELPER, &["--tree-root"]),
             Self::Driver => (HELPER, &["--driver-control"]),
             Self::Deadline => (HELPER, &["--deadline-control"]),
             Self::Boundary => (HELPER, &["--boundary-control"]),
@@ -712,6 +990,8 @@ struct Invocation {
     timed_out: bool,
     job_empty: bool,
     output: Vec<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    execution_trace: Option<aiw_provider_wsb::sevenzip_execution_trace::SevenZipExecutionTrace>,
 }
 
 fn launch(
@@ -720,6 +1000,19 @@ fn launch(
     directory: &Path,
     sid: &str,
 ) -> Result<Invocation> {
+    // Exact installed code is held before creation, separately from event files.
+    let execution_code = operation
+        .execution_phase()
+        .map(application_trace::HeldCode::open)
+        .transpose()?;
+    // Hold the exact fixed console-support image before any process creation,
+    // including implicit OS support creation. Other launch modes do not enroll it.
+    #[cfg(feature = "research-sevenzip")]
+    let tree_support = if matches!(operation, Operation::Tree) {
+        Some(process_tree::HeldConsoleSupport::open()?)
+    } else {
+        None
+    };
     let (image, arguments) = operation.command();
     let capture = directory.join(format!(
         "{}-{}-capture.txt",
@@ -767,6 +1060,7 @@ fn launch(
             None,
             true,
             CREATE_SUSPENDED
+                | process_tree_creation_flags(operation)
                 | CREATE_UNICODE_ENVIRONMENT
                 | EXTENDED_STARTUPINFO_PRESENT
                 | CREATE_NO_WINDOW,
@@ -781,8 +1075,36 @@ fn launch(
     if let Err(error) = unsafe { AssignProcessToJobObject(job.handle(), info.hProcess) } {
         let stopped = unsafe { TerminateProcess(info.hProcess, 1) };
         let waited = wait(info.hProcess, Duration::from_secs(2));
+        if operation.execution_phase().is_some() {
+            application_trace::fail_stop(
+                Path::new(WORK),
+                &format!("app debug job assignment:{error};stopped={stopped:?};waited={waited:?}"),
+            );
+        }
+        #[cfg(feature = "research-sevenzip")]
+        if matches!(operation, Operation::Tree) {
+            process_tree::fail_stop(
+                profile,
+                &format!("assign app job: {error}; stopped={stopped:?}; waited={waited:?}"),
+            );
+        }
         return Err(
             format!("assign app job: {error}; stopped={stopped:?}; waited={waited:?}").into(),
+        );
+    }
+    #[cfg(feature = "research-sevenzip")]
+    if matches!(operation, Operation::Tree) {
+        let support = match tree_support {
+            Some(support) => support,
+            None => process_tree::fail_stop(profile, "missing precreation console support custody"),
+        };
+        return process_tree::collect(
+            info, process, _thread, job, output, &capture, profile, sid, support,
+        );
+    }
+    if let Some(code) = execution_code {
+        return application_trace::collect(
+            info, process, _thread, job, output, &capture, profile, sid, code,
         );
     }
     let observed = (|| -> Result<Invocation> {
@@ -814,6 +1136,7 @@ fn launch(
             timed_out: !completed,
             job_empty: true,
             output: bytes,
+            execution_trace: None,
         })
     })();
     let cleanup = job.terminate_and_verify_empty();
@@ -822,6 +1145,20 @@ fn launch(
         (Err(error), cleanup) => Err(format!("{error}; owned job cleanup={cleanup:?}").into()),
         (_, Err(error)) => Err(error.into()),
     }
+}
+
+fn process_tree_creation_flags(
+    operation: Operation,
+) -> windows::Win32::System::Threading::PROCESS_CREATION_FLAGS {
+    if operation.execution_phase().is_some() {
+        return windows::Win32::System::Threading::DEBUG_PROCESS;
+    }
+    #[cfg(feature = "research-sevenzip")]
+    if matches!(operation, Operation::Tree) {
+        return windows::Win32::System::Threading::DEBUG_PROCESS;
+    }
+    let _ = operation;
+    windows::Win32::System::Threading::PROCESS_CREATION_FLAGS(0)
 }
 
 fn record(root: &Path, name: &str, value: &Value) -> Result<()> {
@@ -833,6 +1170,15 @@ fn record(root: &Path, name: &str, value: &Value) -> Result<()> {
 }
 fn collect_stages() -> Result<()> {
     let stages = [
+        "tree-baseline",
+        "tree-candidate",
+        "tree-baseline-binding",
+        "tree-candidate-binding",
+        "tree-baseline-error",
+        "tree-candidate-error",
+        "tree-candidate-profile",
+        "tree-profile-cleanup",
+        "tree-complete",
         "00-driver-control",
         "01-deadline-control",
         "app-ready",
@@ -841,6 +1187,13 @@ fn collect_stages() -> Result<()> {
         "baseline-1",
         "baseline-2",
         "baseline-3",
+        "baseline-artifacts",
+        "baseline-0-trace",
+        "baseline-1-trace",
+        "baseline-2-trace",
+        "baseline-0-binding",
+        "baseline-1-binding",
+        "baseline-2-binding",
         "02-baseline",
         "03-candidate-not-reached",
         "03-boundary",
@@ -849,6 +1202,13 @@ fn collect_stages() -> Result<()> {
         "candidate-1",
         "candidate-2",
         "candidate-3",
+        "candidate-artifacts",
+        "candidate-0-trace",
+        "candidate-1-trace",
+        "candidate-2-trace",
+        "candidate-0-binding",
+        "candidate-1-binding",
+        "candidate-2-binding",
         "04-profile-cleanup",
         "05-comparison",
         "06-code-binding",
@@ -1054,6 +1414,83 @@ impl Drop for DerivedProfileSid {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sevenzip_capture_preserves_verification_prefix_for_invalid_missing_and_oversized_outputs() {
+        for case in [
+            "missing",
+            "extra",
+            "oversized",
+            "metadata-error",
+            "malformed",
+        ] {
+            let root = std::env::temp_dir().join(format!(
+                "aiw-sevenzip-capture-{}-{case}",
+                std::process::id()
+            ));
+            fs::create_dir(&root).unwrap();
+            for leaf in ["Input", "Extracted"] {
+                fs::create_dir(root.join(leaf)).unwrap();
+                fs::create_dir(root.join(leaf).join("sub folder")).unwrap();
+                for (name, bytes) in fixture_bytes() {
+                    write_new(&root.join(leaf).join(name), &bytes).unwrap();
+                }
+            }
+            if case == "missing" {
+                fs::remove_file(root.join("Extracted/hello.txt")).unwrap();
+            }
+            if case == "extra" {
+                write_new(&root.join("Extracted/extra.txt"), b"extra").unwrap();
+            }
+            let archive = if case == "oversized" {
+                vec![0; aiw_provider_wsb::sevenzip_artifacts::MAX_SEVENZIP_ARCHIVE_BYTES + 1]
+            } else {
+                b"malformed archive bytes retained without format claim".to_vec()
+            };
+            write_new(&root.join("archive.7z"), &archive).unwrap();
+            let metadata = if case == "metadata-error" {
+                Err("injected metadata collection failure".into())
+            } else {
+                fixture_metadata(&root.join("Input"))
+            };
+            let result = verify_and_retain_variant(&root, &root, "fixture", metadata);
+            let verification: Value =
+                serde_json::from_slice(&fs::read(root.join("fixture-3.json")).unwrap()).unwrap();
+            assert_eq!(verification["passed"], !matches!(case, "missing" | "extra"));
+            assert_eq!(
+                verification["archive"],
+                inventory_one(&root.join("archive.7z")).unwrap()
+            );
+            if matches!(case, "oversized" | "metadata-error") {
+                assert!(result.is_err());
+                assert!(!root.join("fixture-artifacts.json").exists());
+            } else {
+                assert_eq!(result.unwrap(), case == "malformed");
+                let artifacts: aiw_provider_wsb::sevenzip_artifacts::SevenZipArtifacts =
+                    serde_json::from_slice(&fs::read(root.join("fixture-artifacts.json")).unwrap())
+                        .unwrap();
+                assert_eq!(hex::decode(&artifacts.archive_hex).unwrap(), archive);
+                assert_eq!(artifacts.extracted_capture_complete, case == "malformed");
+                assert!(!artifacts.extracted_hex.contains_key("extra.txt"));
+                fs::remove_file(root.join("fixture-artifacts.json")).unwrap();
+            }
+            for leaf in ["Input", "Extracted"] {
+                for name in fixture_bytes().keys() {
+                    let path = root.join(leaf).join(name);
+                    if path.exists() {
+                        fs::remove_file(path).unwrap();
+                    }
+                }
+                if leaf == "Extracted" && case == "extra" {
+                    fs::remove_file(root.join(leaf).join("extra.txt")).unwrap();
+                }
+                fs::remove_dir(root.join(leaf).join("sub folder")).unwrap();
+                fs::remove_dir(root.join(leaf)).unwrap();
+            }
+            fs::remove_file(root.join("archive.7z")).unwrap();
+            fs::remove_file(root.join("fixture-3.json")).unwrap();
+            fs::remove_dir(root).unwrap();
+        }
+    }
     #[test]
     fn sevenzip_fixture_verification_includes_empty_binary_nested_unicode_and_exact_inventory() {
         let bytes = fixture_bytes();

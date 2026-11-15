@@ -3,7 +3,7 @@ use super::*;
 pub const SEVENZIP_PREPARATION_SCHEMA: &str = "aiw.dev/wsb-preparation-receipt/v0alpha9";
 pub const SEVENZIP_INSTALLER_FILE: &str = "7z2605-x64.exe";
 pub const SEVENZIP_LAUNCHER_FILE: &str = "sevenzip_assessment.exe";
-pub const SEVENZIP_TRUST_DELTA: &str = "installs the fixed approved 7-Zip 26.05 x64 installer with elevated guest authority inside one disposable offline Windows Sandbox; runs the same create/test/extract/verify archive workflow as a standard-user baseline and classic AppContainer with zero capabilities, read-only input and writable output grants; measures held target tokens and fixed file access controls; no automatic host export, general compatibility or effective-isolation verdict";
+pub const SEVENZIP_TRUST_DELTA: &str = "installs the fixed approved 7-Zip 26.05 x64 installer with elevated guest authority inside one disposable offline Windows Sandbox; common setup is not candidate-isolated installation; runs the same create/test/extract/verify archive workflow as a standard-user baseline and classic AppContainer with zero capabilities, read-only input and writable output grants; records installer and application process lifetimes, measured token boundaries, event-image identities and fixed file access controls; no automatic host export, general compatibility or effective-isolation verdict";
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

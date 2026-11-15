@@ -107,3 +107,25 @@ test('Archive filters exclude unrelated profiles and expose the 7-Zip applicatio
   assert.deepEqual(api.filterRows(rows,{application:'7-Zip 26.05'}),[rows[3]]);
   assert.match(fs.readFileSync(require.resolve('../ui/index.html'),'utf8'),/<option>7-Zip 26.05<\/option>/);
 });
+
+test('Archive coverage keeps nonzero exits separate from function success and never executes on open/export',async()=>{
+  const d=dom(),calls=[];
+  const row={selection:1,application:'7-Zip 26.05',workflow:'archive comparison',outcome:'failed',functions:{createArchive:'failed'},stages:[],failureEvidence:'driverIncomplete',evidenceReferences:[],evidenceGaps:[],historicalCleanupVerified:null,
+    sevenzip:{origin:'nativeWorker',eligible:false,reason:'baselineFailed',selectedControlsVerified:false,functions:[{function:'create',baseline:'failed',candidate:'unmeasured'}],archiveBytesEqual:null,innerProfileDeleted:null,
+      executionCoverage:[{variant:'installationSetup',phase:'installationSetup',status:'verified',observedProcesses:1,pairedExits:1,rootExitCode:0},
+        {variant:'baseline',phase:'create',status:'verified',observedProcesses:3,pairedExits:3,rootExitCode:4294967295},
+        {variant:'candidate',phase:'create',status:'unmeasured',observedProcesses:null,pairedExits:null,rootExitCode:null}],
+      executionTrace:{scope:'private-raw-scope',chain:{debuggerChainComplete:true,processes:[{processId:987654}]}}}};
+  const window={document:d.document,__TAURI__:{core:{invoke:async(name)=>{calls.push(name);return name==='open_results'?{token:'coverage',summary:{rows:[row]}}:null;}}}};
+  vm.runInNewContext(fs.readFileSync(require.resolve('../ui/results.js'),'utf8'),{window});
+  await d.get('openResults').handlers.click();
+  const walk=n=>[n.textContent||'',...n.children.flatMap(walk)].join(' '),text=walk(d.get('resultsRows'));
+  assert.match(text,/Common elevated setup \(outside candidate\)/);
+  assert.match(text,/3 processes; 3 paired exits; root exit 4294967295/);
+  assert.match(text,/Unmeasured; no completeness or not-reached inference/);
+  assert.match(text,/Brokers, loaded memory and all-host activity remain unmeasured/);
+  assert.match(text,/create: baseline Failed/);
+  assert.doesNotMatch(text,/private-raw-scope|987654|debuggerChainComplete/);
+  await d.get('exportResultsJson').handlers.click();
+  assert.deepEqual(calls,['open_results','export_results']);
+});

@@ -243,6 +243,7 @@ version = "0.1.0-alpha.1"
 dependencies = [
  "aiw-evidence",
  "aiw-probe",
+ "aiw-provider-mxc",
  "aiw-provider-wsb",
  "aiw-token",
  "aiw-windows-command-line",

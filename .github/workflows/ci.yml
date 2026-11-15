@@ -117,6 +117,25 @@ jobs:
           $PSVersionTable | ConvertTo-Json -Depth 3 | Write-Host
           .\scripts\verify.ps1
 
+      - name: Verify closed environment research feature
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # AIW inline runtime assertion: independent of repository checkout.
+          if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion.Major -ne 7 -or $PSVersionTable.PSVersion.Minor -ne 6 -or $PSVersionTable.PSVersion.PreReleaseLabel -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() -cne 'X64' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Program Files\PowerShell\7\pwsh.exe' -or $PSHOME -ine 'C:\Program Files\PowerShell\7') { throw 'Expected stable machine PowerShell 7.6.x x64' }
+          foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security','Microsoft.PowerShell.Archive')) { Import-Module (Join-Path $PSHOME ('Modules\'+$module+'\'+$module+'.psd1')) -SkipEditionCheck -ErrorAction Stop }
+          $PSModuleAutoLoadingPreference = 'None'
+          if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'Compatibility session is prohibited' }
+          $PSVersionTable | ConvertTo-Json -Depth 3 | Write-Host
+          cargo test -p aiw-provider-wsb --features research-environment --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Environment provider tests failed' }
+          cargo test -p aiw-windows-platform --features research-environment --lib environment_probe::tests --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Environment contract tests failed' }
+          cargo test -p aiw-windows-platform --features research-environment --example environment_sandbox_trial --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Environment transaction tests failed' }
+          cargo clippy -p aiw-windows-platform --all-targets --features research-environment --locked -- -D warnings
+          if ($LASTEXITCODE -ne 0) { throw 'Environment-only clippy failed' }
+
       - name: Install cargo-audit
         if: steps.cargo-audit-cache.outputs.cache-hit != 'true'
         shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
@@ -236,6 +255,8 @@ jobs:
           $PSVersionTable | ConvertTo-Json -Depth 3 | Write-Host
           rustup toolchain install 1.88.0 --profile minimal --no-self-update
           if ($LASTEXITCODE -ne 0) { throw 'Rust 1.88 installation failed' }
+          cargo +1.88.0 check -p aiw-windows-platform --all-targets --features research-environment --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Environment Rust 1.88 check failed' }
           cargo +1.88.0 check --workspace --all-targets --locked
           if ($LASTEXITCODE -ne 0) { throw 'Native tool invocation failed' }
 

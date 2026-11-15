@@ -5,7 +5,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub const SEVENZIP_PROFILE_REVISION: &str = "aiw.dev/sevenzip-archive-pair/v0alpha1";
+pub const SEVENZIP_LEGACY_PROFILE_REVISION: &str = "aiw.dev/sevenzip-archive-pair/v0alpha1";
+pub const SEVENZIP_PROFILE_REVISION: &str = "aiw.dev/sevenzip-archive-pair/v0alpha2";
 pub const SEVENZIP_VERSION: &str = "26.05";
 pub const SEVENZIP_INSTALLER_SHA256: &str =
     "fd99e86f57d8f429ef5ed045bf98315af962e2309b0f1ba87a147a44c71647d0";
@@ -35,7 +36,9 @@ pub enum SevenZipPolicy {
 impl SevenZipProfile {
     pub fn validate(&self) -> Result<(), String> {
         self.validate_historical()?;
-        if self.source_sha256 != seven_zip_source_sha256() {
+        if self.revision != SEVENZIP_PROFILE_REVISION
+            || self.source_sha256 != seven_zip_source_sha256()
+        {
             return Err(
                 "7-Zip source changed; prepare and approve a fresh plan before Start".into(),
             );
@@ -43,12 +46,14 @@ impl SevenZipProfile {
         Ok(())
     }
     /// Retained reads/recovery do not require today's compiler source hash.
-    /// Accept only this closed revision; unknown future revisions fail closed.
+    /// Accept only these closed revisions; unknown future revisions fail closed.
     pub fn validate_historical(&self) -> Result<(), String> {
         self.expected_windows.validate()?;
         self.expected_host_windows.validate()?;
-        if self.revision != SEVENZIP_PROFILE_REVISION
-            || !control_hash(&self.source_sha256)
+        if !matches!(
+            self.revision.as_str(),
+            SEVENZIP_LEGACY_PROFILE_REVISION | SEVENZIP_PROFILE_REVISION
+        ) || !control_hash(&self.source_sha256)
             || self.installer_sha256 != SEVENZIP_INSTALLER_SHA256
             || self.installer_size_bytes != SEVENZIP_INSTALLER_SIZE_BYTES
             || !control_hash(&self.agent_sha256)
@@ -75,8 +80,28 @@ impl SevenZipProfile {
 pub fn seven_zip_source_sha256() -> String {
     let sources = [
         include_str!("sevenzip.rs"),
+        include_str!("../../aiw-provider-wsb/src/lib.rs"),
+        include_str!("../../aiw-windows-platform/src/lib.rs"),
         include_str!("../../aiw-provider-wsb/src/sevenzip.rs"),
+        include_str!("../../aiw-provider-wsb/src/sevenzip_artifacts.rs"),
+        include_str!("../../aiw-provider-wsb/src/sevenzip_process_tree.rs"),
+        include_str!("../../aiw-provider-wsb/src/sevenzip_tree_control.rs"),
+        include_str!("../../aiw-provider-wsb/src/sevenzip_code_control.rs"),
+        include_str!("../../aiw-provider-wsb/src/sevenzip_execution_trace.rs"),
+        include_str!("../../aiw-windows-platform/src/debug_tree.rs"),
         include_str!("../../aiw-windows-platform/src/control_appcontainer/research_sevenzip.rs"),
+        include_str!(
+            "../../aiw-windows-platform/src/control_appcontainer/research_sevenzip/process_tree.rs"
+        ),
+        include_str!(
+            "../../aiw-windows-platform/src/control_appcontainer/research_sevenzip/owner_journal.rs"
+        ),
+        include_str!(
+            "../../aiw-windows-platform/src/control_appcontainer/research_sevenzip/process_tree/console_support.rs"
+        ),
+        include_str!(
+            "../../aiw-windows-platform/src/control_appcontainer/research_sevenzip/application_trace.rs"
+        ),
         include_str!("../../aiw-windows-platform/src/guest_document/paired_inputs/sevenzip.rs"),
         include_str!("../../aiw-windows-platform/src/control_appcontainer.rs"),
         include_str!("../../aiw-windows-platform/src/guest_document/paired_inputs.rs"),
@@ -153,5 +178,22 @@ mod tests {
         let mut unknown = serde_json::to_value(value).unwrap();
         unknown["policy"] = serde_json::json!("fullTrustFallback");
         assert!(serde_json::from_value::<SevenZipProfile>(unknown).is_err());
+    }
+
+    #[test]
+    fn legacy_profile_serialization_hash_is_stable_but_cannot_dispatch() {
+        let mut legacy = profile();
+        legacy.revision = SEVENZIP_LEGACY_PROFILE_REVISION.into();
+        legacy.validate_historical().unwrap();
+        assert!(legacy.validate().is_err());
+        let bytes = serde_json::to_vec(&legacy).unwrap();
+        let hash = legacy.hash().unwrap();
+        let restored: SevenZipProfile = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(serde_json::to_vec(&restored).unwrap(), bytes);
+        assert_eq!(restored.hash().unwrap(), hash);
+        let mut current = legacy;
+        current.revision = SEVENZIP_PROFILE_REVISION.into();
+        current.validate().unwrap();
+        assert_ne!(hash, current.hash().unwrap());
     }
 }

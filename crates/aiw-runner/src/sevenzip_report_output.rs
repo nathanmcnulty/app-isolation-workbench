@@ -43,6 +43,7 @@ pub(super) fn read_sevenzip_output(
         recorded_outcome: outcome, recorded_cleanup_verified: cleanup,
         evidence_status: SevenZipReportEvidenceStatus::Absent,
         receipt_sha256: None, evidence_root_hash: None, observations: None, comparison: None, function_deltas: None,
+        execution_coverage: None,
         evidence_gaps: vec!["GUI, shell, uninstall, registry/system changes, network/IPC/UI, all descendants and endpoint equivalence remain unmeasured".into(),
             "Cleanup is historical; reading never checks current worker state".into()],
     };
@@ -164,6 +165,7 @@ pub(super) fn read_sevenzip_output(
                 evidence_root_hash: verified.evidence_root_hash.clone(),
             };
             report.function_deltas = Some(aiw_core::compare_runs(&summary(false), &summary(true)));
+            report.execution_coverage = observed.verified_execution_coverage(request);
             report.evidence_status = if observed.driver_error.is_some() {
                 SevenZipReportEvidenceStatus::DriverIncomplete
             } else {

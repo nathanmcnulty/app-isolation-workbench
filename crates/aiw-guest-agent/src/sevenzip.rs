@@ -12,7 +12,13 @@ fn role_allowed(path: Option<&Path>, args: &[std::ffi::OsString]) -> bool {
     }) && args.len() == 1
         && matches!(
             args[0].to_str(),
-            Some("--driver-control" | "--deadline-control" | "--boundary-control" | "--workflow")
+            Some(
+                "--driver-control"
+                    | "--deadline-control"
+                    | "--boundary-control"
+                    | "--workflow"
+                    | "--installation-setup"
+            )
         )
 }
 pub(super) fn fixed_role() -> Option<ExitCode> {
@@ -28,7 +34,13 @@ pub(super) fn fixed_role() -> Option<ExitCode> {
     let role_args = args.iter().any(|arg| {
         matches!(
             arg.to_str(),
-            Some("--driver-control" | "--deadline-control" | "--boundary-control" | "--workflow")
+            Some(
+                "--driver-control"
+                    | "--deadline-control"
+                    | "--boundary-control"
+                    | "--workflow"
+                    | "--installation-setup"
+            )
         )
     });
     if !secondary_path && !role_args {
@@ -182,23 +194,25 @@ mod tests {
     }
     #[test]
     fn sevenzip_roles_reject_host_tools_unknown_and_extra_arguments() {
-        let args = [std::ffi::OsString::from("--workflow")];
-        assert!(role_allowed(
-            Some(Path::new(r"C:\AIW\SevenZip\sevenzip_assessment.exe")),
-            &args
-        ));
-        for path in [
-            r"C:\AIW\Tools\aiw-guest-agent.exe",
-            r"C:\AIW\Tools\sevenzip_assessment.exe",
-            r"C:\host\sevenzip_assessment.exe",
-        ] {
-            assert!(!role_allowed(Some(Path::new(path)), &args));
+        for role in ["--workflow", "--installation-setup"] {
+            let args = [std::ffi::OsString::from(role)];
+            assert!(role_allowed(
+                Some(Path::new(r"C:\AIW\SevenZip\sevenzip_assessment.exe")),
+                &args
+            ));
+            for path in [
+                r"C:\AIW\Tools\aiw-guest-agent.exe",
+                r"C:\AIW\Tools\sevenzip_assessment.exe",
+                r"C:\host\sevenzip_assessment.exe",
+            ] {
+                assert!(!role_allowed(Some(Path::new(path)), &args));
+            }
+            assert!(!role_allowed(None, &args));
+            assert!(!role_allowed(
+                Some(Path::new(r"C:\AIW\SevenZip\sevenzip_assessment.exe")),
+                &[role.into(), "extra".into()]
+            ));
         }
-        assert!(!role_allowed(None, &args));
-        assert!(!role_allowed(
-            Some(Path::new(r"C:\AIW\SevenZip\sevenzip_assessment.exe")),
-            &["--workflow".into(), "extra".into()]
-        ));
     }
     #[test]
     fn sevenzip_partial_publication_is_bound_and_receipt_last_without_execution() {

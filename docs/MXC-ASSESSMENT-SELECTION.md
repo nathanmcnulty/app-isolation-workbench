@@ -1,6 +1,7 @@
 # Isolation selection for the real-application assessment
 
-Reviewed 2026-11-05 (America/Anchorage), without building or executing MXC.
+Reviewed 2026-11-05; acquisition/adoption review updated 2026-11-06
+(America/Anchorage), without building, loading or executing MXC.
 The proposed workflow is the Windows x64 7-Zip installer followed by fixed local
 archive creation, archive testing, extraction and independent content verification.
 The application workflow and boundary controls need separate observations.
@@ -13,8 +14,9 @@ The latest official release observed through GitHub's release API is
 stable `1.0.0` request schema. Its `mxc-release-binaries.zip` asset is 542051775
 bytes; the API advertises SHA-256
 `0e832239454ba7fcd338ff56218a287eef4c0a01c1484084b869f55feff8abe9`.
-This is an acquisition identity, not a local download, signature verification,
-complete native/dependency inventory, or execution acceptance.
+The local acquisition and signature checks are recorded below; this release
+identity alone does not establish a complete dependency inventory or execution
+acceptance.
 
 Current main was independently observed at
 [`40df784b2c32e764eaed51899a10ee936a2d7c0c`](https://github.com/microsoft/mxc/tree/40df784b2c32e764eaed51899a10ee936a2d7c0c),
@@ -22,6 +24,34 @@ committed 2026-11-05. Development behavior must not be attributed to v1.0.1.
 AIW still pins `c4a3ab668e85b221b2c77e5e43876ed4e40598ad`,
 `0.8.0-alpha`, in `third-party/mxc-pin.json`; its adapter is planning-only.
 Neither research nor these release identities advances that pin.
+
+For the active [multi-mode work](MULTIMODE-ASSESSMENT.md), the official release
+archive has now been acquired inertly and independently rehashed to that asset
+digest. Selected x64 `mxc_ffi.dll` is 6,123,320 bytes, SHA-256
+`bd45522f06dc9cc8001dcd5d7320bc2bf303fb08a39bf10f3404bd9a8001812c`.
+Acquisition Authenticode validation returned Valid, Microsoft Corporation;
+FileVersion is 1.0.1 and ProductVersion 1.0.1+fda29ac6. Static imports are Windows
+system/API-set DLLs with no delay-import or external VC-runtime DLL identified.
+This is not a complete dynamic-dependency inventory. The release SBOM does not
+provide a complete per-Windows-PE inventory, and COSE/build reproducibility were
+not independently verified. Private raw provenance remains outside Git.
+
+The selected direct C ABI accepts full exact `1.0.0` request JSON, including
+`fallback.allowDaclMutation:false`. The CLI performs orphan recovery before its
+probe; the typed Rust v1 request omits fallback policy. A dedicated fixed guest
+helper therefore probes the signed pinned DLL directly with System32-only
+dependency search, after strict local-copy identity checks. Trial preparation,
+exact approval and Start remain
+separate. The user approved this pinned runtime for this goal's fresh Sandboxes
+on existing VM107 through reviewed Proxmox-console scripts; parent runtime
+installation and VM/host security changes are excluded. The first
+[native capability trial](MXC-PROBE-NATIVE-20261106.md) captured native-tier support
+reports inside a fresh guest, but its host marker failed custody validation.
+Probe support cannot prove effective creation/enforcement inside Sandbox.
+
+Sources: [exact JSON C ABI](https://github.com/microsoft/mxc/blob/fda29ac63bc306b7f97f3b86b4b63d44f7f40cf2/src/ffi/mxc_ffi/src/lib.rs),
+[CLI startup](https://github.com/microsoft/mxc/blob/fda29ac63bc306b7f97f3b86b4b63d44f7f40cf2/src/tools/wxc/src/main.rs),
+[typed request translation](https://github.com/microsoft/mxc/blob/fda29ac63bc306b7f97f3b86b4b63d44f7f40cf2/src/mxc-sdk/src/policy/exact/v1_0.rs).
 
 Microsoft's [platform support guidance](https://learn.microsoft.com/en-us/windows/apps/develop/mxc/platform-support)
 distinguishes backend availability from V1 SDK operation support. Its stated

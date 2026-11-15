@@ -108,6 +108,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "aiw-provider-mxc"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "aiw-windows-command-line",
+ "base64 0.23.1",
+ "hex",
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "aiw-provider-wsb"
 version = "0.1.0-alpha.1"
 dependencies = [
@@ -176,6 +190,7 @@ version = "0.1.0-alpha.1"
 dependencies = [
  "aiw-evidence",
  "aiw-probe",
+ "aiw-provider-mxc",
  "aiw-provider-wsb",
  "aiw-token",
  "aiw-windows-command-line",

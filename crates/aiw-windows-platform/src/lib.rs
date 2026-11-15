@@ -2,6 +2,27 @@
 
 use aiw_probe::WindowsSandboxReadiness;
 
+// The fixed 7-Zip workflow observes its inherited debugger chains. Research
+// controls remain separate; registry foundations are still test-only.
+#[cfg(windows)]
+#[allow(dead_code)]
+mod debug_tree;
+#[cfg(all(windows, test))]
+#[allow(dead_code)]
+mod sevenzip_registry;
+
+#[cfg(all(windows, feature = "research-environment"))]
+pub mod environment_probe;
+#[cfg(all(windows, feature = "research-mxc-process"))]
+mod mxc_process;
+#[cfg(all(
+    windows,
+    any(feature = "research-mxc-process", feature = "research-environment")
+))]
+pub mod research_publication;
+#[cfg(all(windows, feature = "research-mxc-process"))]
+pub use mxc_process::run_fixed_probe as run_mxc_process_probe;
+
 #[cfg(all(windows, feature = "research-sevenzip"))]
 pub use control_appcontainer::research_sevenzip::run as run_sevenzip_research;
 

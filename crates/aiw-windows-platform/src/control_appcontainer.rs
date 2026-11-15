@@ -905,6 +905,9 @@ struct Job {
     handle: OwnedHandle,
 }
 impl Job {
+    fn into_owned_handle(self) -> OwnedHandle {
+        self.handle
+    }
     fn create() -> Result<Self, ControlAppContainerError> {
         let handle = unsafe { CreateJobObjectW(None, PCWSTR::null()) }
             .map_err(|error| fixed(format!("create fixture job failed: {error}")))?;

@@ -19,6 +19,57 @@ struct Fixture {
     result: SevenZipResult,
 }
 impl Fixture {
+    fn enroll_current_execution_traces(&mut self) {
+        use aiw_provider_wsb::sevenzip_execution_trace::SevenZipExecutionPhase as P;
+        self.request.profile.revision = SEVENZIP_PROFILE_REVISION.into();
+        self.request.request_sha256 = self.request.hash().unwrap();
+        self.result.request_sha256 = self.request.request_sha256.clone();
+        self.result.profile_sha256 = self.request.profile.hash().unwrap();
+        let mut installer = serde_json::to_value(process(30, false).held_token.unwrap()).unwrap();
+        installer["userSid"] = serde_json::json!("S-1-5-21-11-22-33-504");
+        installer["isElevated"] = serde_json::json!(true);
+        installer["integrity"] =
+            serde_json::json!({"sid":"S-1-16-12288","rid":12288,"level":"high"});
+        self.result.installation.as_mut().unwrap().execution_trace = Some(coverage_trace(
+            installer,
+            P::InstallationSetup,
+            &SevenZipFileDigest {
+                sha256: SEVENZIP_INSTALLER_SHA256.into(),
+                size_bytes: SEVENZIP_INSTALLER_SIZE_BYTES,
+            },
+        ));
+        let code = self
+            .result
+            .code_binding
+            .as_ref()
+            .unwrap()
+            .image_before
+            .clone();
+        for variant in [&mut self.result.baseline, &mut self.result.candidate]
+            .into_iter()
+            .flatten()
+        {
+            for (phase, invocation) in [
+                (P::Create, &mut variant.create),
+                (P::Test, &mut variant.test),
+                (P::Extract, &mut variant.extract),
+            ] {
+                if let Some(invocation) = invocation {
+                    invocation.execution_trace = Some(coverage_trace(
+                        serde_json::to_value(invocation.held_token.as_ref().unwrap()).unwrap(),
+                        phase,
+                        &code,
+                    ));
+                }
+            }
+        }
+        self.result.validate(&self.request).unwrap();
+        self.publish(if self.result.driver_error.is_some() {
+            CompletionStatus::Failed
+        } else {
+            CompletionStatus::Succeeded
+        });
+    }
     fn new(partial: bool) -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
@@ -28,7 +79,7 @@ impl Fixture {
         ));
         fs::create_dir(&root).unwrap();
         let profile = aiw_probe::SevenZipProfile {
-            revision: SEVENZIP_PROFILE_REVISION.into(),
+            revision: SEVENZIP_LEGACY_PROFILE_REVISION.into(),
             source_sha256: seven_zip_source_sha256(),
             installer_sha256: SEVENZIP_INSTALLER_SHA256.into(),
             installer_size_bytes: SEVENZIP_INSTALLER_SIZE_BYTES,
@@ -43,7 +94,7 @@ impl Fixture {
                 .unwrap(),
             policy: SevenZipPolicy::ClassicAppContainerNoCapabilitiesReadInputWriteOutput,
         };
-        let request = SevenZipRequest::new(
+        let request = SevenZipRequest::from_retained_binding(
             "inert-sevenzip-report",
             "11111111-2222-3333-4444-555555555555",
             &"f".repeat(64),
@@ -57,6 +108,7 @@ impl Fixture {
         let image = SevenZipFileDigest::for_bytes(b"inert image bytes, never executed");
         let dll = SevenZipFileDigest::for_bytes(b"inert DLL bytes, never loaded");
         result.installation = Some(SevenZipInstallation {
+            execution_trace: None,
             exit_code: Some(0),
             timed_out: false,
             job_empty: Some(true),
@@ -247,6 +299,7 @@ fn process(pid: u32, candidate: bool) -> SevenZipInvocation {
     }
     let output = SevenZipFileDigest::for_bytes(b"inert capture");
     SevenZipInvocation {
+        execution_trace: None,
         process_id: pid,
         exit_code: Some(0),
         timed_out: false,
@@ -264,6 +317,7 @@ fn variant(first: u32, candidate: bool) -> SevenZipVariant {
         extract: Some(process(first + 2, candidate)),
         input_after: Some(sevenzip_fixture_inventory()),
         extracted: Some(sevenzip_fixture_inventory()),
+        artifacts: None,
         archive: Some(SevenZipFileDigest {
             sha256: if candidate {
                 "c".repeat(64)
@@ -272,6 +326,157 @@ fn variant(first: u32, candidate: bool) -> SevenZipVariant {
             },
             size_bytes: if candidate { 579 } else { 578 },
         }),
+    }
+}
+
+fn coverage_trace(
+    token: serde_json::Value,
+    phase: aiw_provider_wsb::sevenzip_execution_trace::SevenZipExecutionPhase,
+    code: &SevenZipFileDigest,
+) -> aiw_provider_wsb::sevenzip_execution_trace::SevenZipExecutionTrace {
+    use aiw_provider_wsb::sevenzip_execution_trace::SEVENZIP_EXECUTION_TRACE_SCHEMA;
+    use aiw_provider_wsb::sevenzip_process_tree::{
+        SEVENZIP_PROCESS_CHAIN_SCHEMA, SEVENZIP_PROCESS_CHAIN_SCOPE,
+    };
+    // Synthetic DTO only. No image is loaded or launched. Full-width creation
+    // time is deserialized directly from Rust JSON, never through a JS Number.
+    let pid = token["processId"].as_u64().unwrap();
+    let time = (1u64 << 55) + 3;
+    let image = serde_json::json!({"processImagePath":phase.fixed_image_path(),"sha256":code.sha256,"sizeBytes":code.size_bytes,"volumeSerialNumber":1,"fileIndex":2});
+    serde_json::from_value(serde_json::json!({
+        "schemaVersion":SEVENZIP_EXECUTION_TRACE_SCHEMA,"phase":phase,
+        "rootBinding":{"processId":pid,"creationTime100ns":time,"heldToken":token},
+        "chain":{"schemaVersion":SEVENZIP_PROCESS_CHAIN_SCHEMA,"scope":SEVENZIP_PROCESS_CHAIN_SCOPE,"rootProcessId":pid,"eventsProcessed":2,
+            "processes":[{"ordinal":0,"processId":pid,"createEventSequence":1,"creationTime100ns":time,"tokenBeforeContinue":token,"imageBeforeContinue":image,"exitCode":0,"exitEventSequence":2}],
+            "timedOut":false,"ownedJobTerminationRequested":false,"ownedJobTerminationSucceeded":false,"jobTotalProcesses":1,"jobActiveProcesses":0,"jobLimitTerminatedProcesses":0,
+            "jobAccountingReconciled":true,"debuggerChainComplete":true,"requiresDebuggerProcessExit":false,"gaps":[]},
+        "imageLifetimes":[{"ordinal":0,"processId":pid,"createEventSequence":1,"imageAfterExit":image}]
+    })).unwrap()
+}
+
+#[test]
+fn sevenzip_retained_coverage_is_request_verified_and_independent_of_cleanup_credit() {
+    let mut fixture = Fixture::new(false);
+    fixture.enroll_current_execution_traces();
+    let before = fixture.snapshot();
+    for cleanup in [None, Some(false), Some(true)] {
+        let report = fixture.report(cleanup, SevenZipExecutionProvenance::ApprovedDispatch);
+        assert_eq!(
+            report.evidence_status,
+            SevenZipReportEvidenceStatus::Verified
+        );
+        let coverage = report.execution_coverage.as_ref().unwrap();
+        assert_eq!(coverage.baseline.len(), 3);
+        assert_eq!(coverage.candidate.len(), 3);
+        assert_eq!(coverage.installation_setup.observed_processes, 1);
+        assert!(
+            coverage
+                .baseline
+                .iter()
+                .chain(&coverage.candidate)
+                .all(|s| s.paired_exits == s.observed_processes
+                    && s.exact_job_reconciled
+                    && s.lifetime_images_revalidated)
+        );
+        let public = serde_json::to_string(coverage).unwrap();
+        for raw in [
+            "processId",
+            "userSid",
+            "fileIndex",
+            "creationTime",
+            "S-1-",
+            r"C:\",
+        ] {
+            assert!(!public.contains(raw));
+        }
+        if cleanup != Some(true) {
+            assert!(!report.comparison.unwrap().eligible);
+        }
+    }
+    for provenance in [
+        SevenZipExecutionProvenance::ApprovalUnavailable,
+        SevenZipExecutionProvenance::ApprovedWithoutDispatch,
+    ] {
+        let report = fixture.report(Some(true), provenance);
+        assert!(report.execution_coverage.is_none());
+        assert!(
+            serde_json::to_value(report)
+                .unwrap()
+                .get("executionCoverage")
+                .is_none()
+        );
+    }
+    assert_eq!(before, fixture.snapshot());
+}
+
+#[test]
+fn sevenzip_retained_coverage_omits_legacy_and_incomplete_but_retains_driver_prefix() {
+    let legacy = Fixture::new(false);
+    let report = legacy.report(Some(true), SevenZipExecutionProvenance::ApprovedDispatch);
+    assert!(
+        serde_json::to_value(report)
+            .unwrap()
+            .get("executionCoverage")
+            .is_none()
+    );
+    let mut fixture = Fixture::new(true);
+    fixture.enroll_current_execution_traces();
+    let report = fixture.report(Some(true), SevenZipExecutionProvenance::ApprovedDispatch);
+    assert_eq!(
+        report.evidence_status,
+        SevenZipReportEvidenceStatus::DriverIncomplete
+    );
+    let coverage = report.execution_coverage.unwrap();
+    assert_eq!(coverage.baseline.len(), 1);
+    assert!(coverage.candidate.is_empty());
+    fixture
+        .result
+        .baseline
+        .as_mut()
+        .unwrap()
+        .create
+        .as_mut()
+        .unwrap()
+        .execution_trace
+        .as_mut()
+        .unwrap()
+        .chain
+        .gaps
+        .push("observed gap".into());
+    fixture.publish(CompletionStatus::Failed);
+    let report = fixture.report(Some(true), SevenZipExecutionProvenance::ApprovedDispatch);
+    assert!(report.execution_coverage.is_none());
+    assert!(report.observations.is_some());
+    assert!(
+        serde_json::to_value(report)
+            .unwrap()
+            .get("executionCoverage")
+            .is_none()
+    );
+}
+
+#[test]
+fn sevenzip_retained_coverage_cannot_survive_rejected_receipt_or_evidence() {
+    let mut fixture = Fixture::new(false);
+    fixture.enroll_current_execution_traces();
+    for tamper in 0..2 {
+        let original = fixture.receipt();
+        let mut receipt = original.clone();
+        if tamper == 0 {
+            receipt.evidence_root_hash = "0".repeat(64);
+        } else {
+            receipt.status = CompletionStatus::Failed;
+            receipt.exit_code = 1;
+        }
+        fixture.replace_receipt(&receipt);
+        let report = fixture.report(Some(true), SevenZipExecutionProvenance::ApprovedDispatch);
+        assert_eq!(
+            report.evidence_status,
+            SevenZipReportEvidenceStatus::Rejected
+        );
+        assert!(report.execution_coverage.is_none());
+        assert!(report.observations.is_none());
+        fixture.replace_receipt(&original);
     }
 }
 

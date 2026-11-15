@@ -10,7 +10,33 @@ rust-version.workspace = true
 [features]
 research-msix-control = []
 research-msix-lifecycle = []
-research-sevenzip = []
+research-sevenzip = ["aiw-provider-wsb/research-fixed-publication"]
+research-mxc-process = ["aiw-provider-wsb/research-fixed-publication"]
+research-environment = ["aiw-provider-wsb/research-environment"]
+
+[[example]]
+name = "environment_probe"
+required-features = ["research-environment"]
+
+[[example]]
+name = "environment_sandbox_trial"
+required-features = ["research-environment"]
+
+[[example]]
+name = "mxc_process_probe"
+required-features = ["research-mxc-process"]
+
+[[example]]
+name = "mxc_probe_sandbox_trial"
+required-features = ["research-mxc-process"]
+
+[[example]]
+name = "publication_control_guest"
+required-features = ["research-mxc-process"]
+
+[[example]]
+name = "publication_control_sandbox_trial"
+required-features = ["research-mxc-process"]
 
 [[example]]
 name = "sevenzip_assessment"
@@ -19,6 +45,10 @@ required-features = ["research-sevenzip"]
 [[example]]
 name = "sevenzip_sandbox_trial"
 required-features = ["research-sevenzip"]
+
+[[example]]
+name = "sevenzip_tree_sandbox_trial"
+required-features = ["research-sevenzip", "research-mxc-process"]
 
 [[example]]
 name = "msix_standard_user_control"
@@ -32,6 +62,7 @@ required-features = ["research-msix-lifecycle"]
 aiw-evidence.workspace = true
 aiw-probe.workspace = true
 aiw-provider-wsb.workspace = true
+aiw-provider-mxc.workspace = true
 aiw-token.workspace = true
 aiw-windows-command-line.workspace = true
 hex.workspace = true
@@ -50,6 +81,7 @@ windows = { version = "0.62.2", features = [
     "System",
     "System_Profile",
     "Wdk_Storage_FileSystem",
+    "Wdk_System_Registry",
     "Win32_Foundation",
     "Win32_Globalization",
     "Win32_Security",
@@ -60,6 +92,7 @@ windows = { version = "0.62.2", features = [
     "Win32_Security_WinTrust",
     "Win32_Storage_FileSystem",
     "Win32_System_JobObjects",
+    "Win32_System_Diagnostics_Debug",
     "Win32_System_LibraryLoader",
     "Win32_System_Registry",
     "Win32_System_IO",
