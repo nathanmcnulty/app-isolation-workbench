@@ -19,8 +19,15 @@ target-directory cleanup, recovering 8.41 GiB of volume space (11.34 GiB free).
 Source and evidence were preserved. Dev/test profiles disable incremental output
 and symbols. Shared preflight now covers normal builders and verification, with
 one caller-selected cache, 10 GiB minimum free and an 8 GiB cache budget. Override
-and compiler-log regression checks passed; measured consecutive core-tool builds
-and renewed project-owned control qualification are next.
+and compiler-log regression checks passed. Source `51b2a95` completed two identical
+Windows dev builds and a release refresh in the existing shared cache. Cache size
+remained 1,464,790,831 bytes / 1,815 files after every pass; artifact hashes matched,
+with zero second-pass compilation. The earlier actual compiler trace contains 90
+rustc invocations without incremental or full-debug flags. Four incremental
+directories contain zero files/bytes. Small MSVC public-symbol PDBs are measured
+within the budget. Independent evidence review passed; final host free space was
+about 10.81 GiB. Hosted CI passed at `51b2a95` (run `43770608201`). Detailed private
+measurement: `C:\aiw\generic-assessment-108\normal-windows-build-r3\measurement.json`.
 
 The generic CLI/shared service path now covers held intake, compilation, protected
 preparation, review/approval and separate Start, typed guest execution, retained
@@ -30,8 +37,24 @@ facts and flushes progress before resume. Collector mutation-denial gates preced
 application dispatch. Interrupted progress remains diagnostic. See
 [the implementation boundary](APPLICATION-ASSESSMENT.md).
 
-Native acceptance is still pending. Before vendor trials, prove this changed
-driver with the project-owned control in fresh Sandboxes on existing VM107.
+Native acceptance is blocked by a newly observed provider protocol mismatch.
+The exact-source images were reconstructed and fully hash-verified on VM107 under
+`C:\AIW\Goal108\control-r5`, preserving earlier roots. Fresh ordinary-control
+preparation passed; its actual plan and separate approval/Start wrappers passed
+independent review. Approval was recorded for plan
+`c50e5904fb0cbd9e28ee19c674a0bd6e2dcf3702ceaf62d8cc7daa7610d07b94`.
+Start exited 1 with complete diagnostics: installed Sandbox CLI `0.8.114.0` is
+outside the reviewed `0.8.107.0` adapter. Source rejects this after held-provider
+version observation, before list/start. Separate retained Read exited 0 and
+reported `evidenceStatus=notRun`, with outcome/cleanup/evidence null. This is a
+provider prerequisite, not application incompatibility or cleanup proof. No
+retry, allowlist bypass, downgrade, installation or security change was made.
+The small transfer helper was stopped and its viewer closed. Before vendor
+trials, qualify a supported provider with the ordinary/classic and timeout/overflow
+controls; supporting a new version requires captured/reviewed protocol behavior
+and lifecycle/recovery validation, not a changed version constant.
+
+Earlier preparation diagnostics remain preserved:
 The first control preparation at `7df2d87` stopped at strict portable intake:
 Windows exposed a short-name alias for the long control filename. A fresh private
 input with identical bytes as `control.exe` passed intake, replay export and
