@@ -240,7 +240,8 @@ fn retained_binding(
 
 // Same bounded, held-machine-Core VM/ordinary-console guard as the prior native
 // fixtures, without inheriting their obsolete OS/root/session constants.
-fn vm_guard() -> Result<String> {
+fn vm_guard(diagnostic: bool) -> Result<String> {
+    inspection_checkpoint(diagnostic, "TOKEN_BEGIN")?;
     let token = aiw_token::collect_current_process_token()?;
     if token.is_elevated
         || token.is_app_container
@@ -250,14 +251,18 @@ fn vm_guard() -> Result<String> {
     {
         return Err("ordinary medium primary operator required".into());
     }
+    inspection_checkpoint(diagnostic, "TOKEN_VERIFIED")?;
+    inspection_checkpoint(diagnostic, "HELD_CORE_BEGIN")?;
     let runtime = aiw_windows_platform::HeldPowerShell::observe()?;
     runtime.revalidate()?;
+    inspection_checkpoint(diagnostic, "HELD_CORE_VERIFIED")?;
     let script = concat!(
         "$ErrorActionPreference='Stop';",
         "if((Get-CimInstance Win32_ComputerSystemProduct -OperationTimeoutSec 15).UUID -ine 'e5cecc90-35c2-4831-bf9c-424be23f7d4e'){throw 'Wrong existing VM'};",
         "if([Security.Principal.WindowsIdentity]::GetCurrent().Name -ine 'AIW\\labadmin' -or [Diagnostics.Process]::GetCurrentProcess().SessionId -ne 1){throw 'Wrong ordinary console'};",
         "[Console]::Out.Write('VM107-ENVIRONMENT-GUARD-OK')"
     );
+    inspection_checkpoint(diagnostic, "VM_GUARD_BEGIN")?;
     let mut child = Command::new(aiw_probe::powershell::POWERSHELL_EXECUTABLE)
         .args([
             "-NoLogo",
@@ -308,7 +313,31 @@ fn vm_guard() -> Result<String> {
     if !status.success() || output != b"VM107-ENVIRONMENT-GUARD-OK" || !errors.is_empty() {
         return Err("fixed VM/operator guard refused".into());
     }
+    inspection_checkpoint(diagnostic, "VM_GUARD_VERIFIED")?;
     Ok(token.user_sid)
+}
+
+fn write_inspection_checkpoint(output: &mut impl Write, phase: &str) -> std::io::Result<()> {
+    // Only fixed call-site labels, never imported data or a caller-nominated phase.
+    output.write_all(b"AIW_ENV_DIAGNOSTIC_V1|")?;
+    output.write_all(phase.as_bytes())?;
+    output.write_all(b"\n")?;
+    output.flush()
+}
+fn inspection_checkpoint(enabled: bool, phase: &str) -> std::io::Result<()> {
+    if enabled {
+        write_inspection_checkpoint(&mut std::io::stderr().lock(), phase)?;
+    }
+    Ok(())
+}
+fn inspection_mode(args: &[String]) -> Option<bool> {
+    if args == ["--inspect-host"] {
+        Some(false)
+    } else if args == ["--diagnose-inspect-host"] {
+        Some(true)
+    } else {
+        None
+    }
 }
 fn host_identity() -> Result<(WindowsVersionObservation, WindowsSandboxStaticIdentity)> {
     let windows = contract::observe_windows()?;
@@ -428,7 +457,9 @@ pub fn run() -> Result<()> {
         )?;
         return Ok(());
     }
-    let inspect = args == ["--inspect-host"];
+    let inspection = inspection_mode(&args);
+    let inspect = inspection.is_some();
+    let diagnostic = inspection == Some(true);
     let prepare = args == ["--prepare"];
     if !inspect
         && !prepare
@@ -438,16 +469,21 @@ pub fn run() -> Result<()> {
     {
         return Err("closed environment action and exact plan hash required".into());
     }
-    let actor = vm_guard()?;
+    inspection_checkpoint(diagnostic, "ENTRY")?;
+    let actor = vm_guard(diagnostic)?;
     if inspect {
+        inspection_checkpoint(diagnostic, "WINDOWS_BEGIN")?;
         let windows = contract::observe_windows();
+        inspection_checkpoint(diagnostic, "WINDOWS_RETURNED")?;
+        inspection_checkpoint(diagnostic, "STATIC_PROVIDER_BEGIN")?;
         let provider = aiw_windows_platform::inspect_windows_sandbox_static();
-        println!(
-            "{}",
-            serde_json::to_string_pretty(
-                &json!({"schemaVersion":SCHEMA,"readOnly":true,"sourceSha256":source_hash(),"compiledStaticCrt":true,"actorSid":actor,"workerUuid":VM_UUID,"windows":windows.as_ref().ok(),"windowsError":windows.as_ref().err(),"staticProvider":provider.as_ref().ok(),"staticProviderError":provider.as_ref().err(),"cliProtocol":"unmeasured","providerCalls":0,"applicationExecutions":0})
-            )?
-        );
+        inspection_checkpoint(diagnostic, "STATIC_PROVIDER_RETURNED")?;
+        inspection_checkpoint(diagnostic, "SERIALIZATION_BEGIN")?;
+        let value = json!({"schemaVersion":SCHEMA,"readOnly":true,"diagnostic":diagnostic,"sourceSha256":source_hash(),"compiledStaticCrt":true,"actorSid":actor,"workerUuid":VM_UUID,"windows":windows.as_ref().ok(),"windowsError":windows.as_ref().err(),"staticProvider":provider.as_ref().ok(),"staticProviderError":provider.as_ref().err(),"cliProtocol":"unmeasured","providerCalls":0,"applicationExecutions":0});
+        print_json(&value)?;
+        inspection_checkpoint(diagnostic, "OUTPUT_FLUSH_BEGIN")?;
+        std::io::stdout().lock().flush()?;
+        inspection_checkpoint(diagnostic, "COMPLETE")?;
         return Ok(());
     }
     helper_hash()?;
@@ -634,6 +670,42 @@ pub fn run() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn diagnostic_is_a_closed_inspection_action_without_extra_arguments() {
+        assert_eq!(inspection_mode(&["--inspect-host".into()]), Some(false));
+        assert_eq!(
+            inspection_mode(&["--diagnose-inspect-host".into()]),
+            Some(true)
+        );
+        for args in [
+            vec![],
+            vec!["--diagnose-inspect-host".into(), "--start".into()],
+            vec!["--diagnose-inspect-host".into(), "extra".into()],
+            vec!["--diagnose-inspect-host=1".into()],
+            vec!["--start".into()],
+        ] {
+            assert_eq!(inspection_mode(&args), None);
+        }
+    }
+    #[test]
+    fn diagnostic_refuses_to_advance_when_checkpoint_flush_fails() {
+        struct Unflushed(Vec<u8>);
+        impl Write for Unflushed {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "closed capture",
+                ))
+            }
+        }
+        let mut output = Unflushed(Vec::new());
+        assert!(write_inspection_checkpoint(&mut output, "ENTRY").is_err());
+        assert_eq!(output.0, b"AIW_ENV_DIAGNOSTIC_V1|ENTRY\n");
+    }
     #[test]
     fn closed_environment_plan_uses_only_readonly_tools_and_one_output() {
         let plan = fixed_plan(&format!(r"{ROOT}\Trial"));

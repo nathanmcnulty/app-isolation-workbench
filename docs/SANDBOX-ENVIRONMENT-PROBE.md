@@ -65,6 +65,17 @@ rerunning staging. The complete-transfer observation has separate admission
 `native-transfer-completion-admission-r2.json`, SHA
 `9c0268422ac8bca78cdd6500f991d843c9a8b1848aa0663a9acc19f42d8cc684`.
 
+The separate closed `--diagnose-inspect-host` action adds fixed, flushed stderr
+checkpoints around entry, token verification, held Core inspection, the existing
+VM guard, Windows observation, static provider inspection and output. It follows
+the same inspection sequence without changing COM initialization or cleanup.
+Stdout explicitly identifies a diagnostic result. A checkpoint write or flush
+failure returns an error before advancing; normal actions emit no checkpoints.
+Retained read and recovery keep their existing authority boundaries. This new
+source needs a separately pinned build, packet and reviewed native command;
+it has not been used natively. Checkpoints bracket calls, and no checkpoint
+absence alone identifies a failing instruction or establishes a cause.
+
 The provider accepts only `environment_probe.exe`, its fixed output argument,
 one read-only tools mapping and one writable output mapping. This feature does
 not enable the older MXC or application publication roles. The guest makes no

@@ -111,6 +111,10 @@ No faulting module, offset or cause was obtained, and the helper was not replaye
 Guest servicing, dependency availability and loader compatibility remain
 unmeasured. Private records use `C:\aiw\environment-probe-20261114`; see
 [the probe record](SANDBOX-ENVIRONMENT-PROBE.md) for exact evidence pins.
+A separate closed `--diagnose-inspect-host` action adds flushed phase markers
+without changing COM lifetime or the inspection sequence. Independent source
+review and six host transaction tests passed; a fresh pinned build and reviewed
+native command are still required. It has not been run in VM107.
 
 ## Authorization and remaining work
 
