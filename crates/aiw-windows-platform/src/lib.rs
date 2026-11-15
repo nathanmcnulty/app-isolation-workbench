@@ -249,6 +249,12 @@ pub fn inspect_windows_sandbox_static() -> Result<aiw_probe::WindowsSandboxStati
     windows_platform::inspect_windows_sandbox_static()
 }
 
+/// Opt-in, fixed read-only protocol research. Never establishes execution readiness.
+#[cfg(all(windows, feature = "research-sandbox-protocol"))]
+pub fn capture_windows_sandbox_protocol() -> Result<serde_json::Value, String> {
+    windows_platform::capture_windows_sandbox_protocol()
+}
+
 #[must_use]
 pub fn assess_windows_sandbox() -> WindowsSandboxReadiness {
     platform::assess_windows_sandbox()

@@ -885,6 +885,187 @@ pub(super) fn inspect_windows_sandbox_static()
     inspect_static_provider().map(|held| held.identity)
 }
 
+// Research is deliberately separate from assess_provider: unknown bytes cannot
+// create a readiness report, lease, protocol selection, or approval authority.
+#[cfg(feature = "research-sandbox-protocol")]
+pub(super) fn capture_windows_sandbox_protocol() -> Result<serde_json::Value, String> {
+    let mut held = inspect_static_provider()?;
+    let path = PathBuf::from(&held.identity.provider.canonical_path);
+    let commands = capture_protocol_commands(|arguments| {
+        invoke_job_bound(
+            &path,
+            arguments,
+            invocation_deadline(READ_ONLY_TIMEOUT).map_err(|e| e.to_string())?,
+            OutputMode::Capture,
+            DescendantPolicy::ProviderManaged,
+        )
+    });
+    let revalidation_error = (|| -> Result<(), String> {
+        let final_path = final_path(&held._provider)?;
+        let current_identity = file_identity(&held._provider, &final_path)?;
+        let (sha256, size_bytes) = hash_held_file(&mut held._provider)?;
+        if current_identity != held.identity.file_identity
+            || sha256 != held.identity.provider.sha256
+            || size_bytes != held.identity.provider.size_bytes
+        {
+            return Err("AIW_WSB_RESEARCH_PROVIDER_DRIFT: held provider changed".into());
+        }
+        Ok(())
+    })()
+    .err();
+    Ok(protocol_capture_report(
+        serde_json::json!(held.identity),
+        commands,
+        revalidation_error,
+    ))
+}
+
+#[cfg(feature = "research-sandbox-protocol")]
+fn protocol_capture_report(
+    static_identity: serde_json::Value,
+    commands: Vec<serde_json::Value>,
+    revalidation_error: Option<String>,
+) -> serde_json::Value {
+    let all_commands_captured = commands.len() == 3
+        && commands
+            .iter()
+            .all(|command| command["captureComplete"] == true);
+    serde_json::json!({
+        "schemaVersion": "aiw.private/sandbox-protocol-capture/v1",
+        "staticIdentity": static_identity,
+        "commands": commands,
+        "allCommandsCaptured": all_commands_captured,
+        "heldProviderUnchanged": revalidation_error.is_none(),
+        "providerRevalidationError": revalidation_error,
+        "streamLimitBytes": STREAM_LIMIT,
+        "perCommandDeadlineSeconds": READ_ONLY_TIMEOUT.as_secs(),
+        "executionReadinessEstablished": false,
+        "scope": "Fixed read-only original bytes; no protocol admission, session mutation, application execution, or live session-absence/cleanup verdict. Successful provider-managed descendants use the existing launcher policy. Catalog trust is the static inspection observation, not continuous catalog attestation."
+    })
+}
+
+#[cfg(all(feature = "research-sandbox-protocol", windows))]
+fn capture_protocol_commands(
+    mut invoke: impl FnMut(&[&str]) -> Result<ProcessOutput, String>,
+) -> Vec<serde_json::Value> {
+    let mut records = Vec::new();
+    for arguments in [&["--version"][..], &["--help"][..], &["list", "--raw"][..]] {
+        let output = invoke(arguments);
+        let failed = output.is_err();
+        let record = match output {
+            Ok(output) => serde_json::json!({
+                "arguments": arguments,
+                "exitCode": output.exit_code,
+                "stdout": {"sizeBytes": output.stdout.len(), "sha256": hex::encode(Sha256::digest(&output.stdout)), "hex": hex::encode(&output.stdout)},
+                "stderr": {"sizeBytes": output.stderr.len(), "sha256": hex::encode(Sha256::digest(&output.stderr)), "hex": hex::encode(&output.stderr)},
+                "captureComplete": true,
+                "invocationError": null
+            }),
+            Err(error) => serde_json::json!({
+                "arguments": arguments,
+                "exitCode": null, "stdout": null, "stderr": null,
+                "captureComplete": false, "invocationError": error
+            }),
+        };
+        records.push(record);
+        if failed {
+            break;
+        }
+    }
+    records
+}
+
+#[cfg(all(test, feature = "research-sandbox-protocol"))]
+mod protocol_capture_tests {
+    use super::*;
+
+    #[test]
+    fn protocol_capture_preserves_unknown_version_nonzero_and_non_utf8_bytes() {
+        let mut seen = Vec::new();
+        let records = capture_protocol_commands(|args| {
+            seen.push(args.join(" "));
+            Ok(ProcessOutput {
+                exit_code: 7,
+                stdout: if args == ["--version"] {
+                    b"0.8.114.0\r\n".to_vec()
+                } else {
+                    vec![0, 255, 128, 13, 10]
+                },
+                stderr: vec![254, 0, 10],
+            })
+        });
+        assert_eq!(seen, ["--version", "--help", "list --raw"]);
+        assert_eq!(records.len(), 3);
+        for record in &records {
+            assert_eq!(record["exitCode"], 7);
+            assert_eq!(record["captureComplete"], true);
+            assert!(record["invocationError"].is_null());
+            for stream in ["stdout", "stderr"] {
+                let raw = hex::decode(record[stream]["hex"].as_str().unwrap()).unwrap();
+                assert_eq!(
+                    raw.len(),
+                    record[stream]["sizeBytes"].as_u64().unwrap() as usize
+                );
+                assert_eq!(hex::encode(Sha256::digest(&raw)), record[stream]["sha256"]);
+            }
+        }
+        assert_eq!(
+            hex::decode(records[1]["stdout"]["hex"].as_str().unwrap()).unwrap(),
+            [0, 255, 128, 13, 10]
+        );
+        assert_eq!(
+            hex::decode(records[0]["stdout"]["hex"].as_str().unwrap()).unwrap(),
+            b"0.8.114.0\r\n"
+        );
+    }
+
+    #[test]
+    fn protocol_capture_stops_after_launcher_failure_and_keeps_prior_output() {
+        let mut calls = 0;
+        let records = capture_protocol_commands(|_| {
+            calls += 1;
+            if calls == 2 {
+                Err("bounded launcher refusal".into())
+            } else {
+                Ok(ProcessOutput {
+                    exit_code: 0,
+                    stdout: b"first".to_vec(),
+                    stderr: vec![],
+                })
+            }
+        });
+        assert_eq!(calls, 2);
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0]["stdout"]["hex"], hex::encode(b"first"));
+        assert_eq!(records[1]["captureComplete"], false);
+        assert_eq!(records[1]["invocationError"], "bounded launcher refusal");
+        assert!(records[1]["stdout"].is_null());
+        assert!(records[1]["exitCode"].is_null());
+    }
+
+    #[test]
+    fn protocol_capture_retains_diagnostic_bytes_when_final_identity_check_fails() {
+        let records = capture_protocol_commands(|_| {
+            Ok(ProcessOutput {
+                exit_code: 0,
+                stdout: vec![0, 255],
+                stderr: vec![],
+            })
+        });
+        let expected = serde_json::json!(records);
+        let report = protocol_capture_report(
+            serde_json::Value::Null,
+            records,
+            Some("identity refused".into()),
+        );
+        assert_eq!(report["commands"], expected);
+        assert_eq!(report["allCommandsCaptured"], true);
+        assert_eq!(report["heldProviderUnchanged"], false);
+        assert_eq!(report["providerRevalidationError"], "identity refused");
+        assert_eq!(report["executionReadinessEstablished"], false);
+    }
+}
+
 fn assess_provider(result: &mut WindowsSandboxReadiness) -> Result<(), String> {
     let static_provider = inspect_static_provider()?;
     let HeldStaticProvider {

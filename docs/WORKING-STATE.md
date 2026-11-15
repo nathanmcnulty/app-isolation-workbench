@@ -54,6 +54,15 @@ trials, qualify a supported provider with the ordinary/classic and timeout/overf
 controls; supporting a new version requires captured/reviewed protocol behavior
 and lifecycle/recovery validation, not a changed version constant.
 
+The opt-in `research-sandbox-protocol` feature now provides a fixed read-only
+capture of version/help/raw list through the existing verified held-provider and
+bounded job launcher. Three inert byte-retention/failure regressions and
+consequential independent review passed. No provider capture has executed yet;
+production readiness, leases and the supported-version gate remain unchanged.
+See [protocol capture](SANDBOX-PROTOCOL-CAPTURE.md). Build and transfer only the
+source-pinned example in the existing shared cache, then capture on VM107 before
+designing explicit newer-version support. Preserve the refused R5b run.
+
 Earlier preparation diagnostics remain preserved:
 The first control preparation at `7df2d87` stopped at strict portable intake:
 Windows exposed a short-name alias for the long control filename. A fresh private

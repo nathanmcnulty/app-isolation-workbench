@@ -11,6 +11,11 @@ rust-version.workspace = true
 research-msix-control = []
 research-msix-lifecycle = []
 research-sevenzip = []
+research-sandbox-protocol = []
+
+[[example]]
+name = "sandbox_protocol_capture"
+required-features = ["research-sandbox-protocol"]
 
 [[example]]
 name = "sevenzip_assessment"

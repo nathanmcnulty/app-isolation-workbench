@@ -75,6 +75,10 @@ logs and receipts needed for diagnosis, rather than whole failed build trees.
 There is no automatic evidence deletion or cache quota claim, and a policy-blocked
 cleanup must not be retried through another mechanism.
 
+Unknown Sandbox CLI versions can be investigated with the opt-in, fixed
+[read-only protocol capture](SANDBOX-PROTOCOL-CAPTURE.md). Its diagnostic output
+does not relax the production version gate or establish execution readiness.
+
 The ordinary Windows suite verifies global mutex acquisition with the current process token. Hosted Windows runners can be elevated, so they cannot prove unelevated acquisition. Run the separate environment-specific check from an unelevated PowerShell session:
 
 ```powershell
