@@ -22,6 +22,11 @@
 - Documentation-only edits need link/content review and governance checks, not the Rust suite. Report-only edits should use retained evidence before considering live reruns. Execution or trust-boundary changes need appropriate negative tests and disposable-worker proof.
 - Run each required check once on the completed code. Repeat only when relevant code changes, a failure, or an unresolved concern justifies it. No automatic pass cache: prior logs are evidence for their recorded state, not today's checkout.
 - Use one build owner per target directory. Save full test output to logs and inspect failures selectively.
+- Cleanliness is part of completion: account for owned processes and temporary
+  test/assembly files, remove disposable files created by that invocation, and
+  retain only needed diagnostics and evidence. Keep one bounded reusable build
+  cache instead of full build copies in each output package. Do not label all
+  rebuildable output as evidence or preserve failed build trees by default.
 - Before a build, measure free space on the target volume. Keep at least 10 GiB
   free before starting; reclaim verified idle build caches first if below that
   floor. Routine dev/test builds disable incremental output and debug symbols in

@@ -16,6 +16,7 @@ $PSNativeCommandUseErrorActionPreference = $false
 $env:AIW_TEST_PWSH = Join-Path $PSHOME 'pwsh.exe'
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'build-storage.ps1')
 $logRoot = Join-Path ([IO.Path]::GetTempPath()) ('aiw-local-checks-' + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $logRoot | Out-Null
 $results = @()
@@ -54,13 +55,7 @@ try {
         $testTemp = $null
         try {
             if ($program -eq 'cargo' -and $name -ne 'Format') {
-                $targetRoot = if ($env:CARGO_TARGET_DIR) {
-                    [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR, $repoRoot)
-                } else { Join-Path $repoRoot 'target' }
-                $targetVolume = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($targetRoot))
-                if ($targetVolume.AvailableFreeSpace -lt 10GB) {
-                    throw ('Build not started: target volume has {0:N2} GiB free; 10 GiB required. Reclaim verified idle build cache before retrying. Target: {1}' -f ($targetVolume.AvailableFreeSpace / 1GB), $targetRoot)
-                }
+                $null = Assert-AiwBuildStoragePolicy -RepositoryRoot $repoRoot
             }
             if ($program -eq 'cargo' -and $arguments[0] -eq 'test') {
                 # Native parent-entry checks are bounded. Unrelated files in a

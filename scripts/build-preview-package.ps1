@@ -23,6 +23,7 @@ if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw
 $PSNativeCommandUseErrorActionPreference = $false
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'build-storage.ps1')
 $isBambu = $Product -eq 'BambuStudioExport'
 $isInteractive = $Product -eq 'NotepadPlusPlusInteractive'
 $productDirectory = if ($isBambu) { 'bambu-studio' } elseif ($isInteractive) { 'notepad-plus-plus-interactive' } else { 'notepad-plus-plus' }
@@ -142,6 +143,7 @@ try {
         throw 'Rust toolchain release or host is missing'
     }
 
+    $null = Assert-AiwBuildStoragePolicy -RepositoryRoot $repoRoot
     $targetRustFlagsName = 'CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS'
     $targetRustFlagsPath = "Env:$targetRustFlagsName"
     $hadTargetRustFlags = Test-Path $targetRustFlagsPath
@@ -152,11 +154,11 @@ try {
         $null
     }
     try {
-        $targetRustFlags = (@($originalTargetRustFlags, '-C target-feature=+crt-static') |
-            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ' '
+        $targetRustFlags = '-C target-feature=+crt-static'
         Set-Item -Path $targetRustFlagsPath -Value $targetRustFlags
         # An explicit target keeps static CRT flags off host build scripts and
         # procedural macros, even when the target equals the host triple.
+        $null = Assert-AiwBuildStoragePolicy -RepositoryRoot $repoRoot
         & cargo build --locked --release -p aiw-cli --target $targetTriple
         if ($LASTEXITCODE -ne 0) { throw 'release aiw-cli build failed' }
     }

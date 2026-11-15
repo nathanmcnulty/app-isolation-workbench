@@ -13,10 +13,14 @@ fetch configuration tracks another branch; use the recorded fetched commit.
 
 Storage work takes priority before more native trials. The idle shared debug
 incremental cache measured 32.15 GiB; compiled dependencies measured 10.06 GiB.
-Automatic approval review blocked removal of the verified incremental cache,
-so no space recovery is claimed. Dev/test defaults now disable incremental
-output and debug symbols in both workspaces, with a 10 GiB pre-build floor in
-`check-local.ps1`. Do not resume builds or bulk staging below that floor.
+Automatic approval review blocked removal of that incremental cache; it remains
+untouched. A separate verified idle GUI cache was removed with Cargo's exact
+target-directory cleanup, recovering 8.41 GiB of volume space (11.34 GiB free).
+Source and evidence were preserved. Dev/test profiles disable incremental output
+and symbols. Shared preflight now covers normal builders and verification, with
+one caller-selected cache, 10 GiB minimum free and an 8 GiB cache budget. Override
+and compiler-log regression checks passed; measured consecutive core-tool builds
+and renewed project-owned control qualification are next.
 
 The generic CLI/shared service path now covers held intake, compilation, protected
 preparation, review/approval and separate Start, typed guest execution, retained

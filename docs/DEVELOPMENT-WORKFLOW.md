@@ -34,23 +34,41 @@ The helper deliberately does not perform live installation, start Sandbox, manag
 Core and desktop are separate Cargo workspaces. Both disable incremental
 compilation and debug symbols for routine dev/test builds. Test assertions and
 overflow checks keep their existing defaults; release profiles are unchanged.
-Full symbols can be enabled deliberately with `CARGO_PROFILE_DEV_DEBUG=2` and
-`CARGO_PROFILE_TEST_DEBUG=2` for a debugging session. Remove those overrides
-afterward; changing profiles/targets/flags creates additional compiled variants.
+Normal build scripts reject environment/config overrides that re-enable symbols
+or incremental output, global/encoded Rust flags and compiler wrappers. Only the
+reviewed target-specific static-CRT setting is admitted. Full-symbol debugging is
+a separate development operation with an explicit storage budget, not a normal
+validation default. Changing profiles/targets/flags creates compiled variants.
 
-`check-local.ps1` refuses compilation checks when the target volume has less
-than 10 GiB free. Formatting and governance checks still work under that floor.
-Check space before direct Cargo commands and bulk artifact creation too. Reuse
-one stable cache per required target/flag set rather than one per revision.
+The shared `scripts/build-storage.ps1` policy refuses normal compilation when the
+target volume has less than 10 GiB free or the cache exceeds 8 GiB. Verification,
+guest/control builders and package builders use it, honor `CARGO_TARGET_DIR`, and
+do not allocate per-commit or per-package compiled trees. Desktop packaging keeps
+only its small assembly staging temporary; the shared build directory is outside
+that staging and is never removed by packaging cleanup. Formatting/governance
+still work under storage pressure. Direct Cargo commands also need this preflight.
 
-Inspect cache usage at milestones. Rust incremental directories and compiled
+`build-assessment-tools.ps1 -SourceRevision <clean-head> -ReportDirectory <fresh-small-report>`
+runs two identical dev builds for the CLI, guest agent and project-owned control
+in one selected cache, followed by a release-artifact refresh in that same cache.
+It records source/toolchain identities, effective verbose
+compiler arguments, before/after bytes and hashes. A watchdog checks the 8 GiB
+cache budget, a 2 GiB running free-space floor, 20-minute deadline and 8 MiB log
+bounds. These are sampled limits, not filesystem quotas. The same bounds are
+checked after exit. Failure records retain root exit/termination facts and keep
+primary and cleanup errors separate. This does not run a fixture or a provider.
+
+Inspect cache usage at milestones and before moving to another revision. Rust incremental directories and compiled
 dependencies can be rebuilt; retained evidence, source, protected intake and
 pinned trial binaries have a different retention requirement. Before cleanup,
 verify exact paths, absence of reparse traversal, and that all sessions have
 released compilers, tests and artifact consumers. Do not run Cargo clean against
 an active shared target; a target filter can also remove host artifacts. Record
-what was removed and the measured space recovered. There is no automatic
-evidence deletion or cache quota claim.
+what was removed and the measured space recovered. Temporary test/assembly files
+created by an invocation are removed in its cleanup path by default. Retain small
+logs and receipts needed for diagnosis, rather than whole failed build trees.
+There is no automatic evidence deletion or cache quota claim, and a policy-blocked
+cleanup must not be retried through another mechanism.
 
 The ordinary Windows suite verifies global mutex acquisition with the current process token. Hosted Windows runners can be elevated, so they cannot prove unelevated acquisition. Run the separate environment-specific check from an unelevated PowerShell session:
 
