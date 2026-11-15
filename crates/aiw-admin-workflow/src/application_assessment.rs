@@ -101,8 +101,7 @@ impl ApplicationAssessmentRun {
             || !valid_sha256(&self.plan_sha256)
             || !valid_sha256(&self.assessment_sha256)
             || !valid_sha256(&self.agent_sha256)
-            || self.workspace.parent() != Some(self.evidence_root.as_path())
-            || self.project_path.parent() != Some(self.evidence_root.as_path())
+            || !locator_parents_match(&self.workspace, &self.evidence_root, &self.project_path)
         {
             bail!("generic assessment run locator is invalid");
         }
@@ -145,6 +144,30 @@ impl ApplicationAssessmentRun {
         }
         Ok(project)
     }
+}
+
+/// Windows canonicalize returns extended disk paths, whereas held workspace
+/// identities use ordinary DOS paths. Only remove that exact disk prefix:
+/// this does not resolve paths, fold case, accept aliases, or establish identity.
+fn disk_locator_path(path: &Path) -> &Path {
+    if let Some(text) = path.to_str() {
+        let bytes = text.as_bytes();
+        if text.starts_with(r"\\?\")
+            && bytes.len() >= 7
+            && bytes[4].is_ascii_alphabetic()
+            && bytes[5] == b':'
+            && bytes[6] == b'\\'
+        {
+            return Path::new(&text[4..]);
+        }
+    }
+    path
+}
+
+fn locator_parents_match(workspace: &Path, evidence_root: &Path, project_path: &Path) -> bool {
+    let evidence_root = disk_locator_path(evidence_root);
+    disk_locator_path(workspace).parent() == Some(evidence_root)
+        && disk_locator_path(project_path).parent() == Some(evidence_root)
 }
 
 fn normalized_path(value: &str) -> String {
@@ -206,7 +229,13 @@ pub fn prepare_for_review(
             inputs,
         },
     )?;
-    let workspace = PathBuf::from(&prepared.receipt.workspace.root.final_path);
+    // Publish one representation for paths already constructed or observed by
+    // trusted preparation. Retained locators still undergo all layout, plan and
+    // workspace-binding checks below; spelling equivalence grants no authority.
+    let workspace =
+        disk_locator_path(Path::new(&prepared.receipt.workspace.root.final_path)).to_path_buf();
+    let evidence_root = disk_locator_path(&evidence_root).to_path_buf();
+    let project_path = disk_locator_path(&project_path).to_path_buf();
     aiw_runner::import_windows_sandbox_preparation(
         &workspace,
         project,
@@ -393,4 +422,114 @@ pub fn compare_retained(
         candidate,
         gaps,
     })
+}
+
+#[cfg(test)]
+mod locator_tests {
+    use super::*;
+
+    #[test]
+    fn disk_locator_conversion_only_removes_extended_drive_prefix() {
+        assert_eq!(
+            disk_locator_path(Path::new(r"\\?\C:\Evidence\run")),
+            Path::new(r"C:\Evidence\run")
+        );
+        for path in [
+            r"C:\Evidence\run",
+            r"\\?\UNC\server\share\run",
+            r"\\.\C:\Evidence\run",
+            r"\\?\GLOBALROOT\Device\volume\run",
+            r"\\?\C:relative",
+            r"\\?\C:/Evidence/run",
+            r"relative\run",
+        ] {
+            assert_eq!(disk_locator_path(Path::new(path)), Path::new(path));
+        }
+        // Other spelling changes deliberately remain unchanged, not resolved.
+        assert_eq!(
+            disk_locator_path(Path::new(r"\\?\C:\Evidence\..\other")),
+            Path::new(r"C:\Evidence\..\other")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn locator_parent_equivalence_is_limited_to_extended_drive_spelling() {
+        for workspace in [r"C:\Evidence\run", r"\\?\C:\Evidence\run"] {
+            for evidence in [r"C:\Evidence", r"\\?\C:\Evidence"] {
+                for project in [r"C:\Evidence\project.json", r"\\?\C:\Evidence\project.json"] {
+                    assert!(locator_parents_match(
+                        Path::new(workspace),
+                        Path::new(evidence),
+                        Path::new(project),
+                    ));
+                }
+            }
+        }
+        // This is the construction-time mismatch present before the fix.
+        assert_ne!(
+            Path::new(r"C:\Evidence\run").parent(),
+            Some(Path::new(r"\\?\C:\Evidence"))
+        );
+        for (workspace, project) in [
+            (r"D:\Evidence\run", r"C:\Evidence\project.json"),
+            (r"C:\Other\run", r"C:\Evidence\project.json"),
+            (r"C:\Evidence\run", r"C:\Other\project.json"),
+            (r"C:\evidence\run", r"C:\Evidence\project.json"),
+            (r"\\?\UNC\server\Evidence\run", r"C:\Evidence\project.json"),
+        ] {
+            assert!(!locator_parents_match(
+                Path::new(workspace),
+                Path::new(r"\\?\C:\Evidence"),
+                Path::new(project),
+            ));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn equivalent_locator_spelling_does_not_bypass_retained_plan_checks() {
+        let root =
+            std::env::temp_dir().join(format!("aiw-locator-{}-{}", std::process::id(), nonce()));
+        std::fs::create_dir(&root).unwrap();
+        let evidence_root = root.canonicalize().unwrap();
+        let workspace = disk_locator_path(&evidence_root).join("workspace");
+        std::fs::create_dir(&workspace).unwrap();
+        let plan = aiw_orchestrator::RunPlan::new(
+            "locator-test",
+            "project",
+            "a".repeat(64),
+            aiw_orchestrator::RunLifecycleKind::Assessment,
+            "now",
+            vec![aiw_orchestrator::PlannedAction::AssessHost],
+            vec![],
+        )
+        .unwrap();
+        let layout = RunLayout::new(&workspace, &plan.run_id).unwrap();
+        layout.create(&plan).unwrap();
+        let mut run = ApplicationAssessmentRun {
+            schema_version: APPLICATION_RUN_SCHEMA.into(),
+            run_id: plan.run_id.clone(),
+            workspace,
+            project_path: evidence_root.join("project.json"),
+            evidence_root,
+            project_revision_sha256: "a".repeat(64),
+            plan_sha256: plan.hash().unwrap(),
+            assessment_sha256: "b".repeat(64),
+            agent_sha256: "c".repeat(64),
+        };
+        // Equivalent paths pass shape checks, but a retained non-assessment
+        // plan cannot borrow generic execution authority from the locator.
+        assert_eq!(
+            run.validate().err().unwrap().to_string(),
+            "generic assessment action is absent"
+        );
+        run.plan_sha256 = "d".repeat(64);
+        assert_eq!(
+            run.validate().err().unwrap().to_string(),
+            "generic assessment plan differs from retained locator"
+        );
+        drop(layout);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

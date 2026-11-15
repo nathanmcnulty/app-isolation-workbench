@@ -37,6 +37,13 @@ those rights, retaining the same sharing and verification checks. Platform tests
 206 passed, 10 ignored, including both created/reopened workspace regressions and
 continued write/rename denial. The old failure is preserved; fresh end-to-end
 control qualification is still required on rebuilt binaries.
+The rebuilt `2a777a5` preparation passed that custody stage and published its
+plan, preparation and run locator on VM107. The final locator check then refused
+mixed Windows path spellings: the workspace used plain DOS paths while the
+canonical evidence root and project path retained the extended drive prefix.
+The exact 870-byte locator is retained privately. A narrow prefix-equivalence
+fix keeps all retained plan/workspace checks; independent static review passed.
+Fresh control qualification remains pending; no approval or Start was issued.
 Collector launch privileges are an unmeasured prerequisite; a refusal is a driver
 blocker, not application incompatibility. Synchronous setup/I/O is bounded by the
 outer worker watchdog, not hard real-time cancellation. No fallback, privilege
