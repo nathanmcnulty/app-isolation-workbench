@@ -6,6 +6,25 @@ version and dependency observations must precede a new application plan after
 host servicing changes. It is not an application assessment or MXC support test.
 Native execution of this new probe is pending.
 
+Source `404c837` passed all three [hosted CI jobs](https://github.com/nathanmcnulty/app-isolation-workbench/actions/runs/43654996049).
+Independent reviews covered the execution boundary, fixes, static builds, direct
+and delay imports, source framing, and actual transport packet. The host's pure
+identity output matches the independently reconstructed source commitment
+`1cc0f6677c60c34846f9e2e9d88208e864af761d86c47b3128d5b5158e6e8b68`.
+
+| Artifact | Bytes | SHA256 |
+|---|---:|---|
+| Static guest helper | 436,224 | `8a647447a50a5d67b06b9abb5b78cbdf40ea707e88c7ee84d81f09114f28f56b` |
+| Static host helper | 3,108,864 | `2f3aaa905bfc5266f571d953edd262c750562082f854be91c89a88939ef6bd18` |
+| AIW-only transport ZIP | 1,181,413 | `d2f0a590f71e5ebdae4e5d1bd432b907d5738ac8fe947c853119ae3b1509cb41` |
+
+Both PE images are AMD64 with no external CRT, vendor or delay imports. All 487
+tracked source files matched before/after each build and the reviewed checkout.
+This establishes build/source consistency, not reproducibility or native loading.
+The first data receiver timed out after acknowledging five of seventeen parts.
+Those files remain intact; post-exit prefix validation and reviewed continuation
+are pending. No staging, native helper invocation or fresh Sandbox occurred.
+
 The provider accepts only `environment_probe.exe`, its fixed output argument,
 one read-only tools mapping and one writable output mapping. This feature does
 not enable the older MXC or application publication roles. The guest makes no

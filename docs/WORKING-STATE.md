@@ -86,19 +86,26 @@ local tab closed, and the original console/tab remain. Revalidate the raw record
 actual console identity before any new command. Long wrappers belong in the
 console, never Windows Run (which truncates long input).
 
-Next native prerequisite: a fresh static-CRT first-party environment probe using
-the existing held workspace, exact session lease and bounded lifecycle. Measure
-host/guest versions before preparing an application plan; observe prerequisites
-without vendor/MXC loads. A dependency file's presence is not loader proof.
-Keep any refused measurement unknown and do not install runtimes automatically.
-The [default-off environment feature](SANDBOX-ENVIRONMENT-PROBE.md) now implements
-that closed transaction, with separate prepare/approve/start, retained read and
-dispatch-bound recovery. Focused checks passed: 138 environment-provider tests,
-5 guest-contract tests, 4 host-transaction tests, 139 older publication-role
-regression tests, 138 default provider tests, all-research and environment-only
-Clippy, Rust 1.88 feature checks, format and governance. Independent code and
-CI/documentation reviews passed after fixes. New static artifacts and native proof remain
-pending; the earlier `c0357ca` artifacts do not contain this feature.
+The [default-off environment feature](SANDBOX-ENVIRONMENT-PROBE.md), source
+`404c837`, implements a fresh first-party prerequisite observation with separate
+prepare/approve/start, retained read and dispatch-bound recovery. Focused checks
+passed: 138 environment-provider, 5 guest-contract, 4 host-transaction, 139 older
+publication-role and 138 default-provider tests; Clippy, Rust 1.88, format and
+governance. Independent code/CI/docs reviews passed after fixes. All three
+[hosted CI jobs](https://github.com/nathanmcnulty/app-isolation-workbench/actions/runs/43654996049)
+passed. Both static helpers passed independent PE/build review; their compiled
+source commitment matches independent reconstruction. No external CRT, vendor
+or delay imports were found. These artifacts do not replace the earlier tools.
+
+The reviewed AIW-only environment packet has 17 fixed parts. Its first receiver
+reached the 20-minute deadline after acknowledging parts 0–4 (350,000 bytes),
+then returned to the existing ordinary Core prompt. All five files are preserved;
+post-exit prefix custody still needs an audit before any explicit continuation.
+Browser automation did not reliably focus the native clipboard controls; native
+copy/paste delivered the acknowledged parts. No staging, helper launch, provider
+call or fresh Sandbox occurred. Guest servicing, dependency availability and
+loader compatibility remain unmeasured. Private records use
+`C:\aiw\environment-probe-20261114`; start with `receiver-ui-outcome-r1.json`.
 
 ## Authorization and remaining work
 
