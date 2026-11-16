@@ -3,6 +3,7 @@
 pub mod assessment_request;
 
 pub mod assessment;
+pub mod assessment_channel;
 pub mod assessment_evidence;
 pub mod assessment_observation;
 

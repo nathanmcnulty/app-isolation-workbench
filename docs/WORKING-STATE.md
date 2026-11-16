@@ -94,10 +94,20 @@ An isolated Windows CNG primitive now supplies ephemeral P-256 keys, public-only
 export/import, fixed-size SHA-256 signing/verification, public nonces and explicit
 fallible key/provider release. Four native tests include RFC 6979 public-vector
 verification and tamper/encoding/foreign-key cases. Consequential source review,
-format and governance passed; exact-source hosted Windows checks are required.
-No assessment authority or dispatch path calls this primitive yet.
+format and governance passed. Hosted Windows CI run 43800695240 passed all three
+jobs at facbfbe; its tested merge has the identical Git tree. Independent CI
+admission confirmed the Windows workspace test exit. No assessment authority or
+dispatch path calls this primitive yet.
 
-Next: complete hosted checks, freeze the channel DTO/caps and implement/review the protected guest-local
+The isolated pure signed-record contract adds closed canonical DTOs, an explicit
+trusted-local-Start binding, one bootstrap/ACK attempt, signature/content-chain
+checks, exact wire/artifact budgets and private verified transport wrappers.
+Its synthetic tests are protocol checks, not cryptographic or native proof.
+Consequential source review and hosted Windows checks must complete for this
+slice. No launch, preparation, recovery or report path uses it. It does not
+admit native semantics; the versioned local-collector reducer is still required.
+
+Next: finish pure-contract review/checks and implement/review the protected guest-local
 collector and authenticated transport. Do not dispatch an application until the
 evidence boundary is proved. Resume
 builds only when permitted storage satisfies preflight. Qualify ordinary/classic positives,
