@@ -104,17 +104,22 @@ review and all three hosted Windows CI jobs at 76acd65 (run 43802528747, identic
 tested merge tree). Four CNG and ten protocol tests are included in workspace
 coverage. This proves those components, not application execution.
 
-Current integration is under independent source review: v3 generic
+Current integration passed independent source review at abfb884: v3 generic
 plans / alpha3 preparation / alpha2 authenticated requests / alpha4 transactions,
 consumed Start intent, public local descriptor/latch, separate provider Start
 marker, guest-local collector, file/process/thread/default-DACL gates, signed
 raw artifact admission and provider-zero retained reports. Historical plan v1/v2
 and transaction alpha2/3 hashes remain separate and read-only. No fresh native
-trial or compilation has validated this integration. Review caught and fixed a
-plan-hash/XML-hash confusion; regression coverage now checks both independently.
+trial has validated this integration. The first hosted compile found a missing
+test dependency, excluded offline-rehearsal wrapper and missing optional test
+argument; fixes await hosted checks. Review caught and fixed a plan-hash/XML-hash
+confusion; regression coverage now checks both independently.
 
-Next: finish consequential host/guest review, commit fixes, and use hosted Windows
-CI. Do not dispatch an application until the evidence boundary is proved. Resume
+Hosted CI now has a reviewed same-cache measured build and one-day retention of
+three unsigned first-party tools plus the exact checkout receipt, after all
+verification/audit/governance in that job. Actual build/artifact admission is
+pending. Next: finish hosted Windows checks and inspect exact-source artifacts.
+Do not dispatch an application until the evidence boundary is proved. Resume
 builds only when permitted storage satisfies preflight. Qualify ordinary/classic positives,
 timeout/overflow negatives and controlled interruption/exact recovery before
 running either external fixture. jq and SQLite payloads/provenance and the same

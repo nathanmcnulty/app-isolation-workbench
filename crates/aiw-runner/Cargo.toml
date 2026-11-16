@@ -31,5 +31,8 @@ zip.workspace = true
 [target.'cfg(windows)'.dependencies]
 aiw-windows-platform.workspace = true
 
+[target.'cfg(windows)'.dev-dependencies]
+aiw-token.workspace = true
+
 [lints]
 workspace = true

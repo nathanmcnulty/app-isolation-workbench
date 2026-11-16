@@ -63,6 +63,14 @@ cold compiler trace for that separate proof. MSVC PDBs can retain backtrace
 symbols even with debug information disabled; their measured bytes count toward
 the cache budget and their existence alone is not a debug-profile verdict.
 
+Hosted Windows CI runs that same measured builder after verification, dependency
+audit and governance. It retains only the CLI, guest agent, first-party control
+and measurement receipt for one day, with a run/attempt-specific artifact name.
+These unsigned qualification tools contain no application payload. Check the
+receipt's actual checkout revision (the merge revision for a pull request),
+source tree and all three file sizes/hashes before using them. CI success and
+artifact integrity do not qualify a Sandbox lifecycle or application outcome.
+
 Inspect cache usage at milestones and before moving to another revision. Rust incremental directories and compiled
 dependencies can be rebuilt; retained evidence, source, protected intake and
 pinned trial binaries have a different retention requirement. Before cleanup,

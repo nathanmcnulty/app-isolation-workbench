@@ -99,7 +99,7 @@ fn live_msi_interrupted_completion_rejects_foreign_request_and_recovers() {
     prepare_request_artifact(&context.request_path, &context.guest_request).unwrap();
     revalidate_workspace(&start, held.workspace()).unwrap();
     store.create("approved-start").unwrap();
-    let operation = run_attempt(&start, &layout, &native, &context, &store);
+    let operation = run_attempt(&start, &layout, &native, &context, &store, None);
     // Release process-local handles and lease, omitting normal finalization.
     drop(native);
     drop(held);

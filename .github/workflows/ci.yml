@@ -21,7 +21,7 @@ jobs:
   verify:
     name: Verify and audit
     runs-on: windows-2025
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -158,6 +158,54 @@ jobs:
           if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'Compatibility session is prohibited' }
           $PSVersionTable | ConvertTo-Json -Depth 3 | Write-Host
           .\scripts\verify.ps1 -GovernanceOnly
+
+      - name: Build measured first-party assessment tools
+        # Fixed project-owned tools only. No application fixture or provider runs.
+        shell: 'C:\Windows\System32\cmd.exe /d /v:off /s /c "if exist "{0}.ps1" (exit /b 91) else (copy /b "{0}" "{0}.ps1" >nul && "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -File "{0}.ps1")"'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # AIW inline runtime assertion: independent of repository checkout.
+          if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion.Major -ne 7 -or $PSVersionTable.PSVersion.Minor -ne 6 -or $PSVersionTable.PSVersion.PreReleaseLabel -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() -cne 'X64' -or [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine 'C:\Program Files\PowerShell\7\pwsh.exe' -or $PSHOME -ine 'C:\Program Files\PowerShell\7') { throw 'Expected stable machine PowerShell 7.6.x x64' }
+          foreach ($module in @('Microsoft.PowerShell.Management','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Security')) { Import-Module (Join-Path $PSHOME ('Modules\'+$module+'\'+$module+'.psd1')) -SkipEditionCheck -ErrorAction Stop }
+          $PSModuleAutoLoadingPreference = 'None'
+          if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw 'Compatibility session is prohibited' }
+          $revision = (& git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'Checked-out source identity unavailable' }
+          $report = Join-Path $env:RUNNER_TEMP 'aiw-assessment-tool-measurement'
+          .\scripts\build-assessment-tools.ps1 -SourceRevision $revision -ReportDirectory $report | Out-Null
+          $measurement = Get-Content -Raw -LiteralPath (Join-Path $report 'measurement.json') | ConvertFrom-Json
+          # PR artifacts identify the actual checked-out merge revision, not the PR head.
+          if ($measurement.schemaVersion -cne 'aiw.dev/assessment-tool-build-measurement/v0alpha1' -or $measurement.failure -or $measurement.sourceRevision -cne $revision -or $measurement.artifacts.Count -ne 3 -or $measurement.passes.Count -ne 3) { throw 'Measured artifact build incomplete' }
+          for ($index = 0; $index -lt 3; $index++) {
+            $pass = $measurement.passes[$index]
+            $profile = if ($index -eq 2) { 'release' } else { 'dev' }
+            if ($pass.pass -ne ($index + 1) -or $pass.profile -cne $profile -or $pass.started -ne $true -or $pass.rootExitObserved -ne $true -or $pass.exitCode -ne 0 -or $pass.killRequested -or $pass.primaryError -or $pass.cleanupError) { throw 'Measured build pass did not finish successfully' }
+          }
+          $assembly = Join-Path $env:RUNNER_TEMP 'aiw-assessment-tools'
+          if (Test-Path -LiteralPath $assembly) { throw 'Artifact assembly must be fresh' }
+          $null = New-Item -ItemType Directory -Path $assembly -ErrorAction Stop
+          foreach ($name in @('aiw.exe','aiw-guest-agent.exe','aiw-control-fixture.exe')) {
+            $artifact = @($measurement.artifacts | Where-Object name -CEQ $name)
+            if ($artifact.Count -ne 1) { throw 'Fixed first-party artifact absent or duplicated' }
+            $source = Join-Path $env:CARGO_TARGET_DIR ('x86_64-pc-windows-msvc\release\'+$name)
+            $destination = Join-Path $assembly $name
+            if ($artifact[0].machine -cne 'amd64' -or $artifact[0].crt -cne 'static' -or (Get-Item -LiteralPath $source).Length -ne $artifact[0].sizeBytes -or (Get-FileHash -LiteralPath $source).Hash.ToLowerInvariant() -cne $artifact[0].sha256) { throw 'Source first-party artifact identity differs' }
+            [IO.File]::Copy($source, $destination, $false)
+            if ((Get-Item -LiteralPath $destination).Length -ne $artifact[0].sizeBytes -or (Get-FileHash -LiteralPath $destination).Hash.ToLowerInvariant() -cne $artifact[0].sha256) { throw 'Copied first-party artifact identity differs' }
+          }
+          [IO.File]::Copy((Join-Path $report 'measurement.json'), (Join-Path $assembly 'measurement.json'), $false)
+
+      - name: Retain bounded unsigned assessment tools
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: assessment-tools-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/aiw-assessment-tools/aiw.exe
+            ${{ runner.temp }}/aiw-assessment-tools/aiw-guest-agent.exe
+            ${{ runner.temp }}/aiw-assessment-tools/aiw-control-fixture.exe
+            ${{ runner.temp }}/aiw-assessment-tools/measurement.json
+          if-no-files-found: error
+          retention-days: 1
 
   msrv:
     name: Minimum supported Rust

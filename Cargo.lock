@@ -203,6 +203,7 @@ dependencies = [
  "aiw-probe",
  "aiw-provider-wsb",
  "aiw-schema",
+ "aiw-token",
  "aiw-windows-platform",
  "hex",
  "schemars",

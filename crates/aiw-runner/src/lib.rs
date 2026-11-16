@@ -732,7 +732,7 @@ impl LeaseBoundary for AlreadyHeldProviderLease {
 
 /// Execute the one approved W1 provider operation.  A success means lifecycle
 /// and receipt correlation succeeded, not that containment has been proven.
-#[cfg(test)]
+#[cfg(any(test, feature = "offline-rehearsal"))]
 pub(crate) fn execute_wsb_golden_probe(
     request: &WsbGoldenProbeStart,
     readiness: &WindowsSandboxReadiness,
