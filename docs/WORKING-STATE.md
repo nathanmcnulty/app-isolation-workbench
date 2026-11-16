@@ -63,19 +63,27 @@ Use only `C:\aiw\environment-probe-20261114\target-static-r1`, the existing
 shared cache. Normal builders require explicit CARGO_TARGET_DIR and reject
 unsafe overrides; both dev/test workspaces disable incremental/full debug.
 Preflight requires 10 GiB free and cache <=8 GiB. The latest read-only check
-measured 2,082,927,749 cache bytes and 9,601,937,408 bytes free; preflight correctly
-refused a build below the free-space floor. No build was started. Do not create
-retry caches or bypass the floor.
+now measures about 2.12 GB of cache and 16.34 GB free after cleanup and measured
+builds. Earlier preflight correctly refused compilation below the floor. Do not
+create retry caches or bypass it.
 A separately audited idle GUI cache recovered 8.41 GiB. The policy-blocked
 `C:\aiw\app-isolation-workbench\target\debug\incremental` remains untouched;
 never retry or bypass its cleanup. Preserve source, pinned images and evidence.
+An independently reviewed, separately scoped cleanup removed 833 single-link
+Rust archive/metadata files from idle `target/debug/deps`, recovering an observed
+6,857,707,520 bytes. All 320 linked files, 312 empty unrecognized files, executables,
+DLLs, symbols and child directories were excluded. The blocked path was not
+traversed. Fresh per-file custody, old Cargo coordination locks and an immutable
+removal receipt were verified; no broad Cargo clean or marker creation occurred.
 
-Exact source 71d1877 completed two consecutive dev builds with the same
-2,082,529,471-byte / 2,813-file cache and identical tool hashes; the second added
+Exact source 458bf68 completed two consecutive dev builds with the same
+2,107,562,723-byte / 2,813-file cache and identical tool hashes; the second added
 zero bytes and made zero rustc calls. Its release refresh ended at
-2,082,927,749 bytes in that same cache. New compiler calls (10 dev / 10 release)
+2,123,969,551 bytes in that same cache. New compiler calls (10 dev / 10 release)
 showed no incremental/full-debug flags; source, complete image hashes and logs
-passed independent review. Private evidence: normal-windows-build-r4/measurement.json.
+passed 359 independent admission checks. Private evidence:
+normal-windows-build-r5/measurement.json. No inherited overrides were present;
+normal scripts also reject unsafe overrides before compilation.
 This is a measured preflight budget, not a hard filesystem quota. Storage
 policy 43, compiler-log 12, churn 1,000 cycles, real provider 126 tests,
 governance and independent review passed. Local checks now clean fresh owned
@@ -87,8 +95,8 @@ the proof and originals remain private. Missing raw request/progress bytes are
 explicit admission limits; there is no application acceptance credit. The
 [evidence channel design](ASSESSMENT-EVIDENCE-CHANNEL.md) passed independent
 design review, including the trusted local Start anchor, crash boundaries,
-key confidentiality and sampled output budgets. It is not implemented or
-qualified. Hosted Windows CI passed all three jobs at e65874b.
+key confidentiality and sampled output budgets. The implementation below now
+exists; fresh native qualification remains pending.
 
 An isolated Windows CNG primitive now supplies ephemeral P-256 keys, public-only
 export/import, fixed-size SHA-256 signing/verification, public nonces and explicit
@@ -97,7 +105,7 @@ verification and tamper/encoding/foreign-key cases. Consequential source review,
 format and governance passed. Hosted Windows CI run 43800695240 passed all three
 jobs at facbfbe; its tested merge has the identical Git tree. Independent CI
 admission confirmed the Windows workspace test exit. No assessment authority or
-dispatch path calls this primitive yet.
+dispatch path called this primitive at that historical revision.
 
 The isolated pure signed-record contract and CNG components passed consequential
 review and all three hosted Windows CI jobs at 76acd65 (run 43802528747, identical
@@ -123,8 +131,18 @@ Review also fixed plan-hash/XML-hash confusion with distinct-commitment coverage
 Hosted CI now has a reviewed same-cache measured build and one-day retention of
 three unsigned first-party tools plus the exact checkout receipt, after all
 verification/audit/governance in that job. The 92e535b artifact is not admitted
-because of the workspace failure. Next: run corrected hosted checks, inspect
-original logs and exact-source artifacts, and complete independent admission.
+because of the workspace failure. Corrected run 43814048969 at 458bf68 passed
+all three jobs. Independent admission checked original logs: workspace passed=true,
+exit 0; tested merge 508796bfc090687115a75cf493825b0983ebfaad has the identical
+Git tree 946bf5e992cf22085c00a61860d7a4b263cc3e73. Local exact-source release tools
+are pinned once in private qualification-tools-458 (three images, 29,822,464 bytes).
+No additional build cache or full build-tree copy was created.
+
+The R7 first-party control packet remains an unsealed draft. A read-only VM107
+preflight input timed out; the partial input was visibly cancelled with Ctrl+C
+and a clean PowerShell prompt verified. It was never submitted. No new provider,
+Sandbox or application execution occurred. Obtain fresh parent-process facts
+before sealing the packet; do not infer them from the old run.
 Do not dispatch an application until the evidence boundary is proved. Resume
 builds only when permitted storage satisfies preflight. Qualify ordinary/classic positives,
 timeout/overflow negatives and controlled interruption/exact recovery before
