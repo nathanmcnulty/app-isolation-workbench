@@ -82,10 +82,17 @@ governance and independent review passed. Local checks now clean fresh owned
 fixtures on success/failure and report cleanup refusals. All transfer helpers
 were stopped; the console is idle and the clipboard contains the last capture.
 
-Next: preserve/admit the raw control-r6 failure and design/review a protected
-guest-local collector with authenticated transport. Moving output locally and
-copying it to a candidate-writable mapped folder alone cannot prevent forgery.
-Do not dispatch an application until the evidence boundary is proved. Resume
+The four raw control-r6 originals passed independent byte/hash/binding review;
+the proof and originals remain private. Missing raw request/progress bytes are
+explicit admission limits; there is no application acceptance credit. The
+[evidence channel design](ASSESSMENT-EVIDENCE-CHANNEL.md) passed independent
+design review, including the trusted local Start anchor, crash boundaries,
+key confidentiality and sampled output budgets. It is not implemented or
+qualified. Hosted Windows CI passed all three jobs at e65874b.
+
+Next: freeze the channel DTO/caps and implement/review the protected guest-local
+collector and authenticated transport. Do not dispatch an application until the
+evidence boundary is proved. Resume
 builds only when permitted storage satisfies preflight. Qualify ordinary/classic positives,
 timeout/overflow negatives and controlled interruption/exact recovery before
 running either external fixture. jq and SQLite payloads/provenance and the same
