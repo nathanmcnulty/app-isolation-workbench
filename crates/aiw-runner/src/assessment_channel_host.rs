@@ -573,7 +573,7 @@ fn optional_output(
         Err(_) => Err(RunnerError::Drift),
         Ok(m) if m.is_file() && !m.file_type().is_symlink() => {
             let directory = workspace
-                .reopen_root_directory("output", WorkspaceAclPolicy::Inherited)
+                .reopen_root_directory("output", WorkspaceAclPolicy::Protected)
                 .map_err(|_| RunnerError::Drift)?;
             read_exact(&directory, leaf, cap).map(Some)
         }
@@ -813,6 +813,58 @@ fn verify_artifacts(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn channel_optional_output_reads_protected_workspace_without_relaxing_guards() {
+        let parent = std::env::temp_dir().canonicalize().unwrap();
+        let leaf = format!("aiw-channel-output-test-{}", std::process::id());
+        let workspace = HeldRunWorkspace::create(&parent, &leaf).unwrap();
+        let root = workspace.root_path().to_owned();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            assert!(
+                optional_output(&workspace, CHANNEL_BOOTSTRAP_LEAF, 16)
+                    .unwrap()
+                    .is_none()
+            );
+            // The production workspace protects output. Requiring inherited
+            // ACLs used to refuse the first present bootstrap before ACK.
+            assert!(
+                workspace
+                    .reopen_root_directory("output", WorkspaceAclPolicy::Inherited)
+                    .is_err()
+            );
+            let mut file = workspace
+                .create_output_file_new(CHANNEL_BOOTSTRAP_LEAF)
+                .unwrap()
+                .into_file();
+            file.write_all(b"inert bootstrap").unwrap();
+            file.sync_all().unwrap();
+            drop(file);
+            assert_eq!(
+                optional_output(&workspace, CHANNEL_BOOTSTRAP_LEAF, 16).unwrap(),
+                Some(b"inert bootstrap".to_vec())
+            );
+            assert!(optional_output(&workspace, CHANNEL_BOOTSTRAP_LEAF, 14).is_err());
+            // Ensure the traversal target exists so this exercises the held
+            // reader's leaf validation rather than the optional absent case.
+            let mut plan = workspace
+                .create_root_file_new("plan.json")
+                .unwrap()
+                .into_file();
+            plan.write_all(b"inert plan").unwrap();
+            drop(plan);
+            assert!(optional_output(&workspace, "../plan.json", 1024).is_err());
+            let directory = workspace.create_output_directory_new("collision").unwrap();
+            drop(directory);
+            assert!(optional_output(&workspace, "collision", 16).is_err());
+            workspace.revalidate().unwrap();
+        }));
+        drop(workspace);
+        std::fs::remove_dir_all(root).unwrap();
+        if let Err(panic) = result {
+            std::panic::resume_unwind(panic);
+        }
+    }
 
     #[test]
     fn native_cng_host_ingestion_waits_for_lf_and_refuses_prefix_rewrite() {

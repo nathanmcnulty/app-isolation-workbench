@@ -1,6 +1,6 @@
 # Working state
 
-Updated 2026-11-15 (America/Anchorage). The user-selected goal is #108: one
+Updated 2026-11-16 (America/Anchorage). The user-selected goal is #108: one
 application-neutral assessment and packaging path, demonstrated with two
 behaviorally different external fixtures without product-specific code changes.
 Legacy #111 and its evidence remain preserved and paused.
@@ -138,32 +138,42 @@ Git tree 946bf5e992cf22085c00a61860d7a4b263cc3e73. Local exact-source release to
 are pinned once in private qualification-tools-458 (three images, 29,822,464 bytes).
 No additional build cache or full build-tree copy was created.
 
-The R7 first-party control packet remains an unsealed draft. A read-only VM107
-preflight input timed out; the partial input was visibly cancelled with Ctrl+C
-and a clean PowerShell prompt verified. It was never submitted. No new provider,
-Sandbox or application execution occurred. Obtain fresh parent-process facts
-before sealing the packet; do not infer them from the old run.
-After the user restored the console, fresh native read-only queries confirmed
-the exact parent process/birth/path/session, Core 7.6.10 x64, ordinary actor,
-VM UUID and Windows 26300.9974. Both R7 targets are absent; R4/R6 remain present.
-Guest free space is 63,106,760,704 bytes. These are screenshot transcriptions,
-not a machine-framed preflight or held-file identity admission. Native literal
-keys plus line redraw work; browser binding and clipboard delivery remain broken.
-A reviewed marker-only LAN probe raised a Windows Firewall prompt; Allow was
-not clicked, no guest request ran, and the exact owned marker was stopped with
-zero listeners remaining. Do not change firewall rules to complete this transfer.
-The bounded R7 packet constructor is source only and remains unexecuted until a
-permitted delivery route is available. Offline review found
-the R1 harness conflated authenticated report smoke success with full native
-qualification. An unsealed R2 accuracy draft separates those results and keeps
-qualification pending/false; the original templates and wrappers remain unchanged.
+The user-authorized VM107 OpenSSH route is operational: dedicated restricted
+key, host-key verification through the console, TCP 22 restricted to the parent
+host, and a byte-verified SCP round trip. No parent firewall change was made.
+The earlier marker listener is stopped; its firewall prompt was cancelled.
+The obsolete packet/delta constructors remain unexecuted.
+
+R7 tools from source 458bf68 were copied directly from the single pinned image
+set. The reviewed data-only guest verifier admitted all five payload hashes,
+sizes, single-link identities and closed namespace, then published the directory
+without AIW/provider execution. Independent admission passed. Fresh ordinary
+Core 7.6.10 console PID 6636 is bound by its full process birth time. Its readonly
+custody bootstrap loaded, and generic Inspect, Export, Verify and Prepare
+completed. Actual ordinary run assessment-1794822472455079100 has plan hash
+ffbb4f239d8c426538b52743b07cda7a4d4087e53d8b8fd58d037cdba4d8a86d.
+Independent original-plan admission passed; separate approval and Start ran in
+that exact ordinary console. Start failed after the collector published its
+bootstrap. Its signature and bindings independently verify; no latch/ACK or
+application result exists. Original diagnostics show one exact-ID Start,
+connect and stop, with two final empty lists and cleanupComplete=true. Retained
+Read reports incompleteOrUnauthenticatedPublication with no function/isolation
+credit. Never replay this consumed approval/Start.
+
+Review found a source contradiction: optional_output reopened the protected
+output directory with an Inherited ACL expectation. The narrow correction
+requires Protected, retaining exact ACL verification. A focused Windows
+regression covers missing/present bootstrap, the rejected inherited expectation,
+size bound, existing traversal target and directory collision. Three channel tests and consequential source review passed. The runner
+suite had 159 passed / 9 ignored / one shared-TEMP ancestry failure; that
+case passed separately with TEMP set to the existing goal directory. Runner
+all-target Clippy and governance passed. No corrected-source native result
+is yet available.
+
 Full signed originals/local-anchor admission, native 15/14/default-DACL facts,
-cleanup and retained Read stability remain required. No native acceptance follows
-from the draft's synthetic predicate tests.
-Do not dispatch an application until the evidence boundary is proved. Resume
-builds only when permitted storage satisfies preflight. Qualify ordinary/classic positives,
-timeout/overflow negatives and controlled interruption/exact recovery before
-running either external fixture. jq and SQLite payloads/provenance and the same
+cleanup and retained Read stability remain required. Qualify ordinary/classic
+positives, timeout/overflow negatives and controlled interruption/exact recovery
+before either external fixture. jq and SQLite payloads/provenance and the same
 data-driven private harness are ready but have never executed. Native setup
-refusals are driver blockers, not application incompatibility. No fallback,
-privilege grant, runtime installation, VM or host-security change is authorized.
+refusals are driver blockers, not application incompatibility. No fallback or
+additional privilege/runtime/VM/security change follows from these results.
