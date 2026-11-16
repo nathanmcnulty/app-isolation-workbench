@@ -93,6 +93,14 @@ The rejected parameter remains unresolved. Preserve this consumed Start.
 Created-but-unresumed failures remain DriverIncomplete/Unmeasured and cannot
 confer application compatibility.
 
+A separate unsigned, suspended-only research diagnostic completed two fixed
+CreateProcessWithTokenW cases differing only in CREATE_NO_WINDOW. Both returned
+87 before creating a child; account cleanup reported success and owned Sandbox
+cleanup completed.
+Removing that flag does not fix this diagnostic tuple. This is not signed
+assessment evidence, a PSS audit or application qualification. The rejected
+parameter remains unknown; ordinary/classic positive controls remain blocked.
+
 ## Storage and next gates
 
 Use only `C:\aiw\environment-probe-20261114\target-static-r1`. Normal builds
