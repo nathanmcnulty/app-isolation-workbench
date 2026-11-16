@@ -26,7 +26,12 @@ preparation receipts use v0alpha2. Start observes the matching held-provider
 version before list/start. Recovery requires committed approval and the exact
 persisted protocol before query/stop. Historical generic v1 remains read-only;
 never relabel it or reuse its approval. Explicit adapters cover 0.8.107.0 and
-0.8.114.0; native qualification of 114 is still pending.
+0.8.114.0. The first native 114 ordinary control completed the outer lifecycle
+and verified Sandbox cleanup, but refused application dispatch: under the fresh
+standard user, 13 of 15 mutation opens on the mapped collector succeeded, one
+was denied and one returned sharing error 32. Its retained outcome is
+insufficientEvidence/notRun, not compatibility or isolation acceptance. Preserve
+control-r6 and its consumed approval; do not rerun or weaken the denial gate.
 
 Affected tests passed: admin 72 (1 ignored), orchestrator 65, probe 30, runner
 152 (9 ignored), platform 208 (10 ignored). Workspace all-target Clippy,
@@ -57,23 +62,31 @@ or application trial occurred. See [capture](SANDBOX-PROTOCOL-CAPTURE.md).
 Use only `C:\aiw\environment-probe-20261114\target-static-r1`, the existing
 shared cache. Normal builders require explicit CARGO_TARGET_DIR and reject
 unsafe overrides; both dev/test workspaces disable incremental/full debug.
-Preflight requires 10 GiB free and cache <=8 GiB. Last completed Clippy measured
-2,082,100,909 cache bytes and 10,895,130,624 bytes free. Do not create retry caches.
+Preflight requires 10 GiB free and cache <=8 GiB. The latest read-only check
+measured 2,082,927,749 cache bytes and 9,601,937,408 bytes free; preflight correctly
+refused a build below the free-space floor. No build was started. Do not create
+retry caches or bypass the floor.
 A separately audited idle GUI cache recovered 8.41 GiB. The policy-blocked
 `C:\aiw\app-isolation-workbench\target\debug\incremental` remains untouched;
 never retry or bypass its cleanup. Preserve source, pinned images and evidence.
 
-Source 51b2 completed two consecutive dev builds with the same 1,464,790,831-byte
-cache and identical tool hashes; a cold trace records 90 rustc calls without
-incremental/full debug. Later test growth is accounted separately. Storage
+Exact source 71d1877 completed two consecutive dev builds with the same
+2,082,529,471-byte / 2,813-file cache and identical tool hashes; the second added
+zero bytes and made zero rustc calls. Its release refresh ended at
+2,082,927,749 bytes in that same cache. New compiler calls (10 dev / 10 release)
+showed no incremental/full-debug flags; source, complete image hashes and logs
+passed independent review. Private evidence: normal-windows-build-r4/measurement.json.
+This is a measured preflight budget, not a hard filesystem quota. Storage
 policy 43, compiler-log 12, churn 1,000 cycles, real provider 126 tests,
 governance and independent review passed. Local checks now clean fresh owned
 fixtures on success/failure and report cleanup refusals. All transfer helpers
 were stopped; the console is idle and the clipboard contains the last capture.
 
-Next: finish the clean exact-source three-tool build in that same cache; seal
-fresh control-r6 templates and data-only deltas. Independently review its actual
-version-2 plan before separate approval/Start. Qualify ordinary/classic positives,
+Next: preserve/admit the raw control-r6 failure and design/review a protected
+guest-local collector with authenticated transport. Moving output locally and
+copying it to a candidate-writable mapped folder alone cannot prevent forgery.
+Do not dispatch an application until the evidence boundary is proved. Resume
+builds only when permitted storage satisfies preflight. Qualify ordinary/classic positives,
 timeout/overflow negatives and controlled interruption/exact recovery before
 running either external fixture. jq and SQLite payloads/provenance and the same
 data-driven private harness are ready but have never executed. Native setup
