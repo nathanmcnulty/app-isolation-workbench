@@ -27,6 +27,10 @@
   retain only needed diagnostics and evidence. Keep one bounded reusable build
   cache instead of full build copies in each output package. Do not label all
   rebuildable output as evidence or preserve failed build trees by default.
+- Tests retaining directory write authority use an invocation-owned parent below
+  TEMP, never the shared TEMP directory itself. Release all leases before owned
+  fixture cleanup, including assertion-failure paths; do not serialize unrelated
+  tests or weaken sharing checks to hide fixture interference.
 - Before a build, measure free space on the target volume. Keep at least 10 GiB
   free before starting; reclaim verified idle build caches first if below that
   floor. Routine dev/test builds disable incremental output and debug symbols in

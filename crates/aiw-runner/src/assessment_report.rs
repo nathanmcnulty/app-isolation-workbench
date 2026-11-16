@@ -1171,6 +1171,57 @@ mod tests {
     use std::io::Write;
 
     #[test]
+    fn export_ancestry_refuses_workspace_parent_writer_but_accepts_sibling() {
+        use std::os::windows::fs::OpenOptionsExt as _;
+
+        let root = std::env::temp_dir().join(format!(
+            "aiw-export-sharing-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&root).unwrap();
+        let result = std::panic::catch_unwind(|| {
+            let worker_parent = root.join("worker-parent");
+            let export_parent = root.join("export-parent");
+            fs::create_dir(&worker_parent).unwrap();
+            fs::create_dir(&export_parent).unwrap();
+            let workspace =
+                aiw_windows_platform::HeldRunWorkspace::create(&worker_parent, "worker").unwrap();
+            // The workspace intentionally retains write authority on its
+            // immediate parent. A strict read-sharing ancestry lease conflicts.
+            let error = OpenOptions::new()
+                .access_mode(0x0000_0081)
+                .share_mode(1)
+                .custom_flags(0x0220_0000)
+                .open(&worker_parent)
+                .unwrap_err();
+            assert_eq!(error.raw_os_error(), Some(32));
+            assert!(
+                canonical_export_destination(
+                    &worker_parent.join("result.txt"),
+                    workspace.root_path()
+                )
+                .is_err()
+            );
+            let (_, ancestry) = canonical_export_destination(
+                &export_parent.join("result.txt"),
+                workspace.root_path(),
+            )
+            .unwrap();
+            drop(ancestry);
+            workspace.revalidate().unwrap();
+        });
+        // All leases, including those in a failed assertion, have left scope.
+        fs::remove_dir_all(root).unwrap();
+        if let Err(panic) = result {
+            std::panic::resume_unwind(panic);
+        }
+    }
+
+    #[test]
     fn export_destination_holds_ancestry_and_refuses_unsafe_targets() {
         use std::os::windows::fs::OpenOptionsExt as _;
 

@@ -164,12 +164,23 @@ Review found a source contradiction: optional_output reopened the protected
 output directory with an Inherited ACL expectation. The narrow correction
 requires Protected, retaining exact ACL verification. A focused Windows
 regression covers missing/present bootstrap, the rejected inherited expectation,
-size bound, existing traversal target and directory collision. Three channel tests and consequential source review passed. The runner
-suite had 159 passed / 9 ignored / one shared-TEMP ancestry failure; that
-case passed separately with TEMP set to the existing goal directory. Runner
-all-target Clippy and governance passed. No corrected-source native result
-is yet available.
+size bound, existing traversal target and directory collision. Three channel
+tests and consequential source review passed. Source 9a47a5d built twice in the
+same cache at 2,180,364,597 bytes / 2,916 files; pass two compiled nothing and
+kept identical tool hashes. Release ended at 2,180,349,895 bytes. Independent
+source/command/PE/hash admission passed. Only the changed CLI was pinned anew;
+unchanged guest/fixture images reference the existing immutable set.
 
+CI 43846478148 correctly failed the parallel workspace check: the new regression
+retained write authority on shared TEMP, conflicting with export ancestry
+leases. MSRV/desktop passed; this failed Verify run is not accepted. A test-only
+correction uses a private parent and catches assertion unwinding before owned
+cleanup. A deterministic sibling test observes error 32 through the held writer
+parent and accepts an independent sibling without weakening production checks.
+The normal parallel runner suite now passes 161 / 0 failed / 9 ignored; review
+confirms unchanged production prefixes. Final Clippy and governance passed; corrected
+hosted CI remains a gate. The R8 source packet is frozen for independent review;
+corrected-source native qualification has not occurred.
 Full signed originals/local-anchor admission, native 15/14/default-DACL facts,
 cleanup and retained Read stability remain required. Qualify ordinary/classic
 positives, timeout/overflow negatives and controlled interruption/exact recovery

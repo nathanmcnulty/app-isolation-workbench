@@ -816,11 +816,16 @@ mod tests {
 
     #[test]
     fn channel_optional_output_reads_protected_workspace_without_relaxing_guards() {
-        let parent = std::env::temp_dir().canonicalize().unwrap();
-        let leaf = format!("aiw-channel-output-test-{}", std::process::id());
-        let workspace = HeldRunWorkspace::create(&parent, &leaf).unwrap();
-        let root = workspace.root_path().to_owned();
+        // Workspace creation retains write authority on its immediate parent.
+        // Never retain that authority on the shared TEMP directory: parallel
+        // export tests deliberately require read-only ancestry leases there.
+        let parent = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("aiw-channel-output-test-{}", std::process::id()));
+        std::fs::create_dir(&parent).unwrap();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let workspace = HeldRunWorkspace::create(&parent, "worker").unwrap();
             assert!(
                 optional_output(&workspace, CHANNEL_BOOTSTRAP_LEAF, 16)
                     .unwrap()
@@ -859,8 +864,9 @@ mod tests {
             assert!(optional_output(&workspace, "collision", 16).is_err());
             workspace.revalidate().unwrap();
         }));
-        drop(workspace);
-        std::fs::remove_dir_all(root).unwrap();
+        // All workspace/file leases leave scope on success or unwind before
+        // removing this invocation's exclusively created fixture parent.
+        std::fs::remove_dir_all(parent).unwrap();
         if let Err(panic) = result {
             std::panic::resume_unwind(panic);
         }
