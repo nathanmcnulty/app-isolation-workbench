@@ -120,6 +120,28 @@ original receipt bytes; the legacy API's canonical receipt digest is unchanged.
 Filesystem/crypto fixtures cover complete failed-driver publication and malformed
 or missing output. They do not qualify application execution or isolation.
 
+## Exact collector logon trustee provenance
+
+Protection v2 may admit one additional DACL trustee: the exact logon SID read
+from the collector's retained primary token. It must be a canonical logon SID
+with both SE_GROUP_LOGON_ID bits, enabled and not deny-only. The observed token
+user must match the setup collector, and the SID must be absent from the full,
+bounded group list of the retained standard application token. A SID prefix or
+an arbitrary caller-supplied logon SID never establishes this exception.
+
+The collector retains both token handles and revalidates their user/type/group
+facts, current process token identity, descriptors and primary default DACL
+before application creation. The exception applies only to trustees; owner
+policy remains collector user, SYSTEM or Administrators. All 15 file and 14
+process/thread denial checks remain mandatory. Signed progress and final result
+must carry identical provenance. Historical protection v1 retains its strict
+allowlist and cannot borrow the new exception.
+
+The first complete native signed publication authenticated successfully but
+reported NotRun: its observed logon trustee was outside the v1 allowlist. All
+29 access checks denied access, and outer Sandbox cleanup completed. That run
+does not qualify application behavior or the new v2 provenance implementation.
+
 ## Crash, retained reads and export
 
 Persist only the public descriptor, request, bootstrap, ACK, latched guest key
@@ -177,6 +199,8 @@ channel gates is satisfied by the earlier failed control.
 - [Process security](https://learn.microsoft.com/en-us/windows/win32/procthread/process-security-and-access-rights)
 - [Thread security](https://learn.microsoft.com/en-us/windows/win32/procthread/thread-security-and-access-rights)
 - [Mandatory integrity control](https://learn.microsoft.com/en-us/windows/win32/secauthz/mandatory-integrity-control)
+- [Token information classes](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ne-winnt-token_information_class)
+- [Token group attributes](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-token_groups)
 
 These references describe OS contracts, not qualification of this proposed
 implementation or installed provider wire behavior.

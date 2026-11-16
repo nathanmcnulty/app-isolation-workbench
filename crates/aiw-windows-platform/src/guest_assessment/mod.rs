@@ -317,6 +317,7 @@ fn collect_outcome(
                     .as_ref()
                     .ok_or("collector token missing")?
                     .user_sid,
+                user.token(),
             )?;
             let facts = user.impersonate(|| {
                 protection

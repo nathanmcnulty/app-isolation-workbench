@@ -98,6 +98,8 @@ pub struct AssessmentCollectorAccessDenial {
 }
 pub const ASSESSMENT_COLLECTOR_PROTECTION_SCHEMA: &str =
     "aiw.dev/assessment-collector-protection/v0alpha1";
+pub const ASSESSMENT_COLLECTOR_PROTECTION_V2_SCHEMA: &str =
+    "aiw.dev/assessment-collector-protection/v0alpha2";
 pub const ASSESSMENT_COLLECTOR_PROCESS_RIGHTS: [u32; 7] =
     [0x2, 0x8, 0x10, 0x20, 0x40, 0x40000, 0x80000];
 pub const ASSESSMENT_COLLECTOR_THREAD_RIGHTS: [u32; 7] =
@@ -128,7 +130,7 @@ pub struct AssessmentCollectorObjectSecurity {
     pub trustee_sids: Vec<String>,
     pub parse_error: Option<String>,
 }
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AssessmentCollectorProtection {
     pub schema_version: String,
@@ -141,7 +143,146 @@ pub struct AssessmentCollectorProtection {
     /// Actual primary TokenDefaultDacl; creator provenance for subsequently
     /// created unimpersonated reader threads, not an observation of all threads.
     pub primary_default_dacl: AssessmentCollectorDefaultDacl,
+    /// Actual held primary-token observations, never inferred from ACL text.
+    /// Historical protection v1 cannot use a logon-SID trustee exception.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_provenance: Option<AssessmentCollectorTokenProvenance>,
     pub access_checks: Vec<AssessmentCollectorObjectAccess>,
+}
+
+#[derive(Default)]
+struct TokenProvenancePresence {
+    present: bool,
+    value: Option<AssessmentCollectorTokenProvenance>,
+}
+impl<'de> Deserialize<'de> for TokenProvenancePresence {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(Self {
+            present: true,
+            value: Option::<AssessmentCollectorTokenProvenance>::deserialize(d)?,
+        })
+    }
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CollectorProtectionWire {
+    schema_version: String,
+    storage: crate::assessment_channel::ChannelCollectorStorage,
+    collector_process_id: u32,
+    collector_creation_time_100ns: String,
+    signing_thread_id: u32,
+    process_security: AssessmentCollectorObjectSecurity,
+    thread_security: AssessmentCollectorObjectSecurity,
+    primary_default_dacl: AssessmentCollectorDefaultDacl,
+    #[serde(default)]
+    token_provenance: TokenProvenancePresence,
+    access_checks: Vec<AssessmentCollectorObjectAccess>,
+}
+impl<'de> Deserialize<'de> for AssessmentCollectorProtection {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let w = CollectorProtectionWire::deserialize(d)?;
+        if w.schema_version == ASSESSMENT_COLLECTOR_PROTECTION_SCHEMA && w.token_provenance.present
+        {
+            return Err(serde::de::Error::custom(
+                "historical collector protection cannot contain token provenance",
+            ));
+        }
+        Ok(Self {
+            schema_version: w.schema_version,
+            storage: w.storage,
+            collector_process_id: w.collector_process_id,
+            collector_creation_time_100ns: w.collector_creation_time_100ns,
+            signing_thread_id: w.signing_thread_id,
+            process_security: w.process_security,
+            thread_security: w.thread_security,
+            primary_default_dacl: w.primary_default_dacl,
+            token_provenance: w.token_provenance.value,
+            access_checks: w.access_checks,
+        })
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssessmentTokenGroup {
+    pub sid: String,
+    pub attributes: u32,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssessmentCollectorTokenProvenance {
+    pub collector_user_sid: String,
+    pub collector_token_type: aiw_token::TokenType,
+    pub collector_logon_sid: String,
+    pub collector_logon_attributes: u32,
+    pub standard_user_sid: String,
+    /// Complete bounded TokenGroups observation from the held standard token.
+    pub standard_groups: Vec<AssessmentTokenGroup>,
+}
+
+/// Validate reported provenance and return only its exact logon-SID trustee
+/// exception. Native callers must independently measure/revalidate the held
+/// tokens. This pure function grants no observation or execution authority.
+pub fn validate_collector_token_provenance<'a>(
+    protection: &'a AssessmentCollectorProtection,
+    collector_sid: &str,
+    standard_sid: &str,
+) -> Result<Option<&'a str>, String> {
+    match protection.schema_version.as_str() {
+        ASSESSMENT_COLLECTOR_PROTECTION_SCHEMA if protection.token_provenance.is_none() => {
+            return Ok(None);
+        }
+        ASSESSMENT_COLLECTOR_PROTECTION_V2_SCHEMA => {}
+        _ => return Err("collector token provenance version refused".into()),
+    }
+    let p = protection
+        .token_provenance
+        .as_ref()
+        .ok_or("collector token provenance absent")?;
+    let canonical_sid = |value: &str| {
+        if value.len() > 184 {
+            return false;
+        }
+        let parts: Vec<_> = value.split('-').collect();
+        (4..=18).contains(&parts.len())
+            && parts[0] == "S"
+            && parts[1] == "1"
+            && parts[2]
+                .parse::<u64>()
+                .ok()
+                .is_some_and(|n| n < (1_u64 << 48) && n.to_string() == parts[2])
+            && parts[3..].iter().all(|part| {
+                part.parse::<u32>()
+                    .ok()
+                    .is_some_and(|n| n.to_string() == *part)
+            })
+    };
+    let canonical_logon = canonical_sid(&p.collector_logon_sid)
+        && p.collector_logon_sid
+            .strip_prefix("S-1-5-5-")
+            .is_some_and(|tail| tail.split('-').count() == 2);
+    if !canonical_sid(&p.collector_user_sid)
+        || !canonical_sid(&p.standard_user_sid)
+        || p.collector_user_sid != collector_sid
+        || p.standard_user_sid != standard_sid
+        || collector_sid == standard_sid
+        || p.collector_token_type != aiw_token::TokenType::Primary
+        || p.collector_logon_sid == p.standard_user_sid
+        || !canonical_logon
+        || p.collector_logon_attributes & 0xc000_0000 != 0xc000_0000
+        || p.collector_logon_attributes & 0x4 == 0
+        || p.collector_logon_attributes & 0x10 != 0
+        || p.standard_groups.len() > 256
+        || p.standard_groups
+            .iter()
+            .any(|group| !canonical_sid(&group.sid) || group.sid == p.collector_logon_sid)
+        || !p
+            .standard_groups
+            .windows(2)
+            .all(|pair| pair[0].sid < pair[1].sid)
+    {
+        return Err("collector token provenance binding/groups refused".into());
+    }
+    Ok(Some(&p.collector_logon_sid))
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

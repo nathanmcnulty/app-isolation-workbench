@@ -1,4 +1,6 @@
 //! Actual standard-token object-access observations for this collector only.
+#[path = "protection_token.rs"]
+mod token;
 use super::{Result, bound_error, guard_no_impersonation};
 use aiw_provider_wsb::assessment_observation::*;
 use sha2::{Digest, Sha256};
@@ -183,26 +185,27 @@ fn birth(handle: HANDLE) -> Result<String> {
     }
     Ok(n.to_string())
 }
-fn trusted_descriptor(d: &AssessmentCollectorObjectSecurity, collector_sid: &str) -> bool {
+fn trusted_descriptor(
+    d: &AssessmentCollectorObjectSecurity,
+    collector_sid: &str,
+    logon: Option<&str>,
+) -> bool {
     let trusted = |sid: &str| sid == collector_sid || sid == "S-1-5-18" || sid == "S-1-5-32-544";
-    d.parse_error.is_none() && trusted(&d.owner_sid) && d.trustee_sids.iter().all(|s| trusted(s))
+    d.parse_error.is_none()
+        && trusted(&d.owner_sid)
+        && d.trustee_sids
+            .iter()
+            .all(|s| trusted(s) || logon == Some(s.as_str()))
 }
-fn default_dacl(process: HANDLE) -> Result<AssessmentCollectorDefaultDacl> {
-    use windows::Win32::Security::{
-        GetTokenInformation, TOKEN_DEFAULT_DACL, TOKEN_QUERY, TokenDefaultDacl,
-    };
-    use windows::Win32::System::Threading::OpenProcessToken;
-    let mut token = HANDLE::default();
-    unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) }
-        .map_err(|_| "collector primary token query refused")?;
-    let token = unsafe { OwnedHandle::from_raw_handle(token.0) };
+fn default_dacl(token: HANDLE) -> Result<AssessmentCollectorDefaultDacl> {
+    use windows::Win32::Security::{GetTokenInformation, TOKEN_DEFAULT_DACL, TokenDefaultDacl};
     // u64 alignment covers TOKEN_DEFAULT_DACL and ACL. Fixed capacity; no
     // caller-controlled allocation or retry, and no token/security mutation.
     let mut storage = vec![0u64; 8192];
     let mut returned = 0;
     unsafe {
         GetTokenInformation(
-            raw(&token),
+            token,
             TokenDefaultDacl,
             Some(storage.as_mut_ptr().cast()),
             65536,
@@ -246,21 +249,29 @@ fn default_dacl(process: HANDLE) -> Result<AssessmentCollectorDefaultDacl> {
         parse_error,
     })
 }
-fn trusted_default(d: &AssessmentCollectorDefaultDacl, collector_sid: &str) -> bool {
+fn trusted_default(
+    d: &AssessmentCollectorDefaultDacl,
+    collector_sid: &str,
+    logon: Option<&str>,
+) -> bool {
     d.parse_error.is_none()
         && !d.acl_hex.is_empty()
-        && d.trustee_sids
-            .iter()
-            .all(|s| s == collector_sid || s == "S-1-5-18" || s == "S-1-5-32-544")
+        && d.trustee_sids.iter().all(|s| {
+            s == collector_sid
+                || s == "S-1-5-18"
+                || s == "S-1-5-32-544"
+                || logon == Some(s.as_str())
+        })
 }
 pub(super) struct ProtectionHold {
     process: OwnedHandle,
     thread: OwnedHandle,
     fact: AssessmentCollectorProtection,
     collector_sid: String,
+    tokens: token::Tokens,
 }
 impl ProtectionHold {
-    pub(super) fn observe(collector_sid: &str) -> Result<Self> {
+    pub(super) fn observe(collector_sid: &str, standard: HANDLE) -> Result<Self> {
         guard_no_impersonation()?;
         let pid = unsafe { GetCurrentProcessId() };
         let tid = unsafe { GetCurrentThreadId() };
@@ -285,8 +296,9 @@ impl ProtectionHold {
         if unsafe { GetProcessIdOfThread(raw(&thread)) } != pid {
             return Err("signing thread owner differs".into());
         }
+        let tokens = token::Tokens::observe(raw(&process), standard)?;
         let fact = AssessmentCollectorProtection {
-            schema_version: ASSESSMENT_COLLECTOR_PROTECTION_SCHEMA.into(),
+            schema_version: ASSESSMENT_COLLECTOR_PROTECTION_V2_SCHEMA.into(),
             storage:
                 aiw_provider_wsb::assessment_channel::ChannelCollectorStorage::ProtectedGuestLocal,
             collector_process_id: pid,
@@ -294,7 +306,8 @@ impl ProtectionHold {
             signing_thread_id: tid,
             process_security: security(raw(&process))?,
             thread_security: security(raw(&thread))?,
-            primary_default_dacl: default_dacl(raw(&process))?,
+            primary_default_dacl: default_dacl(tokens.collector())?,
+            token_provenance: Some(tokens.facts()?),
             access_checks: vec![],
         };
         Ok(Self {
@@ -302,6 +315,7 @@ impl ProtectionHold {
             thread,
             fact,
             collector_sid: collector_sid.into(),
+            tokens,
         })
     }
     /// Called ONLY inside the freshly held standard-token impersonation scope.
@@ -309,6 +323,14 @@ impl ProtectionHold {
         let sid = super::progress::effective_sid()?;
         if sid != expected_sid {
             return Err("key-boundary probe effective SID differs".into());
+        }
+        let provenance = self
+            .fact
+            .token_provenance
+            .as_ref()
+            .ok_or("collector token provenance absent")?;
+        if provenance.standard_user_sid != expected_sid {
+            return Err("held standard token differs from access-probe actor".into());
         }
         if !self.fact.access_checks.is_empty() {
             return Err("collector access probes already consumed".into());
@@ -385,19 +407,36 @@ impl ProtectionHold {
             || unsafe { GetProcessIdOfThread(raw(&self.thread)) } != self.fact.collector_process_id
             || security(raw(&self.process))? != self.fact.process_security
             || security(raw(&self.thread))? != self.fact.thread_security
-            || default_dacl(raw(&self.process))? != self.fact.primary_default_dacl
+            || default_dacl(self.tokens.collector())? != self.fact.primary_default_dacl
         {
             return Err("collector process/thread/security identity changed".into());
         }
+        self.tokens.revalidate(
+            raw(&self.process),
+            self.fact
+                .token_provenance
+                .as_ref()
+                .ok_or("collector token provenance absent")?,
+        )?;
         Ok(())
     }
     pub(super) fn require_denied(&self) -> Result<()> {
         self.revalidate()?;
+        let standard = self
+            .fact
+            .token_provenance
+            .as_ref()
+            .ok_or("collector token provenance absent")?;
+        let logon = validate_collector_token_provenance(
+            &self.fact,
+            &self.collector_sid,
+            &standard.standard_user_sid,
+        )?;
         let descriptors = [&self.fact.process_security, &self.fact.thread_security]
             .into_iter()
-            .all(|d| trusted_descriptor(d, &self.collector_sid));
+            .all(|d| trusted_descriptor(d, &self.collector_sid, logon));
         if !descriptors
-            || !trusted_default(&self.fact.primary_default_dacl, &self.collector_sid)
+            || !trusted_default(&self.fact.primary_default_dacl, &self.collector_sid, logon)
             || self.fact.access_checks.len() != 14
             || self
                 .fact
@@ -425,7 +464,7 @@ mod tests {
             trustee_sids: vec![owner.into(), "S-1-5-18".into(), "S-1-5-32-544".into()],
             parse_error: None,
         };
-        assert!(trusted_descriptor(&d, owner));
+        assert!(trusted_descriptor(&d, owner, None));
         for sid in [
             "S-1-15-2-1",
             "S-1-1-0",
@@ -434,22 +473,22 @@ mod tests {
         ] {
             let mut altered = d.clone();
             altered.trustee_sids.push(sid.into());
-            assert!(!trusted_descriptor(&altered, owner));
+            assert!(!trusted_descriptor(&altered, owner, None));
         }
         d.parse_error = Some("NULL/unsupported DACL".into());
-        assert!(!trusted_descriptor(&d, owner));
+        assert!(!trusted_descriptor(&d, owner, None));
         let mut default = AssessmentCollectorDefaultDacl {
             acl_hex: "0200080000000000".into(),
             sha256: String::new(),
             trustee_sids: vec![owner.into()],
             parse_error: None,
         };
-        assert!(trusted_default(&default, owner));
+        assert!(trusted_default(&default, owner, None));
         default.trustee_sids.push("S-1-15-2-1".into());
-        assert!(!trusted_default(&default, owner));
+        assert!(!trusted_default(&default, owner, None));
         default.trustee_sids.clear();
         default.parse_error = Some("NULL primary default DACL".into());
-        assert!(!trusted_default(&default, owner));
+        assert!(!trusted_default(&default, owner, None));
     }
     #[test]
     fn owned_descriptor_memory_exposes_package_ace_to_closed_trustee_gate() {
@@ -486,6 +525,6 @@ mod tests {
             trustee_sids: sids,
             parse_error: None,
         };
-        assert!(!trusted_descriptor(&d, "S-1-5-21-1-2-3-504"));
+        assert!(!trusted_descriptor(&d, "S-1-5-21-1-2-3-504", None));
     }
 }

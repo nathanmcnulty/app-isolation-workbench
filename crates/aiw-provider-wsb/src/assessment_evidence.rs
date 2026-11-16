@@ -32,8 +32,8 @@ fn collector_protection(
     native: &crate::assessment_observation::AssessmentNativeOutcome,
 ) -> Result<Option<bool>, String> {
     use crate::assessment_observation::{
-        ASSESSMENT_COLLECTOR_PROCESS_RIGHTS, ASSESSMENT_COLLECTOR_PROTECTION_SCHEMA,
-        ASSESSMENT_COLLECTOR_THREAD_RIGHTS, AssessmentCollectorObject as O,
+        ASSESSMENT_COLLECTOR_PROCESS_RIGHTS, ASSESSMENT_COLLECTOR_THREAD_RIGHTS,
+        AssessmentCollectorObject as O, validate_collector_token_provenance,
     };
     let Some(p) = &native.collector_protection else {
         return Ok(None);
@@ -47,13 +47,13 @@ fn collector_protection(
         .as_ref()
         .ok_or("collector protection lacks standard context")?;
     require(
-        p.schema_version == ASSESSMENT_COLLECTOR_PROTECTION_SCHEMA
-            && p.collector_process_id == setup.process_id
+        p.collector_process_id == setup.process_id
             && p.collector_process_id != 0
             && p.signing_thread_id != 0
             && canonical_birth(&p.collector_creation_time_100ns).is_some(),
         "collector protection identity/version refused",
     )?;
+    let logon = validate_collector_token_provenance(p, &setup.user_sid, &context.user_sid)?;
     let mut descriptor_policy = true;
     for descriptor in [&p.process_security, &p.thread_security] {
         error(&descriptor.parse_error)?;
@@ -76,7 +76,10 @@ fn collector_protection(
             && descriptor.sddl.contains("D:")
             && descriptor.sddl.contains("S:")
             && trusted(&descriptor.owner_sid)
-            && descriptor.trustee_sids.iter().all(|s| trusted(s));
+            && descriptor
+                .trustee_sids
+                .iter()
+                .all(|s| trusted(s) || logon == Some(s.as_str()));
     }
     let default = &p.primary_default_dacl;
     error(&default.parse_error)?;
@@ -96,10 +99,12 @@ fn collector_protection(
     )?;
     descriptor_policy &= default.parse_error.is_none()
         && acl.len() >= 8
-        && default
-            .trustee_sids
-            .iter()
-            .all(|s| s == &setup.user_sid || s == "S-1-5-18" || s == "S-1-5-32-544");
+        && default.trustee_sids.iter().all(|s| {
+            s == &setup.user_sid
+                || s == "S-1-5-18"
+                || s == "S-1-5-32-544"
+                || logon == Some(s.as_str())
+        });
     let expected: Vec<_> = ASSESSMENT_COLLECTOR_PROCESS_RIGHTS
         .into_iter()
         .map(|m| (O::CollectorProcess, m))
@@ -2832,9 +2837,230 @@ mod tests {
                 parse_error: None,
             },
             access_checks: checks,
+            token_provenance: None,
         });
         (request, result)
     }
+    fn logon_provenance_fixture() -> (
+        ApplicationAssessmentGuestRequest,
+        ApplicationAssessmentResult,
+    ) {
+        let (request, mut result) = authenticated_fixture();
+        let collector = result.native.setup_token.as_ref().unwrap().user_sid.clone();
+        let standard = result
+            .native
+            .standard_context
+            .as_ref()
+            .unwrap()
+            .user_sid
+            .clone();
+        let p = result.native.collector_protection.as_mut().unwrap();
+        p.schema_version = ASSESSMENT_COLLECTOR_PROTECTION_V2_SCHEMA.into();
+        let logon = "S-1-5-5-0-214563";
+        p.token_provenance = Some(AssessmentCollectorTokenProvenance {
+            collector_user_sid: collector,
+            collector_token_type: TokenType::Primary,
+            collector_logon_sid: logon.into(),
+            collector_logon_attributes: 0xc000_0007,
+            standard_user_sid: standard,
+            standard_groups: vec![AssessmentTokenGroup {
+                sid: "S-1-5-32-545".into(),
+                attributes: 7,
+            }],
+        });
+        for d in [&mut p.process_security, &mut p.thread_security] {
+            d.owner_sid = "S-1-5-32-544".into();
+            d.trustee_sids = vec!["S-1-5-18".into(), "S-1-5-32-544".into(), logon.into()];
+            d.sddl = format!("O:BAD:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;{logon})S:(ML;;NW;;;HI)");
+            d.sha256 = hex::encode(Sha256::digest(d.sddl.as_bytes()));
+        }
+        // Synthetic but structurally complete ACL with one allow ACE for the
+        // exact logon SID. No Windows descriptor/token observation is claimed.
+        let mut acl = vec![2, 0, 36, 0, 1, 0, 0, 0, 0, 0, 28, 0];
+        acl.extend_from_slice(&0x001f_ffff_u32.to_le_bytes());
+        acl.extend_from_slice(&[1, 3, 0, 0, 0, 0, 0, 5]);
+        for n in [5_u32, 0, 214563] {
+            acl.extend_from_slice(&n.to_le_bytes());
+        }
+        p.primary_default_dacl.acl_hex = hex::encode(&acl);
+        p.primary_default_dacl.sha256 = hex::encode(Sha256::digest(&acl));
+        p.primary_default_dacl.trustee_sids = vec![logon.into()];
+        (request, result)
+    }
+
+    #[test]
+    fn exact_collector_token_logon_provenance_preserves_all_existing_security_gates() {
+        let (request, result) = logon_provenance_fixture();
+        assert_eq!(collector_protection(&result.native).unwrap(), Some(true));
+        assert!(
+            verify_assessment_result_inner(&request, &result)
+                .unwrap()
+                .driver_complete
+        );
+        let (raw, records, _) = authenticated_records(&request, &result);
+        verify_authenticated_assessment_progress(&raw, &records, &request, &result).unwrap();
+        for index in 0..29 {
+            let mut changed = result.clone();
+            if index < 15 {
+                let f = &mut changed.native.collector_access_denials[index];
+                f.native_code = Some(0);
+                f.denied = Some(false);
+                changed.native.collector_write_denied = Some(false);
+            } else {
+                let f = &mut changed
+                    .native
+                    .collector_protection
+                    .as_mut()
+                    .unwrap()
+                    .access_checks[index - 15];
+                f.native_code = Some(0);
+                f.denied = Some(false);
+            }
+            assert!(
+                verify_assessment_result_inner(&request, &changed).is_err(),
+                "right {index}"
+            );
+        }
+        let mut owner = result.clone();
+        let p = owner.native.collector_protection.as_mut().unwrap();
+        p.process_security.owner_sid = p
+            .token_provenance
+            .as_ref()
+            .unwrap()
+            .collector_logon_sid
+            .clone();
+        assert_eq!(collector_protection(&owner.native).unwrap(), None);
+        assert!(verify_assessment_result_inner(&request, &owner).is_err());
+        let (_, old) = authenticated_fixture();
+        let legacy = old.native.collector_protection.as_ref().unwrap();
+        assert!(
+            !serde_json::to_string(legacy)
+                .unwrap()
+                .contains("tokenProvenance")
+        );
+        let mut borrowed = result.clone();
+        borrowed
+            .native
+            .collector_protection
+            .as_mut()
+            .unwrap()
+            .schema_version = ASSESSMENT_COLLECTOR_PROTECTION_SCHEMA.into();
+        assert!(collector_protection(&borrowed.native).is_err());
+    }
+
+    #[test]
+    fn collector_logon_exception_rejects_unbound_forged_membership_and_wire_shapes() {
+        let (request, result) = logon_provenance_fixture();
+        for case in 0..20 {
+            let mut changed = result.clone();
+            let p = changed.native.collector_protection.as_mut().unwrap();
+            match case {
+                0 => p.token_provenance = None,
+                1 => p.schema_version = "unknown".into(),
+                _ => {
+                    let t = p.token_provenance.as_mut().unwrap();
+                    match case {
+                        2 => t.collector_user_sid = t.standard_user_sid.clone(),
+                        3 => t.standard_user_sid = t.collector_user_sid.clone(),
+                        4 => t.collector_token_type = TokenType::Impersonation,
+                        5 => t.collector_logon_sid = "S-1-5-5-0-999".into(),
+                        6 => t.collector_logon_sid = "S-1-5-5-0-0214563".into(),
+                        7 => t.collector_logon_sid = "S-1-5-5-0-4294967296".into(),
+                        8 => t.collector_logon_sid = "S-1-5-5-214563".into(),
+                        9 => t.collector_logon_attributes = 0x4000_0007,
+                        10 => t.collector_logon_attributes = 0xc000_0003,
+                        11 => t.collector_logon_attributes |= 0x10,
+                        12 => t.standard_groups.push(AssessmentTokenGroup {
+                            sid: t.collector_logon_sid.clone(),
+                            attributes: 0x10,
+                        }),
+                        13 => t.standard_groups.push(t.standard_groups[0].clone()),
+                        14 => t.standard_groups[0].sid = "S-1-05-32-545".into(),
+                        15 => t.standard_groups = vec![t.standard_groups[0].clone(); 257],
+                        16 => t.collector_logon_sid = "S-1-15-2-1-2".into(),
+                        17 => p.collector_process_id += 1,
+                        18 => p.collector_creation_time_100ns = "0133000000000000001".into(),
+                        _ => t.standard_groups.insert(
+                            0,
+                            AssessmentTokenGroup {
+                                sid: "S-1-5-99".into(),
+                                attributes: 7,
+                            },
+                        ),
+                    }
+                }
+            }
+            assert!(
+                verify_assessment_result_inner(&request, &changed).is_err(),
+                "case {case}"
+            );
+        }
+        let provenance = result
+            .native
+            .collector_protection
+            .as_ref()
+            .unwrap()
+            .token_provenance
+            .as_ref()
+            .unwrap();
+        let raw = serde_json::to_string(provenance).unwrap();
+        let duplicate = raw.replacen('{', "{\"collectorUserSid\":\"S-1-5-18\",", 1);
+        assert!(serde_json::from_str::<AssessmentCollectorTokenProvenance>(&duplicate).is_err());
+        let extra = raw.replacen('{', "{\"unmeasuredPrivateField\":true,", 1);
+        assert!(serde_json::from_str::<AssessmentCollectorTokenProvenance>(&extra).is_err());
+    }
+
+    #[test]
+    fn collector_protection_wire_preserves_v1_absence_and_excludes_standard_user_trustee() {
+        let (_, old_result) = authenticated_fixture();
+        let legacy = old_result.native.collector_protection.as_ref().unwrap();
+        let raw = serde_json::to_vec(legacy).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<AssessmentCollectorProtection>(&raw).unwrap(),
+            *legacy
+        );
+        let (_, result) = logon_provenance_fixture();
+        let valid_provenance = serde_json::to_value(
+            result
+                .native
+                .collector_protection
+                .as_ref()
+                .unwrap()
+                .token_provenance
+                .as_ref()
+                .unwrap(),
+        )
+        .unwrap();
+        for value in [serde_json::Value::Null, valid_provenance] {
+            let mut v1 = serde_json::to_value(legacy).unwrap();
+            v1["tokenProvenance"] = value;
+            assert!(serde_json::from_value::<AssessmentCollectorProtection>(v1).is_err());
+        }
+        let protection = result.native.collector_protection.as_ref().unwrap();
+        let collector = &result.native.setup_token.as_ref().unwrap().user_sid;
+        let standard = &result.native.standard_context.as_ref().unwrap().user_sid;
+        for null_field in [false, true] {
+            let mut v2 = serde_json::to_value(protection).unwrap();
+            if null_field {
+                v2["tokenProvenance"] = serde_json::Value::Null;
+            } else {
+                v2.as_object_mut().unwrap().remove("tokenProvenance");
+            }
+            let parsed = serde_json::from_value::<AssessmentCollectorProtection>(v2).unwrap();
+            assert!(validate_collector_token_provenance(&parsed, collector, standard).is_err());
+        }
+        let mut user_collision = protection.clone();
+        let p = user_collision.token_provenance.as_mut().unwrap();
+        p.standard_user_sid = p.collector_logon_sid.clone();
+        p.standard_groups.clear();
+        let standard = p.standard_user_sid.clone();
+        // All supplied bindings match and no group duplicates the SID: the
+        // trustee is unsafe because it is the target token's USER itself.
+        assert!(
+            validate_collector_token_provenance(&user_collision, collector, &standard).is_err()
+        );
+    }
+
     // NOT cryptography: permits exercising verified-wrapper associations without
     // invoking CNG/native processes. Native signature proof is separately gated.
     struct SyntheticChannel;
