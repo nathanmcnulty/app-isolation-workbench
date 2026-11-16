@@ -496,7 +496,7 @@ pub(super) fn verify_completed(
             maximum_bytes: MAX_PROGRESS_BYTES as u64,
         });
     let verification =
-        verify_completion_receipt(&workspace.output_path(), &expectation).map_err(receipt_error)?;
+        verify_completion_receipt(workspace.output_path(), &expectation).map_err(receipt_error)?;
     let result = optional_output(workspace, "assessment-result.json", 16 * 1024 * 1024)?
         .ok_or(RunnerError::Drift)?;
     let observed = serde_json::from_slice(&result).map_err(receipt_error)?;
