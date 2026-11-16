@@ -277,6 +277,7 @@ pub(crate) struct DirectoryEntry {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct DirectoryAliasEntry {
+    file_id: u64,
     name: String,
     short_name: Option<String>,
     ea_size: u32,
@@ -2494,6 +2495,220 @@ pub(crate) fn exact_directory_entry(
     Ok(result)
 }
 
+/// Read-only observation for the seven closed authenticated transport leaves.
+/// An observed short name grants no spelling/open authority and is never used.
+pub(crate) fn assessment_channel_directory_entry(
+    file: &File,
+    kind: crate::workspace::AssessmentChannelFile,
+) -> Result<(DirectoryEntry, Option<String>, u64), ExactDisposeError> {
+    select_assessment_channel_entry(
+        extended_directory_entries(file)?,
+        directory_alias_entries(file)?,
+        kind,
+    )
+}
+
+#[cfg(test)]
+mod channel_entry_tests {
+    use super::*;
+    use crate::workspace::AssessmentChannelFile;
+    fn fixture() -> (Vec<DirectoryEntry>, Vec<DirectoryAliasEntry>) {
+        (
+            vec![DirectoryEntry {
+                name: AssessmentChannelFile::Bootstrap.leaf().into(),
+                file_id: [1; 16],
+                attributes: 0x20,
+                ea_size: 0,
+                reparse_tag: 0,
+            }],
+            vec![DirectoryAliasEntry {
+                file_id: 1,
+                name: AssessmentChannelFile::Bootstrap.leaf().into(),
+                short_name: Some("ASSESS~1.JSO".into()),
+                ea_size: 0,
+            }],
+        )
+    }
+    #[test]
+    fn fixed_long_name_can_observe_alias_but_not_case_collision_or_unsafe_entry() {
+        let (entries, aliases) = fixture();
+        let (_, alias, legacy_id) = select_assessment_channel_entry(
+            entries.clone(),
+            aliases.clone(),
+            AssessmentChannelFile::Bootstrap,
+        )
+        .unwrap();
+        assert_eq!(alias.as_deref(), Some("ASSESS~1.JSO"));
+        assert_eq!(legacy_id, 1);
+        assert!(
+            select_assessment_channel_entry(
+                entries.clone(),
+                aliases.clone(),
+                AssessmentChannelFile::Result
+            )
+            .is_err()
+        );
+        for case in 0..8 {
+            let (mut e, mut a) = fixture();
+            match case {
+                0 => e[0].name.make_ascii_uppercase(),
+                1 => a[0].name.make_ascii_uppercase(),
+                2 => {
+                    e.push(e[0].clone());
+                    a.push(a[0].clone());
+                }
+                3 => e[0].attributes |= FILE_ATTRIBUTE_REPARSE_POINT.0,
+                4 => e[0].ea_size = 1,
+                5 => a[0].ea_size = 1,
+                6 => e[0].file_id = [0; 16],
+                _ => a[0].file_id = 0,
+            }
+            assert!(
+                select_assessment_channel_entry(e, a, AssessmentChannelFile::Bootstrap).is_err(),
+                "case {case}"
+            );
+        }
+    }
+
+    #[test]
+    fn transport_metadata_rejects_an_actual_custom_extended_attribute() {
+        use std::io::Write;
+        let root = std::env::temp_dir().join(format!(
+            "aiw-channel-ea-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let result = std::panic::catch_unwind(|| {
+            let mut file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .open(root.join("inert.bin"))
+                .unwrap();
+            file.write_all(b"x").unwrap();
+            file.sync_all().unwrap();
+            assessment_channel_streams_and_eas(&file, Some(1)).unwrap();
+            let mut storage = [0u64; 3];
+            // SAFETY: aligned owned 24-byte storage, exposed only during construction.
+            let bytes =
+                unsafe { std::slice::from_raw_parts_mut(storage.as_mut_ptr().cast::<u8>(), 24) };
+            bytes[5] = 8;
+            bytes[6..8].copy_from_slice(&1u16.to_le_bytes());
+            bytes[8..16].copy_from_slice(b"AIW_TEST");
+            bytes[17] = 1; // NUL at16 followed by one value byte.
+            let mut status = IO_STATUS_BLOCK::default();
+            // SAFETY: live owned file, aligned complete FILE_FULL_EA_INFORMATION.
+            let result = unsafe {
+                windows::Wdk::Storage::FileSystem::NtSetEaFile(
+                    raw_handle(&file),
+                    &mut status,
+                    storage.as_ptr().cast(),
+                    18,
+                )
+            };
+            assert_eq!(result.0, 0);
+            assert!(assessment_channel_streams_and_eas(&file, Some(1)).is_err());
+        });
+        std::fs::remove_dir_all(root).unwrap();
+        if let Err(panic) = result {
+            std::panic::resume_unwind(panic);
+        }
+    }
+}
+
+fn select_assessment_channel_entry(
+    entries: Vec<DirectoryEntry>,
+    aliases: Vec<DirectoryAliasEntry>,
+    kind: crate::workspace::AssessmentChannelFile,
+) -> Result<(DirectoryEntry, Option<String>, u64), ExactDisposeError> {
+    if entries.len() > 10
+        || aliases.len() > 10
+        || entries.iter().any(|e| {
+            !crate::workspace::AssessmentChannelFile::ALL
+                .iter()
+                .any(|k| k.leaf() == e.name)
+                && !matches!(
+                    e.name.as_str(),
+                    "assessment-channel-bootstrap.json.pending"
+                        | "assessment-channel-terminal.json.pending"
+                        | "assessment-channel-ack.json.pending"
+                )
+        })
+    {
+        return Err(ExactDisposeError::Rejected(
+            "transport namespace is not closed".into(),
+        ));
+    }
+    let names = normalized_names(entries.iter().map(|e| e.name.clone()).collect())?;
+    if names != normalized_names(aliases.iter().map(|e| e.name.clone()).collect())? {
+        return Err(ExactDisposeError::Rejected(
+            "transport directory views disagree".into(),
+        ));
+    }
+    let leaf = kind.leaf();
+    let mut entry = entries
+        .into_iter()
+        .find(|e| e.name == leaf)
+        .ok_or_else(|| ExactDisposeError::Rejected("exact transport long name absent".into()))?;
+    let alias = aliases
+        .into_iter()
+        .find(|e| e.name == leaf)
+        .ok_or_else(|| ExactDisposeError::Rejected("exact transport alias view absent".into()))?;
+    if entry.file_id == [0; 16]
+        || alias.file_id == 0
+        || alias.ea_size != 0
+        || entry.ea_size != 0
+        || entry.reparse_tag != 0
+        || entry.attributes & (FORBIDDEN_ATTRIBUTES | FILE_ATTRIBUTE_DIRECTORY.0) != 0
+    {
+        return Err(ExactDisposeError::Rejected(
+            "transport entry type/identity/EA refused".into(),
+        ));
+    }
+    entry.ea_size = alias.ea_size;
+    Ok((entry, alias.short_name, alias.file_id))
+}
+
+pub(crate) fn assessment_channel_streams_and_eas(
+    file: &File,
+    expected_size: Option<u64>,
+) -> Result<(), ExactDisposeError> {
+    let streams = enumerate_file_streams(file, false)?;
+    if streams.len() != 1
+        || streams[0].0 != "::$DATA"
+        || expected_size.is_some_and(|size| streams[0].1 != size)
+        || !query_extended_attributes(file, false)?.entries.is_empty()
+    {
+        return Err(ExactDisposeError::Rejected(
+            "transport requires unnamed data only and no EAs".into(),
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn assessment_channel_completed_roster(file: &File) -> Result<(), ExactDisposeError> {
+    let entries = extended_directory_entries(file)?;
+    let aliases = directory_alias_entries(file)?;
+    let actual: BTreeSet<_> = entries.iter().map(|e| e.name.as_str()).collect();
+    let expected: BTreeSet<_> = crate::workspace::AssessmentChannelFile::ALL
+        .iter()
+        .map(|k| k.leaf())
+        .collect();
+    if actual != expected || entries.len() != expected.len() {
+        return Err(ExactDisposeError::Rejected(
+            "completed transport roster differs".into(),
+        ));
+    }
+    for kind in crate::workspace::AssessmentChannelFile::ALL {
+        select_assessment_channel_entry(entries.clone(), aliases.clone(), kind)?;
+    }
+    Ok(())
+}
+
 fn extended_directory_entries(file: &File) -> Result<Vec<DirectoryEntry>, ExactDisposeError> {
     let mut entries = Vec::new();
     let mut first = true;
@@ -2709,6 +2924,7 @@ fn parse_alias_directory_buffer(
                 )
             };
             entries.push(DirectoryAliasEntry {
+                file_id: info.FileId as u64,
                 name,
                 short_name,
                 ea_size: info.EaSize,

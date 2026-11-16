@@ -873,7 +873,7 @@ fn execute_wsb_golden_probe_with_channel(
     #[cfg(windows)]
     let application_output_custody = if request.application_assessment.is_some() {
         Some(finish_cleaned_attempt(layout, || {
-            assessment_channel_host::hold_output(&context.output_root)
+            assessment_channel_host::hold_output(&request.workspace)
         })?)
     } else {
         None
@@ -1138,10 +1138,7 @@ fn execute_wsb_golden_probe_with_channel(
     #[cfg(windows)]
     if let Some(files) = &application_output_custody {
         finish_cleaned_attempt(layout, || {
-            for file in files {
-                file.revalidate().map_err(|_| RunnerError::Drift)?;
-            }
-            Ok(())
+            files.revalidate().map_err(|_| RunnerError::Drift)
         })?;
     }
     #[cfg(windows)]

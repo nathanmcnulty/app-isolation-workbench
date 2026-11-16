@@ -70,7 +70,8 @@ pub use completion::{
     WINDOWS_SANDBOX_COMPLETION_RECEIPT_SCHEMA_VERSION,
     WINDOWS_SANDBOX_COMPLETION_VERIFICATION_SCHEMA_VERSION, WindowsSandboxCompletionError,
     WindowsSandboxCompletionExpectation, WindowsSandboxCompletionReceipt,
-    WindowsSandboxCompletionVerification, verify_completion_receipt,
+    WindowsSandboxCompletionVerification, verify_assessment_channel_completion,
+    verify_completion_receipt,
 };
 pub use failure_snapshots::{
     FailedSnapshotPhase, IMPORTED_MSI_FAILED_SNAPSHOTS_EVENT,

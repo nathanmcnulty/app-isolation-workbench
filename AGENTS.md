@@ -31,6 +31,8 @@
   TEMP, never the shared TEMP directory itself. Release all leases before owned
   fixture cleanup, including assertion-failure paths; do not serialize unrelated
   tests or weaken sharing checks to hide fixture interference.
+  Shared helpers need per-invocation uniqueness; a PID-only name collides when
+  several tests call the helper in parallel.
 - Before a build, measure free space on the target volume. Keep at least 10 GiB
   free before starting; reclaim verified idle build caches first if below that
   floor. Routine dev/test builds disable incremental output and debug symbols in

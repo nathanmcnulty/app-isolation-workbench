@@ -99,8 +99,9 @@ pub use windows_platform::{
 
 #[cfg(windows)]
 pub use workspace::{
-    BoundWorkspaceDirectory, BoundWorkspaceFile, CreatedWorkspaceDirectory, CreatedWorkspaceFile,
-    HeldRunWorkspace, WorkspaceAclPolicy, WorkspaceError,
+    AssessmentChannelFile, BoundWorkspaceDirectory, BoundWorkspaceFile, CreatedWorkspaceDirectory,
+    CreatedWorkspaceFile, HeldAssessmentChannelFile, HeldAssessmentChannelOutput, HeldRunWorkspace,
+    WorkspaceAclPolicy, WorkspaceError,
 };
 
 #[cfg(windows)]

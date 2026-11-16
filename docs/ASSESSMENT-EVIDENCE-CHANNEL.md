@@ -88,6 +88,38 @@ under the same reviewed security boundary. Keep the explicit application handle
 inheritance list; do not inherit collector/key authority. Missing boundary
 facts block dispatch and remain unknown in reports.
 
+## Fixed transport custody
+
+The source-9a47a5d control stopped after bootstrap: the mapped file had an
+OS-generated 8.3 alias, which the generic workspace reader deliberately refuses.
+Its directory and file ACLs matched the protected-output/inherited-file policy.
+The failed run, consumed Start and verified outer cleanup remain preserved.
+
+Signed transport uses a separate closed role enum for bootstrap, ACK, terminal,
+result, evidence, completion and signed progress. A caller cannot supply another
+path, alias, cap or sharing policy. Each opaque file hold retains its bound
+workspace ancestry, exact long-name casing, both directory views, held 128-bit
+identity and matching legacy identity, owner/SYSTEM ACL, one link, ordinary disk
+type, no reparse point, no EAs and only the unnamed data stream. An observed short
+alias is metadata; it is never opened or repaired. General intake, workspace and
+disposal readers retain their strict alias policy. No filesystem setting changes.
+
+Completed custody requires exactly these seven files, with no pending or unknown
+entries. Closed reads deny write/delete sharing and recheck bytes, identity and
+metadata. Only the fixed live progress reader permits append sharing; returned
+bytes remain bounded and require complete signed lines and unchanged prior
+prefixes. ACK readback uses the same fixed-role boundary after create-only
+publication. The mapped handshake copies must match the protected local latch.
+
+After CNG verifies the terminal and all four original raw artifacts, a pure
+completion verifier checks their closed receipt policy, hashes and evidence
+chain. The semantic reducer consumes those same raw bytes and verified records.
+The legacy filesystem completion verifier still refuses undeclared files; it
+does not gain a generic allow-extras option. The new raw-data API hashes the
+original receipt bytes; the legacy API's canonical receipt digest is unchanged.
+Filesystem/crypto fixtures cover complete failed-driver publication and malformed
+or missing output. They do not qualify application execution or isolation.
+
 ## Crash, retained reads and export
 
 Persist only the public descriptor, request, bootstrap, ACK, latched guest key

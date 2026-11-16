@@ -1,8 +1,10 @@
+use sha2::{Digest, Sha256};
 use std::ffi::c_void;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::mem::size_of;
 use std::os::windows::ffi::OsStrExt;
+use std::os::windows::fs::FileExt;
 use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle};
 use std::path::{Path, PathBuf};
@@ -31,10 +33,11 @@ use windows::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
     FILE_FLAG_WRITE_THROUGH, FILE_ID_INFO, FILE_LIST_DIRECTORY, FILE_NAME_NORMALIZED,
     FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_READ_EA, FILE_REMOTE_PROTOCOL_INFO,
-    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA,
-    FILE_WRITE_EA, FileIdInfo, FileRemoteProtocolInfo, GetDriveTypeW, GetFileInformationByHandle,
-    GetFileInformationByHandleEx, GetFinalPathNameByHandleW, GetVolumeInformationByHandleW,
-    GetVolumePathNameW, READ_CONTROL, SYNCHRONIZE, SetFileShortNameW,
+    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TYPE_DISK, FILE_WRITE_ATTRIBUTES,
+    FILE_WRITE_DATA, FILE_WRITE_EA, FileIdInfo, FileRemoteProtocolInfo, GetDriveTypeW,
+    GetFileInformationByHandle, GetFileInformationByHandleEx, GetFileType,
+    GetFinalPathNameByHandleW, GetVolumeInformationByHandleW, GetVolumePathNameW, READ_CONTROL,
+    SYNCHRONIZE, SetFileShortNameW,
 };
 use windows::Win32::System::SystemServices::ACCESS_ALLOWED_ACE_TYPE;
 use windows::Win32::System::SystemServices::FILE_PERSISTENT_ACLS;
@@ -43,6 +46,10 @@ use windows::Win32::System::WindowsProgramming::DRIVE_FIXED;
 use windows::core::{PCWSTR, PWSTR};
 
 use crate::exact_dispose::{ExactDisposeError, exact_directory_entry, rename_relative};
+use crate::exact_dispose::{
+    assessment_channel_completed_roster, assessment_channel_directory_entry,
+    assessment_channel_streams_and_eas,
+};
 
 const MAX_FINAL_PATH: usize = 32_768;
 
@@ -131,6 +138,230 @@ pub struct HeldRunWorkspace {
     output: File,
     root_path: PathBuf,
     evidence: WorkspaceBindingEvidence,
+}
+
+/// Closed authenticated transport roles; raw observations grant no evidence authority.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AssessmentChannelFile {
+    Bootstrap,
+    Acknowledgement,
+    Terminal,
+    Result,
+    Evidence,
+    Completion,
+    Progress,
+}
+impl AssessmentChannelFile {
+    pub const ALL: [Self; 7] = [
+        Self::Bootstrap,
+        Self::Acknowledgement,
+        Self::Terminal,
+        Self::Result,
+        Self::Evidence,
+        Self::Completion,
+        Self::Progress,
+    ];
+    pub const fn leaf(self) -> &'static str {
+        use aiw_provider_wsb::assessment_channel::*;
+        match self {
+            Self::Bootstrap => CHANNEL_BOOTSTRAP_LEAF,
+            Self::Acknowledgement => CHANNEL_ACK_LEAF,
+            Self::Terminal => CHANNEL_TERMINAL_LEAF,
+            Self::Result => "assessment-result.json",
+            Self::Evidence => "evidence.jsonl",
+            Self::Completion => "completion.json",
+            Self::Progress => CHANNEL_PROGRESS_LEAF,
+        }
+    }
+    pub const fn maximum_bytes(self) -> u64 {
+        use aiw_provider_wsb::assessment_channel::{
+            MAX_ACK_BYTES, MAX_BOOTSTRAP_BYTES, MAX_TERMINAL_BYTES,
+        };
+        match self {
+            Self::Bootstrap => MAX_BOOTSTRAP_BYTES as u64,
+            Self::Acknowledgement => MAX_ACK_BYTES as u64,
+            Self::Terminal => MAX_TERMINAL_BYTES as u64,
+            Self::Result | Self::Progress => 16 * 1024 * 1024,
+            Self::Evidence | Self::Completion => 1024 * 1024,
+        }
+    }
+}
+
+/// Immutable raw transport snapshot. Owns its workspace ancestry and file lease;
+/// no path constructor, File accessor, mutation or general alias policy exists.
+#[derive(Debug)]
+pub struct HeldAssessmentChannelFile {
+    workspace: HeldRunWorkspace,
+    file: File,
+    kind: AssessmentChannelFile,
+    identity: WindowsFileIdentity,
+    short_name: Option<String>,
+    size: u64,
+    sha256: [u8; 32],
+}
+impl HeldAssessmentChannelFile {
+    pub fn identity(&self) -> &WindowsFileIdentity {
+        &self.identity
+    }
+    pub fn observed_short_name(&self) -> Option<&str> {
+        self.short_name.as_deref()
+    }
+    pub fn read(&self) -> Result<Vec<u8>, WorkspaceError> {
+        self.workspace.revalidate()?;
+        if verify_channel_entry(&self.workspace, &self.file, self.kind, &self.identity)?
+            != self.short_name
+        {
+            return Err(WorkspaceError::IdentityRejected);
+        }
+        assessment_channel_streams_and_eas(&self.file, Some(self.size))
+            .map_err(channel_metadata_error)?;
+        let bytes = read_channel_bytes(&self.file, self.size, self.kind.maximum_bytes())?;
+        if <[u8; 32]>::from(Sha256::digest(&bytes)) != self.sha256
+            || verify_channel_entry(&self.workspace, &self.file, self.kind, &self.identity)?
+                != self.short_name
+        {
+            return Err(WorkspaceError::IdentityRejected);
+        }
+        assessment_channel_streams_and_eas(&self.file, Some(self.size))
+            .map_err(channel_metadata_error)?;
+        self.workspace.revalidate()?;
+        Ok(bytes)
+    }
+    pub fn revalidate(&self) -> Result<(), WorkspaceError> {
+        self.read().map(drop)
+    }
+}
+
+/// Exact seven-file completed transport custody. Pending/unknown/extra names
+/// refuse. Signature and local Start verification remain separate requirements.
+#[derive(Debug)]
+pub struct HeldAssessmentChannelOutput {
+    workspace: HeldRunWorkspace,
+    files: Vec<(AssessmentChannelFile, HeldAssessmentChannelFile)>,
+}
+impl HeldAssessmentChannelOutput {
+    pub fn open_bound(evidence: &WorkspaceBindingEvidence) -> Result<Self, WorkspaceError> {
+        let workspace = HeldRunWorkspace::reopen_bound(evidence)?;
+        assessment_channel_completed_roster(&workspace.output).map_err(channel_metadata_error)?;
+        let mut files = Vec::new();
+        for kind in AssessmentChannelFile::ALL {
+            files.push((kind, workspace.open_assessment_channel_file(kind)?));
+        }
+        let result = Self { workspace, files };
+        result.revalidate()?;
+        Ok(result)
+    }
+    pub fn read(&self, kind: AssessmentChannelFile) -> Result<Vec<u8>, WorkspaceError> {
+        self.workspace.revalidate()?;
+        assessment_channel_completed_roster(&self.workspace.output)
+            .map_err(channel_metadata_error)?;
+        let bytes = self
+            .files
+            .iter()
+            .find(|(k, _)| *k == kind)
+            .ok_or(WorkspaceError::IdentityRejected)?
+            .1
+            .read()?;
+        assessment_channel_completed_roster(&self.workspace.output)
+            .map_err(channel_metadata_error)?;
+        self.workspace.revalidate()?;
+        Ok(bytes)
+    }
+    pub fn revalidate(&self) -> Result<(), WorkspaceError> {
+        self.workspace.revalidate()?;
+        assessment_channel_completed_roster(&self.workspace.output)
+            .map_err(channel_metadata_error)?;
+        for (_, file) in &self.files {
+            file.revalidate()?;
+        }
+        assessment_channel_completed_roster(&self.workspace.output)
+            .map_err(channel_metadata_error)?;
+        self.workspace.revalidate()
+    }
+}
+
+fn channel_metadata_error(_error: ExactDisposeError) -> WorkspaceError {
+    WorkspaceError::Native {
+        operation: "closed assessment transport metadata",
+        detail: "fixed transport metadata refused".into(),
+    }
+}
+
+fn channel_io(operation: &'static str, error: std::io::Error) -> WorkspaceError {
+    WorkspaceError::Native {
+        operation,
+        detail: error.to_string(),
+    }
+}
+
+fn read_channel_bytes(file: &File, size: u64, cap: u64) -> Result<Vec<u8>, WorkspaceError> {
+    if size == 0
+        || size > cap
+        || file
+            .metadata()
+            .map_err(|e| channel_io("channel metadata", e))?
+            .len()
+            != size
+    {
+        return Err(WorkspaceError::IdentityRejected);
+    }
+    let mut bytes = vec![0; size as usize];
+    let mut offset = 0;
+    while offset < bytes.len() {
+        let n = file
+            .seek_read(&mut bytes[offset..], offset as u64)
+            .map_err(|e| channel_io("channel read", e))?;
+        if n == 0 {
+            return Err(WorkspaceError::IdentityRejected);
+        }
+        offset += n;
+    }
+    let mut tail = [0];
+    if file
+        .seek_read(&mut tail, size)
+        .map_err(|e| channel_io("channel EOF", e))?
+        != 0
+        || file
+            .metadata()
+            .map_err(|e| channel_io("channel metadata", e))?
+            .len()
+            != size
+    {
+        return Err(WorkspaceError::IdentityRejected);
+    }
+    Ok(bytes)
+}
+
+fn verify_channel_entry(
+    workspace: &HeldRunWorkspace,
+    file: &File,
+    kind: AssessmentChannelFile,
+    expected: &WindowsFileIdentity,
+) -> Result<Option<String>, WorkspaceError> {
+    let owner = OwnedSid::from_string(&workspace.evidence.owner_sid)?;
+    verify_owner_system_acl(file, &owner, false, false)?;
+    verify_created_child(&workspace.output, kind.leaf(), file, false)?;
+    // SAFETY: this file owns a live kernel handle throughout the query.
+    let file_type = unsafe { GetFileType(raw_handle(file)) };
+    if file_identity(file)? != *expected
+        || expected.volume_serial_number != workspace.evidence.output.volume_serial_number
+        || expected.volume_serial_number.bytes().all(|b| b == b'0')
+        || file_type != FILE_TYPE_DISK
+    {
+        return Err(WorkspaceError::IdentityRejected);
+    }
+    let (entry, alias, legacy_id) = assessment_channel_directory_entry(&workspace.output, kind)
+        .map_err(channel_metadata_error)?;
+    let mut basic = BY_HANDLE_FILE_INFORMATION::default();
+    // SAFETY: live held file and writable result through this query.
+    unsafe { GetFileInformationByHandle(raw_handle(file), &mut basic) }
+        .map_err(|e| native("channel legacy identity", e))?;
+    if hex::encode(entry.file_id) != expected.file_id
+        || legacy_id != ((u64::from(basic.nFileIndexHigh) << 32) | u64::from(basic.nFileIndexLow))
+    {
+        return Err(WorkspaceError::IdentityRejected);
+    }
+    Ok(alias)
 }
 
 /// A newly-created owner-and-SYSTEM-protected workspace directory.  The
@@ -878,10 +1109,37 @@ impl HeldRunWorkspace {
         Ok(available)
     }
 
-    /// One fixed authenticated transport prefix. Wide write sharing permits
-    /// append observations only; callers must authenticate complete lines and
-    /// reject changes to their previously observed prefix. No general live-file
-    /// reader or native evidence authority is exposed.
+    /// Open one closed role under a separately owned bound-workspace lease.
+    /// Captured bytes remain untrusted until the signed protocol admits them.
+    pub fn open_assessment_channel_file(
+        &self,
+        kind: AssessmentChannelFile,
+    ) -> Result<HeldAssessmentChannelFile, WorkspaceError> {
+        let workspace = Self::reopen_bound(&self.evidence)?;
+        let file = open_child_read_authority(&workspace.output, kind.leaf(), false)?;
+        let identity = file_identity(&file)?;
+        let short_name = verify_channel_entry(&workspace, &file, kind, &identity)?;
+        let size = file
+            .metadata()
+            .map_err(|e| channel_io("channel open size", e))?
+            .len();
+        assessment_channel_streams_and_eas(&file, Some(size)).map_err(channel_metadata_error)?;
+        let bytes = read_channel_bytes(&file, size, kind.maximum_bytes())?;
+        let result = HeldAssessmentChannelFile {
+            workspace,
+            file,
+            kind,
+            identity,
+            short_name,
+            size,
+            sha256: Sha256::digest(&bytes).into(),
+        };
+        result.revalidate()?;
+        Ok(result)
+    }
+
+    /// Live fixed progress prefix only. Read/write sharing permits append;
+    /// callers authenticate complete lines and reject prior-prefix rewrites.
     pub fn read_assessment_channel_progress_prefix(&self) -> Result<Vec<u8>, WorkspaceError> {
         use aiw_provider_wsb::assessment_channel::{CHANNEL_PROGRESS_LEAF, MAX_PROGRESS_BYTES};
         self.revalidate()?;
@@ -895,7 +1153,8 @@ impl HeldRunWorkspace {
         verify_owner_system_acl(&file, &owner, false, false)?;
         let identity = file_identity(&file)?;
         verify_created_child(&self.output, CHANNEL_PROGRESS_LEAF, &file, false)?;
-        verify_exact_child_entry(&self.output, CHANNEL_PROGRESS_LEAF, &identity)?;
+        verify_channel_entry(self, &file, AssessmentChannelFile::Progress, &identity)?;
+        assessment_channel_streams_and_eas(&file, None).map_err(channel_metadata_error)?;
         let length = file
             .metadata()
             .map_err(|e| WorkspaceError::Native {
@@ -914,19 +1173,22 @@ impl HeldRunWorkspace {
                 operation: "channel prefix read",
                 detail: e.to_string(),
             })?;
+        let after_length = file
+            .metadata()
+            .map_err(|e| WorkspaceError::Native {
+                operation: "channel prefix recheck",
+                detail: e.to_string(),
+            })?
+            .len();
         if bytes.len() as u64 != length
             || file_identity(&file)? != identity
-            || file
-                .metadata()
-                .map_err(|e| WorkspaceError::Native {
-                    operation: "channel prefix recheck",
-                    detail: e.to_string(),
-                })?
-                .len()
-                < length
+            || after_length < length
+            || after_length > MAX_PROGRESS_BYTES as u64
         {
             return Err(WorkspaceError::IdentityRejected);
         }
+        verify_channel_entry(self, &file, AssessmentChannelFile::Progress, &identity)?;
+        assessment_channel_streams_and_eas(&file, None).map_err(channel_metadata_error)?;
         self.revalidate()?;
         Ok(bytes)
     }
@@ -978,16 +1240,9 @@ impl HeldRunWorkspace {
             operation: "channel ACK publication",
             detail: e.to_string(),
         })?;
-        let published = self.reopen_output_file_readonly(CHANNEL_ACK_LEAF)?;
-        let mut actual = Vec::new();
-        published
-            .as_file()
-            .take(MAX_ACK_BYTES as u64 + 1)
-            .read_to_end(&mut actual)
-            .map_err(|e| WorkspaceError::Native {
-                operation: "channel ACK readback",
-                detail: e.to_string(),
-            })?;
+        let published =
+            self.open_assessment_channel_file(AssessmentChannelFile::Acknowledgement)?;
+        let actual = published.read()?;
         if actual != bytes {
             return Err(WorkspaceError::IdentityRejected);
         }
@@ -2365,6 +2620,178 @@ impl Drop for SecurityDescriptor {
 mod tests {
     use super::*;
     use std::io::{Read, Seek, SeekFrom, Write};
+
+    fn with_channel_fixture(test: impl FnOnce(&HeldRunWorkspace)) {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let owned = std::env::temp_dir().canonicalize().unwrap().join(format!(
+            "{}-{}",
+            leaf("closed-channel"),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        std::fs::create_dir(&owned).unwrap();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let workspace = HeldRunWorkspace::create(&owned, "worker").unwrap();
+            test(&workspace);
+        }));
+        std::fs::remove_dir_all(owned).unwrap();
+        if let Err(panic) = result {
+            std::panic::resume_unwind(panic);
+        }
+    }
+
+    #[test]
+    fn closed_channel_holds_exact_roster_without_granting_generic_alias_authority() {
+        with_channel_fixture(|workspace| {
+            // Normal guest-style creation may acquire an OS-generated short name.
+            // No alias, volume policy, security descriptor or privilege is changed.
+            for kind in AssessmentChannelFile::ALL {
+                std::fs::write(workspace.output_path().join(kind.leaf()), b"raw").unwrap();
+            }
+            let held = HeldAssessmentChannelOutput::open_bound(workspace.evidence()).unwrap();
+            for kind in AssessmentChannelFile::ALL {
+                assert_eq!(held.read(kind).unwrap(), b"raw");
+            }
+            let single = workspace
+                .open_assessment_channel_file(AssessmentChannelFile::Bootstrap)
+                .unwrap();
+            if let Some(alias) = single.observed_short_name() {
+                eprintln!("actual transport short-name observation: {alias}");
+                assert!(
+                    workspace
+                        .reopen_output_file_readonly(AssessmentChannelFile::Bootstrap.leaf())
+                        .is_err()
+                );
+            } else {
+                eprintln!(
+                    "short-name positive branch unmeasured: host produced no alias; synthetic alias controls cover selection only"
+                );
+            }
+            assert!(
+                std::fs::write(
+                    workspace
+                        .output_path()
+                        .join(AssessmentChannelFile::Result.leaf()),
+                    b"change"
+                )
+                .is_err()
+            );
+            assert!(
+                std::fs::remove_file(
+                    workspace
+                        .output_path()
+                        .join(AssessmentChannelFile::Result.leaf())
+                )
+                .is_err()
+            );
+            std::fs::write(workspace.output_path().join("unknown.json"), b"unknown").unwrap();
+            assert!(held.revalidate().is_err());
+            assert!(HeldAssessmentChannelOutput::open_bound(workspace.evidence()).is_err());
+            std::fs::remove_file(workspace.output_path().join("unknown.json")).unwrap();
+            held.revalidate().unwrap();
+            drop(single);
+            drop(held);
+            std::fs::remove_file(
+                workspace
+                    .output_path()
+                    .join(AssessmentChannelFile::Terminal.leaf()),
+            )
+            .unwrap();
+            assert!(HeldAssessmentChannelOutput::open_bound(workspace.evidence()).is_err());
+        });
+    }
+
+    #[test]
+    fn closed_channel_refuses_hardlinks_streams_oversize_and_directory_targets() {
+        with_channel_fixture(|workspace| {
+            let path = workspace
+                .output_path()
+                .join(AssessmentChannelFile::Bootstrap.leaf());
+            std::fs::write(&path, b"raw").unwrap();
+            let link = workspace.root_path().join("extra-link");
+            std::fs::hard_link(&path, &link).unwrap();
+            assert!(
+                workspace
+                    .open_assessment_channel_file(AssessmentChannelFile::Bootstrap)
+                    .is_err()
+            );
+            std::fs::remove_file(link).unwrap();
+            let stream = format!("{}:unexpected", path.display());
+            std::fs::write(&stream, b"stream").unwrap();
+            assert!(
+                workspace
+                    .open_assessment_channel_file(AssessmentChannelFile::Bootstrap)
+                    .is_err()
+            );
+            std::fs::remove_file(stream).unwrap();
+            OpenOptions::new()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_len(16 * 1024 + 1)
+                .unwrap();
+            assert!(
+                workspace
+                    .open_assessment_channel_file(AssessmentChannelFile::Bootstrap)
+                    .is_err()
+            );
+            std::fs::remove_file(&path).unwrap();
+            std::fs::create_dir(&path).unwrap();
+            assert!(
+                workspace
+                    .open_assessment_channel_file(AssessmentChannelFile::Bootstrap)
+                    .is_err()
+            );
+            std::fs::remove_dir(&path).unwrap();
+            let target = workspace.root_path().join("inert-target");
+            std::fs::write(&target, b"target").unwrap();
+            match std::os::windows::fs::symlink_file(&target, &path) {
+                Ok(()) => {
+                    assert!(
+                        workspace
+                            .open_assessment_channel_file(AssessmentChannelFile::Bootstrap)
+                            .is_err()
+                    );
+                    std::fs::remove_file(&path).unwrap();
+                }
+                Err(error) => {
+                    eprintln!("native reparse branch unmeasured: fixture creation refused: {error}")
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn closed_channel_snapshot_revalidation_binds_measured_id_and_bytes() {
+        with_channel_fixture(|workspace| {
+            std::fs::write(
+                workspace
+                    .output_path()
+                    .join(AssessmentChannelFile::Bootstrap.leaf()),
+                b"raw",
+            )
+            .unwrap();
+            let mut hold = workspace
+                .open_assessment_channel_file(AssessmentChannelFile::Bootstrap)
+                .unwrap();
+            let original = hold.identity.file_id.clone();
+            hold.identity.file_id = "00".repeat(16);
+            assert!(hold.read().is_err());
+            hold.identity.file_id = original;
+            hold.sha256[0] ^= 1;
+            assert!(hold.revalidate().is_err());
+        });
+        let leaves: std::collections::BTreeSet<_> = AssessmentChannelFile::ALL
+            .iter()
+            .map(|k| k.leaf())
+            .collect();
+        assert_eq!(leaves.len(), 7);
+        assert!(
+            AssessmentChannelFile::ALL
+                .iter()
+                .all(|k| !k.leaf().contains(['/', '\\', ':'])
+                    && k.maximum_bytes() <= 16 * 1024 * 1024)
+        );
+    }
 
     fn parent() -> PathBuf {
         std::env::temp_dir().canonicalize().unwrap()

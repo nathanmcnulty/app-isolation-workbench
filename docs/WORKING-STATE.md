@@ -138,53 +138,44 @@ Git tree 946bf5e992cf22085c00a61860d7a4b263cc3e73. Local exact-source release to
 are pinned once in private qualification-tools-458 (three images, 29,822,464 bytes).
 No additional build cache or full build-tree copy was created.
 
-The user-authorized VM107 OpenSSH route is operational: dedicated restricted
-key, host-key verification through the console, TCP 22 restricted to the parent
-host, and a byte-verified SCP round trip. No parent firewall change was made.
-The earlier marker listener is stopped; its firewall prompt was cancelled.
-The obsolete packet/delta constructors remain unexecuted.
+The user-authorized VM107 SSH/SCP route is operational with a console-verified
+host key, dedicated restricted key and TCP 22 restricted to the parent host.
+No parent firewall change was made; the prior marker listener is stopped.
+Ordinary Core console PID 6636 is bound by its full birth time.
 
-R7 tools from source 458bf68 were copied directly from the single pinned image
-set. The reviewed data-only guest verifier admitted all five payload hashes,
-sizes, single-link identities and closed namespace, then published the directory
-without AIW/provider execution. Independent admission passed. Fresh ordinary
-Core 7.6.10 console PID 6636 is bound by its full process birth time. Its readonly
-custody bootstrap loaded, and generic Inspect, Export, Verify and Prepare
-completed. Actual ordinary run assessment-1794822472455079100 has plan hash
-ffbb4f239d8c426538b52743b07cda7a4d4087e53d8b8fd58d037cdba4d8a86d.
-Independent original-plan admission passed; separate approval and Start ran in
-that exact ordinary console. Start failed after the collector published its
-bootstrap. Its signature and bindings independently verify; no latch/ACK or
-application result exists. Original diagnostics show one exact-ID Start,
-connect and stop, with two final empty lists and cleanupComplete=true. Retained
-Read reports incompleteOrUnauthenticatedPublication with no function/isolation
-credit. Never replay this consumed approval/Start.
+R7 (source 458bf68) and R8 (source 9a47a5d) each stopped after collector bootstrap,
+with no committed latch/ACK or application result. Preserve both consumed Starts.
+R7 exposed the wrong inherited/protected output expectation. R8 independently
+observed a generated bootstrap short alias; the generic reader refused it.
+Original R8 diagnostics show one exact Start/connect/stop and two final empty
+lists, with cleanupComplete=true. Retained Read gives
+incompleteOrUnauthenticatedPublication and no function/isolation credit.
 
-Review found a source contradiction: optional_output reopened the protected
-output directory with an Inherited ACL expectation. The narrow correction
-requires Protected, retaining exact ACL verification. A focused Windows
-regression covers missing/present bootstrap, the rejected inherited expectation,
-size bound, existing traversal target and directory collision. Three channel
-tests and consequential source review passed. Source 9a47a5d built twice in the
-same cache at 2,180,364,597 bytes / 2,916 files; pass two compiled nothing and
-kept identical tool hashes. Release ended at 2,180,349,895 bytes. Independent
-source/command/PE/hash admission passed. Only the changed CLI was pinned anew;
-unchanged guest/fixture images reference the existing immutable set.
+Source 9a47a5d built twice in the same cache at 2,180,364,597 bytes / 2,916 files;
+pass two compiled nothing and kept identical hashes. Release ended at
+2,180,349,895 bytes. Independent source/command/PE/hash admission passed. Only the
+changed CLI was pinned anew; unchanged guest/fixture images reference the prior
+immutable set. No additional build directory or full build-tree copy was created.
 
-CI 43846478148 correctly failed the parallel workspace check: the new regression
-retained write authority on shared TEMP, conflicting with export ancestry
-leases. MSRV/desktop passed; this failed Verify run is not accepted. A test-only
-correction uses a private parent and catches assertion unwinding before owned
-cleanup. A deterministic sibling test observes error 32 through the held writer
-parent and accepts an independent sibling without weakening production checks.
-The normal parallel runner suite now passes 161 / 0 failed / 9 ignored; review
-confirms unchanged production prefixes. Final Clippy and governance passed; corrected
-hosted CI remains a gate. The R8 source packet is frozen for independent review;
-corrected-source native qualification has not occurred.
-Full signed originals/local-anchor admission, native 15/14/default-DACL facts,
-cleanup and retained Read stability remain required. Qualify ordinary/classic
-positives, timeout/overflow negatives and controlled interruption/exact recovery
-before either external fixture. jq and SQLite payloads/provenance and the same
-data-driven private harness are ready but have never executed. Native setup
-refusals are driver blockers, not application incompatibility. No fallback or
-additional privilege/runtime/VM/security change follows from these results.
+The test-only private-parent fix at dc05731 passed CI 43848997429: all three jobs,
+actual workspace passed=true / exit 0 / 472.44 seconds, audit and governance.
+Tested merge eb942aa has the identical tree
+6bb08e0550dd603bc88d9b14d60e5d4284509d41. Earlier failed CI runs remain unaccepted.
+
+Current uncommitted transport correction adds closed-role alias-aware raw-file
+custody, exact seven-file completion, unchanged strict generic intake, and pure
+completion verification after CNG binds the original four artifacts. See
+[channel design](ASSESSMENT-EVIDENCE-CHANNEL.md). Independent cross-boundary and
+platform source reviews passed. Focused checks passed: five host/CNG tests with
+all seven actual short aliases, sixteen provider tests and twelve platform
+tests. One native symlink fixture could not be created without privilege; its
+branch remains unmeasured. Full affected suites passed: provider 146, runner 163 (9 ignored), platform 222
+(10 ignored). Clippy and governance passed. A new source-pinned build precedes
+any further native trial.
+
+Qualify ordinary/classic positives, timeout/overflow negatives and controlled
+interruption/exact recovery before either external fixture. jq and SQLite
+payloads/provenance and the same data-driven private harness are ready but have
+never executed. These setup refusals are driver failures, not application
+incompatibility. No fallback or additional privilege/runtime/VM/security change
+follows from these results.

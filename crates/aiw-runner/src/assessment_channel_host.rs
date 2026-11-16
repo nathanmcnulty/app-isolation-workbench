@@ -8,7 +8,10 @@ use aiw_provider_wsb::assessment_request::{
     ApplicationAssessmentGuestRequest, AssessmentChannelRequest, assessment_value_sha256,
 };
 use aiw_windows_platform::assessment_channel_crypto::{self, AssessmentSigningKey};
-use aiw_windows_platform::{BoundWorkspaceDirectory, HeldRunWorkspace, WorkspaceAclPolicy};
+use aiw_windows_platform::{
+    AssessmentChannelFile, BoundWorkspaceDirectory, HeldAssessmentChannelOutput, HeldRunWorkspace,
+    WorkspaceAclPolicy,
+};
 
 const DESCRIPTOR_FILE: &str = "assessment-channel-execution.json";
 const LATCH_FILE: &str = "assessment-channel-latch.json";
@@ -375,28 +378,21 @@ pub(super) struct CompletedChannelEvidence {
     pub evidence: aiw_provider_wsb::assessment_evidence::VerifiedAssessmentEvidence,
 }
 pub(super) fn hold_output(
-    output: &Path,
-) -> Result<Vec<aiw_windows_platform::HeldApplicationFile>, RunnerError> {
-    [
-        ("assessment-result.json", 16 * 1024 * 1024),
-        ("evidence.jsonl", 1024 * 1024),
-        ("completion.json", 1024 * 1024),
-        (CHANNEL_PROGRESS_LEAF, MAX_PROGRESS_BYTES as u64),
-        (CHANNEL_TERMINAL_LEAF, MAX_TERMINAL_BYTES as u64),
-    ]
-    .into_iter()
-    .map(|(leaf, cap)| {
-        aiw_windows_platform::HeldApplicationFile::open_bounded(&output.join(leaf), cap)
-            .map_err(|_| RunnerError::Drift)
-    })
-    .collect()
+    workspace: &WorkspaceBindingEvidence,
+) -> Result<HeldAssessmentChannelOutput, RunnerError> {
+    HeldAssessmentChannelOutput::open_bound(workspace).map_err(transport_error)
+}
+struct ReplayedLatch {
+    session: AssessmentChannelSession,
+    bootstrap: Vec<u8>,
+    acknowledgement: Vec<u8>,
 }
 fn replay_public_latch(
     workspace: &HeldRunWorkspace,
     layout: &RunLayout,
     descriptor: &ExecutionDescriptor,
     transaction: &SessionTransaction,
-) -> Result<AssessmentChannelSession, RunnerError> {
+) -> Result<ReplayedLatch, RunnerError> {
     let expected = transaction
         .transitions
         .last()
@@ -440,7 +436,14 @@ fn replay_public_latch(
             &CngVerifier,
         )
         .map_err(receipt_error)?;
-    Ok(session)
+    Ok(ReplayedLatch {
+        session,
+        bootstrap: latch.bootstrap.canonical_wire().map_err(receipt_error)?,
+        acknowledgement: latch
+            .acknowledgement
+            .canonical_wire()
+            .map_err(receipt_error)?,
+    })
 }
 
 pub(super) fn verify_completed(
@@ -450,9 +453,36 @@ pub(super) fn verify_completed(
     transaction: &SessionTransaction,
 ) -> Result<CompletedChannelEvidence, RunnerError> {
     let descriptor = validate_recovery_authority(workspace, layout, plan, transaction)?;
-    let mut session = replay_public_latch(workspace, layout, &descriptor, transaction)?;
-    let progress = optional_output(workspace, CHANNEL_PROGRESS_LEAF, MAX_PROGRESS_BYTES as u64)?
-        .ok_or(RunnerError::Drift)?;
+    let replay = replay_public_latch(workspace, layout, &descriptor, transaction)?;
+    let held = hold_output(workspace.evidence())?;
+    verify_closed_publication(&held, &descriptor.request, replay)
+}
+
+// This private core is reached only after the committed local Start/latch has
+// been verified. Filesystem custody or an imported self-chosen key alone never
+// grants execution origin or application evidence authority.
+fn verify_closed_publication(
+    held: &HeldAssessmentChannelOutput,
+    request: &ApplicationAssessmentGuestRequest,
+    replay: ReplayedLatch,
+) -> Result<CompletedChannelEvidence, RunnerError> {
+    if held
+        .read(AssessmentChannelFile::Bootstrap)
+        .map_err(transport_error)?
+        != replay.bootstrap
+        || held
+            .read(AssessmentChannelFile::Acknowledgement)
+            .map_err(transport_error)?
+            != replay.acknowledgement
+    {
+        return Err(RunnerError::Receipt(
+            "mapped handshake differs from the committed local latch".into(),
+        ));
+    }
+    let mut session = replay.session;
+    let progress = held
+        .read(AssessmentChannelFile::Progress)
+        .map_err(transport_error)?;
     let mut records = Vec::new();
     let mut raw = Vec::new();
     let mut consumed = 0;
@@ -468,13 +498,18 @@ pub(super) fn verify_completed(
             "signed terminal journal is incomplete".into(),
         ));
     }
-    let terminal = optional_output(workspace, CHANNEL_TERMINAL_LEAF, MAX_TERMINAL_BYTES as u64)?
-        .ok_or(RunnerError::Drift)?;
+    let terminal = held
+        .read(AssessmentChannelFile::Terminal)
+        .map_err(transport_error)?;
     let terminal = session
         .accept_terminal(&terminal, &CngVerifier)
         .map_err(receipt_error)?;
-    verify_artifacts(workspace, &terminal)?;
-    let request = &descriptor.request;
+    let artifacts = verify_artifacts(held, &terminal)?;
+    if artifacts.progress != raw {
+        return Err(RunnerError::Receipt(
+            "closed signed progress changed during admission".into(),
+        ));
+    }
     let mut expectation = completion_expectation(
         &request.run_id,
         &request.sandbox_id,
@@ -495,28 +530,28 @@ pub(super) fn verify_completed(
             media_type: "application/x-ndjson".into(),
             maximum_bytes: MAX_PROGRESS_BYTES as u64,
         });
-    let verification =
-        verify_completion_receipt(workspace.output_path(), &expectation).map_err(receipt_error)?;
-    let result = optional_output(workspace, "assessment-result.json", 16 * 1024 * 1024)?
-        .ok_or(RunnerError::Drift)?;
-    let observed = serde_json::from_slice(&result).map_err(receipt_error)?;
-    let evidence =
-        optional_output(workspace, "evidence.jsonl", 1024 * 1024)?.ok_or(RunnerError::Drift)?;
-    let receipt =
-        optional_output(workspace, "completion.json", 1024 * 1024)?.ok_or(RunnerError::Drift)?;
+    let verification = aiw_provider_wsb::verify_assessment_channel_completion(
+        &expectation,
+        &artifacts.completion,
+        &artifacts.result,
+        &artifacts.evidence,
+        &artifacts.progress,
+    )
+    .map_err(receipt_error)?;
+    let observed = serde_json::from_slice(&artifacts.result).map_err(receipt_error)?;
     let evidence = aiw_provider_wsb::assessment_evidence::verify_authenticated_assessment_evidence(
         &terminal,
-        &evidence,
+        &artifacts.evidence,
         &verification.evidence_root_hash,
-        &result,
-        &receipt,
+        &artifacts.result,
+        &artifacts.completion,
         &raw,
         &records,
         request,
         &observed,
     )
     .map_err(receipt_error)?;
-    workspace.revalidate().map_err(|_| RunnerError::Drift)?;
+    held.revalidate().map_err(transport_error)?;
     Ok(CompletedChannelEvidence {
         verification,
         observed,
@@ -538,7 +573,7 @@ pub(super) fn verify_prefix(
     {
         return Ok(None);
     }
-    let mut session = replay_public_latch(workspace, layout, &descriptor, transaction)?;
+    let mut session = replay_public_latch(workspace, layout, &descriptor, transaction)?.session;
     match fs::symlink_metadata(workspace.output_path().join(CHANNEL_PROGRESS_LEAF)) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(_) => return Err(RunnerError::Drift),
@@ -546,7 +581,7 @@ pub(super) fn verify_prefix(
     }
     let prefix = workspace
         .read_assessment_channel_progress_prefix()
-        .map_err(|_| RunnerError::Drift)?;
+        .map_err(transport_error)?;
     let mut records = Vec::new();
     let mut raw = Vec::new();
     let mut consumed = 0;
@@ -565,20 +600,24 @@ pub(super) fn verify_prefix(
 
 fn optional_output(
     workspace: &HeldRunWorkspace,
-    leaf: &str,
-    cap: u64,
+    kind: AssessmentChannelFile,
 ) -> Result<Option<Vec<u8>>, RunnerError> {
-    match fs::symlink_metadata(workspace.output_path().join(leaf)) {
+    match fs::symlink_metadata(workspace.output_path().join(kind.leaf())) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(_) => Err(RunnerError::Drift),
-        Ok(m) if m.is_file() && !m.file_type().is_symlink() => {
-            let directory = workspace
-                .reopen_root_directory("output", WorkspaceAclPolicy::Protected)
-                .map_err(|_| RunnerError::Drift)?;
-            read_exact(&directory, leaf, cap).map(Some)
-        }
+        Ok(m) if m.is_file() && !m.file_type().is_symlink() => workspace
+            .open_assessment_channel_file(kind)
+            .and_then(|file| file.read())
+            .map(Some)
+            .map_err(transport_error),
         _ => Err(RunnerError::Drift),
     }
+}
+fn transport_error(error: aiw_windows_platform::WorkspaceError) -> RunnerError {
+    RunnerError::Receipt(format!(
+        "signed collector transport refused: {}",
+        error.to_string().chars().take(1024).collect::<String>()
+    ))
 }
 fn output_budget(workspace: &HeldRunWorkspace) -> Result<(), RunnerError> {
     if workspace
@@ -672,11 +711,8 @@ impl AuthenticatedAssessmentChannel for StartChannel {
             }
             output_budget(&workspace)?;
             if !session.ack_verified() {
-                if let Some(bytes) = optional_output(
-                    &workspace,
-                    CHANNEL_BOOTSTRAP_LEAF,
-                    MAX_BOOTSTRAP_BYTES as u64,
-                )? {
+                if let Some(bytes) = optional_output(&workspace, AssessmentChannelFile::Bootstrap)?
+                {
                     let bootstrap = session
                         .latch_bootstrap(&bytes, &CngVerifier)
                         .map_err(receipt_error)?;
@@ -725,7 +761,7 @@ impl AuthenticatedAssessmentChannel for StartChannel {
                     Ok(_) => {
                         let prefix = workspace
                             .read_assessment_channel_progress_prefix()
-                            .map_err(|_| RunnerError::Drift)?;
+                            .map_err(transport_error)?;
                         ingest_prefix(
                             &mut session,
                             &mut records,
@@ -736,16 +772,22 @@ impl AuthenticatedAssessmentChannel for StartChannel {
                     }
                 }
                 if let Some(terminal) =
-                    optional_output(&workspace, CHANNEL_TERMINAL_LEAF, MAX_TERMINAL_BYTES as u64)?
+                    optional_output(&workspace, AssessmentChannelFile::Terminal)?
                 {
                     // The terminal can appear after this iteration's prefix
                     // sample. Consume the final closed journal first.
-                    let complete = optional_output(
-                        &workspace,
-                        CHANNEL_PROGRESS_LEAF,
-                        MAX_PROGRESS_BYTES as u64,
-                    )?
-                    .ok_or(RunnerError::Drift)?;
+                    let held = hold_output(workspace.evidence())?;
+                    let final_terminal = held
+                        .read(AssessmentChannelFile::Terminal)
+                        .map_err(transport_error)?;
+                    if terminal != final_terminal {
+                        return Err(RunnerError::Receipt(
+                            "signed terminal changed before closed custody".into(),
+                        ));
+                    }
+                    let complete = held
+                        .read(AssessmentChannelFile::Progress)
+                        .map_err(transport_error)?;
                     ingest_prefix(
                         &mut session,
                         &mut records,
@@ -761,7 +803,8 @@ impl AuthenticatedAssessmentChannel for StartChannel {
                     let verified = session
                         .accept_terminal(&terminal, &CngVerifier)
                         .map_err(receipt_error)?;
-                    verify_artifacts(&workspace, &verified)?;
+                    let _ = verify_artifacts(&held, &verified)?;
+                    held.revalidate().map_err(transport_error)?;
                     return Ok(());
                 }
             }
@@ -795,20 +838,51 @@ fn ingest_prefix(
     Ok(())
 }
 
+struct RawChannelArtifacts {
+    result: Vec<u8>,
+    evidence: Vec<u8>,
+    completion: Vec<u8>,
+    progress: Vec<u8>,
+}
+
 fn verify_artifacts(
-    workspace: &HeldRunWorkspace,
+    held: &HeldAssessmentChannelOutput,
     terminal: &VerifiedChannelRecord,
-) -> Result<(), RunnerError> {
-    let AssessmentChannelPayload::Terminal { artifacts, .. } = &terminal.record().payload else {
+) -> Result<RawChannelArtifacts, RunnerError> {
+    let AssessmentChannelPayload::Terminal { .. } = &terminal.record().payload else {
         return Err(RunnerError::Drift);
     };
-    for artifact in artifacts {
-        let raw = optional_output(workspace, &artifact.path, artifact.size_bytes)?
-            .ok_or(RunnerError::Drift)?;
-        verify_channel_artifact(terminal, artifact.role, &raw).map_err(receipt_error)?;
+    let artifacts = RawChannelArtifacts {
+        result: held
+            .read(AssessmentChannelFile::Result)
+            .map_err(transport_error)?,
+        evidence: held
+            .read(AssessmentChannelFile::Evidence)
+            .map_err(transport_error)?,
+        completion: held
+            .read(AssessmentChannelFile::Completion)
+            .map_err(transport_error)?,
+        progress: held
+            .read(AssessmentChannelFile::Progress)
+            .map_err(transport_error)?,
+    };
+    for (role, bytes) in [
+        (ChannelArtifactRole::Result, artifacts.result.as_slice()),
+        (ChannelArtifactRole::Evidence, artifacts.evidence.as_slice()),
+        (
+            ChannelArtifactRole::Completion,
+            artifacts.completion.as_slice(),
+        ),
+        (ChannelArtifactRole::Progress, artifacts.progress.as_slice()),
+    ] {
+        verify_channel_artifact(terminal, role, bytes).map_err(receipt_error)?;
     }
-    Ok(())
+    Ok(artifacts)
 }
+
+#[cfg(test)]
+#[path = "assessment_channel_publication_tests.rs"]
+mod publication_tests;
 
 #[cfg(test)]
 mod tests {
@@ -827,7 +901,7 @@ mod tests {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let workspace = HeldRunWorkspace::create(&parent, "worker").unwrap();
             assert!(
-                optional_output(&workspace, CHANNEL_BOOTSTRAP_LEAF, 16)
+                optional_output(&workspace, AssessmentChannelFile::Bootstrap)
                     .unwrap()
                     .is_none()
             );
@@ -846,10 +920,15 @@ mod tests {
             file.sync_all().unwrap();
             drop(file);
             assert_eq!(
-                optional_output(&workspace, CHANNEL_BOOTSTRAP_LEAF, 16).unwrap(),
+                optional_output(&workspace, AssessmentChannelFile::Bootstrap).unwrap(),
                 Some(b"inert bootstrap".to_vec())
             );
-            assert!(optional_output(&workspace, CHANNEL_BOOTSTRAP_LEAF, 14).is_err());
+            std::fs::write(
+                workspace.output_path().join(CHANNEL_BOOTSTRAP_LEAF),
+                vec![0; MAX_BOOTSTRAP_BYTES + 1],
+            )
+            .unwrap();
+            assert!(optional_output(&workspace, AssessmentChannelFile::Bootstrap).is_err());
             // Ensure the traversal target exists so this exercises the held
             // reader's leaf validation rather than the optional absent case.
             let mut plan = workspace
@@ -858,10 +937,16 @@ mod tests {
                 .into_file();
             plan.write_all(b"inert plan").unwrap();
             drop(plan);
-            assert!(optional_output(&workspace, "../plan.json", 1024).is_err());
-            let directory = workspace.create_output_directory_new("collision").unwrap();
+            assert!(
+                workspace
+                    .reopen_output_file_readonly("../plan.json")
+                    .is_err()
+            );
+            let directory = workspace
+                .create_output_directory_new(CHANNEL_TERMINAL_LEAF)
+                .unwrap();
             drop(directory);
-            assert!(optional_output(&workspace, "collision", 16).is_err());
+            assert!(optional_output(&workspace, AssessmentChannelFile::Terminal).is_err());
             workspace.revalidate().unwrap();
         }));
         // All workspace/file leases leave scope on success or unwind before

@@ -164,6 +164,8 @@ pub enum WindowsSandboxCompletionError {
     EvidenceRootMismatch,
     #[error("completion output changed while it was being verified")]
     OutputChangedDuringVerification,
+    #[error("assessment channel completion requires its closed three-artifact policy")]
+    InvalidAssessmentChannelPolicy,
     #[error(transparent)]
     Bundle(#[from] AssessmentBundleError),
     #[error(transparent)]
@@ -264,6 +266,125 @@ pub fn verify_completion_receipt(
         evidence_root_hash: receipt.evidence_root_hash,
         artifact_count: first_manifest.artifact_count,
         total_bytes: first_manifest.total_bytes,
+        status: receipt.status,
+        exit_code: receipt.exit_code,
+        run_binding_verified: true,
+        artifact_hashes_verified: true,
+        evidence_chain_verified: true,
+        receipt_verified: true,
+        successful: receipt.status == CompletionStatus::Succeeded,
+    })
+}
+
+/// Verify completion data from the four ORIGINAL, already authenticated byte
+/// slices. This performs no filesystem or channel-signature verification and
+/// grants no execution-origin, application-success or isolation authority. The
+/// caller must first bind all four slices to its independently anchored CNG
+/// terminal and subsequently apply the assessment semantic verifier.
+///
+/// Unlike the historical filesystem API's canonical receipt digest, this API's
+/// `receipt_sha256` hashes the exact supplied receipt bytes, including whitespace.
+pub fn verify_assessment_channel_completion(
+    expectation: &WindowsSandboxCompletionExpectation,
+    raw_receipt: &[u8],
+    raw_result: &[u8],
+    raw_evidence: &[u8],
+    raw_progress: &[u8],
+) -> Result<WindowsSandboxCompletionVerification, WindowsSandboxCompletionError> {
+    validate_expectation(expectation)?;
+    let roster = [
+        (
+            "assessment-result.json",
+            ArtifactRole::ScenarioResults,
+            "application/json",
+            16 * 1024 * 1024,
+            raw_result,
+        ),
+        (
+            "evidence.jsonl",
+            ArtifactRole::EvidenceLog,
+            "application/x-ndjson",
+            1024 * 1024,
+            raw_evidence,
+        ),
+        (
+            crate::assessment_channel::CHANNEL_PROGRESS_LEAF,
+            ArtifactRole::DiagnosticLog,
+            "application/x-ndjson",
+            crate::assessment_channel::MAX_PROGRESS_BYTES as u64,
+            raw_progress,
+        ),
+    ];
+    if expectation.receipt_path != "completion.json"
+        || expectation.evidence_log_path != "evidence.jsonl"
+        || expectation.artifacts.len() != roster.len()
+    {
+        return Err(WindowsSandboxCompletionError::InvalidAssessmentChannelPolicy);
+    }
+    if raw_receipt.len() as u64 > MAX_RECEIPT_BYTES {
+        return Err(WindowsSandboxCompletionError::ReceiptTooLarge);
+    }
+    let mut measured = Vec::with_capacity(roster.len());
+    let mut total_bytes = 0_u64;
+    for (path, role, media_type, maximum, bytes) in roster {
+        let policy = expectation
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.path == path)
+            .ok_or(WindowsSandboxCompletionError::InvalidAssessmentChannelPolicy)?;
+        if policy.role != role || policy.media_type != media_type || policy.maximum_bytes > maximum
+        {
+            return Err(WindowsSandboxCompletionError::InvalidAssessmentChannelPolicy);
+        }
+        let size_bytes = bytes.len() as u64;
+        if size_bytes > policy.maximum_bytes
+            || (bytes.is_empty() && role != ArtifactRole::EvidenceLog)
+        {
+            return Err(WindowsSandboxCompletionError::ArtifactMismatch);
+        }
+        total_bytes = total_bytes
+            .checked_add(size_bytes)
+            .ok_or(WindowsSandboxCompletionError::ArtifactMismatch)?;
+        // Fixed safe paths/media/roles and validate_expectation satisfy the
+        // bundle-spec invariants. These are exactly the same measured metadata
+        // and raw-byte SHA fields build_assessment_bundle would produce, without
+        // inventing a filesystem tree or extending its namespace allowlist.
+        measured.push(aiw_evidence::BundleArtifact {
+            path: path.into(),
+            role,
+            class: aiw_evidence::ArtifactClass::Evidence,
+            sensitivity: policy.sensitivity,
+            media_type: media_type.into(),
+            size_bytes,
+            sha256: hex::encode(Sha256::digest(bytes)),
+        });
+    }
+    measured.sort_by_key(|artifact| normalize_path(&artifact.path));
+    let receipt: WindowsSandboxCompletionReceipt =
+        serde_json::from_slice(raw_receipt).map_err(|_| {
+            WindowsSandboxCompletionError::ReceiptJson(
+                "strict assessment channel receipt refused".into(),
+            )
+        })?;
+    validate_receipt(expectation, &receipt)?;
+    verify_reported_artifacts(expectation, &receipt, &measured)?;
+    let records = parse_evidence_records(raw_evidence)?;
+    if records.is_empty() {
+        return Err(WindowsSandboxCompletionError::EmptyEvidenceLog);
+    }
+    let manifest = verify_records(&records)?;
+    if receipt.evidence_root_hash != manifest.root_hash {
+        return Err(WindowsSandboxCompletionError::EvidenceRootMismatch);
+    }
+    Ok(WindowsSandboxCompletionVerification {
+        schema_version: WINDOWS_SANDBOX_COMPLETION_VERIFICATION_SCHEMA_VERSION.into(),
+        run_id: receipt.run_id,
+        sandbox_id: receipt.sandbox_id,
+        config_sha256: receipt.config_sha256,
+        receipt_sha256: hex::encode(Sha256::digest(raw_receipt)),
+        evidence_root_hash: receipt.evidence_root_hash,
+        artifact_count: measured.len() as u64,
+        total_bytes,
         status: receipt.status,
         exit_code: receipt.exit_code,
         run_binding_verified: true,
@@ -721,6 +842,342 @@ mod tests {
         )
         .unwrap();
         (root, expectation, receipt)
+    }
+
+    #[derive(Clone)]
+    struct ChannelFixture {
+        expectation: WindowsSandboxCompletionExpectation,
+        receipt: WindowsSandboxCompletionReceipt,
+        result: Vec<u8>,
+        evidence: Vec<u8>,
+        progress: Vec<u8>,
+    }
+
+    impl ChannelFixture {
+        fn new() -> Self {
+            let mut log = EvidenceLog::new();
+            log.append(EvidenceEvent {
+                observed_utc: "untrusted-fixture-time".into(),
+                kind: "completion-fixture".into(),
+                source: "pure-test".into(),
+                payload: serde_json::json!({"flag": true}),
+            })
+            .unwrap();
+            let mut evidence = Vec::new();
+            for record in log.records() {
+                serde_json::to_writer(&mut evidence, record).unwrap();
+                evidence.push(b'\n');
+            }
+            // Completion hashes opaque artifacts. These are deliberately NOT
+            // application-semantic or CNG fixtures; callers must verify those.
+            let result = b"{\"synthetic\":true}\n".to_vec();
+            let progress = b"opaque signed-progress fixture bytes\n".to_vec();
+            let policies = [
+                (
+                    "assessment-result.json",
+                    ArtifactRole::ScenarioResults,
+                    DataSensitivity::Internal,
+                    "application/json",
+                    16 * 1024 * 1024,
+                    result.as_slice(),
+                ),
+                (
+                    "evidence.jsonl",
+                    ArtifactRole::EvidenceLog,
+                    DataSensitivity::Internal,
+                    "application/x-ndjson",
+                    1024 * 1024,
+                    evidence.as_slice(),
+                ),
+                (
+                    crate::assessment_channel::CHANNEL_PROGRESS_LEAF,
+                    ArtifactRole::DiagnosticLog,
+                    DataSensitivity::Confidential,
+                    "application/x-ndjson",
+                    16 * 1024 * 1024,
+                    progress.as_slice(),
+                ),
+            ];
+            let expectation = WindowsSandboxCompletionExpectation {
+                schema_version: WINDOWS_SANDBOX_COMPLETION_EXPECTATION_SCHEMA_VERSION.into(),
+                run_id: "channel-fixture".into(),
+                sandbox_id: "12345678-1234-abcd-9876-1234567890ab".into(),
+                config_sha256: "a".repeat(64),
+                request_sha256: "b".repeat(64),
+                agent_sha256: "c".repeat(64),
+                receipt_path: "completion.json".into(),
+                evidence_log_path: "evidence.jsonl".into(),
+                content_declaration: ContentDeclaration::NoKnownSecrets,
+                artifacts: policies
+                    .iter()
+                    .map(
+                        |(path, role, sensitivity, media, cap, _)| CompletionArtifactExpectation {
+                            path: (*path).into(),
+                            role: *role,
+                            sensitivity: *sensitivity,
+                            media_type: (*media).into(),
+                            maximum_bytes: *cap,
+                        },
+                    )
+                    .collect(),
+            };
+            let receipt = WindowsSandboxCompletionReceipt {
+                schema_version: WINDOWS_SANDBOX_COMPLETION_RECEIPT_SCHEMA_VERSION.into(),
+                run_id: expectation.run_id.clone(),
+                sandbox_id: expectation.sandbox_id.clone(),
+                config_sha256: expectation.config_sha256.clone(),
+                request_sha256: expectation.request_sha256.clone(),
+                agent_sha256: expectation.agent_sha256.clone(),
+                status: CompletionStatus::Succeeded,
+                exit_code: 0,
+                evidence_root_hash: log.manifest().unwrap().root_hash,
+                artifacts: policies
+                    .iter()
+                    .map(|(path, role, _, media, _, bytes)| CompletionArtifact {
+                        path: (*path).into(),
+                        role: *role,
+                        media_type: (*media).into(),
+                        size_bytes: bytes.len() as u64,
+                        sha256: hex::encode(Sha256::digest(bytes)),
+                    })
+                    .collect(),
+            };
+            Self {
+                expectation,
+                receipt,
+                result,
+                evidence,
+                progress,
+            }
+        }
+
+        fn raw_receipt(&self) -> Vec<u8> {
+            let mut bytes = serde_json::to_vec_pretty(&self.receipt).unwrap();
+            bytes.extend_from_slice(b"\r\n");
+            bytes
+        }
+
+        fn verify(
+            &self,
+        ) -> Result<WindowsSandboxCompletionVerification, WindowsSandboxCompletionError> {
+            verify_assessment_channel_completion(
+                &self.expectation,
+                &self.raw_receipt(),
+                &self.result,
+                &self.evidence,
+                &self.progress,
+            )
+        }
+    }
+
+    #[test]
+    fn channel_completion_hashes_original_bytes_and_preserves_failed_status() {
+        let mut f = ChannelFixture::new();
+        f.receipt.artifacts.reverse();
+        let verified = f.verify().unwrap();
+        assert!(verified.receipt_verified && verified.evidence_chain_verified);
+        assert!(verified.successful);
+        assert_eq!(verified.artifact_count, 3);
+        assert_eq!(
+            verified.total_bytes,
+            (f.result.len() + f.evidence.len() + f.progress.len()) as u64
+        );
+        assert_eq!(
+            verified.receipt_sha256,
+            hex::encode(Sha256::digest(f.raw_receipt()))
+        );
+        let canonical = canonical_json_bytes(&serde_json::to_value(&f.receipt).unwrap()).unwrap();
+        assert_ne!(
+            verified.receipt_sha256,
+            hex::encode(Sha256::digest(canonical))
+        );
+        f.receipt.status = CompletionStatus::Failed;
+        f.receipt.exit_code = 7;
+        let failed = f.verify().unwrap();
+        assert!(failed.receipt_verified);
+        assert!(!failed.successful);
+        assert_eq!(failed.exit_code, 7);
+    }
+
+    #[test]
+    fn channel_completion_rejects_mutations_of_each_raw_artifact_and_bindings() {
+        let f = ChannelFixture::new();
+        for target in 0..3 {
+            let mut changed = f.clone();
+            match target {
+                0 => changed.result.push(b' '),
+                1 => changed.evidence.push(b' '),
+                _ => changed.progress.push(b' '),
+            }
+            assert!(matches!(
+                changed.verify(),
+                Err(WindowsSandboxCompletionError::ArtifactMismatch)
+            ));
+        }
+        for field in 0..5 {
+            let mut changed = f.clone();
+            match field {
+                0 => changed.receipt.run_id = "other-run".into(),
+                1 => changed.receipt.sandbox_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".into(),
+                2 => changed.receipt.config_sha256 = "d".repeat(64),
+                3 => changed.receipt.request_sha256 = "d".repeat(64),
+                _ => changed.receipt.agent_sha256 = "d".repeat(64),
+            }
+            assert!(matches!(
+                changed.verify(),
+                Err(WindowsSandboxCompletionError::BindingMismatch(_))
+            ));
+        }
+        let mut changed = f.clone();
+        changed.receipt.status = CompletionStatus::Failed;
+        assert!(matches!(
+            changed.verify(),
+            Err(WindowsSandboxCompletionError::InconsistentTerminalStatus)
+        ));
+        changed = f.clone();
+        changed.receipt.artifacts[0].role = ArtifactRole::TokenEvidence;
+        assert!(matches!(
+            changed.verify(),
+            Err(WindowsSandboxCompletionError::ArtifactMismatch)
+        ));
+        changed = f.clone();
+        changed.receipt.artifacts[0].media_type = "text/plain".into();
+        assert!(matches!(
+            changed.verify(),
+            Err(WindowsSandboxCompletionError::ArtifactMismatch)
+        ));
+        changed = f.clone();
+        changed.receipt.evidence_root_hash = "0".repeat(64);
+        assert!(matches!(
+            changed.verify(),
+            Err(WindowsSandboxCompletionError::EvidenceRootMismatch)
+        ));
+    }
+
+    #[test]
+    fn channel_completion_requires_closed_policy_caps_and_strict_receipt_fields() {
+        let f = ChannelFixture::new();
+        for change in 0..7 {
+            let mut changed = f.clone();
+            match change {
+                0 => changed
+                    .expectation
+                    .artifacts
+                    .push(CompletionArtifactExpectation {
+                        path: "assessment-channel-bootstrap.json".into(),
+                        role: ArtifactRole::DiagnosticLog,
+                        sensitivity: DataSensitivity::Confidential,
+                        media_type: "application/json".into(),
+                        maximum_bytes: 16384,
+                    }),
+                1 => changed.expectation.receipt_path = "other.json".into(),
+                2 => changed.expectation.artifacts[0].path = "Assessment-result.json".into(),
+                3 => changed.expectation.artifacts[0].role = ArtifactRole::TokenEvidence,
+                4 => changed.expectation.artifacts[0].media_type = "text/plain".into(),
+                5 => changed.expectation.artifacts[0].maximum_bytes = 16 * 1024 * 1024 + 1,
+                _ => changed.expectation.artifacts[2].maximum_bytes = 16 * 1024 * 1024 + 1,
+            }
+            assert!(matches!(
+                changed.verify(),
+                Err(WindowsSandboxCompletionError::InvalidAssessmentChannelPolicy)
+            ));
+        }
+        let mut changed = f.clone();
+        changed.expectation.artifacts[0].maximum_bytes = 1;
+        assert!(matches!(
+            changed.verify(),
+            Err(WindowsSandboxCompletionError::ArtifactMismatch)
+        ));
+        let raw = String::from_utf8(f.raw_receipt()).unwrap();
+        let duplicate = raw.replacen('{', "{\"runId\":\"shadow\",", 1);
+        let nested_duplicate = raw.replacen(
+            "\"sha256\":",
+            &format!("\"sha256\":\"{}\",\"sha256\":", "0".repeat(64)),
+            1,
+        );
+        let extra = raw.replacen('{', "{\"private-marker-extra\":true,", 1);
+        for invalid in [duplicate, nested_duplicate, extra] {
+            let error = verify_assessment_channel_completion(
+                &f.expectation,
+                invalid.as_bytes(),
+                &f.result,
+                &f.evidence,
+                &f.progress,
+            )
+            .unwrap_err();
+            assert!(matches!(
+                &error,
+                WindowsSandboxCompletionError::ReceiptJson(_)
+            ));
+            assert!(!error.to_string().contains("private-marker"));
+        }
+        assert!(matches!(
+            verify_assessment_channel_completion(
+                &f.expectation,
+                &vec![b' '; MAX_RECEIPT_BYTES as usize + 1],
+                &f.result,
+                &f.evidence,
+                &f.progress
+            ),
+            Err(WindowsSandboxCompletionError::ReceiptTooLarge)
+        ));
+    }
+
+    #[test]
+    fn channel_completion_checks_evidence_chain_after_matching_raw_hashes() {
+        let mut f = ChannelFixture::new();
+        f.evidence = String::from_utf8(f.evidence)
+            .unwrap()
+            .replace("\"flag\":true", "\"flag\":false")
+            .into_bytes();
+        let artifact = f
+            .receipt
+            .artifacts
+            .iter_mut()
+            .find(|a| a.path == "evidence.jsonl")
+            .unwrap();
+        artifact.size_bytes = f.evidence.len() as u64;
+        artifact.sha256 = hex::encode(Sha256::digest(&f.evidence));
+        assert!(matches!(
+            f.verify(),
+            Err(WindowsSandboxCompletionError::Evidence(
+                EvidenceError::HashMismatch { .. }
+            ))
+        ));
+    }
+
+    #[test]
+    fn channel_completion_does_not_relax_legacy_output_namespace_or_digest() {
+        let f = ChannelFixture::new();
+        let root = TestRoot::new();
+        for (name, bytes) in [
+            ("completion.json", f.raw_receipt()),
+            ("assessment-result.json", f.result.clone()),
+            ("evidence.jsonl", f.evidence.clone()),
+            (
+                crate::assessment_channel::CHANNEL_PROGRESS_LEAF,
+                f.progress.clone(),
+            ),
+        ] {
+            fs::write(root.0.join(name), bytes).unwrap();
+        }
+        let legacy = verify_completion_receipt(&root.0, &f.expectation).unwrap();
+        let channel = f.verify().unwrap();
+        assert_eq!(legacy.artifact_count, channel.artifact_count);
+        assert_eq!(legacy.total_bytes, channel.total_bytes);
+        assert_ne!(legacy.receipt_sha256, channel.receipt_sha256);
+        for name in [
+            crate::assessment_channel::CHANNEL_BOOTSTRAP_LEAF,
+            crate::assessment_channel::CHANNEL_ACK_LEAF,
+            crate::assessment_channel::CHANNEL_TERMINAL_LEAF,
+        ] {
+            fs::write(root.0.join(name), b"untrusted transport").unwrap();
+            assert!(matches!(
+                verify_completion_receipt(&root.0, &f.expectation),
+                Err(WindowsSandboxCompletionError::UnexpectedOutputEntry(_))
+            ));
+            fs::remove_file(root.0.join(name)).unwrap();
+        }
     }
 
     #[test]
