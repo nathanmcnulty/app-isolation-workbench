@@ -152,6 +152,35 @@ facts, not privilege grants or permanent attribute invariants. They do not
 select a launch API, weaken the 29 denial gates or establish application success.
 Historical protection v1/v2 reject any new diagnostic field, including null.
 
+## Suspended launch checks
+
+The launch candidate calls CreateProcessWithTokenW once with the retained
+ordinary-user primary token, explicit image/environment/cwd, existing startup
+handle/security attributes and suspended/no-window flags. It does not fall back
+to another API or grant privileges. An explicit WinSta0\\Default desktop avoids
+the documented null/empty-desktop permission-addition branch; existing access
+failures remain failures. The quoted command is limited to 1,024 UTF-16 units
+including its terminating NUL.
+
+Before Resume, the exact owned job, token, physical/token session, process birth
+and held image are checked. A handles-only PSS snapshot positively matches all
+three inherited stdio slots to their held pipe objects, and checks every captured
+handle against one deliberately excluded inheritable unnamed event. Unknown
+comparison results, duplicates, extent mismatches or missing stdio refuse Resume.
+The walk permits at most 256 entries plus an exact terminal status. This is one
+canary guard, not proof that every possible inherited handle is excluded.
+PSS internal time/allocation is not bounded by the walk cap; the outer worker
+watchdog remains necessary.
+
+Every local duplicate, walk marker, locally owned snapshot and canary has a
+checked release before Resume. Any audit or release error blocks application
+execution and preserves owned cleanup. The deadline is rechecked after signed
+pre-resume publication. The wire has no resumed flag: a retained created root
+can therefore have a measured token policy while its workflow remains
+DriverIncomplete/Unmeasured. Neither that row nor complete empty pipe captures
+confer application compatibility. Native stdio, attributes, AppContainer and
+desktop behavior still require fresh controlled qualification.
+
 ## Crash, retained reads and export
 
 Persist only the public descriptor, request, bootstrap, ACK, latched guest key
@@ -213,6 +242,10 @@ channel gates is satisfied by the earlier failed control.
 - [Token group attributes](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-token_groups)
 - [Token privileges](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-token_privileges)
 - [Local privilege LUID lookup](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-lookupprivilegevaluew)
+- [CreateProcessWithTokenW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-createprocesswithtokenw)
+- [PSS capture](https://learn.microsoft.com/en-us/windows/win32/api/processsnapshot/nf-processsnapshot-psscapturesnapshot)
+- [PSS walking](https://learn.microsoft.com/en-us/windows/win32/api/processsnapshot/nf-processsnapshot-psswalksnapshot)
+- [Handle identity comparison](https://learn.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-compareobjecthandles)
 
 These references describe OS contracts, not qualification of this proposed
 implementation or installed provider wire behavior.

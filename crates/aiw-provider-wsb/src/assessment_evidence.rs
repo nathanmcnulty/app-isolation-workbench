@@ -3273,6 +3273,58 @@ mod tests {
         }
     }
 
+    #[test]
+    fn final_pre_resume_audit_failure_retains_created_root_without_workflow_credit() {
+        // Post-authentication projection fixture only. SyntheticChannel below
+        // exercises record associations, not CNG or an actual suspended child.
+        let (request, mut result) = logon_provenance_fixture();
+        partial(&mut result);
+        let row = &mut result.native.steps[1];
+        row.error = Some("suspended handle audit refused; no Resume".into());
+        let process = row.process.as_mut().unwrap();
+        assert!(process.held_token.is_some() && row.image.is_some());
+        process.exit_code = None;
+        process.timed_out = false;
+        process.job_empty = Some(true);
+        process.errors = vec!["suspended handle audit refused; no Resume".into()];
+        process.stdout = capture_bytes(b"", request.assessment.settings.stdout_max_bytes);
+        process.stderr = capture_bytes(b"", request.assessment.settings.stderr_max_bytes);
+        assert!(process.stdout.complete && process.stderr.complete);
+
+        let verified = verify_assessment_result_inner(&request, &result).unwrap();
+        assert_eq!(verified.status, AssessmentEvidenceStatus::DriverIncomplete);
+        assert_eq!(verified.workflow_status, AssessmentFactStatus::Unmeasured);
+        assert!(!verified.driver_complete);
+        assert_eq!(verified.coverage.process_records, 1);
+        assert_eq!(verified.coverage.complete_captures, 2);
+        assert_eq!(verified.coverage.collector_key_protected, Some(true));
+        assert_eq!(verified.steps[1].root_policy, AssessmentFactStatus::Passed);
+        assert_eq!(verified.steps[1].status, AssessmentFactStatus::Unmeasured);
+        assert_eq!(verified.steps[1].exit_code, None);
+        assert!(
+            verified
+                .assertions
+                .iter()
+                .all(|a| a.status == AssessmentFactStatus::NotRun)
+        );
+        let (raw, records, _) = authenticated_records(&request, &result);
+        let admitted =
+            verify_authenticated_assessment_progress(&raw, &records, &request, &result).unwrap();
+        assert!(admitted.terminal_present && admitted.pending_launch.is_none());
+        assert_eq!(admitted.result, result);
+
+        // A claimed completed driver cannot override the same exit-less failed
+        // launch, even when token policy, capture EOF and cleanup are measured.
+        let mut contradicted = result;
+        contradicted.native.driver_completed = true;
+        assert!(verify_assessment_result_inner(&request, &contradicted).is_err());
+        let (raw, records, _) = authenticated_records(&request, &contradicted);
+        assert!(
+            verify_authenticated_assessment_progress(&raw, &records, &request, &contradicted)
+                .is_err()
+        );
+    }
+
     // NOT cryptography: permits exercising verified-wrapper associations without
     // invoking CNG/native processes. Native signature proof is separately gated.
     struct SyntheticChannel;

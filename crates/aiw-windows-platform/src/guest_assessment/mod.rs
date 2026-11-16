@@ -6,6 +6,7 @@ mod files;
 mod process;
 mod progress;
 mod protection;
+mod suspended_handles;
 use crate::{
     GuestMsiExecutionError, HeldApplicationFile, guest_standard_user::StandardUserSession,
 };

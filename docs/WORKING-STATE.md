@@ -63,27 +63,40 @@ an application process was created. Outcome remains NotRun, not incompatibility.
 One exact owned Sandbox was stopped, with final empty lists and recorded cleanup.
 Application-job cleanup remains unmeasured. Preserve this consumed Start.
 
-The current readonly diagnostic records three launch-related privileges from the
-same retained collector token through the existing signed channel. It changes no
-privileges, desktop ACLs, launch API or authority gates. Focused native tests
-passed five; provider 152, signed-host 5, all-target Clippy and governance passed.
-Independent native and cross-boundary source reviews passed; a Clippy conditional
-rewrite has a separate equivalence review. The diagnostic has not yet been
-measured in a fresh Sandbox. Microsoft
-documents alternatives to CreateProcessAsUser, but a secure replacement still
-needs held-token, stdio inheritance and desktop-side-effect validation; no blind
-fallback or privilege grant is authorized by the failed baseline.
+R11 used exact source-3c8f317 tools. Independent admission checked 42 originals
+(111,552 bytes), 25 signatures, all 29 denials and the complete local Start chain.
+The signed held-token snapshot measured AssignPrimaryToken absent, IncreaseQuota
+present/attributes 0 and Impersonate present/attributes 3. CreateProcessAsUserW
+again failed with 1314 before creating an application. Retained Read authenticated
+with collectorKeyProtected=true; the owned Sandbox was stopped and final lists
+were empty. Account cleanup is historical; application-job cleanup is unmeasured.
+
+Authorized SSH now drives separately reviewed, one-shot InteractiveToken/LUA
+tasks in session 1. Actual before/after actors were Medium, limited, non-elevated
+and matched the exact operator SID. Prepare and committed approval were separately
+admitted before Start. No terminal UI input or administrator SSH assessment was
+used for R11. Each phase preserves original CLI bytes and removes its idle task.
+
+The current launch candidate uses CreateProcessWithTokenW with the same held
+token, startup attributes, job and identity checks. A suspended PSS audit requires
+the three actual stdio objects and absence of one excluded inheritable canary;
+checked cleanup and a post-publication deadline guard precede Resume. This grants
+no privileges or desktop permissions. Independent source reviews passed; focused
+first-freeze tests passed four audit and eight process tests. Final validation
+and fresh native qualification remain required. Created-but-unresumed failures
+remain DriverIncomplete/Unmeasured and cannot confer application compatibility.
 
 ## Storage and next gates
 
 Use only `C:\aiw\environment-probe-20261114\target-static-r1`. Normal builds
 require explicit cache selection, reject unsafe overrides, disable incremental
 and debug symbols, and require at least 10 GiB free with cache <=8 GiB.
-Source f7b55485 consecutive dev builds measured 2,455,961,560 bytes / 3,313 files
+Source 3c8f317 consecutive dev builds measured 2,462,915,631 bytes / 3,313 files
 both times; pass two compiled nothing and kept identical image hashes. Release
-ended at 2,457,169,979 bytes. All 18 actual compiler commands and three exact-source
+ended at 2,464,451,499 bytes. All 18 actual compiler commands and three exact-source
 AMD64 static-CRT images passed independent admission. Keep one immutable
-30,060,032-byte three-tool set, not copied trees.
+30,268,928-byte three-tool set, not copied trees. Linker/backtrace PDB files are
+measured separately; disabling full compiler symbols does not mean zero PDBs.
 
 Earlier audited cleanup recovered 8.41 GiB of idle GUI output and 6,857,707,520
 bytes of verified idle compiler metadata. Policy-blocked incremental cleanup
@@ -95,9 +108,9 @@ space increased 24,453,120 bytes. Independent cleanup admission passed. Correcte
 validation uses storage preflight and the normal builder's explicit target/flags.
 Do not create retry caches or blindly remove current artifacts.
 
-Preserve all consumed controls R6/R7/R8/R9. Qualify ordinary/classic positives,
+Preserve all consumed controls R6/R7/R8/R9/R10/R11. Qualify ordinary/classic positives,
 negative controls, interruption/exact recovery and stable provider-zero reads
 before the two external fixtures. Their exact payloads/provenance remain private
 run inputs and have never executed. Use the authorized VM107 SSH/SCP route for
-data transfer and its birth-bound ordinary console for execution. No additional
+data transfer and the reviewed limited interactive task route for execution. No additional
 privilege/runtime/VM/security change follows from a setup refusal.

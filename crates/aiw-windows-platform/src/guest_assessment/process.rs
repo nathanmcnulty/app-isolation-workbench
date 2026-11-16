@@ -1,5 +1,5 @@
 //! One native suspended launch, exact owned job, fair bounded pipe draining.
-//! No shell, PATH lookup, detached readers or inherited collector handles.
+//! No shell, PATH lookup or detached readers; suspended handle checks precede Resume.
 use super::{Result, bound_error};
 use crate::{
     HeldApplicationFile,
@@ -32,9 +32,9 @@ use windows::{
             JobObjects::{AssignProcessToJobObject, IsProcessInJob},
             Pipes::{CreatePipe, PeekNamedPipe},
             Threading::{
-                CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT,
-                CreateProcessAsUserW, EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess,
-                GetProcessTimes, PROCESS_INFORMATION, PROCESS_NAME_WIN32,
+                CREATE_NO_WINDOW, CREATE_PROCESS_LOGON_FLAGS, CREATE_SUSPENDED,
+                CREATE_UNICODE_ENVIRONMENT, CreateProcessWithTokenW, EXTENDED_STARTUPINFO_PRESENT,
+                GetExitCodeProcess, GetProcessTimes, PROCESS_INFORMATION, PROCESS_NAME_WIN32,
                 QueryFullProcessImageNameW, ResumeThread, STARTF_USESTDHANDLES, STARTUPINFOEXW,
                 TerminateProcess, WaitForSingleObject,
             },
@@ -90,6 +90,16 @@ fn wide(value: &OsStr) -> Result<Vec<u16>> {
         return Err("NUL in native argument".into());
     }
     Ok(value)
+}
+fn validate_command(command: &[u16]) -> Result<()> {
+    // The WithToken API has a smaller command-line contract. Count UTF-16 code
+    // units, conservatively including the terminating NUL, before any creation.
+    if command.len() > 1024 {
+        return Err(
+            "CreateProcessWithTokenW command exceeds 1024 UTF-16 units including NUL".into(),
+        );
+    }
+    Ok(())
 }
 #[derive(Default)]
 struct Prefix {
@@ -324,6 +334,10 @@ pub(super) fn launch(spec: Launch<'_>) -> Result<AssessmentProcessObservation> {
         std::iter::once(identity.canonical_path.as_str())
             .chain(spec.arguments.iter().map(String::as_str)),
     )))?;
+    validate_command(&command)?;
+    // An explicit desktop avoids WithToken's documented null/empty desktop
+    // permission-addition branch. Existing access failures are never repaired.
+    let mut desktop = wide(OsStr::new(r"WinSta0\Default"))?;
     let mut stdout = Pipe::new(spec.stdout_limit)?;
     let mut stderr = Pipe::new(spec.stderr_limit)?;
     let mut stdin = Pipe::new(0)?;
@@ -359,6 +373,7 @@ pub(super) fn launch(spec: Launch<'_>) -> Result<AssessmentProcessObservation> {
     let mut startup = STARTUPINFOEXW::default();
     startup.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
     startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    startup.StartupInfo.lpDesktop = PWSTR(desktop.as_mut_ptr());
     startup.StartupInfo.hStdInput = handles[0];
     startup.StartupInfo.hStdOutput = handles[1];
     startup.StartupInfo.hStdError = handles[2];
@@ -372,17 +387,16 @@ pub(super) fn launch(spec: Launch<'_>) -> Result<AssessmentProcessObservation> {
     if Instant::now() >= spec.deadline {
         return Err("launch deadline expired during image/pipe preparation".into());
     }
+    let mut canary = super::suspended_handles::Canary::new()?;
     // SAFETY: explicit held image, quoted argv, held cwd and exact handle list.
     // The elevated collector always supplies the fresh ordinary user token.
     // No application is launched with the collector identity or a fallback.
     let created = unsafe {
-        CreateProcessAsUserW(
-            Some(spec.user.token()),
+        CreateProcessWithTokenW(
+            spec.user.token(),
+            CREATE_PROCESS_LOGON_FLAGS(0),
             PCWSTR(image.as_ptr()),
             Some(PWSTR(command.as_mut_ptr())),
-            None,
-            None,
-            true,
             flags,
             Some(spec.user.environment().cast_const()),
             PCWSTR(cwd.as_ptr()),
@@ -390,11 +404,14 @@ pub(super) fn launch(spec: Launch<'_>) -> Result<AssessmentProcessObservation> {
             &mut info,
         )
     };
-    created.map_err(|e| format!("CreateProcessAsUserW failed: {e}"))?;
+    if let Err(error) = created {
+        let cleanup = canary.close().err().unwrap_or_default();
+        return Err(format!(
+            "CreateProcessWithTokenW failed: {error}; {cleanup}"
+        ));
+    }
     let process = unsafe { OwnedHandle::from_raw_handle(info.hProcess.0) };
     let thread = unsafe { OwnedHandle::from_raw_handle(info.hThread.0) };
-    drop(stdout.write.take());
-    drop(stderr.write.take());
     let mut result = AssessmentProcessObservation {
         process_id: info.dwProcessId,
         creation_time_100ns: None,
@@ -483,17 +500,27 @@ pub(super) fn launch(spec: Launch<'_>) -> Result<AssessmentProcessObservation> {
             if !super::fixed_image(Path::new(&name), &identity.canonical_path) {
                 return Err("suspended process image path differs".into());
             }
+            canary.verify(raw(&process), handles, spec.deadline)?;
+            drop(stdout.write.take());
+            drop(stderr.write.take());
             spec.image.revalidate().map_err(|e| e.to_string())?;
-            // CreateProcessAsUser enables necessary already-assigned privileges
-            // only for its call. Missing privileges remain an API failure; no
-            // explicit grant or alternate launch mechanism is attempted.
+            // Native privilege/access failures remain API failures. No grant,
+            // desktop permission change, dropped attribute or fallback occurs.
             super::check_collector(&mut *spec.collector_unimpersonated)?;
+            if Instant::now() >= spec.deadline {
+                return Err("launch deadline expired before Resume".into());
+            }
             spec.progress
                 .record(&AssessmentProgressEvent::LaunchStarted {
                     index: spec.step_index,
                     process: result.clone(),
                 })?;
             started_recorded = true;
+            // Signed publication may synchronously flush past the deadline.
+            // A retained pre-resume row never authorizes a late Resume.
+            if Instant::now() >= spec.deadline {
+                return Err("launch deadline expired during pre-resume publication".into());
+            }
             if unsafe { ResumeThread(raw(&thread)) } != 1 {
                 return Err("suspended resume count differs".into());
             }
@@ -542,6 +569,11 @@ pub(super) fn launch(spec: Launch<'_>) -> Result<AssessmentProcessObservation> {
             }
         }
     }
+    if let Err(error) = canary.close() {
+        result.errors.push(bound_error(&error));
+    }
+    drop(stdout.write.take());
+    drop(stderr.write.take());
     let drain = Instant::now() + Duration::from_secs(2);
     while Instant::now() < drain
         && ((!stdout.prefix.eof && stdout.prefix.error.is_none())
@@ -570,6 +602,13 @@ pub(super) fn launch(spec: Launch<'_>) -> Result<AssessmentProcessObservation> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn with_token_command_bound_counts_utf16_and_the_terminating_nul() {
+        assert!(validate_command(&wide(OsStr::new(&"a".repeat(1023))).unwrap()).is_ok());
+        assert!(validate_command(&wide(OsStr::new(&"a".repeat(1024))).unwrap()).is_err());
+        assert!(validate_command(&wide(OsStr::new(&"🚀".repeat(511))).unwrap()).is_ok());
+        assert!(validate_command(&wide(OsStr::new(&"🚀".repeat(512))).unwrap()).is_err());
+    }
     fn pe() -> Vec<u8> {
         let mut bytes = vec![0; 512];
         bytes[..2].copy_from_slice(b"MZ");
