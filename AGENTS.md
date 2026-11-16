@@ -22,6 +22,28 @@
 - Documentation-only edits need link/content review and governance checks, not the Rust suite. Report-only edits should use retained evidence before considering live reruns. Execution or trust-boundary changes need appropriate negative tests and disposable-worker proof.
 - Run each required check once on the completed code. Repeat only when relevant code changes, a failure, or an unresolved concern justifies it. No automatic pass cache: prior logs are evidence for their recorded state, not today's checkout.
 - Use one build owner per target directory. Save full test output to logs and inspect failures selectively.
+- Cleanliness is part of completion: account for owned processes and temporary
+  test/assembly files, remove disposable files created by that invocation, and
+  retain only needed diagnostics and evidence. Keep one bounded reusable build
+  cache instead of full build copies in each output package. Do not label all
+  rebuildable output as evidence or preserve failed build trees by default.
+- Tests retaining directory write authority use an invocation-owned parent below
+  TEMP, never the shared TEMP directory itself. Release all leases before owned
+  fixture cleanup, including assertion-failure paths; do not serialize unrelated
+  tests or weaken sharing checks to hide fixture interference.
+  Shared helpers need per-invocation uniqueness; a PID-only name collides when
+  several tests call the helper in parallel.
+- Before a build, measure free space on the target volume. Keep at least 10 GiB
+  free before starting; reclaim verified idle build caches first if below that
+  floor. Routine dev/test builds disable incremental output and debug symbols in
+  both workspace manifests. Keep one stable cache per required target/flag set;
+  do not create a cache for each revision or vary profile environment overrides
+  casually. Full symbols are a deliberate debugging opt-in, not the default.
+- Cache output is disposable; intake, evidence, pinned trial binaries and source
+  are not. Verify exact cache paths, no reparse traversal, and no active compiler,
+  test or artifact consumer before cleanup. Never clean a shared target while
+  another session uses it. Do not use target-filtered Cargo clean as a promise
+  that host artifacts will be spared.
 - Use hosted CI at integration milestones. Do not create PRs, dispatch workflows, or rerun unchanged jobs merely to check a branch. Observe existing runs; honor required merge checks.
 
 ## Preserve the evidence boundary

@@ -14,18 +14,20 @@ if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw
 $PSNativeCommandUseErrorActionPreference = $false
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$targetRoot = Join-Path $repoRoot 'target\guest-agent-static'
+. (Join-Path $PSScriptRoot 'build-storage.ps1')
+$targetRoot = (Assert-AiwBuildStoragePolicy -RepositoryRoot $repoRoot).targetDirectory
 $targetTriple = 'x86_64-pc-windows-msvc'
 $previousTarget = $env:CARGO_TARGET_DIR
+$previousFlags = $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS
 
 Push-Location -LiteralPath $repoRoot
 try {
     $env:CARGO_TARGET_DIR = $targetRoot
-    $arguments = @('rustc', '--locked', '-p', 'aiw-guest-agent', '--target', $targetTriple)
+    $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS = '-C target-feature=+crt-static'
+    $arguments = @('build', '--locked', '-p', 'aiw-guest-agent', '--target', $targetTriple)
     if ($Profile -eq 'release') {
         $arguments += @('--profile', 'release')
     }
-    $arguments += @('--', '-C', 'target-feature=+crt-static')
     & cargo @arguments
     if ($LASTEXITCODE -ne 0) {
         throw 'statically linked guest-agent build failed'
@@ -73,6 +75,7 @@ try {
     } | ConvertTo-Json
 }
 finally {
+    [Environment]::SetEnvironmentVariable('CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS', $previousFlags, 'Process')
     if ($null -eq $previousTarget) {
         Remove-Item Env:CARGO_TARGET_DIR -ErrorAction SilentlyContinue
     }

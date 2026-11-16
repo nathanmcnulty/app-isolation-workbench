@@ -14,6 +14,7 @@ $PSNativeCommandUseErrorActionPreference = $false
 $env:AIW_TEST_PWSH = Join-Path $PSHOME 'pwsh.exe'
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'build-storage.ps1')
 Push-Location -LiteralPath $repoRoot
 
 try {
@@ -82,10 +83,15 @@ try {
     }
 
     & (Join-Path $PSScriptRoot 'test-hosted-bootstrap-shell.ps1') | ConvertFrom-Json | Out-Null
+    & (Join-Path $PSScriptRoot 'test-build-storage.ps1') | ConvertFrom-Json | Out-Null
+    & (Join-Path $PSScriptRoot 'test-build-assessment-logs.ps1') | ConvertFrom-Json | Out-Null
+    & (Join-Path $PSScriptRoot 'test-build-cache-measurement.ps1') | ConvertFrom-Json | Out-Null
+    & (Join-Path $PSScriptRoot 'test-local-check-failure.ps1') | ConvertFrom-Json | Out-Null
 
     cargo fmt --all --check
     if ($LASTEXITCODE -ne 0) { throw 'cargo fmt failed' }
 
+    $null = Assert-AiwBuildStoragePolicy -RepositoryRoot $repoRoot
     cargo clippy --workspace --all-targets --locked -- -D warnings
     if ($LASTEXITCODE -ne 0) { throw 'cargo clippy failed' }
 
@@ -94,18 +100,23 @@ try {
 
     & (Join-Path $PSScriptRoot 'test-preview-package-verifier.ps1')
 
+    $null = Assert-AiwBuildStoragePolicy -RepositoryRoot $repoRoot
     cargo run --quiet --locked -p aiw-cli -- project validate --path .\examples\minimal.aiw.yaml | ConvertFrom-Json | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'example project validation failed' }
 
+    $null = Assert-AiwBuildStoragePolicy -RepositoryRoot $repoRoot
     cargo run --quiet --locked -p aiw-cli -- provider compile-msi-scenario --project .\examples\notepad-plus-plus-msi.aiw.yaml --scenario install-launch-close | ConvertFrom-Json | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'typed MSI scenario compilation failed' }
 
+    $null = Assert-AiwBuildStoragePolicy -RepositoryRoot $repoRoot
     cargo run --quiet --locked -p aiw-cli -- provider compile-bambu-scenario --project .\examples\bambu-studio-info.json --scenario local-file-info | ConvertFrom-Json | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'typed Bambu scenario compilation failed' }
 
+    $null = Assert-AiwBuildStoragePolicy -RepositoryRoot $repoRoot
     cargo run --quiet --locked -p aiw-cli -- model-pack validate --path .\examples\model-pack.json | ConvertFrom-Json | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'example model-pack validation failed' }
 
+    $null = Assert-AiwBuildStoragePolicy -RepositoryRoot $repoRoot
     cargo run --quiet --locked -p aiw-cli -- analyst validate --report .\examples\analyst-report.json --evidence-log .\examples\analyst-evidence.jsonl --model-pack .\examples\model-pack.json | ConvertFrom-Json | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'example analyst report validation failed' }
 
@@ -126,6 +137,7 @@ try {
 
     $bundleManifestPath = Join-Path ([IO.Path]::GetTempPath()) "aiw-bundle-$([guid]::NewGuid()).json"
     try {
+        $null = Assert-AiwBuildStoragePolicy -RepositoryRoot $repoRoot
         $bundleJson = cargo run --quiet --locked -p aiw-cli -- bundle build --root . --spec .\examples\assessment-bundle-spec.json
         if ($LASTEXITCODE -ne 0) { throw 'assessment bundle build failed' }
         $bundleJson | ConvertFrom-Json | Out-Null
@@ -141,6 +153,7 @@ try {
         Remove-Item -LiteralPath $bundleManifestPath -Force -ErrorAction SilentlyContinue
     }
 
+    $null = Assert-AiwBuildStoragePolicy -RepositoryRoot $repoRoot
     cargo run --quiet --locked -p aiw-cli -- canary evaluate --plan .\examples\canary-plan.json --observations .\examples\canary-observations.json --evidence-log .\examples\canary-evidence.jsonl | ConvertFrom-Json | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'canary evaluation failed' }
 

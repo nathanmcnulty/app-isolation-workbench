@@ -15,7 +15,7 @@ Users obtain applications from their publishers and keep installers, application
 
 ## Current state
 
-AIW is experimental alpha software with a Windows desktop app and CLI. General-purpose assessment and packaging are unfinished: the existing implementation still relies on fixed application-specific adapters. The [recovery roadmap](docs/ROADMAP.md) replaces them with one capability-based workflow, then retires their execution paths. Unknown application names must not become gates, and exact payloads still bind each approved run. This migration is not yet implemented; [repository scope](docs/REPOSITORY-SCOPE.md) records the distribution boundary.
+AIW is experimental alpha software with a Windows desktop app and CLI. The first [application-neutral CLI path](docs/APPLICATION-ASSESSMENT.md) accepts an administrator-supplied portable x64 application, explicit offline workflow and test inputs. It reuses protected intake, approval and separate Start, records bounded process/output facts, reopens retained reports and creates data-only replay packages. Native acceptance is in progress. MSI/EXE installation, GUI automation and the desktop intake migration remain unfinished; existing fixed adapters retain their original scope. The [recovery roadmap](docs/ROADMAP.md) tracks their eventual retirement. Unknown application names never select behavior in the new path, and exact payloads bind each approved run. [Repository scope](docs/REPOSITORY-SCOPE.md) records the distribution boundary.
 
 Testing has included Notepad++, Bambu Studio, and 7-Zip. These are historical test subjects, not products distributed or endorsed by this project and not a supported-application catalog. Previous results apply only to their recorded versions, inputs, and workflows.
 

@@ -339,6 +339,86 @@ enum PackageCommand {
 
 #[derive(Debug, Subcommand)]
 enum ApplicationCommand {
+    /// Compile administrator-supplied workflow data without provider calls or application execution.
+    PlanAssessment {
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        settings: PathBuf,
+        #[arg(long)]
+        source: PathBuf,
+    },
+    /// Create a fresh protected assessment and review data. Never approves or starts it.
+    PrepareAssessment {
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        settings: PathBuf,
+        #[arg(long)]
+        source: PathBuf,
+        /// JSON object mapping reviewed input IDs to administrator-supplied files.
+        #[arg(long)]
+        inputs: PathBuf,
+        #[arg(long)]
+        guest_agent: PathBuf,
+        #[arg(long)]
+        guest_agent_sha256: String,
+        #[arg(long)]
+        evidence_parent: PathBuf,
+        #[arg(long)]
+        operator: String,
+    },
+    /// Reopen a retained generic report without a provider or application execution.
+    ReportAssessment {
+        #[arg(long)]
+        workspace: PathBuf,
+        #[arg(long)]
+        run_id: String,
+    },
+    /// Compare independently verified retained baseline/candidate workflows without running either.
+    CompareAssessments {
+        #[arg(long)]
+        baseline_workspace: PathBuf,
+        #[arg(long)]
+        baseline_run_id: String,
+        #[arg(long)]
+        candidate_workspace: PathBuf,
+        #[arg(long)]
+        candidate_run_id: String,
+    },
+    /// Copy the reviewed external workflow and bytes into a fresh data-only replay package.
+    ExportAssessmentPackage {
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        settings: PathBuf,
+        #[arg(long)]
+        source: PathBuf,
+        #[arg(long)]
+        inputs: PathBuf,
+        #[arg(long)]
+        output_parent: PathBuf,
+        #[arg(long)]
+        package_id: String,
+    },
+    /// Verify a data-only replay package. Does not import, approve or run it.
+    VerifyAssessmentPackage {
+        #[arg(long)]
+        package: PathBuf,
+    },
+    /// Revalidate a replay package and create fresh review data; never reuse approval or session authority.
+    PrepareAssessmentPackage {
+        #[arg(long)]
+        package: PathBuf,
+        #[arg(long)]
+        guest_agent: PathBuf,
+        #[arg(long)]
+        guest_agent_sha256: String,
+        #[arg(long)]
+        evidence_parent: PathBuf,
+        #[arg(long)]
+        operator: String,
+    },
     /// Inspect source identity without executing, copying, or trusting it.
     Inspect {
         #[arg(long)]
@@ -887,6 +967,12 @@ struct SchemaArgs {
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum SchemaKind {
+    AssessmentSettings,
+    CompiledAssessment,
+    ApplicationAssessmentGuestRequest,
+    ApplicationAssessmentResult,
+    VerifiedAssessmentEvidence,
+    GenericApplicationRunReport,
     ImportedMsiGuestRequest,
     ImportedMsiScenarioResult,
     WsbApprovedExecution,
@@ -1792,6 +1878,194 @@ fn run(command: Command) -> Result<()> {
             }
         },
         Command::Application(args) => match args.command {
+            ApplicationCommand::PlanAssessment {
+                project,
+                settings,
+                source,
+            } => {
+                let project = read_project(&project)?;
+                let settings = read_document(&settings, MAX_CONFIG_BYTES)?;
+                write_json(&aiw_admin_workflow::application_assessment::preview(
+                    &project.project,
+                    &settings,
+                    &source,
+                )?)
+            }
+            ApplicationCommand::PrepareAssessment {
+                project,
+                settings,
+                source,
+                inputs,
+                guest_agent,
+                guest_agent_sha256,
+                evidence_parent,
+                operator,
+            } => {
+                let project = read_project(&project)?;
+                let settings: aiw_provider_wsb::assessment::AssessmentSettings =
+                    read_document(&settings, MAX_CONFIG_BYTES)?;
+                let inputs: std::collections::BTreeMap<String, PathBuf> =
+                    read_document(&inputs, MAX_CONFIG_BYTES)?;
+                #[cfg(windows)]
+                {
+                    let prepared = aiw_admin_workflow::application_assessment::prepare_for_review(
+                        &project.project,
+                        &settings,
+                        &source,
+                        &inputs,
+                        &guest_agent,
+                        &guest_agent_sha256,
+                        &evidence_parent,
+                        &operator,
+                    )?;
+                    write_json(
+                        &serde_json::json!({"run":prepared.run,"recipe":prepared.review.recipe,"plan":prepared.review.plan,"proposedApproval":prepared.review.proposed_approval,"approvalRecorded":false,"executionStarted":false}),
+                    )
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (
+                        project,
+                        settings,
+                        source,
+                        inputs,
+                        guest_agent,
+                        guest_agent_sha256,
+                        evidence_parent,
+                        operator,
+                    );
+                    bail!(
+                        "protected assessment preparation requires Windows; no application was executed"
+                    )
+                }
+            }
+            ApplicationCommand::ReportAssessment { workspace, run_id } => {
+                #[cfg(windows)]
+                {
+                    let run = aiw_admin_workflow::application_assessment::open_retained(
+                        &workspace, &run_id,
+                    )?;
+                    write_json(&aiw_admin_workflow::application_assessment::report(&run)?)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (workspace, run_id);
+                    bail!("protected retained assessment read requires Windows")
+                }
+            }
+            ApplicationCommand::CompareAssessments {
+                baseline_workspace,
+                baseline_run_id,
+                candidate_workspace,
+                candidate_run_id,
+            } => {
+                #[cfg(windows)]
+                {
+                    let baseline = aiw_admin_workflow::application_assessment::open_retained(
+                        &baseline_workspace,
+                        &baseline_run_id,
+                    )?;
+                    let candidate = aiw_admin_workflow::application_assessment::open_retained(
+                        &candidate_workspace,
+                        &candidate_run_id,
+                    )?;
+                    write_json(
+                        &aiw_admin_workflow::application_assessment::compare_retained(
+                            &baseline, &candidate,
+                        )?,
+                    )
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (
+                        baseline_workspace,
+                        baseline_run_id,
+                        candidate_workspace,
+                        candidate_run_id,
+                    );
+                    bail!("protected retained comparison requires Windows")
+                }
+            }
+            ApplicationCommand::ExportAssessmentPackage {
+                project,
+                settings,
+                source,
+                inputs,
+                output_parent,
+                package_id,
+            } => {
+                let project = read_project(&project)?;
+                let settings: aiw_provider_wsb::assessment::AssessmentSettings =
+                    read_document(&settings, MAX_CONFIG_BYTES)?;
+                let inputs: std::collections::BTreeMap<String, PathBuf> =
+                    read_document(&inputs, MAX_CONFIG_BYTES)?;
+                #[cfg(windows)]
+                {
+                    let destination = aiw_admin_workflow::application_package::export_package(
+                        &project.project,
+                        &settings,
+                        &source,
+                        &inputs,
+                        &output_parent,
+                        &package_id,
+                    )?;
+                    write_json(
+                        &serde_json::json!({"package":destination,"approvalIncluded":false,"applicationExecutions":0}),
+                    )
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (project, settings, source, inputs, output_parent, package_id);
+                    bail!("protected package export requires Windows")
+                }
+            }
+            ApplicationCommand::VerifyAssessmentPackage { package } => {
+                #[cfg(windows)]
+                {
+                    let verified =
+                        aiw_admin_workflow::application_package::verify_package(&package)?;
+                    verified.revalidate()?;
+                    write_json(&verified.package)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = package;
+                    bail!("protected package verification requires Windows")
+                }
+            }
+            ApplicationCommand::PrepareAssessmentPackage {
+                package,
+                guest_agent,
+                guest_agent_sha256,
+                evidence_parent,
+                operator,
+            } => {
+                #[cfg(windows)]
+                {
+                    let prepared =
+                        aiw_admin_workflow::application_assessment::prepare_package_for_review(
+                            &package,
+                            &guest_agent,
+                            &guest_agent_sha256,
+                            &evidence_parent,
+                            &operator,
+                        )?;
+                    write_json(
+                        &serde_json::json!({"run":prepared.run,"recipe":prepared.review.recipe,"plan":prepared.review.plan,"proposedApproval":prepared.review.proposed_approval,"approvalRecorded":false,"executionStarted":false}),
+                    )
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (
+                        package,
+                        guest_agent,
+                        guest_agent_sha256,
+                        evidence_parent,
+                        operator,
+                    );
+                    bail!("protected package preparation requires Windows")
+                }
+            }
             ApplicationCommand::Inspect { source, kind } => {
                 #[cfg(windows)]
                 let held_file = matches!(kind, ApplicationKindArg::Msi | ApplicationKindArg::Exe)
@@ -2843,6 +3117,24 @@ fn run(command: Command) -> Result<()> {
             ProviderCommand::MxcProbe { binary } => write_json(&plan_capability_probe(&binary)?),
         },
         Command::Schema(args) => match args.kind {
+            SchemaKind::AssessmentSettings => write_json(&schema_for!(
+                aiw_provider_wsb::assessment::AssessmentSettings
+            )),
+            SchemaKind::CompiledAssessment => write_json(&schema_for!(
+                aiw_provider_wsb::assessment::CompiledAssessment
+            )),
+            SchemaKind::ApplicationAssessmentGuestRequest => write_json(&schema_for!(
+                aiw_provider_wsb::assessment_request::ApplicationAssessmentGuestRequest
+            )),
+            SchemaKind::ApplicationAssessmentResult => write_json(&schema_for!(
+                aiw_provider_wsb::assessment_observation::ApplicationAssessmentResult
+            )),
+            SchemaKind::VerifiedAssessmentEvidence => write_json(&schema_for!(
+                aiw_provider_wsb::assessment_evidence::VerifiedAssessmentEvidence
+            )),
+            SchemaKind::GenericApplicationRunReport => {
+                write_json(&schema_for!(aiw_runner::GenericApplicationRunReport))
+            }
             SchemaKind::ImportedMsiGuestRequest => {
                 write_json(&schema_for!(aiw_provider_wsb::ImportedMsiGuestRequest))
             }
@@ -3502,7 +3794,33 @@ fn observe_wsb_status(layout: &RunLayout) -> Result<WsbSessionStatus> {
 }
 
 fn preparation_error_envelope(error: &RunPreparationFailed) -> ErrorEnvelope {
-    let (code, summary, stage, remediation) = match &error.source {
+    typed_preparation_error_envelope(&error.source, Some(error.run_id.clone()))
+}
+
+fn preparation_error_from_anyhow(error: &anyhow::Error) -> Option<ErrorEnvelope> {
+    if let Some(error) = error.downcast_ref::<RunPreparationFailed>() {
+        Some(preparation_error_envelope(error))
+    } else {
+        error
+            .downcast_ref::<WsbPreparationError>()
+            .map(|source| typed_preparation_error_envelope(source, None))
+    }
+}
+
+fn typed_preparation_error_envelope(
+    source: &WsbPreparationError,
+    run_id: Option<String>,
+) -> ErrorEnvelope {
+    // Match the preparation contract's bounded ASCII run-ID domain before
+    // disclosing a wrapper's caller-supplied identifier on preflight failure.
+    let run_id = run_id.filter(|value| {
+        !value.is_empty()
+            && value.len() <= 128
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    });
+    let (code, summary, stage, remediation) = match source {
         WsbPreparationError::Project(_) => (
             "AIW_WSB_PREPARATION_PROJECT_INVALID",
             "project is not valid for Windows Sandbox preparation",
@@ -3543,17 +3861,34 @@ fn preparation_error_envelope(error: &RunPreparationFailed) -> ErrorEnvelope {
             "AIW_WSB_PREPARATION_INCOMPLETE",
             "Windows Sandbox preparation stopped and preserved its fresh workspace",
             "wsbPreparation",
-            "Preserve and inspect the exact reported workspace. Never adopt, repair, or blindly delete it; retry with a new run ID after correcting the cause.",
+            "Preserve the incomplete workspace for inspection. Never adopt, repair, or blindly delete it; use a fresh run ID only after correcting the cause.",
         ),
+    };
+    // Native errors may contain local paths, user identities and opaque input.
+    // Public classification depends only on the typed variant, never its text.
+    let detail = match source {
+        WsbPreparationError::Project(_) => "Project validation rejected preparation.",
+        WsbPreparationError::Readiness(_) => {
+            "Static or runtime readiness did not satisfy preparation requirements."
+        }
+        WsbPreparationError::Workspace(_) => "Protected workspace requirements were not satisfied.",
+        WsbPreparationError::GuestAgent(_) => {
+            "Guest-agent identity or staging requirements were not satisfied."
+        }
+        WsbPreparationError::Contract(_) => "The bounded preparation contract was not satisfied.",
+        WsbPreparationError::Persistence(_) => "Preparation publication did not complete.",
+        WsbPreparationError::WorkspacePreserved { .. } => {
+            "Preparation is incomplete and its workspace was preserved; cleanup and execution success are not inferred."
+        }
     };
     ErrorEnvelope {
         code: code.to_owned(),
         summary: summary.to_owned(),
         stage: stage.to_owned(),
-        run_id: Some(error.run_id.clone()),
+        run_id,
         retryable: false,
         remediation: remediation.to_owned(),
-        detail: error.source.to_string().chars().take(512).collect(),
+        detail: detail.to_owned(),
     }
 }
 
@@ -3736,8 +4071,8 @@ fn emit_anyhow_error(error: &anyhow::Error) {
             remediation: "Inspect before planning import. Preserve the workspace and resolve the reported identity, readiness, or preparation mismatch; use retained reports for completed runs.".to_owned(),
             detail: error.0.to_string().chars().take(512).collect(),
         });
-    } else if let Some(error) = error.downcast_ref::<RunPreparationFailed>() {
-        emit_error(&preparation_error_envelope(error));
+    } else if let Some(envelope) = preparation_error_from_anyhow(error) {
+        emit_error(&envelope);
     } else if let Some(error) = error.downcast_ref::<RunPreparationImportFailed>() {
         emit_error(&preparation_import_error_envelope(error));
     } else if let Some(error) = error.downcast_ref::<ApplicationInspectionFailed>() {
@@ -4357,5 +4692,105 @@ mod tests {
             assert_eq!(envelope.run_id.as_deref(), Some("run-one"));
             assert!(envelope.detail.len() <= 512);
         }
+    }
+
+    #[test]
+    fn direct_and_wrapped_preparation_routing_preserves_typed_codes_without_private_text() {
+        fn source(index: usize) -> WsbPreparationError {
+            let private = "C:\\Private\\secret-input\nS-1-5-21-123456789-504\n秘密".to_owned();
+            match index {
+                0 => WsbPreparationError::Project(private),
+                1 => WsbPreparationError::Readiness(private),
+                2 => WsbPreparationError::Workspace(private),
+                3 => WsbPreparationError::GuestAgent(private),
+                4 => WsbPreparationError::Contract(private),
+                5 => WsbPreparationError::Persistence(private),
+                6 => WsbPreparationError::WorkspacePreserved {
+                    workspace_path: private.clone(),
+                    detail: private,
+                },
+                _ => unreachable!(),
+            }
+        }
+        let expected = [
+            (
+                "AIW_WSB_PREPARATION_PROJECT_INVALID",
+                "wsbPreparationPreflight",
+            ),
+            (
+                "AIW_WSB_PREPARATION_READINESS_BLOCKED",
+                "wsbPreparationPreflight",
+            ),
+            ("AIW_WSB_PREPARATION_WORKSPACE_REJECTED", "wsbWorkspace"),
+            (
+                "AIW_WSB_PREPARATION_GUEST_AGENT_REJECTED",
+                "guestAgentStaging",
+            ),
+            ("AIW_WSB_PREPARATION_CONTRACT_INVALID", "wsbPreparationPlan"),
+            (
+                "AIW_WSB_PREPARATION_PUBLISH_FAILED",
+                "wsbPreparationPublish",
+            ),
+            ("AIW_WSB_PREPARATION_INCOMPLETE", "wsbPreparation"),
+        ];
+        for (index, (code, stage)) in expected.into_iter().enumerate() {
+            // Exercise the helper actually used by emit_anyhow_error, including
+            // the admin service's direct typed error through anyhow context.
+            let direct = anyhow::Error::new(source(index)).context("private context: secret-input");
+            let wrapped = anyhow::Error::new(RunPreparationFailed {
+                run_id: "run-one".into(),
+                source: source(index),
+            });
+            let direct = preparation_error_from_anyhow(&direct).unwrap();
+            let wrapped = preparation_error_from_anyhow(&wrapped).unwrap();
+            assert_eq!(direct.code, code);
+            assert_eq!(direct.stage, stage);
+            assert_eq!(direct.run_id, None);
+            assert_eq!(wrapped.run_id.as_deref(), Some("run-one"));
+            assert!(!direct.retryable && !wrapped.retryable);
+            let mut direct_value = serde_json::to_value(&direct).unwrap();
+            let mut wrapped_value = serde_json::to_value(&wrapped).unwrap();
+            direct_value.as_object_mut().unwrap().remove("runId");
+            wrapped_value.as_object_mut().unwrap().remove("runId");
+            assert_eq!(direct_value, wrapped_value);
+            for envelope in [&direct, &wrapped] {
+                let public = serde_json::to_string(envelope).unwrap();
+                for private in [
+                    "Private",
+                    "secret-input",
+                    "S-1-5-21-",
+                    "秘密",
+                    "private context",
+                ] {
+                    assert!(!public.contains(private), "private text in {code}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn preparation_routing_omits_invalid_wrapper_ids_and_keeps_unrelated_errors_generic() {
+        let oversized = "x".repeat(129);
+        for run_id in [
+            "",
+            "C:\\Private\\secret",
+            "run\nsecret",
+            "秘密",
+            oversized.as_str(),
+        ] {
+            let error = anyhow::Error::new(RunPreparationFailed {
+                run_id: run_id.into(),
+                source: WsbPreparationError::Contract("private detail".into()),
+            });
+            let envelope = preparation_error_from_anyhow(&error).unwrap();
+            assert_eq!(envelope.run_id, None);
+            assert_eq!(envelope.code, "AIW_WSB_PREPARATION_CONTRACT_INVALID");
+        }
+        let unrelated = anyhow!("secret unrelated failure");
+        assert!(preparation_error_from_anyhow(&unrelated).is_none());
+        let fallback =
+            preparation_error_from_anyhow(&unrelated).unwrap_or_else(generic_error_envelope);
+        assert_eq!(fallback.code, "AIW_CLI_FAILED");
+        assert!(!serde_json::to_string(&fallback).unwrap().contains("secret"));
     }
 }

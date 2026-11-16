@@ -31,6 +31,7 @@ const PAIRED_OUTPUT_ROOT: &str = r"C:\AIW\Output";
 const REQUEST_SCHEMA: &str = "aiw.dev/wsb-golden-probe-request/v0alpha1";
 const MAX_REQUEST_BYTES: u64 = 64 * 1024;
 const MAX_OUTPUT_ARTIFACT_BYTES: usize = 16 * 1024 * 1024;
+mod assessment;
 mod sevenzip;
 
 #[derive(Debug, Parser)]
@@ -39,6 +40,9 @@ struct Cli {
     /// Read a strict, immutable golden-probe request from the read-only tools mapping.
     #[arg(long)]
     request: PathBuf,
+    /// Internal fixed SYSTEM collector role; independently validates native identity.
+    #[arg(long, hide = true)]
+    system_assessment: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -57,6 +61,9 @@ struct GoldenProbeRequest {
 }
 
 enum GuestRequest {
+    ApplicationAssessment(
+        Box<aiw_provider_wsb::assessment_request::ApplicationAssessmentGuestRequest>,
+    ),
     Golden(Box<GoldenProbeRequest>),
     ImportedMsi(Box<ImportedMsiGuestRequest>),
     ImportedBambu(Box<ImportedBambuGuestRequest>),
@@ -299,7 +306,13 @@ fn publish_paired_controls(
 fn run() -> Result<()> {
     let cli = Cli::parse();
     let request = read_request(&cli.request)?;
+    if cli.system_assessment && !matches!(request, GuestRequest::ApplicationAssessment(_)) {
+        bail!("SYSTEM collector role is limited to the versioned assessment request");
+    }
     match request {
+        GuestRequest::ApplicationAssessment(request) => {
+            assessment::execute(&request, cli.system_assessment)
+        }
         GuestRequest::SevenZip(request) => sevenzip::execute(&request),
         GuestRequest::PairedControls(request) => execute_paired_controls_request(&request),
         GuestRequest::Golden(request) => {
@@ -1112,6 +1125,22 @@ fn open_installer_read_held(path: &Path) -> Result<File> {
 }
 
 fn read_request(path: &Path) -> Result<GuestRequest> {
+    if assessment::request_path_allowed(path) {
+        let metadata = fs::symlink_metadata(path).context("inspect fixed assessment request")?;
+        if !metadata.is_file() || metadata.file_type().is_symlink() || has_reparse_point(&metadata)
+        {
+            bail!("fixed assessment request must be an ordinary file");
+        }
+        let file = File::open(path).context("open fixed application assessment request")?;
+        let mut bytes = Vec::new();
+        file.take(
+            aiw_provider_wsb::assessment_request::APPLICATION_ASSESSMENT_REQUEST_MAX_BYTES + 1,
+        )
+        .read_to_end(&mut bytes)?;
+        return assessment::parse_request(path, &bytes)
+            .map(Box::new)
+            .map(GuestRequest::ApplicationAssessment);
+    }
     let file = File::open(path).context("open guest request")?;
     let mut bytes = Vec::new();
     file.take(MAX_REQUEST_BYTES + 1).read_to_end(&mut bytes)?;
@@ -1124,6 +1153,9 @@ fn read_request(path: &Path) -> Result<GuestRequest> {
         .get("schemaVersion")
         .and_then(serde_json::Value::as_str)
     {
+        Some(aiw_provider_wsb::assessment_request::APPLICATION_ASSESSMENT_REQUEST_SCHEMA) => {
+            bail!("application assessment requires its exact fixed request path")
+        }
         Some(aiw_provider_wsb::sevenzip::SEVENZIP_REQUEST_SCHEMA) => serde_json::from_value(value)
             .map(Box::new)
             .map(GuestRequest::SevenZip)

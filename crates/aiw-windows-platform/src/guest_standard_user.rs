@@ -84,6 +84,7 @@ struct ProfileInfoW {
 #[link(name = "Netapi32")]
 unsafe extern "system" {
     fn NetUserAdd(server: PWSTR, level: u32, buffer: *const u8, parameter_error: *mut u32) -> u32;
+    fn NetUserDel(server: PWSTR, user_name: PWSTR) -> u32;
 }
 #[link(name = "Bcrypt")]
 unsafe extern "system" {
@@ -159,13 +160,136 @@ pub(crate) struct StandardUserSession {
 }
 
 impl StandardUserSession {
+    /// Keep teardown explicitly unmeasured when owned process termination was
+    /// not established. Do not unload a possibly active profile or retry it in
+    /// Drop; the disposable outer worker must reconcile the remaining objects.
+    pub(crate) fn defer_assessment_cleanup(
+        mut self,
+    ) -> aiw_provider_wsb::assessment_observation::AssessmentAccountCleanup {
+        self.environment = std::ptr::null_mut();
+        self.profile = HANDLE::default();
+        aiw_provider_wsb::assessment_observation::AssessmentAccountCleanup{errors:vec!["Account/profile/environment teardown deferred: owned application job absence unconfirmed; disposable-worker cleanup required".into()],..Default::default()}
+    }
+    /// Explicit generic-worker teardown. Each attempted native cleanup is
+    /// recorded exactly once; Drop cannot silently retry a reported failure.
+    pub(crate) fn cleanup_assessment(
+        mut self,
+    ) -> aiw_provider_wsb::assessment_observation::AssessmentAccountCleanup {
+        let mut report =
+            aiw_provider_wsb::assessment_observation::AssessmentAccountCleanup::default();
+        if !self.environment.is_null() {
+            let environment = std::mem::replace(&mut self.environment, std::ptr::null_mut());
+            // SAFETY: exact owned environment; cleared before the one attempt.
+            let success = unsafe { DestroyEnvironmentBlock(environment) } != 0;
+            report.environment_destroyed = Some(success);
+            if !success {
+                report
+                    .errors
+                    .push(last_error("DestroyEnvironmentBlock").to_string());
+            }
+        }
+        if !self.profile.is_invalid() {
+            let profile = std::mem::take(&mut self.profile);
+            // SAFETY: exact owned profile and its still-live logon token.
+            let success = unsafe { UnloadUserProfile(raw_handle(&self.token), profile) } != 0;
+            report.profile_unloaded = Some(success);
+            if !success {
+                report
+                    .errors
+                    .push(last_error("UnloadUserProfile").to_string());
+            }
+        }
+        // Never remove a preexisting/replaced account. establish() refused one;
+        // bind the current name to the exact SID returned by our own logon.
+        match crate::control_appcontainer::fixed_account_sid(STANDARD_USER_ACCOUNT_NAME) {
+            Ok(sid) if sid == self.context.user_sid => match wide(STANDARD_USER_ACCOUNT_NAME) {
+                Ok(mut name) => {
+                    // SAFETY: fixed local account name, exact ownership checked.
+                    let status = unsafe { NetUserDel(PWSTR::null(), PWSTR(name.as_mut_ptr())) };
+                    report.account_deleted = Some(status == NERR_SUCCESS);
+                    if status != NERR_SUCCESS {
+                        report.errors.push(format!("NetUserDel returned {status}"));
+                    }
+                }
+                Err(error) => report.errors.push(error.to_string()),
+            },
+            Ok(_) => report
+                .errors
+                .push("Account SID changed; deletion refused".into()),
+            Err(error) => report
+                .errors
+                .push(format!("Account ownership revalidation: {error}")),
+        }
+        report
+    }
     /// Creates the one reviewed Sandbox-local account.  An existing account is
     /// always rejected: accepting it would turn this into account adoption.
     pub(crate) fn establish() -> Result<Self, GuestMsiExecutionError> {
         let mut user_name = wide(STANDARD_USER_ACCOUNT_NAME)?;
         let mut password = GuestPassword(random_password()?);
         create_user(&mut user_name, &mut password.0)?;
+        Self::establish_created(user_name, password)
+    }
 
+    /// Generic worker variant retains account cleanup facts even when a later
+    /// logon/profile/environment step fails. Foreign/preexisting names are
+    /// never deleted; only our successful NetUserAdd plus exact SID qualifies.
+    pub(crate) fn establish_assessment() -> Result<
+        Self,
+        (
+            GuestMsiExecutionError,
+            aiw_provider_wsb::assessment_observation::AssessmentAccountCleanup,
+        ),
+    > {
+        let mut cleanup =
+            aiw_provider_wsb::assessment_observation::AssessmentAccountCleanup::default();
+        let prepared = (|| {
+            let mut name = wide(STANDARD_USER_ACCOUNT_NAME)?;
+            let mut password = GuestPassword(random_password()?);
+            create_user(&mut name, &mut password.0)?;
+            Ok::<_, GuestMsiExecutionError>((name, password))
+        })();
+        let (mut name, password) = match prepared {
+            Ok(value) => value,
+            Err(error) => return Err((error, cleanup)),
+        };
+        let owned_sid =
+            match crate::control_appcontainer::fixed_account_sid(STANDARD_USER_ACCOUNT_NAME) {
+                Ok(sid) => sid,
+                Err(error) => {
+                    cleanup
+                        .errors
+                        .push("Fresh account SID unavailable; deletion not authorized".into());
+                    return Err((GuestMsiExecutionError::Process(error.to_string()), cleanup));
+                }
+            };
+        match Self::establish_created(name.clone(), password) {
+            Ok(session) => Ok(session),
+            Err(error) => {
+                cleanup.errors.push("Partial logon/profile/environment cleanup is unmeasured; disposable-worker cleanup remains required".into());
+                match crate::control_appcontainer::fixed_account_sid(STANDARD_USER_ACCOUNT_NAME) {
+                    Ok(sid) if sid == owned_sid => {
+                        let code = unsafe { NetUserDel(PWSTR::null(), PWSTR(name.as_mut_ptr())) };
+                        cleanup.account_deleted = Some(code == NERR_SUCCESS);
+                        if code != NERR_SUCCESS {
+                            cleanup.errors.push(format!(
+                                "NetUserDel after establishment failure returned {code}"
+                            ));
+                        }
+                    }
+                    _ => cleanup
+                        .errors
+                        .push("Fresh account identity changed; deletion refused".into()),
+                }
+                Err((error, cleanup))
+            }
+        }
+    }
+
+    fn establish_created(
+        mut user_name: Vec<u16>,
+        mut password: GuestPassword,
+    ) -> Result<Self, GuestMsiExecutionError> {
         let mut token = HANDLE::default();
         let domain = wide(".")?;
         // SAFETY: the account and password buffers remain valid for the call;
@@ -393,7 +517,7 @@ impl ScopedPrivileges {
             // AdjustTokenPrivileges may succeed while reporting partial assignment
             // through last-error, so clear stale state immediately before it.
             unsafe { SetLastError(windows::Win32::Foundation::WIN32_ERROR(0)) };
-            if unsafe {
+            let adjusted = unsafe {
                 AdjustTokenPrivileges(
                     raw_handle(&guard.token),
                     0,
@@ -402,10 +526,12 @@ impl ScopedPrivileges {
                     &mut prior,
                     &mut returned,
                 )
-            } == 0
-                || unsafe { GetLastError() }.0 == ERROR_NOT_ALL_ASSIGNED
-            {
-                return Err(last_error("AdjustTokenPrivileges enable"));
+            };
+            let adjustment_error = unsafe { GetLastError() }.0;
+            if adjusted == 0 || adjustment_error == ERROR_NOT_ALL_ASSIGNED {
+                return Err(GuestMsiExecutionError::Process(format!(
+                    "AdjustTokenPrivileges enable {name} failed: Win32 {adjustment_error}"
+                )));
             }
             // Already-enabled privileges have no changed entry to restore.
             if prior.count == 0

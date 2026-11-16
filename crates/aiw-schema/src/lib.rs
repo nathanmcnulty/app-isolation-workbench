@@ -361,6 +361,11 @@ pub struct Candidate {
 )]
 pub enum CandidateConfiguration {
     Baseline,
+    /// Classic, zero-capability AppContainer inside the disposable Windows worker.
+    /// This selects a boundary, not an application or a provider availability claim.
+    ClassicAppContainer {
+        network: NetworkIntent,
+    },
     WindowsSandbox {
         #[serde(alias = "provider_id")]
         provider_id: String,
@@ -392,6 +397,49 @@ pub enum CandidateConfiguration {
 pub enum ProcessContainerBackend {
     AppContainer,
     BaseContainer,
+}
+
+#[cfg(test)]
+mod classic_appcontainer_configuration_tests {
+    use super::*;
+
+    #[test]
+    fn classic_configuration_is_distinct_closed_and_zero_network_only() {
+        let config: CandidateConfiguration = serde_json::from_value(serde_json::json!({
+            "type":"classicAppContainer", "network":"blocked"
+        }))
+        .unwrap();
+        let mut candidate = Candidate {
+            id: "classic".into(),
+            candidate_type: CandidateType::ClassicAppContainer,
+            experimental: false,
+            config,
+            extensions: BTreeMap::new(),
+        };
+        let mut issues = Vec::new();
+        validate_candidate(&mut issues, 0, &candidate, &[]);
+        assert!(issues.is_empty());
+        candidate.candidate_type = CandidateType::ProcessContainer;
+        validate_candidate(&mut issues, 0, &candidate, &[]);
+        assert!(!issues.is_empty());
+        candidate.candidate_type = CandidateType::ClassicAppContainer;
+        candidate.config = CandidateConfiguration::ClassicAppContainer {
+            network: NetworkIntent::Allowed,
+        };
+        issues.clear();
+        validate_candidate(&mut issues, 0, &candidate, &[]);
+        assert!(!issues.is_empty());
+        assert!(
+            serde_json::from_value::<CandidateConfiguration>(serde_json::json!({
+                "type":"classicAppContainer", "network":"blocked", "capabilities":["internetClient"]
+            }))
+            .is_err()
+        );
+        assert_eq!(
+            serde_json::to_value(CandidateConfiguration::Baseline).unwrap(),
+            serde_json::json!({"type":"baseline"})
+        );
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -1373,6 +1421,24 @@ fn validate_candidate(
     let path = format!("$.candidates[{index}]");
     validate_extensions(issues, &format!("{path}.extensions"), &candidate.extensions);
     match &candidate.config {
+        CandidateConfiguration::ClassicAppContainer { network } => {
+            if candidate.candidate_type != CandidateType::ClassicAppContainer {
+                issue(
+                    issues,
+                    &format!("{path}.config"),
+                    "candidateConfigurationMismatch",
+                    "classicAppContainer configuration requires the classicAppContainer candidate type",
+                );
+            }
+            if *network != NetworkIntent::Blocked {
+                issue(
+                    issues,
+                    &format!("{path}.config.network"),
+                    "unsupportedNetworkIntent",
+                    "classicAppContainer currently requires blocked network",
+                );
+            }
+        }
         CandidateConfiguration::Baseline => {
             if candidate.candidate_type != CandidateType::UnpackagedBaseline {
                 issue(

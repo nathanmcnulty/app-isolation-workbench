@@ -21,6 +21,16 @@ members = [
 ]
 resolver = "3"
 
+# Keep routine local checks small on shared development machines. Full symbols
+# are an explicit debugging opt-in; release/acceptance profiles are unchanged.
+[profile.dev]
+debug = 0
+incremental = false
+
+[profile.test]
+debug = 0
+incremental = false
+
 [workspace.package]
 version = "0.1.0-alpha.1"
 edition = "2024"

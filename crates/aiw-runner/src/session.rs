@@ -15,6 +15,8 @@ use sha2::{Digest, Sha256};
 use crate::{RunnerError, valid_uuid};
 
 pub const SESSION_TRANSACTION_SCHEMA_VERSION: &str = "aiw.dev/wsb-session-transaction/v0alpha3";
+pub const AUTHENTICATED_SESSION_TRANSACTION_SCHEMA: &str =
+    "aiw.dev/wsb-session-transaction/v0alpha4";
 const LEGACY_SESSION_TRANSACTION_SCHEMA_VERSION: &str = "aiw.dev/wsb-session-transaction/v0alpha2";
 const MAX_TRANSACTION_BYTES: u64 = 64 * 1024;
 const MAX_TRANSITIONS: usize = 16;
@@ -31,7 +33,7 @@ pub enum SessionTransactionState {
     RecoveryRequired,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SessionTransition {
     pub sequence: u32,
@@ -39,6 +41,51 @@ pub struct SessionTransition {
     pub reason_code: String,
     pub previous_hash: String,
     pub hash: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_latch_sha256: Option<String>,
+}
+
+#[derive(Default)]
+struct HashPresence {
+    present: bool,
+    value: Option<String>,
+}
+impl<'de> Deserialize<'de> for HashPresence {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Self {
+            present: true,
+            value: Option::<String>::deserialize(deserializer)?,
+        })
+    }
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TransitionWire {
+    sequence: u32,
+    state: SessionTransactionState,
+    reason_code: String,
+    previous_hash: String,
+    hash: String,
+    #[serde(default)]
+    channel_latch_sha256: HashPresence,
+}
+impl<'de> Deserialize<'de> for SessionTransition {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let w = TransitionWire::deserialize(deserializer)?;
+        if w.channel_latch_sha256.present && w.channel_latch_sha256.value.is_none() {
+            return Err(serde::de::Error::custom(
+                "channel latch null is not a historical field",
+            ));
+        }
+        Ok(Self {
+            sequence: w.sequence,
+            state: w.state,
+            reason_code: w.reason_code,
+            previous_hash: w.previous_hash,
+            hash: w.hash,
+            channel_latch_sha256: w.channel_latch_sha256.value,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -63,6 +110,8 @@ pub struct SessionTransaction {
     pub workspace_identity_sha256: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recovery: Option<SessionRecoveryBinding>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub descriptor_sha256: Option<String>,
     pub transitions: Vec<SessionTransition>,
 }
 
@@ -80,6 +129,8 @@ struct SessionTransactionWire {
     workspace_identity_sha256: String,
     #[serde(default)]
     recovery: Option<SessionRecoveryBinding>,
+    #[serde(default)]
+    descriptor_sha256: HashPresence,
     transitions: Vec<SessionTransition>,
 }
 
@@ -89,6 +140,11 @@ impl<'de> Deserialize<'de> for SessionTransaction {
         D: Deserializer<'de>,
     {
         let wire = SessionTransactionWire::deserialize(deserializer)?;
+        if wire.descriptor_sha256.present && wire.descriptor_sha256.value.is_none() {
+            return Err(serde::de::Error::custom(
+                "channel descriptor null is not a historical field",
+            ));
+        }
         let transaction = Self {
             schema_version: wire.schema_version,
             run_id: wire.run_id,
@@ -100,6 +156,7 @@ impl<'de> Deserialize<'de> for SessionTransaction {
             request_sha256: wire.request_sha256,
             workspace_identity_sha256: wire.workspace_identity_sha256,
             recovery: wire.recovery,
+            descriptor_sha256: wire.descriptor_sha256.value,
             transitions: wire.transitions,
         };
         validate_transaction(&transaction).map_err(serde::de::Error::custom)?;
@@ -188,12 +245,18 @@ pub(crate) struct SessionBinding {
     pub request_sha256: String,
     pub workspace_identity_sha256: String,
     pub recovery: Option<SessionRecoveryBinding>,
+    pub descriptor_sha256: Option<String>,
 }
 
 impl SessionBinding {
     fn transaction(&self, reason_code: &str) -> Result<SessionTransaction, RunnerError> {
         let mut transaction = SessionTransaction {
-            schema_version: SESSION_TRANSACTION_SCHEMA_VERSION.to_owned(),
+            schema_version: if self.descriptor_sha256.is_some() {
+                AUTHENTICATED_SESSION_TRANSACTION_SCHEMA
+            } else {
+                SESSION_TRANSACTION_SCHEMA_VERSION
+            }
+            .to_owned(),
             run_id: self.run_id.clone(),
             plan_hash: self.plan_hash.clone(),
             project_revision_hash: self.project_revision_hash.clone(),
@@ -207,6 +270,7 @@ impl SessionBinding {
                     "new session transaction lacks its recovery binding".to_owned(),
                 )
             })?),
+            descriptor_sha256: self.descriptor_sha256.clone(),
             transitions: Vec::new(),
         };
         transaction.push(SessionTransactionState::StartIntent, reason_code)?;
@@ -222,7 +286,13 @@ impl SessionBinding {
             && transaction.session_id == self.session_id
             && transaction.request_sha256 == self.request_sha256
             && transaction.workspace_identity_sha256 == self.workspace_identity_sha256
+            && transaction.descriptor_sha256 == self.descriptor_sha256
             && match transaction.schema_version.as_str() {
+                AUTHENTICATED_SESSION_TRANSACTION_SCHEMA => {
+                    self.descriptor_sha256.is_some()
+                        && self.recovery.is_some()
+                        && transaction.recovery == self.recovery
+                }
                 SESSION_TRANSACTION_SCHEMA_VERSION => {
                     self.recovery.is_some() && transaction.recovery == self.recovery
                 }
@@ -240,6 +310,18 @@ impl SessionTransaction {
         state: SessionTransactionState,
         reason_code: &str,
     ) -> Result<(), RunnerError> {
+        let latch = self
+            .transitions
+            .last()
+            .and_then(|t| t.channel_latch_sha256.clone());
+        self.push_with_latch(state, reason_code, latch)
+    }
+    fn push_with_latch(
+        &mut self,
+        state: SessionTransactionState,
+        reason_code: &str,
+        latch: Option<String>,
+    ) -> Result<(), RunnerError> {
         validate_reason(reason_code)?;
         let sequence = u32::try_from(self.transitions.len() + 1)
             .map_err(|_| RunnerError::Transaction("transition sequence overflow".to_owned()))?;
@@ -248,13 +330,21 @@ impl SessionTransaction {
             .last()
             .map_or(ZERO_HASH, |transition| transition.hash.as_str())
             .to_owned();
-        let hash = transition_hash(self, sequence, state, reason_code, &previous_hash)?;
+        let hash = transition_hash(
+            self,
+            sequence,
+            state,
+            reason_code,
+            &previous_hash,
+            latch.as_deref(),
+        )?;
         self.transitions.push(SessionTransition {
             sequence,
             state,
             reason_code: reason_code.to_owned(),
             previous_hash,
             hash,
+            channel_latch_sha256: latch,
         });
         if let Err(error) = validate_transaction(self) {
             self.transitions.pop();
@@ -294,6 +384,7 @@ impl<'a> TransactionStore<'a> {
             request_sha256: self.binding.request_sha256.clone(),
             workspace_identity_sha256: self.binding.workspace_identity_sha256.clone(),
             recovery: None,
+            descriptor_sha256: None,
             transitions: Vec::new(),
         };
         transaction.push(SessionTransactionState::StartIntent, "approved-start")?;
@@ -320,6 +411,35 @@ impl<'a> TransactionStore<'a> {
             RunnerError::Transaction("session transaction does not exist".to_owned())
         })?;
         transaction.push(state, reason_code)?;
+        self.publish(&transaction)?;
+        Ok(transaction)
+    }
+
+    /// The immutable public latch is committed before any ACK transport write.
+    pub(crate) fn commit_channel_latch(
+        &self,
+        digest: &str,
+    ) -> Result<SessionTransaction, RunnerError> {
+        validate_hash(digest)?;
+        let mut transaction = self
+            .load()?
+            .ok_or_else(|| RunnerError::Transaction("channel transaction is absent".into()))?;
+        if transaction.schema_version != AUTHENTICATED_SESSION_TRANSACTION_SCHEMA
+            || transaction.current_state() != SessionTransactionState::Active
+            || transaction
+                .transitions
+                .iter()
+                .any(|t| t.channel_latch_sha256.is_some())
+        {
+            return Err(RunnerError::Transaction(
+                "channel latch intent already consumed or unavailable".into(),
+            ));
+        }
+        transaction.push_with_latch(
+            SessionTransactionState::Active,
+            "channel-ack-latched",
+            Some(digest.into()),
+        )?;
         self.publish(&transaction)?;
         Ok(transaction)
     }
@@ -373,6 +493,7 @@ impl<'a> TransactionStore<'a> {
                 session_id: transaction.session_id.clone(),
                 request_sha256: transaction.request_sha256.clone(),
                 workspace_identity_sha256: transaction.workspace_identity_sha256.clone(),
+                descriptor_sha256: transaction.descriptor_sha256.clone(),
                 recovery: transaction.recovery.clone(),
             },
         })
@@ -594,7 +715,9 @@ fn pending_publication(path: &Path) -> Result<PendingPublication, RunnerError> {
 fn validate_transaction(transaction: &SessionTransaction) -> Result<(), RunnerError> {
     if !matches!(
         transaction.schema_version.as_str(),
-        SESSION_TRANSACTION_SCHEMA_VERSION | LEGACY_SESSION_TRANSACTION_SCHEMA_VERSION
+        SESSION_TRANSACTION_SCHEMA_VERSION
+            | LEGACY_SESSION_TRANSACTION_SCHEMA_VERSION
+            | AUTHENTICATED_SESSION_TRANSACTION_SCHEMA
     ) || !valid_run_id(&transaction.run_id)
         || !valid_uuid(&transaction.session_id)
         || transaction
@@ -609,7 +732,7 @@ fn validate_transaction(transaction: &SessionTransaction) -> Result<(), RunnerEr
         ));
     }
     match transaction.schema_version.as_str() {
-        SESSION_TRANSACTION_SCHEMA_VERSION => {
+        SESSION_TRANSACTION_SCHEMA_VERSION | AUTHENTICATED_SESSION_TRANSACTION_SCHEMA => {
             let recovery = transaction.recovery.as_ref().ok_or_else(|| {
                 RunnerError::Transaction(
                     "v0alpha3 session transaction lacks its recovery binding".to_owned(),
@@ -625,6 +748,20 @@ fn validate_transaction(transaction: &SessionTransaction) -> Result<(), RunnerEr
         }
         _ => unreachable!("schema version was bounded above"),
     }
+    if transaction.schema_version == AUTHENTICATED_SESSION_TRANSACTION_SCHEMA {
+        validate_hash(transaction.descriptor_sha256.as_deref().ok_or_else(|| {
+            RunnerError::Transaction("authenticated transaction lacks descriptor".into())
+        })?)?;
+    } else if transaction.descriptor_sha256.is_some()
+        || transaction
+            .transitions
+            .iter()
+            .any(|t| t.channel_latch_sha256.is_some())
+    {
+        return Err(RunnerError::Transaction(
+            "historical transaction cannot acquire channel fields".into(),
+        ));
+    }
     for value in [
         &transaction.plan_hash,
         &transaction.project_revision_hash,
@@ -637,6 +774,8 @@ fn validate_transaction(transaction: &SessionTransaction) -> Result<(), RunnerEr
     }
     let mut previous_state = None;
     let mut previous_hash = ZERO_HASH.to_owned();
+    let mut previous_latch: Option<&str> = None;
+    let mut provider_start_intent = false;
     for (index, transition) in transaction.transitions.iter().enumerate() {
         if usize::try_from(transition.sequence).ok() != Some(index + 1)
             || transition.previous_hash != previous_hash
@@ -646,9 +785,55 @@ fn validate_transaction(transaction: &SessionTransaction) -> Result<(), RunnerEr
             ));
         }
         validate_reason(&transition.reason_code)?;
-        if !valid_transition(previous_state, transition.state) {
+        let latch_step = transaction.schema_version == AUTHENTICATED_SESSION_TRANSACTION_SCHEMA
+            && previous_state == Some(SessionTransactionState::Active)
+            && transition.state == SessionTransactionState::Active
+            && transition.reason_code == "channel-ack-latched"
+            && previous_latch.is_none()
+            && transition.channel_latch_sha256.is_some();
+        let provider_step = transaction.schema_version == AUTHENTICATED_SESSION_TRANSACTION_SCHEMA
+            && previous_state == Some(SessionTransactionState::StartIntent)
+            && transition.state == SessionTransactionState::StartIntent
+            && transition.reason_code == "provider-start-intent"
+            && !provider_start_intent
+            && index == 1
+            && previous_latch.is_none();
+        let preflight_cleanup = transaction.schema_version
+            == AUTHENTICATED_SESSION_TRANSACTION_SCHEMA
+            && previous_state == Some(SessionTransactionState::StartIntent)
+            && !provider_start_intent
+            && transition.state == SessionTransactionState::CleanupIntent
+            && transition.reason_code == "channel-preflight-cleanup";
+        if transaction.schema_version == AUTHENTICATED_SESSION_TRANSACTION_SCHEMA
+            && ((index == 0 && transition.reason_code != "channel-provider-preflight")
+                || (transition.reason_code == "provider-start-intent" && !provider_step)
+                || (transition.reason_code == "channel-preflight-cleanup" && !preflight_cleanup)
+                || (matches!(
+                    transition.state,
+                    SessionTransactionState::Active | SessionTransactionState::Unknown
+                ) && !provider_start_intent))
+        {
+            return Err(RunnerError::Transaction(
+                "authenticated provider phase authority differs".into(),
+            ));
+        }
+        if !valid_transition(previous_state, transition.state)
+            && !latch_step
+            && !provider_step
+            && !preflight_cleanup
+        {
             return Err(RunnerError::Transaction(
                 "session transition grammar is invalid".to_owned(),
+            ));
+        }
+        if let Some(latch) = transition.channel_latch_sha256.as_deref() {
+            validate_hash(latch)?;
+        }
+        if (!latch_step && transition.channel_latch_sha256.as_deref() != previous_latch)
+            || (transition.reason_code == "channel-ack-latched" && !latch_step)
+        {
+            return Err(RunnerError::Transaction(
+                "channel latch changed, disappeared or lacks its unique intent transition".into(),
             ));
         }
         let expected = transition_hash(
@@ -657,6 +842,7 @@ fn validate_transaction(transaction: &SessionTransaction) -> Result<(), RunnerEr
             transition.state,
             &transition.reason_code,
             &transition.previous_hash,
+            transition.channel_latch_sha256.as_deref(),
         )?;
         if transition.hash != expected {
             return Err(RunnerError::Transaction(
@@ -665,6 +851,8 @@ fn validate_transaction(transaction: &SessionTransaction) -> Result<(), RunnerEr
         }
         previous_state = Some(transition.state);
         previous_hash.clone_from(&transition.hash);
+        previous_latch = transition.channel_latch_sha256.as_deref();
+        provider_start_intent |= provider_step;
     }
     Ok(())
 }
@@ -681,9 +869,7 @@ fn validate_recovery_binding(
         || !recovery.request_relative_path.is_ascii()
         || recovery.request_relative_path.contains('\\')
         || !is_safe_relative_path(&recovery.request_relative_path)
-        || recovery.provider_protocol.cli_version != "0.8.107.0"
-        || recovery.provider_protocol.protocol != "windowsSandboxCli/v0.8.107.0"
-        || recovery.provider_protocol.list_schema != "WindowsSandboxEnvironments/Id"
+        || recovery.provider_protocol.adapter().is_err()
     {
         return Err(RunnerError::Transaction(
             "session recovery binding is invalid".to_owned(),
@@ -778,12 +964,23 @@ struct TransitionHashInputV3<'a> {
     previous_hash: &'a str,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TransitionHashInputV4<'a> {
+    #[serde(flatten)]
+    base: TransitionHashInputV3<'a>,
+    descriptor_sha256: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    channel_latch_sha256: Option<&'a str>,
+}
+
 fn transition_hash(
     transaction: &SessionTransaction,
     sequence: u32,
     state: SessionTransactionState,
     reason_code: &str,
     previous_hash: &str,
+    channel_latch_sha256: Option<&str>,
 ) -> Result<String, RunnerError> {
     let value = match transaction.schema_version.as_str() {
         LEGACY_SESSION_TRANSACTION_SCHEMA_VERSION => serde_json::to_value(TransitionHashInputV2 {
@@ -801,13 +998,13 @@ fn transition_hash(
             reason_code,
             previous_hash,
         }),
-        SESSION_TRANSACTION_SCHEMA_VERSION => {
+        SESSION_TRANSACTION_SCHEMA_VERSION | AUTHENTICATED_SESSION_TRANSACTION_SCHEMA => {
             let recovery = transaction.recovery.as_ref().ok_or_else(|| {
                 RunnerError::Transaction(
                     "v0alpha3 transition lacks its recovery binding".to_owned(),
                 )
             })?;
-            serde_json::to_value(TransitionHashInputV3 {
+            let base = TransitionHashInputV3 {
                 schema_version: &transaction.schema_version,
                 run_id: &transaction.run_id,
                 plan_hash: &transaction.plan_hash,
@@ -822,7 +1019,18 @@ fn transition_hash(
                 state,
                 reason_code,
                 previous_hash,
-            })
+            };
+            if transaction.schema_version == AUTHENTICATED_SESSION_TRANSACTION_SCHEMA {
+                serde_json::to_value(TransitionHashInputV4 {
+                    base,
+                    descriptor_sha256: transaction.descriptor_sha256.as_deref().ok_or_else(
+                        || RunnerError::Transaction("authenticated hash lacks descriptor".into()),
+                    )?,
+                    channel_latch_sha256,
+                })
+            } else {
+                serde_json::to_value(base)
+            }
         }
         _ => {
             return Err(RunnerError::Transaction(
@@ -874,6 +1082,7 @@ fn same_binding(left: &SessionTransaction, right: &SessionTransaction) -> bool {
         && left.request_sha256 == right.request_sha256
         && left.workspace_identity_sha256 == right.workspace_identity_sha256
         && left.recovery == right.recovery
+        && left.descriptor_sha256 == right.descriptor_sha256
 }
 
 fn parse_snapshot_name(name: &str) -> Result<u32, RunnerError> {
@@ -1051,7 +1260,184 @@ mod tests {
             request_sha256: "5".repeat(64),
             workspace_identity_sha256: workspace_hash(&recovery),
             recovery: Some(recovery),
+            descriptor_sha256: None,
         }
+    }
+
+    #[test]
+    fn authenticated_descriptor_and_latch_are_bound_without_rewriting_prior_hashes() {
+        let mut bound = binding();
+        bound.descriptor_sha256 = Some("a".repeat(64));
+        let mut tx = bound.transaction("channel-provider-preflight").unwrap();
+        assert_eq!(tx.schema_version, AUTHENTICATED_SESSION_TRANSACTION_SCHEMA);
+        tx.push(
+            SessionTransactionState::StartIntent,
+            "provider-start-intent",
+        )
+        .unwrap();
+        tx.push(SessionTransactionState::Active, "start-confirmed")
+            .unwrap();
+        let prior = tx.transitions.clone();
+        tx.push_with_latch(
+            SessionTransactionState::Active,
+            "channel-ack-latched",
+            Some("b".repeat(64)),
+        )
+        .unwrap();
+        assert_eq!(tx.transitions[..3], prior);
+        let latched = tx.clone();
+        assert!(
+            tx.push_with_latch(
+                SessionTransactionState::Active,
+                "channel-ack-latched",
+                Some("c".repeat(64))
+            )
+            .is_err()
+        );
+        assert_eq!(tx, latched);
+        tx.push(SessionTransactionState::CleanupIntent, "cleanup")
+            .unwrap();
+        assert_eq!(
+            tx.transitions
+                .last()
+                .unwrap()
+                .channel_latch_sha256
+                .as_deref(),
+            Some("b".repeat(64).as_str())
+        );
+        tx.push(SessionTransactionState::CleanupVerified, "cleanup-verified")
+            .unwrap();
+        assert!(validate_transaction(&tx).is_ok());
+        let mut changed = tx.clone();
+        changed.descriptor_sha256 = Some("d".repeat(64));
+        assert!(validate_transaction(&changed).is_err());
+        let mut changed = tx.clone();
+        changed.transitions.last_mut().unwrap().channel_latch_sha256 = None;
+        assert!(validate_transaction(&changed).is_err());
+        let mut mixed = tx;
+        mixed.schema_version = SESSION_TRANSACTION_SCHEMA_VERSION.into();
+        assert!(validate_transaction(&mixed).is_err());
+    }
+
+    #[test]
+    fn historical_transactions_reject_channel_fields_even_null() {
+        for mut tx in [
+            binding().transaction("approved-start").unwrap(),
+            legacy_transaction("approved-start"),
+        ] {
+            let before = serde_json::to_value(&tx).unwrap();
+            assert!(before.get("descriptorSha256").is_none());
+            assert!(before["transitions"][0].get("channelLatchSha256").is_none());
+            for value in [serde_json::Value::Null, serde_json::json!("a".repeat(64))] {
+                let mut wire = before.clone();
+                wire["descriptorSha256"] = value.clone();
+                assert!(serde_json::from_value::<SessionTransaction>(wire).is_err());
+                let mut wire = before.clone();
+                wire["transitions"][0]["channelLatchSha256"] = value;
+                assert!(serde_json::from_value::<SessionTransaction>(wire).is_err());
+            }
+            assert_eq!(serde_json::to_value(&tx).unwrap(), before);
+            tx.push(SessionTransactionState::Active, "start-confirmed")
+                .unwrap();
+            assert!(validate_transaction(&tx).is_ok());
+        }
+    }
+
+    #[test]
+    fn authenticated_provider_start_marker_is_single_and_preflight_never_grants_start() {
+        let mut bound = binding();
+        bound.descriptor_sha256 = Some("a".repeat(64));
+        let mut tx = bound.transaction("channel-provider-preflight").unwrap();
+        assert!(super::super::channel_start_not_attempted(&tx));
+        let before = tx.clone();
+        assert!(
+            tx.push(SessionTransactionState::Active, "start-confirmed")
+                .is_err()
+        );
+        assert!(
+            tx.push(SessionTransactionState::Unknown, "start-outcome-unknown")
+                .is_err()
+        );
+        assert_eq!(tx, before);
+        let mut clean = tx.clone();
+        clean
+            .push(
+                SessionTransactionState::CleanupIntent,
+                "channel-preflight-cleanup",
+            )
+            .unwrap();
+        clean
+            .push(
+                SessionTransactionState::CleanupVerified,
+                "channel-preflight-cleanup-verified",
+            )
+            .unwrap();
+        assert!(super::super::channel_start_not_attempted(&clean));
+        assert!(super::super::start_settled(&clean));
+        tx.push(
+            SessionTransactionState::StartIntent,
+            "provider-start-intent",
+        )
+        .unwrap();
+        assert!(!super::super::channel_start_not_attempted(&tx));
+        assert!(
+            tx.push(
+                SessionTransactionState::StartIntent,
+                "provider-start-intent"
+            )
+            .is_err()
+        );
+        assert!(
+            tx.push(
+                SessionTransactionState::CleanupIntent,
+                "channel-preflight-cleanup"
+            )
+            .is_err()
+        );
+        tx.push(SessionTransactionState::Unknown, "start-outcome-unknown")
+            .unwrap();
+        assert!(!super::super::start_settled(&tx));
+        let legacy = binding().transaction("channel-provider-preflight").unwrap();
+        assert!(!super::super::channel_start_not_attempted(&legacy));
+    }
+
+    #[test]
+    fn public_latch_publication_is_bound_to_committed_active_history_once() {
+        let root = TestRoot::new();
+        let layout = layout(&root);
+        let mut bound = binding();
+        bound.descriptor_sha256 = Some("a".repeat(64));
+        let store = TransactionStore::new(&layout, bound);
+        store.create("channel-provider-preflight").unwrap();
+        assert!(store.commit_channel_latch(&"b".repeat(64)).is_err());
+        store
+            .transition(
+                SessionTransactionState::StartIntent,
+                "provider-start-intent",
+            )
+            .unwrap();
+        assert!(store.commit_channel_latch(&"b".repeat(64)).is_err());
+        store
+            .transition(SessionTransactionState::Active, "start-confirmed")
+            .unwrap();
+        let before = store.load_current().unwrap().unwrap();
+        let latched = store.commit_channel_latch(&"b".repeat(64)).unwrap();
+        assert_eq!(latched.transitions[..3], before.transitions);
+        assert!(store.commit_channel_latch(&"c".repeat(64)).is_err());
+        assert_eq!(store.load_current().unwrap().unwrap(), latched);
+        store
+            .transition(SessionTransactionState::CleanupIntent, "cleanup")
+            .unwrap();
+        let current = store.load_current().unwrap().unwrap();
+        assert_eq!(
+            current
+                .transitions
+                .last()
+                .unwrap()
+                .channel_latch_sha256
+                .as_deref(),
+            Some("b".repeat(64).as_str())
+        );
     }
 
     fn legacy_transaction(reason_code: &str) -> SessionTransaction {
@@ -1067,6 +1453,7 @@ mod tests {
             request_sha256: binding.request_sha256,
             workspace_identity_sha256: binding.workspace_identity_sha256,
             recovery: None,
+            descriptor_sha256: None,
             transitions: Vec::new(),
         };
         transaction
@@ -1143,6 +1530,7 @@ mod tests {
             SessionTransactionState::CleanupVerified,
             "approved-start",
             ZERO_HASH,
+            None,
         )
         .unwrap();
         assert!(
