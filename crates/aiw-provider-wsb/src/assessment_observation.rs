@@ -100,6 +100,85 @@ pub const ASSESSMENT_COLLECTOR_PROTECTION_SCHEMA: &str =
     "aiw.dev/assessment-collector-protection/v0alpha1";
 pub const ASSESSMENT_COLLECTOR_PROTECTION_V2_SCHEMA: &str =
     "aiw.dev/assessment-collector-protection/v0alpha2";
+pub const ASSESSMENT_COLLECTOR_PROTECTION_V3_SCHEMA: &str =
+    "aiw.dev/assessment-collector-protection/v0alpha3";
+pub const ASSESSMENT_COLLECTOR_CAPABILITIES_SCHEMA: &str =
+    "aiw.dev/collector-prelaunch-privileges/v0alpha1";
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
+pub enum AssessmentCollectorPrivilege {
+    #[serde(rename = "SeAssignPrimaryTokenPrivilege")]
+    AssignPrimaryToken,
+    #[serde(rename = "SeIncreaseQuotaPrivilege")]
+    IncreaseQuota,
+    #[serde(rename = "SeImpersonatePrivilege")]
+    Impersonate,
+}
+impl AssessmentCollectorPrivilege {
+    pub const ALL: [Self; 3] = [
+        Self::AssignPrimaryToken,
+        Self::IncreaseQuota,
+        Self::Impersonate,
+    ];
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssessmentCollectorPrivilegeObservation {
+    pub privilege: AssessmentCollectorPrivilege,
+    pub present: Option<bool>,
+    pub attributes: Option<u32>,
+}
+/// Read-only facts from the held collector primary token. Presence/attributes
+/// never grant launch, key-protection, compatibility or execution authority.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssessmentCollectorCapabilities {
+    pub schema_version: String,
+    pub token_id: String,
+    pub observations: Vec<AssessmentCollectorPrivilegeObservation>,
+    pub query_error: Option<String>,
+}
+impl AssessmentCollectorCapabilities {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.schema_version != ASSESSMENT_COLLECTOR_CAPABILITIES_SCHEMA
+            || self.token_id.len() != 16
+            || !self
+                .token_id
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            || self.token_id.bytes().all(|b| b == b'0')
+            || self.observations.len() != 3
+        {
+            return Err("collector privilege diagnostic identity/count refused".into());
+        }
+        if let Some(error) = &self.query_error
+            && (error.is_empty()
+                || error.len() > 4096
+                || error.chars().count() > 1024
+                || error.contains('\0'))
+        {
+            return Err("collector privilege diagnostic error bound".into());
+        }
+        for (fact, expected) in self
+            .observations
+            .iter()
+            .zip(AssessmentCollectorPrivilege::ALL)
+        {
+            let valid_fact = if self.query_error.is_some() {
+                fact.present.is_none() && fact.attributes.is_none()
+            } else {
+                matches!(
+                    (fact.present, fact.attributes),
+                    (Some(true), Some(_)) | (Some(false), None)
+                )
+            };
+            if fact.privilege != expected || !valid_fact {
+                return Err("collector privilege diagnostic order/claim refused".into());
+            }
+        }
+        Ok(())
+    }
+}
 pub const ASSESSMENT_COLLECTOR_PROCESS_RIGHTS: [u32; 7] =
     [0x2, 0x8, 0x10, 0x20, 0x40, 0x40000, 0x80000];
 pub const ASSESSMENT_COLLECTOR_THREAD_RIGHTS: [u32; 7] =
@@ -147,6 +226,8 @@ pub struct AssessmentCollectorProtection {
     /// Historical protection v1 cannot use a logon-SID trustee exception.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_provenance: Option<AssessmentCollectorTokenProvenance>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collector_capabilities: Option<AssessmentCollectorCapabilities>,
     pub access_checks: Vec<AssessmentCollectorObjectAccess>,
 }
 
@@ -163,6 +244,19 @@ impl<'de> Deserialize<'de> for TokenProvenancePresence {
         })
     }
 }
+#[derive(Default)]
+struct CollectorCapabilitiesPresence {
+    present: bool,
+    value: Option<AssessmentCollectorCapabilities>,
+}
+impl<'de> Deserialize<'de> for CollectorCapabilitiesPresence {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(Self {
+            present: true,
+            value: Option::<AssessmentCollectorCapabilities>::deserialize(d)?,
+        })
+    }
+}
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CollectorProtectionWire {
@@ -176,6 +270,8 @@ struct CollectorProtectionWire {
     primary_default_dacl: AssessmentCollectorDefaultDacl,
     #[serde(default)]
     token_provenance: TokenProvenancePresence,
+    #[serde(default)]
+    collector_capabilities: CollectorCapabilitiesPresence,
     access_checks: Vec<AssessmentCollectorObjectAccess>,
 }
 impl<'de> Deserialize<'de> for AssessmentCollectorProtection {
@@ -187,6 +283,25 @@ impl<'de> Deserialize<'de> for AssessmentCollectorProtection {
                 "historical collector protection cannot contain token provenance",
             ));
         }
+        if matches!(
+            w.schema_version.as_str(),
+            ASSESSMENT_COLLECTOR_PROTECTION_SCHEMA | ASSESSMENT_COLLECTOR_PROTECTION_V2_SCHEMA
+        ) && w.collector_capabilities.present
+        {
+            return Err(serde::de::Error::custom(
+                "historical collector protection cannot contain capabilities",
+            ));
+        }
+        if w.schema_version == ASSESSMENT_COLLECTOR_PROTECTION_V3_SCHEMA {
+            w.collector_capabilities
+                .value
+                .as_ref()
+                .ok_or_else(|| {
+                    <D::Error as serde::de::Error>::custom("collector privilege diagnostic absent")
+                })?
+                .validate()
+                .map_err(<D::Error as serde::de::Error>::custom)?;
+        }
         Ok(Self {
             schema_version: w.schema_version,
             storage: w.storage,
@@ -197,6 +312,7 @@ impl<'de> Deserialize<'de> for AssessmentCollectorProtection {
             thread_security: w.thread_security,
             primary_default_dacl: w.primary_default_dacl,
             token_provenance: w.token_provenance.value,
+            collector_capabilities: w.collector_capabilities.value,
             access_checks: w.access_checks,
         })
     }
@@ -228,10 +344,21 @@ pub fn validate_collector_token_provenance<'a>(
     standard_sid: &str,
 ) -> Result<Option<&'a str>, String> {
     match protection.schema_version.as_str() {
-        ASSESSMENT_COLLECTOR_PROTECTION_SCHEMA if protection.token_provenance.is_none() => {
+        ASSESSMENT_COLLECTOR_PROTECTION_SCHEMA
+            if protection.token_provenance.is_none()
+                && protection.collector_capabilities.is_none() =>
+        {
             return Ok(None);
         }
-        ASSESSMENT_COLLECTOR_PROTECTION_V2_SCHEMA => {}
+        ASSESSMENT_COLLECTOR_PROTECTION_V2_SCHEMA
+            if protection.collector_capabilities.is_none() => {}
+        ASSESSMENT_COLLECTOR_PROTECTION_V3_SCHEMA => {
+            protection
+                .collector_capabilities
+                .as_ref()
+                .ok_or("collector privilege diagnostic absent")?
+                .validate()?;
+        }
         _ => return Err("collector token provenance version refused".into()),
     }
     let p = protection

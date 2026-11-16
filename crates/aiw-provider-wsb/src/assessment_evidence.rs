@@ -2838,6 +2838,7 @@ mod tests {
             },
             access_checks: checks,
             token_provenance: None,
+            collector_capabilities: None,
         });
         (request, result)
     }
@@ -3059,6 +3060,217 @@ mod tests {
         assert!(
             validate_collector_token_provenance(&user_collision, collector, &standard).is_err()
         );
+    }
+
+    fn collector_capabilities_fixture() -> AssessmentCollectorCapabilities {
+        AssessmentCollectorCapabilities {
+            schema_version: ASSESSMENT_COLLECTOR_CAPABILITIES_SCHEMA.into(),
+            token_id: "0000000000034623".into(),
+            observations: AssessmentCollectorPrivilege::ALL
+                .into_iter()
+                .map(|privilege| AssessmentCollectorPrivilegeObservation {
+                    privilege,
+                    present: Some(false),
+                    attributes: None,
+                })
+                .collect(),
+            query_error: None,
+        }
+    }
+
+    #[test]
+    fn collector_privilege_diagnostic_shape_and_closed_wire_refuse_contradictions() {
+        let valid = collector_capabilities_fixture();
+        valid.validate().unwrap();
+        let raw = serde_json::to_string(&valid).unwrap();
+        for name in [
+            "SeAssignPrimaryTokenPrivilege",
+            "SeIncreaseQuotaPrivilege",
+            "SeImpersonatePrivilege",
+        ] {
+            assert!(raw.contains(name));
+        }
+        assert!(
+            serde_json::from_str::<AssessmentCollectorCapabilities>(
+                &raw.replace("SeImpersonatePrivilege", "SeDebugPrivilege")
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_str::<AssessmentCollectorCapabilities>(&raw.replacen(
+                '{',
+                "{\"privateUnknown\":true,",
+                1
+            ))
+            .is_err()
+        );
+        assert!(
+            serde_json::from_str::<AssessmentCollectorCapabilities>(&raw.replacen(
+                '{',
+                "{\"tokenId\":\"0000000000000001\",",
+                1
+            ))
+            .is_err()
+        );
+        for case in 0..17 {
+            let mut bad = valid.clone();
+            match case {
+                0 => bad.schema_version = "unknown".into(),
+                1 => bad.token_id = "0000000000000000".into(),
+                2 => bad.token_id = "000000000003462A".into(),
+                3 => {
+                    bad.token_id.pop();
+                }
+                4 => {
+                    bad.observations.pop();
+                }
+                5 => bad.observations.push(bad.observations[0].clone()),
+                6 => bad.observations.swap(0, 1),
+                7 => bad.observations[1].privilege = bad.observations[0].privilege,
+                8 => bad.observations[0].attributes = Some(0),
+                9 => bad.observations[0].present = Some(true),
+                10 => bad.observations[0].present = None,
+                11 => bad.query_error = Some("query failed".into()),
+                12 => bad.query_error = Some(String::new()),
+                13 => bad.query_error = Some("x".repeat(1025)),
+                14 => bad.query_error = Some("bad\0error".into()),
+                15 => {
+                    bad.query_error = Some("query failed".into());
+                    bad.observations[0].present = None;
+                }
+                _ => bad.token_id = "-000000000034623".into(),
+            }
+            assert!(bad.validate().is_err(), "case {case}");
+        }
+        let mut unknown = valid.clone();
+        unknown.query_error = Some("GetTokenInformation failed; privileges unknown".into());
+        for observation in &mut unknown.observations {
+            observation.present = None;
+        }
+        unknown.validate().unwrap();
+        unknown.observations[0].attributes = Some(0);
+        assert!(unknown.validate().is_err());
+        let mut assigned = valid;
+        for observation in &mut assigned.observations {
+            observation.present = Some(true);
+            observation.attributes = Some(0);
+        }
+        assigned.validate().unwrap(); // Assigned but disabled is an actual fact.
+    }
+
+    #[test]
+    fn protection_v3_requires_diagnostic_and_cannot_extend_historical_wire() {
+        let (_, result) = logon_provenance_fixture();
+        let v2 = result.native.collector_protection.as_ref().unwrap();
+        let diagnostic = collector_capabilities_fixture();
+        for version in [
+            ASSESSMENT_COLLECTOR_PROTECTION_SCHEMA,
+            ASSESSMENT_COLLECTOR_PROTECTION_V2_SCHEMA,
+        ] {
+            let mut old = v2.clone();
+            old.schema_version = version.into();
+            if version == ASSESSMENT_COLLECTOR_PROTECTION_SCHEMA {
+                old.token_provenance = None;
+            }
+            let value = serde_json::to_value(&old).unwrap();
+            assert!(
+                !value
+                    .as_object()
+                    .unwrap()
+                    .contains_key("collectorCapabilities")
+            );
+            assert_eq!(
+                serde_json::from_value::<AssessmentCollectorProtection>(value.clone()).unwrap(),
+                old
+            );
+            for inserted in [
+                serde_json::Value::Null,
+                serde_json::to_value(&diagnostic).unwrap(),
+            ] {
+                let mut changed = value.clone();
+                changed["collectorCapabilities"] = inserted;
+                assert!(serde_json::from_value::<AssessmentCollectorProtection>(changed).is_err());
+            }
+            old.collector_capabilities = Some(diagnostic.clone());
+            assert!(
+                validate_collector_token_provenance(
+                    &old,
+                    &result.native.setup_token.as_ref().unwrap().user_sid,
+                    &result.native.standard_context.as_ref().unwrap().user_sid
+                )
+                .is_err()
+            );
+        }
+        let mut v3 = v2.clone();
+        v3.schema_version = ASSESSMENT_COLLECTOR_PROTECTION_V3_SCHEMA.into();
+        v3.collector_capabilities = Some(diagnostic);
+        let value = serde_json::to_value(&v3).unwrap();
+        assert_eq!(
+            serde_json::from_value::<AssessmentCollectorProtection>(value.clone()).unwrap(),
+            v3
+        );
+        for null in [false, true] {
+            let mut changed = value.clone();
+            if null {
+                changed["collectorCapabilities"] = serde_json::Value::Null;
+            } else {
+                changed
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("collectorCapabilities");
+            }
+            assert!(serde_json::from_value::<AssessmentCollectorProtection>(changed).is_err());
+        }
+        let mut contradiction = value;
+        contradiction["collectorCapabilities"]["observations"][0]["attributes"] =
+            serde_json::json!(2);
+        assert!(serde_json::from_value::<AssessmentCollectorProtection>(contradiction).is_err());
+    }
+
+    #[test]
+    fn collector_privilege_absence_or_query_failure_is_diagnostic_not_dispatch_authority() {
+        let (request, original) = logon_provenance_fixture();
+        for kind in 0..3 {
+            let mut result = original.clone();
+            let mut diagnostic = collector_capabilities_fixture();
+            if kind == 1 {
+                diagnostic.query_error = Some("read-only privilege query unavailable".into());
+                for fact in &mut diagnostic.observations {
+                    fact.present = None;
+                }
+            } else if kind == 2 {
+                for fact in &mut diagnostic.observations {
+                    fact.present = Some(true);
+                    fact.attributes = Some(2);
+                }
+            }
+            let protection = result.native.collector_protection.as_mut().unwrap();
+            protection.schema_version = ASSESSMENT_COLLECTOR_PROTECTION_V3_SCHEMA.into();
+            protection.collector_capabilities = Some(diagnostic);
+            assert_eq!(collector_protection(&result.native).unwrap(), Some(true));
+            // A missing privilege or failed query cannot manufacture a process
+            // or turn an actual 1314 refusal into application incompatibility.
+            result.native.steps.clear();
+            result.native.assertions.clear();
+            result.native.driver_completed = false;
+            result.native.driver_errors = vec!["CreateProcessAsUserW failed: 1314".into()];
+            let verified = verify_assessment_result_inner(&request, &result).unwrap();
+            assert_eq!(verified.coverage.collector_key_protected, Some(true));
+            assert_eq!(verified.coverage.process_records, 0);
+            assert!(!verified.driver_complete);
+            assert_eq!(verified.workflow_status, AssessmentFactStatus::NotRun);
+            let (raw, records, _) = authenticated_records(&request, &result);
+            verify_authenticated_assessment_progress(&raw, &records, &request, &result).unwrap();
+            let denied = &mut result
+                .native
+                .collector_protection
+                .as_mut()
+                .unwrap()
+                .access_checks[0];
+            denied.native_code = Some(0);
+            denied.denied = Some(false);
+            assert_eq!(collector_protection(&result.native).unwrap(), Some(false));
+        }
     }
 
     // NOT cryptography: permits exercising verified-wrapper associations without

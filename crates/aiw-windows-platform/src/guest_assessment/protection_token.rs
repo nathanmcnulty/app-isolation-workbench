@@ -1,6 +1,8 @@
 //! Read-only, held-token provenance for the collector's exact logon trustee.
 use super::{Local, Result, raw};
 use aiw_provider_wsb::assessment_observation::{
+    ASSESSMENT_COLLECTOR_CAPABILITIES_SCHEMA, AssessmentCollectorCapabilities,
+    AssessmentCollectorPrivilege, AssessmentCollectorPrivilegeObservation,
     AssessmentCollectorTokenProvenance, AssessmentTokenGroup,
 };
 use std::{
@@ -11,10 +13,10 @@ use windows::{
     Win32::{
         Foundation::{HANDLE, HLOCAL},
         Security::{
-            Authorization::ConvertSidToStringSidW, GetTokenInformation, IsValidSid, PSID,
-            SID_AND_ATTRIBUTES, TOKEN_GROUPS, TOKEN_INFORMATION_CLASS, TOKEN_QUERY,
-            TOKEN_STATISTICS, TOKEN_TYPE, TOKEN_USER, TokenGroups, TokenLogonSid, TokenPrimary,
-            TokenStatistics, TokenType, TokenUser,
+            Authorization::ConvertSidToStringSidW, GetTokenInformation, IsValidSid,
+            LUID_AND_ATTRIBUTES, PSID, SID_AND_ATTRIBUTES, TOKEN_GROUPS, TOKEN_INFORMATION_CLASS,
+            TOKEN_PRIVILEGES, TOKEN_QUERY, TOKEN_STATISTICS, TOKEN_TYPE, TOKEN_USER, TokenGroups,
+            TokenLogonSid, TokenPrimary, TokenStatistics, TokenType, TokenUser,
         },
         System::Threading::OpenProcessToken,
     },
@@ -117,6 +119,29 @@ impl Buffer {
         }
         Ok(groups)
     }
+    fn privileges(&self) -> Result<Vec<LUID_AND_ATTRIBUTES>> {
+        let count = self.read::<u32>(0)? as usize;
+        let offset = offset_of!(TOKEN_PRIVILEGES, Privileges);
+        if count > 128
+            || offset
+                .checked_add(count * size_of::<LUID_AND_ATTRIBUTES>())
+                .is_none_or(|end| end > self.used)
+        {
+            return Err("collector privilege count/extent refused".into());
+        }
+        let mut values: Vec<LUID_AND_ATTRIBUTES> = Vec::with_capacity(count);
+        for index in 0..count {
+            let value = self
+                .read::<LUID_AND_ATTRIBUTES>(offset + index * size_of::<LUID_AND_ATTRIBUTES>())?;
+            if values.iter().any(|old| {
+                old.Luid.LowPart == value.Luid.LowPart && old.Luid.HighPart == value.Luid.HighPart
+            }) {
+                return Err("collector privilege duplicate LUID refused".into());
+            }
+            values.push(value);
+        }
+        Ok(values)
+    }
 }
 fn primary_user(token: HANDLE) -> Result<String> {
     if Buffer::query(token, TokenType)?.read::<TOKEN_TYPE>(0)? != TokenPrimary {
@@ -158,6 +183,72 @@ impl Tokens {
     pub(super) fn collector(&self) -> HANDLE {
         raw(&self.collector)
     }
+    /// Snapshot only. No privilege adjustment, launch selection or permission
+    /// grant follows from these facts. USED_FOR_ACCESS may change later, so the
+    /// snapshot is not an invariant substituted for the live dispatch guards.
+    pub(super) fn capabilities(&self) -> AssessmentCollectorCapabilities {
+        use AssessmentCollectorPrivilege::{AssignPrimaryToken, Impersonate, IncreaseQuota};
+        use windows::Win32::{
+            Foundation::LUID,
+            Security::{LookupPrivilegeValueW, TokenPrivileges},
+        };
+        use windows::core::PCWSTR;
+        let roles = [AssignPrimaryToken, IncreaseQuota, Impersonate];
+        let observed = (|| -> Result<Vec<AssessmentCollectorPrivilegeObservation>> {
+            super::guard_no_impersonation()?;
+            let values = Buffer::query(raw(&self.collector), TokenPrivileges)?.privileges()?;
+            let mut observations = Vec::with_capacity(3);
+            for role in roles {
+                let name = match role {
+                    AssignPrimaryToken => "SeAssignPrimaryTokenPrivilege",
+                    IncreaseQuota => "SeIncreaseQuotaPrivilege",
+                    Impersonate => "SeImpersonatePrivilege",
+                };
+                let name: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
+                let mut luid = LUID::default();
+                unsafe { LookupPrivilegeValueW(None, PCWSTR(name.as_ptr()), &mut luid) }
+                    .map_err(|_| "collector privilege LUID lookup refused")?;
+                let attributes = values
+                    .iter()
+                    .find(|value| {
+                        value.Luid.LowPart == luid.LowPart && value.Luid.HighPart == luid.HighPart
+                    })
+                    .map(|value| value.Attributes.0);
+                observations.push(AssessmentCollectorPrivilegeObservation {
+                    privilege: role,
+                    present: Some(attributes.is_some()),
+                    attributes,
+                });
+            }
+            if identity(raw(&self.collector))? != self.collector_id {
+                return Err("collector diagnostic token identity changed".into());
+            }
+            Ok(observations)
+        })();
+        let (observations, query_error) = match observed {
+            Ok(values) => (values, None),
+            Err(error) => (
+                roles
+                    .into_iter()
+                    .map(|privilege| AssessmentCollectorPrivilegeObservation {
+                        privilege,
+                        present: None,
+                        attributes: None,
+                    })
+                    .collect(),
+                Some(super::bound_error(&error)),
+            ),
+        };
+        AssessmentCollectorCapabilities {
+            schema_version: ASSESSMENT_COLLECTOR_CAPABILITIES_SCHEMA.into(),
+            token_id: format!(
+                "{:08x}{:08x}",
+                self.collector_id.1 as u32, self.collector_id.0
+            ),
+            observations,
+            query_error,
+        }
+    }
     pub(super) fn facts(&self) -> Result<AssessmentCollectorTokenProvenance> {
         let logon = Buffer::query(raw(&self.collector), TokenLogonSid)?.groups()?;
         if logon.len() != 1 {
@@ -192,6 +283,49 @@ impl Tokens {
 mod tests {
     use super::*;
     #[test]
+    fn privilege_buffers_bound_counts_extents_and_duplicate_luids() {
+        use windows::Win32::{Foundation::LUID, Security::TOKEN_PRIVILEGES_ATTRIBUTES};
+        let mut b = Buffer {
+            words: vec![0; 8192],
+            used: 4,
+        };
+        assert!(b.privileges().unwrap().is_empty());
+        b.words[0] = 129;
+        b.used = 65536;
+        assert!(b.privileges().is_err());
+        b.words[0] = 2;
+        b.used = 8;
+        assert!(b.privileges().is_err());
+        let offset = offset_of!(TOKEN_PRIVILEGES, Privileges);
+        b.used = offset + 2 * size_of::<LUID_AND_ATTRIBUTES>();
+        let value = LUID_AND_ATTRIBUTES {
+            Luid: LUID {
+                LowPart: 10,
+                HighPart: 0,
+            },
+            Attributes: TOKEN_PRIVILEGES_ATTRIBUTES(2),
+        };
+        // This test owns the entire allocation and checks its returned extent.
+        unsafe {
+            let bytes = b.words.as_mut_ptr().cast::<u8>();
+            bytes.cast::<u32>().write_unaligned(2);
+            bytes
+                .add(offset)
+                .cast::<LUID_AND_ATTRIBUTES>()
+                .write_unaligned(value);
+            bytes
+                .add(offset + size_of::<LUID_AND_ATTRIBUTES>())
+                .cast::<LUID_AND_ATTRIBUTES>()
+                .write_unaligned(value);
+        }
+        assert!(b.privileges().is_err());
+        unsafe { b.words.as_mut_ptr().cast::<u32>().write_unaligned(1) };
+        assert_eq!(b.privileges().unwrap().len(), 1);
+        assert!(
+            Buffer::query(HANDLE::default(), windows::Win32::Security::TokenPrivileges).is_err()
+        );
+    }
+    #[test]
     fn malformed_token_buffers_refuse_before_dereference() {
         let mut b = Buffer {
             words: vec![0; 8192],
@@ -224,6 +358,15 @@ mod tests {
         let token = open(process).unwrap();
         let held = Tokens::observe(process, raw(&token)).unwrap();
         let facts = held.facts().unwrap();
+        let default_before = super::super::default_dacl(held.collector()).unwrap();
+        let capabilities = held.capabilities();
+        capabilities.validate().unwrap();
+        assert!(capabilities.query_error.is_none());
+        assert_eq!(capabilities.observations.len(), 3);
+        assert_eq!(
+            super::super::default_dacl(held.collector()).unwrap(),
+            default_before
+        );
         assert!(facts.collector_logon_sid.starts_with("S-1-5-5-"));
         assert_eq!(facts.collector_user_sid, facts.standard_user_sid);
         assert!(

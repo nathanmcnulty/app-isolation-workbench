@@ -298,7 +298,7 @@ impl ProtectionHold {
         }
         let tokens = token::Tokens::observe(raw(&process), standard)?;
         let fact = AssessmentCollectorProtection {
-            schema_version: ASSESSMENT_COLLECTOR_PROTECTION_V2_SCHEMA.into(),
+            schema_version: ASSESSMENT_COLLECTOR_PROTECTION_V3_SCHEMA.into(),
             storage:
                 aiw_provider_wsb::assessment_channel::ChannelCollectorStorage::ProtectedGuestLocal,
             collector_process_id: pid,
@@ -308,6 +308,7 @@ impl ProtectionHold {
             thread_security: security(raw(&thread))?,
             primary_default_dacl: default_dacl(tokens.collector())?,
             token_provenance: Some(tokens.facts()?),
+            collector_capabilities: Some(tokens.capabilities()),
             access_checks: vec![],
         };
         Ok(Self {

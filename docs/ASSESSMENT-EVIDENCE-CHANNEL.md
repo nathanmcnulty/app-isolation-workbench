@@ -142,6 +142,16 @@ reported NotRun: its observed logon trustee was outside the v1 allowlist. All
 29 access checks denied access, and outer Sandbox cleanup completed. That run
 does not qualify application behavior or the new v2 provenance implementation.
 
+Protection v3 adds a diagnostic snapshot from that same retained primary token:
+the presence and observed attributes of SeAssignPrimaryTokenPrivilege,
+SeIncreaseQuotaPrivilege and SeImpersonatePrivilege. TokenPrivileges reads use a
+fixed 64 KiB buffer, at most 128 entries and three fixed local LUID lookups.
+Failures report three unknown observations. The exact token ID and snapshot
+travel in the existing signed CollectorProtection record. These are prelaunch
+facts, not privilege grants or permanent attribute invariants. They do not
+select a launch API, weaken the 29 denial gates or establish application success.
+Historical protection v1/v2 reject any new diagnostic field, including null.
+
 ## Crash, retained reads and export
 
 Persist only the public descriptor, request, bootstrap, ACK, latched guest key
@@ -201,6 +211,8 @@ channel gates is satisfied by the earlier failed control.
 - [Mandatory integrity control](https://learn.microsoft.com/en-us/windows/win32/secauthz/mandatory-integrity-control)
 - [Token information classes](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ne-winnt-token_information_class)
 - [Token group attributes](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-token_groups)
+- [Token privileges](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-token_privileges)
+- [Local privilege LUID lookup](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-lookupprivilegevaluew)
 
 These references describe OS contracts, not qualification of this proposed
 implementation or installed provider wire behavior.

@@ -51,18 +51,39 @@ native and cross-boundary source reviews passed. The first freeze passed 535
 affected unit tests (19 ignored), Clippy and governance. A reviewed followup keeps
 v1 wire fields closed even for null provenance and excludes the standard user SID
 itself from the logon-trustee exception. Final provider 149, native protection 4
-and signed-host 5 tests plus all-target Clippy passed. No fresh Sandbox run
-qualifies this change.
+and signed-host 5 tests plus all-target Clippy passed. CI 43867287965 at f7b55485
+passed all three jobs; actual workspace passed=true / exit 0 / 472.6 seconds,
+with the same tested tree 9596f436708a87451a34b3c8e6fb8a367bd2a9bc.
+
+R10 independently admitted 34 originals, 25 signatures and all 29 denials.
+Protection v2 passed: the collector logon SID was absent from the actual standard
+token groups, and retained Read records collectorKeyProtected=true. Portable
+staging completed, but CreateProcessAsUserW returned privilege error 1314 before
+an application process was created. Outcome remains NotRun, not incompatibility.
+One exact owned Sandbox was stopped, with final empty lists and recorded cleanup.
+Application-job cleanup remains unmeasured. Preserve this consumed Start.
+
+The current readonly diagnostic records three launch-related privileges from the
+same retained collector token through the existing signed channel. It changes no
+privileges, desktop ACLs, launch API or authority gates. Focused native tests
+passed five; provider 152, signed-host 5, all-target Clippy and governance passed.
+Independent native and cross-boundary source reviews passed; a Clippy conditional
+rewrite has a separate equivalence review. The diagnostic has not yet been
+measured in a fresh Sandbox. Microsoft
+documents alternatives to CreateProcessAsUser, but a secure replacement still
+needs held-token, stdio inheritance and desktop-side-effect validation; no blind
+fallback or privilege grant is authorized by the failed baseline.
 
 ## Storage and next gates
 
 Use only `C:\aiw\environment-probe-20261114\target-static-r1`. Normal builds
 require explicit cache selection, reject unsafe overrides, disable incremental
 and debug symbols, and require at least 10 GiB free with cache <=8 GiB.
-Source 93eded3 consecutive dev builds measured 2,210,133,247 bytes / 2,935 files
+Source f7b55485 consecutive dev builds measured 2,455,961,560 bytes / 3,313 files
 both times; pass two compiled nothing and kept identical image hashes. Release
-ended at 2,210,597,898 bytes. Actual compiler commands and exact-source images
-passed independent admission. Keep one immutable three-tool set, not copied trees.
+ended at 2,457,169,979 bytes. All 18 actual compiler commands and three exact-source
+AMD64 static-CRT images passed independent admission. Keep one immutable
+30,060,032-byte three-tool set, not copied trees.
 
 Earlier audited cleanup recovered 8.41 GiB of idle GUI output and 6,857,707,520
 bytes of verified idle compiler metadata. Policy-blocked incremental cleanup
