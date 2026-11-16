@@ -143,9 +143,17 @@ preflight input timed out; the partial input was visibly cancelled with Ctrl+C
 and a clean PowerShell prompt verified. It was never submitted. No new provider,
 Sandbox or application execution occurred. Obtain fresh parent-process facts
 before sealing the packet; do not infer them from the old run.
-Computer Use subsequently stopped because it could not verify the current URL;
-native validation now requires restoration of the visible VM107 console. Do not
-retry through another automation route to bypass that stop. Offline review found
+After the user restored the console, fresh native read-only queries confirmed
+the exact parent process/birth/path/session, Core 7.6.10 x64, ordinary actor,
+VM UUID and Windows 26300.9974. Both R7 targets are absent; R4/R6 remain present.
+Guest free space is 63,106,760,704 bytes. These are screenshot transcriptions,
+not a machine-framed preflight or held-file identity admission. Native literal
+keys plus line redraw work; browser binding and clipboard delivery remain broken.
+A reviewed marker-only LAN probe raised a Windows Firewall prompt; Allow was
+not clicked, no guest request ran, and the exact owned marker was stopped with
+zero listeners remaining. Do not change firewall rules to complete this transfer.
+The bounded R7 packet constructor is source only and remains unexecuted until a
+permitted delivery route is available. Offline review found
 the R1 harness conflated authenticated report smoke success with full native
 qualification. An unsealed R2 accuracy draft separates those results and keeps
 qualification pending/false; the original templates and wrappers remain unchanged.
