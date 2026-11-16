@@ -81,21 +81,30 @@ The current launch candidate uses CreateProcessWithTokenW with the same held
 token, startup attributes, job and identity checks. A suspended PSS audit requires
 the three actual stdio objects and absence of one excluded inheritable canary;
 checked cleanup and a post-publication deadline guard precede Resume. This grants
-no privileges or desktop permissions. Independent source reviews passed; focused
-first-freeze tests passed four audit and eight process tests. Final validation
-and fresh native qualification remain required. Created-but-unresumed failures
-remain DriverIncomplete/Unmeasured and cannot confer application compatibility.
+no privileges or desktop permissions. Source 1726c6c passed independent reviews,
+153 provider tests, 230 platform tests (10 ignored), Clippy, format and governance.
+All three CI jobs in run 43905819003 passed; the tested merge has the same tree.
+Fresh R12 completed separate Prepare, approval, Start and retained Read. Independent
+admission verified 42 originals (111,527 bytes), 25 signatures, all 29 denials and
+the complete Start chain. CreateProcessWithTokenW returned error 87 before creating
+a child. Read authenticates as NotRun. No Resume, suspended audit or application
+code ran. Owned Sandbox cleanup passed; application-job cleanup is unmeasured.
+The rejected parameter remains unresolved. Preserve this consumed Start.
+Created-but-unresumed failures remain DriverIncomplete/Unmeasured and cannot
+confer application compatibility.
 
 ## Storage and next gates
 
 Use only `C:\aiw\environment-probe-20261114\target-static-r1`. Normal builds
 require explicit cache selection, reject unsafe overrides, disable incremental
 and debug symbols, and require at least 10 GiB free with cache <=8 GiB.
-Source 3c8f317 consecutive dev builds measured 2,462,915,631 bytes / 3,313 files
+Source 1726c6c consecutive dev builds measured 2,873,857,828 bytes / 3,499 paths
 both times; pass two compiled nothing and kept identical image hashes. Release
-ended at 2,464,451,499 bytes. All 18 actual compiler commands and three exact-source
+ended at 3,115,819,164 bytes. All 21 actual compiler commands and three exact-source
 AMD64 static-CRT images passed independent admission. Keep one immutable
-30,268,928-byte three-tool set, not copied trees. Linker/backtrace PDB files are
+30,285,312-byte three-tool set, not copied trees. Totals sum file lengths and may
+count Cargo hard-link aliases twice. Volume-free samples measure actual space.
+Linker/backtrace PDB files are
 measured separately; disabling full compiler symbols does not mean zero PDBs.
 
 Earlier audited cleanup recovered 8.41 GiB of idle GUI output and 6,857,707,520
@@ -108,7 +117,7 @@ space increased 24,453,120 bytes. Independent cleanup admission passed. Correcte
 validation uses storage preflight and the normal builder's explicit target/flags.
 Do not create retry caches or blindly remove current artifacts.
 
-Preserve all consumed controls R6/R7/R8/R9/R10/R11. Qualify ordinary/classic positives,
+Preserve all consumed controls R6/R7/R8/R9/R10/R11/R12. Qualify ordinary/classic positives,
 negative controls, interruption/exact recovery and stable provider-zero reads
 before the two external fixtures. Their exact payloads/provenance remain private
 run inputs and have never executed. Use the authorized VM107 SSH/SCP route for
