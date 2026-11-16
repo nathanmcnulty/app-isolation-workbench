@@ -2639,13 +2639,36 @@ mod tests {
         }
     }
 
+    fn publish_channel_fixture(
+        workspace: &HeldRunWorkspace,
+        kind: AssessmentChannelFile,
+        bytes: &[u8],
+    ) {
+        // Explicit owner-bound creation is required on elevated CI as well as
+        // ordinary desktops. Distinct short staging names avoid alias reuse.
+        let staging = format!("s{}.tmp", kind as u8);
+        let mut file = workspace
+            .create_output_file_new(&staging)
+            .unwrap()
+            .into_file();
+        file.write_all(bytes).unwrap();
+        file.sync_all().unwrap();
+        drop(file);
+        assert!(!workspace.output_path().join(kind.leaf()).exists());
+        std::fs::rename(
+            workspace.output_path().join(staging),
+            workspace.output_path().join(kind.leaf()),
+        )
+        .unwrap();
+    }
+
     #[test]
     fn closed_channel_holds_exact_roster_without_granting_generic_alias_authority() {
         with_channel_fixture(|workspace| {
             // Normal guest-style creation may acquire an OS-generated short name.
             // No alias, volume policy, security descriptor or privilege is changed.
             for kind in AssessmentChannelFile::ALL {
-                std::fs::write(workspace.output_path().join(kind.leaf()), b"raw").unwrap();
+                publish_channel_fixture(workspace, kind, b"raw");
             }
             let held = HeldAssessmentChannelOutput::open_bound(workspace.evidence()).unwrap();
             for kind in AssessmentChannelFile::ALL {
@@ -2706,7 +2729,7 @@ mod tests {
             let path = workspace
                 .output_path()
                 .join(AssessmentChannelFile::Bootstrap.leaf());
-            std::fs::write(&path, b"raw").unwrap();
+            publish_channel_fixture(workspace, AssessmentChannelFile::Bootstrap, b"raw");
             let link = workspace.root_path().join("extra-link");
             std::fs::hard_link(&path, &link).unwrap();
             assert!(
@@ -2763,13 +2786,7 @@ mod tests {
     #[test]
     fn closed_channel_snapshot_revalidation_binds_measured_id_and_bytes() {
         with_channel_fixture(|workspace| {
-            std::fs::write(
-                workspace
-                    .output_path()
-                    .join(AssessmentChannelFile::Bootstrap.leaf()),
-                b"raw",
-            )
-            .unwrap();
+            publish_channel_fixture(workspace, AssessmentChannelFile::Bootstrap, b"raw");
             let mut hold = workspace
                 .open_assessment_channel_file(AssessmentChannelFile::Bootstrap)
                 .unwrap();

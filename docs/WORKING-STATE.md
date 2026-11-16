@@ -162,7 +162,7 @@ actual workspace passed=true / exit 0 / 472.44 seconds, audit and governance.
 Tested merge eb942aa has the identical tree
 6bb08e0550dd603bc88d9b14d60e5d4284509d41. Earlier failed CI runs remain unaccepted.
 
-Current uncommitted transport correction adds closed-role alias-aware raw-file
+The source-93eded3 transport correction adds closed-role alias-aware raw-file
 custody, exact seven-file completion, unchanged strict generic intake, and pure
 completion verification after CNG binds the original four artifacts. See
 [channel design](ASSESSMENT-EVIDENCE-CHANNEL.md). Independent cross-boundary and
@@ -170,8 +170,18 @@ platform source reviews passed. Focused checks passed: five host/CNG tests with
 all seven actual short aliases, sixteen provider tests and twelve platform
 tests. One native symlink fixture could not be created without privilege; its
 branch remains unmeasured. Full affected suites passed: provider 146, runner 163 (9 ignored), platform 222
-(10 ignored). Clippy and governance passed. A new source-pinned build precedes
-any further native trial.
+(10 ignored). Clippy and governance passed. Source 93eded3 built twice in the
+same cache at 2,210,133,247 bytes / 2,935 files after both, with identical hashes
+and zero second-pass compilation. Release ended at 2,210,597,898 bytes. All three
+new image pins, source and compiler flags passed independent admission.
+
+CI 43857370994 failed the two new publication fixtures: elevated default file
+ownership differed from the required operator SID. The runtime correctly refused.
+A test-only owner-bound staged publisher fixes that fixture without changing
+runtime policy. Its runner 7 and platform 12 focused checks, Clippy, governance
+and independent review passed. These new fixtures observed no aliases; retain
+the earlier source-93eded3 real-alias proofs separately. New hosted CI is pending.
+R9 staging uses the exact source-93eded3 binaries; native qualification is open.
 
 Qualify ordinary/classic positives, timeout/overflow negatives and controlled
 interruption/exact recovery before either external fixture. jq and SQLite

@@ -355,8 +355,25 @@ fn with_workspace(f: impl FnOnce(&HeldRunWorkspace)) {
 }
 
 fn write_files(workspace: &HeldRunWorkspace, files: &BTreeMap<String, Vec<u8>>) {
-    for (name, bytes) in files {
-        std::fs::write(workspace.output_path().join(name), bytes).unwrap();
+    for (index, (name, bytes)) in files.iter().enumerate() {
+        // An elevated runner may default ordinary fs::write ownership to the
+        // Administrators group. Explicit owner-bound creation models the actual
+        // mapped publisher's operator ownership without relaxing the reader.
+        // Rename from a distinct short staging name lets NTFS generate aliases.
+        let staging = format!("s{index}.tmp");
+        let mut file = workspace
+            .create_output_file_new(&staging)
+            .unwrap()
+            .into_file();
+        file.write_all(bytes).unwrap();
+        file.sync_all().unwrap();
+        drop(file);
+        assert!(!workspace.output_path().join(name).exists());
+        std::fs::rename(
+            workspace.output_path().join(staging),
+            workspace.output_path().join(name),
+        )
+        .unwrap();
     }
 }
 
