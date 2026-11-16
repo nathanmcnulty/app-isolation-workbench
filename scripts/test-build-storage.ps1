@@ -26,9 +26,10 @@ function Refuses([scriptblock]$Operation) {
 try {
     foreach ($item in Get-ChildItem Env: | Where-Object Name -Match $pattern) { Remove-Item -LiteralPath ('Env:'+$item.Name) }
     $env:CARGO_HOME = $cargoHome
-    $policy = Assert-AiwBuildStoragePolicy -RepositoryRoot $repo
-    Assert-Case ($policy.targetDirectory -ceq (Join-Path $repo 'target'))
-    Assert-Case ($policy.cacheBytes -eq 0 -and -not (Test-Path -LiteralPath $policy.targetDirectory))
+    Refuses { Assert-AiwBuildStoragePolicy -RepositoryRoot $repo }
+    Assert-Case (-not (Test-Path -LiteralPath (Join-Path $repo 'target')))
+    $env:CARGO_TARGET_DIR = ' '
+    Refuses { Assert-AiwBuildStoragePolicy -RepositoryRoot $repo }
     $env:CARGO_TARGET_DIR = 'cache'
     $policy = Assert-AiwBuildStoragePolicy -RepositoryRoot $repo -WorkingDirectory $repo
     Assert-Case ($policy.targetDirectory -ceq (Join-Path $repo 'cache'))
@@ -82,6 +83,24 @@ try {
     $env:CARGO_TARGET_DIR=$repo
     Refuses { Assert-AiwBuildStoragePolicy -RepositoryRoot $repo }
     $env:CARGO_TARGET_DIR=Join-Path $repo 'cache'
+    $owned = Join-Path $root 'aiwt-0123456789ab'
+    [void][IO.Directory]::CreateDirectory($owned)
+    [IO.File]::WriteAllBytes((Join-Path $owned 'fixture.bin'), [byte[]]@(1,2,3))
+    Refuses { Remove-AiwOwnedTestDirectory -Path $owned -Parent $repo }
+    Refuses { Remove-AiwOwnedTestDirectory -Path $policy.targetDirectory -Parent $repo }
+    [IO.File]::WriteAllBytes((Join-Path $owned 'second.bin'), [byte[]]@(4))
+    Refuses { Remove-AiwOwnedTestDirectory -Path $owned -Parent $root -MaximumEntries 1 }
+    [void][IO.Directory]::CreateDirectory((Join-Path $owned 'child\grandchild'))
+    Refuses { Remove-AiwOwnedTestDirectory -Path $owned -Parent $root -MaximumDepth 1 }
+    Remove-AiwOwnedTestDirectory -Path $owned -Parent $root
+    Assert-Case (-not (Test-Path -LiteralPath $owned))
+    [void][IO.Directory]::CreateDirectory($owned)
+    $ownedRedirect = Join-Path $owned 'redirect'
+    New-Item -ItemType Junction -Path $ownedRedirect -Target $repo | Out-Null
+    Refuses { Remove-AiwOwnedTestDirectory -Path $owned -Parent $root }
+    Assert-Case (Test-Path -LiteralPath $repo)
+    Remove-Item -LiteralPath $ownedRedirect -Force
+    Remove-AiwOwnedTestDirectory -Path $owned -Parent $root
     $outside=Join-Path $root 'owned-link-target'; [void][IO.Directory]::CreateDirectory($outside)
     $link=Join-Path $policy.targetDirectory 'redirect'
     New-Item -ItemType Junction -Path $link -Target $outside | Out-Null
@@ -94,7 +113,10 @@ try {
     Set-Item Function:Get-AiwBuildCacheBytes $originalCache
     # Only this freshly created fixture tree is disposable. Never clean a cache.
     if([IO.Path]::GetDirectoryName($root).TrimEnd('\') -cne ([IO.Path]::GetFullPath([IO.Path]::GetTempPath())).TrimEnd('\') -or [IO.Path]::GetFileName($root) -cnotmatch '^aiw-build-policy-[0-9a-f]{32}$'){throw 'Unexpected test fixture root'}
-    if(Test-Path -LiteralPath (Join-Path $root 'repo\cache\redirect')){Remove-Item -LiteralPath (Join-Path $root 'repo\cache\redirect') -Force}
+    foreach ($relative in @('repo\cache\redirect','aiwt-0123456789ab\redirect')) {
+        $ownedLink=Join-Path $root $relative
+        if(Test-Path -LiteralPath $ownedLink){Remove-Item -LiteralPath $ownedLink -Force}
+    }
     if(@(Get-ChildItem -LiteralPath $root -Force -Recurse -Attributes ReparsePoint).Count){throw 'Unexpected redirect in owned test fixture'}
     Remove-Item -LiteralPath $root -Recurse -Force
 }

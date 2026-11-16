@@ -53,6 +53,7 @@ try {
         $previousTemp = $env:TEMP
         $previousTmp = $env:TMP
         $testTemp = $null
+        $testTempParent = [IO.Path]::GetTempPath()
         try {
             if ($program -eq 'cargo' -and $name -ne 'Format') {
                 $null = Assert-AiwBuildStoragePolicy -RepositoryRoot $repoRoot
@@ -61,8 +62,10 @@ try {
                 # Native parent-entry checks are bounded. Unrelated files in a
                 # long-lived user TEMP must not determine whether fixtures work.
                 # Keep the fixture root short for Win32 APIs without long-path prefixes.
-                $testTemp = Join-Path ([IO.Path]::GetTempPath()) ('aiwt-' + [guid]::NewGuid().ToString('N').Substring(0, 12))
-                New-Item -ItemType Directory -Path $testTemp | Out-Null
+                $candidateTemp = Join-Path $testTempParent ('aiwt-' + [guid]::NewGuid().ToString('N').Substring(0, 12))
+                New-Item -ItemType Directory -Path $candidateTemp -ErrorAction Stop | Out-Null
+                # Register ownership only after exclusive directory creation succeeds.
+                $testTemp = $candidateTemp
                 $env:TEMP = $testTemp
                 $env:TMP = $testTemp
             }
@@ -72,6 +75,10 @@ try {
         finally {
             $env:TEMP = $previousTemp
             $env:TMP = $previousTmp
+            if ($testTemp) {
+                try { Remove-AiwOwnedTestDirectory -Path $testTemp -Parent $testTempParent }
+                catch { $failure = "$failure Owned test cleanup failed: $($_.Exception.Message)".Trim() }
+            }
         }
         $timer.Stop()
         $record = [ordered]@{
@@ -84,6 +91,7 @@ try {
             stdout = $stdout
             stderr = $stderr
             testTemp = $testTemp
+            testTempRemoved = $null -ne $testTemp -and -not (Test-Path -LiteralPath $testTemp)
         }
         if (!$record.passed) {
             $record.failure = $failure

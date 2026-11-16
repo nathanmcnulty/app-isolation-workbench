@@ -13,6 +13,10 @@ concurrency:
 permissions:
   contents: read
 
+# One explicitly selected cache per ephemeral runner, reused by core and GUI.
+env:
+  CARGO_TARGET_DIR: ${{ github.workspace }}\target
+
 jobs:
   verify:
     name: Verify and audit

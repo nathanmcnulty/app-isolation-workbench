@@ -11,6 +11,22 @@ fetch configuration tracks another branch; use the recorded fetched commit.
 
 ## Current boundary and next work
 
+Storage follow-up: normal builders now require explicit `CARGO_TARGET_DIR`
+instead of silently selecting a per-checkout cache; hosted jobs select one
+explicit cache. `check-local.ps1` now audits and removes only its freshly owned
+test directory after each test, including failures; cleanup refusal fails the
+check and preserves the path for investigation. The paused desktop workflow no
+longer opts into retaining failed staging. The current read-only inventory is
+`C:\aiw\generic-assessment-108\storage-current-inventory-r2.json`: old main
+checkout 47,259,909,938 bytes, current goal artifacts 149,987,557 bytes. The
+reused cache later measured 2,058,300,420 bytes after expanded test compilation,
+with 10,930,884,608 bytes free on C:. No further historical cache deletion was attempted.
+The uncommitted versioned-provider adapter is under validation: initial runner
+tests exposed stale synthetic package/runtime-version fixtures, now corrected
+without relaxing production trust checks. It is not native-qualified. The
+second read-only help capture was staged on VM107 but its unexecuted console
+command was cancelled at the prompt while prioritizing storage work.
+
 The storage budget now gates further native-validation builds. The idle shared debug
 incremental cache measured 32.15 GiB; compiled dependencies measured 10.06 GiB.
 Automatic approval review blocked removal of that incremental cache; it remains

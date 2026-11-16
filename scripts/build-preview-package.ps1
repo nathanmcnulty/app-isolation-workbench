@@ -31,11 +31,7 @@ $productId = if ($isBambu) { 'bambu-studio-export' } elseif ($isInteractive) { '
 $scenarioIdExpected = if ($isBambu) { 'local-file-export' } else { 'install-launch-close' }
 $projectFile = if ($isBambu) { 'project.json' } else { 'project.yaml' }
 $productRoot = Join-Path $repoRoot "crates\aiw-cli\product\$productDirectory"
-$buildTarget = if ([string]::IsNullOrWhiteSpace($env:CARGO_TARGET_DIR)) {
-    Join-Path $repoRoot 'target'
-} else {
-    [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR)
-}
+$buildTarget = (Assert-AiwBuildStoragePolicy -RepositoryRoot $repoRoot).targetDirectory
 $targetTriple = 'x86_64-pc-windows-msvc'
 $cliSource = Join-Path $buildTarget "$targetTriple\release\aiw.exe"
 $projectSource = Join-Path $productRoot $projectFile

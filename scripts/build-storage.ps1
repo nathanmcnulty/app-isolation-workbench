@@ -138,13 +138,50 @@ function Get-AiwBuildAvailableBytes([string]$Target) {
     return [IO.DriveInfo]::new([IO.Path]::GetPathRoot($Target)).AvailableFreeSpace
 }
 
+# Only the fresh per-check fixture directory, after its foreground test exits.
+# Never use this for a cache, retained run, or historical temporary directory.
+function Remove-AiwOwnedTestDirectory {
+    param([string]$Path, [string]$Parent,
+        [ValidateRange(1,100000)][int]$MaximumEntries=100000,
+        [ValidateRange(1,64)][int]$MaximumDepth=64)
+    $resolved = [IO.Path]::GetFullPath($Path)
+    $expectedParent = [IO.Path]::GetFullPath($Parent).TrimEnd('\')
+    if ([IO.Path]::GetDirectoryName($resolved).TrimEnd('\') -cne $expectedParent -or
+        [IO.Path]::GetFileName($resolved) -cnotmatch '^aiwt-[0-9a-f]{12}$') {
+        throw 'Unexpected owned test directory; cleanup refused'
+    }
+    Assert-AiwBuildLocalDirectory $resolved
+    # Audit the entire tree without following redirects before recursive removal.
+    # Oversized or redirected leftovers require investigation, never a bypass.
+    $entries=0; $bytes=0L
+    $queue=[Collections.Generic.Queue[string]]::new(); $queue.Enqueue($resolved)
+    while ($queue.Count) {
+        $directory=$queue.Dequeue()
+        if (-not (Test-Path -LiteralPath $directory)) { continue }
+        foreach ($entry in [IO.DirectoryInfo]::new($directory).EnumerateFileSystemInfos()) {
+            $entries++
+            if ($entries -gt $MaximumEntries -or
+                [IO.Path]::GetRelativePath($resolved,$entry.FullName).Split('\').Count -gt $MaximumDepth) {
+                throw 'Owned test directory exceeds cleanup entry/depth bounds'
+            }
+            if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Owned test directory contains a redirect' }
+            if (($entry.Attributes -band [IO.FileAttributes]::Directory) -ne 0) { $queue.Enqueue($entry.FullName) }
+            else { $bytes+=$entry.Length; if ($bytes -gt 8GB) { throw 'Owned test directory exceeds cleanup byte bound' } }
+        }
+    }
+    if (Test-Path -LiteralPath $resolved) { Remove-Item -LiteralPath $resolved -Recurse -Force -ErrorAction Stop }
+}
+
 function Assert-AiwBuildStoragePolicy {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$RepositoryRoot, [string]$WorkingDirectory = $RepositoryRoot)
     $repo = [IO.Path]::GetFullPath($RepositoryRoot)
     $working = [IO.Path]::GetFullPath($WorkingDirectory)
     Assert-AiwBuildLocalDirectory $repo; Assert-AiwBuildLocalDirectory $working
-    $target = if ($env:CARGO_TARGET_DIR) { [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR, $working) } else { Join-Path $repo 'target' }
+    if ([string]::IsNullOrWhiteSpace($env:CARGO_TARGET_DIR)) {
+        throw 'Select one reusable CARGO_TARGET_DIR before building; no per-checkout cache is chosen automatically'
+    }
+    $target = [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR, $working)
     Assert-AiwBuildLocalDirectory $target
     if (Test-AiwBuildPathWithin $repo $target) { throw 'Build cache cannot be a repository ancestor or the repository itself' }
     Assert-AiwBuildOverrides $target $working
