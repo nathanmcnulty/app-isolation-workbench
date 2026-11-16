@@ -64,6 +64,7 @@ pub const WSB_PLANNING_IMPORT_RESULT_SCHEMA_VERSION: &str =
 
 const READINESS_SCHEMA: &str = "aiw.dev/windows-sandbox-readiness/v0alpha2";
 const PINNED_CLI_VERSION: &str = "0.8.107.0";
+// Historical builders keep their original protocol; generic v2 selects explicitly.
 const PINNED_CLI_PROTOCOL: &str = "windowsSandboxCli/v0.8.107.0";
 const PINNED_LIST_SCHEMA: &str = "WindowsSandboxEnvironments/Id";
 const GUEST_AGENT_FILE: &str = "aiw-guest-agent.exe";
@@ -415,7 +416,14 @@ impl WsbPreparationReceipt {
         }
         let deferred = self.provider_protocol_observation.is_some();
         let expected_schema = if self.application_assessment.is_some() {
-            application_assessment::APPLICATION_ASSESSMENT_PREPARATION_SCHEMA
+            if historical
+                && self.schema_version
+                    == application_assessment::HISTORICAL_APPLICATION_PREPARATION_V1
+            {
+                application_assessment::HISTORICAL_APPLICATION_PREPARATION_V1
+            } else {
+                application_assessment::APPLICATION_ASSESSMENT_PREPARATION_SCHEMA
+            }
         } else if self.seven_zip.is_some() {
             sevenzip::SEVENZIP_PREPARATION_SCHEMA
         } else if self.paired_controls.is_some() && deferred {
@@ -521,7 +529,10 @@ impl WsbPreparationReceipt {
             || if deferred {
                 self.provider.version.is_some()
             } else {
-                self.provider.version.as_deref() != Some(PINNED_CLI_VERSION)
+                self.provider
+                    .version
+                    .as_deref()
+                    .is_none_or(|v| aiw_probe::WindowsSandboxCliAdapter::from_version(v).is_err())
             }
             || self.provider_package.architecture != "x64"
             || self.provider_package.signature_kind != "store"
@@ -535,6 +546,32 @@ impl WsbPreparationReceipt {
             ));
         }
         require_pinned_protocol(&self.provider_protocol)?;
+        if historical
+            && self.application_assessment.is_some()
+            && self.schema_version == application_assessment::HISTORICAL_APPLICATION_PREPARATION_V1
+            && self.provider_protocol.cli_version != PINNED_CLI_VERSION
+        {
+            return Err(WsbPreparationError::Contract(
+                "historical v1 preparation did not authorize a new protocol".into(),
+            ));
+        }
+        if self.application_assessment.is_none()
+            && self.provider_protocol.cli_version != PINNED_CLI_VERSION
+        {
+            return Err(WsbPreparationError::Readiness(
+                "legacy preparation remains exact107 only".into(),
+            ));
+        }
+        if self.application_assessment.is_some()
+            && !(historical
+                && self.schema_version
+                    == application_assessment::HISTORICAL_APPLICATION_PREPARATION_V1)
+            && self.provider_package.version != self.provider_protocol.cli_version
+        {
+            return Err(WsbPreparationError::Readiness(
+                "required protocol differs from static registered package version".into(),
+            ));
+        }
         if let Some(assessment) = &self.application_assessment {
             assessment.validate(&self.workspace)?;
         }
@@ -602,7 +639,7 @@ impl PreparedWsbArtifacts {
             self.receipt.validate()?;
         }
         if self.receipt.application_assessment.is_some() {
-            return application_assessment::validate_application_artifacts(self);
+            return application_assessment::validate_application_artifacts(self, historical);
         }
         let mut profile_plan = self.wsb_plan.clone();
         if self.receipt.msi.is_some()
@@ -813,6 +850,11 @@ pub fn build_wsb_preparation(
         .cli_protocol
         .as_ref()
         .ok_or_else(|| WsbPreparationError::Readiness("CLI protocol is absent".into()))?;
+    if protocol.cli_version != PINNED_CLI_VERSION {
+        return Err(WsbPreparationError::Readiness(
+            "legacy preparation requires exact107 protocol".into(),
+        ));
+    }
     let artifacts = build_preparation_identity(
         run_id,
         project,
@@ -1139,7 +1181,10 @@ pub(crate) fn require_readiness(
         WsbPreparationError::Readiness("trusted provider identity is absent".to_owned())
     })?;
     if provider.signature_status != ReadinessState::Available
-        || provider.version.as_deref() != Some(PINNED_CLI_VERSION)
+        || provider
+            .version
+            .as_deref()
+            .is_none_or(|v| aiw_probe::WindowsSandboxCliAdapter::from_version(v).is_err())
         || provider.size_bytes == 0
         || !provider
             .canonical_path
@@ -1156,6 +1201,11 @@ pub(crate) fn require_readiness(
         .as_ref()
         .ok_or_else(|| WsbPreparationError::Readiness("CLI protocol is absent".to_owned()))?;
     require_pinned_protocol(protocol)?;
+    if provider.version.as_deref() != Some(protocol.cli_version.as_str()) {
+        return Err(WsbPreparationError::Readiness(
+            "runtime binary version and tuple differ".into(),
+        ));
+    }
     let package = readiness.provider_package.as_ref().ok_or_else(|| {
         WsbPreparationError::Readiness("trusted Store package identity is absent".to_owned())
     })?;
@@ -1165,7 +1215,8 @@ pub(crate) fn require_readiness(
     let file_identity = readiness.provider_file_identity.as_ref().ok_or_else(|| {
         WsbPreparationError::Readiness("held provider file identity is absent".to_owned())
     })?;
-    if package.architecture != "x64"
+    if package.version != protocol.cli_version
+        || package.architecture != "x64"
         || package.signature_kind != "store"
         || !package.status_ok
         || catalog.verification_status != ReadinessState::Available
@@ -1256,7 +1307,7 @@ pub(crate) fn runtime_identity_matches_receipt(
     }
     let mut expected = receipt.provider.clone();
     if receipt.provider_protocol_observation.is_some() {
-        expected.version = Some(PINNED_CLI_VERSION.into());
+        expected.version = Some(receipt.provider_protocol.cli_version.clone());
     }
     if trusted.provider != &expected
         || trusted.package != &receipt.provider_package
@@ -1298,10 +1349,7 @@ pub(crate) fn require_current_readiness_matches_receipt(
 fn require_pinned_protocol(
     protocol: &WindowsSandboxCliProtocol,
 ) -> Result<(), WsbPreparationError> {
-    if protocol.cli_version != PINNED_CLI_VERSION
-        || protocol.protocol != PINNED_CLI_PROTOCOL
-        || protocol.list_schema != PINNED_LIST_SCHEMA
-    {
+    if protocol.adapter().is_err() {
         return Err(WsbPreparationError::Readiness(
             "Windows Sandbox CLI protocol does not match the pinned contract".to_owned(),
         ));

@@ -152,6 +152,40 @@ fn build(
 }
 
 #[test]
+fn static_package_selects_required_protocol_without_claiming_runtime_observation() {
+    let (project, assessment, identity) = fixture();
+    let original = build(&project, assessment.clone(), &identity).unwrap();
+    assert_eq!(original.receipt.provider_protocol.cli_version, "0.8.107.0");
+
+    let mut serviced = identity.clone();
+    serviced.package.version = "0.8.114.0".into();
+    serviced.package.full_name = "MicrosoftWindows.WindowsSandbox_0.8.114.0_x64".into();
+    let current = build(&project, assessment.clone(), &serviced).unwrap();
+    let required = aiw_probe::WindowsSandboxCliAdapter::V0_8_114_0.protocol();
+    assert_eq!(current.receipt.provider_protocol, required);
+    assert!(current.receipt.provider.version.is_none());
+    assert!(current.receipt.provider_protocol_observation.is_some());
+    assert!(!current.receipt.provider_acquired && !current.receipt.provider_mutated);
+    let PlannedAction::ExecuteWindowsSandboxApplicationAssessment {
+        provider_protocol, ..
+    } = &current.run_plan.actions[2]
+    else {
+        panic!("current generic action required");
+    };
+    assert_eq!(provider_protocol.as_ref(), Some(&required));
+    assert_ne!(
+        original.run_plan.hash().unwrap(),
+        current.run_plan.hash().unwrap()
+    );
+
+    serviced.package.version = "0.8.115.0".into();
+    assert!(matches!(
+        build(&project, assessment, &serviced),
+        Err(WsbPreparationError::Readiness(_))
+    ));
+}
+
+#[test]
 fn unlisted_portable_plan_is_closed_offline_and_does_not_approve_or_dispatch() {
     let (mut project, assessment, identity) = fixture();
     let first = build(&project, assessment.clone(), &identity).unwrap();

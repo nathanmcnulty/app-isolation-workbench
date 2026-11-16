@@ -263,7 +263,7 @@ pub fn prepare_for_review(
         run_id,
         workspace,
         evidence_root,
-        recipe: serde_json::json!({"schemaVersion":"aiw.dev/application-assessment-review/v0alpha1", "application":project.metadata.display_name,"assessment":assessment.compiled,"mappings":prepared.wsb_plan.mappings,"scope":aiw_provider_wsb::assessment::ASSESSMENT_SCOPE}),
+        recipe: serde_json::json!({"schemaVersion":"aiw.dev/application-assessment-review/v0alpha1", "application":project.metadata.display_name,"assessment":assessment.compiled,"providerChecks":{"runtime":"requiredAtStartNotObserved","requiredProtocol":prepared.receipt.provider_protocol},"mappings":prepared.wsb_plan.mappings,"scope":aiw_provider_wsb::assessment::ASSESSMENT_SCOPE}),
         proposed_approval: ApprovalRecord::for_plan(&prepared.run_plan, identity, now_rfc3339())?,
         plan: prepared.run_plan,
     };

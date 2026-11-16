@@ -35,3 +35,12 @@ artifact hashes and retained original output. Keep raw diagnostics private. A ne
 version still needs explicit plan/receipt/recovery selection, strict raw-response
 tests, and fresh first-party exact-ID lifecycle and interruption/recovery proof
 before application trials. Historical 0.8.107.0 evidence keeps its original scope.
+
+VM107's installed `0.8.114.0` completed all seven fixed read-only queries with
+exit 0, empty stderr and unchanged held provider identity. The verb help
+corroborates explicit `--id`, inline `--config` and `--raw` syntax; the actual
+empty list uses `WindowsSandboxEnvironments`. Complete original stream bytes and
+hashes were retained privately and independently reviewed. This supports testing
+the explicit versioned adapter. Start response/ID behavior, connection, exact
+stop/absence, interruption and recovery still require fresh approved first-party
+native controls; no application compatibility follows from these diagnostics.

@@ -1988,3 +1988,70 @@ pub use paired_controls::{
     ControlEvidenceOrigin, PAIRED_CONTROL_PLAN_SCHEMA, PAIRED_CONTROL_REVISION,
     PairedControlProfile,
 };
+
+/// Exact version-specific protocol expectations, not lifecycle qualification.
+/// Selection is exact, never a range or fallback. Native qualification is separate.
+#[allow(non_camel_case_types)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowsSandboxCliAdapter {
+    V0_8_107_0,
+    V0_8_114_0,
+}
+impl WindowsSandboxCliAdapter {
+    pub fn from_version(version: &str) -> Result<Self, &'static str> {
+        match version {
+            "0.8.107.0" => Ok(Self::V0_8_107_0),
+            "0.8.114.0" => Ok(Self::V0_8_114_0),
+            _ => Err("Windows Sandbox CLI version is not a known exact contract"),
+        }
+    }
+    pub fn version(self) -> &'static str {
+        match self {
+            Self::V0_8_107_0 => "0.8.107.0",
+            Self::V0_8_114_0 => "0.8.114.0",
+        }
+    }
+    pub fn protocol(self) -> WindowsSandboxCliProtocol {
+        WindowsSandboxCliProtocol {
+            cli_version: self.version().into(),
+            protocol: format!("windowsSandboxCli/v{}", self.version()),
+            list_schema: "WindowsSandboxEnvironments/Id".into(),
+        }
+    }
+}
+impl WindowsSandboxCliProtocol {
+    pub fn adapter(&self) -> Result<WindowsSandboxCliAdapter, &'static str> {
+        let selected = WindowsSandboxCliAdapter::from_version(&self.cli_version)?;
+        if *self != selected.protocol() {
+            return Err(
+                "Windows Sandbox CLI protocol fields do not form one exact version-specific tuple",
+            );
+        }
+        Ok(selected)
+    }
+}
+#[cfg(test)]
+mod versioned_sandbox_protocol_tests {
+    use super::*;
+    #[test]
+    fn exact_versions_and_mixed_fields_fail_closed() {
+        for version in ["0.8.107.0", "0.8.114.0"] {
+            let a = WindowsSandboxCliAdapter::from_version(version).unwrap();
+            assert_eq!(a.protocol().adapter(), Ok(a));
+        }
+        for version in ["0.8.115.0", "0.8.114", "v0.8.114.0", "0.8.0114.0", ""] {
+            assert!(WindowsSandboxCliAdapter::from_version(version).is_err());
+        }
+        let mut mixed = WindowsSandboxCliAdapter::V0_8_114_0.protocol();
+        mixed.protocol = "windowsSandboxCli/v0.8.107.0".into();
+        assert!(mixed.adapter().is_err());
+    }
+    #[test]
+    fn historic_107_tuple_serialization_is_unchanged() {
+        let p = WindowsSandboxCliAdapter::V0_8_107_0.protocol();
+        assert_eq!(
+            serde_json::to_string(&p).unwrap(),
+            r#"{"cliVersion":"0.8.107.0","protocol":"windowsSandboxCli/v0.8.107.0","listSchema":"WindowsSandboxEnvironments/Id"}"#
+        );
+    }
+}

@@ -312,3 +312,26 @@ mod platform {
         }
     }
 }
+
+#[cfg(windows)]
+pub fn acquire_windows_sandbox_for_protocol(
+    expected_provider_sha256: &str,
+    expected_protocol: &aiw_probe::WindowsSandboxCliProtocol,
+) -> Result<WindowsSandboxExecutionLease, WindowsSandboxInvocationError> {
+    windows_platform::acquire_windows_sandbox_for_protocol(
+        expected_provider_sha256,
+        expected_protocol,
+    )
+}
+#[cfg(windows)]
+pub fn acquire_windows_sandbox_recovery_for_protocol(
+    start_provider_sha256: &str,
+    persisted_session: CanonicalSandboxId,
+    expected_protocol: &aiw_probe::WindowsSandboxCliProtocol,
+) -> Result<WindowsSandboxRecoveryLease, WindowsSandboxInvocationError> {
+    windows_platform::acquire_windows_sandbox_recovery_for_protocol(
+        start_provider_sha256,
+        persisted_session,
+        expected_protocol,
+    )
+}

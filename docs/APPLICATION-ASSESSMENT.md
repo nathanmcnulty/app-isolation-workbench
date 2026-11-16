@@ -41,6 +41,19 @@ selected policy. It aids comparison, not execution authority. Full approval bind
 project, compiled plan, protected intake, inputs, agent, provider, workspace,
 session and rendered configuration. Start remains separate.
 
+Current generic plans use version 2 and preparation receipts use `v0alpha2`.
+Their exact typed Sandbox CLI protocol is part of plan hashing and approval;
+preparation selects it from the verified Store package without claiming a live
+version observation. Start must observe the same held provider version before
+listing or starting sessions. The exact adapters are `0.8.107.0` and
+`0.8.114.0`; ranges, mixed tuples and fallback are rejected. Protocol selection
+does not establish native lifecycle qualification. Recovery additionally
+requires committed approval and the same persisted plan/session protocol before
+querying or stopping anything. Historical generic version-1 plans remain
+readable with their original hashes but cannot acquire mutation authority,
+including locked cleanup/discard. Preserve those runs and prepare a fresh
+versioned plan; do not relabel or reuse an earlier approval.
+
 ## Worker and evidence
 
 A fixed first-party agent reads a bounded read-only request. Source and fixture

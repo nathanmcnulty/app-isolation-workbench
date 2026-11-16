@@ -1304,9 +1304,11 @@ fn start_approved_windows_sandbox_inner(
     }) {
         return Err(RunnerError::ApprovalBinding);
     }
-    let mut native_lease =
-        aiw_windows_platform::acquire_windows_sandbox(&artifacts.receipt.provider.sha256)
-            .map_err(native_invocation_error)?;
+    let mut native_lease = aiw_windows_platform::acquire_windows_sandbox_for_protocol(
+        &artifacts.receipt.provider.sha256,
+        &artifacts.receipt.provider_protocol,
+    )
+    .map_err(native_invocation_error)?;
     native_lease.retain_diagnostics(create_provider_diagnostics(
         held.workspace(),
         layout.run_id(),
@@ -1445,11 +1447,12 @@ fn start_approved_windows_sandbox_inner(
 pub fn recover_windows_sandbox(layout: &RunLayout) -> Result<WsbRecoveryResult, RunnerError> {
     use aiw_windows_platform::{
         CanonicalSandboxId, HeldRunWorkspace, WsbRecoveryDisposition,
-        acquire_windows_sandbox_recovery,
+        acquire_windows_sandbox_recovery_for_protocol,
     };
 
     // Synthetic rehearsals never establish authority over a real worker.
     let retained = layout.retained_snapshot().map_err(journal_error)?;
+    require_generic_recovery_approval(&retained)?;
     if retained.plan.actions.iter().any(|action| {
         matches!(action,
         PlannedAction::ExecuteWindowsSandboxSevenZipAssessment { profile, .. }
@@ -1487,8 +1490,13 @@ pub fn recover_windows_sandbox(layout: &RunLayout) -> Result<WsbRecoveryResult, 
 
     let session_id =
         CanonicalSandboxId::parse(&transaction.session_id).map_err(native_recovery_error)?;
-    let mut provider = acquire_windows_sandbox_recovery(&transaction.provider_sha256, session_id)
-        .map_err(native_recovery_error)?;
+    let expected_protocol = recovery_protocol_for_plan(&retained.plan, &transaction)?;
+    let mut provider = acquire_windows_sandbox_recovery_for_protocol(
+        &transaction.provider_sha256,
+        session_id,
+        &expected_protocol,
+    )
+    .map_err(native_recovery_error)?;
     store.discard_pending_after_authority(&inspection)?;
 
     if transaction.current_state() == SessionTransactionState::CleanupVerified {
@@ -1626,6 +1634,83 @@ pub fn recover_windows_sandbox(layout: &RunLayout) -> Result<WsbRecoveryResult, 
 }
 
 #[cfg(windows)]
+fn require_generic_recovery_approval(
+    retained: &aiw_orchestrator::RetainedRunSnapshot,
+) -> Result<(), RunnerError> {
+    if retained.plan.actions.iter().any(|action| {
+        matches!(
+            action,
+            PlannedAction::ExecuteWindowsSandboxApplicationAssessment { .. }
+        )
+    }) {
+        retained.plan.ensure_current().map_err(journal_error)?;
+        // retained_snapshot supplies an approval only after its committed journal
+        // record and exact plan binding have both been verified.
+        if retained.approval.is_none() {
+            return Err(RunnerError::ApprovalBinding);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn recovery_protocol_for_plan(
+    plan: &RunPlan,
+    transaction: &SessionTransaction,
+) -> Result<aiw_probe::WindowsSandboxCliProtocol, RunnerError> {
+    plan.ensure_current().map_err(journal_error)?;
+    if transaction.plan_hash != plan.hash().map_err(journal_error)?
+        || transaction.run_id != plan.run_id
+        || transaction.project_revision_hash != plan.project_revision_hash
+    {
+        return Err(RunnerError::Transaction(
+            "recovery protocol belongs to a different approved plan".into(),
+        ));
+    }
+    let generic = plan.actions.iter().find_map(|action| match action {
+        PlannedAction::ExecuteWindowsSandboxApplicationAssessment {
+            provider_protocol, ..
+        } => Some(provider_protocol),
+        _ => None,
+    });
+    if let Some(required) = generic {
+        let required = required.as_ref().ok_or_else(|| {
+            RunnerError::Transaction("current generic plan has no exact protocol".into())
+        })?;
+        let binding = transaction.recovery.as_ref().ok_or_else(|| {
+            RunnerError::Transaction(
+                "current generic recovery cannot default a missing protocol".into(),
+            )
+        })?;
+        if transaction.schema_version != session::SESSION_TRANSACTION_SCHEMA_VERSION
+            || required.adapter().is_err()
+            || &binding.provider_protocol != required
+        {
+            return Err(RunnerError::Transaction(
+                "persisted recovery protocol differs from the approved generic plan".into(),
+            ));
+        }
+        return Ok(required.clone());
+    }
+    // Legacy plans never acquire a newer adapter. Only a validated legacy v2
+    // transaction may lack recovery; v3 must retain its exact107 binding.
+    let legacy = aiw_probe::WindowsSandboxCliAdapter::V0_8_107_0.protocol();
+    match (
+        transaction.schema_version.as_str(),
+        transaction.recovery.as_ref(),
+    ) {
+        ("aiw.dev/wsb-session-transaction/v0alpha2", None) => Ok(legacy),
+        (session::SESSION_TRANSACTION_SCHEMA_VERSION, Some(binding))
+            if binding.provider_protocol == legacy =>
+        {
+            Ok(legacy)
+        }
+        _ => Err(RunnerError::Transaction(
+            "legacy recovery protocol is absent, mixed or not exact107".into(),
+        )),
+    }
+}
+
 fn recovery_workspace(
     layout: &RunLayout,
     transaction: &SessionTransaction,
@@ -1668,6 +1753,7 @@ fn recovery_workspace(
             "session transaction recovery binding differs from the run plan".to_owned(),
         ));
     }
+    let _required_protocol = recovery_protocol_for_plan(&plan, transaction)?;
     let run_dir = layout.run_dir();
     let selected_root = run_dir
         .parent()
@@ -1820,6 +1906,19 @@ fn prepare_execution(
         return Err(RunnerError::ApprovalBinding);
     }
     ensure_approval(&plan, &approval, request)?;
+    let expected_protocol = plan
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            PlannedAction::ExecuteWindowsSandboxApplicationAssessment {
+                provider_protocol, ..
+            } => provider_protocol.clone(),
+            _ => None,
+        })
+        .unwrap_or_else(|| aiw_probe::WindowsSandboxCliAdapter::V0_8_107_0.protocol());
+    if readiness.cli_protocol.as_ref() != Some(&expected_protocol) {
+        return Err(RunnerError::ApprovalBinding);
+    }
     revalidate_project_revision(&plan, Path::new(&request.project_path))?;
     revalidate_identity(&request.provider)?;
     revalidate_identity(&request.guest_agent)?;
@@ -2871,6 +2970,7 @@ fn ensure_approval(
         return Err(RunnerError::ApprovalBinding);
     }
     if let Some(assessment) = &request.application_assessment {
+        plan.ensure_current().map_err(journal_error)?;
         let PlannedAction::ExecuteWindowsSandboxApplicationAssessment {
             intake_receipt_sha256,
             source_manifest_sha256,
@@ -3071,9 +3171,9 @@ fn validate_start(
             || !fixed_lower_hex(&value.volume_serial_number, 8)
             || !fixed_lower_hex(&value.file_id, 16)
     }) || protocol.is_none_or(|value| {
-        value.cli_version != "0.8.107.0"
-            || value.protocol != "windowsSandboxCli/v0.8.107.0"
-            || value.list_schema != "WindowsSandboxEnvironments/Id"
+        value.adapter().is_err()
+            || reported.version.as_deref() != Some(value.cli_version.as_str())
+            || package.is_none_or(|p| p.version != value.cli_version)
     }) {
         return Err(RunnerError::Readiness(
             "required package, catalog, file, or CLI protocol authority is absent".to_owned(),
@@ -3891,7 +3991,13 @@ mod tests {
             process_architecture: "x86_64".to_owned(),
             virtualization: aiw_probe::ReadinessState::Available,
             sandbox_feature: aiw_probe::ReadinessState::Available,
-            provider_binary: Some(start.provider.clone()),
+            provider_binary: Some({
+                // Static/prepared identity does not claim a CLI observation;
+                // this synthetic readiness does, and must retain its version.
+                let mut observed = start.provider.clone();
+                observed.version = Some("0.8.107.0".into());
+                observed
+            }),
             provider_package: Some(aiw_probe::WindowsPackageIdentity {
                 name: "MicrosoftWindows.WindowsSandbox".to_owned(),
                 full_name: "MicrosoftWindows.WindowsSandbox_0.8.107.0_x64__cw5n1h2txyewy"
@@ -4133,6 +4239,34 @@ mod tests {
             ),
             RunnerError::RecoveryRequired(_)
         ));
+    }
+
+    #[test]
+    fn runtime_readiness_requires_observed_version_and_matching_package_protocol() {
+        let (_root, _layout, start, readiness) = setup();
+        validate_start(&start, &readiness).unwrap();
+
+        for drift in 0..4 {
+            let mut changed = readiness.clone();
+            match drift {
+                0 => changed.provider_binary.as_mut().unwrap().version = None,
+                1 => {
+                    changed.provider_binary.as_mut().unwrap().version = Some("0.8.114.0".into());
+                }
+                2 => changed.provider_package.as_mut().unwrap().version = "0.8.114.0".into(),
+                _ => {
+                    changed.cli_protocol.as_mut().unwrap().protocol =
+                        "windowsSandboxCli/v0.8.114.0".into();
+                }
+            }
+            assert!(
+                matches!(
+                    validate_start(&start, &changed),
+                    Err(RunnerError::Readiness(_))
+                ),
+                "runtime version/package/protocol drift {drift} must refuse"
+            );
+        }
     }
 
     #[test]
@@ -4960,6 +5094,79 @@ mod tests {
         assert!(lease.try_acquire().is_ok());
     }
 
+    #[test]
+    fn recovery_protocol_is_bound_to_generic_approval_not_transaction_claim() {
+        let (_root, layout, _start, _readiness) = setup();
+        let mut plan = layout.read_plan().unwrap();
+        let b = plan.actions[2].windows_sandbox_binding().unwrap();
+        let required = aiw_probe::WindowsSandboxCliAdapter::V0_8_114_0.protocol();
+        let workspace = b.workspace.clone();
+        let provider = b.provider_sha256.to_owned();
+        let workspace_hash = b.workspace_identity_sha256.to_owned();
+        let action = PlannedAction::ExecuteWindowsSandboxApplicationAssessment {
+            provider_protocol: Some(required.clone()),
+            sandbox_plan_sha256: b.sandbox_plan_sha256.into(),
+            provider_sha256: provider.clone(),
+            guest_agent_sha256: b.guest_agent_sha256.into(),
+            workspace: Box::new(workspace.clone()),
+            workspace_identity_sha256: workspace_hash.clone(),
+            intake_receipt_sha256: "1".repeat(64),
+            source_manifest_sha256: "2".repeat(64),
+            assessment_sha256: "3".repeat(64),
+        };
+        plan.schema = aiw_orchestrator::APPLICATION_ASSESSMENT_RUN_PLAN_SCHEMA.into();
+        plan.actions[2] = action;
+        plan.ensure_current().unwrap();
+        let mut retained = aiw_orchestrator::RetainedRunSnapshot {
+            plan: plan.clone(),
+            approval: None,
+            status: aiw_orchestrator::RecoveryStatus::PendingApproval {
+                plan_hash: plan.hash().unwrap(),
+                last_sequence: 1,
+            },
+        };
+        assert!(matches!(
+            require_generic_recovery_approval(&retained),
+            Err(RunnerError::ApprovalBinding)
+        ));
+        let approved = ApprovalRecord::for_plan(&plan, "operator", "now").unwrap();
+        retained.approval = Some(approved.clone());
+        retained.status = aiw_orchestrator::RecoveryStatus::Ready {
+            approval: approved,
+            last_sequence: 2,
+        };
+        require_generic_recovery_approval(&retained).unwrap();
+        let mut transaction = SessionTransaction {
+            schema_version: session::SESSION_TRANSACTION_SCHEMA_VERSION.into(),
+            run_id: plan.run_id.clone(),
+            plan_hash: plan.hash().unwrap(),
+            project_revision_hash: plan.project_revision_hash.clone(),
+            provider_sha256: provider,
+            config_sha256: "4".repeat(64),
+            session_id: "1782a9f3-4e9a-45ac-abe1-afc8ecf78666".into(),
+            request_sha256: "5".repeat(64),
+            workspace_identity_sha256: workspace_hash,
+            recovery: Some(SessionRecoveryBinding {
+                workspace,
+                request_relative_path: "assessment-request.json".into(),
+                provider_protocol: required.clone(),
+            }),
+            transitions: vec![],
+        };
+        assert_eq!(
+            recovery_protocol_for_plan(&plan, &transaction).unwrap(),
+            required
+        );
+        let same_approved_hash = transaction.plan_hash.clone();
+        transaction.recovery.as_mut().unwrap().provider_protocol =
+            aiw_probe::WindowsSandboxCliAdapter::V0_8_107_0.protocol();
+        assert_eq!(transaction.plan_hash, same_approved_hash);
+        assert!(recovery_protocol_for_plan(&plan, &transaction).is_err());
+        transaction.recovery = None;
+        assert!(recovery_protocol_for_plan(&plan, &transaction).is_err());
+        transaction.schema_version = "aiw.dev/wsb-session-transaction/v0alpha2".into();
+        assert!(recovery_protocol_for_plan(&plan, &transaction).is_err());
+    }
     #[test]
     fn transaction_rejects_foreign_binding_and_requires_pending_recovery() {
         let (_root, layout, start, readiness) = setup();

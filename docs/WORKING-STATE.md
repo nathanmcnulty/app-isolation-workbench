@@ -1,194 +1,81 @@
 # Working state
 
-Updated 2026-11-15 (America/Anchorage). Active goal is #108: one generic assessment
-and packaging path, demonstrated by two different external fixtures with no
-product-specific code changes. Worktree `C:\aiw\app-isolation-workbench-108`,
-branch `codex/application-neutral-assessment`, starts from freshly fetched main
-`04be2cefb9e9e4ffff73408e960efee6d30ea9d8`. Start with `scripts/work-status.ps1`,
-[roadmap](ROADMAP.md), [migration audit](APPLICATION-AGNOSTIC-MIGRATION.md) and
-[release gates](RELEASE-GATES.md). The local `origin/main` ref is stale because
-fetch configuration tracks another branch; use the recorded fetched commit.
+Updated 2026-11-15 (America/Anchorage). The user-selected goal is #108: one
+application-neutral assessment and packaging path, demonstrated with two
+behaviorally different external fixtures without product-specific code changes.
+Legacy #111 and its evidence remain preserved and paused.
 
-## Current boundary and next work
+Checkout: `C:\aiw\app-isolation-workbench-108`, branch
+`codex/application-neutral-assessment`, draft PR #112. Base fetched main is
+`04be2cefb9e9e4ffff73408e960efee6d30ea9d8`; the local `origin/main` ref can be
+stale. Start with `scripts/work-status.ps1`, [scope](REPOSITORY-SCOPE.md),
+[migration](APPLICATION-AGNOSTIC-MIGRATION.md), and [release gates](RELEASE-GATES.md).
 
-Storage follow-up: normal builders now require explicit `CARGO_TARGET_DIR`
-instead of silently selecting a per-checkout cache; hosted jobs select one
-explicit cache. `check-local.ps1` now audits and removes only its freshly owned
-test directory after each test, including failures; cleanup refusal fails the
-check and preserves the path for investigation. The paused desktop workflow no
-longer opts into retaining failed staging. The current read-only inventory is
-`C:\aiw\generic-assessment-108\storage-current-inventory-r2.json`: old main
-checkout 47,259,909,938 bytes, current goal artifacts 149,987,557 bytes. The
-reused cache later measured 2,058,300,420 bytes after expanded test compilation,
-with 10,930,884,608 bytes free on C:. No further historical cache deletion was attempted.
-The uncommitted versioned-provider adapter is under validation: initial runner
-tests exposed stale synthetic package/runtime-version fixtures, now corrected
-without relaxing production trust checks. It is not native-qualified. The
-second read-only help capture was staged on VM107 but its unexecuted console
-command was cancelled at the prompt while prioritizing storage work.
+## Current implementation and evidence
 
-The storage budget now gates further native-validation builds. The idle shared debug
-incremental cache measured 32.15 GiB; compiled dependencies measured 10.06 GiB.
-Automatic approval review blocked removal of that incremental cache; it remains
-untouched. A separate verified idle GUI cache was removed with Cargo's exact
-target-directory cleanup, recovering 8.41 GiB of volume space (11.34 GiB free).
-Source and evidence were preserved. Dev/test profiles disable incremental output
-and symbols. Shared preflight now covers normal builders and verification, with
-one caller-selected cache, 10 GiB minimum free and an 8 GiB cache budget. Override
-and compiler-log regression checks passed. Source `51b2a95` completed two identical
-Windows dev builds and a release refresh in the existing shared cache. Cache size
-remained 1,464,790,831 bytes / 1,815 files after every pass; artifact hashes matched,
-with zero second-pass compilation. The earlier actual compiler trace contains 90
-rustc invocations without incremental or full-debug flags. Four incremental
-directories contain zero files/bytes. Small MSVC public-symbol PDBs are measured
-within the budget. Independent evidence review passed; final host free space was
-about 10.81 GiB. Hosted CI passed at `51b2a95` (run `43770608201`). Detailed private
-measurement: `C:\aiw\generic-assessment-108\normal-windows-build-r3\measurement.json`.
+The generic portable/offline x64 CLI path covers protected intake, compilation,
+preparation, review/approval, separate Start, ordinary-user or classic
+AppContainer execution, retained reports/comparison and data-only replay.
+Application facts and exact payloads are run inputs. See
+[application assessment](APPLICATION-ASSESSMENT.md). Installers/GUI automation,
+full descendants/registry/network/DLL/memory evidence, the seven-fixture/holdout
+matrix, W4/W5 and production acceptance remain open.
 
-The generic CLI/shared service path now covers held intake, compilation, protected
-preparation, review/approval and separate Start, typed guest execution, retained
-reports/comparison and data-only replay packaging. The elevated collector creates
-ordinary-user or classic AppContainer roots suspended, observes image/token/job
-facts and flushes progress before resume. Collector mutation-denial gates precede
-application dispatch. Interrupted progress remains diagnostic. See
-[the implementation boundary](APPLICATION-ASSESSMENT.md).
+Exact protocol selection now enters generic version-2 plan hashes and approval;
+preparation receipts use v0alpha2. Start observes the matching held-provider
+version before list/start. Recovery requires committed approval and the exact
+persisted protocol before query/stop. Historical generic v1 remains read-only;
+never relabel it or reuse its approval. Explicit adapters cover 0.8.107.0 and
+0.8.114.0; native qualification of 114 is still pending.
 
-Native acceptance is blocked by a newly observed provider protocol mismatch.
-The exact-source images were reconstructed and fully hash-verified on VM107 under
-`C:\AIW\Goal108\control-r5`, preserving earlier roots. Fresh ordinary-control
-preparation passed; its actual plan and separate approval/Start wrappers passed
-independent review. Approval was recorded for plan
-`c50e5904fb0cbd9e28ee19c674a0bd6e2dcf3702ceaf62d8cc7daa7610d07b94`.
-Start exited 1 with complete diagnostics: installed Sandbox CLI `0.8.114.0` is
-outside the reviewed `0.8.107.0` adapter. Source rejects this after held-provider
-version observation, before list/start. Separate retained Read exited 0 and
-reported `evidenceStatus=notRun`, with outcome/cleanup/evidence null. This is a
-provider prerequisite, not application incompatibility or cleanup proof. No
-retry, allowlist bypass, downgrade, installation or security change was made.
-The small transfer helper was stopped and its viewer closed. Before vendor
-trials, qualify a supported provider with the ordinary/classic and timeout/overflow
-controls; supporting a new version requires captured/reviewed protocol behavior
-and lifecycle/recovery validation, not a changed version constant.
+Affected tests passed: admin 72 (1 ignored), orchestrator 65, probe 30, runner
+152 (9 ignored), platform 208 (10 ignored). Workspace all-target Clippy,
+formatting, governance and consequential source review passed. Initial runner
+failures exposed contradictory synthetic package/runtime-version fixtures;
+those were corrected without relaxing production checks. The later runner and
+platform runs used fresh owned TEMP directories and verified their removal.
 
-The opt-in `research-sandbox-protocol` feature now provides a fixed read-only
-capture of version/help/raw list through the existing verified held-provider and
-bounded job launcher. Three inert byte-retention/failure regressions and
-consequential independent review passed. Source `9a7cfed` built the 512,512-byte
-static-CRT example in the same cache; actual compiler flags and PE/imports passed
-independent review. On VM107, all three read-only commands completed with exit 0
-and empty stderr: CLI `0.8.114.0`, complete help, and an empty
-`WindowsSandboxEnvironments` list. The held provider remained unchanged. The
-full 9,371-byte original envelope and 5,191-byte raw report are retained privately
-as `VM107-protocol-originals-r1.json` and `VM107-protocol-report-original-r1.json`
-under `C:\aiw\generic-assessment-108`. No start,
-connect, stop or application trial occurred. The transfer helper was stopped
-after prefetch and its viewer closed. Production readiness, leases and the
-supported-version gate remain unchanged; the read-only bytes do not qualify a
-new lifecycle. See [protocol capture](SANDBOX-PROTOCOL-CAPTURE.md). Review these
-observations before explicit versioned support and fresh lifecycle/recovery
-qualification. Preserve the refused R5b run.
-The research command table now also includes four fixed verb-specific help
-queries, with focused tests, Clippy and independent source review passed; their
-native capture is next. Generic protocol changes must be committed into fresh
-approval authority, and recovery must compare the persisted protocol before any
-session query or stop. Do not merely widen the version allowlist.
+VM107's source-51b2 R5b preparation and actual plan review passed, but Start
+correctly refused installed CLI 0.8.114.0 against the old 107 adapter before
+list/start. Its consumed intent and retained notRun report remain preserved at
+`C:\AIW\Goal108\control-r5`; no cleanup/compatibility credit follows.
+Earlier custody/locator failures and their fixes remain recorded in Git history
+and private `C:\aiw\generic-assessment-108\VM107-r3-*`/R4 evidence.
 
-Earlier preparation diagnostics remain preserved:
-The first control preparation at `7df2d87` stopped at strict portable intake:
-Windows exposed a short-name alias for the long control filename. A fresh private
-input with identical bytes as `control.exe` passed intake, replay export and
-verification. Prepare then exited 1 with complete captures after staging the
-agent and application, leaving a preserved partial workspace. The original
-generic CLI error exposes no specific cause. Diagnose retained protected intake
-before a fresh preparation; no approval or Start was issued. Neither attempt
-establishes guest execution or application compatibility. Private facts and raw
-capture pointers are under `C:\aiw\generic-assessment-108\VM107-r3-*`.
-Read-only verification subsequently admitted that retained intake. Two host
-Windows regressions then reproduced sharing error 32 when workspace observations
-requested ADD rights while intake custody was held. Observational opens now omit
-those rights, retaining the same sharing and verification checks. Platform tests:
-206 passed, 10 ignored, including both created/reopened workspace regressions and
-continued write/rename denial. The old failure is preserved; fresh end-to-end
-control qualification is still required on rebuilt binaries.
-The rebuilt `2a777a5` preparation passed that custody stage and published its
-plan, preparation and run locator on VM107. The final locator check then refused
-mixed Windows path spellings: the workspace used plain DOS paths while the
-canonical evidence root and project path retained the extended drive prefix.
-The exact 870-byte locator is retained privately. A narrow prefix-equivalence
-fix keeps all retained plan/workspace checks; independent static review passed.
-Fresh control qualification remains pending; no approval or Start was issued.
-Collector launch privileges are an unmeasured prerequisite; a refusal is a driver
-blocker, not application incompatibility. Synchronous setup/I/O is bounded by the
-outer worker watchdog, not hard real-time cancellation. No fallback, privilege
-grant, runtime installation, VM or host-security change is authorized here.
+The source-2f2 read-only seven-query helper completed on VM107 at
+`C:\AIW\Goal108\protocol-r2`: all exits 0, empty stderr, unchanged held provider,
+CLI 0.8.114.0 and empty raw list. Verb help confirms explicit id/config/raw
+syntax. Original envelope 14,435 bytes SHA256
+`584f271d2fdc871fa249f78dce368e2e51dc4c2a929d519230d593ac6d32f37c`
+and raw report 8,988 bytes SHA256
+`76baad24003afd612c31c5958bb233320d4bca8827298b4c3d8ed0f28e0d54d3`
+are private; independent original-byte admission passed. No start/connect/stop
+or application trial occurred. See [capture](SANDBOX-PROTOCOL-CAPTURE.md).
 
-Checks so far: schema 17, orchestrator 62, provider 126, guest 17, runner 143 plus
-four generic preparation tests, 13 focused Windows native contracts, held intake
-custody, and two package round-trip/drift tests passed. CLI 56 passed with one
-historical-archive test ignored; runner's nine live tests were not invoked.
-Existing admin regression cases passed; its two new fixture-construction failures
-were corrected and their focused rerun passed. Workspace all-target Clippy and
-governance passed. Final checks must cover subsequent changes.
-Hosted Verify/audit, MSRV and Windows desktop CI all passed at `7df2d87` (run
-`43684206047`), including the generic request's separate 2 MiB bound. Static x64
-CLI/agent/control binaries are pinned in private build records for that revision.
-The subsequent CLI reporting fix preserves safe typed preparation categories
-without raw error text or invalid run IDs. CLI 58 tests passed with one historical
-archive case ignored; formatting and CLI all-target Clippy passed. Earlier native
-failures retain their original diagnostics and are not retrospectively reclassified.
+## Storage and next work
 
-One unchanged CLI binary compiled ordinary/classic plans and exported/reverified
-packages for both real external fixtures. Semantic hashes matched across policy
-selection and survived packaging. This was metadata/copy work only: zero provider
-calls or fixture executions. Private proof:
-`C:\aiw\generic-assessment-108\host-input-checks-r1\proof.json`.
-Consequential native review found and closed ACL inheritance, total-budget and
-FFI-lifetime issues. Private review receipts and test logs are under
-`C:\aiw\generic-assessment-108`; no native acceptance follows from source review.
+Use only `C:\aiw\environment-probe-20261114\target-static-r1`, the existing
+shared cache. Normal builders require explicit CARGO_TARGET_DIR and reject
+unsafe overrides; both dev/test workspaces disable incremental/full debug.
+Preflight requires 10 GiB free and cache <=8 GiB. Last completed Clippy measured
+2,082,100,909 cache bytes and 10,895,130,624 bytes free. Do not create retry caches.
+A separately audited idle GUI cache recovered 8.41 GiB. The policy-blocked
+`C:\aiw\app-isolation-workbench\target\debug\incremental` remains untouched;
+never retry or bypass its cleanup. Preserve source, pinned images and evidence.
 
-The first path is portable offline CLI execution, with exact argv/cwd, inputs,
-bounded capture, exit checks and work-file assertions. Other mechanisms and
-required evidence scopes remain explicit blockers until implemented. External
-fixture choices are a stateless JSON CLI and a stateful database CLI; their names,
-payloads, arguments and expected results remain private run inputs, never product
-gates or distributed assets. Desktop intake, installer/GUI mechanisms and the
-broader seven-fixture/holdout matrix remain open. Legacy execution remains until
-equivalent generic regression coverage transfers; its readers/evidence stay intact.
+Source 51b2 completed two consecutive dev builds with the same 1,464,790,831-byte
+cache and identical tool hashes; a cold trace records 90 rustc calls without
+incremental/full debug. Later test growth is accounted separately. Storage
+policy 43, compiler-log 12, churn 1,000 cycles, real provider 126 tests,
+governance and independent review passed. Local checks now clean fresh owned
+fixtures on success/failure and report cleanup refusals. All transfer helpers
+were stopped; the console is idle and the clipboard contains the last capture.
 
-Draft [#111](https://github.com/nathanmcnulty/app-isolation-workbench/pull/111)
-is paused by user direction. Preserve its checkout at
-`C:\aiw\app-isolation-workbench`, branch and all private evidence. Its in-flight
-diagnostic build was stopped through its verified owned process tree; partial
-artifacts/logs remain and no diagnostic ran in VM107. Private pause receipt:
-`C:\aiw\environment-probe-20261114\legacy-pause-build-reconciliation-r1.json`.
-Do not continue legacy 7-Zip adapters, MXC research or diagnostics for their own
-sake. Reuse tracing or a Windows probe only where the generic path needs it.
-See [execution packets](EXECUTION-PLAN.md). The roadmap does not authorize a live
-trial, authentication, dependency install, runtime pin change or provider setup.
-
-Vendor configuration bytes, application MSIX publication and installer-bundling
-assembly are removed in the cleanup. Desktop candidate jobs remain paused until
-an AIW-only layout and publication gates are reviewed. Original native archive
-pins remain strict; synthetic test data is not original acceptance evidence.
-
-## Retained evidence pointers
-
-- [Fixed 7-Zip assessment](SEVENZIP-NATIVE-ACCEPTANCE.md): successful comparison
-  and separate cancellation at source `593281a`; broader measurements remain
-  unmeasured. Preserve the earlier failed attempt without inventing its cause.
-- [Paired project-owned controls](PAIRED-NATIVE-APPROVAL.md) and
-  [Results audit](RESULTS-ACCEPTANCE-AUDIT.md): scoped source and native records.
-- [External historical archive tests](../fixtures/msix-lifecycle/README.md):
-  exact native bytes are not distributed with source.
-
-Preserve existing VMs, old packages, retained runs and unrelated work. Do not
-rerun applications, recover completed sessions, delete remote releases/history
-or alter retained evidence merely to align documentation.
-
-## Integration checks
-
-Run applicable contract, Rust, desktop and governance checks and consequential
-independent review. Native acceptance requires approved disposable-worker proof;
-synthetic tests, compilation and downloads do not establish it. Complete one
-draft PR for this generic slice, with precise remaining limitations. Do not
-claim all of #108, W4/W5 or production acceptance complete without evidence.
+Next: finish the clean exact-source three-tool build in that same cache; seal
+fresh control-r6 templates and data-only deltas. Independently review its actual
+version-2 plan before separate approval/Start. Qualify ordinary/classic positives,
+timeout/overflow negatives and controlled interruption/exact recovery before
+running either external fixture. jq and SQLite payloads/provenance and the same
+data-driven private harness are ready but have never executed. Native setup
+refusals are driver blockers, not application incompatibility. No fallback,
+privilege grant, runtime installation, VM or host-security change is authorized.

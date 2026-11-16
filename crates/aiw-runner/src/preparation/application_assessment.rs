@@ -8,6 +8,8 @@ use aiw_provider_wsb::assessment_request::{
 };
 
 pub const APPLICATION_ASSESSMENT_PREPARATION_SCHEMA: &str =
+    "aiw.dev/wsb-preparation/application-assessment/v0alpha2";
+pub const HISTORICAL_APPLICATION_PREPARATION_V1: &str =
     "aiw.dev/wsb-preparation/application-assessment/v0alpha1";
 pub const APPLICATION_ASSESSMENT_TRUST_DELTA: &str = "stages only reviewed application and fixture content in a fresh offline Windows Sandbox; runs the declared bounded workflow as a fresh standard user under the selected ordinary or classic AppContainer policy; grants only owned guest application/work paths; retains bounded output and independent cleanup facts; no automatic host export, installation, fallback or general compatibility verdict";
 pub const APPLICATION_INTAKE_LEAF: &str = "application-intake";
@@ -152,11 +154,9 @@ pub fn build_wsb_application_assessment_preparation(
     assessment: WsbApplicationAssessment,
 ) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
     let trusted = require_static_identity(identity)?;
-    let protocol = WindowsSandboxCliProtocol {
-        cli_version: PINNED_CLI_VERSION.into(),
-        protocol: "windowsSandboxCli/v0.8.107.0".into(),
-        list_schema: "WindowsSandboxEnvironments/Id".into(),
-    };
+    let protocol = aiw_probe::WindowsSandboxCliAdapter::from_version(&identity.package.version)
+        .map_err(|e| WsbPreparationError::Readiness(e.into()))?
+        .protocol();
     let mut artifacts = build_preparation_identity(
         run_id,
         project,
@@ -405,10 +405,16 @@ pub(crate) fn fixed_assessment_wsb_plan(
 pub(crate) fn expected_application_run_plan(
     receipt: &WsbPreparationReceipt,
 ) -> Result<RunPlan, WsbPreparationError> {
+    expected_application_run_plan_for_read(receipt, false)
+}
+fn expected_application_run_plan_for_read(
+    receipt: &WsbPreparationReceipt,
+    historical: bool,
+) -> Result<RunPlan, WsbPreparationError> {
     let assessment = receipt.application_assessment.as_ref().ok_or_else(|| {
         WsbPreparationError::Contract("generic assessment preparation is absent".into())
     })?;
-    RunPlan::new(
+    let mut plan = RunPlan::new(
         &receipt.run_id,
         &receipt.project_id,
         &receipt.project_revision_sha256,
@@ -418,6 +424,7 @@ pub(crate) fn expected_application_run_plan(
             PlannedAction::AssessHost,
             PlannedAction::PrepareWorkspace,
             PlannedAction::ExecuteWindowsSandboxApplicationAssessment {
+                provider_protocol: Some(receipt.provider_protocol.clone()),
                 sandbox_plan_sha256: receipt.wsb_plan_sha256.clone(),
                 provider_sha256: receipt.provider.sha256.clone(),
                 guest_agent_sha256: receipt.guest_agent.sha256.clone(),
@@ -434,11 +441,22 @@ pub(crate) fn expected_application_run_plan(
             TRUST_DELTA_MAPPINGS.into(),
         ],
     )
-    .map_err(|error| WsbPreparationError::Contract(error.to_string()))
+    .map_err(|error| WsbPreparationError::Contract(error.to_string()))?;
+    if historical && receipt.schema_version == HISTORICAL_APPLICATION_PREPARATION_V1 {
+        plan.schema = aiw_orchestrator::HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V1.into();
+        if let PlannedAction::ExecuteWindowsSandboxApplicationAssessment {
+            provider_protocol, ..
+        } = &mut plan.actions[2]
+        {
+            *provider_protocol = None;
+        }
+    }
+    Ok(plan)
 }
 
 pub(crate) fn validate_application_artifacts(
     artifacts: &PreparedWsbArtifacts,
+    historical: bool,
 ) -> Result<(), WsbPreparationError> {
     let assessment = artifacts
         .receipt
@@ -452,7 +470,8 @@ pub(crate) fn validate_application_artifacts(
     validate_plan(&expected).map_err(|error| WsbPreparationError::Contract(error.to_string()))?;
     if artifacts.wsb_plan != expected
         || canonical_hash(&expected)? != artifacts.receipt.wsb_plan_sha256
-        || expected_application_run_plan(&artifacts.receipt)? != artifacts.run_plan
+        || expected_application_run_plan_for_read(&artifacts.receipt, historical)?
+            != artifacts.run_plan
         || artifacts
             .run_plan
             .hash()

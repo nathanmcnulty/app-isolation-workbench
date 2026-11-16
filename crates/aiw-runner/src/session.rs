@@ -681,9 +681,7 @@ fn validate_recovery_binding(
         || !recovery.request_relative_path.is_ascii()
         || recovery.request_relative_path.contains('\\')
         || !is_safe_relative_path(&recovery.request_relative_path)
-        || recovery.provider_protocol.cli_version != "0.8.107.0"
-        || recovery.provider_protocol.protocol != "windowsSandboxCli/v0.8.107.0"
-        || recovery.provider_protocol.list_schema != "WindowsSandboxEnvironments/Id"
+        || recovery.provider_protocol.adapter().is_err()
     {
         return Err(RunnerError::Transaction(
             "session recovery binding is invalid".to_owned(),

@@ -51,6 +51,8 @@ pub const WSB_PAIRED_CONTROL_IMPORT_SCHEMA: &str = "aiw.dev/wsb-planning-import-
 pub const SEVENZIP_RUN_PLAN_SCHEMA: &str = "aiw.dev/run-plan/v0alpha8";
 pub const WSB_SEVENZIP_IMPORT_SCHEMA: &str = "aiw.dev/wsb-planning-import-receipt/v0alpha5";
 pub const APPLICATION_ASSESSMENT_RUN_PLAN_SCHEMA: &str =
+    "aiw.dev/run-plan/application-assessment/v2";
+pub const HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V1: &str =
     "aiw.dev/run-plan/application-assessment/v1";
 pub const WSB_APPLICATION_ASSESSMENT_IMPORT_SCHEMA: &str =
     "aiw.dev/wsb-planning-import-receipt/application-assessment/v1";
@@ -111,6 +113,8 @@ pub enum PlannedAction {
     /// The runner must reverify protected intake and the compiled assessment before
     /// this action can acquire a provider. A plan hash alone is not that proof.
     ExecuteWindowsSandboxApplicationAssessment {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider_protocol: Option<aiw_probe::WindowsSandboxCliProtocol>,
         sandbox_plan_sha256: String,
         provider_sha256: String,
         guest_agent_sha256: String,
@@ -393,10 +397,34 @@ impl RunPlan {
     }
 
     pub fn hash(&self) -> Result<String, AiwError> {
-        validate_plan(self)?;
+        validate_plan_historical(self)?;
         hash_value(self)
     }
 
+    pub fn ensure_current(&self) -> Result<(), AiwError> {
+        validate_plan(self)
+    }
+    /// Historical parsing/hashing is read-only and confers no execution authority.
+    pub fn from_retained_value(value: serde_json::Value) -> Result<Self, AiwError> {
+        if value.get("schema").and_then(serde_json::Value::as_str)
+            == Some(HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V1)
+            && value
+                .get("actions")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|actions| actions.iter().any(|a| a.get("providerProtocol").is_some()))
+        {
+            return Err(run_error(
+                "AIW_PLAN_SCHEMA_UNSUPPORTED",
+                "historical v1 did not define providerProtocol, including null",
+                "plan",
+                "",
+            ));
+        }
+        let plan: Self =
+            serde_json::from_value(value).map_err(|e| serialization_error("plan", "", e))?;
+        validate_plan_historical(&plan)?;
+        Ok(plan)
+    }
     /// Parses only the current mutation-capable plan contract. Legacy plans
     /// remain separately readable for inspection and fail closed here.
     pub fn from_value(value: serde_json::Value) -> Result<Self, AiwError> {
@@ -445,6 +473,7 @@ impl ApprovalRecord {
         approved_by: impl Into<String>,
         approved_at: impl Into<String>,
     ) -> Result<Self, AiwError> {
+        validate_plan(plan)?;
         let value = Self {
             schema: APPROVAL_SCHEMA.into(),
             run_id: plan.run_id.clone(),
@@ -1136,6 +1165,21 @@ impl RunLayout {
         ensure_file(&path, &self.run_id, "lock")?;
         FileExt::lock(&file).map_err(|error| storage_error("lock", &self.run_id, error))?;
         self.revalidate_root()?;
+        // Current authority is tested only under the acquired portable lock.
+        // No-lock status and retained snapshots continue to read historical data.
+        if self.plan_path().is_file() {
+            self.validate_run_dir()?;
+            let retained = self.read_plan_locked()?;
+            if retained.schema == HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V1 {
+                return Err(run_error(
+                    "AIW_HISTORICAL_APPLICATION_PLAN_READ_ONLY",
+                    "historical generic v1 is read-only; preserve evidence and prepare a new versioned plan",
+                    stage,
+                    &self.run_id,
+                ));
+            }
+            validate_plan(&retained)?;
+        }
         if matches!(purpose, RunLockPurpose::Ordinary)
             && self.run_dir().is_dir()
             && self.has_internal_wsb_revocation_marker_locked()?
@@ -1936,7 +1980,7 @@ impl RunLayout {
     fn read_plan_locked(&self) -> Result<RunPlan, AiwError> {
         let value: serde_json::Value =
             read_json(&self.plan_path(), MAX_ARTIFACT, &self.run_id, "plan")?;
-        let plan = RunPlan::from_value(value)?;
+        let plan = RunPlan::from_retained_value(value)?;
         if plan.run_id != self.run_id {
             return Err(run_error(
                 "AIW_RUN_ID_MISMATCH",
@@ -3835,6 +3879,12 @@ pub struct CompletedRunSnapshot {
 }
 
 fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
+    validate_plan_for_read(plan, false)
+}
+fn validate_plan_historical(plan: &RunPlan) -> Result<(), AiwError> {
+    validate_plan_for_read(plan, true)
+}
+fn validate_plan_for_read(plan: &RunPlan, historical: bool) -> Result<(), AiwError> {
     let has_application_assessment = plan.actions.iter().any(|action| {
         matches!(
             action,
@@ -3868,7 +3918,12 @@ fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
             PlannedAction::ExecuteWindowsSandboxSevenZipAssessment { .. }
         )
     });
-    let expected_schema = if has_application_assessment {
+    let expected_schema = if has_application_assessment
+        && historical
+        && plan.schema == HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V1
+    {
+        HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V1
+    } else if has_application_assessment {
         APPLICATION_ASSESSMENT_RUN_PLAN_SCHEMA
     } else if has_sevenzip_action {
         SEVENZIP_RUN_PLAN_SCHEMA
@@ -3928,6 +3983,7 @@ fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
         }
         match action {
             PlannedAction::ExecuteWindowsSandboxApplicationAssessment {
+                provider_protocol,
                 sandbox_plan_sha256,
                 provider_sha256,
                 guest_agent_sha256,
@@ -3937,6 +3993,21 @@ fn validate_plan(plan: &RunPlan) -> Result<(), AiwError> {
                 source_manifest_sha256,
                 assessment_sha256,
             } => {
+                let protocol_valid = if plan.schema == HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V1 {
+                    historical && provider_protocol.is_none()
+                } else {
+                    provider_protocol
+                        .as_ref()
+                        .is_some_and(|p| p.adapter().is_ok())
+                };
+                if !protocol_valid {
+                    return Err(run_error(
+                        "AIW_APPLICATION_PROTOCOL_BINDING_INVALID",
+                        "current generic plans require an exact typed protocol; historical v1 cannot acquire mutation authority",
+                        "plan",
+                        &plan.run_id,
+                    ));
+                }
                 for (field, hash) in [
                     ("sandboxPlanSha256", sandbox_plan_sha256),
                     ("providerSha256", provider_sha256),
@@ -4227,7 +4298,7 @@ fn wsb_workspace(plan: &RunPlan) -> Result<&WorkspaceBindingEvidence, AiwError> 
 }
 
 fn validate_wsb_import(receipt: &WsbPlanningImportReceipt, plan: &RunPlan) -> Result<(), AiwError> {
-    validate_plan(plan)?;
+    validate_plan_historical(plan)?;
     let action = wsb_action(plan)?.ok_or_else(|| {
         run_error(
             "AIW_WSB_IMPORT_INVALID",
@@ -6051,6 +6122,7 @@ mod tests {
             RunLifecycleKind::Assessment,
             "2026-11-14T00:00:00Z",
             vec![PlannedAction::ExecuteWindowsSandboxApplicationAssessment {
+                provider_protocol: Some(aiw_probe::WindowsSandboxCliAdapter::V0_8_107_0.protocol()),
                 sandbox_plan_sha256: "a".repeat(64),
                 provider_sha256: "b".repeat(64),
                 guest_agent_sha256: "c".repeat(64),
@@ -6065,6 +6137,82 @@ mod tests {
         .unwrap()
     }
 
+    #[test]
+    fn exact_protocol_changes_plan_and_cannot_borrow_approval() {
+        let original = application_assessment_plan();
+        let approval = ApprovalRecord::for_plan(&original, "operator", "now").unwrap();
+        let mut changed = original.clone();
+        if let PlannedAction::ExecuteWindowsSandboxApplicationAssessment {
+            provider_protocol, ..
+        } = &mut changed.actions[0]
+        {
+            *provider_protocol = Some(aiw_probe::WindowsSandboxCliAdapter::V0_8_114_0.protocol());
+        }
+        assert_ne!(changed.hash().unwrap(), original.hash().unwrap());
+        assert!(validate_approval(&approval, &changed).is_err());
+        if let PlannedAction::ExecuteWindowsSandboxApplicationAssessment {
+            provider_protocol, ..
+        } = &mut changed.actions[0]
+        {
+            provider_protocol.as_mut().unwrap().protocol = "windowsSandboxCli/v0.8.107.0".into();
+        }
+        assert!(changed.ensure_current().is_err());
+    }
+    #[test]
+    fn historical_generic_v1_hash_bytes_read_but_never_mutate() {
+        let mut wire = serde_json::to_value(application_assessment_plan()).unwrap();
+        wire["schema"] = HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V1.into();
+        wire["actions"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("providerProtocol");
+        let historic = RunPlan::from_retained_value(wire.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&historic).unwrap(), wire);
+        assert_eq!(historic.hash().unwrap(), hash_value(&wire).unwrap());
+        assert!(RunPlan::from_value(wire.clone()).is_err());
+        assert!(historic.ensure_current().is_err());
+        assert!(ApprovalRecord::for_plan(&historic, "operator", "now").is_err());
+        wire["actions"][0]["providerProtocol"] = serde_json::Value::Null;
+        assert!(RunPlan::from_retained_value(wire).is_err());
+    }
+    #[test]
+    fn historical_generic_status_snapshot_are_no_write_and_lock_mutations_refuse() {
+        let root = root();
+        let mut wire = serde_json::to_value(application_assessment_plan()).unwrap();
+        wire["schema"] = HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V1.into();
+        wire["actions"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("providerProtocol");
+        let historic = RunPlan::from_retained_value(wire).unwrap();
+        let layout = layout(&root, &historic.run_id);
+        let import = wsb_import(&historic);
+        let stage = stage_complete_wsb_import(&layout, &historic, &import);
+        fs::rename(stage, layout.run_dir()).unwrap();
+        let before = tree_snapshot(&root, &root);
+        assert!(layout.status().is_ok());
+        assert_eq!(layout.retained_snapshot().unwrap().plan, historic);
+        assert_eq!(before, tree_snapshot(&root, &root));
+        let prior = ApprovalRecord {
+            schema: APPROVAL_SCHEMA.into(),
+            run_id: historic.run_id.clone(),
+            plan_hash: historic.hash().unwrap(),
+            trust_deltas: historic.trust_deltas.clone(),
+            approved_by: "operator".into(),
+            approved_at: "now".into(),
+        };
+        assert_eq!(
+            layout.write_approval(&prior).unwrap_err().code.as_ref(),
+            "AIW_HISTORICAL_APPLICATION_PLAN_READ_ONLY"
+        );
+        // Start's current-plan lock boundary refuses before any execution work.
+        assert_eq!(
+            layout.read_plan().unwrap_err().code.as_ref(),
+            "AIW_HISTORICAL_APPLICATION_PLAN_READ_ONLY"
+        );
+        assert_eq!(before, tree_snapshot(&root, &root));
+        fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn application_assessment_approval_cannot_survive_identity_or_workflow_drift() {
         let plan = application_assessment_plan();

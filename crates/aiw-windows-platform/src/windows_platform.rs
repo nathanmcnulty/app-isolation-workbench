@@ -76,7 +76,7 @@ const PUBLISHER: &str =
 const PUBLISHER_ID: &str = "cw5n1h2txyewy";
 const PROVIDER_FILE: &str = "wsb.exe";
 const CATALOG_FILE: &str = "AppxMetadata\\CodeIntegrity.cat";
-const SUPPORTED_CLI_VERSION: &str = "0.8.107.0";
+type ProtocolAdapter = aiw_probe::WindowsSandboxCliAdapter;
 const STREAM_LIMIT: u64 = 64 * 1024;
 const READ_ONLY_TIMEOUT: Duration = Duration::from_secs(15);
 const MUTATING_TIMEOUT: Duration = Duration::from_secs(120);
@@ -161,6 +161,7 @@ pub struct WsbRecoveryObservation {
 }
 
 pub struct WindowsSandboxExecutionLease {
+    adapter: ProtocolAdapter,
     readiness: WindowsSandboxReadiness,
     provider_path: PathBuf,
     _provider: File,
@@ -174,6 +175,7 @@ pub struct WindowsSandboxExecutionLease {
 /// Recovery-only authority for one exact persisted Sandbox UUID. This type has
 /// no start or connect surface and never accepts a provider path or command.
 pub struct WindowsSandboxRecoveryLease {
+    adapter: ProtocolAdapter,
     readiness: WindowsSandboxReadiness,
     provider_path: PathBuf,
     _provider: File,
@@ -225,6 +227,7 @@ impl WindowsSandboxRecoveryLease {
         let deadline = invocation_deadline(READ_ONLY_TIMEOUT)?;
         let mut provider = NativeRecoveryProvider {
             provider_path: &self.provider_path,
+            adapter: self.adapter,
         };
         let session_ids = provider.list(deadline)?;
         if session_ids
@@ -252,6 +255,7 @@ impl WindowsSandboxRecoveryLease {
         let deadline = invocation_deadline(timeout)?;
         let mut provider = NativeRecoveryProvider {
             provider_path: &self.provider_path,
+            adapter: self.adapter,
         };
         let observation = reconcile_bound_session(
             &self.bound_session,
@@ -348,7 +352,7 @@ impl WindowsSandboxExecutionLease {
         let output = self
             .invoke_logged(&["list", "--raw"], deadline, OutputMode::Capture)
             .map_err(WindowsSandboxInvocationError::Process)?;
-        let session_ids = parse_list_ids_v0_8_107_0(&output.stdout)
+        let session_ids = parse_list_for(self.adapter, &output.stdout)
             .map_err(WindowsSandboxInvocationError::Protocol)?;
         Ok(WsbListObservation { session_ids })
     }
@@ -410,7 +414,7 @@ impl WindowsSandboxExecutionLease {
                 OutputMode::Capture,
             )
             .map_err(WindowsSandboxInvocationError::Process)?;
-        let observed = parse_start_v0_8_107_0(&output.stdout)
+        let observed = parse_start_for(self.adapter, &output.stdout)
             .map_err(WindowsSandboxInvocationError::Protocol)?;
         if observed != sandbox_id.as_str() {
             return Err(WindowsSandboxInvocationError::Protocol(
@@ -497,9 +501,10 @@ impl WindowsSandboxExecutionLease {
             )
             .map_err(WindowsSandboxInvocationError::Process)?;
         if !output.stdout.is_empty() {
-            return Err(WindowsSandboxInvocationError::Protocol(
-                "stop response must be empty for CLI protocol 0.8.107.0".to_owned(),
-            ));
+            return Err(WindowsSandboxInvocationError::Protocol(format!(
+                "stop response must be empty for CLI protocol {}",
+                self.adapter.version()
+            )));
         }
         let remaining = self.list_until(deadline)?;
         if !remaining.session_ids.is_empty() {
@@ -519,11 +524,25 @@ impl WindowsSandboxExecutionLease {
 pub fn acquire_windows_sandbox(
     expected_provider_sha256: &str,
 ) -> Result<WindowsSandboxExecutionLease, WindowsSandboxInvocationError> {
+    acquire_windows_sandbox_for_protocol(
+        expected_provider_sha256,
+        &ProtocolAdapter::V0_8_107_0.protocol(),
+    )
+}
+pub fn acquire_windows_sandbox_for_protocol(
+    expected_provider_sha256: &str,
+    expected_protocol: &WindowsSandboxCliProtocol,
+) -> Result<WindowsSandboxExecutionLease, WindowsSandboxInvocationError> {
+    let adapter = expected_protocol
+        .adapter()
+        .map_err(|e| WindowsSandboxInvocationError::Authority(e.into()))?;
     let authority = acquire_verified_provider(
         expected_provider_sha256,
+        adapter,
         MutexAcquisitionMode::NormalExecution,
     )?;
     Ok(WindowsSandboxExecutionLease {
+        adapter: authority.adapter,
         readiness: authority.readiness,
         provider_path: authority.provider_path,
         _provider: authority.provider,
@@ -539,9 +558,28 @@ pub fn acquire_windows_sandbox_recovery(
     start_provider_sha256: &str,
     persisted_session: CanonicalSandboxId,
 ) -> Result<WindowsSandboxRecoveryLease, WindowsSandboxInvocationError> {
-    let authority =
-        acquire_verified_provider(start_provider_sha256, MutexAcquisitionMode::Recovery)?;
+    acquire_windows_sandbox_recovery_for_protocol(
+        start_provider_sha256,
+        persisted_session,
+        &ProtocolAdapter::V0_8_107_0.protocol(),
+    )
+}
+pub fn acquire_windows_sandbox_recovery_for_protocol(
+    start_provider_sha256: &str,
+    persisted_session: CanonicalSandboxId,
+    expected_protocol: &WindowsSandboxCliProtocol,
+) -> Result<WindowsSandboxRecoveryLease, WindowsSandboxInvocationError> {
+    let adapter = expected_protocol
+        .adapter()
+        .map_err(|e| WindowsSandboxInvocationError::Authority(e.into()))?;
+    // Expected version is checked before the readiness list, and before any stop.
+    let authority = acquire_verified_provider(
+        start_provider_sha256,
+        adapter,
+        MutexAcquisitionMode::Recovery,
+    )?;
     Ok(WindowsSandboxRecoveryLease {
+        adapter: authority.adapter,
         readiness: authority.readiness,
         provider_path: authority.provider_path,
         _provider: authority.provider,
@@ -557,6 +595,7 @@ pub fn acquire_windows_sandbox_recovery(
 }
 
 struct VerifiedProviderAuthority {
+    adapter: ProtocolAdapter,
     readiness: WindowsSandboxReadiness,
     provider_path: PathBuf,
     provider: File,
@@ -575,6 +614,7 @@ struct ProviderHashBinding {
 
 fn acquire_verified_provider(
     expected_provider_sha256: &str,
+    adapter: ProtocolAdapter,
     mode: MutexAcquisitionMode,
 ) -> Result<VerifiedProviderAuthority, WindowsSandboxInvocationError> {
     if !is_lowercase_sha256(expected_provider_sha256) {
@@ -583,7 +623,7 @@ fn acquire_verified_provider(
         ));
     }
     let mutex_acquisition = ProviderMutex::try_acquire(mode)?;
-    let readiness = assess_windows_sandbox();
+    let readiness = assess_windows_sandbox_for(Some(adapter));
     if !readiness.supported {
         return Err(WindowsSandboxInvocationError::Authority(
             readiness.blockers.join(" "),
@@ -637,6 +677,7 @@ fn acquire_verified_provider(
         ));
     }
     Ok(VerifiedProviderAuthority {
+        adapter,
         readiness,
         provider_path: observed_path,
         provider,
@@ -688,6 +729,7 @@ trait RecoveryProvider {
 }
 
 struct NativeRecoveryProvider<'a> {
+    adapter: ProtocolAdapter,
     provider_path: &'a Path,
 }
 
@@ -700,7 +742,8 @@ impl RecoveryProvider for NativeRecoveryProvider<'_> {
             DescendantPolicy::ProviderManaged,
         )
         .map_err(WindowsSandboxInvocationError::Process)?;
-        parse_list_ids_v0_8_107_0(&output.stdout).map_err(WindowsSandboxInvocationError::Protocol)
+        parse_list_for(self.adapter, &output.stdout)
+            .map_err(WindowsSandboxInvocationError::Protocol)
     }
 
     fn stop(
@@ -716,9 +759,10 @@ impl RecoveryProvider for NativeRecoveryProvider<'_> {
         )
         .map_err(WindowsSandboxInvocationError::Process)?;
         if !output.stdout.is_empty() {
-            return Err(WindowsSandboxInvocationError::Protocol(
-                "recovery stop response must be empty for CLI protocol 0.8.107.0".to_owned(),
-            ));
+            return Err(WindowsSandboxInvocationError::Protocol(format!(
+                "recovery stop response must be empty for CLI protocol {}",
+                self.adapter.version()
+            )));
         }
         Ok(())
     }
@@ -778,6 +822,10 @@ fn reconcile_bound_session(
 }
 
 pub(super) fn assess_windows_sandbox() -> WindowsSandboxReadiness {
+    assess_windows_sandbox_for(None)
+}
+
+fn assess_windows_sandbox_for(required: Option<ProtocolAdapter>) -> WindowsSandboxReadiness {
     let mut result = empty_readiness();
     result.os_version = observe_windows_version().ok();
     result.os_build = result.os_version.as_ref().map(|os| u32::from(os.build));
@@ -807,7 +855,7 @@ pub(super) fn assess_windows_sandbox() -> WindowsSandboxReadiness {
         );
     }
 
-    match assess_provider(&mut result) {
+    match assess_provider(&mut result, required) {
         Ok(()) => {
             result.supported = result.blockers.is_empty();
         }
@@ -1086,7 +1134,10 @@ mod protocol_capture_tests {
     }
 }
 
-fn assess_provider(result: &mut WindowsSandboxReadiness) -> Result<(), String> {
+fn assess_provider(
+    result: &mut WindowsSandboxReadiness,
+    required: Option<ProtocolAdapter>,
+) -> Result<(), String> {
     let static_provider = inspect_static_provider()?;
     let HeldStaticProvider {
         _provider: provider,
@@ -1108,22 +1159,18 @@ fn assess_provider(result: &mut WindowsSandboxReadiness) -> Result<(), String> {
         DescendantPolicy::ProviderManaged,
     )?;
     let cli_version = parse_version(&version_output.stdout)?;
-    if cli_version != SUPPORTED_CLI_VERSION {
-        return Err(format!(
-            "AIW_WSB_CLI_VERSION_UNSUPPORTED: observed {cli_version}; supported protocol is {SUPPORTED_CLI_VERSION}."
-        ));
-    }
+    let adapter = require_protocol_identity(&package_identity.version, &cli_version, required)?;
     let list_output = invoke_read_only(
         &final_path,
         &["list", "--raw"],
         invocation_deadline(READ_ONLY_TIMEOUT).map_err(|error| error.to_string())?,
         DescendantPolicy::ProviderManaged,
     )?;
-    let session_count = parse_list_v0_8_107_0(&list_output.stdout)?;
+    let session_count = parse_list_for(adapter, &list_output.stdout)?.len();
 
     result.sandbox_feature = ReadinessState::Available;
     result.current_sessions = ReadinessState::Available;
-    result.current_session_ids = parse_list_ids_v0_8_107_0(&list_output.stdout)?;
+    result.current_session_ids = parse_list_for(adapter, &list_output.stdout)?;
     if session_count > 0 {
         result.warnings.push(format!(
             "AIW_WSB_EXISTING_SESSIONS: observed {session_count} current Windows Sandbox session(s); execution preflight must require an empty provider."
@@ -1139,11 +1186,7 @@ fn assess_provider(result: &mut WindowsSandboxReadiness) -> Result<(), String> {
     result.provider_package = Some(package_identity);
     result.catalog_trust = Some(catalog_trust);
     result.provider_file_identity = Some(file_identity);
-    result.cli_protocol = Some(WindowsSandboxCliProtocol {
-        cli_version,
-        protocol: "windowsSandboxCli/v0.8.107.0".to_owned(),
-        list_schema: "WindowsSandboxEnvironments/Id".to_owned(),
-    });
+    result.cli_protocol = Some(adapter.protocol());
     Ok(())
 }
 
@@ -2086,6 +2129,7 @@ fn parse_version(bytes: &[u8]) -> Result<String, String> {
     Ok(value.to_owned())
 }
 
+#[cfg(test)]
 fn parse_list_v0_8_107_0(bytes: &[u8]) -> Result<usize, String> {
     parse_list_ids_v0_8_107_0(bytes).map(|sessions| sessions.len())
 }
@@ -3086,5 +3130,68 @@ mod tests {
         let token: serde_json::Value = serde_json::from_slice(&token_bytes.unwrap()).unwrap();
         assert_eq!(token["schemaVersion"], "aiw.dev/token-evidence/v0alpha1");
         std::fs::remove_dir_all(workspace).unwrap();
+    }
+}
+
+fn parse_list_for(adapter: ProtocolAdapter, bytes: &[u8]) -> Result<Vec<String>, String> {
+    match adapter {
+        ProtocolAdapter::V0_8_107_0 | ProtocolAdapter::V0_8_114_0 => {
+            parse_list_ids_v0_8_107_0(bytes)
+        }
+    }
+}
+fn parse_start_for(adapter: ProtocolAdapter, bytes: &[u8]) -> Result<String, String> {
+    match adapter {
+        ProtocolAdapter::V0_8_107_0 | ProtocolAdapter::V0_8_114_0 => parse_start_v0_8_107_0(bytes),
+    }
+}
+
+fn require_protocol_identity(
+    package_version: &str,
+    observed: &str,
+    required: Option<ProtocolAdapter>,
+) -> Result<ProtocolAdapter, String> {
+    let adapter = ProtocolAdapter::from_version(observed).map_err(|_| {
+        "AIW_WSB_CLI_VERSION_UNSUPPORTED: observed CLI version has no exact adapter".to_owned()
+    })?;
+    if package_version != observed || required.is_some_and(|expected| expected != adapter) {
+        return Err("AIW_WSB_CLI_VERSION_UNSUPPORTED: package, observed CLI and approved exact adapter differ".into());
+    }
+    Ok(adapter)
+}
+#[cfg(test)]
+mod versioned_adapter_admission_tests {
+    use super::*;
+    #[test]
+    fn expected_package_observed_version_drift_is_refused() {
+        assert_eq!(
+            require_protocol_identity("0.8.114.0", "0.8.114.0", Some(ProtocolAdapter::V0_8_114_0))
+                .unwrap(),
+            ProtocolAdapter::V0_8_114_0
+        );
+        for (package, observed, expected) in [
+            ("0.8.114.0", "0.8.114.0", ProtocolAdapter::V0_8_107_0),
+            ("0.8.107.0", "0.8.114.0", ProtocolAdapter::V0_8_114_0),
+            ("0.8.115.0", "0.8.115.0", ProtocolAdapter::V0_8_114_0),
+        ] {
+            assert!(require_protocol_identity(package, observed, Some(expected)).is_err());
+        }
+    }
+    #[test]
+    fn both_explicit_adapters_keep_strict_shared_wire_contract() {
+        for adapter in [ProtocolAdapter::V0_8_107_0, ProtocolAdapter::V0_8_114_0] {
+            assert_eq!(
+                parse_list_for(adapter, br#"{"WindowsSandboxEnvironments":[]}"#).unwrap(),
+                Vec::<String>::new()
+            );
+            assert!(
+                parse_list_for(
+                    adapter,
+                    br#"{"WindowsSandboxEnvironments":[],"extra":true}"#
+                )
+                .is_err()
+            );
+            assert!(parse_start_for(adapter, br#"{"Id":"bad"}"#).is_err());
+        }
     }
 }
