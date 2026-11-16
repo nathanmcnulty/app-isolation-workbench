@@ -90,7 +90,14 @@ design review, including the trusted local Start anchor, crash boundaries,
 key confidentiality and sampled output budgets. It is not implemented or
 qualified. Hosted Windows CI passed all three jobs at e65874b.
 
-Next: freeze the channel DTO/caps and implement/review the protected guest-local
+An isolated Windows CNG primitive now supplies ephemeral P-256 keys, public-only
+export/import, fixed-size SHA-256 signing/verification, public nonces and explicit
+fallible key/provider release. Four native tests include RFC 6979 public-vector
+verification and tamper/encoding/foreign-key cases. Consequential source review,
+format and governance passed; exact-source hosted Windows checks are required.
+No assessment authority or dispatch path calls this primitive yet.
+
+Next: complete hosted checks, freeze the channel DTO/caps and implement/review the protected guest-local
 collector and authenticated transport. Do not dispatch an application until the
 evidence boundary is proved. Resume
 builds only when permitted storage satisfies preflight. Qualify ordinary/classic positives,

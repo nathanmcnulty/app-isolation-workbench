@@ -2,6 +2,12 @@
 
 use aiw_probe::WindowsSandboxReadiness;
 
+/// Narrow cryptographic primitives for the application-assessment channel.
+/// These primitives alone grant no execution or evidence authority.
+#[cfg(windows)]
+#[doc(hidden)]
+pub mod assessment_channel_crypto;
+
 #[cfg(windows)]
 mod guest_assessment;
 #[cfg(windows)]
