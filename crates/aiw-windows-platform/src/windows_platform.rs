@@ -926,7 +926,7 @@ fn protocol_capture_report(
     commands: Vec<serde_json::Value>,
     revalidation_error: Option<String>,
 ) -> serde_json::Value {
-    let all_commands_captured = commands.len() == 3
+    let all_commands_captured = commands.len() == 7
         && commands
             .iter()
             .all(|command| command["captureComplete"] == true);
@@ -934,6 +934,7 @@ fn protocol_capture_report(
         "schemaVersion": "aiw.private/sandbox-protocol-capture/v1",
         "staticIdentity": static_identity,
         "commands": commands,
+        "expectedCommandCount": 7,
         "allCommandsCaptured": all_commands_captured,
         "heldProviderUnchanged": revalidation_error.is_none(),
         "providerRevalidationError": revalidation_error,
@@ -949,7 +950,15 @@ fn capture_protocol_commands(
     mut invoke: impl FnMut(&[&str]) -> Result<ProcessOutput, String>,
 ) -> Vec<serde_json::Value> {
     let mut records = Vec::new();
-    for arguments in [&["--version"][..], &["--help"][..], &["list", "--raw"][..]] {
+    for arguments in [
+        &["--version"][..],
+        &["--help"][..],
+        &["list", "--raw"][..],
+        &["start", "--help"][..],
+        &["list", "--help"][..],
+        &["connect", "--help"][..],
+        &["stop", "--help"][..],
+    ] {
         let output = invoke(arguments);
         let failed = output.is_err();
         let record = match output {
@@ -994,8 +1003,19 @@ mod protocol_capture_tests {
                 stderr: vec![254, 0, 10],
             })
         });
-        assert_eq!(seen, ["--version", "--help", "list --raw"]);
-        assert_eq!(records.len(), 3);
+        assert_eq!(
+            seen,
+            [
+                "--version",
+                "--help",
+                "list --raw",
+                "start --help",
+                "list --help",
+                "connect --help",
+                "stop --help"
+            ]
+        );
+        assert_eq!(records.len(), 7);
         for record in &records {
             assert_eq!(record["exitCode"], 7);
             assert_eq!(record["captureComplete"], true);

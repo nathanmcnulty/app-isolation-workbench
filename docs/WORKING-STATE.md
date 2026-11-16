@@ -11,7 +11,7 @@ fetch configuration tracks another branch; use the recorded fetched commit.
 
 ## Current boundary and next work
 
-Storage work takes priority before more native trials. The idle shared debug
+The storage budget now gates further native-validation builds. The idle shared debug
 incremental cache measured 32.15 GiB; compiled dependencies measured 10.06 GiB.
 Automatic approval review blocked removal of that incremental cache; it remains
 untouched. A separate verified idle GUI cache was removed with Cargo's exact
@@ -57,11 +57,25 @@ and lifecycle/recovery validation, not a changed version constant.
 The opt-in `research-sandbox-protocol` feature now provides a fixed read-only
 capture of version/help/raw list through the existing verified held-provider and
 bounded job launcher. Three inert byte-retention/failure regressions and
-consequential independent review passed. No provider capture has executed yet;
-production readiness, leases and the supported-version gate remain unchanged.
-See [protocol capture](SANDBOX-PROTOCOL-CAPTURE.md). Build and transfer only the
-source-pinned example in the existing shared cache, then capture on VM107 before
-designing explicit newer-version support. Preserve the refused R5b run.
+consequential independent review passed. Source `9a7cfed` built the 512,512-byte
+static-CRT example in the same cache; actual compiler flags and PE/imports passed
+independent review. On VM107, all three read-only commands completed with exit 0
+and empty stderr: CLI `0.8.114.0`, complete help, and an empty
+`WindowsSandboxEnvironments` list. The held provider remained unchanged. The
+full 9,371-byte original envelope and 5,191-byte raw report are retained privately
+as `VM107-protocol-originals-r1.json` and `VM107-protocol-report-original-r1.json`
+under `C:\aiw\generic-assessment-108`. No start,
+connect, stop or application trial occurred. The transfer helper was stopped
+after prefetch and its viewer closed. Production readiness, leases and the
+supported-version gate remain unchanged; the read-only bytes do not qualify a
+new lifecycle. See [protocol capture](SANDBOX-PROTOCOL-CAPTURE.md). Review these
+observations before explicit versioned support and fresh lifecycle/recovery
+qualification. Preserve the refused R5b run.
+The research command table now also includes four fixed verb-specific help
+queries, with focused tests, Clippy and independent source review passed; their
+native capture is next. Generic protocol changes must be committed into fresh
+approval authority, and recovery must compare the persisted protocol before any
+session query or stop. Do not merely widen the version allowlist.
 
 Earlier preparation diagnostics remain preserved:
 The first control preparation at `7df2d87` stopped at strict portable intake:

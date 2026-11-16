@@ -8,9 +8,10 @@ The opt-in `research-sandbox-protocol` feature adds the
 `sandbox_protocol_capture` example. It is excluded from default builds and accepts
 no arguments, command strings or provider paths. It uses the existing static
 Store/package/catalog verification, holds the provider file, and invokes only
-`--version`, `--help`, and `list --raw` through the existing suspended, job-bound
-launcher. It never calls start, connect, stop or exec, and leaves existing sessions
-untouched. Build it in the selected shared cache after the normal
+`--version`, `--help`, `list --raw`, and the four fixed `start`, `list`, `connect`
+and `stop` commands with `--help` through the existing suspended, job-bound
+launcher. The verb-specific calls request help only; no session mutation or exec
+operation is requested. Build it in the selected shared cache after the normal
 `scripts/build-storage.ps1` preflight; use the existing target-specific static CRT
 setting for a clean worker. Do not create another target directory for research.
 
