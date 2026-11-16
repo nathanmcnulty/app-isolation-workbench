@@ -298,7 +298,7 @@ impl ProtectionHold {
         }
         let tokens = token::Tokens::observe(raw(&process), standard)?;
         let fact = AssessmentCollectorProtection {
-            schema_version: ASSESSMENT_COLLECTOR_PROTECTION_V3_SCHEMA.into(),
+            schema_version: ASSESSMENT_COLLECTOR_PROTECTION_V4_SCHEMA.into(),
             storage:
                 aiw_provider_wsb::assessment_channel::ChannelCollectorStorage::ProtectedGuestLocal,
             collector_process_id: pid,
@@ -307,7 +307,8 @@ impl ProtectionHold {
             process_security: security(raw(&process))?,
             thread_security: security(raw(&thread))?,
             primary_default_dacl: default_dacl(tokens.collector())?,
-            token_provenance: Some(tokens.facts()?),
+            token_provenance: None,
+            system_token_provenance: Some(tokens.system_facts()?),
             collector_capabilities: Some(tokens.capabilities()),
             access_checks: vec![],
         };
@@ -327,7 +328,7 @@ impl ProtectionHold {
         }
         let provenance = self
             .fact
-            .token_provenance
+            .system_token_provenance
             .as_ref()
             .ok_or("collector token provenance absent")?;
         if provenance.standard_user_sid != expected_sid {
@@ -412,10 +413,10 @@ impl ProtectionHold {
         {
             return Err("collector process/thread/security identity changed".into());
         }
-        self.tokens.revalidate(
+        self.tokens.revalidate_system(
             raw(&self.process),
             self.fact
-                .token_provenance
+                .system_token_provenance
                 .as_ref()
                 .ok_or("collector token provenance absent")?,
         )?;
@@ -425,7 +426,7 @@ impl ProtectionHold {
         self.revalidate()?;
         let standard = self
             .fact
-            .token_provenance
+            .system_token_provenance
             .as_ref()
             .ok_or("collector token provenance absent")?;
         let logon = validate_collector_token_provenance(

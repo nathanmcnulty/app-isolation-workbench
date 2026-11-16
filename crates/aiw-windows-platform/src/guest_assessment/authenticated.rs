@@ -161,11 +161,12 @@ impl Progress {
             0,
             ZERO,
             AssessmentChannelPayload::Bootstrap {
-                schema_version: CHANNEL_SCHEMA.into(),
+                schema_version: binding.schema_version.clone(),
                 binding: Box::new(binding.clone()),
                 guest_public_key_hex: key.clone(),
                 collector_token: Box::new(token.clone()),
                 collector_storage: ChannelCollectorStorage::ProtectedGuestLocal,
+                collector_sessions: Some(super::system0_sessions()?),
             },
         )?;
         let bootstrap_digest = bootstrap.signing_digest()?;

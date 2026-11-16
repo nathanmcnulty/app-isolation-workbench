@@ -65,11 +65,11 @@ impl PublicationFixture {
             impersonation_level: None,
             is_app_container: false,
             app_container_sid: None,
-            user_sid: "S-1-5-21-1-2-3-504".into(),
+            user_sid: "S-1-5-18".into(),
             integrity: IntegrityEvidence {
-                sid: "S-1-16-12288".into(),
-                rid: 12288,
-                level: IntegrityLevel::High,
+                sid: "S-1-16-16384".into(),
+                rid: 16384,
+                level: IntegrityLevel::System,
             },
             elevation_type: ElevationType::Full,
             is_elevated: true,
@@ -111,11 +111,15 @@ impl PublicationFixture {
                 0,
                 &"0".repeat(64),
                 AssessmentChannelPayload::Bootstrap {
-                    schema_version: CHANNEL_SCHEMA.into(),
+                    schema_version: binding.schema_version.clone(),
                     binding: Box::new(binding.clone()),
                     guest_public_key_hex: guest_public.clone(),
                     collector_token: Box::new(collector.clone()),
                     collector_storage: ChannelCollectorStorage::ProtectedGuestLocal,
+                    collector_sessions: Some(AssessmentCollectorSessions {
+                        token_session: 0,
+                        process_session: 0,
+                    }),
                 },
             )
             .unwrap(),

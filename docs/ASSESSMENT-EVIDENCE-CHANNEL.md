@@ -33,6 +33,19 @@ plans and approvals retain their original hashes and cannot acquire this
 authority. Request and transaction schemas must version the new fields rather
 than silently extending historical execution.
 
+The current qualification candidate uses plan v4 / preparation alpha4 and
+request alpha3. Its closed noninteractive context is a fixed Sandbox SYSTEM
+collector in token and physical session 0, with a fresh standard-user application
+token in that session and the explicit empty-desktop AsUser policy. Binding and
+bootstrap alpha2 commit this context and actual collector sessions. Historical
+plan v3 / request alpha2 / binding alpha1 preserve their original WDAG semantics
+for retained Read only. They cannot authorize this new collector or application
+launch. The envelope, signature framing and progress protocol remain unchanged.
+The SYSTEM role requires explicit operator approval in the concrete run plan;
+it grants no application SYSTEM identity, rights installation, session reassignment
+or desktop repair. All 29 native denial checks and independent protected-key gates
+remain mandatory. This candidate is not natively qualified.
+
 1. Under the owned run lock and one-shot Start intent, generate an ephemeral
    host ACK signing key and a fresh 32-byte CSPRNG nonce. Persist an immutable
    **public** execution descriptor and complete request outside every guest

@@ -12,7 +12,8 @@ pub mod assessment_channel_crypto;
 mod guest_assessment;
 #[cfg(windows)]
 pub use guest_assessment::{
-    execute_assessment, execute_authenticated_assessment, publish_assessment_completion,
+    bootstrap_system_assessment, execute_assessment, execute_authenticated_assessment,
+    publish_assessment_completion,
 };
 
 #[cfg(all(windows, feature = "research-sevenzip"))]

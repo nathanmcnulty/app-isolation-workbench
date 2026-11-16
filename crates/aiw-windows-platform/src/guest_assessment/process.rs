@@ -32,9 +32,9 @@ use windows::{
             JobObjects::{AssignProcessToJobObject, IsProcessInJob},
             Pipes::{CreatePipe, PeekNamedPipe},
             Threading::{
-                CREATE_NO_WINDOW, CREATE_PROCESS_LOGON_FLAGS, CREATE_SUSPENDED,
-                CREATE_UNICODE_ENVIRONMENT, CreateProcessWithTokenW, EXTENDED_STARTUPINFO_PRESENT,
-                GetExitCodeProcess, GetProcessTimes, PROCESS_INFORMATION, PROCESS_NAME_WIN32,
+                CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT,
+                CreateProcessAsUserW, EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess,
+                GetProcessTimes, PROCESS_INFORMATION, PROCESS_NAME_WIN32,
                 QueryFullProcessImageNameW, ResumeThread, STARTF_USESTDHANDLES, STARTUPINFOEXW,
                 TerminateProcess, WaitForSingleObject,
             },
@@ -77,7 +77,7 @@ fn same_session(process: HANDLE, pid: u32) -> Result<()> {
         )
     }
     .map_err(|e| e.to_string())?;
-    if actual != current || token_session != current || returned != 4 {
+    if current != 0 || actual != current || token_session != current || returned != 4 {
         return Err(format!(
             "suspended application session differs: token={token_session}; physical={actual}; collector={current}; returnedBytes={returned}"
         ));
@@ -92,12 +92,9 @@ fn wide(value: &OsStr) -> Result<Vec<u16>> {
     Ok(value)
 }
 fn validate_command(command: &[u16]) -> Result<()> {
-    // The WithToken API has a smaller command-line contract. Count UTF-16 code
-    // units, conservatively including the terminating NUL, before any creation.
+    // Keep the existing conservative command bound, including terminating NUL.
     if command.len() > 1024 {
-        return Err(
-            "CreateProcessWithTokenW command exceeds 1024 UTF-16 units including NUL".into(),
-        );
+        return Err("assessment command exceeds 1024 UTF-16 units including NUL".into());
     }
     Ok(())
 }
@@ -335,9 +332,9 @@ pub(super) fn launch(spec: Launch<'_>) -> Result<AssessmentProcessObservation> {
             .chain(spec.arguments.iter().map(String::as_str)),
     )))?;
     validate_command(&command)?;
-    // An explicit desktop avoids WithToken's documented null/empty desktop
-    // permission-addition branch. Existing access failures are never repaired.
-    let mut desktop = wide(OsStr::new(r"WinSta0\Default"))?;
+    // Versioned noninteractiveLogonDefault: explicit empty string selects the
+    // documented AsUser OS connection rules. No interactive desktop ACL repair.
+    let mut desktop = wide(OsStr::new(""))?;
     let mut stdout = Pipe::new(spec.stdout_limit)?;
     let mut stderr = Pipe::new(spec.stderr_limit)?;
     let mut stdin = Pipe::new(0)?;
@@ -392,11 +389,13 @@ pub(super) fn launch(spec: Launch<'_>) -> Result<AssessmentProcessObservation> {
     // The elevated collector always supplies the fresh ordinary user token.
     // No application is launched with the collector identity or a fallback.
     let created = unsafe {
-        CreateProcessWithTokenW(
-            spec.user.token(),
-            CREATE_PROCESS_LOGON_FLAGS(0),
+        CreateProcessAsUserW(
+            Some(spec.user.token()),
             PCWSTR(image.as_ptr()),
             Some(PWSTR(command.as_mut_ptr())),
+            None,
+            None,
+            true,
             flags,
             Some(spec.user.environment().cast_const()),
             PCWSTR(cwd.as_ptr()),
@@ -406,9 +405,7 @@ pub(super) fn launch(spec: Launch<'_>) -> Result<AssessmentProcessObservation> {
     };
     if let Err(error) = created {
         let cleanup = canary.close().err().unwrap_or_default();
-        return Err(format!(
-            "CreateProcessWithTokenW failed: {error}; {cleanup}"
-        ));
+        return Err(format!("CreateProcessAsUserW failed: {error}; {cleanup}"));
     }
     let process = unsafe { OwnedHandle::from_raw_handle(info.hProcess.0) };
     let thread = unsafe { OwnedHandle::from_raw_handle(info.hThread.0) };

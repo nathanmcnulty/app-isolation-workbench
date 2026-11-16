@@ -207,6 +207,10 @@ fn historical_preparations_keep_their_original_plan_without_channel_authority() 
             HISTORICAL_APPLICATION_PREPARATION_V2,
             aiw_orchestrator::HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V2,
         ),
+        (
+            HISTORICAL_APPLICATION_PREPARATION_V3,
+            aiw_orchestrator::HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V3,
+        ),
     ] {
         let mut historical = current.clone();
         historical.receipt.schema_version = schema.into();
@@ -218,10 +222,17 @@ fn historical_preparations_keep_their_original_plan_without_channel_authority() 
         assert_eq!(historical.run_plan.schema, plan_schema);
         assert_eq!(
             historical.run_plan.trust_deltas[0],
-            HISTORICAL_APPLICATION_TRUST_DELTA
+            if schema == HISTORICAL_APPLICATION_PREPARATION_V3 {
+                HISTORICAL_APPLICATION_V3_TRUST_DELTA
+            } else {
+                HISTORICAL_APPLICATION_TRUST_DELTA
+            }
         );
         let old = serde_json::to_value(&historical.run_plan).unwrap();
-        assert!(old["actions"][2].get("evidenceChannel").is_none());
+        assert_eq!(
+            old["actions"][2].get("evidenceChannel").is_none(),
+            schema != HISTORICAL_APPLICATION_PREPARATION_V3
+        );
         assert_eq!(
             old["actions"][2].get("providerProtocol").is_none(),
             schema == HISTORICAL_APPLICATION_PREPARATION_V1

@@ -98,7 +98,10 @@ fn failed(
     }
 }
 
-pub(super) fn execute(request: &ApplicationAssessmentGuestRequest) -> Result<()> {
+pub(super) fn execute(
+    request: &ApplicationAssessmentGuestRequest,
+    system_collector: bool,
+) -> Result<()> {
     request
         .require_authenticated_execution()
         .map_err(anyhow::Error::msg)?;
@@ -112,8 +115,14 @@ pub(super) fn execute(request: &ApplicationAssessmentGuestRequest) -> Result<()>
     }
     let mut agent = HeldInstaller::open(&image, &request.agent_sha256, size)?;
     #[cfg(windows)]
-    let execution =
-        aiw_windows_platform::execute_authenticated_assessment(request).map_err(anyhow::Error::msg);
+    let execution = if system_collector {
+        aiw_windows_platform::execute_authenticated_assessment(request)
+    } else {
+        aiw_windows_platform::bootstrap_system_assessment(request)
+    }
+    .map_err(anyhow::Error::msg);
+    #[cfg(not(windows))]
+    let _ = system_collector;
     #[cfg(not(windows))]
     let execution: Result<()> = Err(anyhow::anyhow!(
         "authenticated assessment requires native Windows"
@@ -289,9 +298,14 @@ mod tests {
     use super::*;
     #[test]
     fn historical_request_refuses_before_native_execution_or_image_intake() {
-        let error = execute(&request()).unwrap_err().to_string();
-        assert!(error.contains("authenticated"));
-        assert!(!error.contains("current image"));
+        for system_role in [false, true] {
+            let error = execute(&request(), system_role).unwrap_err().to_string();
+            assert_eq!(
+                error,
+                "historical assessment execution context is read-only"
+            );
+            assert!(!error.contains("current image"));
+        }
     }
     fn request() -> ApplicationAssessmentGuestRequest {
         use aiw_provider_wsb::assessment::*;

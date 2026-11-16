@@ -239,6 +239,9 @@ pub(super) fn read_descriptor(
         })
         .ok_or(RunnerError::ApprovalBinding)?;
     let expected = &descriptor.request;
+    expected
+        .require_system0_execution()
+        .map_err(receipt_error)?;
     let binding = expected.channel_binding().map_err(receipt_error)?;
     if canonical_bytes(&descriptor)? != raw
         || descriptor.schema_version != "aiw.dev/assessment-channel-execution/v0alpha1"
@@ -283,6 +286,19 @@ pub(super) fn validate_recovery_authority(
         .request
         .channel_binding()
         .map_err(receipt_error)?;
+    let context_matches_plan = match plan.schema.as_str() {
+        aiw_orchestrator::APPLICATION_ASSESSMENT_RUN_PLAN_SCHEMA => {
+            expected.execution_context
+                == Some(aiw_provider_wsb::assessment_request::AssessmentExecutionContext::SYSTEM0)
+        }
+        aiw_orchestrator::HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V3 => {
+            expected.execution_context.is_none()
+        }
+        _ => false,
+    };
+    if !context_matches_plan {
+        return Err(RunnerError::ApprovalBinding);
+    }
     let action = plan
         .actions
         .iter()
@@ -968,6 +984,7 @@ mod tests {
         let guest_public = hex::encode(guest.public_key().unwrap());
         let binding = AssessmentChannelBinding {
             schema_version: CHANNEL_SCHEMA.into(),
+            execution_context: None,
             channel_protocol: CHANNEL_PROTOCOL.into(),
             run_id: "host-channel-test".into(),
             plan_sha256: "1".repeat(64),
@@ -1016,6 +1033,7 @@ mod tests {
                 binding: Box::new(binding.clone()),
                 guest_public_key_hex: guest_public.clone(),
                 collector_token: Box::new(collector.clone()),
+                collector_sessions: None,
                 collector_storage: ChannelCollectorStorage::ProtectedGuestLocal,
             },
         )

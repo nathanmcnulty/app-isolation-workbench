@@ -30,6 +30,10 @@ pub struct GenericApplicationRunReport {
     pub guest_agent_sha256: String,
     pub provider_sha256: String,
     pub mode: aiw_provider_wsb::assessment::AssessmentMode,
+    /// Reviewed expected context. Observed role and sessions must independently
+    /// pass the signed native evidence reducer; this field is not observation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_context: Option<aiw_provider_wsb::assessment_request::AssessmentExecutionContext>,
     pub windows: Option<aiw_probe::WindowsVersionObservation>,
     /// Historical recorded cleanup; reading never observes current provider state.
     pub recorded_cleanup_verified: Option<bool>,
@@ -116,7 +120,11 @@ pub fn report_windows_sandbox_application_assessment(
     {
         return Err(RunnerError::Drift);
     }
-    if before.plan.schema == aiw_orchestrator::APPLICATION_ASSESSMENT_RUN_PLAN_SCHEMA {
+    if matches!(
+        before.plan.schema.as_str(),
+        aiw_orchestrator::APPLICATION_ASSESSMENT_RUN_PLAN_SCHEMA
+            | aiw_orchestrator::HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V3
+    ) {
         let inspection = session::inspect_for_recovery(&layout)?;
         let report = report_authenticated(
             &held,
@@ -195,7 +203,7 @@ pub fn report_windows_sandbox_application_assessment(
     let mut report = GenericApplicationRunReport {
         schema_version: "aiw.dev/generic-application-run-report/v0alpha1".into(), run_id: run_id.into(), project_revision_sha256: request.project_revision_sha256.clone(),
         semantic_sha256: request.assessment.semantic_sha256.clone(), source_manifest_sha256: request.assessment.portable_manifest_sha256.clone(), guest_agent_sha256: expected_agent.into(), provider_sha256: artifacts.receipt.provider.sha256.clone(), mode: request.assessment.mode,
-        windows: None, recorded_cleanup_verified: cleanup, recorded_outcome: outcome, evidence_status: "notRun".into(), receipt_sha256: None, evidence_root_hash: None, evidence: None, diagnostic_progress: None,
+        execution_context: None, windows: None, recorded_cleanup_verified: cleanup, recorded_outcome: outcome, evidence_status: "notRun".into(), receipt_sha256: None, evidence_root_hash: None, evidence: None, diagnostic_progress: None,
         gaps: vec!["Only the declared portable CLI workflow is in scope; descendants, DLLs, network denial and general compatibility remain unmeasured".into(), "Cleanup is historical; this read does not inspect or acquire the provider".into()],
     };
     if before.approval.is_some() && inspection.transaction.is_some() {
@@ -332,10 +340,11 @@ fn report_authenticated(
         .as_ref()
         .ok_or(RunnerError::Drift)?;
     let mut report=GenericApplicationRunReport{
-        schema_version:"aiw.dev/generic-application-run-report/v0alpha2".into(),run_id:layout.run_id().into(),
+        schema_version:if before.plan.schema == aiw_orchestrator::APPLICATION_ASSESSMENT_RUN_PLAN_SCHEMA { "aiw.dev/generic-application-run-report/v0alpha3" } else { "aiw.dev/generic-application-run-report/v0alpha2" }.into(),run_id:layout.run_id().into(),
         project_revision_sha256:artifacts.receipt.project_revision_sha256.clone(),semantic_sha256:assessment.compiled.semantic_sha256.clone(),
         source_manifest_sha256:assessment.compiled.portable_manifest_sha256.clone(),guest_agent_sha256:expected_agent.into(),
         provider_sha256:artifacts.receipt.provider.sha256.clone(),mode:assessment.compiled.mode,windows:None,
+        execution_context: (before.plan.schema == aiw_orchestrator::APPLICATION_ASSESSMENT_RUN_PLAN_SCHEMA).then_some(aiw_provider_wsb::assessment_request::AssessmentExecutionContext::SYSTEM0),
         recorded_cleanup_verified:None,recorded_outcome:None,evidence_status:"notRun".into(),receipt_sha256:None,evidence_root_hash:None,evidence:None,diagnostic_progress:None,
         gaps:vec!["Only declared portable CLI facts are in scope; descendants, DLLs, network denial and general compatibility remain unmeasured.".into(),"Cleanup is historical; retained Read never queries the provider or regenerates keys.".into(),"Execution origin requires this trusted local approved Start anchor; imported self-chosen keys establish internal integrity only.".into()],
     };

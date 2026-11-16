@@ -149,6 +149,18 @@ fn collector_protection(
     })
 }
 
+fn protection_context(
+    request: &ApplicationAssessmentGuestRequest,
+    protection: &crate::assessment_observation::AssessmentCollectorProtection,
+) -> Result<(), String> {
+    require(
+        (protection.schema_version
+            == crate::assessment_observation::ASSESSMENT_COLLECTOR_PROTECTION_V4_SCHEMA)
+            == request.execution_context.is_some(),
+        "collector protection execution context differs",
+    )
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum AssessmentEvidenceStatus {
@@ -578,8 +590,12 @@ fn verify_assessment_result_inner(
     )?;
     let plan = &request.assessment;
     let native = &result.native;
-    let authenticated = request.schema_version
-        == crate::assessment_request::APPLICATION_ASSESSMENT_REQUEST_V2_SCHEMA;
+    let authenticated = matches!(
+        request.schema_version.as_str(),
+        crate::assessment_request::APPLICATION_ASSESSMENT_REQUEST_V2_SCHEMA
+            | crate::assessment_request::APPLICATION_ASSESSMENT_REQUEST_V3_SCHEMA
+    );
+    let system0 = request.execution_context.is_some();
     require(
         result.schema_version
             == if authenticated {
@@ -623,6 +639,9 @@ fn verify_assessment_result_inner(
     }
     let collector_write_denied = collector_denial(native)?;
     let protected = if authenticated {
+        if let Some(p) = &native.collector_protection {
+            protection_context(request, p)?;
+        }
         collector_protection(native)?
     } else {
         require(
@@ -664,22 +683,33 @@ fn verify_assessment_result_inner(
         "profile cleanup has no independently retained created-profile identity",
     )?;
     let setup_ok = native.setup_token.as_ref().is_some_and(|t| {
-        t.user_sid.starts_with("S-1-5-21-")
-            && t.user_sid.ends_with("-504")
-            && t.token_type == TokenType::Primary
+        (if system0 {
+            t.user_sid == "S-1-5-18"
+        } else {
+            t.user_sid.starts_with("S-1-5-21-") && t.user_sid.ends_with("-504")
+        }) && t.token_type == TokenType::Primary
             && t.impersonation_level.is_none()
             && t.is_elevated
             && !t.is_app_container
             && t.app_container_sid.is_none()
             && t.capabilities.is_empty()
-            && t.integrity.rid == 12288
-            && t.integrity.level == IntegrityLevel::High
+            && t.integrity.rid == if system0 { 16384 } else { 12288 }
+            && t.integrity.level
+                == if system0 {
+                    IntegrityLevel::System
+                } else {
+                    IntegrityLevel::High
+                }
     });
     let context_ok = native.standard_context.as_ref().is_some_and(|context| {
         native.setup_token.as_ref().is_some_and(|setup| {
             setup.user_sid != context.user_sid
-                && setup.user_sid.rsplit_once('-').map(|v| v.0)
-                    == context.user_sid.rsplit_once('-').map(|v| v.0)
+                && (if system0 {
+                    context.user_sid.starts_with("S-1-5-21-") && sid(&context.user_sid)
+                } else {
+                    setup.user_sid.rsplit_once('-').map(|v| v.0)
+                        == context.user_sid.rsplit_once('-').map(|v| v.0)
+                })
         })
     });
     let mut rows = Vec::new();
@@ -1470,6 +1500,7 @@ fn reduce_progress_events(
                         && pending.is_none(),
                     "collector protection is legacy/duplicate/late",
                 )?;
+                protection_context(request, &observation)?;
                 native.collector_protection = Some(*observation);
                 collector_protection(&native)?;
             }
@@ -2770,7 +2801,7 @@ mod tests {
             ASSESSMENT_CHANNEL_REQUEST_SCHEMA, AssessmentChannelRequest,
         };
         let old = request(false);
-        let request = ApplicationAssessmentGuestRequest::new_authenticated(
+        let mut request = ApplicationAssessmentGuestRequest::new_authenticated(
             old.run_id,
             old.sandbox_id,
             old.config_sha256,
@@ -2789,6 +2820,12 @@ mod tests {
             },
         )
         .unwrap();
+        // Historical fixtures remain the exact WDAG/alpha2 read contract.
+        request.schema_version =
+            crate::assessment_request::APPLICATION_ASSESSMENT_REQUEST_V2_SCHEMA.into();
+        request.execution_context = None;
+        request.request_sha256 = request.request_hash().unwrap();
+        request.validate().unwrap();
         let mut result = result(&request);
         result.schema_version = APPLICATION_ASSESSMENT_RESULT_V2_SCHEMA.into();
         result.native.schema_version = ASSESSMENT_NATIVE_OBSERVATION_V2_SCHEMA.into();
@@ -2839,6 +2876,7 @@ mod tests {
             access_checks: checks,
             token_provenance: None,
             collector_capabilities: None,
+            system_token_provenance: None,
         });
         (request, result)
     }
@@ -3325,6 +3363,175 @@ mod tests {
         );
     }
 
+    fn system_protection_fixture() -> (
+        ApplicationAssessmentGuestRequest,
+        ApplicationAssessmentResult,
+    ) {
+        let (mut request, mut result) = authenticated_fixture();
+        request.schema_version =
+            crate::assessment_request::APPLICATION_ASSESSMENT_REQUEST_V3_SCHEMA.into();
+        request.execution_context =
+            Some(crate::assessment_request::AssessmentExecutionContext::SYSTEM0);
+        request.request_sha256 = request.request_hash().unwrap();
+        result.request_sha256 = request.request_sha256.clone();
+        let setup = result.native.setup_token.as_mut().unwrap();
+        setup.user_sid = "S-1-5-18".into();
+        setup.integrity.rid = 16384;
+        setup.integrity.sid = "S-1-16-16384".into();
+        setup.integrity.level = IntegrityLevel::System;
+        let standard = result
+            .native
+            .standard_context
+            .as_ref()
+            .unwrap()
+            .user_sid
+            .clone();
+        let p = result.native.collector_protection.as_mut().unwrap();
+        p.schema_version = ASSESSMENT_COLLECTOR_PROTECTION_V4_SCHEMA.into();
+        p.collector_capabilities = Some(collector_capabilities_fixture());
+        for d in [&mut p.process_security, &mut p.thread_security] {
+            d.owner_sid = "S-1-5-18".into();
+            d.sddl = "O:SYD:(A;;GA;;;SY)S:(ML;;NW;;;SI)".into();
+            d.sha256 = hex::encode(Sha256::digest(d.sddl.as_bytes()));
+            d.trustee_sids = vec!["S-1-5-18".into()];
+        }
+        p.system_token_provenance = Some(AssessmentSystemCollectorTokenProvenance {
+            collector_user_sid: "S-1-5-18".into(),
+            collector_token_type: TokenType::Primary,
+            collector_sessions: crate::assessment_channel::AssessmentCollectorSessions {
+                token_session: 0,
+                process_session: 0,
+            },
+            // No logon-SID is invented. Complete synthetic group rosters.
+            collector_groups: vec![AssessmentTokenGroup {
+                sid: "S-1-5-32-544".into(),
+                attributes: 7,
+            }],
+            standard_user_sid: standard,
+            standard_token_type: TokenType::Primary,
+            standard_token_session: 0,
+            standard_groups: vec![AssessmentTokenGroup {
+                sid: "S-1-1-0".into(),
+                attributes: 7,
+            }],
+        });
+        (request, result)
+    }
+    #[test]
+    fn system_protection_is_distinct_closed_wire_not_historical_logon_exception() {
+        let (request, result) = system_protection_fixture();
+        let p = result.native.collector_protection.as_ref().unwrap();
+        assert_eq!(
+            validate_collector_token_provenance(
+                p,
+                "S-1-5-18",
+                &result.native.standard_context.as_ref().unwrap().user_sid
+            )
+            .unwrap(),
+            None
+        );
+        let value = serde_json::to_value(p).unwrap();
+        assert_eq!(
+            serde_json::from_value::<AssessmentCollectorProtection>(value.clone()).unwrap(),
+            *p
+        );
+        for version in [
+            ASSESSMENT_COLLECTOR_PROTECTION_SCHEMA,
+            ASSESSMENT_COLLECTOR_PROTECTION_V2_SCHEMA,
+            ASSESSMENT_COLLECTOR_PROTECTION_V3_SCHEMA,
+        ] {
+            let (_, old) = authenticated_fixture();
+            let mut wire = serde_json::to_value(old.native.collector_protection.unwrap()).unwrap();
+            wire["schemaVersion"] = serde_json::json!(version);
+            for inserted in [
+                serde_json::Value::Null,
+                value["systemTokenProvenance"].clone(),
+            ] {
+                wire["systemTokenProvenance"] = inserted;
+                assert!(
+                    serde_json::from_value::<AssessmentCollectorProtection>(wire.clone()).is_err()
+                );
+            }
+        }
+        for field in ["systemTokenProvenance", "collectorCapabilities"] {
+            for null in [false, true] {
+                let mut wire = value.clone();
+                if null {
+                    wire[field] = serde_json::Value::Null;
+                } else {
+                    wire.as_object_mut().unwrap().remove(field);
+                }
+                assert!(serde_json::from_value::<AssessmentCollectorProtection>(wire).is_err());
+            }
+        }
+        let mut borrowed = value;
+        borrowed["tokenProvenance"] = serde_json::Value::Null;
+        assert!(serde_json::from_value::<AssessmentCollectorProtection>(borrowed).is_err());
+        assert_eq!(collector_protection(&result.native).unwrap(), Some(true));
+        let (legacy, _) = authenticated_fixture();
+        assert!(protection_context(&legacy, p).is_err());
+        let (_, old) = authenticated_fixture();
+        assert!(
+            protection_context(&request, old.native.collector_protection.as_ref().unwrap())
+                .is_err()
+        );
+    }
+    #[test]
+    fn system_protection_requires_sessions_groups_syba_and_all_denials_not_privileges() {
+        let (request, mut result) = system_protection_fixture();
+        for case in 0..7 {
+            let mut bad = result.clone();
+            let p = bad
+                .native
+                .collector_protection
+                .as_mut()
+                .unwrap()
+                .system_token_provenance
+                .as_mut()
+                .unwrap();
+            match case {
+                0 => p.collector_user_sid = "S-1-5-21-1-2-3-504".into(),
+                1 => p.collector_sessions.token_session = 1,
+                2 => p.collector_sessions.process_session = 1,
+                3 => p.standard_token_session = 1,
+                4 => p.standard_user_sid = "S-1-5-18".into(),
+                5 => p.collector_groups.push(p.collector_groups[0].clone()),
+                _ => p.standard_token_type = TokenType::Impersonation,
+            }
+            assert!(collector_protection(&bad.native).is_err(), "case {case}");
+        }
+        let mut trustee = result.clone();
+        trustee
+            .native
+            .collector_protection
+            .as_mut()
+            .unwrap()
+            .process_security
+            .trustee_sids
+            .push("S-1-5-5-0-123".into());
+        assert_ne!(collector_protection(&trustee.native).unwrap(), Some(true));
+        let mut allowed = result.clone();
+        let check = &mut allowed
+            .native
+            .collector_protection
+            .as_mut()
+            .unwrap()
+            .access_checks[0];
+        check.native_code = Some(0);
+        check.denied = Some(false);
+        assert_eq!(collector_protection(&allowed.native).unwrap(), Some(false));
+        // Pure signed-wrapper seam only, not a native/CNG or launch claim.
+        result.native.steps.clear();
+        result.native.assertions.clear();
+        result.native.driver_completed = false;
+        result.native.driver_errors = vec!["launch prerequisite refused".into()];
+        let verified = verify_assessment_result_inner(&request, &result).unwrap();
+        assert_eq!(verified.coverage.collector_key_protected, Some(true));
+        assert_eq!(verified.workflow_status, AssessmentFactStatus::NotRun);
+        let (raw, records, _) = authenticated_records(&request, &result);
+        verify_authenticated_assessment_progress(&raw, &records, &request, &result).unwrap();
+    }
+
     // NOT cryptography: permits exercising verified-wrapper associations without
     // invoking CNG/native processes. Native signature proof is separately gated.
     struct SyntheticChannel;
@@ -3370,10 +3577,16 @@ mod tests {
                 0,
                 &"0".repeat(64),
                 AssessmentChannelPayload::Bootstrap {
-                    schema_version: CHANNEL_SCHEMA.into(),
+                    schema_version: binding.schema_version.clone(),
                     binding: Box::new(binding.clone()),
                     guest_public_key_hex: key.clone(),
                     collector_token: Box::new(result.native.setup_token.clone().unwrap()),
+                    collector_sessions: request.execution_context.map(|_| {
+                        AssessmentCollectorSessions {
+                            token_session: 0,
+                            process_session: 0,
+                        }
+                    }),
                     collector_storage: ChannelCollectorStorage::ProtectedGuestLocal,
                 },
             )

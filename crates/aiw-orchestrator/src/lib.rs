@@ -51,10 +51,13 @@ pub const WSB_PAIRED_CONTROL_IMPORT_SCHEMA: &str = "aiw.dev/wsb-planning-import-
 pub const SEVENZIP_RUN_PLAN_SCHEMA: &str = "aiw.dev/run-plan/v0alpha8";
 pub const WSB_SEVENZIP_IMPORT_SCHEMA: &str = "aiw.dev/wsb-planning-import-receipt/v0alpha5";
 pub const APPLICATION_ASSESSMENT_RUN_PLAN_SCHEMA: &str =
+    "aiw.dev/run-plan/application-assessment/v4";
+pub const HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V3: &str =
     "aiw.dev/run-plan/application-assessment/v3";
 pub const HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V2: &str =
     "aiw.dev/run-plan/application-assessment/v2";
 pub const APPLICATION_CHANNEL_START_INTENT_FILE: &str = "assessment-channel-start-intent.json";
+pub const APPLICATION_ASSESSMENT_TRUST_DELTA: &str = "stages reviewed portable application and fixture inputs in one fresh offline Windows Sandbox; fixed first-party collector runs as Sandbox SYSTEM in token and process session 0; application remains a fresh standard user in session 0 under the selected ordinary or classic AppContainer policy; desktop policy noninteractiveLogonDefault uses an explicit empty desktop string and supports offline CLI only, without rights grants, session changes or desktop ACL repair; fresh Start binds this execution context, host acknowledgement key and nonce; protected guest-local collection, authenticated signedCollector/p256-sha256/v1 transport and all measured collector file/process/thread guards are required before application creation; grants only owned guest application/work paths; sampled bounded output monitoring is not a disk quota; retains bounded facts and independent cleanup; no automatic host export, installation, interactive GUI, fallback or general compatibility verdict";
 pub const HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V1: &str =
     "aiw.dev/run-plan/application-assessment/v1";
 pub const WSB_APPLICATION_ASSESSMENT_IMPORT_SCHEMA: &str =
@@ -1208,10 +1211,11 @@ impl RunLayout {
                 retained.schema.as_str(),
                 HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V1
                     | HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V2
+                    | HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V3
             ) {
                 return Err(run_error(
                     "AIW_HISTORICAL_APPLICATION_PLAN_READ_ONLY",
-                    "historical generic v1/v2 is read-only; preserve evidence and prepare a new versioned plan",
+                    "historical generic plans are read-only; preserve evidence and prepare a new versioned plan",
                     stage,
                     &self.run_id,
                 ));
@@ -2119,7 +2123,7 @@ impl RunLayout {
         &self,
     ) -> Result<ApplicationChannelStartIntent, AiwError> {
         let snapshot = self.retained_snapshot()?;
-        snapshot.plan.ensure_current()?;
+        validate_plan_historical(&snapshot.plan)?;
         let approval = snapshot.approval.as_ref().ok_or_else(|| {
             run_error(
                 "AIW_APPROVAL_REQUIRED",
@@ -2135,7 +2139,10 @@ impl RunLayout {
             "channel-read",
         )?;
         if intent.schema_version != "aiw.dev/application-channel-start-intent/v0alpha1"
-            || snapshot.plan.schema != APPLICATION_ASSESSMENT_RUN_PLAN_SCHEMA
+            || !matches!(
+                snapshot.plan.schema.as_str(),
+                APPLICATION_ASSESSMENT_RUN_PLAN_SCHEMA | HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V3
+            )
             || intent.run_id != self.run_id
             || intent.plan_hash != snapshot.plan.hash()?
             || intent.approval_sha256 != hash_value(approval)?
@@ -4042,7 +4049,9 @@ fn validate_plan_for_read(plan: &RunPlan, historical: bool) -> Result<(), AiwErr
         && historical
         && matches!(
             plan.schema.as_str(),
-            HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V1 | HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V2
+            HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V1
+                | HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V2
+                | HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V3
         ) {
         plan.schema.as_str()
     } else if has_application_assessment {
@@ -4126,6 +4135,21 @@ fn validate_plan_for_read(plan: &RunPlan, historical: bool) -> Result<(), AiwErr
                     evidence_channel.as_deref()
                         == Some(aiw_probe::APPLICATION_ASSESSMENT_CHANNEL_PROTOCOL)
                 };
+                if plan.schema == APPLICATION_ASSESSMENT_RUN_PLAN_SCHEMA
+                    && plan
+                        .trust_deltas
+                        .iter()
+                        .filter(|v| v.as_str() == APPLICATION_ASSESSMENT_TRUST_DELTA)
+                        .count()
+                        != 1
+                {
+                    return Err(run_error(
+                        "AIW_APPLICATION_CONTEXT_REVIEW_REQUIRED",
+                        "current assessment plan requires its exact noninteractive SYSTEM0 collector and standard-user0 trust delta once",
+                        "plan",
+                        &plan.run_id,
+                    ));
+                }
                 if !channel_valid {
                     return Err(run_error(
                         "AIW_APPLICATION_CHANNEL_BINDING_INVALID",
@@ -6274,7 +6298,7 @@ mod tests {
                 source_manifest_sha256: "e".repeat(64),
                 assessment_sha256: "1".repeat(64),
             }],
-            vec!["Run the reviewed application in one disposable worker".into()],
+            vec![APPLICATION_ASSESSMENT_TRUST_DELTA.into()],
         )
         .unwrap()
     }
@@ -6464,6 +6488,33 @@ mod tests {
         }
         let mut wire = serde_json::to_value(&plan).unwrap();
         wire["actions"][0]["workspaceIdentitySha256"] = serde_json::json!("9".repeat(64));
+        assert!(RunPlan::from_value(wire).is_err());
+    }
+
+    #[test]
+    fn system0_context_requires_exact_review_and_preserves_read_only_v3() {
+        let plan = application_assessment_plan();
+        for deltas in [
+            vec![],
+            vec!["old interactive collector".into()],
+            vec![
+                APPLICATION_ASSESSMENT_TRUST_DELTA.into(),
+                APPLICATION_ASSESSMENT_TRUST_DELTA.into(),
+            ],
+        ] {
+            let mut drift = plan.clone();
+            drift.trust_deltas = deltas;
+            assert!(drift.ensure_current().is_err());
+            assert!(ApprovalRecord::for_plan(&drift, "operator", "now").is_err());
+        }
+        let mut legacy = plan.clone();
+        legacy.schema = HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V3.into();
+        legacy.trust_deltas = vec!["historical exact reviewed text".into()];
+        let wire = serde_json::to_value(&legacy).unwrap();
+        let retained = RunPlan::from_retained_value(wire.clone()).unwrap();
+        assert_eq!(retained.hash().unwrap(), legacy.hash().unwrap());
+        assert_eq!(serde_json::to_value(retained).unwrap(), wire);
+        assert!(legacy.ensure_current().is_err());
         assert!(RunPlan::from_value(wire).is_err());
     }
 

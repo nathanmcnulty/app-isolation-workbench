@@ -41,8 +41,21 @@ selected policy. It aids comparison, not execution authority. Full approval bind
 project, compiled plan, protected intake, inputs, agent, provider, workspace,
 session and rendered configuration. Start remains separate.
 
-Current generic plans use version 3 and preparation receipts use `v0alpha3`.
-They approve the fixed signed collector channel as well as the workflow.
+Current generic plans use version 4 and preparation receipts use `v0alpha4`.
+They approve the fixed signed collector channel, workflow and the closed
+`sandboxSystemNoninteractive` context: collector token/process session 0,
+fresh standard-user application session 0 and desktop policy
+`noninteractiveLogonDefault`. The application never runs as SYSTEM. This
+CLI-only context uses an explicit empty desktop string with CreateProcessAsUserW;
+Windows chooses the connection under its
+[documented process connection rules](https://learn.microsoft.com/en-us/windows/win32/winstation/process-connection-to-a-window-station).
+The [process-creation contract](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessasuserw)
+requires same-session handle inheritance and describes temporary use of assigned
+privileges. No rights grant,
+session reassignment, desktop ACL repair or interactive fallback is permitted.
+Requests use `v0alpha3`; channel bindings/bootstrap use `v0alpha2`. The signature
+envelope and progress protocol retain their existing bytes and meaning.
+These contracts are implemented for qualification; native acceptance remains open.
 Their exact typed Sandbox CLI protocol is part of plan hashing and approval;
 preparation selects it from the verified Store package without claiming a live
 version observation. Start must observe the same held provider version before
@@ -50,7 +63,7 @@ listing or starting sessions. The exact adapters are `0.8.107.0` and
 `0.8.114.0`; ranges, mixed tuples and fallback are rejected. Protocol selection
 does not establish native lifecycle qualification. Recovery additionally
 requires committed approval and the same persisted plan/session protocol before
-querying or stopping anything. Historical generic version-1/version-2 plans remain
+querying or stopping anything. Historical generic version-1/version-2/version-3 plans remain
 readable with their original hashes but cannot acquire mutation authority,
 including locked cleanup/discard. Preserve those runs and prepare a fresh
 versioned plan; do not relabel or reuse an earlier approval.
@@ -58,7 +71,14 @@ versioned plan; do not relabel or reuse an earlier approval.
 ## Worker and evidence
 
 A fixed first-party agent reads a bounded read-only request. Source and fixture
-mappings are read-only. An elevated guest collector stages code/data, establishes
+mappings are read-only. The fixed elevated WDAG bootstrap holds the request and
+agent and creates one fresh local SYSTEM ServiceAccount task with no triggers,
+restarts or session override. A protected create-only intent binds one shared
+monotonic deadline; the application also retains its stricter declared total
+timeout. Only the unchanged, positively idle task can be deleted. Unknown or
+active tasks remain for exact owned outer Sandbox cleanup, without Stop or replay.
+The SYSTEM collector independently measures its primary identity and token/physical
+session 0 before collecting. It stages code/data, establishes
 a fresh ordinary user and launches each application directly with that user's
 token. Collection stays in the elevated process. No secondary ordinary-user
 observer or application-selected helper runs. Before dispatch, all fifteen

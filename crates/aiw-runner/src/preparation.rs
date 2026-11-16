@@ -421,6 +421,7 @@ impl WsbPreparationReceipt {
                     self.schema_version.as_str(),
                     application_assessment::HISTORICAL_APPLICATION_PREPARATION_V1
                         | application_assessment::HISTORICAL_APPLICATION_PREPARATION_V2
+                        | application_assessment::HISTORICAL_APPLICATION_PREPARATION_V3
                 )
             {
                 self.schema_version.as_str()

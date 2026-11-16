@@ -5277,6 +5277,8 @@ mod tests {
         };
         plan.schema = aiw_orchestrator::APPLICATION_ASSESSMENT_RUN_PLAN_SCHEMA.into();
         plan.actions[2] = action;
+        plan.trust_deltas
+            .push(aiw_orchestrator::APPLICATION_ASSESSMENT_TRUST_DELTA.into());
         plan.ensure_current().unwrap();
         let mut retained = aiw_orchestrator::RetainedRunSnapshot {
             plan: plan.clone(),

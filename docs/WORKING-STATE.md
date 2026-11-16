@@ -1,141 +1,96 @@
 # Working state
 
 Updated 2026-11-16 (America/Anchorage). Effective goal #108 is one application-neutral
-assessment and packaging path, demonstrated with two behaviorally different
-administrator-supplied external fixtures through unchanged production code.
-Legacy #111 and its evidence are preserved and paused.
+assessment and packaging path demonstrated with two behaviorally different external
+administrator-supplied fixtures through unchanged production code. Preserve #111
+evidence; its legacy application-specific work is paused.
 
-Checkout: `C:\aiw\app-isolation-workbench-108`, branch
-`codex/application-neutral-assessment`, draft PR #112. Base main:
-`04be2cefb9e9e4ffff73408e960efee6d30ea9d8`. Start with `scripts/work-status.ps1`,
-[scope](REPOSITORY-SCOPE.md), [migration](APPLICATION-AGNOSTIC-MIGRATION.md) and
-[release gates](RELEASE-GATES.md).
+Checkout `C:\aiw\app-isolation-workbench-108`, branch
+`codex/application-neutral-assessment`, draft PR #112. Base main
+`04be2cefb9e9e4ffff73408e960efee6d30ea9d8`. Resume with
+`scripts/work-status.ps1`, [assessment](APPLICATION-ASSESSMENT.md) and
+[channel design](ASSESSMENT-EVIDENCE-CHANNEL.md).
 
-## Current slice
+## Current slice and authority
 
-The generic offline x64 portable CLI path covers protected intake, compilation,
+The portable offline x64 CLI path covers protected intake, compilation,
 preparation, separate approval/Start, ordinary-user or classic AppContainer
 execution, signed retained reporting/comparison and data-only replay. Names,
-payloads and operations are run inputs. See [assessment](APPLICATION-ASSESSMENT.md)
-and [channel design](ASSESSMENT-EVIDENCE-CHANNEL.md). Installers/GUI automation,
-full descendants/registry/network/DLL/memory coverage, the wider fixture matrix,
-W4/W5 and production acceptance remain open.
+payloads and operations are run inputs. Installers/GUI automation, complete
+descendants/registry/network/DLL/memory coverage, W4/W5 and production acceptance
+remain open. Neither external fixture has executed.
 
-Source 93eded3 closes the seven-role signed transport boundary while preserving
-strict generic intake. Full affected suites passed: provider 146, runner 163
-(9 ignored), platform 222 (10 ignored); Clippy, governance and independent reviews
-passed. Actual CNG/filesystem fixtures observed all seven short aliases. The
-later owner-bound publication tests observed no aliases and do not replace those
-proofs. A native symlink fixture required unavailable privilege and remains
-unmeasured. Test-only commit 24b6349 passed all three jobs in CI 43860384530;
-raw workspace passed=true, exit 0, 488.97 seconds. Tested merge 5b5cc441 has the
-same tree 25fae8047dfdaa1409ad7a26783df8fcde46b950.
+The working tree now contains a **SYSTEM0 integration candidate awaiting native qualification**.
+Plan v4 / preparation alpha4 explicitly approve its fixed noninteractive context;
+request alpha3 / channel binding and bootstrap alpha2 bind it. Applications remain
+fresh standard-user session0 or zero-capability classic AppContainer. Fixed
+TaskScheduler bootstrap uses one default SYSTEM ServiceAccount Run, no session
+override, triggers, rights grants, desktop ACL repair or application SYSTEM identity.
+AsUser uses the exact handle list and suspended PSS checks. The collector has a
+separate protection-v4 provenance form; historical WDAG rules remain read-only.
+The shared bootstrap deadline never extends the declared assessment total.
 
-R9 used exact source-93eded3 tools. Complete signed publication and retained Read
-now authenticate against the trusted local Start. Independent original admission
-verified 23 signatures, raw artifact hashes, 15 file denials and 14 process/thread
-denials. The application was not created: the collector's actual logon trustee
-was outside the protection-v1 allowlist. Outcome remains NotRun/insufficientEvidence.
-One exact owned Start/connect/stop completed; final two lists were empty and
-outer cleanup was recorded complete. Retained Read exited 0; a subsequent private
-QA projection accessed an absent property, independently preserved as a harness
-bug. Original request bytes were removed during cleanup; its descriptor commitment
-was recomputed without claiming custody of the absent original file.
+The user explicitly approved this fixed collector role only inside fresh Windows
+Sandboxes on existing VM107. Receipt and exact scope are retained privately at
+`C:\aiw\generic-assessment-108\collector-role-user-approval-r1.json`.
+Each concrete run still requires its own reviewed plan and separate approval/Start.
+VM/controller/service/runtime changes and apps as SYSTEM are excluded.
 
-The current provenance correction measures the exact collector primary-token
-logon SID and proves absence from the held standard token's complete group list.
-It retains/revalidates both token handles and collector token identity before
-application creation. Only trustee policy gains that exact v2 exception; owner
-policy, all 29 denial checks and historical v1 rules remain unchanged. Independent
-native and cross-boundary source reviews passed. The first freeze passed 535
-affected unit tests (19 ignored), Clippy and governance. A reviewed followup keeps
-v1 wire fields closed even for null provenance and excludes the standard user SID
-itself from the logon-trustee exception. Final provider 149, native protection 4
-and signed-host 5 tests plus all-target Clippy passed. CI 43867287965 at f7b55485
-passed all three jobs; actual workspace passed=true / exit 0 / 472.6 seconds,
-with the same tested tree 9596f436708a87451a34b3c8e6fb8a367bd2a9bc.
+## Retained facts and next gates
 
-R10 independently admitted 34 originals, 25 signatures and all 29 denials.
-Protection v2 passed: the collector logon SID was absent from the actual standard
-token groups, and retained Read records collectorKeyProtected=true. Portable
-staging completed, but CreateProcessAsUserW returned privilege error 1314 before
-an application process was created. Outcome remains NotRun, not incompatibility.
-One exact owned Sandbox was stopped, with final empty lists and recorded cleanup.
-Application-job cleanup remains unmeasured. Preserve this consumed Start.
+The candidate passed 770 affected tests (21 ignored), including 157 provider,
+234 native-platform, 163 runner, 68 orchestrator and 18 guest-agent tests.
+All-target Clippy passed for the seven affected packages. Independent root,
+protection and fixed-task source reviews passed. A small BSTR comparison and
+strict XML-decoding followup passed independent review, Clippy and all four
+affected task tests. These are unit/source checks, not native acceptance.
 
-R11 used exact source-3c8f317 tools. Independent admission checked 42 originals
-(111,552 bytes), 25 signatures, all 29 denials and the complete local Start chain.
-The signed held-token snapshot measured AssignPrimaryToken absent, IncreaseQuota
-present/attributes 0 and Impersonate present/attributes 3. CreateProcessAsUserW
-again failed with 1314 before creating an application. Retained Read authenticated
-with collectorKeyProtected=true; the owned Sandbox was stopped and final lists
-were empty. Account cleanup is historical; application-job cleanup is unmeasured.
+The previous native-trial runtime is 1726c6c: 153 provider tests, 230 platform tests (10 ignored),
+Clippy, format, governance and independent reviews passed. CI 43905819003 passed
+all three jobs with the same tested tree. Documentation head de61e6c also passed
+CI 43932194038; actual workspace passed=true / exit0 / 459.54 seconds with equal
+source/merge trees. These do not validate the current source changes.
 
-Authorized SSH now drives separately reviewed, one-shot InteractiveToken/LUA
-tasks in session 1. Actual before/after actors were Medium, limited, non-elevated
-and matched the exact operator SID. Prepare and committed approval were separately
-admitted before Start. No terminal UI input or administrator SSH assessment was
-used for R11. Each phase preserves original CLI bytes and removes its idle task.
+Preserve consumed controls R6 through R12. R12 admitted 42 originals, 25 signatures,
+all 29 denial checks and the complete local Start chain; retained Read authenticates
+as NotRun. WithToken error87 occurred before child creation. Owned outer Sandbox
+cleanup passed; application-job cleanup is unmeasured. Separate unsigned research
+narrowed error87 to the extended-startup call shape; it grants no permission to
+drop handle-list or AppContainer attributes and no compatibility credit.
 
-The current launch candidate uses CreateProcessWithTokenW with the same held
-token, startup attributes, job and identity checks. A suspended PSS audit requires
-the three actual stdio objects and absence of one excluded inheritable canary;
-checked cleanup and a post-publication deadline guard precede Resume. This grants
-no privileges or desktop permissions. Source 1726c6c passed independent reviews,
-153 provider tests, 230 platform tests (10 ignored), Clippy, format and governance.
-All three CI jobs in run 43905819003 passed; the tested merge has the same tree.
-Fresh R12 completed separate Prepare, approval, Start and retained Read. Independent
-admission verified 42 originals (111,527 bytes), 25 signatures, all 29 denials and
-the complete Start chain. CreateProcessWithTokenW returned error 87 before creating
-a child. Read authenticates as NotRun. No Resume, suspended audit or application
-code ran. Owned Sandbox cleanup passed; application-job cleanup is unmeasured.
-The rejected parameter remains unresolved. Preserve this consumed Start.
-Created-but-unresumed failures remain DriverIncomplete/Unmeasured and cannot
-confer application compatibility.
+Approved actor-only trials measured default SYSTEM token/process session0 with
+assigned privileges and no rights changes. R4 independently admitted 13 originals
+(16,765 bytes), including the physical 311-byte Output marker. Exact mapped Tools
+manifest/image reads and CreateNew Output write/readback passed. Task idle/deletion
+and exact owned Sandbox cleanup passed. This proves basic mapping visibility,
+not fresh-standard-user launch, all29 under SYSTEM, CNG or application compatibility.
+Detailed receipts/checkpoint remain in `C:\aiw\generic-assessment-108`.
 
-A separate unsigned, suspended-only research diagnostic completed two fixed
-CreateProcessWithTokenW cases differing only in CREATE_NO_WINDOW. Both returned
-87 before creating a child; account cleanup reported success and owned Sandbox
-cleanup completed.
-Removing that flag does not fix this diagnostic tuple. This is not signed
-assessment evidence, a PSS audit or application qualification. The rejected
-parameter remains unknown; ordinary/classic positive controls remain blocked.
+Finish affected tests and independent consequential reviews, build exact-source
+tools, then qualify ordinary/classic first-party positives, negatives,
+interruption/exact recovery and provider-zero retained Read. Reopen R12 with the
+new reader to verify historical evidence preservation. Only then run both external
+fixtures using unchanged production code and produce comparisons/packages.
 
-A further unsigned diagnostic measured basic/extended startup sizes 104/112 and
-attribute offset 104. Extended startup with either the three-handle list or a
-public-API-initialized empty list returned 87. Separate basic startup created a
-suspended standard-user child; owned termination and job-empty checks completed
-without Resume. Its exit code 1 was the termination code, not a workload result.
-This narrows the observed call-shape failure. It does not authorize dropping
-the production handle list or AppContainer attributes, or prove stdio inheritance.
+## Storage and execution policy
 
-## Storage and next gates
+Use only `C:\aiw\environment-probe-20261114\target-static-r1`, >=10 GiB starting
+free and <=8 GiB cache prebuild. Run storage preflight and copy the normal builder's
+explicit target/static-CRT flags; disable incremental/full compiler symbols.
+1726c6c consecutive dev builds both measured 2,873,857,828 bytes /3,499 paths;
+pass two compiled nothing and image hashes matched. Release ended at
+3,115,819,164 bytes. All21 actual compiler commands and three exact-source images
+were independently admitted. File-length sums may count Cargo hard-link aliases
+twice; volume-free samples separately measure actual space. PDB files are measured
+separately; no full compiler symbols does not promise zero PDBs.
 
-Use only `C:\aiw\environment-probe-20261114\target-static-r1`. Normal builds
-require explicit cache selection, reject unsafe overrides, disable incremental
-and debug symbols, and require at least 10 GiB free with cache <=8 GiB.
-Source 1726c6c consecutive dev builds measured 2,873,857,828 bytes / 3,499 paths
-both times; pass two compiled nothing and kept identical image hashes. Release
-ended at 3,115,819,164 bytes. All 21 actual compiler commands and three exact-source
-AMD64 static-CRT images passed independent admission. Keep one immutable
-30,285,312-byte three-tool set, not copied trees. Totals sum file lengths and may
-count Cargo hard-link aliases twice. Volume-free samples measure actual space.
-Linker/backtrace PDB files are
-measured separately; disabling full compiler symbols does not mean zero PDBs.
+Prior audited cleanup recovered 8.41 GiB GUI output and 6,857,707,520 bytes idle
+compiler metadata. The policy-blocked incremental path and three blocked empty
+fixture directories remain untouched. Never retry/bypass those blocks. Keep one
+immutable selected tool set per retained qualification; no copied build/PDB trees.
+Clean owned temporary test fixtures in finally after releasing leases.
 
-Earlier audited cleanup recovered 8.41 GiB of idle GUI output and 6,857,707,520
-bytes of verified idle compiler metadata. Policy-blocked incremental cleanup
-was never retried. One mistaken direct check omitted target/static flags and was
-stopped after about 25 MB of extra metadata in the same bounded cache. After
-tests settled, 45 audited single-link metadata files totaling 24,367,136 bytes
-were removed while the cache was idle under exclusive Cargo locks; observed free
-space increased 24,453,120 bytes. Independent cleanup admission passed. Corrected
-validation uses storage preflight and the normal builder's explicit target/flags.
-Do not create retry caches or blindly remove current artifacts.
-
-Preserve all consumed controls R6/R7/R8/R9/R10/R11/R12. Qualify ordinary/classic positives,
-negative controls, interruption/exact recovery and stable provider-zero reads
-before the two external fixtures. Their exact payloads/provenance remain private
-run inputs and have never executed. Use the authorized VM107 SSH/SCP route for
-data transfer and the reviewed limited interactive task route for execution. No additional
-privilege/runtime/VM/security change follows from a setup refusal.
+Use authorized pinned SSH/SCP for data and reviewed one-shot InteractiveToken/LUA
+session1 tasks for controller execution. Verify exact operator/VM identity and
+before/after Medium/non-elevated token. No administrator SSH assessment, terminal
+UI input, unknown process termination, consumed Start replay or unrelated cleanup.

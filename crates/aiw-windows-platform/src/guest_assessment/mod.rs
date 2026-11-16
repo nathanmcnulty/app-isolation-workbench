@@ -7,6 +7,7 @@ mod process;
 mod progress;
 mod protection;
 mod suspended_handles;
+mod system_task;
 use crate::{
     GuestMsiExecutionError, HeldApplicationFile, guest_standard_user::StandardUserSession,
 };
@@ -97,6 +98,66 @@ pub(super) fn check_collector(fact: &mut Option<bool>) -> Result<()> {
 pub(super) fn guard_no_impersonation() -> Result<()> {
     check_collector(&mut Some(true))
 }
+pub(super) fn system0_sessions()
+-> Result<aiw_provider_wsb::assessment_channel::AssessmentCollectorSessions> {
+    use windows::Win32::{
+        Security::{GetTokenInformation, TokenSessionId},
+        System::{
+            RemoteDesktop::ProcessIdToSessionId,
+            Threading::{GetCurrentProcess, GetCurrentProcessId, OpenProcessToken},
+        },
+    };
+    guard_no_impersonation()?;
+    let mut token = HANDLE::default();
+    unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) }
+        .map_err(|e| e.to_string())?;
+    let _token = unsafe { OwnedHandle::from_raw_handle(token.0) };
+    let mut token_session = u32::MAX;
+    let mut returned = 0;
+    unsafe {
+        GetTokenInformation(
+            token,
+            TokenSessionId,
+            Some((&mut token_session as *mut u32).cast()),
+            4,
+            &mut returned,
+        )
+    }
+    .map_err(|e| e.to_string())?;
+    let mut process_session = u32::MAX;
+    unsafe { ProcessIdToSessionId(GetCurrentProcessId(), &mut process_session) }
+        .map_err(|e| e.to_string())?;
+    if returned != 4 || token_session != 0 || process_session != 0 {
+        return Err("collector token and physical process must both be in session0".into());
+    }
+    Ok(
+        aiw_provider_wsb::assessment_channel::AssessmentCollectorSessions {
+            token_session,
+            process_session,
+        },
+    )
+}
+fn guard_system0(token: &aiw_token::TokenEvidence) -> Result<()> {
+    guard_no_impersonation()?;
+    if token.user_sid != "S-1-5-18"
+        || !token.is_elevated
+        || token.token_type != TokenType::Primary
+        || token.impersonation_level.is_some()
+        || token.is_app_container
+        || token.app_container_sid.is_some()
+        || !token.capabilities.is_empty()
+        || token.restricted_sid_count != 0
+        || token.integrity.level != IntegrityLevel::System
+        || token.integrity.rid != 16384
+        || token.integrity.sid != "S-1-16-16384"
+    {
+        return Err("fixed primary noninteractive Sandbox SYSTEM collector required".into());
+    }
+    system0_sessions().map(|_| ())
+}
+pub fn bootstrap_system_assessment(request: &ApplicationAssessmentGuestRequest) -> Result<()> {
+    system_task::bootstrap(request)
+}
 fn empty(plan: &CompiledAssessment) -> AssessmentNativeOutcome {
     AssessmentNativeOutcome {
         schema_version: OUTCOME_SCHEMA.into(),
@@ -157,20 +218,7 @@ pub fn publish_assessment_completion(bytes: &[u8]) -> Result<()> {
         return Err("fixed Sandbox assessment publisher required".into());
     }
     let token = aiw_token::collect_current_process_token().map_err(|e| e.to_string())?;
-    let expected = crate::control_appcontainer::fixed_account_sid("WDAGUtilityAccount")
-        .map_err(|e| e.to_string())?;
-    if token.user_sid != expected
-        || !token.is_elevated
-        || token.token_type != TokenType::Primary
-        || token.impersonation_level.is_some()
-        || token.is_app_container
-        || token.app_container_sid.is_some()
-        || !token.capabilities.is_empty()
-        || token.integrity.level != IntegrityLevel::High
-        || token.integrity.rid != 12288
-    {
-        return Err("elevated primary Sandbox receipt publisher required".into());
-    }
+    guard_system0(&token)?;
     let legacy_output = Path::new(r"C:\AIW\Output");
     let _held = files::Directories::hold(legacy_output)?;
     let pending = legacy_output.join("completion.pending");
@@ -212,17 +260,13 @@ pub fn execute_assessment(
     Err("authenticated assessment must use its sealed publication entry".into())
 }
 pub fn execute_authenticated_assessment(request: &ApplicationAssessmentGuestRequest) -> Result<()> {
+    let collector_entry = Instant::now();
     request.require_authenticated_execution()?;
     let plan = &request.assessment;
     // One monotonic assessment budget, including staging/setup. Synchronous
     // filesystem/profile IO cannot be interrupted here: the outer Sandbox
     // watchdog remains its hard bound. Expiry forbids further app dispatch;
     // owned cleanup still runs after the budget has elapsed.
-    let deadline = Instant::now()
-        .checked_add(Duration::from_secs(u64::from(
-            plan.settings.total_timeout_seconds,
-        )))
-        .ok_or("assessment deadline overflow")?;
     plan_guard(plan)?;
     guard_no_impersonation()?;
     if !fixed_image(
@@ -232,20 +276,14 @@ pub fn execute_authenticated_assessment(request: &ApplicationAssessmentGuestRequ
         return Err("fixed elevated Sandbox assessment agent required".into());
     }
     let token = aiw_token::collect_current_process_token().map_err(|e| e.to_string())?;
-    let expected = crate::control_appcontainer::fixed_account_sid("WDAGUtilityAccount")
-        .map_err(|e| e.to_string())?;
-    if token.user_sid != expected
-        || !token.is_elevated
-        || token.token_type != TokenType::Primary
-        || token.impersonation_level.is_some()
-        || token.is_app_container
-        || token.app_container_sid.is_some()
-        || !token.capabilities.is_empty()
-        || token.integrity.level != IntegrityLevel::High
-        || token.integrity.rid != 12288
-    {
-        return Err("elevated primary Sandbox collector required".into());
-    }
+    guard_system0(&token)?;
+    let deadline = system_task::collector_deadline(request)?.min(
+        collector_entry
+            .checked_add(Duration::from_secs(u64::from(
+                plan.settings.total_timeout_seconds,
+            )))
+            .ok_or("assessment declared deadline overflow")?,
+    );
     let mut agent = files::hold_agent(&request.agent_sha256)?;
     let _root = files::initialize_collector()?;
     let mut progress = progress::Progress::create(request, token.clone(), deadline)?;

@@ -1,9 +1,11 @@
 //! Read-only, held-token provenance for the collector's exact logon trustee.
 use super::{Local, Result, raw};
+#[cfg(test)]
+use aiw_provider_wsb::assessment_observation::AssessmentCollectorTokenProvenance;
 use aiw_provider_wsb::assessment_observation::{
     ASSESSMENT_COLLECTOR_CAPABILITIES_SCHEMA, AssessmentCollectorCapabilities,
     AssessmentCollectorPrivilege, AssessmentCollectorPrivilegeObservation,
-    AssessmentCollectorTokenProvenance, AssessmentTokenGroup,
+    AssessmentSystemCollectorTokenProvenance, AssessmentTokenGroup,
 };
 use std::{
     mem::{offset_of, size_of},
@@ -16,9 +18,9 @@ use windows::{
             Authorization::ConvertSidToStringSidW, GetTokenInformation, IsValidSid,
             LUID_AND_ATTRIBUTES, PSID, SID_AND_ATTRIBUTES, TOKEN_GROUPS, TOKEN_INFORMATION_CLASS,
             TOKEN_PRIVILEGES, TOKEN_QUERY, TOKEN_STATISTICS, TOKEN_TYPE, TOKEN_USER, TokenGroups,
-            TokenLogonSid, TokenPrimary, TokenStatistics, TokenType, TokenUser,
+            TokenPrimary, TokenSessionId, TokenStatistics, TokenType, TokenUser,
         },
-        System::Threading::OpenProcessToken,
+        System::Threading::{GetCurrentProcessId, OpenProcessToken},
     },
     core::PWSTR,
 };
@@ -164,6 +166,7 @@ pub(super) struct Tokens {
     collector: OwnedHandle,
     standard: OwnedHandle,
     collector_id: (u32, i32),
+    standard_id: (u32, i32),
 }
 impl Tokens {
     pub(super) fn observe(process: HANDLE, standard: HANDLE) -> Result<Self> {
@@ -174,10 +177,12 @@ impl Tokens {
             .try_clone_to_owned()
             .map_err(|_| "held standard token duplication refused")?;
         let collector_id = identity(raw(&collector))?;
+        let standard_id = identity(raw(&standard))?;
         Ok(Self {
             collector,
             standard,
             collector_id,
+            standard_id,
         })
     }
     pub(super) fn collector(&self) -> HANDLE {
@@ -249,8 +254,13 @@ impl Tokens {
             query_error,
         }
     }
+    #[cfg(test)]
     pub(super) fn facts(&self) -> Result<AssessmentCollectorTokenProvenance> {
-        let logon = Buffer::query(raw(&self.collector), TokenLogonSid)?.groups()?;
+        let logon = Buffer::query(
+            raw(&self.collector),
+            windows::Win32::Security::TokenLogonSid,
+        )?
+        .groups()?;
         if logon.len() != 1 {
             return Err("collector token requires exactly one logon SID".into());
         }
@@ -263,6 +273,48 @@ impl Tokens {
             standard_groups: Buffer::query(raw(&self.standard), TokenGroups)?.groups()?,
         })
     }
+    pub(super) fn system_facts(&self) -> Result<AssessmentSystemCollectorTokenProvenance> {
+        // Query both the held primary token and this process's physical session;
+        // no session setter or privilege adjustment is used.
+        unsafe extern "system" {
+            fn ProcessIdToSessionId(pid: u32, session: *mut u32) -> windows::core::BOOL;
+        }
+        let mut process_session = u32::MAX;
+        if !unsafe { ProcessIdToSessionId(GetCurrentProcessId(), &mut process_session) }.as_bool() {
+            return Err("System collector physical session unavailable".into());
+        }
+        Ok(AssessmentSystemCollectorTokenProvenance {
+            collector_user_sid: primary_user(raw(&self.collector))?,
+            collector_token_type: aiw_token::TokenType::Primary,
+            collector_sessions: aiw_provider_wsb::assessment_channel::AssessmentCollectorSessions {
+                token_session: Buffer::query(raw(&self.collector), TokenSessionId)?
+                    .read::<u32>(0)?,
+                process_session,
+            },
+            collector_groups: Buffer::query(raw(&self.collector), TokenGroups)?.groups()?,
+            standard_user_sid: primary_user(raw(&self.standard))?,
+            standard_token_type: aiw_token::TokenType::Primary,
+            standard_token_session: Buffer::query(raw(&self.standard), TokenSessionId)?
+                .read::<u32>(0)?,
+            standard_groups: Buffer::query(raw(&self.standard), TokenGroups)?.groups()?,
+        })
+    }
+    pub(super) fn revalidate_system(
+        &self,
+        process: HANDLE,
+        expected: &AssessmentSystemCollectorTokenProvenance,
+    ) -> Result<()> {
+        let current = open(process)?;
+        if identity(raw(&current))? != self.collector_id
+            || identity(raw(&self.collector))? != self.collector_id
+            || identity(raw(&self.standard))? != self.standard_id
+            || &self.system_facts()? != expected
+        {
+            return Err("System collector held-token provenance changed".into());
+        }
+        Ok(())
+    }
+    #[cfg(test)]
     pub(super) fn revalidate(
         &self,
         process: HANDLE,
@@ -271,6 +323,7 @@ impl Tokens {
         let current = open(process)?;
         if identity(raw(&current))? != self.collector_id
             || identity(raw(&self.collector))? != self.collector_id
+            || identity(raw(&self.standard))? != self.standard_id
             || &self.facts()? != expected
         {
             return Err("collector held-token provenance changed".into());
@@ -357,6 +410,31 @@ mod tests {
         let process = unsafe { windows::Win32::System::Threading::GetCurrentProcess() };
         let token = open(process).unwrap();
         let held = Tokens::observe(process, raw(&token)).unwrap();
+        let system_form = held.system_facts().unwrap();
+        assert_eq!(
+            system_form.collector_user_sid,
+            system_form.standard_user_sid
+        );
+        assert_eq!(system_form.collector_groups, system_form.standard_groups);
+        assert_eq!(
+            system_form.collector_sessions.token_session,
+            system_form.standard_token_session
+        );
+        held.revalidate_system(process, &system_form).unwrap();
+        let mut drift = system_form.clone();
+        drift.collector_sessions.process_session =
+            drift.collector_sessions.process_session.wrapping_add(1);
+        assert!(held.revalidate_system(process, &drift).is_err());
+        // Observation does not pretend this test runner is the fixed System0
+        // collector or a distinct fresh standard account.
+        assert!(
+            aiw_provider_wsb::assessment_observation::validate_system_collector_token_provenance(
+                &system_form,
+                &system_form.collector_user_sid,
+                &system_form.standard_user_sid
+            )
+            .is_err()
+        );
         let facts = held.facts().unwrap();
         let default_before = super::super::default_dacl(held.collector()).unwrap();
         let capabilities = held.capabilities();

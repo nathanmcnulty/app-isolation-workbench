@@ -16,6 +16,7 @@ use crate::{
 };
 
 pub const CHANNEL_SCHEMA: &str = "aiw.dev/assessment-channel/v0alpha1";
+pub const CHANNEL_V2_SCHEMA: &str = "aiw.dev/assessment-channel/v0alpha2";
 pub const CHANNEL_PROTOCOL: &str = aiw_probe::APPLICATION_ASSESSMENT_CHANNEL_PROTOCOL;
 pub const CHANNEL_BOOTSTRAP_LEAF: &str = "assessment-channel-bootstrap.json";
 pub const CHANNEL_ACK_LEAF: &str = "assessment-channel-ack.json";
@@ -47,7 +48,7 @@ pub trait AssessmentChannelVerifier {
     ) -> Result<()>;
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AssessmentChannelBinding {
     pub schema_version: String,
@@ -68,6 +69,62 @@ pub struct AssessmentChannelBinding {
     pub request_sha256: String,
     pub nonce_hex: String,
     pub host_ack_public_key_hex: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_context: Option<crate::assessment_request::AssessmentExecutionContext>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BindingWire {
+    schema_version: String,
+    channel_protocol: String,
+    run_id: String,
+    plan_sha256: String,
+    project_revision_sha256: String,
+    assessment_sha256: String,
+    semantic_sha256: String,
+    application_content_manifest_sha256: String,
+    agent_sha256: String,
+    provider_sha256: String,
+    provider_protocol: WindowsSandboxCliProtocol,
+    config_sha256: String,
+    sandbox_id: String,
+    workspace_identity_sha256: String,
+    request_sha256: String,
+    nonce_hex: String,
+    host_ack_public_key_hex: String,
+    #[serde(default)]
+    execution_context: crate::assessment_request::ExecutionContextPresence,
+}
+impl<'de> Deserialize<'de> for AssessmentChannelBinding {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let w = BindingWire::deserialize(d)?;
+        if w.schema_version != CHANNEL_V2_SCHEMA && w.execution_context.present {
+            return Err(serde::de::Error::custom(
+                "historical channel cannot contain executionContext",
+            ));
+        }
+        Ok(Self {
+            schema_version: w.schema_version,
+            channel_protocol: w.channel_protocol,
+            run_id: w.run_id,
+            plan_sha256: w.plan_sha256,
+            project_revision_sha256: w.project_revision_sha256,
+            assessment_sha256: w.assessment_sha256,
+            semantic_sha256: w.semantic_sha256,
+            application_content_manifest_sha256: w.application_content_manifest_sha256,
+            agent_sha256: w.agent_sha256,
+            provider_sha256: w.provider_sha256,
+            provider_protocol: w.provider_protocol,
+            config_sha256: w.config_sha256,
+            sandbox_id: w.sandbox_id,
+            workspace_identity_sha256: w.workspace_identity_sha256,
+            request_sha256: w.request_sha256,
+            nonce_hex: w.nonce_hex,
+            host_ack_public_key_hex: w.host_ack_public_key_hex,
+            execution_context: w.execution_context.value,
+        })
+    }
 }
 
 fn require(condition: bool, detail: &str) -> Result<()> {
@@ -116,7 +173,14 @@ fn signature_bytes(value: &str) -> Result<[u8; 64]> {
 impl AssessmentChannelBinding {
     pub fn validate(&self) -> Result<()> {
         require(
-            self.schema_version == CHANNEL_SCHEMA && self.channel_protocol == CHANNEL_PROTOCOL,
+            matches!(
+                (self.schema_version.as_str(), self.execution_context),
+                (CHANNEL_SCHEMA, None)
+                    | (
+                        CHANNEL_V2_SCHEMA,
+                        Some(crate::assessment_request::AssessmentExecutionContext::SYSTEM0)
+                    )
+            ) && self.channel_protocol == CHANNEL_PROTOCOL,
             "channel binding version refused",
         )?;
         require(
@@ -282,6 +346,12 @@ pub enum AssessmentChannelPayload {
         guest_public_key_hex: String,
         collector_token: Box<TokenEvidence>,
         collector_storage: ChannelCollectorStorage,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "deserialize_collector_sessions"
+        )]
+        collector_sessions: Option<AssessmentCollectorSessions>,
     },
     HostAck {
         schema_version: String,
@@ -307,6 +377,18 @@ pub enum AssessmentChannelPayload {
         last_progress_commitment: String,
     },
 }
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssessmentCollectorSessions {
+    pub token_session: u32,
+    pub process_session: u32,
+}
+fn deserialize_collector_sessions<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> std::result::Result<Option<AssessmentCollectorSessions>, D::Error> {
+    // Absence is historical; explicit null is never a supported observation.
+    AssessmentCollectorSessions::deserialize(d).map(Some)
+}
 impl AssessmentChannelPayload {
     pub fn kind(&self) -> ChannelRecordKind {
         match self {
@@ -323,10 +405,26 @@ impl AssessmentChannelPayload {
                 binding,
                 guest_public_key_hex,
                 collector_token,
+                collector_sessions,
                 ..
             } => {
-                require(schema_version == CHANNEL_SCHEMA, "bootstrap schema refused")?;
+                require(
+                    schema_version == &binding.schema_version,
+                    "bootstrap schema refused",
+                )?;
                 binding.validate()?;
+                require(
+                    if binding.execution_context.is_some() {
+                        *collector_sessions
+                            == Some(AssessmentCollectorSessions {
+                                token_session: 0,
+                                process_session: 0,
+                            })
+                    } else {
+                        collector_sessions.is_none()
+                    },
+                    "bootstrap collector session observations refused",
+                )?;
                 public_key_bytes(guest_public_key_hex)?;
                 require(
                     guest_public_key_hex != &binding.host_ack_public_key_hex,
@@ -342,9 +440,16 @@ impl AssessmentChannelPayload {
                         && collector_token.app_container_sid.is_none()
                         && collector_token.capabilities.is_empty()
                         && collector_token.restricted_sid_count == 0
-                        && collector_token.integrity.level == IntegrityLevel::High
-                        && collector_token.integrity.rid == 12288
-                        && collector_token.integrity.sid == "S-1-16-12288"
+                        && if binding.execution_context.is_some() {
+                            collector_token.integrity.level == IntegrityLevel::System
+                                && collector_token.integrity.rid == 16384
+                                && collector_token.integrity.sid == "S-1-16-16384"
+                                && collector_token.user_sid == "S-1-5-18"
+                        } else {
+                            collector_token.integrity.level == IntegrityLevel::High
+                                && collector_token.integrity.rid == 12288
+                                && collector_token.integrity.sid == "S-1-16-12288"
+                        }
                         && collector_token.user_sid.starts_with("S-1-")
                         && collector_token.user_sid.len() <= 184,
                     "bootstrap collector token shape refused",
@@ -1048,6 +1153,7 @@ mod tests {
     fn binding() -> AssessmentChannelBinding {
         AssessmentChannelBinding {
             schema_version: CHANNEL_SCHEMA.into(),
+            execution_context: None,
             channel_protocol: CHANNEL_PROTOCOL.into(),
             run_id: "assessment-123".into(),
             plan_sha256: "1".repeat(64),
@@ -1105,12 +1211,89 @@ mod tests {
                     binding: Box::new(b.clone()),
                     guest_public_key_hex: k.into(),
                     collector_token: Box::new(collector()),
+                    collector_sessions: None,
                     collector_storage: ChannelCollectorStorage::ProtectedGuestLocal,
                 },
             )
             .unwrap(),
             k,
         )
+    }
+    #[test]
+    fn system_bootstrap_requires_bound_role_and_both_measured_sessions() {
+        use crate::assessment_request::AssessmentExecutionContext;
+        let old = binding();
+        let mut b = old.clone();
+        b.schema_version = CHANNEL_V2_SCHEMA.into();
+        b.execution_context = Some(AssessmentExecutionContext::SYSTEM0);
+        b.validate().unwrap();
+        assert_ne!(b.context_sha256().unwrap(), old.context_sha256().unwrap());
+        let mut token = collector();
+        token.user_sid = "S-1-5-18".into();
+        token.integrity.level = IntegrityLevel::System;
+        token.integrity.rid = 16384;
+        token.integrity.sid = "S-1-16-16384".into();
+        let payload = AssessmentChannelPayload::Bootstrap {
+            schema_version: CHANNEL_V2_SCHEMA.into(),
+            binding: Box::new(b.clone()),
+            guest_public_key_hex: key(2),
+            collector_token: Box::new(token),
+            collector_storage: ChannelCollectorStorage::ProtectedGuestLocal,
+            collector_sessions: Some(AssessmentCollectorSessions {
+                token_session: 0,
+                process_session: 0,
+            }),
+        };
+        payload.validate().unwrap();
+        for sessions in [
+            None,
+            Some(AssessmentCollectorSessions {
+                token_session: 1,
+                process_session: 0,
+            }),
+            Some(AssessmentCollectorSessions {
+                token_session: 0,
+                process_session: 1,
+            }),
+        ] {
+            let mut drift = payload.clone();
+            if let AssessmentChannelPayload::Bootstrap {
+                collector_sessions, ..
+            } = &mut drift
+            {
+                *collector_sessions = sessions;
+            }
+            assert!(drift.validate().is_err());
+        }
+        let mut borrowed = payload.clone();
+        if let AssessmentChannelPayload::Bootstrap {
+            collector_token, ..
+        } = &mut borrowed
+        {
+            **collector_token = collector();
+        }
+        assert!(borrowed.validate().is_err());
+        for extra in [
+            serde_json::Value::Null,
+            serde_json::to_value(AssessmentExecutionContext::SYSTEM0).unwrap(),
+        ] {
+            let mut wire = serde_json::to_value(&old).unwrap();
+            wire["executionContext"] = extra;
+            assert!(serde_json::from_value::<AssessmentChannelBinding>(wire).is_err());
+        }
+        let mut missing = b;
+        missing.execution_context = None;
+        assert!(missing.validate().is_err());
+        let historical = bootstrap(&old, &key(2));
+        for extra in [
+            serde_json::Value::Null,
+            serde_json::json!({"tokenSession":0,"processSession":0}),
+        ] {
+            let mut wire = serde_json::to_value(&historical.payload).unwrap();
+            wire["collectorSessions"] = extra;
+            let parsed = serde_json::from_value::<AssessmentChannelPayload>(wire);
+            assert!(parsed.is_err() || parsed.unwrap().validate().is_err());
+        }
     }
     fn active() -> AssessmentChannelSession {
         let b = binding();

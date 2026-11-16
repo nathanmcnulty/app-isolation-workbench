@@ -102,6 +102,8 @@ pub const ASSESSMENT_COLLECTOR_PROTECTION_V2_SCHEMA: &str =
     "aiw.dev/assessment-collector-protection/v0alpha2";
 pub const ASSESSMENT_COLLECTOR_PROTECTION_V3_SCHEMA: &str =
     "aiw.dev/assessment-collector-protection/v0alpha3";
+pub const ASSESSMENT_COLLECTOR_PROTECTION_V4_SCHEMA: &str =
+    "aiw.dev/assessment-collector-protection/v0alpha4";
 pub const ASSESSMENT_COLLECTOR_CAPABILITIES_SCHEMA: &str =
     "aiw.dev/collector-prelaunch-privileges/v0alpha1";
 
@@ -228,6 +230,8 @@ pub struct AssessmentCollectorProtection {
     pub token_provenance: Option<AssessmentCollectorTokenProvenance>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub collector_capabilities: Option<AssessmentCollectorCapabilities>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_token_provenance: Option<AssessmentSystemCollectorTokenProvenance>,
     pub access_checks: Vec<AssessmentCollectorObjectAccess>,
 }
 
@@ -248,6 +252,19 @@ impl<'de> Deserialize<'de> for TokenProvenancePresence {
 struct CollectorCapabilitiesPresence {
     present: bool,
     value: Option<AssessmentCollectorCapabilities>,
+}
+#[derive(Default)]
+struct SystemProvenancePresence {
+    present: bool,
+    value: Option<AssessmentSystemCollectorTokenProvenance>,
+}
+impl<'de> Deserialize<'de> for SystemProvenancePresence {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(Self {
+            present: true,
+            value: Option::<AssessmentSystemCollectorTokenProvenance>::deserialize(d)?,
+        })
+    }
 }
 impl<'de> Deserialize<'de> for CollectorCapabilitiesPresence {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -272,11 +289,32 @@ struct CollectorProtectionWire {
     token_provenance: TokenProvenancePresence,
     #[serde(default)]
     collector_capabilities: CollectorCapabilitiesPresence,
+    #[serde(default)]
+    system_token_provenance: SystemProvenancePresence,
     access_checks: Vec<AssessmentCollectorObjectAccess>,
 }
 impl<'de> Deserialize<'de> for AssessmentCollectorProtection {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let w = CollectorProtectionWire::deserialize(d)?;
+        if w.schema_version != ASSESSMENT_COLLECTOR_PROTECTION_V4_SCHEMA
+            && w.system_token_provenance.present
+        {
+            return Err(serde::de::Error::custom(
+                "historical collector protection cannot contain System provenance",
+            ));
+        }
+        if w.schema_version == ASSESSMENT_COLLECTOR_PROTECTION_V4_SCHEMA {
+            if w.token_provenance.present {
+                return Err(serde::de::Error::custom(
+                    "System collector cannot borrow historical provenance",
+                ));
+            }
+            if w.system_token_provenance.value.is_none() {
+                return Err(serde::de::Error::custom(
+                    "System collector provenance absent",
+                ));
+            }
+        }
         if w.schema_version == ASSESSMENT_COLLECTOR_PROTECTION_SCHEMA && w.token_provenance.present
         {
             return Err(serde::de::Error::custom(
@@ -292,7 +330,10 @@ impl<'de> Deserialize<'de> for AssessmentCollectorProtection {
                 "historical collector protection cannot contain capabilities",
             ));
         }
-        if w.schema_version == ASSESSMENT_COLLECTOR_PROTECTION_V3_SCHEMA {
+        if matches!(
+            w.schema_version.as_str(),
+            ASSESSMENT_COLLECTOR_PROTECTION_V3_SCHEMA | ASSESSMENT_COLLECTOR_PROTECTION_V4_SCHEMA
+        ) {
             w.collector_capabilities
                 .value
                 .as_ref()
@@ -313,6 +354,7 @@ impl<'de> Deserialize<'de> for AssessmentCollectorProtection {
             primary_default_dacl: w.primary_default_dacl,
             token_provenance: w.token_provenance.value,
             collector_capabilities: w.collector_capabilities.value,
+            system_token_provenance: w.system_token_provenance.value,
             access_checks: w.access_checks,
         })
     }
@@ -335,6 +377,65 @@ pub struct AssessmentCollectorTokenProvenance {
     pub standard_groups: Vec<AssessmentTokenGroup>,
 }
 
+/// A distinct, complete held-token observation for the fixed System/session0
+/// collector. No logon-SID trustee exception is granted by this form.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssessmentSystemCollectorTokenProvenance {
+    pub collector_user_sid: String,
+    pub collector_token_type: aiw_token::TokenType,
+    pub collector_sessions: crate::assessment_channel::AssessmentCollectorSessions,
+    pub collector_groups: Vec<AssessmentTokenGroup>,
+    pub standard_user_sid: String,
+    pub standard_token_type: aiw_token::TokenType,
+    pub standard_token_session: u32,
+    pub standard_groups: Vec<AssessmentTokenGroup>,
+}
+
+pub fn validate_system_collector_token_provenance(
+    p: &AssessmentSystemCollectorTokenProvenance,
+    collector_sid: &str,
+    standard_sid: &str,
+) -> Result<(), String> {
+    let groups = |values: &[AssessmentTokenGroup]| {
+        values.len() <= 256
+            && values.iter().all(|g| canonical_token_sid(&g.sid))
+            && values.windows(2).all(|pair| pair[0].sid < pair[1].sid)
+    };
+    if collector_sid != "S-1-5-18"
+        || p.collector_user_sid != collector_sid
+        || p.collector_token_type != aiw_token::TokenType::Primary
+        || p.collector_sessions.token_session != 0
+        || p.collector_sessions.process_session != 0
+        || p.standard_user_sid != standard_sid
+        || !standard_sid.starts_with("S-1-5-21-")
+        || !canonical_token_sid(standard_sid)
+        || p.standard_token_type != aiw_token::TokenType::Primary
+        || p.standard_token_session != 0
+        || !groups(&p.collector_groups)
+        || !groups(&p.standard_groups)
+    {
+        return Err("System collector token/session/groups binding refused".into());
+    }
+    Ok(())
+}
+fn canonical_token_sid(value: &str) -> bool {
+    if value.len() > 184 {
+        return false;
+    }
+    let parts: Vec<_> = value.split('-').collect();
+    (4..=18).contains(&parts.len())
+        && parts[0] == "S"
+        && parts[1] == "1"
+        && parts[2]
+            .parse::<u64>()
+            .ok()
+            .is_some_and(|n| n < (1_u64 << 48) && n.to_string() == parts[2])
+        && parts[3..]
+            .iter()
+            .all(|v| v.parse::<u32>().ok().is_some_and(|n| n.to_string() == *v))
+}
+
 /// Validate reported provenance and return only its exact logon-SID trustee
 /// exception. Native callers must independently measure/revalidate the held
 /// tokens. This pure function grants no observation or execution authority.
@@ -343,6 +444,28 @@ pub fn validate_collector_token_provenance<'a>(
     collector_sid: &str,
     standard_sid: &str,
 ) -> Result<Option<&'a str>, String> {
+    if protection.schema_version == ASSESSMENT_COLLECTOR_PROTECTION_V4_SCHEMA {
+        if protection.token_provenance.is_some() {
+            return Err("System collector historical provenance refused".into());
+        }
+        protection
+            .collector_capabilities
+            .as_ref()
+            .ok_or("collector privilege diagnostic absent")?
+            .validate()?;
+        validate_system_collector_token_provenance(
+            protection
+                .system_token_provenance
+                .as_ref()
+                .ok_or("System collector provenance absent")?,
+            collector_sid,
+            standard_sid,
+        )?;
+        return Ok(None);
+    }
+    if protection.system_token_provenance.is_some() {
+        return Err("historical System provenance refused".into());
+    }
     match protection.schema_version.as_str() {
         ASSESSMENT_COLLECTOR_PROTECTION_SCHEMA
             if protection.token_provenance.is_none()

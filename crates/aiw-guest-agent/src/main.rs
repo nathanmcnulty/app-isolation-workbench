@@ -40,6 +40,9 @@ struct Cli {
     /// Read a strict, immutable golden-probe request from the read-only tools mapping.
     #[arg(long)]
     request: PathBuf,
+    /// Internal fixed SYSTEM collector role; independently validates native identity.
+    #[arg(long, hide = true)]
+    system_assessment: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -303,8 +306,13 @@ fn publish_paired_controls(
 fn run() -> Result<()> {
     let cli = Cli::parse();
     let request = read_request(&cli.request)?;
+    if cli.system_assessment && !matches!(request, GuestRequest::ApplicationAssessment(_)) {
+        bail!("SYSTEM collector role is limited to the versioned assessment request");
+    }
     match request {
-        GuestRequest::ApplicationAssessment(request) => assessment::execute(&request),
+        GuestRequest::ApplicationAssessment(request) => {
+            assessment::execute(&request, cli.system_assessment)
+        }
         GuestRequest::SevenZip(request) => sevenzip::execute(&request),
         GuestRequest::PairedControls(request) => execute_paired_controls_request(&request),
         GuestRequest::Golden(request) => {

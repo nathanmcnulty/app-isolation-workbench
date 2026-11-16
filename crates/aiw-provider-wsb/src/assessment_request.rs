@@ -11,6 +11,59 @@ pub const APPLICATION_ASSESSMENT_REQUEST_SCHEMA: &str =
     "aiw.dev/application-assessment-request/v0alpha1";
 pub const APPLICATION_ASSESSMENT_REQUEST_V2_SCHEMA: &str =
     "aiw.dev/application-assessment-request/v0alpha2";
+pub const APPLICATION_ASSESSMENT_REQUEST_V3_SCHEMA: &str =
+    "aiw.dev/application-assessment-request/v0alpha3";
+
+/// Closed CLI-only context. Session numbers are observations to require, never
+/// caller-selected token/session mutations. This is not an interactive desktop.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssessmentExecutionContext {
+    pub collector_role: AssessmentCollectorRole,
+    pub collector_session: u32,
+    pub application_session: u32,
+    pub desktop_policy: AssessmentDesktopPolicy,
+}
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum AssessmentCollectorRole {
+    SandboxSystemNoninteractive,
+}
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum AssessmentDesktopPolicy {
+    NoninteractiveLogonDefault,
+}
+impl AssessmentExecutionContext {
+    pub const SYSTEM0: Self = Self {
+        collector_role: AssessmentCollectorRole::SandboxSystemNoninteractive,
+        collector_session: 0,
+        application_session: 0,
+        desktop_policy: AssessmentDesktopPolicy::NoninteractiveLogonDefault,
+    };
+    pub fn validate(&self) -> Result<(), String> {
+        if *self != Self::SYSTEM0 {
+            return Err("only the fixed noninteractive SYSTEM0 collector / standard-user0 context is supported".into());
+        }
+        Ok(())
+    }
+}
+
+/// Tracks wire presence, including null, so historical contracts cannot acquire
+/// a new role by silently discarding an explicitly supplied field.
+#[derive(Default)]
+pub(crate) struct ExecutionContextPresence {
+    pub present: bool,
+    pub value: Option<AssessmentExecutionContext>,
+}
+impl<'de> Deserialize<'de> for ExecutionContextPresence {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(Self {
+            present: true,
+            value: Option::deserialize(d)?,
+        })
+    }
+}
 pub const ASSESSMENT_CHANNEL_REQUEST_SCHEMA: &str = "aiw.dev/assessment-channel-request/v0alpha1";
 pub const APPLICATION_ASSESSMENT_REQUEST_PATH: &str = r"C:\AIW\Tools\assessment-request.json";
 pub const APPLICATION_ASSESSMENT_RESULT_PATH: &str = r"C:\AIW\Output\assessment-result.json";
@@ -44,6 +97,8 @@ pub struct ApplicationAssessmentGuestRequest {
     pub request_sha256: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub channel: Option<AssessmentChannelRequest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_context: Option<AssessmentExecutionContext>,
 }
 
 // Preserve alpha1 bytes and reject even an explicit channel:null there. Option
@@ -75,6 +130,8 @@ struct RequestWire {
     request_sha256: String,
     #[serde(default)]
     channel: ChannelPresence,
+    #[serde(default)]
+    execution_context: ExecutionContextPresence,
 }
 impl<'de> Deserialize<'de> for ApplicationAssessmentGuestRequest {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -82,6 +139,13 @@ impl<'de> Deserialize<'de> for ApplicationAssessmentGuestRequest {
         if w.schema_version == APPLICATION_ASSESSMENT_REQUEST_SCHEMA && w.channel.present {
             return Err(serde::de::Error::custom(
                 "historical assessment request cannot contain channel",
+            ));
+        }
+        if w.schema_version != APPLICATION_ASSESSMENT_REQUEST_V3_SCHEMA
+            && w.execution_context.present
+        {
+            return Err(serde::de::Error::custom(
+                "historical assessment request cannot contain executionContext",
             ));
         }
         Ok(Self {
@@ -95,6 +159,7 @@ impl<'de> Deserialize<'de> for ApplicationAssessmentGuestRequest {
             assessment: w.assessment,
             request_sha256: w.request_sha256,
             channel: w.channel.value,
+            execution_context: w.execution_context.value,
         })
     }
 }
@@ -151,6 +216,7 @@ impl ApplicationAssessmentGuestRequest {
             assessment,
             request_sha256: String::new(),
             channel: None,
+            execution_context: None,
         };
         value.request_sha256 = value.request_hash()?;
         value.validate()?;
@@ -159,9 +225,18 @@ impl ApplicationAssessmentGuestRequest {
 
     pub fn validate(&self) -> Result<(), String> {
         if !matches!(
-            (self.schema_version.as_str(), self.channel.is_some()),
-            (APPLICATION_ASSESSMENT_REQUEST_SCHEMA, false)
-                | (APPLICATION_ASSESSMENT_REQUEST_V2_SCHEMA, true)
+            (
+                self.schema_version.as_str(),
+                self.channel.is_some(),
+                self.execution_context
+            ),
+            (APPLICATION_ASSESSMENT_REQUEST_SCHEMA, false, None)
+                | (APPLICATION_ASSESSMENT_REQUEST_V2_SCHEMA, true, None)
+                | (
+                    APPLICATION_ASSESSMENT_REQUEST_V3_SCHEMA,
+                    true,
+                    Some(AssessmentExecutionContext::SYSTEM0)
+                )
         ) || self.run_id.is_empty()
             || self.run_id.len() > 80
             || !self
@@ -215,7 +290,7 @@ impl ApplicationAssessmentGuestRequest {
         channel: AssessmentChannelRequest,
     ) -> Result<Self, String> {
         let mut value = Self {
-            schema_version: APPLICATION_ASSESSMENT_REQUEST_V2_SCHEMA.into(),
+            schema_version: APPLICATION_ASSESSMENT_REQUEST_V3_SCHEMA.into(),
             run_id,
             sandbox_id,
             config_sha256,
@@ -225,13 +300,23 @@ impl ApplicationAssessmentGuestRequest {
             assessment,
             request_sha256: String::new(),
             channel: Some(channel),
+            execution_context: Some(AssessmentExecutionContext::SYSTEM0),
         };
         value.request_sha256 = value.request_hash()?;
         value.validate()?;
         Ok(value)
     }
     pub fn require_authenticated_execution(&self) -> Result<(), String> {
-        self.channel_binding().map(|_| ())
+        self.require_system0_execution()
+    }
+    pub fn require_system0_execution(&self) -> Result<(), String> {
+        self.validate()?;
+        if self.schema_version != APPLICATION_ASSESSMENT_REQUEST_V3_SCHEMA
+            || self.execution_context != Some(AssessmentExecutionContext::SYSTEM0)
+        {
+            return Err("historical assessment execution context is read-only".into());
+        }
+        self.channel_binding_unchecked()?.validate()
     }
     pub fn channel_binding(
         &self,
@@ -243,19 +328,27 @@ impl ApplicationAssessmentGuestRequest {
         &self,
     ) -> Result<crate::assessment_channel::AssessmentChannelBinding, String> {
         use crate::assessment_channel::{
-            AssessmentChannelBinding, CHANNEL_PROTOCOL, CHANNEL_SCHEMA,
+            AssessmentChannelBinding, CHANNEL_PROTOCOL, CHANNEL_SCHEMA, CHANNEL_V2_SCHEMA,
         };
         let channel = self.channel.as_ref().ok_or(
             "historical assessment request is read-only; authenticated execution required",
         )?;
-        if self.schema_version != APPLICATION_ASSESSMENT_REQUEST_V2_SCHEMA
-            || channel.schema_version != ASSESSMENT_CHANNEL_REQUEST_SCHEMA
+        if !matches!(
+            self.schema_version.as_str(),
+            APPLICATION_ASSESSMENT_REQUEST_V2_SCHEMA | APPLICATION_ASSESSMENT_REQUEST_V3_SCHEMA
+        ) || channel.schema_version != ASSESSMENT_CHANNEL_REQUEST_SCHEMA
             || channel.channel_protocol != CHANNEL_PROTOCOL
         {
             return Err("assessment channel request version refused".into());
         }
         Ok(AssessmentChannelBinding {
-            schema_version: CHANNEL_SCHEMA.into(),
+            schema_version: if self.execution_context.is_some() {
+                CHANNEL_V2_SCHEMA
+            } else {
+                CHANNEL_SCHEMA
+            }
+            .into(),
+            execution_context: self.execution_context,
             channel_protocol: channel.channel_protocol.clone(),
             run_id: self.run_id.clone(),
             plan_sha256: channel.plan_sha256.clone(),
@@ -441,5 +534,72 @@ mod tests {
         missing.channel = None;
         missing.request_sha256 = missing.request_hash().unwrap();
         assert!(missing.validate().is_err());
+    }
+
+    #[test]
+    fn system_context_is_closed_and_old_requests_cannot_acquire_it() {
+        let old = request();
+        let current = ApplicationAssessmentGuestRequest::new_authenticated(
+            old.run_id,
+            old.sandbox_id,
+            old.config_sha256,
+            old.agent_sha256,
+            old.project_revision_sha256,
+            old.assessment,
+            channel(),
+        )
+        .unwrap();
+        current.require_system0_execution().unwrap();
+        let mut legacy = current.clone();
+        legacy.schema_version = APPLICATION_ASSESSMENT_REQUEST_V2_SCHEMA.into();
+        legacy.execution_context = None;
+        legacy.request_sha256 = legacy.request_hash().unwrap();
+        legacy.validate().unwrap();
+        assert!(legacy.require_system0_execution().is_err());
+        assert!(
+            legacy
+                .channel_binding()
+                .unwrap()
+                .execution_context
+                .is_none()
+        );
+        for extra in [
+            serde_json::Value::Null,
+            serde_json::to_value(AssessmentExecutionContext::SYSTEM0).unwrap(),
+        ] {
+            let mut wire = serde_json::to_value(&legacy).unwrap();
+            wire["executionContext"] = extra;
+            assert!(serde_json::from_value::<ApplicationAssessmentGuestRequest>(wire).is_err());
+        }
+        for field in ["collectorSession", "applicationSession"] {
+            let mut wire = serde_json::to_value(&current).unwrap();
+            wire["executionContext"][field] = 1.into();
+            let mut drift: ApplicationAssessmentGuestRequest =
+                serde_json::from_value(wire).unwrap();
+            drift.request_sha256 = drift.request_hash().unwrap();
+            assert!(drift.validate().is_err(), "{field}");
+        }
+        for replacement in [
+            serde_json::Value::Null,
+            serde_json::json!({"collectorRole":"administrator"}),
+        ] {
+            let mut wire = serde_json::to_value(&current).unwrap();
+            wire["executionContext"] = replacement;
+            let parsed = serde_json::from_value::<ApplicationAssessmentGuestRequest>(wire);
+            assert!(parsed.is_err() || parsed.unwrap().validate().is_err());
+        }
+        let mut missing = serde_json::to_value(&current).unwrap();
+        missing.as_object_mut().unwrap().remove("executionContext");
+        assert!(
+            serde_json::from_value::<ApplicationAssessmentGuestRequest>(missing)
+                .unwrap()
+                .validate()
+                .is_err()
+        );
+        assert_ne!(legacy.request_sha256, current.request_sha256);
+        assert_ne!(
+            legacy.channel_binding().unwrap().context_sha256().unwrap(),
+            current.channel_binding().unwrap().context_sha256().unwrap()
+        );
     }
 }

@@ -263,7 +263,7 @@ pub fn prepare_for_review(
         run_id,
         workspace,
         evidence_root,
-        recipe: serde_json::json!({"schemaVersion":"aiw.dev/application-assessment-review/v0alpha1", "application":project.metadata.display_name,"assessment":assessment.compiled,"providerChecks":{"runtime":"requiredAtStartNotObserved","requiredProtocol":prepared.receipt.provider_protocol},"mappings":prepared.wsb_plan.mappings,"scope":aiw_provider_wsb::assessment::ASSESSMENT_SCOPE}),
+        recipe: serde_json::json!({"schemaVersion":"aiw.dev/application-assessment-review/v0alpha2", "application":project.metadata.display_name,"assessment":assessment.compiled,"executionContext":aiw_provider_wsb::assessment_request::AssessmentExecutionContext::SYSTEM0,"providerChecks":{"runtime":"requiredAtStartNotObserved","requiredProtocol":prepared.receipt.provider_protocol},"mappings":prepared.wsb_plan.mappings,"scope":aiw_provider_wsb::assessment::ASSESSMENT_SCOPE}),
         proposed_approval: ApprovalRecord::for_plan(&prepared.run_plan, identity, now_rfc3339())?,
         plan: prepared.run_plan,
     };
@@ -386,6 +386,9 @@ pub fn compare_retained(
     }
     if baseline.windows.is_none() || baseline.windows != candidate.windows {
         gaps.push("fresh worker Windows versions are absent or differ".into());
+    }
+    if baseline.execution_context != candidate.execution_context {
+        gaps.push("collector role, application session or desktop policy differs".into());
     }
     if baseline.run_id == candidate.run_id {
         gaps.push("comparison requires independently prepared fresh workers".into());

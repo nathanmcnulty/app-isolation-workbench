@@ -8,13 +8,17 @@ use aiw_provider_wsb::assessment_request::{
 };
 
 pub const APPLICATION_ASSESSMENT_PREPARATION_SCHEMA: &str =
+    "aiw.dev/wsb-preparation/application-assessment/v0alpha4";
+pub const HISTORICAL_APPLICATION_PREPARATION_V3: &str =
     "aiw.dev/wsb-preparation/application-assessment/v0alpha3";
 pub const HISTORICAL_APPLICATION_PREPARATION_V2: &str =
     "aiw.dev/wsb-preparation/application-assessment/v0alpha2";
 pub const HISTORICAL_APPLICATION_PREPARATION_V1: &str =
     "aiw.dev/wsb-preparation/application-assessment/v0alpha1";
 pub const HISTORICAL_APPLICATION_TRUST_DELTA: &str = "stages only reviewed application and fixture content in a fresh offline Windows Sandbox; runs the declared bounded workflow as a fresh standard user under the selected ordinary or classic AppContainer policy; grants only owned guest application/work paths; retains bounded output and independent cleanup facts; no automatic host export, installation, fallback or general compatibility verdict";
-pub const APPLICATION_ASSESSMENT_TRUST_DELTA: &str = "stages reviewed portable application and fixture inputs in one fresh offline Windows Sandbox; generates one ephemeral host collector-key acknowledgement key and nonce at separate Start and retains only public execution bindings; requires protected guest-local collection, authenticated signedCollector/p256-sha256/v1 transport and measured collector file/process/thread guards before any application creation as a fresh standard user under the selected ordinary or classic AppContainer policy; grants only owned guest application/work paths; sampled bounded output monitoring is not a disk quota; retains bounded facts and independent cleanup; no automatic host export, installation, fallback or general compatibility verdict";
+pub const HISTORICAL_APPLICATION_V3_TRUST_DELTA: &str = "stages reviewed portable application and fixture inputs in one fresh offline Windows Sandbox; generates one ephemeral host collector-key acknowledgement key and nonce at separate Start and retains only public execution bindings; requires protected guest-local collection, authenticated signedCollector/p256-sha256/v1 transport and measured collector file/process/thread guards before any application creation as a fresh standard user under the selected ordinary or classic AppContainer policy; grants only owned guest application/work paths; sampled bounded output monitoring is not a disk quota; retains bounded facts and independent cleanup; no automatic host export, installation, fallback or general compatibility verdict";
+pub const APPLICATION_ASSESSMENT_TRUST_DELTA: &str =
+    aiw_orchestrator::APPLICATION_ASSESSMENT_TRUST_DELTA;
 pub const APPLICATION_INTAKE_LEAF: &str = "application-intake";
 pub const APPLICATION_FIXTURES_LEAF: &str = "fixtures";
 
@@ -446,6 +450,10 @@ pub(super) fn expected_application_run_plan_for_read(
         ],
     )
     .map_err(|error| WsbPreparationError::Contract(error.to_string()))?;
+    if historical && receipt.schema_version == HISTORICAL_APPLICATION_PREPARATION_V3 {
+        plan.schema = aiw_orchestrator::HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V3.into();
+        plan.trust_deltas[0] = HISTORICAL_APPLICATION_V3_TRUST_DELTA.into();
+    }
     if historical
         && matches!(
             receipt.schema_version.as_str(),
