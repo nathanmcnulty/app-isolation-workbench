@@ -110,15 +110,21 @@ consumed Start intent, public local descriptor/latch, separate provider Start
 marker, guest-local collector, file/process/thread/default-DACL gates, signed
 raw artifact admission and provider-zero retained reports. Historical plan v1/v2
 and transaction alpha2/3 hashes remain separate and read-only. No fresh native
-trial has validated this integration. The first hosted compile found a missing
-test dependency, excluded offline-rehearsal wrapper and missing optional test
-argument; fixes await hosted checks. Review caught and fixed a plan-hash/XML-hash
-confusion; regression coverage now checks both independently.
+trial has validated this integration. Compile fixes passed hosted checks, but
+run 43810705670 is **not accepted** despite green job metadata: its raw workspace
+summary reports exit 101 and one failing platform sharing-fixture test. The test
+used a DELETE-owning staging handle instead of the guest's write-only transport
+writer. Its fixture is corrected without widening production sharing. The local
+check helper now throws after a failure summary, so in-process verification
+cannot continue and upload artifacts after a failed test. A two-case inert
+failure/success caller regression passed with no compiler/provider invocation.
+Review also fixed plan-hash/XML-hash confusion with distinct-commitment coverage.
 
 Hosted CI now has a reviewed same-cache measured build and one-day retention of
 three unsigned first-party tools plus the exact checkout receipt, after all
-verification/audit/governance in that job. Actual build/artifact admission is
-pending. Next: finish hosted Windows checks and inspect exact-source artifacts.
+verification/audit/governance in that job. The 92e535b artifact is not admitted
+because of the workspace failure. Next: run corrected hosted checks, inspect
+original logs and exact-source artifacts, and complete independent admission.
 Do not dispatch an application until the evidence boundary is proved. Resume
 builds only when permitted storage satisfies preflight. Qualify ordinary/classic positives,
 timeout/overflow negatives and controlled interruption/exact recovery before

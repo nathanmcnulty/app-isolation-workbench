@@ -86,6 +86,7 @@ try {
     & (Join-Path $PSScriptRoot 'test-build-storage.ps1') | ConvertFrom-Json | Out-Null
     & (Join-Path $PSScriptRoot 'test-build-assessment-logs.ps1') | ConvertFrom-Json | Out-Null
     & (Join-Path $PSScriptRoot 'test-build-cache-measurement.ps1') | ConvertFrom-Json | Out-Null
+    & (Join-Path $PSScriptRoot 'test-local-check-failure.ps1') | ConvertFrom-Json | Out-Null
 
     cargo fmt --all --check
     if ($LASTEXITCODE -ne 0) { throw 'cargo fmt failed' }

@@ -147,4 +147,6 @@ $json | Set-Content -LiteralPath (Join-Path $logRoot 'summary.json')
     })
     logs = $logRoot
 } | ConvertTo-Json -Depth 5
-if (!$summary.passed) { exit 1 }
+# A terminating error is required for in-process callers such as verify.ps1.
+# `exit 1` only sets LASTEXITCODE there, which later native commands can erase.
+if (!$summary.passed) { throw 'AIW local checks failed; inspect the emitted summary and log paths' }

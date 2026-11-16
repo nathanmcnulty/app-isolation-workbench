@@ -182,6 +182,17 @@ jobs:
             if ($pass.pass -ne ($index + 1) -or $pass.profile -cne $profile -or $pass.started -ne $true -or $pass.rootExitObserved -ne $true -or $pass.exitCode -ne 0 -or $pass.killRequested -or $pass.primaryError -or $pass.cleanupError) { throw 'Measured build pass did not finish successfully' }
           }
           $assembly = Join-Path $env:RUNNER_TEMP 'aiw-assessment-tools'
+          $assemblyBytes = 0L
+          foreach ($artifact in $measurement.artifacts) {
+            if ($artifact.sizeBytes -lt 1 -or $artifact.sizeBytes -gt 128MB) { throw 'Qualification tool exceeds artifact byte budget' }
+            $assemblyBytes += $artifact.sizeBytes
+          }
+          $receiptBytes = (Get-Item -LiteralPath (Join-Path $report 'measurement.json')).Length
+          if ($assemblyBytes -gt 128MB -or $receiptBytes -gt 1MB) { throw 'Qualification artifact roster exceeds aggregate byte budget' }
+          $assemblyBytes += $receiptBytes
+          $destinationVolume = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($assembly))
+          $assemblyFreeBefore = $destinationVolume.AvailableFreeSpace
+          if ($assemblyFreeBefore -lt (10GB + $assemblyBytes)) { throw 'Qualification assembly requires 10 GiB free plus its complete byte reserve' }
           if (Test-Path -LiteralPath $assembly) { throw 'Artifact assembly must be fresh' }
           $null = New-Item -ItemType Directory -Path $assembly -ErrorAction Stop
           foreach ($name in @('aiw.exe','aiw-guest-agent.exe','aiw-control-fixture.exe')) {
@@ -194,6 +205,9 @@ jobs:
             if ((Get-Item -LiteralPath $destination).Length -ne $artifact[0].sizeBytes -or (Get-FileHash -LiteralPath $destination).Hash.ToLowerInvariant() -cne $artifact[0].sha256) { throw 'Copied first-party artifact identity differs' }
           }
           [IO.File]::Copy((Join-Path $report 'measurement.json'), (Join-Path $assembly 'measurement.json'), $false)
+          $assemblyFreeAfter = $destinationVolume.AvailableFreeSpace
+          if ($assemblyFreeAfter -lt 10GB) { throw 'Qualification assembly free-space floor exceeded' }
+          [ordered]@{qualificationArtifactBytes=$assemblyBytes;availableBytesBefore=$assemblyFreeBefore;availableBytesAfter=$assemblyFreeAfter;maximumArtifactBytes=129MB;minimumFreeBytes=10GB} | ConvertTo-Json -Compress | Write-Host
 
       - name: Retain bounded unsigned assessment tools
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

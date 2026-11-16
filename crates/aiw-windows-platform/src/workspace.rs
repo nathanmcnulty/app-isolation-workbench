@@ -2418,10 +2418,19 @@ mod tests {
     fn channel_prefix_reader_can_observe_append_without_weakening_closed_reader() {
         use aiw_provider_wsb::assessment_channel::CHANNEL_PROGRESS_LEAF;
         let workspace = HeldRunWorkspace::create(&parent(), &leaf("channel-prefix")).unwrap();
-        let mut writer = workspace
-            .create_output_file_new(CHANNEL_PROGRESS_LEAF)
-            .unwrap()
-            .into_file();
+        drop(
+            workspace
+                .create_output_file_new(CHANNEL_PROGRESS_LEAF)
+                .unwrap(),
+        );
+        // Match the guest's transport writer. A fresh protected staging handle
+        // also owns DELETE, which is deliberately incompatible with this reader.
+        let mut writer = OpenOptions::new()
+            .write(true)
+            .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
+            .open(workspace.output_path().join(CHANNEL_PROGRESS_LEAF))
+            .unwrap();
         writer.write_all(b"complete\npartial").unwrap();
         writer.sync_all().unwrap();
         assert_eq!(
