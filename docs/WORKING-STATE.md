@@ -143,6 +143,15 @@ preflight input timed out; the partial input was visibly cancelled with Ctrl+C
 and a clean PowerShell prompt verified. It was never submitted. No new provider,
 Sandbox or application execution occurred. Obtain fresh parent-process facts
 before sealing the packet; do not infer them from the old run.
+Computer Use subsequently stopped because it could not verify the current URL;
+native validation now requires restoration of the visible VM107 console. Do not
+retry through another automation route to bypass that stop. Offline review found
+the R1 harness conflated authenticated report smoke success with full native
+qualification. An unsealed R2 accuracy draft separates those results and keeps
+qualification pending/false; the original templates and wrappers remain unchanged.
+Full signed originals/local-anchor admission, native 15/14/default-DACL facts,
+cleanup and retained Read stability remain required. No native acceptance follows
+from the draft's synthetic predicate tests.
 Do not dispatch an application until the evidence boundary is proved. Resume
 builds only when permitted storage satisfies preflight. Qualify ordinary/classic positives,
 timeout/overflow negatives and controlled interruption/exact recovery before
