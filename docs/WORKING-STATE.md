@@ -101,6 +101,14 @@ Removing that flag does not fix this diagnostic tuple. This is not signed
 assessment evidence, a PSS audit or application qualification. The rejected
 parameter remains unknown; ordinary/classic positive controls remain blocked.
 
+A further unsigned diagnostic measured basic/extended startup sizes 104/112 and
+attribute offset 104. Extended startup with either the three-handle list or a
+public-API-initialized empty list returned 87. Separate basic startup created a
+suspended standard-user child; owned termination and job-empty checks completed
+without Resume. Its exit code 1 was the termination code, not a workload result.
+This narrows the observed call-shape failure. It does not authorize dropping
+the production handle list or AppContainer attributes, or prove stdio inheritance.
+
 ## Storage and next gates
 
 Use only `C:\aiw\environment-probe-20261114\target-static-r1`. Normal builds
