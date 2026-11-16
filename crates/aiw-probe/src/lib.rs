@@ -987,6 +987,9 @@ pub struct WindowsSandboxCliProtocol {
     pub list_schema: String,
 }
 
+/// Closed application-assessment transport selected by a fresh approved plan.
+pub const APPLICATION_ASSESSMENT_CHANNEL_PROTOCOL: &str = "signedCollector/p256-sha256/v1";
+
 pub const WINDOWS_SANDBOX_STATIC_IDENTITY_SCHEMA: &str =
     "aiw.dev/windows-sandbox-static-identity/v0alpha1";
 /// Static trusted identity only. No CLI protocol, runtime feature or session observation.

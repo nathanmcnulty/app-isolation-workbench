@@ -417,10 +417,13 @@ impl WsbPreparationReceipt {
         let deferred = self.provider_protocol_observation.is_some();
         let expected_schema = if self.application_assessment.is_some() {
             if historical
-                && self.schema_version
-                    == application_assessment::HISTORICAL_APPLICATION_PREPARATION_V1
+                && matches!(
+                    self.schema_version.as_str(),
+                    application_assessment::HISTORICAL_APPLICATION_PREPARATION_V1
+                        | application_assessment::HISTORICAL_APPLICATION_PREPARATION_V2
+                )
             {
-                application_assessment::HISTORICAL_APPLICATION_PREPARATION_V1
+                self.schema_version.as_str()
             } else {
                 application_assessment::APPLICATION_ASSESSMENT_PREPARATION_SCHEMA
             }

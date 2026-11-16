@@ -1,8 +1,8 @@
 # Assessment evidence channel
 
-Design and acceptance requirements; **not implemented or qualified**. The
-current application driver must keep refusing dispatch when its collector
-guard fails. This document grants no new execution authority.
+Design and acceptance requirements. The implementation is under consequential
+source review and is **not natively qualified**. Dispatch must remain refused
+whenever a collector guard fails. This document grants no execution authority.
 
 ## Observed boundary failure
 
@@ -50,8 +50,11 @@ than silently extending historical execution.
    creation, the host latches this guest key exactly once in protected run
    records, signs an ACK binding both keys and the bootstrap digest, and
    durably records it before publishing it. Destroy the host private handle
-   after this single ACK. The agent verifies the ACK against the host public
-   key in its read-only request before reaching application creation/resume.
+   before publishing this single ACK. The agent verifies the ACK against the
+   host public key in its read-only request. The ACK acknowledges the collector
+   key; it does not grant application dispatch. Account setup and native file,
+   process/thread and primary-token default-DACL guards follow, permitting a
+   signed setup failure. Every guard must pass before any application creation.
 4. Sign bounded progress commitments and one terminal manifest. Commit to the
    exact payload bytes, byte length, record type, sequence, previous canonical
    content commitment and complete execution binding. The terminal binds every
@@ -95,6 +98,15 @@ be unknown even if no signed launch record survived. Recovery validates the
 approved execution/session bindings before provider query or exact stop.
 Valid signed prefixes are partial diagnostics; absent terminal data remains
 incomplete. Keep parent cleanup separate from guest-reported cleanup.
+
+The new transaction distinguishes `channel-provider-preflight` from the durable
+`provider-start-intent` recorded immediately before invoking provider Start.
+Only a complete validated history without pending snapshots and without that
+marker proves Start was never authorized. Recovery in that state queries only:
+an ID collision or failed query never authorizes stopping that session. Exact
+absence permits owned request cleanup. Once the marker exists, asynchronous
+Start uncertainty remains; absence alone does not prove Start settled. Historical
+transaction schemas do not acquire these semantics.
 
 The trusted local Start record anchors the generated host key. An imported
 bundle can fabricate its own host/guest keys and valid signatures. Without

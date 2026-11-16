@@ -1,5 +1,5 @@
 //! Narrow mapped-byte transport, fresh local staging and strict local custody.
-use super::{APP, ROOT, Result, WORK};
+use super::{APP, COLLECTOR, ROOT, Result, WORK};
 use crate::{HeldApplicationFile, guest_document as relative};
 use aiw_probe::PortableContentEntryKind;
 use aiw_provider_wsb::assessment::{CompiledAssessment, safe_assessment_relative_path};
@@ -181,10 +181,10 @@ pub(super) struct Directories(Vec<File>);
 impl Directories {
     pub(super) fn collector_probe() -> Result<Self> {
         use windows::Win32::Storage::FileSystem::FILE_SHARE_DELETE;
-        let mut held = Self::hold(Path::new(r"C:\AIW"))?;
+        let mut held = Self::hold(Path::new(ROOT))?;
         let output = relative::open_relative_directory(
             held.last()?,
-            "Output",
+            "Collector",
             0,
             FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0 | FILE_SHARE_DELETE.0,
         )?
@@ -254,6 +254,31 @@ struct MappedFile {
 }
 pub(super) struct AgentHold {
     _mapped: MappedFile,
+}
+impl AgentHold {
+    pub(super) fn revalidate(&mut self) -> Result<()> {
+        self._mapped.verify()
+    }
+}
+/// Fresh root is created exactly once before progress/bootstrap/user setup.
+/// The collector leaf is not narrowly held until its wide-share probes finish.
+pub(super) fn initialize_collector() -> Result<Directories> {
+    let _parents = Directories::hold(Path::new(r"C:\AIW"))?;
+    fs::create_dir(ROOT).map_err(|e| format!("fresh local assessment root: {e}"))?;
+    set_acl(
+        Path::new(ROOT),
+        "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+        false,
+    )?;
+    let root = Directories::hold(Path::new(ROOT))?;
+    fs::create_dir(COLLECTOR).map_err(|e| format!("fresh local collector: {e}"))?;
+    set_acl(
+        Path::new(COLLECTOR),
+        "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+        false,
+    )?;
+    set_acl(Path::new(COLLECTOR), "S:(ML;OICI;NW;;;HI)", true)?;
+    Ok(root)
 }
 pub(super) fn hold_agent(hash: &str) -> Result<AgentHold> {
     let parents = Directories::hold(Path::new(r"C:\AIW\Tools"))?;
@@ -369,13 +394,8 @@ pub(super) struct Staged {
 impl Staged {
     pub(super) fn prepare(plan: &CompiledAssessment) -> Result<Self> {
         let ancestors = Directories::hold(Path::new(r"C:\AIW"))?;
-        // create_dir is create-only. No adoption, recursive reset or deletion.
-        fs::create_dir(ROOT).map_err(|e| format!("fresh assessment root: {e}"))?;
-        set_acl(
-            Path::new(ROOT),
-            "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
-            false,
-        )?;
+        // The privileged entry owns initialize_collector's fresh-root lease;
+        // no alternate entry may adopt an existing root to execute applications.
         let root = Directories::hold(Path::new(ROOT))?;
         for path in [APP, WORK] {
             fs::create_dir(path).map_err(|e| e.to_string())?;

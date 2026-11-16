@@ -9,12 +9,28 @@ use crate::assessment::CompiledAssessment;
 
 pub const APPLICATION_ASSESSMENT_REQUEST_SCHEMA: &str =
     "aiw.dev/application-assessment-request/v0alpha1";
+pub const APPLICATION_ASSESSMENT_REQUEST_V2_SCHEMA: &str =
+    "aiw.dev/application-assessment-request/v0alpha2";
+pub const ASSESSMENT_CHANNEL_REQUEST_SCHEMA: &str = "aiw.dev/assessment-channel-request/v0alpha1";
 pub const APPLICATION_ASSESSMENT_REQUEST_PATH: &str = r"C:\AIW\Tools\assessment-request.json";
 pub const APPLICATION_ASSESSMENT_RESULT_PATH: &str = r"C:\AIW\Output\assessment-result.json";
 pub const APPLICATION_ASSESSMENT_AGENT_PATH: &str = r"C:\AIW\Tools\aiw-guest-agent.exe";
 pub const APPLICATION_ASSESSMENT_REQUEST_MAX_BYTES: u64 = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssessmentChannelRequest {
+    pub schema_version: String,
+    pub channel_protocol: String,
+    pub plan_sha256: String,
+    pub provider_sha256: String,
+    pub provider_protocol: aiw_probe::WindowsSandboxCliProtocol,
+    pub workspace_identity_sha256: String,
+    pub nonce_hex: String,
+    pub host_ack_public_key_hex: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ApplicationAssessmentGuestRequest {
     pub schema_version: String,
@@ -26,6 +42,61 @@ pub struct ApplicationAssessmentGuestRequest {
     pub assessment_sha256: String,
     pub assessment: CompiledAssessment,
     pub request_sha256: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel: Option<AssessmentChannelRequest>,
+}
+
+// Preserve alpha1 bytes and reject even an explicit channel:null there. Option
+// alone erases wire presence; this field's custom type tracks it separately.
+#[derive(Default)]
+struct ChannelPresence {
+    present: bool,
+    value: Option<AssessmentChannelRequest>,
+}
+impl<'de> Deserialize<'de> for ChannelPresence {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Self {
+            present: true,
+            value: Option::<AssessmentChannelRequest>::deserialize(deserializer)?,
+        })
+    }
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RequestWire {
+    schema_version: String,
+    run_id: String,
+    sandbox_id: String,
+    config_sha256: String,
+    agent_sha256: String,
+    project_revision_sha256: String,
+    assessment_sha256: String,
+    assessment: CompiledAssessment,
+    request_sha256: String,
+    #[serde(default)]
+    channel: ChannelPresence,
+}
+impl<'de> Deserialize<'de> for ApplicationAssessmentGuestRequest {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let w = RequestWire::deserialize(deserializer)?;
+        if w.schema_version == APPLICATION_ASSESSMENT_REQUEST_SCHEMA && w.channel.present {
+            return Err(serde::de::Error::custom(
+                "historical assessment request cannot contain channel",
+            ));
+        }
+        Ok(Self {
+            schema_version: w.schema_version,
+            run_id: w.run_id,
+            sandbox_id: w.sandbox_id,
+            config_sha256: w.config_sha256,
+            agent_sha256: w.agent_sha256,
+            project_revision_sha256: w.project_revision_sha256,
+            assessment_sha256: w.assessment_sha256,
+            assessment: w.assessment,
+            request_sha256: w.request_sha256,
+            channel: w.channel.value,
+        })
+    }
 }
 
 pub fn assessment_value_sha256(value: &impl Serialize) -> Result<String, String> {
@@ -79,6 +150,7 @@ impl ApplicationAssessmentGuestRequest {
             assessment_sha256: assessment_value_sha256(&assessment)?,
             assessment,
             request_sha256: String::new(),
+            channel: None,
         };
         value.request_sha256 = value.request_hash()?;
         value.validate()?;
@@ -86,8 +158,11 @@ impl ApplicationAssessmentGuestRequest {
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        if self.schema_version != APPLICATION_ASSESSMENT_REQUEST_SCHEMA
-            || self.run_id.is_empty()
+        if !matches!(
+            (self.schema_version.as_str(), self.channel.is_some()),
+            (APPLICATION_ASSESSMENT_REQUEST_SCHEMA, false)
+                | (APPLICATION_ASSESSMENT_REQUEST_V2_SCHEMA, true)
+        ) || self.run_id.is_empty()
             || self.run_id.len() > 80
             || !self
                 .run_id
@@ -123,7 +198,81 @@ impl ApplicationAssessmentGuestRequest {
         if bytes.len() as u64 > APPLICATION_ASSESSMENT_REQUEST_MAX_BYTES {
             return Err("complete application assessment request exceeds its size bound".into());
         }
+        if self.channel.is_some() {
+            self.channel_binding_unchecked()?.validate()?;
+        }
         Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_authenticated(
+        run_id: String,
+        sandbox_id: String,
+        config_sha256: String,
+        agent_sha256: String,
+        project_revision_sha256: String,
+        assessment: CompiledAssessment,
+        channel: AssessmentChannelRequest,
+    ) -> Result<Self, String> {
+        let mut value = Self {
+            schema_version: APPLICATION_ASSESSMENT_REQUEST_V2_SCHEMA.into(),
+            run_id,
+            sandbox_id,
+            config_sha256,
+            agent_sha256,
+            project_revision_sha256,
+            assessment_sha256: assessment_value_sha256(&assessment)?,
+            assessment,
+            request_sha256: String::new(),
+            channel: Some(channel),
+        };
+        value.request_sha256 = value.request_hash()?;
+        value.validate()?;
+        Ok(value)
+    }
+    pub fn require_authenticated_execution(&self) -> Result<(), String> {
+        self.channel_binding().map(|_| ())
+    }
+    pub fn channel_binding(
+        &self,
+    ) -> Result<crate::assessment_channel::AssessmentChannelBinding, String> {
+        self.validate()?;
+        self.channel_binding_unchecked()
+    }
+    fn channel_binding_unchecked(
+        &self,
+    ) -> Result<crate::assessment_channel::AssessmentChannelBinding, String> {
+        use crate::assessment_channel::{
+            AssessmentChannelBinding, CHANNEL_PROTOCOL, CHANNEL_SCHEMA,
+        };
+        let channel = self.channel.as_ref().ok_or(
+            "historical assessment request is read-only; authenticated execution required",
+        )?;
+        if self.schema_version != APPLICATION_ASSESSMENT_REQUEST_V2_SCHEMA
+            || channel.schema_version != ASSESSMENT_CHANNEL_REQUEST_SCHEMA
+            || channel.channel_protocol != CHANNEL_PROTOCOL
+        {
+            return Err("assessment channel request version refused".into());
+        }
+        Ok(AssessmentChannelBinding {
+            schema_version: CHANNEL_SCHEMA.into(),
+            channel_protocol: channel.channel_protocol.clone(),
+            run_id: self.run_id.clone(),
+            plan_sha256: channel.plan_sha256.clone(),
+            project_revision_sha256: self.project_revision_sha256.clone(),
+            assessment_sha256: self.assessment_sha256.clone(),
+            semantic_sha256: self.assessment.semantic_sha256.clone(),
+            application_content_manifest_sha256: self.assessment.portable_manifest_sha256.clone(),
+            agent_sha256: self.agent_sha256.clone(),
+            provider_sha256: channel.provider_sha256.clone(),
+            provider_protocol: channel.provider_protocol.clone(),
+            config_sha256: self.config_sha256.clone(),
+            sandbox_id: self.sandbox_id.clone(),
+            workspace_identity_sha256: channel.workspace_identity_sha256.clone(),
+            request_sha256: self.request_sha256.clone(),
+            nonce_hex: channel.nonce_hex.clone(),
+            host_ack_public_key_hex: channel.host_ack_public_key_hex.clone(),
+        })
     }
 }
 
@@ -209,5 +358,88 @@ mod tests {
         }
         assert!(!hash_valid(&"0".repeat(64)));
         assert!(!hash_valid(&"A".repeat(64)));
+    }
+    fn channel() -> AssessmentChannelRequest {
+        let mut key = [1u8; 72];
+        key[..8].copy_from_slice(&[0x45, 0x43, 0x53, 0x31, 32, 0, 0, 0]);
+        AssessmentChannelRequest {
+            schema_version: ASSESSMENT_CHANNEL_REQUEST_SCHEMA.into(),
+            channel_protocol: crate::assessment_channel::CHANNEL_PROTOCOL.into(),
+            plan_sha256: "d".repeat(64),
+            provider_sha256: "e".repeat(64),
+            provider_protocol: aiw_probe::WindowsSandboxCliAdapter::V0_8_114_0.protocol(),
+            workspace_identity_sha256: "f".repeat(64),
+            nonce_hex: "1".repeat(64),
+            host_ack_public_key_hex: hex::encode(key),
+        }
+    }
+    #[test]
+    fn historical_wire_has_no_channel_and_refuses_even_explicit_null() {
+        let old = request();
+        let bytes = serde_json::to_vec(&old).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(value.get("channel").is_none());
+        assert!(old.require_authenticated_execution().is_err());
+        for extra in [
+            serde_json::Value::Null,
+            serde_json::to_value(channel()).unwrap(),
+        ] {
+            let mut changed = value.clone();
+            changed["channel"] = extra;
+            assert!(serde_json::from_value::<ApplicationAssessmentGuestRequest>(changed).is_err());
+        }
+        let mut legacy_shape = value;
+        legacy_shape["requestSha256"] = serde_json::json!("");
+        assert_eq!(
+            old.request_hash().unwrap(),
+            assessment_value_sha256(&legacy_shape).unwrap()
+        );
+    }
+    #[test]
+    fn authenticated_request_commits_public_entropy_without_a_hash_cycle() {
+        let old = request();
+        let r = ApplicationAssessmentGuestRequest::new_authenticated(
+            old.run_id,
+            old.sandbox_id,
+            old.config_sha256,
+            old.agent_sha256,
+            old.project_revision_sha256,
+            old.assessment,
+            channel(),
+        )
+        .unwrap();
+        r.require_authenticated_execution().unwrap();
+        let binding = r.channel_binding().unwrap();
+        assert_eq!(binding.request_sha256, r.request_sha256);
+        assert_eq!(
+            binding.application_content_manifest_sha256,
+            r.assessment.portable_manifest_sha256
+        );
+        assert_eq!(binding.plan_sha256, r.channel.as_ref().unwrap().plan_sha256);
+        assert_eq!(
+            serde_json::from_slice::<ApplicationAssessmentGuestRequest>(
+                &serde_json::to_vec(&r).unwrap()
+            )
+            .unwrap(),
+            r
+        );
+        let mut changed = r.clone();
+        changed.channel.as_mut().unwrap().nonce_hex = "2".repeat(64);
+        assert!(changed.validate().is_err());
+        changed.request_sha256 = changed.request_hash().unwrap();
+        changed.validate().unwrap();
+        assert_ne!(changed.request_sha256, r.request_sha256);
+        changed
+            .channel
+            .as_mut()
+            .unwrap()
+            .provider_protocol
+            .cli_version = "0.8.115.0".into();
+        changed.request_sha256 = changed.request_hash().unwrap();
+        assert!(changed.validate().is_err());
+        let mut missing = r;
+        missing.channel = None;
+        missing.request_sha256 = missing.request_hash().unwrap();
+        assert!(missing.validate().is_err());
     }
 }

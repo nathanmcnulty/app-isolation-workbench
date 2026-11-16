@@ -116,6 +116,30 @@ pub fn report_windows_sandbox_application_assessment(
     {
         return Err(RunnerError::Drift);
     }
+    if before.plan.schema == aiw_orchestrator::APPLICATION_ASSESSMENT_RUN_PLAN_SCHEMA {
+        let inspection = session::inspect_for_recovery(&layout)?;
+        let report = report_authenticated(
+            &held,
+            &layout,
+            &artifacts,
+            &before,
+            &inspection,
+            expected_agent,
+        )?;
+        content.revalidate().map_err(|_| RunnerError::Drift)?;
+        agent_file.revalidate().map_err(|_| RunnerError::Drift)?;
+        agent.revalidate().map_err(|_| RunnerError::Drift)?;
+        for file in files {
+            file.revalidate().map_err(|_| RunnerError::Drift)?;
+        }
+        held.revalidate().map_err(|_| RunnerError::Drift)?;
+        if layout.retained_snapshot().map_err(journal_error)? != before
+            || session::inspect_for_recovery(&layout)? != inspection
+        {
+            return Err(RunnerError::Drift);
+        }
+        return Ok(report);
+    }
     let config = render_config(&artifacts.wsb_plan).map_err(|_| RunnerError::Drift)?;
     let request = ApplicationAssessmentGuestRequest::new(
         run_id.into(),
@@ -289,6 +313,112 @@ pub fn report_windows_sandbox_application_assessment(
         || session::inspect_for_recovery(&layout)? != inspection
     {
         return Err(RunnerError::Drift);
+    }
+    Ok(report)
+}
+
+#[cfg(windows)]
+fn report_authenticated(
+    held: &aiw_windows_platform::HeldRunWorkspace,
+    layout: &RunLayout,
+    artifacts: &PreparedWsbArtifacts,
+    before: &aiw_orchestrator::RetainedRunSnapshot,
+    inspection: &session::SessionRecoveryInspection,
+    expected_agent: &str,
+) -> Result<GenericApplicationRunReport, RunnerError> {
+    let assessment = artifacts
+        .receipt
+        .application_assessment
+        .as_ref()
+        .ok_or(RunnerError::Drift)?;
+    let mut report=GenericApplicationRunReport{
+        schema_version:"aiw.dev/generic-application-run-report/v0alpha2".into(),run_id:layout.run_id().into(),
+        project_revision_sha256:artifacts.receipt.project_revision_sha256.clone(),semantic_sha256:assessment.compiled.semantic_sha256.clone(),
+        source_manifest_sha256:assessment.compiled.portable_manifest_sha256.clone(),guest_agent_sha256:expected_agent.into(),
+        provider_sha256:artifacts.receipt.provider.sha256.clone(),mode:assessment.compiled.mode,windows:None,
+        recorded_cleanup_verified:None,recorded_outcome:None,evidence_status:"notRun".into(),receipt_sha256:None,evidence_root_hash:None,evidence:None,diagnostic_progress:None,
+        gaps:vec!["Only declared portable CLI facts are in scope; descendants, DLLs, network denial and general compatibility remain unmeasured.".into(),"Cleanup is historical; retained Read never queries the provider or regenerates keys.".into(),"Execution origin requires this trusted local approved Start anchor; imported self-chosen keys establish internal integrity only.".into()],
+    };
+    if let aiw_orchestrator::RecoveryStatus::Terminal { result, .. } = &before.status {
+        report.recorded_outcome = Some(result.outcome);
+    }
+    if let Some(tx) = &inspection.transaction {
+        let descriptor =
+            assessment_channel_host::validate_recovery_authority(held, layout, &before.plan, tx)?;
+        if descriptor.request.assessment != assessment.compiled
+            || descriptor.request.agent_sha256 != expected_agent
+        {
+            return Err(RunnerError::ApprovalBinding);
+        }
+        let recovery = tx.recovery.as_ref().ok_or(RunnerError::Drift)?;
+        if recovery.workspace != artifacts.receipt.workspace
+            || recovery.provider_protocol != artifacts.receipt.provider_protocol
+            || recovery.request_relative_path != "assessment-request.json"
+        {
+            return Err(RunnerError::ApprovalBinding);
+        }
+        if !inspection.pending_present()
+            && tx.current_state() == SessionTransactionState::CleanupVerified
+            && start_settled(tx)
+            && !recovery_request_present(&held.tools_path().join("assessment-request.json"))?
+            && !recovery_request_present(
+                &held.tools_path().join("assessment-request.json.pending"),
+            )?
+        {
+            report.recorded_cleanup_verified = Some(true);
+        }
+        match assessment_channel_host::verify_completed(held, layout, &before.plan, tx) {
+            Ok(auth) => {
+                if auth.verification.successful != auth.observed.native.driver_completed {
+                    return Err(RunnerError::Drift);
+                }
+                if !auth.evidence.driver_complete {
+                    report.gaps.push("Authenticated collector setup, observation or cleanup is incomplete; this is not application incompatibility.".into());
+                }
+                report.windows = auth.observed.native.windows;
+                report.evidence_status = "authenticatedLocalStart".into();
+                report.receipt_sha256 = Some(auth.verification.receipt_sha256);
+                report.evidence_root_hash = Some(auth.verification.evidence_root_hash);
+                report.evidence = Some(auth.evidence);
+            }
+            Err(_) => {
+                report.evidence_status = "incompleteOrUnauthenticatedPublication".into();
+                report.gaps.push("A complete terminal and all artifact bytes could not be authenticated against the committed local latch; raw publication grants no function or isolation credit.".into());
+                match assessment_channel_host::verify_prefix(held,layout,&before.plan,tx) {
+                    Ok(Some(prefix))=>{
+                        let steps=&prefix.result.native.steps;
+                        report.diagnostic_progress=Some(GenericAssessmentProgressDiagnostic{
+                            complete_records:prefix.records,terminal_present:prefix.terminal_present,trailing_incomplete:prefix.trailing_incomplete,
+                            recorded_step_indices:steps.iter().map(|s|s.index).collect(),created_process_steps:steps.iter().filter(|s|s.process.is_some()).map(|s|s.index).collect(),
+                            observed_root_exits:steps.iter().filter_map(|s|s.process.as_ref().and_then(|p|p.exit_code.map(|code|(s.index,code)))).collect(),pending_launch_step:prefix.pending_launch.map(|p|p.index),
+                        });
+                        report.gaps.push("Authenticated partial progress is diagnostic only; creation is recorded before Resume and does not prove application code ran.".into());
+                    }
+                    Ok(None)=>{},Err(_)=>report.gaps.push("Retained progress could not be authenticated; no partial native facts admitted.".into()),
+                }
+            }
+        }
+    } else if layout
+        .run_dir()
+        .join(aiw_orchestrator::APPLICATION_CHANNEL_START_INTENT_FILE)
+        .exists()
+    {
+        report.evidence_status = "incompleteStart".into();
+        report.gaps.push("Start intent was consumed without a committed execution transaction. It cannot generate a replacement key or retry this run.".into());
+    }
+    if let aiw_orchestrator::RecoveryStatus::Terminal { result, .. } = &before.status {
+        if result.cleanup_complete && report.recorded_cleanup_verified != Some(true) {
+            return Err(RunnerError::Drift);
+        }
+        if !result.cleanup_complete {
+            report.recorded_cleanup_verified = None;
+        }
+        if result.evidence_root != report.evidence_root_hash && result.evidence_root.is_some() {
+            report.gaps.push("The recorded terminal evidence root could not be revalidated against the current retained bytes.".into());
+            report.evidence = None;
+            report.windows = None;
+            report.evidence_status = "incompleteOrUnauthenticatedPublication".into();
+        }
     }
     Ok(report)
 }

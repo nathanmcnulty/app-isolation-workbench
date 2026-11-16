@@ -1,18 +1,13 @@
-//! One fixed receipt-bound progress stream. No app owns its writer or handle.
-use super::{COLLECTOR, Result, bound_error, files::Directories};
-use crate::guest_document as relative;
-use aiw_provider_wsb::{
-    assessment_observation::*, assessment_request::ApplicationAssessmentGuestRequest,
-};
-use sha2::{Digest, Sha256};
+//! Exact local mutation-access observations; signing implementation is separate.
+pub(super) use super::authenticated::Progress;
+use super::{COLLECTOR, Result, bound_error};
+use aiw_provider_wsb::assessment_observation::*;
 use std::{
-    fs::{File, OpenOptions},
-    io::{Seek, SeekFrom, Write},
+    fs::OpenOptions,
     os::windows::{
-        fs::{FileExt, OpenOptionsExt},
+        fs::OpenOptionsExt,
         io::{AsRawHandle, FromRawHandle, OwnedHandle},
     },
-    path::Path,
 };
 use windows::{
     Win32::{
@@ -22,180 +17,16 @@ use windows::{
             TokenUser,
         },
         Storage::FileSystem::{
-            BY_HANDLE_FILE_INFORMATION, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-            FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TYPE_DISK, GetFileType,
+            FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE,
+            FILE_SHARE_READ, FILE_SHARE_WRITE,
         },
         System::Threading::{GetCurrentThread, OpenThreadToken},
     },
     core::PWSTR,
 };
-const MAX_BYTES: u64 = 16 * 1024 * 1024;
-const MAX_RECORD: usize = 8 * 1024 * 1024;
 const DIRECTORY_MASKS: [u32; 8] = [2, 4, 0x40, 0x10000, 0x10, 0x100, 0x40000, 0x80000];
 const FILE_MASKS: [u32; 7] = [2, 4, 0x10, 0x100, 0x10000, 0x40000, 0x80000];
-pub(super) struct Progress {
-    _directories: Directories,
-    file: Option<File>,
-    identity: BY_HANDLE_FILE_INFORMATION,
-    bytes: u64,
-    digest: Sha256,
-    refused: bool,
-}
-fn same_identity(a: &BY_HANDLE_FILE_INFORMATION, b: &BY_HANDLE_FILE_INFORMATION) -> bool {
-    a.dwVolumeSerialNumber == b.dwVolumeSerialNumber
-        && a.nFileIndexHigh == b.nFileIndexHigh
-        && a.nFileIndexLow == b.nFileIndexLow
-}
-fn checked_file(file: &File) -> Result<BY_HANDLE_FILE_INFORMATION> {
-    let info = relative::file_information(file)?;
-    if !relative::ordinary_file(&info)
-        || info.nNumberOfLinks != 1
-        || info.dwVolumeSerialNumber == 0
-        || (info.nFileIndexHigh == 0 && info.nFileIndexLow == 0)
-        || unsafe { GetFileType(HANDLE(file.as_raw_handle())) } != FILE_TYPE_DISK
-    {
-        return Err("progress file type/link/identity refused".into());
-    }
-    Ok(info)
-}
-impl Progress {
-    pub(super) fn create(
-        request: &ApplicationAssessmentGuestRequest,
-        token: aiw_token::TokenEvidence,
-    ) -> Result<Self> {
-        let directories = Directories::collector_probe()?;
-        if std::fs::read_dir(COLLECTOR)
-            .map_err(|e| e.to_string())?
-            .next()
-            .transpose()
-            .map_err(|e| e.to_string())?
-            .is_some()
-        {
-            return Err("collector Output is not initially empty; no progress adoption".into());
-        }
-        // Wide sharing exists ONLY before any untrusted app is launched, so
-        // access probes measure DACL decisions, never our own sharing denial.
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0 | FILE_SHARE_DELETE.0)
-            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
-            .open(ASSESSMENT_PROGRESS_PATH)
-            .map_err(|e| e.to_string())?;
-        let identity = checked_file(&file)?;
-        let mut value = Self {
-            _directories: directories,
-            file: Some(file),
-            identity,
-            bytes: 0,
-            digest: Sha256::new(),
-            refused: false,
-        };
-        value.record(&AssessmentProgressEvent::Header {
-            schema_version: ASSESSMENT_PROGRESS_SCHEMA.into(),
-            run_id: request.run_id.clone(),
-            sandbox_id: request.sandbox_id.clone(),
-            request_sha256: request.request_sha256.clone(),
-            assessment_sha256: request.assessment_sha256.clone(),
-            agent_sha256: request.agent_sha256.clone(),
-            config_sha256: request.config_sha256.clone(),
-            project_revision_sha256: request.project_revision_sha256.clone(),
-            collector_token: token,
-        })?;
-        Ok(value)
-    }
-    pub(super) fn record(&mut self, event: &AssessmentProgressEvent) -> Result<()> {
-        super::guard_no_impersonation()?;
-        if self.refused {
-            return Err("progress writer already refused; original prefix retained".into());
-        }
-        let encoded = serde_json::to_vec(event).map_err(|e| e.to_string())?;
-        if encoded.len() > MAX_RECORD
-            || self
-                .bytes
-                .checked_add(encoded.len() as u64 + 1)
-                .is_none_or(|n| n > MAX_BYTES)
-        {
-            self.refused = true;
-            return Err(
-                "complete progress record/aggregate exceeds bound; original prefix retained".into(),
-            );
-        }
-        let file = self.file.as_mut().ok_or("progress writer not held")?;
-        let info = checked_file(file)?;
-        if !same_identity(&info, &self.identity) || relative::file_length(&info) != self.bytes {
-            self.refused = true;
-            return Err("held progress identity/length changed".into());
-        }
-        let operation = file
-            .write_all(&encoded)
-            .and_then(|_| file.write_all(b"\n"))
-            .and_then(|_| file.sync_all());
-        if let Err(error) = operation {
-            self.refused = true;
-            return Err(format!(
-                "progress publication failed; retained prefix may end mid-record: {error}"
-            ));
-        }
-        self.digest.update(&encoded);
-        self.digest.update(b"\n");
-        self.bytes += encoded.len() as u64 + 1;
-        Ok(())
-    }
-    fn verify(&self, file: &File) -> Result<()> {
-        let info = checked_file(file)?;
-        if !same_identity(&info, &self.identity) || relative::file_length(&info) != self.bytes {
-            return Err("progress named/held identity or size differs".into());
-        }
-        let mut digest = Sha256::new();
-        let mut position = 0;
-        let mut buffer = [0u8; 65536];
-        while position < self.bytes {
-            let amount = (self.bytes - position).min(buffer.len() as u64) as usize;
-            let count = file
-                .seek_read(&mut buffer[..amount], position)
-                .map_err(|e| e.to_string())?;
-            if count == 0 {
-                return Err("progress truncated".into());
-            }
-            digest.update(&buffer[..count]);
-            position += count as u64;
-        }
-        if digest.finalize() != self.digest.clone().finalize() {
-            return Err("progress byte prefix changed".into());
-        }
-        Ok(())
-    }
-    pub(super) fn seal_before_apps(&mut self) -> Result<()> {
-        super::guard_no_impersonation()?;
-        let previous = self.file.take().ok_or("progress writer missing")?;
-        self.verify(&previous)?;
-        drop(previous);
-        // No untrusted account process exists yet. Close/reopen is necessary:
-        // a read-sharing-only handle cannot coexist with our old wide writer.
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .share_mode(FILE_SHARE_READ.0)
-            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
-            .open(ASSESSMENT_PROGRESS_PATH)
-            .map_err(|e| e.to_string())?;
-        self.verify(&file)?;
-        file.seek(SeekFrom::End(0)).map_err(|e| e.to_string())?;
-        self.file = Some(file);
-        let narrow = Directories::hold(Path::new(COLLECTOR))?;
-        if !self._directories.same_leaf(&narrow)? {
-            return Err("collector directory identity changed during access checks".into());
-        }
-        self._directories = narrow;
-        Ok(())
-    }
-    pub(super) fn revalidate(&self) -> Result<()> {
-        self.verify(self.file.as_ref().ok_or("progress writer missing")?)
-    }
-}
-fn effective_sid() -> Result<String> {
+pub(super) fn effective_sid() -> Result<String> {
     let mut token = HANDLE::default();
     unsafe { OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, true, &mut token) }
         .map_err(|e| e.to_string())?;
@@ -237,16 +68,17 @@ pub(super) fn probe_access(expected_sid: &str) -> Result<Vec<AssessmentCollector
         return Err("collector access probe effective user differs".into());
     }
     let mut facts = vec![];
+    let progress_path = super::local_progress();
     for (target, masks, path) in [
         (
             AssessmentCollectorTarget::Directory,
             DIRECTORY_MASKS.as_slice(),
-            COLLECTOR,
+            std::path::Path::new(COLLECTOR),
         ),
         (
             AssessmentCollectorTarget::ProgressFile,
             FILE_MASKS.as_slice(),
-            ASSESSMENT_PROGRESS_PATH,
+            progress_path.as_path(),
         ),
     ] {
         for &mask in masks {

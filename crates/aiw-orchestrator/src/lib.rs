@@ -51,7 +51,10 @@ pub const WSB_PAIRED_CONTROL_IMPORT_SCHEMA: &str = "aiw.dev/wsb-planning-import-
 pub const SEVENZIP_RUN_PLAN_SCHEMA: &str = "aiw.dev/run-plan/v0alpha8";
 pub const WSB_SEVENZIP_IMPORT_SCHEMA: &str = "aiw.dev/wsb-planning-import-receipt/v0alpha5";
 pub const APPLICATION_ASSESSMENT_RUN_PLAN_SCHEMA: &str =
+    "aiw.dev/run-plan/application-assessment/v3";
+pub const HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V2: &str =
     "aiw.dev/run-plan/application-assessment/v2";
+pub const APPLICATION_CHANNEL_START_INTENT_FILE: &str = "assessment-channel-start-intent.json";
 pub const HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V1: &str =
     "aiw.dev/run-plan/application-assessment/v1";
 pub const WSB_APPLICATION_ASSESSMENT_IMPORT_SCHEMA: &str =
@@ -115,6 +118,8 @@ pub enum PlannedAction {
     ExecuteWindowsSandboxApplicationAssessment {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         provider_protocol: Option<aiw_probe::WindowsSandboxCliProtocol>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        evidence_channel: Option<String>,
         sandbox_plan_sha256: String,
         provider_sha256: String,
         guest_agent_sha256: String,
@@ -197,6 +202,16 @@ pub struct WindowsSandboxActionBinding<'a> {
     pub guest_agent_sha256: &'a str,
     pub workspace: &'a WorkspaceBindingEvidence,
     pub workspace_identity_sha256: &'a str,
+}
+
+/// Consumes only Start's entropy attempt. It is not provider or dispatch proof.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApplicationChannelStartIntent {
+    pub schema_version: String,
+    pub run_id: String,
+    pub plan_hash: String,
+    pub approval_sha256: String,
 }
 
 impl PlannedAction {
@@ -406,6 +421,25 @@ impl RunPlan {
     }
     /// Historical parsing/hashing is read-only and confers no execution authority.
     pub fn from_retained_value(value: serde_json::Value) -> Result<Self, AiwError> {
+        let schema = value.get("schema").and_then(serde_json::Value::as_str);
+        if matches!(
+            schema,
+            Some(
+                HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V1
+                    | HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V2
+            )
+        ) && value
+            .get("actions")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|actions| actions.iter().any(|a| a.get("evidenceChannel").is_some()))
+        {
+            return Err(run_error(
+                "AIW_PLAN_SCHEMA_UNSUPPORTED",
+                "historical generic plans did not define evidenceChannel, including null",
+                "plan",
+                "",
+            ));
+        }
         if value.get("schema").and_then(serde_json::Value::as_str)
             == Some(HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V1)
             && value
@@ -1170,10 +1204,14 @@ impl RunLayout {
         if self.plan_path().is_file() {
             self.validate_run_dir()?;
             let retained = self.read_plan_locked()?;
-            if retained.schema == HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V1 {
+            if matches!(
+                retained.schema.as_str(),
+                HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V1
+                    | HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V2
+            ) {
                 return Err(run_error(
                     "AIW_HISTORICAL_APPLICATION_PLAN_READ_ONLY",
-                    "historical generic v1 is read-only; preserve evidence and prepare a new versioned plan",
+                    "historical generic v1/v2 is read-only; preserve evidence and prepare a new versioned plan",
                     stage,
                     &self.run_id,
                 ));
@@ -2028,6 +2066,88 @@ impl RunLayout {
         self.reject_if_wsb_discard_started_locked(&plan, "approval")?;
         self.recover_locked()?;
         self.read_approval_locked()
+    }
+
+    /// A create-only consumed attempt, committed under the ordinary run lock
+    /// before key generation or provider acquisition. Partial bytes also block
+    /// retry: this boundary never repairs, removes or adopts an earlier intent.
+    pub fn consume_application_channel_start(
+        &self,
+        expected_plan_hash: &str,
+    ) -> Result<ApplicationChannelStartIntent, AiwError> {
+        let _lock = self.acquire_lock("channel-start")?;
+        self.validate_run_dir()?;
+        let snapshot = self.retained_snapshot()?;
+        snapshot.plan.ensure_current()?;
+        let approval = snapshot.approval.as_ref().ok_or_else(|| {
+            run_error(
+                "AIW_APPROVAL_REQUIRED",
+                "committed approval required before channel Start",
+                "channel-start",
+                &self.run_id,
+            )
+        })?;
+        if !matches!(snapshot.status, RecoveryStatus::Ready { .. })
+            || snapshot.plan.hash()? != expected_plan_hash
+            || snapshot.plan.schema != APPLICATION_ASSESSMENT_RUN_PLAN_SCHEMA
+        {
+            return Err(run_error(
+                "AIW_CHANNEL_START_BINDING",
+                "current approved channel Start binding differs",
+                "channel-start",
+                &self.run_id,
+            ));
+        }
+        let intent = ApplicationChannelStartIntent {
+            schema_version: "aiw.dev/application-channel-start-intent/v0alpha1".into(),
+            run_id: self.run_id.clone(),
+            plan_hash: expected_plan_hash.into(),
+            approval_sha256: hash_value(approval)?,
+        };
+        write_complete_direct_new(
+            &self.run_dir().join(APPLICATION_CHANNEL_START_INTENT_FILE),
+            &intent,
+            &self.run_id,
+            "channel-start",
+        )?;
+        Ok(intent)
+    }
+
+    /// Read-only comparison against the committed local approval. No entropy,
+    /// journal repair, lock file creation, or provider access.
+    pub fn read_application_channel_start_intent(
+        &self,
+    ) -> Result<ApplicationChannelStartIntent, AiwError> {
+        let snapshot = self.retained_snapshot()?;
+        snapshot.plan.ensure_current()?;
+        let approval = snapshot.approval.as_ref().ok_or_else(|| {
+            run_error(
+                "AIW_APPROVAL_REQUIRED",
+                "committed channel approval is absent",
+                "channel-read",
+                &self.run_id,
+            )
+        })?;
+        let intent: ApplicationChannelStartIntent = read_json(
+            &self.run_dir().join(APPLICATION_CHANNEL_START_INTENT_FILE),
+            4096,
+            &self.run_id,
+            "channel-read",
+        )?;
+        if intent.schema_version != "aiw.dev/application-channel-start-intent/v0alpha1"
+            || snapshot.plan.schema != APPLICATION_ASSESSMENT_RUN_PLAN_SCHEMA
+            || intent.run_id != self.run_id
+            || intent.plan_hash != snapshot.plan.hash()?
+            || intent.approval_sha256 != hash_value(approval)?
+        {
+            return Err(run_error(
+                "AIW_CHANNEL_START_BINDING",
+                "retained channel intent differs from committed approval",
+                "channel-read",
+                &self.run_id,
+            ));
+        }
+        Ok(intent)
     }
 
     fn read_approval_locked(&self) -> Result<ApprovalRecord, AiwError> {
@@ -3920,9 +4040,11 @@ fn validate_plan_for_read(plan: &RunPlan, historical: bool) -> Result<(), AiwErr
     });
     let expected_schema = if has_application_assessment
         && historical
-        && plan.schema == HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V1
-    {
-        HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V1
+        && matches!(
+            plan.schema.as_str(),
+            HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V1 | HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V2
+        ) {
+        plan.schema.as_str()
     } else if has_application_assessment {
         APPLICATION_ASSESSMENT_RUN_PLAN_SCHEMA
     } else if has_sevenzip_action {
@@ -3984,6 +4106,7 @@ fn validate_plan_for_read(plan: &RunPlan, historical: bool) -> Result<(), AiwErr
         match action {
             PlannedAction::ExecuteWindowsSandboxApplicationAssessment {
                 provider_protocol,
+                evidence_channel,
                 sandbox_plan_sha256,
                 provider_sha256,
                 guest_agent_sha256,
@@ -3993,6 +4116,24 @@ fn validate_plan_for_read(plan: &RunPlan, historical: bool) -> Result<(), AiwErr
                 source_manifest_sha256,
                 assessment_sha256,
             } => {
+                let channel_valid = if matches!(
+                    plan.schema.as_str(),
+                    HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V1
+                        | HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V2
+                ) {
+                    historical && evidence_channel.is_none()
+                } else {
+                    evidence_channel.as_deref()
+                        == Some(aiw_probe::APPLICATION_ASSESSMENT_CHANNEL_PROTOCOL)
+                };
+                if !channel_valid {
+                    return Err(run_error(
+                        "AIW_APPLICATION_CHANNEL_BINDING_INVALID",
+                        "current generic plans require the closed authenticated collector channel; old approvals cannot acquire it",
+                        "plan",
+                        &plan.run_id,
+                    ));
+                }
                 let protocol_valid = if plan.schema == HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V1 {
                     historical && provider_protocol.is_none()
                 } else {
@@ -6123,6 +6264,7 @@ mod tests {
             "2026-11-14T00:00:00Z",
             vec![PlannedAction::ExecuteWindowsSandboxApplicationAssessment {
                 provider_protocol: Some(aiw_probe::WindowsSandboxCliAdapter::V0_8_107_0.protocol()),
+                evidence_channel: Some(aiw_probe::APPLICATION_ASSESSMENT_CHANNEL_PROTOCOL.into()),
                 sandbox_plan_sha256: "a".repeat(64),
                 provider_sha256: "b".repeat(64),
                 guest_agent_sha256: "c".repeat(64),
@@ -6166,6 +6308,10 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("providerProtocol");
+        wire["actions"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("evidenceChannel");
         let historic = RunPlan::from_retained_value(wire.clone()).unwrap();
         assert_eq!(serde_json::to_value(&historic).unwrap(), wire);
         assert_eq!(historic.hash().unwrap(), hash_value(&wire).unwrap());
@@ -6176,6 +6322,83 @@ mod tests {
         assert!(RunPlan::from_retained_value(wire).is_err());
     }
     #[test]
+    fn historical_generic_v2_cannot_borrow_channel_authority() {
+        let current = application_assessment_plan();
+        let mut wire = serde_json::to_value(&current).unwrap();
+        wire["schema"] = HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V2.into();
+        wire["actions"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("evidenceChannel");
+        let historical = RunPlan::from_retained_value(wire.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&historical).unwrap(), wire);
+        assert_eq!(historical.hash().unwrap(), hash_value(&wire).unwrap());
+        assert!(historical.ensure_current().is_err());
+        assert!(RunPlan::from_value(wire.clone()).is_err());
+        assert_ne!(current.hash().unwrap(), historical.hash().unwrap());
+        for value in [
+            serde_json::Value::Null,
+            serde_json::json!(aiw_probe::APPLICATION_ASSESSMENT_CHANNEL_PROTOCOL),
+        ] {
+            let mut mixed = wire.clone();
+            mixed["actions"][0]["evidenceChannel"] = value;
+            assert!(RunPlan::from_retained_value(mixed).is_err());
+        }
+        let mut missing = serde_json::to_value(current).unwrap();
+        missing["actions"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("evidenceChannel");
+        assert!(RunPlan::from_value(missing).is_err());
+    }
+    #[test]
+    fn channel_entropy_attempt_requires_committed_approval_and_is_consumed_once() {
+        let root = root();
+        let plan = application_assessment_plan();
+        let layout = layout(&root, &plan.run_id);
+        let import = wsb_import(&plan);
+        let stage = stage_complete_wsb_import(&layout, &plan, &import);
+        fs::rename(stage, layout.run_dir()).unwrap();
+        let path = layout.run_dir().join(APPLICATION_CHANNEL_START_INTENT_FILE);
+        assert!(
+            layout
+                .consume_application_channel_start(&plan.hash().unwrap())
+                .is_err()
+        );
+        assert!(!path.exists());
+        let approval = ApprovalRecord::for_plan(&plan, "operator", "now").unwrap();
+        layout.write_approval(&approval).unwrap();
+        assert!(
+            layout
+                .consume_application_channel_start(&"e".repeat(64))
+                .is_err()
+        );
+        assert!(!path.exists());
+        let intent = layout
+            .consume_application_channel_start(&plan.hash().unwrap())
+            .unwrap();
+        assert_eq!(
+            layout.read_application_channel_start_intent().unwrap(),
+            intent
+        );
+        let before = fs::read(&path).unwrap();
+        assert!(
+            layout
+                .consume_application_channel_start(&plan.hash().unwrap())
+                .is_err()
+        );
+        assert_eq!(fs::read(&path).unwrap(), before);
+        // A torn consumed intent is retained, never repaired into a fresh key attempt.
+        fs::write(&path, b"{").unwrap();
+        assert!(layout.read_application_channel_start_intent().is_err());
+        assert!(
+            layout
+                .consume_application_channel_start(&plan.hash().unwrap())
+                .is_err()
+        );
+        assert_eq!(fs::read(&path).unwrap(), b"{");
+    }
+    #[test]
     fn historical_generic_status_snapshot_are_no_write_and_lock_mutations_refuse() {
         let root = root();
         let mut wire = serde_json::to_value(application_assessment_plan()).unwrap();
@@ -6184,6 +6407,10 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("providerProtocol");
+        wire["actions"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("evidenceChannel");
         let historic = RunPlan::from_retained_value(wire).unwrap();
         let layout = layout(&root, &historic.run_id);
         let import = wsb_import(&historic);

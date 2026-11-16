@@ -41,7 +41,8 @@ selected policy. It aids comparison, not execution authority. Full approval bind
 project, compiled plan, protected intake, inputs, agent, provider, workspace,
 session and rendered configuration. Start remains separate.
 
-Current generic plans use version 2 and preparation receipts use `v0alpha2`.
+Current generic plans use version 3 and preparation receipts use `v0alpha3`.
+They approve the fixed signed collector channel as well as the workflow.
 Their exact typed Sandbox CLI protocol is part of plan hashing and approval;
 preparation selects it from the verified Store package without claiming a live
 version observation. Start must observe the same held provider version before
@@ -49,7 +50,7 @@ listing or starting sessions. The exact adapters are `0.8.107.0` and
 `0.8.114.0`; ranges, mixed tuples and fallback are rejected. Protocol selection
 does not establish native lifecycle qualification. Recovery additionally
 requires committed approval and the same persisted plan/session protocol before
-querying or stopping anything. Historical generic version-1 plans remain
+querying or stopping anything. Historical generic version-1/version-2 plans remain
 readable with their original hashes but cannot acquire mutation authority,
 including locked cleanup/discard. Preserve those runs and prepare a fresh
 versioned plan; do not relabel or reuse an earlier approval.
@@ -63,13 +64,21 @@ token. Collection stays in the elevated process. No secondary ordinary-user
 observer or application-selected helper runs. Before dispatch, all fifteen
 individual directory/progress-file mutation opens must return access denied under
 the application user. Sharing violations and unknown results block dispatch.
-Mapped host ACLs are never changed to manufacture this boundary.
+Collection and signing stay in a protected guest-local directory outside every
+mapping. Process/thread rights and the creator's primary-token default DACL must
+also pass the closed trustee and native denial gates before process creation.
+Mapped output is hostile transport. Mapped host ACLs are never changed to
+manufacture this boundary.
 
 The collector holds images, creates processes suspended, measures their token,
 image, full-width lifetime and exact owned job, and flushes a pre-resume creation
 record before resume. Progress records survive missing final completion; retained
 reports project them separately as diagnostics. A creation record alone does not
-prove application code ran. Final receipt publication is atomic and last.
+prove application code ran. A final signed terminal, published after all four
+raw artifacts are closed, authenticates the complete journal/result/evidence/
+receipt against the immutable public local Start anchor. Imported signatures
+without that independent anchor establish internal consistency only. See the
+[channel requirements and qualification gates](ASSESSMENT-EVIDENCE-CHANNEL.md).
 
 Retain actual image identity, full-width lifetime, root token, raw exit bits,
 capture prefixes/completeness/overflow, declared file facts and independent

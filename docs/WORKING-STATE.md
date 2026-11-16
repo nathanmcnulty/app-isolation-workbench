@@ -21,8 +21,8 @@ Application facts and exact payloads are run inputs. See
 full descendants/registry/network/DLL/memory evidence, the seven-fixture/holdout
 matrix, W4/W5 and production acceptance remain open.
 
-Exact protocol selection now enters generic version-2 plan hashes and approval;
-preparation receipts use v0alpha2. Start observes the matching held-provider
+Source-71 protocol selection entered generic version-2 plan hashes and approval;
+its preparation receipts use v0alpha2. Start observes the matching held-provider
 version before list/start. Recovery requires committed approval and the exact
 persisted protocol before query/stop. Historical generic v1 remains read-only;
 never relabel it or reuse its approval. Explicit adapters cover 0.8.107.0 and
@@ -99,17 +99,22 @@ jobs at facbfbe; its tested merge has the identical Git tree. Independent CI
 admission confirmed the Windows workspace test exit. No assessment authority or
 dispatch path calls this primitive yet.
 
-The isolated pure signed-record contract adds closed canonical DTOs, an explicit
-trusted-local-Start binding, one bootstrap/ACK attempt, signature/content-chain
-checks, exact wire/artifact budgets and private verified transport wrappers.
-Its synthetic tests are protocol checks, not cryptographic or native proof.
-Consequential source review and hosted Windows checks must complete for this
-slice. No launch, preparation, recovery or report path uses it. It does not
-admit native semantics; the versioned local-collector reducer is still required.
+The isolated pure signed-record contract and CNG components passed consequential
+review and all three hosted Windows CI jobs at 76acd65 (run 43802528747, identical
+tested merge tree). Four CNG and ten protocol tests are included in workspace
+coverage. This proves those components, not application execution.
 
-Next: finish pure-contract review/checks and implement/review the protected guest-local
-collector and authenticated transport. Do not dispatch an application until the
-evidence boundary is proved. Resume
+Current integration is under independent source review: v3 generic
+plans / alpha3 preparation / alpha2 authenticated requests / alpha4 transactions,
+consumed Start intent, public local descriptor/latch, separate provider Start
+marker, guest-local collector, file/process/thread/default-DACL gates, signed
+raw artifact admission and provider-zero retained reports. Historical plan v1/v2
+and transaction alpha2/3 hashes remain separate and read-only. No fresh native
+trial or compilation has validated this integration. Review caught and fixed a
+plan-hash/XML-hash confusion; regression coverage now checks both independently.
+
+Next: finish consequential host/guest review, commit fixes, and use hosted Windows
+CI. Do not dispatch an application until the evidence boundary is proved. Resume
 builds only when permitted storage satisfies preflight. Qualify ordinary/classic positives,
 timeout/overflow negatives and controlled interruption/exact recovery before
 running either external fixture. jq and SQLite payloads/provenance and the same

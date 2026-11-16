@@ -8,10 +8,13 @@ use aiw_provider_wsb::assessment_request::{
 };
 
 pub const APPLICATION_ASSESSMENT_PREPARATION_SCHEMA: &str =
+    "aiw.dev/wsb-preparation/application-assessment/v0alpha3";
+pub const HISTORICAL_APPLICATION_PREPARATION_V2: &str =
     "aiw.dev/wsb-preparation/application-assessment/v0alpha2";
 pub const HISTORICAL_APPLICATION_PREPARATION_V1: &str =
     "aiw.dev/wsb-preparation/application-assessment/v0alpha1";
-pub const APPLICATION_ASSESSMENT_TRUST_DELTA: &str = "stages only reviewed application and fixture content in a fresh offline Windows Sandbox; runs the declared bounded workflow as a fresh standard user under the selected ordinary or classic AppContainer policy; grants only owned guest application/work paths; retains bounded output and independent cleanup facts; no automatic host export, installation, fallback or general compatibility verdict";
+pub const HISTORICAL_APPLICATION_TRUST_DELTA: &str = "stages only reviewed application and fixture content in a fresh offline Windows Sandbox; runs the declared bounded workflow as a fresh standard user under the selected ordinary or classic AppContainer policy; grants only owned guest application/work paths; retains bounded output and independent cleanup facts; no automatic host export, installation, fallback or general compatibility verdict";
+pub const APPLICATION_ASSESSMENT_TRUST_DELTA: &str = "stages reviewed portable application and fixture inputs in one fresh offline Windows Sandbox; generates one ephemeral host collector-key acknowledgement key and nonce at separate Start and retains only public execution bindings; requires protected guest-local collection, authenticated signedCollector/p256-sha256/v1 transport and measured collector file/process/thread guards before any application creation as a fresh standard user under the selected ordinary or classic AppContainer policy; grants only owned guest application/work paths; sampled bounded output monitoring is not a disk quota; retains bounded facts and independent cleanup; no automatic host export, installation, fallback or general compatibility verdict";
 pub const APPLICATION_INTAKE_LEAF: &str = "application-intake";
 pub const APPLICATION_FIXTURES_LEAF: &str = "fixtures";
 
@@ -407,7 +410,7 @@ pub(crate) fn expected_application_run_plan(
 ) -> Result<RunPlan, WsbPreparationError> {
     expected_application_run_plan_for_read(receipt, false)
 }
-fn expected_application_run_plan_for_read(
+pub(super) fn expected_application_run_plan_for_read(
     receipt: &WsbPreparationReceipt,
     historical: bool,
 ) -> Result<RunPlan, WsbPreparationError> {
@@ -425,6 +428,7 @@ fn expected_application_run_plan_for_read(
             PlannedAction::PrepareWorkspace,
             PlannedAction::ExecuteWindowsSandboxApplicationAssessment {
                 provider_protocol: Some(receipt.provider_protocol.clone()),
+                evidence_channel: Some(aiw_probe::APPLICATION_ASSESSMENT_CHANNEL_PROTOCOL.into()),
                 sandbox_plan_sha256: receipt.wsb_plan_sha256.clone(),
                 provider_sha256: receipt.provider.sha256.clone(),
                 guest_agent_sha256: receipt.guest_agent.sha256.clone(),
@@ -442,13 +446,29 @@ fn expected_application_run_plan_for_read(
         ],
     )
     .map_err(|error| WsbPreparationError::Contract(error.to_string()))?;
-    if historical && receipt.schema_version == HISTORICAL_APPLICATION_PREPARATION_V1 {
-        plan.schema = aiw_orchestrator::HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V1.into();
+    if historical
+        && matches!(
+            receipt.schema_version.as_str(),
+            HISTORICAL_APPLICATION_PREPARATION_V1 | HISTORICAL_APPLICATION_PREPARATION_V2
+        )
+    {
+        plan.schema = if receipt.schema_version == HISTORICAL_APPLICATION_PREPARATION_V1 {
+            aiw_orchestrator::HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V1
+        } else {
+            aiw_orchestrator::HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V2
+        }
+        .into();
+        plan.trust_deltas[0] = HISTORICAL_APPLICATION_TRUST_DELTA.into();
         if let PlannedAction::ExecuteWindowsSandboxApplicationAssessment {
-            provider_protocol, ..
+            provider_protocol,
+            evidence_channel,
+            ..
         } = &mut plan.actions[2]
         {
-            *provider_protocol = None;
+            *evidence_channel = None;
+            if receipt.schema_version == HISTORICAL_APPLICATION_PREPARATION_V1 {
+                *provider_protocol = None;
+            }
         }
     }
     Ok(plan)

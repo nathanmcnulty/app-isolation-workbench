@@ -186,6 +186,54 @@ fn static_package_selects_required_protocol_without_claiming_runtime_observation
 }
 
 #[test]
+fn historical_preparations_keep_their_original_plan_without_channel_authority() {
+    let (project, assessment, identity) = fixture();
+    let current = build(&project, assessment, &identity).unwrap();
+    assert_eq!(
+        current.run_plan.schema,
+        aiw_orchestrator::APPLICATION_ASSESSMENT_RUN_PLAN_SCHEMA
+    );
+    let wire = serde_json::to_value(&current.run_plan).unwrap();
+    assert_eq!(
+        wire["actions"][2]["evidenceChannel"],
+        aiw_probe::APPLICATION_ASSESSMENT_CHANNEL_PROTOCOL
+    );
+    for (schema, plan_schema) in [
+        (
+            HISTORICAL_APPLICATION_PREPARATION_V1,
+            aiw_orchestrator::HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V1,
+        ),
+        (
+            HISTORICAL_APPLICATION_PREPARATION_V2,
+            aiw_orchestrator::HISTORICAL_APPLICATION_ASSESSMENT_PLAN_V2,
+        ),
+    ] {
+        let mut historical = current.clone();
+        historical.receipt.schema_version = schema.into();
+        historical.run_plan =
+            expected_application_run_plan_for_read(&historical.receipt, true).unwrap();
+        historical.receipt.run_plan_sha256 = historical.run_plan.hash().unwrap();
+        historical.validate_historical().unwrap();
+        assert!(historical.validate().is_err());
+        assert_eq!(historical.run_plan.schema, plan_schema);
+        assert_eq!(
+            historical.run_plan.trust_deltas[0],
+            HISTORICAL_APPLICATION_TRUST_DELTA
+        );
+        let old = serde_json::to_value(&historical.run_plan).unwrap();
+        assert!(old["actions"][2].get("evidenceChannel").is_none());
+        assert_eq!(
+            old["actions"][2].get("providerProtocol").is_none(),
+            schema == HISTORICAL_APPLICATION_PREPARATION_V1
+        );
+        assert_ne!(
+            historical.run_plan.hash().unwrap(),
+            current.run_plan.hash().unwrap()
+        );
+    }
+}
+
+#[test]
 fn unlisted_portable_plan_is_closed_offline_and_does_not_approve_or_dispatch() {
     let (mut project, assessment, identity) = fixture();
     let first = build(&project, assessment.clone(), &identity).unwrap();

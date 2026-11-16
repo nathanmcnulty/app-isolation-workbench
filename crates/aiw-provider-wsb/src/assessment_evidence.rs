@@ -28,6 +28,122 @@ pub const VERIFIED_ASSESSMENT_EVIDENCE_SCHEMA: &str =
     "aiw.dev/verified-assessment-evidence/v0alpha1";
 pub const VERIFIED_ASSESSMENT_SCOPE: &str = "Only the declared portable CLI workflow and reported elevated-collector/standard-user root-process, capture, work-file and cleanup facts. No general compatibility, isolation, descendants, DLL/memory, brokers, network-denial, loaded-memory or host-coverage verdict; this is bound native evidence, not host attestation.";
 
+fn collector_protection(
+    native: &crate::assessment_observation::AssessmentNativeOutcome,
+) -> Result<Option<bool>, String> {
+    use crate::assessment_observation::{
+        ASSESSMENT_COLLECTOR_PROCESS_RIGHTS, ASSESSMENT_COLLECTOR_PROTECTION_SCHEMA,
+        ASSESSMENT_COLLECTOR_THREAD_RIGHTS, AssessmentCollectorObject as O,
+    };
+    let Some(p) = &native.collector_protection else {
+        return Ok(None);
+    };
+    let setup = native
+        .setup_token
+        .as_ref()
+        .ok_or("collector protection lacks setup token")?;
+    let context = native
+        .standard_context
+        .as_ref()
+        .ok_or("collector protection lacks standard context")?;
+    require(
+        p.schema_version == ASSESSMENT_COLLECTOR_PROTECTION_SCHEMA
+            && p.collector_process_id == setup.process_id
+            && p.collector_process_id != 0
+            && p.signing_thread_id != 0
+            && canonical_birth(&p.collector_creation_time_100ns).is_some(),
+        "collector protection identity/version refused",
+    )?;
+    let mut descriptor_policy = true;
+    for descriptor in [&p.process_security, &p.thread_security] {
+        error(&descriptor.parse_error)?;
+        require(
+            sid(&descriptor.owner_sid)
+                && !descriptor.sddl.is_empty()
+                && descriptor.sddl.len() <= 8192
+                && !descriptor.sddl.contains('\0')
+                && descriptor.trustee_sids.len() <= 64
+                && descriptor.trustee_sids.iter().all(|s| sid(s))
+                && descriptor
+                    .trustee_sids
+                    .windows(2)
+                    .all(|pair| pair[0] < pair[1])
+                && descriptor.sha256 == hex::encode(Sha256::digest(descriptor.sddl.as_bytes())),
+            "collector object security provenance refused",
+        )?;
+        let trusted = |s: &str| s == setup.user_sid || s == "S-1-5-18" || s == "S-1-5-32-544";
+        descriptor_policy &= descriptor.parse_error.is_none()
+            && descriptor.sddl.contains("D:")
+            && descriptor.sddl.contains("S:")
+            && trusted(&descriptor.owner_sid)
+            && descriptor.trustee_sids.iter().all(|s| trusted(s));
+    }
+    let default = &p.primary_default_dacl;
+    error(&default.parse_error)?;
+    require(
+        default.acl_hex.len() <= 16384,
+        "primary default DACL encoding bound",
+    )?;
+    let acl = hex::decode(&default.acl_hex).map_err(|_| "primary default DACL encoding refused")?;
+    require(
+        acl.len() <= 8192
+            && default.acl_hex == hex::encode(&acl)
+            && default.sha256 == hex::encode(Sha256::digest(&acl))
+            && default.trustee_sids.len() <= 64
+            && default.trustee_sids.iter().all(|s| sid(s))
+            && default.trustee_sids.windows(2).all(|p| p[0] < p[1]),
+        "primary default DACL provenance refused",
+    )?;
+    descriptor_policy &= default.parse_error.is_none()
+        && acl.len() >= 8
+        && default
+            .trustee_sids
+            .iter()
+            .all(|s| s == &setup.user_sid || s == "S-1-5-18" || s == "S-1-5-32-544");
+    let expected: Vec<_> = ASSESSMENT_COLLECTOR_PROCESS_RIGHTS
+        .into_iter()
+        .map(|m| (O::CollectorProcess, m))
+        .chain(
+            ASSESSMENT_COLLECTOR_THREAD_RIGHTS
+                .into_iter()
+                .map(|m| (O::SigningThread, m)),
+        )
+        .collect();
+    require(
+        p.access_checks.len() <= expected.len(),
+        "collector object access count refused",
+    )?;
+    let mut allowed = false;
+    let mut all_denied = p.access_checks.len() == expected.len() && descriptor_policy;
+    for (fact, (target, mask)) in p.access_checks.iter().zip(expected) {
+        error(&fact.error)?;
+        require(
+            fact.target == target
+                && fact.access_mask == mask
+                && fact.effective_user_sid == context.user_sid,
+            "collector object access target/order/SID differs",
+        )?;
+        match (fact.native_code, fact.denied, fact.error.is_some()) {
+            (Some(5), Some(true), false) => {}
+            (Some(0), Some(false), false) => {
+                allowed = true;
+                all_denied = false;
+            }
+            (_, None, true) => {
+                all_denied = false;
+            }
+            _ => return Err("collector object access code/claim contradiction".into()),
+        }
+    }
+    Ok(if all_denied {
+        Some(true)
+    } else if allowed {
+        Some(false)
+    } else {
+        None
+    })
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum AssessmentEvidenceStatus {
@@ -117,6 +233,10 @@ pub struct VerifiedAssessmentCoverage {
     pub measured_root_policies: usize,
     pub collector_write_denied: Option<bool>,
     pub collector_unimpersonated: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collector_key_protected: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collector_storage: Option<crate::assessment_channel::ChannelCollectorStorage>,
     pub windows_observed: bool,
     pub gaps: Vec<AssessmentCoverageGap>,
 }
@@ -434,6 +554,16 @@ pub fn verify_assessment_result(
     request: &ApplicationAssessmentGuestRequest,
     result: &ApplicationAssessmentResult,
 ) -> Result<VerifiedAssessmentEvidence, String> {
+    require(
+        request.schema_version == crate::assessment_request::APPLICATION_ASSESSMENT_REQUEST_SCHEMA,
+        "authenticated result requires verified signed progress",
+    )?;
+    verify_assessment_result_inner(request, result)
+}
+fn verify_assessment_result_inner(
+    request: &ApplicationAssessmentGuestRequest,
+    result: &ApplicationAssessmentResult,
+) -> Result<VerifiedAssessmentEvidence, String> {
     use AssessmentFactStatus as F;
     request.validate()?;
     let serialized = serde_json::to_vec(result).map_err(|e| e.to_string())?;
@@ -443,12 +573,24 @@ pub fn verify_assessment_result(
     )?;
     let plan = &request.assessment;
     let native = &result.native;
+    let authenticated = request.schema_version
+        == crate::assessment_request::APPLICATION_ASSESSMENT_REQUEST_V2_SCHEMA;
     require(
-        result.schema_version == APPLICATION_ASSESSMENT_RESULT_SCHEMA
+        result.schema_version
+            == if authenticated {
+                crate::assessment_observation::APPLICATION_ASSESSMENT_RESULT_V2_SCHEMA
+            } else {
+                APPLICATION_ASSESSMENT_RESULT_SCHEMA
+            }
             && result.run_id == request.run_id
             && result.request_sha256 == request.request_sha256
             && result.assessment_sha256 == request.assessment_sha256
-            && native.schema_version == ASSESSMENT_NATIVE_OBSERVATION_SCHEMA
+            && native.schema_version
+                == if authenticated {
+                    crate::assessment_observation::ASSESSMENT_NATIVE_OBSERVATION_V2_SCHEMA
+                } else {
+                    ASSESSMENT_NATIVE_OBSERVATION_SCHEMA
+                }
             && native.semantic_sha256 == plan.semantic_sha256
             && native.mode == plan.mode
             && native.scope == ASSESSMENT_SCOPE,
@@ -475,6 +617,21 @@ pub fn verify_assessment_result(
         context.validate()?;
     }
     let collector_write_denied = collector_denial(native)?;
+    let protected = if authenticated {
+        collector_protection(native)?
+    } else {
+        require(
+            native.collector_protection.is_none(),
+            "historical result cannot claim collector key protection",
+        )?;
+        None
+    };
+    require(
+        !authenticated
+            || (!native.driver_completed && native.steps.iter().all(|s| s.process.is_none()))
+            || protected == Some(true),
+        "application/completed driver precedes key-protection denial gate",
+    )?;
     if let Some(token) = &native.setup_token {
         token_shape(token)?;
     }
@@ -972,7 +1129,12 @@ pub fn verify_assessment_result(
         AssessmentEvidenceStatus::WorkflowPassed
     };
     Ok(VerifiedAssessmentEvidence {
-        schema_version: VERIFIED_ASSESSMENT_EVIDENCE_SCHEMA.into(),
+        schema_version: if authenticated {
+            "aiw.dev/verified-assessment-evidence/v0alpha2"
+        } else {
+            VERIFIED_ASSESSMENT_EVIDENCE_SCHEMA
+        }
+        .into(),
         scope: VERIFIED_ASSESSMENT_SCOPE.into(),
         semantic_sha256: plan.semantic_sha256.clone(),
         mode: plan.mode,
@@ -989,6 +1151,12 @@ pub fn verify_assessment_result(
             measured_root_policies: root_count,
             collector_write_denied,
             collector_unimpersonated: native.collector_unimpersonated,
+            collector_key_protected: protected,
+            collector_storage: if authenticated {
+                native.collector_protection.as_ref().map(|p| p.storage)
+            } else {
+                None
+            },
             windows_observed: native.windows.is_some(),
             gaps,
         },
@@ -1040,6 +1208,15 @@ pub fn verify_assessment_evidence(
     request: &ApplicationAssessmentGuestRequest,
     result: &ApplicationAssessmentResult,
 ) -> Result<VerifiedAssessmentEvidence, String> {
+    verify_assessment_evidence_reference(bytes, expected_root, request, result)?;
+    verify_assessment_result(request, result)
+}
+fn verify_assessment_evidence_reference(
+    bytes: &[u8],
+    expected_root: &str,
+    request: &ApplicationAssessmentGuestRequest,
+    result: &ApplicationAssessmentResult,
+) -> Result<(), String> {
     require(
         bytes.len() <= 1024 * 1024 && lower_hex(expected_root, 64),
         "evidence log/root exceeds contract",
@@ -1060,7 +1237,7 @@ pub fn verify_assessment_evidence(
         reference == assessment_result_reference(request, result)?,
         "evidence reference differs from actual full result",
     )?;
-    verify_assessment_result(request, result)
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
@@ -1096,18 +1273,62 @@ pub fn parse_assessment_progress(
     bytes: &[u8],
     request: &ApplicationAssessmentGuestRequest,
 ) -> Result<AssessmentProgressPrefix, String> {
+    request.validate()?;
+    require(
+        request.schema_version == crate::assessment_request::APPLICATION_ASSESSMENT_REQUEST_SCHEMA,
+        "historical raw progress requires historical request",
+    )?;
+    require(
+        !bytes.is_empty() && bytes.len() <= 16 * 1024 * 1024,
+        "progress bytes exceed bound or are absent",
+    )?;
+    let mut events = Vec::new();
+    let mut trailing = false;
+    for line in bytes.split_inclusive(|b| *b == b'\n') {
+        if !line.ends_with(b"\n") {
+            require(
+                line.len() <= 8 * 1024 * 1024,
+                "incomplete progress line exceeds bound",
+            )?;
+            trailing = true;
+            break;
+        }
+        let line = &line[..line.len() - 1];
+        require(
+            !line.is_empty() && line.len() <= 8 * 1024 * 1024 && events.len() < 512,
+            "progress record/count bound",
+        )?;
+        events.push(
+            serde_json::from_slice(line)
+                .map_err(|_| "strict progress record refused".to_owned())?,
+        );
+    }
+    reduce_progress_events(events, trailing, request, ProgressPolicy::LegacyV1)
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ProgressPolicy {
+    LegacyV1,
+    AuthenticatedV2,
+}
+fn reduce_progress_events(
+    events: Vec<crate::assessment_observation::AssessmentProgressEvent>,
+    trailing: bool,
+    request: &ApplicationAssessmentGuestRequest,
+    policy: ProgressPolicy,
+) -> Result<AssessmentProgressPrefix, String> {
     use crate::assessment_observation::{
         ASSESSMENT_PROGRESS_SCHEMA, AssessmentAccountCleanup, AssessmentNativeOutcome,
         AssessmentProgressEvent as E,
     };
     request.validate()?;
-    require(
-        !bytes.is_empty() && bytes.len() <= 16 * 1024 * 1024,
-        "progress bytes exceed bound or are absent",
-    )?;
     let plan = &request.assessment;
     let mut native = AssessmentNativeOutcome {
-        schema_version: ASSESSMENT_NATIVE_OBSERVATION_SCHEMA.into(),
+        schema_version: if policy == ProgressPolicy::LegacyV1 {
+            ASSESSMENT_NATIVE_OBSERVATION_SCHEMA
+        } else {
+            crate::assessment_observation::ASSESSMENT_NATIVE_OBSERVATION_V2_SCHEMA
+        }
+        .into(),
         semantic_sha256: plan.semantic_sha256.clone(),
         mode: plan.mode,
         windows: None,
@@ -1119,6 +1340,7 @@ pub fn parse_assessment_progress(
         collector_write_denied: None,
         collector_access_denials: vec![],
         collector_unimpersonated: None,
+        collector_protection: None,
         profile_sid: None,
         account_cleanup: AssessmentAccountCleanup::default(),
         profile_cleanup: None,
@@ -1129,27 +1351,11 @@ pub fn parse_assessment_progress(
     let mut records = 0;
     let mut context_seen = 0;
     let mut terminal = false;
-    let mut trailing = false;
     let mut pending: Option<AssessmentStartedProcess> = None;
-    for line in bytes.split_inclusive(|b| *b == b'\n') {
-        if !line.ends_with(b"\n") {
-            require(
-                line.len() <= 8 * 1024 * 1024,
-                "incomplete progress line exceeds bound",
-            )?;
-            trailing = true;
-            break;
-        }
+    for event in events {
         require(!terminal, "progress record follows terminal")?;
-        let line = &line[..line.len() - 1];
-        require(
-            !line.is_empty() && line.len() <= 8 * 1024 * 1024,
-            "progress record length invalid",
-        )?;
         records += 1;
         require(records <= 512, "too many progress records")?;
-        let event: E = serde_json::from_slice(line)
-            .map_err(|e| format!("strict progress record refused: {e}"))?;
         if records == 1 {
             require(
                 matches!(&event, E::Header { .. }),
@@ -1170,7 +1376,12 @@ pub fn parse_assessment_progress(
             } => {
                 require(
                     records == 1
-                        && schema_version == ASSESSMENT_PROGRESS_SCHEMA
+                        && schema_version
+                            == if policy == ProgressPolicy::LegacyV1 {
+                                ASSESSMENT_PROGRESS_SCHEMA
+                            } else {
+                                crate::assessment_channel::CHANNEL_PROGRESS_SCHEMA
+                            }
                         && run_id == request.run_id
                         && sandbox_id == request.sandbox_id
                         && request_sha256 == request.request_sha256
@@ -1245,6 +1456,18 @@ pub fn parse_assessment_progress(
                 )?;
                 native.profile_sid = Some(profile_sid);
             }
+            E::CollectorProtection { observation } => {
+                require(
+                    policy == ProgressPolicy::AuthenticatedV2
+                        && context_seen == 2
+                        && native.collector_protection.is_none()
+                        && native.steps.is_empty()
+                        && pending.is_none(),
+                    "collector protection is legacy/duplicate/late",
+                )?;
+                native.collector_protection = Some(*observation);
+                collector_protection(&native)?;
+            }
             E::LaunchStarted { index, process } => {
                 require(
                     context_seen == 2
@@ -1303,6 +1526,12 @@ pub fn parse_assessment_progress(
                     collector_denial(&native)? == Some(true),
                     "creation record precedes mandatory complete access-denial gate",
                 )?;
+                if policy == ProgressPolicy::AuthenticatedV2 {
+                    require(
+                        collector_protection(&native)? == Some(true),
+                        "created root precedes collector key-protection gate",
+                    )?;
+                }
                 pending = Some(AssessmentStartedProcess { index, process });
             }
             E::Step { observation } => {
@@ -1385,7 +1614,12 @@ pub fn parse_assessment_progress(
     }
     Ok(AssessmentProgressPrefix {
         result: ApplicationAssessmentResult {
-            schema_version: APPLICATION_ASSESSMENT_RESULT_SCHEMA.into(),
+            schema_version: if policy == ProgressPolicy::LegacyV1 {
+                APPLICATION_ASSESSMENT_RESULT_SCHEMA
+            } else {
+                crate::assessment_observation::APPLICATION_ASSESSMENT_RESULT_V2_SCHEMA
+            }
+            .into(),
             run_id: request.run_id.clone(),
             request_sha256: request.request_sha256.clone(),
             assessment_sha256: request.assessment_sha256.clone(),
@@ -1414,6 +1648,196 @@ pub fn verify_assessment_progress(
     )?;
     verify_assessment_result(request, result)?;
     Ok(parsed)
+}
+
+/// Only records returned by the same CNG-verified session anchored in trusted
+/// local Start state are admissible. A fabricated imported key is not an anchor.
+/// Preserve raw wire association; never feed signed JSON into the v1 parser.
+pub fn parse_authenticated_assessment_progress(
+    raw_wire: &[u8],
+    records: &[crate::assessment_channel::VerifiedChannelRecord],
+    request: &ApplicationAssessmentGuestRequest,
+) -> Result<AssessmentProgressPrefix, String> {
+    use crate::assessment_channel::{
+        AssessmentChannelPayload, CHANNEL_PROGRESS_SCHEMA, ChannelRecordKind,
+    };
+    let expected = request.channel_binding()?;
+    require(
+        !raw_wire.is_empty()
+            && raw_wire.len() <= 16 * 1024 * 1024
+            && !records.is_empty()
+            && records.len() <= 512,
+        "authenticated progress raw/count bound",
+    )?;
+    let mut events = Vec::new();
+    let mut trailing = false;
+    let mut previous = None;
+    let mut guest_key = None;
+    for line in raw_wire.split_inclusive(|b| *b == b'\n') {
+        require(
+            line.len() <= 8 * 1024 * 1024,
+            "authenticated progress line bound",
+        )?;
+        if !line.ends_with(b"\n") {
+            trailing = true;
+            break;
+        }
+        let verified = records
+            .get(events.len())
+            .ok_or("raw progress has unverified complete record")?;
+        let record = verified.record();
+        require(
+            verified.wire_sha256() == hex::encode(Sha256::digest(line))
+                && record.input.kind == ChannelRecordKind::Progress
+                && record.input.context_sha256 == expected.context_sha256()?
+                && record.input.sequence == events.len() as u64 + 1,
+            "authenticated progress bytes/context/sequence differ",
+        )?;
+        if let Some(parent) = &previous {
+            require(
+                &record.input.previous_commitment == parent,
+                "authenticated progress chain differs",
+            )?;
+        }
+        if let Some(key) = &guest_key {
+            require(
+                &record.input.guest_key_sha256 == key,
+                "authenticated progress signing key changed",
+            )?;
+        }
+        match &record.payload {
+            AssessmentChannelPayload::Progress {
+                schema_version,
+                event,
+            } => {
+                require(
+                    schema_version == CHANNEL_PROGRESS_SCHEMA,
+                    "authenticated progress payload version differs",
+                )?;
+                events.push(event.as_ref().clone());
+            }
+            _ => return Err("verified record is not progress".into()),
+        }
+        previous = Some(verified.commitment().to_owned());
+        guest_key = Some(record.input.guest_key_sha256.clone());
+    }
+    require(
+        events.len() == records.len(),
+        "verified progress records absent from raw bytes",
+    )?;
+    reduce_progress_events(events, trailing, request, ProgressPolicy::AuthenticatedV2)
+}
+pub fn verify_authenticated_assessment_progress(
+    raw_wire: &[u8],
+    records: &[crate::assessment_channel::VerifiedChannelRecord],
+    request: &ApplicationAssessmentGuestRequest,
+    result: &ApplicationAssessmentResult,
+) -> Result<AssessmentProgressPrefix, String> {
+    let parsed = parse_authenticated_assessment_progress(raw_wire, records, request)?;
+    require(
+        parsed.terminal_present
+            && !parsed.trailing_incomplete
+            && parsed.pending_launch.is_none()
+            && parsed.result == *result,
+        "authenticated journal is partial or differs from result",
+    )?;
+    verify_assessment_result_inner(request, result)?;
+    Ok(parsed)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn verify_authenticated_assessment_evidence(
+    terminal: &crate::assessment_channel::VerifiedChannelRecord,
+    bytes: &[u8],
+    expected_root: &str,
+    raw_result: &[u8],
+    raw_receipt: &[u8],
+    raw_progress: &[u8],
+    records: &[crate::assessment_channel::VerifiedChannelRecord],
+    request: &ApplicationAssessmentGuestRequest,
+    result: &ApplicationAssessmentResult,
+) -> Result<VerifiedAssessmentEvidence, String> {
+    use crate::assessment_channel::{
+        AssessmentChannelPayload, ChannelArtifactRole, ChannelRecordKind,
+    };
+    require(
+        terminal.record().input.kind == ChannelRecordKind::Terminal
+            && terminal.record().input.context_sha256
+                == request.channel_binding()?.context_sha256()?
+            && records.first().is_some_and(|r| {
+                r.record().input.guest_key_sha256 == terminal.record().input.guest_key_sha256
+            }),
+        "terminal key/context/type differs from verified progress",
+    )?;
+    let manifest = match &terminal.record().payload {
+        AssessmentChannelPayload::Terminal {
+            request_sha256,
+            assessment_sha256,
+            artifacts,
+            evidence_root_hash,
+            last_progress_sequence,
+            last_progress_commitment,
+            ..
+        } => {
+            require(
+                request_sha256 == &request.request_sha256
+                    && assessment_sha256 == &result.assessment_sha256
+                    && evidence_root_hash == expected_root
+                    && records.last().is_some_and(|last| {
+                        last.record().input.sequence == *last_progress_sequence
+                            && last.commitment() == last_progress_commitment
+                    })
+                    && Some(terminal.record().input.sequence)
+                        == last_progress_sequence.checked_add(1),
+                "signed terminal result/evidence binding differs",
+            )?;
+            artifacts
+        }
+        _ => return Err("verified terminal payload absent".into()),
+    };
+    require(
+        raw_result.len() <= 16 * 1024 * 1024 && raw_receipt.len() <= 1024 * 1024,
+        "raw authenticated result/receipt bound",
+    )?;
+    let parsed: ApplicationAssessmentResult =
+        serde_json::from_slice(raw_result).map_err(|_| "strict raw result refused")?;
+    require(
+        &parsed == result,
+        "typed result differs from original raw artifact",
+    )?;
+    let receipt: crate::WindowsSandboxCompletionReceipt =
+        serde_json::from_slice(raw_receipt).map_err(|_| "strict raw receipt refused")?;
+    require(
+        receipt.schema_version == crate::WINDOWS_SANDBOX_COMPLETION_RECEIPT_SCHEMA_VERSION
+            && (receipt.status == crate::CompletionStatus::Succeeded)
+                == result.native.driver_completed
+            && receipt.run_id == request.run_id
+            && receipt.sandbox_id == request.sandbox_id
+            && receipt.config_sha256 == request.config_sha256
+            && receipt.agent_sha256 == request.agent_sha256
+            && receipt.request_sha256 == request.request_sha256
+            && receipt.evidence_root_hash == expected_root,
+        "original receipt execution binding differs",
+    )?;
+    for (role, actual) in [
+        (ChannelArtifactRole::Result, raw_result),
+        (ChannelArtifactRole::Evidence, bytes),
+        (ChannelArtifactRole::Completion, raw_receipt),
+        (ChannelArtifactRole::Progress, raw_progress),
+    ] {
+        let declared = manifest
+            .iter()
+            .find(|a| a.role == role)
+            .ok_or("signed terminal role absent")?;
+        require(
+            declared.size_bytes == actual.len() as u64
+                && declared.sha256 == hex::encode(Sha256::digest(actual)),
+            "signed terminal raw artifact digest/size differs",
+        )?;
+    }
+    verify_assessment_evidence_reference(bytes, expected_root, request, result)?;
+    verify_authenticated_assessment_progress(raw_progress, records, request, result)?;
+    verify_assessment_result_inner(request, result)
 }
 
 #[cfg(test)]
@@ -1605,6 +2029,7 @@ mod tests {
                 collector_write_denied: Some(true),
                 collector_access_denials: denials(),
                 collector_unimpersonated: Some(true),
+                collector_protection: None,
                 account_cleanup: AssessmentAccountCleanup {
                     environment_destroyed: Some(true),
                     profile_unloaded: Some(true),
@@ -2119,7 +2544,12 @@ mod tests {
         let n = &result.native;
         let mut events = vec![
             E::Header {
-                schema_version: ASSESSMENT_PROGRESS_SCHEMA.into(),
+                schema_version: if request.channel.is_some() {
+                    crate::assessment_channel::CHANNEL_PROGRESS_SCHEMA
+                } else {
+                    ASSESSMENT_PROGRESS_SCHEMA
+                }
+                .into(),
                 run_id: request.run_id.clone(),
                 sandbox_id: request.sandbox_id.clone(),
                 request_sha256: request.request_sha256.clone(),
@@ -2146,6 +2576,11 @@ mod tests {
                 .cloned()
                 .map(|observation| E::CollectorAccess { observation }),
         );
+        if let Some(protection) = &n.collector_protection {
+            events.push(E::CollectorProtection {
+                observation: Box::new(protection.clone()),
+            });
+        }
         if let Some(profile_sid) = &n.profile_sid {
             events.push(E::ProfileCreated {
                 profile_sid: profile_sid.clone(),
@@ -2316,5 +2751,409 @@ mod tests {
         let mut repeated = bytes.clone();
         repeated.extend_from_slice(&bytes);
         assert!(verify_assessment_evidence(&repeated, &root, &request, &changed).is_err());
+    }
+    fn public_key(fill: u8) -> String {
+        let mut b = [fill; 72];
+        b[..8].copy_from_slice(&[0x45, 0x43, 0x53, 0x31, 32, 0, 0, 0]);
+        hex::encode(b)
+    }
+    fn authenticated_fixture() -> (
+        ApplicationAssessmentGuestRequest,
+        ApplicationAssessmentResult,
+    ) {
+        use crate::assessment_request::{
+            ASSESSMENT_CHANNEL_REQUEST_SCHEMA, AssessmentChannelRequest,
+        };
+        let old = request(false);
+        let request = ApplicationAssessmentGuestRequest::new_authenticated(
+            old.run_id,
+            old.sandbox_id,
+            old.config_sha256,
+            old.agent_sha256,
+            old.project_revision_sha256,
+            old.assessment,
+            AssessmentChannelRequest {
+                schema_version: ASSESSMENT_CHANNEL_REQUEST_SCHEMA.into(),
+                channel_protocol: crate::assessment_channel::CHANNEL_PROTOCOL.into(),
+                plan_sha256: "d".repeat(64),
+                provider_sha256: "e".repeat(64),
+                provider_protocol: aiw_probe::WindowsSandboxCliAdapter::V0_8_114_0.protocol(),
+                workspace_identity_sha256: "f".repeat(64),
+                nonce_hex: "1".repeat(64),
+                host_ack_public_key_hex: public_key(1),
+            },
+        )
+        .unwrap();
+        let mut result = result(&request);
+        result.schema_version = APPLICATION_ASSESSMENT_RESULT_V2_SCHEMA.into();
+        result.native.schema_version = ASSESSMENT_NATIVE_OBSERVATION_V2_SCHEMA.into();
+        let setup = result.native.setup_token.as_ref().unwrap();
+        let context = result.native.standard_context.as_ref().unwrap();
+        let sddl = format!(
+            "O:{}D:(A;;GA;;;{})S:(ML;;NW;;;HI)",
+            setup.user_sid, setup.user_sid
+        );
+        let security = AssessmentCollectorObjectSecurity {
+            owner_sid: setup.user_sid.clone(),
+            sha256: hex::encode(Sha256::digest(sddl.as_bytes())),
+            sddl,
+            trustee_sids: vec![setup.user_sid.clone()],
+            parse_error: None,
+        };
+        let checks = ASSESSMENT_COLLECTOR_PROCESS_RIGHTS
+            .into_iter()
+            .map(|m| (AssessmentCollectorObject::CollectorProcess, m))
+            .chain(
+                ASSESSMENT_COLLECTOR_THREAD_RIGHTS
+                    .into_iter()
+                    .map(|m| (AssessmentCollectorObject::SigningThread, m)),
+            )
+            .map(|(target, access_mask)| AssessmentCollectorObjectAccess {
+                effective_user_sid: context.user_sid.clone(),
+                target,
+                access_mask,
+                native_code: Some(5),
+                denied: Some(true),
+                error: None,
+            })
+            .collect();
+        result.native.collector_protection = Some(AssessmentCollectorProtection {
+            schema_version: ASSESSMENT_COLLECTOR_PROTECTION_SCHEMA.into(),
+            storage: crate::assessment_channel::ChannelCollectorStorage::ProtectedGuestLocal,
+            collector_process_id: setup.process_id,
+            collector_creation_time_100ns: "133000000000000001".into(),
+            signing_thread_id: 51,
+            process_security: security.clone(),
+            thread_security: security,
+            primary_default_dacl: AssessmentCollectorDefaultDacl {
+                acl_hex: "0200080000000000".into(),
+                sha256: hex::encode(Sha256::digest([2u8, 0, 8, 0, 0, 0, 0, 0])),
+                trustee_sids: vec![],
+                parse_error: None,
+            },
+            access_checks: checks,
+        });
+        (request, result)
+    }
+    // NOT cryptography: permits exercising verified-wrapper associations without
+    // invoking CNG/native processes. Native signature proof is separately gated.
+    struct SyntheticChannel;
+    fn fake_signature(k: &[u8; 72], d: &[u8; 32]) -> [u8; 64] {
+        let mut h = Sha256::new();
+        h.update(k);
+        h.update(d);
+        let mut out = [0; 64];
+        out[..32].copy_from_slice(&h.finalize());
+        out
+    }
+    impl crate::assessment_channel::AssessmentChannelVerifier for SyntheticChannel {
+        fn verify_digest(&self, k: &[u8; 72], d: &[u8; 32], s: &[u8; 64]) -> Result<(), String> {
+            require(
+                *s == fake_signature(k, d),
+                "synthetic channel signature differs",
+            )
+        }
+    }
+    fn authenticated_records(
+        request: &ApplicationAssessmentGuestRequest,
+        result: &ApplicationAssessmentResult,
+    ) -> (
+        Vec<u8>,
+        Vec<crate::assessment_channel::VerifiedChannelRecord>,
+        crate::assessment_channel::AssessmentChannelSession,
+    ) {
+        use crate::assessment_channel::*;
+        let binding = request.channel_binding().unwrap();
+        let key = public_key(2);
+        let keybytes = public_key_bytes(&key).unwrap();
+        let sign = |intent: ChannelSigningIntent, k: &[u8; 72]| {
+            let d = intent.signing_digest().unwrap();
+            intent
+                .with_signature(&fake_signature(k, &d))
+                .canonical_wire()
+                .unwrap()
+        };
+        let bootstrap = sign(
+            signing_intent(
+                &binding,
+                &key,
+                0,
+                &"0".repeat(64),
+                AssessmentChannelPayload::Bootstrap {
+                    schema_version: CHANNEL_SCHEMA.into(),
+                    binding: Box::new(binding.clone()),
+                    guest_public_key_hex: key.clone(),
+                    collector_token: Box::new(result.native.setup_token.clone().unwrap()),
+                    collector_storage: ChannelCollectorStorage::ProtectedGuestLocal,
+                },
+            )
+            .unwrap(),
+            &keybytes,
+        );
+        let mut state = AssessmentChannelSession::new(binding.clone()).unwrap();
+        state
+            .latch_bootstrap(&bootstrap, &SyntheticChannel)
+            .unwrap();
+        let ack = sign(
+            state.begin_ack().unwrap(),
+            &public_key_bytes(&binding.host_ack_public_key_hex).unwrap(),
+        );
+        let accepted = state.accept_ack(&ack, &SyntheticChannel).unwrap();
+        let mut previous = accepted.commitment().to_owned();
+        let mut raw = vec![];
+        let mut records = vec![];
+        for (index, event) in progress(request, result).into_iter().enumerate() {
+            let mut wire = sign(
+                signing_intent(
+                    &binding,
+                    &key,
+                    index as u64 + 1,
+                    &previous,
+                    AssessmentChannelPayload::Progress {
+                        schema_version: CHANNEL_PROGRESS_SCHEMA.into(),
+                        event: Box::new(event),
+                    },
+                )
+                .unwrap(),
+                &keybytes,
+            );
+            wire.push(b'\n');
+            let record = state
+                .accept_progress_line(&wire, &SyntheticChannel)
+                .unwrap();
+            previous = record.commitment().to_owned();
+            raw.extend_from_slice(&wire);
+            records.push(record);
+        }
+        (raw, records, state)
+    }
+    #[test]
+    fn authenticated_v2_needs_verified_raw_association_and_keeps_v1_read_only() {
+        let (request, result) = authenticated_fixture();
+        let (raw, records, _) = authenticated_records(&request, &result);
+        verify_authenticated_assessment_progress(&raw, &records, &request, &result).unwrap();
+        assert!(verify_assessment_result(&request, &result).is_err());
+        assert!(parse_assessment_progress(&raw, &request).is_err());
+        let mut changed = raw.clone();
+        changed[0] = b' ';
+        assert!(parse_authenticated_assessment_progress(&changed, &records, &request).is_err());
+        assert!(
+            parse_authenticated_assessment_progress(&raw, &records[..records.len() - 1], &request)
+                .is_err()
+        );
+        let mut trailing = raw.clone();
+        trailing.push(b'{');
+        let prefix =
+            parse_authenticated_assessment_progress(&trailing, &records, &request).unwrap();
+        assert!(prefix.trailing_incomplete);
+        assert!(
+            verify_authenticated_assessment_progress(&trailing, &records, &request, &result)
+                .is_err()
+        );
+        let old = self::request(false);
+        let historical = self::result(&old);
+        verify_assessment_progress(
+            &progress_bytes(&progress(&old, &historical)),
+            &old,
+            &historical,
+        )
+        .unwrap();
+    }
+    #[test]
+    fn protection_rejects_unknown_package_grants_and_every_missing_or_allowed_right() {
+        let (request, mut result) = authenticated_fixture();
+        assert_eq!(collector_protection(&result.native).unwrap(), Some(true));
+        for default_error in [false, true] {
+            let mut changed = result.clone();
+            let d = &mut changed
+                .native
+                .collector_protection
+                .as_mut()
+                .unwrap()
+                .primary_default_dacl;
+            if default_error {
+                d.parse_error = Some("NULL primary default DACL".into());
+                d.acl_hex.clear();
+                d.sha256 = hex::encode(Sha256::digest([]));
+            } else {
+                d.trustee_sids.push("S-1-15-2-1".into());
+            }
+            assert_eq!(collector_protection(&changed.native).unwrap(), None);
+            assert!(verify_assessment_result_inner(&request, &changed).is_err());
+        }
+        for index in 0..14 {
+            let mut changed = result.clone();
+            let p = changed.native.collector_protection.as_mut().unwrap();
+            p.access_checks[index].native_code = Some(0);
+            p.access_checks[index].denied = Some(false);
+            assert_eq!(collector_protection(&changed.native).unwrap(), Some(false));
+            assert!(verify_assessment_result_inner(&request, &changed).is_err());
+        }
+        result
+            .native
+            .collector_protection
+            .as_mut()
+            .unwrap()
+            .process_security
+            .trustee_sids
+            .push("S-1-15-2-1".into());
+        result
+            .native
+            .collector_protection
+            .as_mut()
+            .unwrap()
+            .process_security
+            .trustee_sids
+            .sort();
+        assert_eq!(collector_protection(&result.native).unwrap(), None);
+        assert!(verify_assessment_result_inner(&request, &result).is_err());
+        result.native.steps.clear();
+        result.native.assertions.clear();
+        result.native.driver_completed = false;
+        result.native.driver_errors = vec!["unrecognized descriptor; no app".into()];
+        verify_assessment_result_inner(&request, &result).unwrap();
+        let p = result.native.collector_protection.as_mut().unwrap();
+        p.process_security.parse_error = Some("NULL DACL".into());
+        p.process_security.trustee_sids.clear();
+        assert_eq!(collector_protection(&result.native).unwrap(), None);
+        let old = self::request(false);
+        let old_result = self::result(&old);
+        let mut value = serde_json::to_value(old_result.native).unwrap();
+        value["collectorProtection"] = serde_json::Value::Null;
+        assert!(serde_json::from_value::<AssessmentNativeOutcome>(value).is_err());
+    }
+    #[test]
+    fn authenticated_terminal_binds_original_json_bytes_including_whitespace() {
+        use crate::assessment_channel::*;
+        let (request, result) = authenticated_fixture();
+        let (raw_progress, records, mut state) = authenticated_records(&request, &result);
+        let mut log = aiw_evidence::EvidenceLog::new();
+        log.append(aiw_evidence::EvidenceEvent {
+            observed_utc: "untrusted-time".into(),
+            kind: APPLICATION_ASSESSMENT_EVIDENCE_EVENT.into(),
+            source: "aiw-guest-agent".into(),
+            payload: serde_json::to_value(assessment_result_reference(&request, &result).unwrap())
+                .unwrap(),
+        })
+        .unwrap();
+        let mut evidence = vec![];
+        for record in log.records() {
+            serde_json::to_writer(&mut evidence, record).unwrap();
+            evidence.push(b'\n');
+        }
+        let root = log.manifest().unwrap().root_hash;
+        let mut raw_result = serde_json::to_vec_pretty(&result).unwrap();
+        raw_result.extend_from_slice(b"\r\n");
+        let receipt = crate::WindowsSandboxCompletionReceipt {
+            schema_version: crate::WINDOWS_SANDBOX_COMPLETION_RECEIPT_SCHEMA_VERSION.into(),
+            run_id: request.run_id.clone(),
+            sandbox_id: request.sandbox_id.clone(),
+            config_sha256: request.config_sha256.clone(),
+            request_sha256: request.request_sha256.clone(),
+            agent_sha256: request.agent_sha256.clone(),
+            status: crate::CompletionStatus::Succeeded,
+            exit_code: 0,
+            evidence_root_hash: root.clone(),
+            artifacts: vec![],
+        };
+        let mut raw_receipt = serde_json::to_vec_pretty(&receipt).unwrap();
+        raw_receipt.push(b'\n');
+        let artifacts = [
+            (
+                ChannelArtifactRole::Result,
+                "assessment-result.json",
+                raw_result.as_slice(),
+            ),
+            (
+                ChannelArtifactRole::Evidence,
+                "evidence.jsonl",
+                evidence.as_slice(),
+            ),
+            (
+                ChannelArtifactRole::Completion,
+                "completion.json",
+                raw_receipt.as_slice(),
+            ),
+            (
+                ChannelArtifactRole::Progress,
+                CHANNEL_PROGRESS_LEAF,
+                raw_progress.as_slice(),
+            ),
+        ]
+        .into_iter()
+        .map(|(role, path, b)| ChannelArtifact {
+            role,
+            path: path.into(),
+            size_bytes: b.len() as u64,
+            sha256: hex::encode(Sha256::digest(b)),
+        })
+        .collect();
+        let last = records.last().unwrap();
+        let key = public_key(2);
+        let intent = signing_intent(
+            &request.channel_binding().unwrap(),
+            &key,
+            last.record().input.sequence + 1,
+            last.commitment(),
+            AssessmentChannelPayload::Terminal {
+                schema_version: CHANNEL_SCHEMA.into(),
+                request_sha256: request.request_sha256.clone(),
+                assessment_sha256: request.assessment_sha256.clone(),
+                artifacts,
+                evidence_root_hash: root.clone(),
+                last_progress_sequence: last.record().input.sequence,
+                last_progress_commitment: last.commitment().into(),
+            },
+        )
+        .unwrap();
+        let digest = intent.signing_digest().unwrap();
+        let wire = intent
+            .with_signature(&fake_signature(&public_key_bytes(&key).unwrap(), &digest))
+            .canonical_wire()
+            .unwrap();
+        let terminal = state.accept_terminal(&wire, &SyntheticChannel).unwrap();
+        verify_authenticated_assessment_evidence(
+            &terminal,
+            &evidence,
+            &root,
+            &raw_result,
+            &raw_receipt,
+            &raw_progress,
+            &records,
+            &request,
+            &result,
+        )
+        .unwrap();
+        // Semantically identical reserialization is NOT the signed raw artifact.
+        let canonical = serde_json::to_vec(&result).unwrap();
+        assert!(
+            verify_authenticated_assessment_evidence(
+                &terminal,
+                &evidence,
+                &root,
+                &canonical,
+                &raw_receipt,
+                &raw_progress,
+                &records,
+                &request,
+                &result
+            )
+            .is_err()
+        );
+        raw_receipt.push(b' ');
+        assert!(
+            verify_authenticated_assessment_evidence(
+                &terminal,
+                &evidence,
+                &root,
+                &raw_result,
+                &raw_receipt,
+                &raw_progress,
+                &records,
+                &request,
+                &result
+            )
+            .is_err()
+        );
     }
 }

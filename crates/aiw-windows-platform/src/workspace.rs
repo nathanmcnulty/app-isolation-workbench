@@ -1,5 +1,6 @@
 use std::ffi::c_void;
 use std::fs::{File, OpenOptions};
+use std::io::{Read, Write};
 use std::mem::size_of;
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::fs::OpenOptionsExt;
@@ -849,6 +850,151 @@ impl HeldRunWorkspace {
         &self.root_path
     }
 
+    /// Sample the caller-available bytes on this held local workspace volume.
+    /// This is a preflight/watchdog observation, never a quota or reservation.
+    pub fn available_volume_bytes(&self) -> Result<u64, WorkspaceError> {
+        self.revalidate()?;
+        let path: Vec<u16> = self
+            .root_path
+            .as_os_str()
+            .encode_wide()
+            .chain(Some(0))
+            .collect();
+        let mut available = 0_u64;
+        // SAFETY: held ordinary local ancestry, terminated path and valid output.
+        unsafe {
+            windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW(
+                PCWSTR(path.as_ptr()),
+                Some(&mut available),
+                None,
+                None,
+            )
+        }
+        .map_err(|error| WorkspaceError::Native {
+            operation: "workspace free-space sample",
+            detail: error.to_string(),
+        })?;
+        self.revalidate()?;
+        Ok(available)
+    }
+
+    /// One fixed authenticated transport prefix. Wide write sharing permits
+    /// append observations only; callers must authenticate complete lines and
+    /// reject changes to their previously observed prefix. No general live-file
+    /// reader or native evidence authority is exposed.
+    pub fn read_assessment_channel_progress_prefix(&self) -> Result<Vec<u8>, WorkspaceError> {
+        use aiw_provider_wsb::assessment_channel::{CHANNEL_PROGRESS_LEAF, MAX_PROGRESS_BYTES};
+        self.revalidate()?;
+        let file = open_child_read_authority_with_sharing(
+            &self.output,
+            CHANNEL_PROGRESS_LEAF,
+            false,
+            FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0,
+        )?;
+        let owner = OwnedSid::from_string(&self.evidence.owner_sid)?;
+        verify_owner_system_acl(&file, &owner, false, false)?;
+        let identity = file_identity(&file)?;
+        verify_created_child(&self.output, CHANNEL_PROGRESS_LEAF, &file, false)?;
+        verify_exact_child_entry(&self.output, CHANNEL_PROGRESS_LEAF, &identity)?;
+        let length = file
+            .metadata()
+            .map_err(|e| WorkspaceError::Native {
+                operation: "channel prefix length",
+                detail: e.to_string(),
+            })?
+            .len();
+        if length > MAX_PROGRESS_BYTES as u64 {
+            return Err(WorkspaceError::IdentityRejected);
+        }
+        let mut bytes = Vec::with_capacity(length as usize);
+        (&file)
+            .take(length)
+            .read_to_end(&mut bytes)
+            .map_err(|e| WorkspaceError::Native {
+                operation: "channel prefix read",
+                detail: e.to_string(),
+            })?;
+        if bytes.len() as u64 != length
+            || file_identity(&file)? != identity
+            || file
+                .metadata()
+                .map_err(|e| WorkspaceError::Native {
+                    operation: "channel prefix recheck",
+                    detail: e.to_string(),
+                })?
+                .len()
+                < length
+        {
+            return Err(WorkspaceError::IdentityRejected);
+        }
+        self.revalidate()?;
+        Ok(bytes)
+    }
+
+    /// Closed, create-only host acknowledgement publication before guest app
+    /// creation. The writer is closed before the final name becomes visible.
+    pub fn publish_assessment_channel_ack(&self, bytes: &[u8]) -> Result<(), WorkspaceError> {
+        use aiw_provider_wsb::assessment_channel::{CHANNEL_ACK_LEAF, MAX_ACK_BYTES};
+        use windows::Win32::Storage::FileSystem::{MOVEFILE_WRITE_THROUGH, MoveFileExW};
+        if bytes.is_empty() || bytes.len() > MAX_ACK_BYTES {
+            return Err(WorkspaceError::IdentityRejected);
+        }
+        self.revalidate()?;
+        let pending = "assessment-channel-ack.json.pending";
+        let created = self.create_output_file_new(pending)?;
+        let mut file = created.into_file();
+        file.write_all(bytes)
+            .and_then(|_| file.sync_all())
+            .map_err(|e| WorkspaceError::Native {
+                operation: "channel ACK flush",
+                detail: e.to_string(),
+            })?;
+        drop(file);
+        self.revalidate()?;
+        let source: Vec<u16> = self
+            .output_path()
+            .join(pending)
+            .as_os_str()
+            .encode_wide()
+            .chain(Some(0))
+            .collect();
+        let target: Vec<u16> = self
+            .output_path()
+            .join(CHANNEL_ACK_LEAF)
+            .as_os_str()
+            .encode_wide()
+            .chain(Some(0))
+            .collect();
+        // SAFETY: held local ordinary parent and two fixed immediate names;
+        // WRITE_THROUGH does not request REPLACE_EXISTING or cross-volume copy.
+        unsafe {
+            MoveFileExW(
+                PCWSTR(source.as_ptr()),
+                PCWSTR(target.as_ptr()),
+                MOVEFILE_WRITE_THROUGH,
+            )
+        }
+        .map_err(|e| WorkspaceError::Native {
+            operation: "channel ACK publication",
+            detail: e.to_string(),
+        })?;
+        let published = self.reopen_output_file_readonly(CHANNEL_ACK_LEAF)?;
+        let mut actual = Vec::new();
+        published
+            .as_file()
+            .take(MAX_ACK_BYTES as u64 + 1)
+            .read_to_end(&mut actual)
+            .map_err(|e| WorkspaceError::Native {
+                operation: "channel ACK readback",
+                detail: e.to_string(),
+            })?;
+        if actual != bytes {
+            return Err(WorkspaceError::IdentityRejected);
+        }
+        published.revalidate()?;
+        self.revalidate()
+    }
+
     pub fn tools_path(&self) -> PathBuf {
         self.root_path.join("tools")
     }
@@ -1390,6 +1536,15 @@ fn open_child_read_authority(
     leaf: &str,
     directory: bool,
 ) -> Result<File, WorkspaceError> {
+    open_child_read_authority_with_sharing(parent, leaf, directory, FILE_SHARE_READ.0)
+}
+
+fn open_child_read_authority_with_sharing(
+    parent: &File,
+    leaf: &str,
+    directory: bool,
+    sharing: u32,
+) -> Result<File, WorkspaceError> {
     validate_new_child_leaf(leaf)?;
     let mut name: Vec<u16> = leaf.encode_utf16().collect();
     let mut unicode = NtUnicodeString {
@@ -1435,7 +1590,7 @@ fn open_child_read_authority(
             &mut io_status,
             std::ptr::null_mut(),
             FILE_ATTRIBUTE_NORMAL.0,
-            FILE_SHARE_READ.0,
+            sharing,
             FILE_OPEN_DISPOSITION,
             create_options,
             std::ptr::null_mut(),
@@ -2224,6 +2379,92 @@ mod tests {
         let path = workspace.root_path().to_owned();
         drop(workspace);
         std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn channel_ack_publication_is_closed_create_only_and_preserves_failed_pending() {
+        use aiw_provider_wsb::assessment_channel::CHANNEL_ACK_LEAF;
+        let workspace = HeldRunWorkspace::create(&parent(), &leaf("channel-ack")).unwrap();
+        workspace
+            .publish_assessment_channel_ack(b"first public ACK")
+            .unwrap();
+        assert_eq!(
+            std::fs::read(workspace.output_path().join(CHANNEL_ACK_LEAF)).unwrap(),
+            b"first public ACK"
+        );
+        assert!(
+            workspace
+                .publish_assessment_channel_ack(b"replacement")
+                .is_err()
+        );
+        assert_eq!(
+            std::fs::read(workspace.output_path().join(CHANNEL_ACK_LEAF)).unwrap(),
+            b"first public ACK"
+        );
+        assert_eq!(
+            std::fs::read(
+                workspace
+                    .output_path()
+                    .join("assessment-channel-ack.json.pending")
+            )
+            .unwrap(),
+            b"replacement"
+        );
+        assert!(workspace.publish_assessment_channel_ack(b"retry").is_err());
+        remove_test_workspace(workspace);
+    }
+
+    #[test]
+    fn channel_prefix_reader_can_observe_append_without_weakening_closed_reader() {
+        use aiw_provider_wsb::assessment_channel::CHANNEL_PROGRESS_LEAF;
+        let workspace = HeldRunWorkspace::create(&parent(), &leaf("channel-prefix")).unwrap();
+        let mut writer = workspace
+            .create_output_file_new(CHANNEL_PROGRESS_LEAF)
+            .unwrap()
+            .into_file();
+        writer.write_all(b"complete\npartial").unwrap();
+        writer.sync_all().unwrap();
+        assert_eq!(
+            workspace.read_assessment_channel_progress_prefix().unwrap(),
+            b"complete\npartial"
+        );
+        assert!(
+            workspace
+                .reopen_output_file_readonly(CHANNEL_PROGRESS_LEAF)
+                .is_err()
+        );
+        writer.write_all(b"-end\n").unwrap();
+        writer.sync_all().unwrap();
+        assert_eq!(
+            workspace.read_assessment_channel_progress_prefix().unwrap(),
+            b"complete\npartial-end\n"
+        );
+        drop(writer);
+        let closed = workspace
+            .reopen_output_file_readonly(CHANNEL_PROGRESS_LEAF)
+            .unwrap();
+        closed.revalidate().unwrap();
+        drop(closed);
+        remove_test_workspace(workspace);
+    }
+
+    #[test]
+    fn channel_prefix_reader_refuses_hardlinked_transport() {
+        use aiw_provider_wsb::assessment_channel::CHANNEL_PROGRESS_LEAF;
+        let workspace = HeldRunWorkspace::create(&parent(), &leaf("channel-prefix-link")).unwrap();
+        let mut writer = workspace
+            .create_output_file_new(CHANNEL_PROGRESS_LEAF)
+            .unwrap()
+            .into_file();
+        writer.write_all(b"untrusted transport\n").unwrap();
+        drop(writer);
+        std::fs::hard_link(
+            workspace.output_path().join(CHANNEL_PROGRESS_LEAF),
+            workspace.output_path().join("alias.jsonl"),
+        )
+        .unwrap();
+        assert!(workspace.read_assessment_channel_progress_prefix().is_err());
+        remove_test_workspace(workspace);
     }
 
     fn exercise_workspace_with_readonly_intake(suffix: &str, reopen_persisted: bool) {

@@ -16,7 +16,13 @@ use crate::{
 };
 
 pub const CHANNEL_SCHEMA: &str = "aiw.dev/assessment-channel/v0alpha1";
-pub const CHANNEL_PROTOCOL: &str = "signedCollector/p256-sha256/v1";
+pub const CHANNEL_PROTOCOL: &str = aiw_probe::APPLICATION_ASSESSMENT_CHANNEL_PROTOCOL;
+pub const CHANNEL_BOOTSTRAP_LEAF: &str = "assessment-channel-bootstrap.json";
+pub const CHANNEL_ACK_LEAF: &str = "assessment-channel-ack.json";
+pub const CHANNEL_TERMINAL_LEAF: &str = "assessment-channel-terminal.json";
+pub const CHANNEL_PROGRESS_LEAF: &str = "assessment-channel-progress.jsonl";
+pub const CHANNEL_BOOTSTRAP_PENDING_LEAF: &str = "assessment-channel-bootstrap.json.pending";
+pub const CHANNEL_TERMINAL_PENDING_LEAF: &str = "assessment-channel-terminal.json.pending";
 pub const CHANNEL_PROGRESS_SCHEMA: &str = "aiw.dev/assessment-channel-progress/v0alpha1";
 pub const MAX_BOOTSTRAP_BYTES: usize = 16 * 1024;
 pub const MAX_ACK_BYTES: usize = 8 * 1024;
@@ -228,7 +234,7 @@ pub enum ChannelCollectorStorage {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum ChannelAcknowledgement {
-    AllowOneDispatch,
+    AcknowledgeCollectorKey,
 }
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -244,7 +250,7 @@ impl ChannelArtifactRole {
             Self::Result => "assessment-result.json",
             Self::Evidence => "evidence.jsonl",
             Self::Completion => "completion.json",
-            Self::Progress => "assessment-channel-progress.jsonl",
+            Self::Progress => CHANNEL_PROGRESS_LEAF,
         }
     }
     fn limit(self) -> u64 {
@@ -660,7 +666,7 @@ impl AssessmentChannelSession {
             bootstrap_commitment: self.bootstrap_commitment.clone(),
             guest_public_key_hex: self.guest_key.clone(),
             host_ack_public_key_hex: self.expected.host_ack_public_key_hex.clone(),
-            acknowledgement: ChannelAcknowledgement::AllowOneDispatch,
+            acknowledgement: ChannelAcknowledgement::AcknowledgeCollectorKey,
         };
         let intent = signing_intent(
             &self.expected,

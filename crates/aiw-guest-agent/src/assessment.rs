@@ -1,5 +1,10 @@
 //! Generic assessed operations remain typed data; no secondary worker role or shell.
 use super::*;
+use aiw_provider_wsb::assessment_request::{
+    APPLICATION_ASSESSMENT_AGENT_PATH, APPLICATION_ASSESSMENT_REQUEST_MAX_BYTES,
+    APPLICATION_ASSESSMENT_REQUEST_PATH, ApplicationAssessmentGuestRequest,
+};
+#[cfg(test)]
 use aiw_provider_wsb::{
     assessment::ASSESSMENT_SCOPE,
     assessment_evidence::{
@@ -10,16 +15,17 @@ use aiw_provider_wsb::{
         APPLICATION_ASSESSMENT_RESULT_SCHEMA, ApplicationAssessmentResult,
         AssessmentAccountCleanup, AssessmentNativeOutcome,
     },
-    assessment_request::{
-        APPLICATION_ASSESSMENT_AGENT_PATH, APPLICATION_ASSESSMENT_REQUEST_MAX_BYTES,
-        APPLICATION_ASSESSMENT_REQUEST_PATH, ApplicationAssessmentGuestRequest,
-    },
 };
 
+#[cfg(test)]
 const RESULT: &str = "assessment-result.json";
+#[cfg(test)]
 const LOG: &str = "evidence.jsonl";
+#[cfg(test)]
 const PROGRESS: &str = "assessment-progress.jsonl";
+#[cfg(test)]
 const MAX_RESULT: u64 = 16 * 1024 * 1024;
+#[cfg(test)]
 const MAX_LOG: u64 = 1024 * 1024;
 
 fn fixed_path(actual: &Path, expected: &str) -> bool {
@@ -48,6 +54,7 @@ pub(super) fn parse_request(
     Ok(request)
 }
 
+#[cfg(test)]
 fn failed(
     request: &ApplicationAssessmentGuestRequest,
     diagnostic: &str,
@@ -75,6 +82,7 @@ fn failed(
             collector_write_denied: None,
             collector_access_denials: vec![],
             collector_unimpersonated: None,
+            collector_protection: None,
             profile_sid: None,
             account_cleanup: AssessmentAccountCleanup::default(),
             profile_cleanup: None,
@@ -91,41 +99,32 @@ fn failed(
 }
 
 pub(super) fn execute(request: &ApplicationAssessmentGuestRequest) -> Result<()> {
-    request.validate().map_err(anyhow::Error::msg)?;
+    request
+        .require_authenticated_execution()
+        .map_err(anyhow::Error::msg)?;
     let image = std::env::current_exe().context("assessment agent current image")?;
     if !fixed_path(&image, APPLICATION_ASSESSMENT_AGENT_PATH) {
-        bail!("assessment requires the exact fixed guest agent image");
+        bail!("fixed assessment agent required");
     }
     let size = ordinary_installer_metadata(&image)?.len();
     if size == 0 || size > 64 * 1024 * 1024 {
-        bail!("assessment agent size exceeds bound");
+        bail!("assessment agent image bound");
     }
-    // The fixed mapped tool is held read-only throughout native execution and
-    // publication. Native intake also validates its local image and held code.
     let mut agent = HeldInstaller::open(&image, &request.agent_sha256, size)?;
-    let root = Path::new(PAIRED_OUTPUT_ROOT);
-    ensure_output_root(root)?;
     #[cfg(windows)]
-    let native = aiw_windows_platform::execute_assessment(request);
+    let execution =
+        aiw_windows_platform::execute_authenticated_assessment(request).map_err(anyhow::Error::msg);
     #[cfg(not(windows))]
-    let native: std::result::Result<AssessmentNativeOutcome, String> =
-        Err("application assessment requires the native Windows worker".into());
-    let result = match native {
-        Ok(native) => ApplicationAssessmentResult {
-            schema_version: APPLICATION_ASSESSMENT_RESULT_SCHEMA.into(),
-            run_id: request.run_id.clone(),
-            request_sha256: request.request_sha256.clone(),
-            assessment_sha256: request.assessment_sha256.clone(),
-            native,
-        },
-        Err(error) => failed(request, &error),
-    };
+    let execution: Result<()> = Err(anyhow::anyhow!(
+        "authenticated assessment requires native Windows"
+    ));
     agent.revalidate()?;
-    publish(request, root, &result)?;
+    execution?;
     agent.revalidate()?;
     Ok(())
 }
 
+#[cfg(test)]
 fn read_bounded_optional(path: &Path, max: u64) -> Result<Option<Vec<u8>>> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(m) => m,
@@ -152,6 +151,7 @@ fn read_bounded_optional(path: &Path, max: u64) -> Result<Option<Vec<u8>>> {
 
 /// No overwrite, no repair and no retry. Incomplete files remain diagnostic;
 /// only completion.json authorizes the retained completion verifier to proceed.
+#[cfg(test)]
 fn create_artifact(path: &Path, bytes: &[u8], max: u64) -> Result<()> {
     if bytes.len() as u64 > max {
         bail!("assessment publication exceeds fixed bound");
@@ -162,6 +162,7 @@ fn create_artifact(path: &Path, bytes: &[u8], max: u64) -> Result<()> {
     drop(file);
     Ok(())
 }
+#[cfg(test)]
 fn fact(
     root: &Path,
     name: &str,
@@ -180,22 +181,7 @@ fn fact(
     })
 }
 
-fn publish(
-    request: &ApplicationAssessmentGuestRequest,
-    root: &Path,
-    result: &ApplicationAssessmentResult,
-) -> Result<()> {
-    publish_with(request, root, result, |bytes| {
-        #[cfg(windows)]
-        {
-            aiw_windows_platform::publish_assessment_completion(bytes).map_err(anyhow::Error::msg)
-        }
-        #[cfg(not(windows))]
-        {
-            create_artifact(&root.join("completion.json"), bytes, MAX_LOG)
-        }
-    })
-}
+#[cfg(test)]
 fn publish_with(
     request: &ApplicationAssessmentGuestRequest,
     root: &Path,
@@ -278,6 +264,7 @@ fn publish_with(
     // after all artifacts have been closed, validated and remeasured.
     finish(&serde_json::to_vec(&receipt)?)
 }
+#[cfg(test)]
 fn has_native_facts(n: &AssessmentNativeOutcome) -> bool {
     n.setup_token.is_some()
         || n.standard_context.is_some()
@@ -300,6 +287,12 @@ fn has_native_facts(n: &AssessmentNativeOutcome) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn historical_request_refuses_before_native_execution_or_image_intake() {
+        let error = execute(&request()).unwrap_err().to_string();
+        assert!(error.contains("authenticated"));
+        assert!(!error.contains("current image"));
+    }
     fn request() -> ApplicationAssessmentGuestRequest {
         use aiw_provider_wsb::assessment::*;
         let entries = vec![aiw_probe::PortableContentEntry {

@@ -96,7 +96,62 @@ pub struct AssessmentCollectorAccessDenial {
     pub denied: Option<bool>,
     pub error: Option<String>,
 }
+pub const ASSESSMENT_COLLECTOR_PROTECTION_SCHEMA: &str =
+    "aiw.dev/assessment-collector-protection/v0alpha1";
+pub const ASSESSMENT_COLLECTOR_PROCESS_RIGHTS: [u32; 7] =
+    [0x2, 0x8, 0x10, 0x20, 0x40, 0x40000, 0x80000];
+pub const ASSESSMENT_COLLECTOR_THREAD_RIGHTS: [u32; 7] =
+    [0x8, 0x10, 0x80, 0x100, 0x200, 0x40000, 0x80000];
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum AssessmentCollectorObject {
+    CollectorProcess,
+    SigningThread,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssessmentCollectorObjectAccess {
+    pub effective_user_sid: String,
+    pub target: AssessmentCollectorObject,
+    pub access_mask: u32,
+    pub native_code: Option<u32>,
+    pub denied: Option<bool>,
+    pub error: Option<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssessmentCollectorObjectSecurity {
+    pub owner_sid: String,
+    pub sddl: String,
+    /// SHA256 of the exact observed SDDL UTF8 bytes, not a private key.
+    pub sha256: String,
+    pub trustee_sids: Vec<String>,
+    pub parse_error: Option<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssessmentCollectorProtection {
+    pub schema_version: String,
+    pub storage: crate::assessment_channel::ChannelCollectorStorage,
+    pub collector_process_id: u32,
+    pub collector_creation_time_100ns: String,
+    pub signing_thread_id: u32,
+    pub process_security: AssessmentCollectorObjectSecurity,
+    pub thread_security: AssessmentCollectorObjectSecurity,
+    /// Actual primary TokenDefaultDacl; creator provenance for subsequently
+    /// created unimpersonated reader threads, not an observation of all threads.
+    pub primary_default_dacl: AssessmentCollectorDefaultDacl,
+    pub access_checks: Vec<AssessmentCollectorObjectAccess>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssessmentCollectorDefaultDacl {
+    pub acl_hex: String,
+    pub sha256: String,
+    pub trustee_sids: Vec<String>,
+    pub parse_error: Option<String>,
+}
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AssessmentNativeOutcome {
     pub schema_version: String,
@@ -111,12 +166,84 @@ pub struct AssessmentNativeOutcome {
     pub collector_write_denied: Option<bool>,
     pub collector_access_denials: Vec<AssessmentCollectorAccessDenial>,
     pub collector_unimpersonated: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collector_protection: Option<AssessmentCollectorProtection>,
     pub profile_sid: Option<String>,
     pub account_cleanup: AssessmentAccountCleanup,
     pub profile_cleanup: Option<bool>,
     pub driver_errors: Vec<String>,
     pub driver_completed: bool,
     pub scope: String,
+}
+#[derive(Default)]
+struct ProtectionPresence {
+    present: bool,
+    value: Option<AssessmentCollectorProtection>,
+}
+impl<'de> Deserialize<'de> for ProtectionPresence {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(Self {
+            present: true,
+            value: Option::<AssessmentCollectorProtection>::deserialize(d)?,
+        })
+    }
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct NativeWire {
+    schema_version: String,
+    semantic_sha256: String,
+    mode: AssessmentMode,
+    windows: Option<WindowsVersionObservation>,
+    windows_error: Option<String>,
+    setup_token: Option<TokenEvidence>,
+    standard_context: Option<StandardUserRuntimeContext>,
+    steps: Vec<AssessmentStepObservation>,
+    assertions: Vec<AssessmentAssertionObservation>,
+    collector_write_denied: Option<bool>,
+    collector_access_denials: Vec<AssessmentCollectorAccessDenial>,
+    collector_unimpersonated: Option<bool>,
+    #[serde(default)]
+    collector_protection: ProtectionPresence,
+    profile_sid: Option<String>,
+    account_cleanup: AssessmentAccountCleanup,
+    profile_cleanup: Option<bool>,
+    driver_errors: Vec<String>,
+    driver_completed: bool,
+    scope: String,
+}
+impl<'de> Deserialize<'de> for AssessmentNativeOutcome {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let w = NativeWire::deserialize(d)?;
+        if w.schema_version == "aiw.dev/assessment-native-observation/v0alpha1"
+            && w.collector_protection.present
+        {
+            return Err(serde::de::Error::custom(
+                "historical native outcome cannot contain collector protection",
+            ));
+        }
+        Ok(Self {
+            schema_version: w.schema_version,
+            semantic_sha256: w.semantic_sha256,
+            mode: w.mode,
+            windows: w.windows,
+            windows_error: w.windows_error,
+            setup_token: w.setup_token,
+            standard_context: w.standard_context,
+            steps: w.steps,
+            assertions: w.assertions,
+            collector_write_denied: w.collector_write_denied,
+            collector_access_denials: w.collector_access_denials,
+            collector_unimpersonated: w.collector_unimpersonated,
+            collector_protection: w.collector_protection.value,
+            profile_sid: w.profile_sid,
+            account_cleanup: w.account_cleanup,
+            profile_cleanup: w.profile_cleanup,
+            driver_errors: w.driver_errors,
+            driver_completed: w.driver_completed,
+            scope: w.scope,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
@@ -130,6 +257,10 @@ pub struct ApplicationAssessmentResult {
 }
 pub const APPLICATION_ASSESSMENT_RESULT_SCHEMA: &str =
     "aiw.dev/application-assessment-result/v0alpha1";
+pub const APPLICATION_ASSESSMENT_RESULT_V2_SCHEMA: &str =
+    "aiw.dev/application-assessment-result/v0alpha2";
+pub const ASSESSMENT_NATIVE_OBSERVATION_V2_SCHEMA: &str =
+    "aiw.dev/assessment-native-observation/v0alpha2";
 
 pub const ASSESSMENT_PROGRESS_SCHEMA: &str = "aiw.dev/assessment-progress/v0alpha1";
 pub const ASSESSMENT_PROGRESS_PATH: &str = r"C:\AIW\Output\assessment-progress.jsonl";
@@ -164,6 +295,10 @@ pub enum AssessmentProgressEvent {
     },
     ProfileCreated {
         profile_sid: String,
+    },
+    /// New authenticated semantic version only. Historical raw v1 refuses it.
+    CollectorProtection {
+        observation: Box<AssessmentCollectorProtection>,
     },
     LaunchStarted {
         index: usize,

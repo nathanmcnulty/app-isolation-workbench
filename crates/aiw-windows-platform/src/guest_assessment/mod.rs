@@ -1,9 +1,11 @@
 //! Application-neutral portable/offline CLI execution by a privileged collector.
 //! Every untrusted image is created as the fresh ordinary user; observation,
 //! pipe readers, held images and journals never run in that user's process.
+mod authenticated;
 mod files;
 mod process;
 mod progress;
+mod protection;
 use crate::{
     GuestMsiExecutionError, HeldApplicationFile, guest_standard_user::StandardUserSession,
 };
@@ -38,10 +40,13 @@ type Result<T> = std::result::Result<T, String>;
 const ROOT: &str = r"C:\AIW\Assessment";
 const APP: &str = r"C:\AIW\Assessment\App";
 const WORK: &str = r"C:\AIW\Assessment\Work";
-const COLLECTOR: &str = r"C:\AIW\Output";
+const COLLECTOR: &str = r"C:\AIW\Assessment\Collector";
+fn local_progress() -> std::path::PathBuf {
+    Path::new(COLLECTOR).join(aiw_provider_wsb::assessment_channel::CHANNEL_PROGRESS_LEAF)
+}
 const PROFILE: &str = "AIW.Assessment.Portable.v1";
 const MAX_OUTCOME: usize = 16 * 1024 * 1024;
-const OUTCOME_SCHEMA: &str = "aiw.dev/assessment-native-observation/v0alpha1";
+const OUTCOME_SCHEMA: &str = "aiw.dev/assessment-native-observation/v0alpha2";
 pub(super) fn bound_error(value: &str) -> String {
     value.chars().take(1024).collect()
 }
@@ -105,6 +110,7 @@ fn empty(plan: &CompiledAssessment) -> AssessmentNativeOutcome {
         collector_write_denied: None,
         collector_access_denials: vec![],
         collector_unimpersonated: Some(true),
+        collector_protection: None,
         profile_sid: None,
         account_cleanup: AssessmentAccountCleanup::default(),
         profile_cleanup: None,
@@ -164,9 +170,10 @@ pub fn publish_assessment_completion(bytes: &[u8]) -> Result<()> {
     {
         return Err("elevated primary Sandbox receipt publisher required".into());
     }
-    let _held = files::Directories::hold(Path::new(COLLECTOR))?;
-    let pending = Path::new(COLLECTOR).join("completion.pending");
-    let destination = Path::new(COLLECTOR).join("completion.json");
+    let legacy_output = Path::new(r"C:\AIW\Output");
+    let _held = files::Directories::hold(legacy_output)?;
+    let pending = legacy_output.join("completion.pending");
+    let destination = legacy_output.join("completion.json");
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -200,7 +207,11 @@ pub fn publish_assessment_completion(bytes: &[u8]) -> Result<()> {
 pub fn execute_assessment(
     request: &ApplicationAssessmentGuestRequest,
 ) -> Result<AssessmentNativeOutcome> {
-    request.validate()?;
+    request.require_authenticated_execution()?;
+    Err("authenticated assessment must use its sealed publication entry".into())
+}
+pub fn execute_authenticated_assessment(request: &ApplicationAssessmentGuestRequest) -> Result<()> {
+    request.require_authenticated_execution()?;
     let plan = &request.assessment;
     // One monotonic assessment budget, including staging/setup. Synchronous
     // filesystem/profile IO cannot be interrupted here: the outer Sandbox
@@ -234,16 +245,24 @@ pub fn execute_assessment(
     {
         return Err("elevated primary Sandbox collector required".into());
     }
-    let _agent = files::hold_agent(&request.agent_sha256)?;
+    let mut agent = files::hold_agent(&request.agent_sha256)?;
+    let _root = files::initialize_collector()?;
+    let mut progress = progress::Progress::create(request, token.clone(), deadline)?;
+    let report = collect_outcome(request, token, &mut progress, deadline)?;
+    agent.revalidate()?;
+    progress.publish_result(request, report)?;
+    agent.revalidate()?;
+    Ok(())
+}
+fn collect_outcome(
+    request: &ApplicationAssessmentGuestRequest,
+    token: aiw_token::TokenEvidence,
+    progress: &mut progress::Progress,
+    deadline: Instant,
+) -> Result<AssessmentNativeOutcome> {
+    let plan = &request.assessment;
     let mut report = empty(plan);
-    report.setup_token = Some(token.clone());
-    let mut progress = match progress::Progress::create(request, token) {
-        Ok(value) => value,
-        Err(error) => {
-            report.driver_errors.push(bound_error(&error));
-            return Ok(report);
-        }
-    };
+    report.setup_token = Some(token);
     match crate::observe_windows_version() {
         Ok(value) => report.windows = Some(value),
         Err(error) => report.windows_error = Some(bound_error(&error.to_string())),
@@ -282,6 +301,7 @@ pub fn execute_assessment(
             report.collector_access_denials = probes.map_err(|e| e.to_string())?;
             report.collector_write_denied =
                 progress::derive_denial(&report.collector_access_denials, &user.context().user_sid);
+            progress.set_file_denial(&report.collector_access_denials, &user.context().user_sid)?;
             for observation in &report.collector_access_denials {
                 progress.record(&AssessmentProgressEvent::CollectorAccess {
                     observation: observation.clone(),
@@ -291,6 +311,29 @@ pub fn execute_assessment(
                 return Err("collector-isolation capability unavailable or unmeasured; no application dispatched".into());
             }
             progress.seal_before_apps()?;
+            let mut protection = protection::ProtectionHold::observe(
+                &report
+                    .setup_token
+                    .as_ref()
+                    .ok_or("collector token missing")?
+                    .user_sid,
+            )?;
+            let facts = user.impersonate(|| {
+                protection
+                    .probe(&user.context().user_sid)
+                    .map_err(GuestMsiExecutionError::Process)
+            });
+            check_collector(&mut report.collector_unimpersonated)?;
+            report.collector_protection = Some(facts.map_err(|e| e.to_string())?);
+            progress.record(&AssessmentProgressEvent::CollectorProtection {
+                observation: Box::new(
+                    report
+                        .collector_protection
+                        .clone()
+                        .ok_or("collector protection facts absent")?,
+                ),
+            })?;
+            progress.set_protection(protection)?;
             require_budget(deadline)?;
             if plan.mode == AssessmentMode::ClassicAppContainer {
                 let created = user.impersonate(|| {
@@ -327,12 +370,13 @@ pub fn execute_assessment(
             require_budget(deadline)?;
             staged.revalidate()?;
             check_collector(&mut report.collector_unimpersonated)?;
+            progress.preflight_remaining(plan)?;
             execute_steps(
                 plan,
                 &user,
                 &mut report,
                 profile.as_ref(),
-                &mut progress,
+                progress,
                 deadline,
             )
         })();

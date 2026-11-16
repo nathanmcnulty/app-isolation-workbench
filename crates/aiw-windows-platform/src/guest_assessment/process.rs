@@ -303,6 +303,9 @@ pub(super) fn observe_image(image: &HeldApplicationFile) -> Result<AssessmentIma
     Ok(result)
 }
 pub(super) fn launch(spec: Launch<'_>) -> Result<AssessmentProcessObservation> {
+    // Key acknowledgement alone is never dispatch authority. Revalidate actual
+    // local15/object-access/security/thread gates before ANY process creation.
+    spec.progress.require_dispatch()?;
     if Instant::now() >= spec.deadline {
         return Err("launch deadline already expired".into());
     }
