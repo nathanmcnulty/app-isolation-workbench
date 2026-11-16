@@ -877,20 +877,18 @@ mod tests {
             },
         )
         .unwrap();
-        let bootstrap = bootstrap_intent.with_signature(
-            &guest
-                .sign_digest(&bootstrap_intent.signing_digest().unwrap())
-                .unwrap(),
-        );
+        let signature = guest
+            .sign_digest(&bootstrap_intent.signing_digest().unwrap())
+            .unwrap();
+        let bootstrap = bootstrap_intent.with_signature(&signature);
         session
             .latch_bootstrap(&bootstrap.canonical_wire().unwrap(), &CngVerifier)
             .unwrap();
         let ack_intent = session.begin_ack().unwrap();
-        let ack = ack_intent.with_signature(
-            &host
-                .sign_digest(&ack_intent.signing_digest().unwrap())
-                .unwrap(),
-        );
+        let signature = host
+            .sign_digest(&ack_intent.signing_digest().unwrap())
+            .unwrap();
+        let ack = ack_intent.with_signature(&signature);
         let verified_ack = session
             .accept_ack(&ack.canonical_wire().unwrap(), &CngVerifier)
             .unwrap();
@@ -918,11 +916,10 @@ mod tests {
             },
         )
         .unwrap();
-        let record = intent.with_signature(
-            &guest
-                .sign_digest(&intent.signing_digest().unwrap())
-                .unwrap(),
-        );
+        let signature = guest
+            .sign_digest(&intent.signing_digest().unwrap())
+            .unwrap();
+        let record = intent.with_signature(&signature);
         guest.destroy().unwrap();
         let mut wire = record.canonical_wire().unwrap();
         let mut records = Vec::new();
