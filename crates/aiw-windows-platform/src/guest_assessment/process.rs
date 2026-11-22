@@ -317,7 +317,7 @@ pub(super) fn launch(spec: Launch<'_>) -> Result<AssessmentProcessObservation> {
         return Err("launch deadline already expired".into());
     }
     super::check_collector(&mut *spec.collector_unimpersonated)?;
-    let _cwd = super::files::Directories::hold(spec.cwd)?;
+    let held_cwd = super::files::Directories::hold(spec.cwd)?;
     spec.image.revalidate().map_err(|e| e.to_string())?;
     let header = spec
         .image
@@ -381,6 +381,23 @@ pub(super) fn launch(spec: Launch<'_>) -> Result<AssessmentProcessObservation> {
         | CREATE_UNICODE_ENVIRONMENT
         | CREATE_NO_WINDOW
         | EXTENDED_STARTUPINFO_PRESENT;
+    // Query under each identity, then restore and revalidate every dispatch gate.
+    // These facts accompany a failed API call only; success is not a causal test
+    // of the earlier source because profile queries may warm per-user OS state.
+    let context = if let Some((_, sid)) = spec.profile {
+        Some(super::launch_context::capture(
+            spec.user,
+            sid,
+            Path::new(&identity.canonical_path),
+            spec.cwd,
+        )?)
+    } else {
+        None
+    };
+    super::check_collector(&mut *spec.collector_unimpersonated)?;
+    spec.progress.require_dispatch()?;
+    spec.image.revalidate().map_err(|e| e.to_string())?;
+    held_cwd.revalidate()?;
     if Instant::now() >= spec.deadline {
         return Err("launch deadline expired during image/pipe preparation".into());
     }
@@ -405,7 +422,12 @@ pub(super) fn launch(spec: Launch<'_>) -> Result<AssessmentProcessObservation> {
     };
     if let Err(error) = created {
         let cleanup = canary.close().err().unwrap_or_default();
-        return Err(format!("CreateProcessAsUserW failed: {error}; {cleanup}"));
+        let mut failure = format!("CreateProcessAsUserW failed: {error}; {cleanup}");
+        if let Some(context) = context {
+            failure.push_str("; ");
+            failure.push_str(&context);
+        }
+        return Err(failure);
     }
     let process = unsafe { OwnedHandle::from_raw_handle(info.hProcess.0) };
     let thread = unsafe { OwnedHandle::from_raw_handle(info.hThread.0) };

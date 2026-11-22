@@ -19,10 +19,10 @@ replay packages. Names, payloads and operations are run inputs. Installers/GUI
 workflows, complete descendants/registry/network/DLL/memory coverage, W4/W5 and
 production acceptance remain open.
 
-Committed candidate cf8568a passed 770 affected tests (21 ignored), Clippy, format,
-governance and independent consequential reviews. CI 43968485273 passed all three
-jobs; the tested merge has the same tree, and workspace verification exited 0 in
-403.85 seconds. Its immutable selected tools and original receipts are private in
+Committed candidate 16a58f7 passed 646 affected library tests (19 ignored), two
+integration tests, Clippy, format, governance and independent consequential
+reviews. CI 44965992731 passed all three jobs; the tested merge has the same tree,
+and workspace verification exited 0 in 482.96 seconds. Selected tools are private in
 `C:\aiw\generic-assessment-108`; raw evidence must stay out of Git.
 
 R13 used those exact tools for separate limited-user Prepare, approval, Start and
@@ -35,13 +35,23 @@ creation because inherited descriptors contain Owner Rights and 34 service SIDs.
 Retained Read is authenticated NotRun / insufficientEvidence. There is no
 CreateProcessAsUser/PSS/application/job/workflow compatibility credit.
 
-The working diff adds protection v5 with measured held primary TOKEN_OWNER,
+Candidate 16a58f7 adds protection v5 with measured held primary TOKEN_OWNER,
 explicit SY/BA owner resolution and collector-only service SID provenance.
 Historical v4 policy is unchanged. No ACL, rights, session or service changes.
-Independent source review and focused addenda passed. All 646 affected library
-tests passed (19 ignored), combining the suite with the corrected owner-test rerun;
-two integration tests also passed. All-target Clippy and format passed. Fresh v5
-exact-source tools and native qualification are still required.
+R14 Ordinary admitted 46 originals /30 signatures: all 29 denial gates, a fresh
+standard Medium process, exit0, complete output, four workflow steps and two
+assertions passed. The owned job emptied and account/Sandbox cleanup passed.
+Retained Read authenticated workflowPassed, but overall insufficientEvidence
+remains because descendant/network enforcement was not measured.
+
+R14 Classic used the same exact images and normalized compiled semantics.
+Independent admission verified 46 originals /26 signatures and all 29 denial
+gates, but CreateProcessAsUserW failed before child creation with 0x80070002.
+Profile/account/Sandbox cleanup passed; retained Read authenticated NotRun.
+This is a driver failure, not evidence of application incompatibility. A small
+working diagnostic compares query-only profile/image/cwd facts under collector
+and standard identities before one unchanged launch attempt. Failure-only facts
+use the signed launch error; success would not establish why the old source failed.
 The user-approved fixed SYSTEM collector role remains restricted to fresh Windows
 Sandboxes on existing VM107; applications remain ordinary user/AppContainer.
 
@@ -53,8 +63,8 @@ directory; do not replay a consumed Start.
 
 ## Next gates
 
-Finish the v5 affected tests/checks and review fixes, commit and build exact-source
-tools using the existing cache. Qualify ordinary/classic first-party positives,
+Review/test the query diagnostic, then build exact-source tools in the existing
+cache and diagnose Classic in a fresh Sandbox. Qualify first-party positives,
 negative controls, interruption/exact recovery and provider-zero retained Read.
 Reopen R12 with the new reader. Then run both external recipes using unchanged
 production code and produce comparisons/packages. A broken baseline is not
@@ -68,9 +78,9 @@ CARGO_TARGET_DIR explicitly, use --target x86_64-pc-windows-msvc and only the
 canonical target-specific `-C target-feature=+crt-static` flags. Routine dev/test
 profiles disable incremental/full compiler symbols; reject unsafe overrides.
 
-cf8568a's consecutive normal dev builds both measured 4,331,519,319 bytes /4,015
+16a58f7's consecutive normal dev builds both measured 4,620,710,209 bytes /4,071
 paths with identical images and zero second-pass compiler calls. Release ended
-at 4,618,166,098 bytes /4,071 paths in the same cache; all20 actual compiler calls
+at 4,620,870,800 bytes /4,071 paths in the same cache; all17 actual compiler calls
 and three selected images passed independent admission. File-length totals can
 count hard-link aliases twice; free-volume samples are separate. PDBs are measured
 separately. Retain selected immutable images and receipts, not build/PDB trees.

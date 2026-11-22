@@ -54,6 +54,21 @@ requires same-session handle inheritance and describes temporary use of assigned
 privileges. No rights grant,
 session reassignment, desktop ACL repair or interactive fallback is permitted.
 
+Classic launch diagnostics query the profile folder and image/cwd access under
+the collector and the fresh standard user before the single process-creation
+attempt. Profile lookup follows the caller's identity as documented by
+[GetAppContainerFolderPath](https://learn.microsoft.com/en-us/windows/win32/api/userenv/nf-userenv-getappcontainerfolderpath).
+Only the owned user's Packages subtree may be opened; other returned paths are
+hashed without traversal. Diagnostic handles close before dispatch, and identity,
+protection, image, cwd and deadline gates are checked again. On API failure, a
+bounded ASCII `ctx1` suffix records HRESULTs, access results and file IDs in the
+signed launch error. It does not replace that error or retry the application.
+Successful launches retain no diagnostic suffix; queries can warm OS state, so a
+later success does not identify the cause of an earlier failure.
+An `unheld` folder result does not distinguish missing from denied ancestor
+access. `outside` leaves access to that returned folder unmeasured, including
+when the SYSTEM lookup selects another profile tree.
+
 Collector protection `v0alpha5` records the held primary token's `TOKEN_OWNER`
 separately from its user SID. For process/thread security and the primary default
 DACL only, Owner Rights resolves to the measured SYSTEM or Administrators owner,

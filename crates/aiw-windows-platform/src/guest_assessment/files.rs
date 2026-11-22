@@ -200,7 +200,7 @@ impl Directories {
             && a.nFileIndexHigh == b.nFileIndexHigh
             && a.nFileIndexLow == b.nFileIndexLow)
     }
-    fn revalidate(&self) -> Result<()> {
+    pub(super) fn revalidate(&self) -> Result<()> {
         for file in &self.0 {
             let info = relative::file_information(file)?;
             if !relative::ordinary_directory(&info)

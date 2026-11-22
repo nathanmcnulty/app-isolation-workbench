@@ -3,6 +3,7 @@
 //! pipe readers, held images and journals never run in that user's process.
 mod authenticated;
 mod files;
+mod launch_context;
 mod process;
 mod progress;
 mod protection;
