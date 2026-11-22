@@ -152,6 +152,7 @@ pub struct HeldPortableDirectory {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DirectoryInspectionPolicy {
     PortableInput,
+    ReplayPackage,
     Evidence,
 }
 
@@ -578,6 +579,12 @@ impl HeldPortableDirectory {
         Self::open_for_policy(path, DirectoryInspectionPolicy::PortableInput)
     }
 
+    /// Hold a closed replay package tree for its inventory verifier. The payload
+    /// wrapper adds one level to the portable-source depth budget.
+    pub fn open_replay_package(path: &Path) -> Result<Self, SourceInspectionError> {
+        Self::open_for_policy(path, DirectoryInspectionPolicy::ReplayPackage)
+    }
+
     fn open_for_policy(
         path: &Path,
         policy: DirectoryInspectionPolicy,
@@ -619,10 +626,10 @@ impl HeldPortableDirectory {
         let mut total_size_bytes = 0_u64;
 
         while let Some((parent_index, depth)) = pending.pop() {
-            let maximum_depth = if policy == DirectoryInspectionPolicy::Evidence {
-                16
-            } else {
-                MAX_PORTABLE_DEPTH
+            let maximum_depth = match policy {
+                DirectoryInspectionPolicy::Evidence => 16,
+                DirectoryInspectionPolicy::PortableInput => MAX_PORTABLE_DEPTH,
+                DirectoryInspectionPolicy::ReplayPackage => MAX_PORTABLE_DEPTH + 1,
             };
             let maximum_entries = if policy == DirectoryInspectionPolicy::Evidence {
                 512
@@ -789,7 +796,7 @@ fn observe_portable_object(
     if directory {
         reject_case_sensitive_directory(file).map_err(exact)?;
         verify_stream_policy(file, true, 0).map_err(exact)?;
-        let mut children = if policy == DirectoryInspectionPolicy::PortableInput {
+        let mut children = if policy != DirectoryInspectionPolicy::Evidence {
             source_directory_entries(file).map_err(exact)?
         } else {
             let entries = filesystem_capture_directory_entries(file).map_err(exact)?;

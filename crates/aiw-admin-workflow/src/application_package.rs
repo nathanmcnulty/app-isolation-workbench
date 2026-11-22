@@ -57,7 +57,7 @@ impl VerifiedApplicationReplayPackage {
 #[cfg(windows)]
 pub fn verify_package(path: &Path) -> Result<VerifiedApplicationReplayPackage> {
     use aiw_probe::PortableContentEntryKind as Kind;
-    let held = aiw_windows_platform::HeldPortableDirectory::open(path)?;
+    let held = aiw_windows_platform::HeldPortableDirectory::open_replay_package(path)?;
     let root = PathBuf::from(&held.manifest().root_path);
     let manifest_file = aiw_windows_platform::HeldApplicationFile::open_bounded(
         &root.join("package.json"),
@@ -286,6 +286,40 @@ mod tests {
         std::fs::write(second.join("payload").join("tool.exe"), b"changed payload").unwrap();
         assert!(verify_package(&second).is_err());
     }
+    #[test]
+    fn replay_accepts_a_payload_at_the_portable_depth_limit() {
+        struct TestRoot(PathBuf);
+        impl Drop for TestRoot {
+            fn drop(&mut self) {
+                std::fs::remove_dir_all(&self.0).unwrap();
+            }
+        }
+
+        let (root, source, mut project, settings, inputs) = fixture();
+        let root = TestRoot(root);
+        let mut deepest = source.clone();
+        for _ in 0..63 {
+            deepest.push("d");
+            std::fs::create_dir(&deepest).unwrap();
+        }
+        std::fs::write(deepest.join("extra.bin"), b"additional input").unwrap();
+        let held = aiw_windows_platform::HeldPortableDirectory::open(&source).unwrap();
+        let aiw_schema::ApplicationSource::PortableDirectory(source_spec) =
+            &mut project.application
+        else {
+            unreachable!("test fixture must declare a portable source");
+        };
+        source_spec.content_manifest_sha256 = held.manifest().manifest_sha256.clone();
+        drop(held);
+
+        let destination =
+            export_package(&project, &settings, &source, &inputs, &root.0, "package").unwrap();
+        let verified = verify_package(&destination).unwrap();
+        assert_eq!(verified.package.compiled.portable_entries.len(), 65);
+        assert!(aiw_windows_platform::HeldPortableDirectory::open(&destination).is_err());
+        verified.revalidate().unwrap();
+    }
+
     #[test]
     fn package_rejects_input_and_plan_drift_without_creating_destination() {
         let (root, source, project, settings, inputs) = fixture();

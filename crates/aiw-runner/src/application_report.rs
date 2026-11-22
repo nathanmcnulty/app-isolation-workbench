@@ -46,6 +46,12 @@ pub struct GenericApplicationRunReport {
     pub gaps: Vec<String>,
 }
 
+impl GenericApplicationRunReport {
+    pub fn has_authenticated_start_evidence(&self) -> bool {
+        self.evidence_status == "authenticatedLocalStart"
+    }
+}
+
 #[cfg(windows)]
 pub fn report_windows_sandbox_application_assessment(
     root: &Path,

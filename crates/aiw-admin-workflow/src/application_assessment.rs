@@ -365,10 +365,16 @@ pub fn compare_retained(
     baseline: &ApplicationAssessmentRun,
     candidate: &ApplicationAssessmentRun,
 ) -> Result<ApplicationWorkflowComparison> {
+    Ok(compare_reports(report(baseline)?, report(candidate)?))
+}
+
+#[cfg(any(windows, test))]
+fn compare_reports(
+    baseline: aiw_runner::GenericApplicationRunReport,
+    candidate: aiw_runner::GenericApplicationRunReport,
+) -> ApplicationWorkflowComparison {
     use aiw_provider_wsb::assessment::AssessmentMode;
     use aiw_provider_wsb::assessment_evidence::AssessmentFactStatus;
-    let baseline = report(baseline)?;
-    let candidate = report(candidate)?;
     let mut gaps = Vec::new();
     if baseline.mode != AssessmentMode::Ordinary
         || candidate.mode != AssessmentMode::ClassicAppContainer
@@ -392,6 +398,12 @@ pub fn compare_retained(
     }
     if baseline.run_id == candidate.run_id {
         gaps.push("comparison requires independently prepared fresh workers".into());
+    }
+    if !baseline.has_authenticated_start_evidence() || !candidate.has_authenticated_start_evidence()
+    {
+        gaps.push(
+            "both runs require evidence authenticated against their local approved Start".into(),
+        );
     }
     for row in [&baseline, &candidate] {
         if row.recorded_outcome != Some(aiw_orchestrator::RunOutcome::InsufficientEvidence)
@@ -418,13 +430,116 @@ pub fn compare_retained(
     }
     let comparable = gaps.is_empty();
     gaps.push("Comparison covers declared CLI assertions and root-token policy only. Descendants, memory, registry, brokers and denial controls remain unmeasured; no general compatibility or isolation verdict follows.".into());
-    Ok(ApplicationWorkflowComparison {
+    ApplicationWorkflowComparison {
         schema_version: "aiw.dev/application-workflow-comparison/v0alpha1",
         comparable,
         baseline,
         candidate,
         gaps,
-    })
+    }
+}
+
+#[cfg(test)]
+mod comparison_tests {
+    use super::*;
+    use aiw_provider_wsb::assessment::AssessmentMode;
+    use aiw_provider_wsb::assessment_evidence::{
+        AssessmentFactStatus::Passed, VerifiedAssessmentCleanup, VerifiedAssessmentCoverage,
+        VerifiedAssessmentEvidence,
+    };
+
+    fn completed_report(
+        run_id: &str,
+        mode: AssessmentMode,
+    ) -> aiw_runner::GenericApplicationRunReport {
+        aiw_runner::GenericApplicationRunReport {
+            schema_version: "aiw.dev/generic-application-run-report/v0alpha3".into(),
+            run_id: run_id.into(),
+            project_revision_sha256: "0".repeat(64),
+            semantic_sha256: "1".repeat(64),
+            source_manifest_sha256: "2".repeat(64),
+            guest_agent_sha256: "3".repeat(64),
+            provider_sha256: "4".repeat(64),
+            mode,
+            execution_context: None,
+            windows: Some(aiw_probe::WindowsVersionObservation {
+                major: 10,
+                minor: 0,
+                build: 26100,
+                revision: 1,
+                observer_architecture: "x64".into(),
+            }),
+            recorded_cleanup_verified: Some(true),
+            recorded_outcome: Some(aiw_orchestrator::RunOutcome::InsufficientEvidence),
+            evidence_status: "authenticatedLocalStart".into(),
+            receipt_sha256: Some("5".repeat(64)),
+            evidence_root_hash: Some("6".repeat(64)),
+            evidence: Some(VerifiedAssessmentEvidence {
+                schema_version: "fixture".into(),
+                scope: String::new(),
+                semantic_sha256: "1".repeat(64),
+                mode,
+                status:
+                    aiw_provider_wsb::assessment_evidence::AssessmentEvidenceStatus::WorkflowPassed,
+                workflow_status: Passed,
+                driver_complete: true,
+                steps: vec![],
+                assertions: vec![],
+                coverage: VerifiedAssessmentCoverage {
+                    planned_steps: 3,
+                    retained_steps: 3,
+                    process_records: 1,
+                    complete_captures: 2,
+                    measured_root_policies: 1,
+                    collector_write_denied: Some(true),
+                    collector_unimpersonated: Some(true),
+                    collector_key_protected: Some(true),
+                    collector_storage: None,
+                    windows_observed: true,
+                    gaps: vec![],
+                },
+                cleanup: VerifiedAssessmentCleanup {
+                    status: Passed,
+                    application_jobs_empty: Some(true),
+                    environment_destroyed: Some(true),
+                    profile_unloaded: Some(true),
+                    account_deleted: Some(true),
+                    appcontainer_profile_deleted: (mode == AssessmentMode::ClassicAppContainer)
+                        .then_some(true),
+                },
+            }),
+            diagnostic_progress: None,
+            gaps: vec![],
+        }
+    }
+
+    #[test]
+    fn comparison_requires_authenticated_start_for_both_retained_reports() {
+        let ordinary = completed_report("ordinary", AssessmentMode::Ordinary);
+        let classic = completed_report("classic", AssessmentMode::ClassicAppContainer);
+        assert!(compare_reports(ordinary.clone(), classic.clone()).comparable);
+
+        let mut historical_ordinary = ordinary.clone();
+        historical_ordinary.evidence_status = "verified".into();
+        let mut historical_classic = classic.clone();
+        historical_classic.evidence_status = "verified".into();
+
+        for comparison in [
+            compare_reports(historical_ordinary.clone(), classic),
+            compare_reports(ordinary, historical_classic.clone()),
+            compare_reports(historical_ordinary, historical_classic),
+        ] {
+            assert!(!comparison.comparable);
+            assert!(
+                comparison
+                    .gaps
+                    .iter()
+                    .any(|gap| gap.contains("local approved Start"))
+            );
+            assert!(comparison.baseline.evidence.is_some());
+            assert!(comparison.candidate.evidence.is_some());
+        }
+    }
 }
 
 #[cfg(test)]
