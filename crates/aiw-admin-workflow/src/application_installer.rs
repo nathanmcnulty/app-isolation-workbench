@@ -1,5 +1,8 @@
 //! Review a bounded Windows Installer operation against existing protected intake.
 use aiw_probe::{ApplicationFileImportReceipt, ApplicationInspectionKind};
+use aiw_provider_wsb::msi_diagnostics::{
+    MAX_MSI_INSTALL_LOG_BYTES, MSI_INSTALL_LOG_ARGUMENT, MSI_INSTALL_LOG_PATH,
+};
 use aiw_schema::{
     ApplicationArchitecture, ApplicationSource, NetworkIntent, Project, ScenarioStep,
 };
@@ -36,7 +39,8 @@ struct WindowsInstallerOperation {
     privilege: &'static str,
     requested_scope: &'static str,
     executable: &'static str,
-    arguments: [&'static str; 5],
+    arguments: [&'static str; 7],
+    max_install_log_observation_bytes: usize,
     timeout_seconds: u32,
     expected_exit_code: u32,
     reboot_exit_codes: [u32; 2],
@@ -64,7 +68,7 @@ pub fn plan_msi_install(
             )
         })?;
     let preview = MsiInstallPreview {
-        schema_version: "aiw.dev/msi-install-preview/v0alpha1",
+        schema_version: "aiw.dev/msi-install-preview/v0alpha2",
         project_revision_sha256: aiw_orchestrator::project_revision_hash(project)?,
         scenario_id: scenario_id.into(),
         intake_receipt_sha256: held.verification().receipt_sha256.clone(),
@@ -76,6 +80,7 @@ pub fn plan_msi_install(
         limitations: &[
             "Review only. This preview grants no execution authority and is not an importable run plan.",
             "Architecture and machine scope are requested. Package metadata, embedded media, dependencies, custom actions and actual registration are unmeasured.",
+            "The planned worker keeps flushed Installer logging guest-local. The observation limit caps diagnostic reads.",
             "Application entry points, compatibility and effective isolation are unmeasured.",
         ],
     };
@@ -199,7 +204,16 @@ fn compile_operation(
         privilege: "elevatedInsideWorker",
         requested_scope: "perMachine",
         executable: r"C:\Windows\System32\msiexec.exe",
-        arguments: ["/i", GUEST_MSI, "/qn", "/norestart", "ALLUSERS=1"],
+        arguments: [
+            "/i",
+            GUEST_MSI,
+            "/qn",
+            "/norestart",
+            "ALLUSERS=1",
+            MSI_INSTALL_LOG_ARGUMENT,
+            MSI_INSTALL_LOG_PATH,
+        ],
+        max_install_log_observation_bytes: MAX_MSI_INSTALL_LOG_BYTES,
         timeout_seconds,
         expected_exit_code: 0,
         reboot_exit_codes: [1641, 3010],
@@ -250,7 +264,19 @@ mod tests {
         );
         assert_eq!(
             first.arguments,
-            ["/i", GUEST_MSI, "/qn", "/norestart", "ALLUSERS=1"]
+            [
+                "/i",
+                GUEST_MSI,
+                "/qn",
+                "/norestart",
+                "ALLUSERS=1",
+                MSI_INSTALL_LOG_ARGUMENT,
+                MSI_INSTALL_LOG_PATH,
+            ]
+        );
+        assert_eq!(
+            first.max_install_log_observation_bytes,
+            MAX_MSI_INSTALL_LOG_BYTES
         );
         assert_eq!(first.expected_exit_code, 0);
         assert_eq!(first.reboot_exit_codes, [1641, 3010]);

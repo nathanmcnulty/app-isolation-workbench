@@ -56,8 +56,12 @@ PR #112 review fix `9de43ed` requires authenticated local Start in both comparis
 lanes and preserves the portable payload depth under the replay wrapper.
 `codex/generic-msi-install-preflight` depends on that draft. The Windows CLI now
 reopens protected MSI intake and previews one bounded offline per-machine install
-from a typed scenario. Guest execution, installed entry-point discovery and
-trusted evidence collection are the next MSI milestone.
+from a typed scenario. The preview requests flushed guest-local MSI logging.
+The diagnostic CLI summarizes captured logs without publishing raw text. Matched
+VM107 trials with a known-good small MSI and CMake reached server-side package
+policy verification, then the 120-second deadline with neither ProductCode
+registered. Controlled installer completion and installed entry-point discovery
+remain open. See [installer diagnostics](APPLICATION-ASSESSMENT.md#installer-diagnostics).
 
 ## Remaining scope
 

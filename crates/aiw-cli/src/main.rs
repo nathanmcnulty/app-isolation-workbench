@@ -339,6 +339,11 @@ enum PackageCommand {
 
 #[derive(Debug, Subcommand)]
 enum ApplicationCommand {
+    /// Read a private Windows Installer log and emit bounded diagnostic observations.
+    SummarizeMsiLog {
+        #[arg(long)]
+        log: PathBuf,
+    },
     /// Preview one bounded, offline machine MSI install from existing protected intake.
     PlanMsiInstall {
         #[arg(long)]
@@ -1889,6 +1894,13 @@ fn run(command: Command) -> Result<()> {
             }
         },
         Command::Application(args) => match args.command {
+            ApplicationCommand::SummarizeMsiLog { log } => {
+                use aiw_provider_wsb::msi_diagnostics::{
+                    MAX_MSI_INSTALL_LOG_BYTES, MsiInstallLogSummary,
+                };
+                let bytes = read_file_bounded(&log, MAX_MSI_INSTALL_LOG_BYTES as u64)?;
+                write_json(&MsiInstallLogSummary::from_bytes(&bytes).map_err(anyhow::Error::msg)?)
+            }
             ApplicationCommand::PlanMsiInstall {
                 project,
                 scenario,

@@ -30,6 +30,7 @@ mod bambu_scenario;
 mod completion;
 mod failure_snapshots;
 mod imported_msi;
+pub mod msi_diagnostics;
 mod product_registration;
 mod registry_observations;
 mod runtime_context;

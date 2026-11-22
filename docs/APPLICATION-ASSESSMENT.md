@@ -32,6 +32,32 @@ observations. Package architecture, actual registration, dependencies, custom
 actions and application entry points remain unmeasured in this preview. The
 preview creates no run, approval, installer invocation or provider session.
 
+### Installer diagnostics
+
+Preview v0alpha2 specifies flushed, guest-local Windows Installer logging and
+an 8 MiB diagnostic read limit. The retained raw log stays private. To inspect
+a captured log without writing out its text:
+
+```powershell
+aiw application summarize-msi-log --log <private-install.log>
+```
+
+The summary recognizes a small set of English log records. It reports observed
+client and server records, server-side package policy verification, the last
+recognized action records, and separate log engine return codes. It skips
+unknown records and an unfinished final line. Compare these diagnostics with
+the held client exit, transaction events tied to that invocation, and
+machine-context registration for the exact MSI ProductCode.
+
+The smaller repository control and the external holdout reproduced the same
+boundary in fresh offline Windows Sandboxes. Each passed staged SHA-256
+verification and produced a matching transaction-start event. Both reached
+server-side package policy verification before the client deadline. Neither
+produced a transaction end, action completion, or observed client exit before
+cleanup. The exact ProductCodes were absent from machine registration before
+and after. These observations locate the stall in the worker and leave the
+underlying policy or trust cause open.
+
 ## First capability
 
 Stage an exact portable manifest into an offline disposable Windows worker and
