@@ -188,6 +188,15 @@ impl Tokens {
     pub(super) fn collector(&self) -> HANDLE {
         raw(&self.collector)
     }
+    pub(super) fn primary_owner_sid(&self) -> Result<String> {
+        use windows::Win32::Security::{TOKEN_OWNER, TokenOwner};
+        let buffer = Buffer::query(raw(&self.collector), TokenOwner)?;
+        let owner = buffer.sid(buffer.read::<TOKEN_OWNER>(0)?.Owner)?;
+        if identity(raw(&self.collector))? != self.collector_id {
+            return Err("collector owner token identity changed".into());
+        }
+        Ok(owner)
+    }
     /// Snapshot only. No privilege adjustment, launch selection or permission
     /// grant follows from these facts. USED_FOR_ACCESS may change later, so the
     /// snapshot is not an invariant substituted for the live dispatch guards.
@@ -410,6 +419,9 @@ mod tests {
         let process = unsafe { windows::Win32::System::Threading::GetCurrentProcess() };
         let token = open(process).unwrap();
         let held = Tokens::observe(process, raw(&token)).unwrap();
+        let owner = held.primary_owner_sid().unwrap();
+        assert!(!owner.is_empty());
+        assert_eq!(held.primary_owner_sid().unwrap(), owner);
         let system_form = held.system_facts().unwrap();
         assert_eq!(
             system_form.collector_user_sid,

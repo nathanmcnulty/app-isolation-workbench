@@ -32,8 +32,10 @@ fn collector_protection(
     native: &crate::assessment_observation::AssessmentNativeOutcome,
 ) -> Result<Option<bool>, String> {
     use crate::assessment_observation::{
-        ASSESSMENT_COLLECTOR_PROCESS_RIGHTS, ASSESSMENT_COLLECTOR_THREAD_RIGHTS,
-        AssessmentCollectorObject as O, validate_collector_token_provenance,
+        ASSESSMENT_COLLECTOR_PROCESS_RIGHTS, ASSESSMENT_COLLECTOR_PROTECTION_V5_SCHEMA,
+        ASSESSMENT_COLLECTOR_THREAD_RIGHTS, AssessmentCollectorObject as O,
+        system_collector_extra_trustee, system_collector_owner_trusted,
+        validate_collector_token_provenance,
     };
     let Some(p) = &native.collector_protection else {
         return Ok(None);
@@ -76,10 +78,13 @@ fn collector_protection(
             && descriptor.sddl.contains("D:")
             && descriptor.sddl.contains("S:")
             && trusted(&descriptor.owner_sid)
-            && descriptor
-                .trustee_sids
-                .iter()
-                .all(|s| trusted(s) || logon == Some(s.as_str()));
+            && (p.schema_version != ASSESSMENT_COLLECTOR_PROTECTION_V5_SCHEMA
+                || system_collector_owner_trusted(p, &descriptor.owner_sid))
+            && descriptor.trustee_sids.iter().all(|s| {
+                trusted(s)
+                    || logon == Some(s.as_str())
+                    || system_collector_extra_trustee(p, &descriptor.owner_sid, s)
+            });
     }
     let default = &p.primary_default_dacl;
     error(&default.parse_error)?;
@@ -99,11 +104,18 @@ fn collector_protection(
     )?;
     descriptor_policy &= default.parse_error.is_none()
         && acl.len() >= 8
+        && (p.schema_version != ASSESSMENT_COLLECTOR_PROTECTION_V5_SCHEMA
+            || p.primary_token_owner_sid
+                .as_deref()
+                .is_some_and(|owner| system_collector_owner_trusted(p, owner)))
         && default.trustee_sids.iter().all(|s| {
             s == &setup.user_sid
                 || s == "S-1-5-18"
                 || s == "S-1-5-32-544"
                 || logon == Some(s.as_str())
+                || p.primary_token_owner_sid
+                    .as_deref()
+                    .is_some_and(|owner| system_collector_extra_trustee(p, owner, s))
         });
     let expected: Vec<_> = ASSESSMENT_COLLECTOR_PROCESS_RIGHTS
         .into_iter()
@@ -154,9 +166,11 @@ fn protection_context(
     protection: &crate::assessment_observation::AssessmentCollectorProtection,
 ) -> Result<(), String> {
     require(
-        (protection.schema_version
-            == crate::assessment_observation::ASSESSMENT_COLLECTOR_PROTECTION_V4_SCHEMA)
-            == request.execution_context.is_some(),
+        (matches!(
+            protection.schema_version.as_str(),
+            crate::assessment_observation::ASSESSMENT_COLLECTOR_PROTECTION_V4_SCHEMA
+                | crate::assessment_observation::ASSESSMENT_COLLECTOR_PROTECTION_V5_SCHEMA
+        )) == request.execution_context.is_some(),
         "collector protection execution context differs",
     )
 }
@@ -2877,6 +2891,7 @@ mod tests {
             token_provenance: None,
             collector_capabilities: None,
             system_token_provenance: None,
+            primary_token_owner_sid: None,
         });
         (request, result)
     }
@@ -3416,6 +3431,222 @@ mod tests {
             }],
         });
         (request, result)
+    }
+    fn service_protection_fixture() -> (
+        ApplicationAssessmentGuestRequest,
+        ApplicationAssessmentResult,
+    ) {
+        use crate::assessment_observation::ASSESSMENT_COLLECTOR_PROTECTION_V5_SCHEMA;
+        let (request, mut result) = system_protection_fixture();
+        let p = result.native.collector_protection.as_mut().unwrap();
+        p.schema_version = ASSESSMENT_COLLECTOR_PROTECTION_V5_SCHEMA.into();
+        p.primary_token_owner_sid = Some("S-1-5-18".into());
+        let service = "S-1-5-80-1-2-3-4-5";
+        let provenance = p.system_token_provenance.as_mut().unwrap();
+        provenance.collector_groups.push(AssessmentTokenGroup {
+            sid: service.into(),
+            attributes: 10,
+        });
+        for d in [&mut p.process_security, &mut p.thread_security] {
+            d.sddl = format!("O:SYD:(A;;GA;;;SY)(A;;RC;;;OW)(A;;GA;;;{service})S:(ML;;NW;;;SI)");
+            d.sha256 = hex::encode(Sha256::digest(d.sddl.as_bytes()));
+            d.trustee_sids = vec!["S-1-3-4".into(), "S-1-5-18".into(), service.into()];
+        }
+        p.primary_default_dacl.trustee_sids =
+            vec!["S-1-3-4".into(), "S-1-5-18".into(), service.into()];
+        (request, result)
+    }
+    #[test]
+    fn system_v5_measured_owner_and_service_groups_do_not_reinterpret_v4() {
+        let (_, mut result) = service_protection_fixture();
+        assert_eq!(collector_protection(&result.native).unwrap(), Some(true));
+        result
+            .native
+            .collector_protection
+            .as_mut()
+            .unwrap()
+            .primary_token_owner_sid = Some("S-1-5-32-544".into());
+        assert_eq!(collector_protection(&result.native).unwrap(), Some(true));
+        let p = result.native.collector_protection.as_mut().unwrap();
+        p.schema_version = ASSESSMENT_COLLECTOR_PROTECTION_V4_SCHEMA.into();
+        p.primary_token_owner_sid = None;
+        assert_eq!(collector_protection(&result.native).unwrap(), None);
+    }
+    #[test]
+    fn system_v5_owner_and_service_membership_refuse_ambiguous_or_shared_principals() {
+        use crate::assessment_observation::{
+            system_collector_extra_trustee, system_collector_owner_trusted,
+        };
+        let (_, result) = service_protection_fixture();
+        let original = result.native.collector_protection.unwrap();
+        for bad in [
+            "S-1-5-80-0",
+            "S-1-5-80-1-2-3-4",
+            "S-1-5-80-1-2-3-4-5-6",
+            "S-1-5-80-01-2-3-4-5",
+            "S-1-5-80-4294967296-2-3-4-5",
+            "S-1-5-5-1-2",
+            "S-1-1-0",
+            "S-1-15-2-1",
+        ] {
+            assert!(!system_collector_extra_trustee(&original, "S-1-5-18", bad));
+        }
+        assert!(!system_collector_owner_trusted(&original, "S-1-3-4"));
+        for attrs in [0, 7, 16] {
+            let mut p = original.clone();
+            p.system_token_provenance
+                .as_mut()
+                .unwrap()
+                .standard_groups
+                .push(AssessmentTokenGroup {
+                    sid: "S-1-5-80-1-2-3-4-5".into(),
+                    attributes: attrs,
+                });
+            assert!(!system_collector_extra_trustee(
+                &p,
+                "S-1-5-18",
+                "S-1-5-80-1-2-3-4-5"
+            ));
+            let mut p = original.clone();
+            p.system_token_provenance
+                .as_mut()
+                .unwrap()
+                .standard_groups
+                .push(AssessmentTokenGroup {
+                    sid: "S-1-5-32-544".into(),
+                    attributes: attrs,
+                });
+            assert!(!system_collector_owner_trusted(&p, "S-1-5-32-544"));
+        }
+        let mut p = original.clone();
+        p.system_token_provenance
+            .as_mut()
+            .unwrap()
+            .collector_groups
+            .clear();
+        assert!(!system_collector_extra_trustee(
+            &p,
+            "S-1-5-18",
+            "S-1-5-80-1-2-3-4-5"
+        ));
+        let mut p = original.clone();
+        p.system_token_provenance
+            .as_mut()
+            .unwrap()
+            .standard_user_sid = "S-1-5-80-1-2-3-4-5".into();
+        assert!(!system_collector_extra_trustee(
+            &p,
+            "S-1-5-18",
+            "S-1-5-80-1-2-3-4-5"
+        ));
+        for owner in [None, Some("S-1-1-0"), Some("S-1-5-80-1-2-3-4-5")] {
+            let mut p = original.clone();
+            p.primary_token_owner_sid = owner.map(String::from);
+            assert!(
+                validate_collector_token_provenance(
+                    &p,
+                    "S-1-5-18",
+                    &p.system_token_provenance
+                        .as_ref()
+                        .unwrap()
+                        .standard_user_sid
+                )
+                .is_err()
+            );
+        }
+    }
+    #[test]
+    fn system_v5_owner_wire_is_required_and_forbidden_even_null_in_older_versions() {
+        let (_, result) = service_protection_fixture();
+        let p = result.native.collector_protection.unwrap();
+        let wire = serde_json::to_value(&p).unwrap();
+        assert_eq!(
+            serde_json::from_value::<AssessmentCollectorProtection>(wire.clone()).unwrap(),
+            p
+        );
+        for missing in [true, false] {
+            let mut value = wire.clone();
+            if missing {
+                value
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("primaryTokenOwnerSid");
+            } else {
+                value["primaryTokenOwnerSid"] = serde_json::Value::Null;
+            }
+            assert!(serde_json::from_value::<AssessmentCollectorProtection>(value).is_err());
+        }
+        for version in [
+            ASSESSMENT_COLLECTOR_PROTECTION_SCHEMA,
+            ASSESSMENT_COLLECTOR_PROTECTION_V2_SCHEMA,
+            ASSESSMENT_COLLECTOR_PROTECTION_V3_SCHEMA,
+            ASSESSMENT_COLLECTOR_PROTECTION_V4_SCHEMA,
+        ] {
+            for value in [serde_json::Value::Null, serde_json::json!("S-1-5-18")] {
+                let mut old = wire.clone();
+                old["schemaVersion"] = serde_json::json!(version);
+                old["primaryTokenOwnerSid"] = value;
+                assert!(serde_json::from_value::<AssessmentCollectorProtection>(old).is_err());
+            }
+        }
+    }
+    #[test]
+    fn system_v5_still_requires_all_object_access_denials() {
+        let (_, result) = service_protection_fixture();
+        for index in 0..14 {
+            let mut altered = result.clone();
+            let fact = &mut altered
+                .native
+                .collector_protection
+                .as_mut()
+                .unwrap()
+                .access_checks[index];
+            fact.denied = Some(false);
+            fact.native_code = Some(0);
+            assert_eq!(collector_protection(&altered.native).unwrap(), Some(false));
+        }
+        let mut altered = result.clone();
+        altered
+            .native
+            .collector_protection
+            .as_mut()
+            .unwrap()
+            .access_checks
+            .pop();
+        assert_eq!(collector_protection(&altered.native).unwrap(), None);
+        for collector in [false, true] {
+            let mut altered = result.clone();
+            let p = altered.native.collector_protection.as_mut().unwrap();
+            let groups = if collector {
+                &mut p.system_token_provenance.as_mut().unwrap().collector_groups
+            } else {
+                &mut p.system_token_provenance.as_mut().unwrap().standard_groups
+            };
+            groups.clear();
+            assert!(collector_protection(&altered.native).is_err());
+        }
+    }
+    #[test]
+    fn system_v5_valid_service_sid_absent_from_held_collector_groups_refuses() {
+        let (_, mut result) = service_protection_fixture();
+        let p = result.native.collector_protection.as_mut().unwrap();
+        for descriptor in [&mut p.process_security, &mut p.thread_security] {
+            descriptor.sddl = descriptor
+                .sddl
+                .replace("S-1-5-80-1-2-3-4-5", "S-1-5-80-1-2-3-4-6");
+            descriptor.sha256 = hex::encode(Sha256::digest(descriptor.sddl.as_bytes()));
+            *descriptor.trustee_sids.last_mut().unwrap() = "S-1-5-80-1-2-3-4-6".into();
+        }
+        *p.primary_default_dacl.trustee_sids.last_mut().unwrap() = "S-1-5-80-1-2-3-4-6".into();
+        assert_eq!(p.access_checks.len(), 14);
+        assert!(
+            !p.system_token_provenance
+                .as_ref()
+                .unwrap()
+                .collector_groups
+                .is_empty()
+        );
+        assert_eq!(collector_protection(&result.native).unwrap(), None);
     }
     #[test]
     fn system_protection_is_distinct_closed_wire_not_historical_logon_exception() {

@@ -298,7 +298,7 @@ impl ProtectionHold {
         }
         let tokens = token::Tokens::observe(raw(&process), standard)?;
         let fact = AssessmentCollectorProtection {
-            schema_version: ASSESSMENT_COLLECTOR_PROTECTION_V4_SCHEMA.into(),
+            schema_version: ASSESSMENT_COLLECTOR_PROTECTION_V5_SCHEMA.into(),
             storage:
                 aiw_provider_wsb::assessment_channel::ChannelCollectorStorage::ProtectedGuestLocal,
             collector_process_id: pid,
@@ -309,6 +309,7 @@ impl ProtectionHold {
             primary_default_dacl: default_dacl(tokens.collector())?,
             token_provenance: None,
             system_token_provenance: Some(tokens.system_facts()?),
+            primary_token_owner_sid: Some(tokens.primary_owner_sid()?),
             collector_capabilities: Some(tokens.capabilities()),
             access_checks: vec![],
         };
@@ -410,6 +411,8 @@ impl ProtectionHold {
             || security(raw(&self.process))? != self.fact.process_security
             || security(raw(&self.thread))? != self.fact.thread_security
             || default_dacl(self.tokens.collector())? != self.fact.primary_default_dacl
+            || self.fact.primary_token_owner_sid.as_deref()
+                != Some(self.tokens.primary_owner_sid()?.as_str())
         {
             return Err("collector process/thread/security identity changed".into());
         }
@@ -436,9 +439,38 @@ impl ProtectionHold {
         )?;
         let descriptors = [&self.fact.process_security, &self.fact.thread_security]
             .into_iter()
-            .all(|d| trusted_descriptor(d, &self.collector_sid, logon));
+            .all(|d| {
+                if self.fact.schema_version == ASSESSMENT_COLLECTOR_PROTECTION_V5_SCHEMA {
+                    d.parse_error.is_none()
+                        && system_collector_owner_trusted(&self.fact, &d.owner_sid)
+                        && d.trustee_sids.iter().all(|sid| {
+                            matches!(sid.as_str(), "S-1-5-18" | "S-1-5-32-544")
+                                || system_collector_extra_trustee(&self.fact, &d.owner_sid, sid)
+                        })
+                } else {
+                    trusted_descriptor(d, &self.collector_sid, logon)
+                }
+            });
+        let default_trusted =
+            if self.fact.schema_version == ASSESSMENT_COLLECTOR_PROTECTION_V5_SCHEMA {
+                let owner = self
+                    .fact
+                    .primary_token_owner_sid
+                    .as_deref()
+                    .ok_or("collector primary owner absent")?;
+                let default = &self.fact.primary_default_dacl;
+                default.parse_error.is_none()
+                    && !default.acl_hex.is_empty()
+                    && system_collector_owner_trusted(&self.fact, owner)
+                    && default.trustee_sids.iter().all(|sid| {
+                        matches!(sid.as_str(), "S-1-5-18" | "S-1-5-32-544")
+                            || system_collector_extra_trustee(&self.fact, owner, sid)
+                    })
+            } else {
+                trusted_default(&self.fact.primary_default_dacl, &self.collector_sid, logon)
+            };
         if !descriptors
-            || !trusted_default(&self.fact.primary_default_dacl, &self.collector_sid, logon)
+            || !default_trusted
             || self.fact.access_checks.len() != 14
             || self
                 .fact
@@ -455,6 +487,26 @@ impl ProtectionHold {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn held_primary_owner_change_refuses_before_application_dispatch() {
+        use windows::Win32::{
+            Security::TOKEN_QUERY,
+            System::Threading::{GetCurrentProcess, OpenProcessToken},
+        };
+        let mut handle = HANDLE::default();
+        unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut handle) }.unwrap();
+        let token = unsafe { OwnedHandle::from_raw_handle(handle.0) };
+        let primary = token::Tokens::observe(unsafe { GetCurrentProcess() }, raw(&token)).unwrap();
+        let sid = primary.system_facts().unwrap().collector_user_sid;
+        // Read-only observation of this test runner; it does not claim the
+        // runner satisfies SYSTEM0 or use an application token for dispatch.
+        let mut held = ProtectionHold::observe(&sid, raw(&token)).unwrap();
+        held.revalidate().unwrap();
+        held.fact.primary_token_owner_sid = None;
+        assert!(held.revalidate().is_err());
+        held.fact.primary_token_owner_sid = Some("S-1-1-0".into());
+        assert!(held.revalidate().is_err());
+    }
     #[test]
     fn null_acl_and_unreviewed_principals_cannot_qualify_collector() {
         assert!(trustee_sids(std::ptr::null()).is_err());

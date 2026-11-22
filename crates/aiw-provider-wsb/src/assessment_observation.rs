@@ -104,6 +104,8 @@ pub const ASSESSMENT_COLLECTOR_PROTECTION_V3_SCHEMA: &str =
     "aiw.dev/assessment-collector-protection/v0alpha3";
 pub const ASSESSMENT_COLLECTOR_PROTECTION_V4_SCHEMA: &str =
     "aiw.dev/assessment-collector-protection/v0alpha4";
+pub const ASSESSMENT_COLLECTOR_PROTECTION_V5_SCHEMA: &str =
+    "aiw.dev/assessment-collector-protection/v0alpha5";
 pub const ASSESSMENT_COLLECTOR_CAPABILITIES_SCHEMA: &str =
     "aiw.dev/collector-prelaunch-privileges/v0alpha1";
 
@@ -232,6 +234,10 @@ pub struct AssessmentCollectorProtection {
     pub collector_capabilities: Option<AssessmentCollectorCapabilities>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_token_provenance: Option<AssessmentSystemCollectorTokenProvenance>,
+    /// Actual held collector primary TOKEN_OWNER. Required only by protection
+    /// v5; TokenUser is not a substitute for default-DACL owner resolution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_token_owner_sid: Option<String>,
     pub access_checks: Vec<AssessmentCollectorObjectAccess>,
 }
 
@@ -257,6 +263,19 @@ struct CollectorCapabilitiesPresence {
 struct SystemProvenancePresence {
     present: bool,
     value: Option<AssessmentSystemCollectorTokenProvenance>,
+}
+#[derive(Default)]
+struct PrimaryOwnerPresence {
+    present: bool,
+    value: Option<String>,
+}
+impl<'de> Deserialize<'de> for PrimaryOwnerPresence {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(Self {
+            present: true,
+            value: Option::<String>::deserialize(d)?,
+        })
+    }
 }
 impl<'de> Deserialize<'de> for SystemProvenancePresence {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -291,19 +310,32 @@ struct CollectorProtectionWire {
     collector_capabilities: CollectorCapabilitiesPresence,
     #[serde(default)]
     system_token_provenance: SystemProvenancePresence,
+    #[serde(default)]
+    primary_token_owner_sid: PrimaryOwnerPresence,
     access_checks: Vec<AssessmentCollectorObjectAccess>,
 }
 impl<'de> Deserialize<'de> for AssessmentCollectorProtection {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let w = CollectorProtectionWire::deserialize(d)?;
-        if w.schema_version != ASSESSMENT_COLLECTOR_PROTECTION_V4_SCHEMA
-            && w.system_token_provenance.present
-        {
+        let system = matches!(
+            w.schema_version.as_str(),
+            ASSESSMENT_COLLECTOR_PROTECTION_V4_SCHEMA | ASSESSMENT_COLLECTOR_PROTECTION_V5_SCHEMA
+        );
+        if w.schema_version == ASSESSMENT_COLLECTOR_PROTECTION_V5_SCHEMA {
+            if w.primary_token_owner_sid.value.is_none() {
+                return Err(serde::de::Error::custom("collector primary owner absent"));
+            }
+        } else if w.primary_token_owner_sid.present {
+            return Err(serde::de::Error::custom(
+                "historical collector cannot contain primary owner",
+            ));
+        }
+        if !system && w.system_token_provenance.present {
             return Err(serde::de::Error::custom(
                 "historical collector protection cannot contain System provenance",
             ));
         }
-        if w.schema_version == ASSESSMENT_COLLECTOR_PROTECTION_V4_SCHEMA {
+        if system {
             if w.token_provenance.present {
                 return Err(serde::de::Error::custom(
                     "System collector cannot borrow historical provenance",
@@ -332,7 +364,9 @@ impl<'de> Deserialize<'de> for AssessmentCollectorProtection {
         }
         if matches!(
             w.schema_version.as_str(),
-            ASSESSMENT_COLLECTOR_PROTECTION_V3_SCHEMA | ASSESSMENT_COLLECTOR_PROTECTION_V4_SCHEMA
+            ASSESSMENT_COLLECTOR_PROTECTION_V3_SCHEMA
+                | ASSESSMENT_COLLECTOR_PROTECTION_V4_SCHEMA
+                | ASSESSMENT_COLLECTOR_PROTECTION_V5_SCHEMA
         ) {
             w.collector_capabilities
                 .value
@@ -355,6 +389,7 @@ impl<'de> Deserialize<'de> for AssessmentCollectorProtection {
             token_provenance: w.token_provenance.value,
             collector_capabilities: w.collector_capabilities.value,
             system_token_provenance: w.system_token_provenance.value,
+            primary_token_owner_sid: w.primary_token_owner_sid.value,
             access_checks: w.access_checks,
         })
     }
@@ -419,6 +454,64 @@ pub fn validate_system_collector_token_provenance(
     }
     Ok(())
 }
+fn system_owner_excluded(protection: &AssessmentCollectorProtection, owner: &str) -> bool {
+    matches!(owner, "S-1-5-18" | "S-1-5-32-544")
+        && protection
+            .system_token_provenance
+            .as_ref()
+            .is_some_and(|p| {
+                owner != p.standard_user_sid && p.standard_groups.iter().all(|g| g.sid != owner)
+            })
+}
+
+/// Protection-v5-only resolution for process/thread owners and the held primary
+/// token's default owner. Callers also validate the complete protection binding.
+pub fn system_collector_owner_trusted(
+    protection: &AssessmentCollectorProtection,
+    owner: &str,
+) -> bool {
+    protection.schema_version == ASSESSMENT_COLLECTOR_PROTECTION_V5_SCHEMA
+        && protection
+            .primary_token_owner_sid
+            .as_deref()
+            .is_some_and(|primary_owner| system_owner_excluded(protection, primary_owner))
+        && system_owner_excluded(protection, owner)
+}
+
+/// Additional trustees in the measured SYSTEM process/thread/default DACL only.
+/// This never grants access, changes an ACL, applies to files, or trusts arbitrary
+/// service-prefix SIDs. Complete held-token observations and native denials are
+/// separate mandatory gates. Group attributes never excuse standard membership.
+pub fn system_collector_extra_trustee(
+    protection: &AssessmentCollectorProtection,
+    owner: &str,
+    trustee: &str,
+) -> bool {
+    if !system_collector_owner_trusted(protection, owner) {
+        return false;
+    }
+    if trustee == "S-1-3-4" {
+        return true;
+    }
+    let Some(p) = protection.system_token_provenance.as_ref() else {
+        return false;
+    };
+    let service = trustee.strip_prefix("S-1-5-80-").is_some_and(|tail| {
+        let mut parts = tail.split('-');
+        (0..5).all(|_| {
+            parts.next().is_some_and(|part| {
+                part.parse::<u32>()
+                    .ok()
+                    .is_some_and(|n| n.to_string() == part)
+            })
+        }) && parts.next().is_none()
+    });
+    service
+        && p.collector_groups.iter().any(|g| g.sid == trustee)
+        && p.standard_user_sid != trustee
+        && p.standard_groups.iter().all(|g| g.sid != trustee)
+}
+
 fn canonical_token_sid(value: &str) -> bool {
     if value.len() > 184 {
         return false;
@@ -444,7 +537,10 @@ pub fn validate_collector_token_provenance<'a>(
     collector_sid: &str,
     standard_sid: &str,
 ) -> Result<Option<&'a str>, String> {
-    if protection.schema_version == ASSESSMENT_COLLECTOR_PROTECTION_V4_SCHEMA {
+    if matches!(
+        protection.schema_version.as_str(),
+        ASSESSMENT_COLLECTOR_PROTECTION_V4_SCHEMA | ASSESSMENT_COLLECTOR_PROTECTION_V5_SCHEMA
+    ) {
         if protection.token_provenance.is_some() {
             return Err("System collector historical provenance refused".into());
         }
@@ -461,7 +557,28 @@ pub fn validate_collector_token_provenance<'a>(
             collector_sid,
             standard_sid,
         )?;
+        if protection.schema_version == ASSESSMENT_COLLECTOR_PROTECTION_V5_SCHEMA {
+            let p = protection
+                .system_token_provenance
+                .as_ref()
+                .ok_or("System provenance absent")?;
+            if p.collector_groups.is_empty() || p.standard_groups.is_empty() {
+                return Err("System collector complete groups absent".into());
+            }
+            let owner = protection
+                .primary_token_owner_sid
+                .as_deref()
+                .ok_or("collector primary owner absent")?;
+            if !system_owner_excluded(protection, owner) {
+                return Err("collector primary owner is not trusted/excluded".into());
+            }
+        } else if protection.primary_token_owner_sid.is_some() {
+            return Err("historical collector primary owner refused".into());
+        }
         return Ok(None);
+    }
+    if protection.primary_token_owner_sid.is_some() {
+        return Err("historical collector primary owner refused".into());
     }
     if protection.system_token_provenance.is_some() {
         return Err("historical System provenance refused".into());

@@ -53,6 +53,20 @@ The [process-creation contract](https://learn.microsoft.com/en-us/windows/win32/
 requires same-session handle inheritance and describes temporary use of assigned
 privileges. No rights grant,
 session reassignment, desktop ACL repair or interactive fallback is permitted.
+
+Collector protection `v0alpha5` records the held primary token's `TOKEN_OWNER`
+separately from its user SID. For process/thread security and the primary default
+DACL only, Owner Rights resolves to the measured SYSTEM or Administrators owner,
+which must be absent from the application user and every application token group.
+An individual NT SERVICE SID is recognized only when its complete canonical SID
+is present in the held collector groups and absent from that application user and
+all of its groups, regardless of group attributes. This recognizes inherited OS
+service principals within the trusted collector environment; it does not grant
+permissions, change ACLs, or establish protection from those services or brokers.
+All 15 file and 14 process/thread denial measurements remain required. Missing
+owner/group facts or an unrecognized trustee prevent application creation.
+Protection v4 retains its stricter trustee rules and historical results remain
+read-only under those rules. Source tests alone do not qualify the v5 path.
 Requests use `v0alpha3`; channel bindings/bootstrap use `v0alpha2`. The signature
 envelope and progress protocol retain their existing bytes and meaning.
 These contracts are implemented for qualification; native acceptance remains open.
