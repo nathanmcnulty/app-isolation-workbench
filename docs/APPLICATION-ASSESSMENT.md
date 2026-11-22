@@ -19,7 +19,7 @@ SHA-256, blocked networking, and a scenario containing exactly one `install`
 step. Then preview the selected scenario:
 
 ```powershell
-aiw application plan-msi-install --project <project.json> --scenario <scenario-id> --import-receipt <receipt.json> --timeout-seconds 120
+aiw application plan-msi-install --project <project.json> --scenario <scenario-id> --import-receipt <receipt.json> --timeout-seconds 300
 ```
 
 The command reopens the protected intake and binds the current receipt, payload
@@ -43,20 +43,25 @@ aiw application summarize-msi-log --log <private-install.log>
 ```
 
 The summary recognizes a small set of English log records. It reports observed
-client and server records, server-side package policy verification, the last
-recognized action records, and separate log engine return codes. It skips
-unknown records and an unfinished final line. Compare these diagnostics with
-the held client exit, transaction events tied to that invocation, and
-machine-context registration for the exact MSI ProductCode.
+client and server records, server-side package policy verification, a matching
+allow record for the same package and server thread, the last recognized action
+records, and separate log engine return codes. It skips unknown records and an
+unfinished final line. Use independent client exit, matching transaction
+events, and machine-context registration for the exact MSI ProductCode to
+verify installation.
 
-The smaller repository control and the external holdout reproduced the same
-boundary in fresh offline Windows Sandboxes. Each passed staged SHA-256
-verification and produced a matching transaction-start event. Both reached
-server-side package policy verification before the client deadline. Neither
-produced a transaction end, action completion, or observed client exit before
-cleanup. The exact ProductCodes were absent from machine registration before
-and after. These observations locate the stall in the worker and leave the
-underlying policy or trust cause open.
+In fresh offline Windows Sandboxes, the 120-second client deadline expired
+during package trust verification for both the repository control and the
+external holdout. For the control, the trace recorded offline certificate
+revocation checks (`0x80092013`), then `WinVerifyTrust` returned success
+after 121.4 seconds and App Control recorded a matching allow.
+
+At the existing 300-second maximum, the control exited successfully in 173.5
+seconds. Matching transaction events, machine-context registration and two
+installed executable candidates were observed. The holdout progressed into
+Windows Installer actions and reached the deadline without a client exit or
+machine registration. The reviewed deadline covers Windows trust processing
+and the install. The actual completion evidence determines the result.
 
 ## First capability
 

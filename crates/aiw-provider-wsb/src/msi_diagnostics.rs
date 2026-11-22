@@ -26,6 +26,7 @@ pub struct MsiInstallLogSummary {
     client_records_observed: bool,
     server_records_observed: bool,
     server_package_policy_check_observed: bool,
+    server_package_policy_allow_observed: bool,
     client_engine_return: Option<u32>,
     server_engine_return: Option<u32>,
 }
@@ -60,27 +61,33 @@ impl MsiInstallLogSummary {
             _ => String::from_utf8_lossy(bytes),
         };
         let mut summary = Self {
-            schema_version: "aiw.dev/msi-install-log-diagnostics/v0alpha1",
+            schema_version: "aiw.dev/msi-install-log-diagnostics/v0alpha2",
             bytes: bytes.len(),
             last_action_started: None,
             last_action_ended: None,
             client_records_observed: false,
             server_records_observed: false,
             server_package_policy_check_observed: false,
+            server_package_policy_allow_observed: false,
             client_engine_return: None,
             server_engine_return: None,
         };
+        let mut pending_policy_check = None;
         // split_terminator would include an unfinished nonempty line at EOF.
         for line in text
             .split_inclusive('\n')
             .filter_map(|line| line.strip_suffix('\n'))
         {
-            summary.observe(line.trim_end_matches('\r'));
+            summary.observe(line.trim_end_matches('\r'), &mut pending_policy_check);
         }
         Ok(summary)
     }
 
-    fn observe(&mut self, line: &str) {
+    fn observe<'log>(
+        &mut self,
+        line: &'log str,
+        pending_policy_check: &mut Option<(&'log str, &'log str)>,
+    ) {
         if let Some(start) = action_message(line, "Action start ")
             .and_then(|message| message.strip_suffix('.'))
             .filter(|name| action_name(name))
@@ -113,14 +120,30 @@ impl MsiInstallLogSummary {
         } else {
             return;
         };
-        let Some((_, message)) = record.split_once("]: ") else {
+        let Some((context, message)) = record.split_once("]: ") else {
             return;
         };
         *seen = true;
         if line.starts_with("MSI (s) ")
-            && message.starts_with("SOFTWARE RESTRICTION POLICY: Verifying package --> ")
+            && let Some((thread, _)) = context.split_once(" [")
+            && let Some(policy) = message.strip_prefix("SOFTWARE RESTRICTION POLICY: ")
         {
-            self.server_package_policy_check_observed = true;
+            if let Some(package) = policy.strip_prefix("Verifying package --> ") {
+                self.server_package_policy_check_observed = true;
+                *pending_policy_check = package
+                    .strip_prefix('\'')
+                    .and_then(|package| {
+                        package.strip_suffix("' against software restriction policy")
+                    })
+                    .filter(|package| !package.is_empty())
+                    .map(|package| (thread, package));
+            } else if let Some(package) = policy
+                .strip_suffix(" is permitted to run at the 'unrestricted' authorization level.")
+                && *pending_policy_check == Some((thread, package))
+            {
+                self.server_package_policy_allow_observed = true;
+                *pending_policy_check = None;
+            }
         }
         if let Some(result) = message
             .trim_start()
@@ -182,7 +205,29 @@ mod tests {
         let input = b"MSI (s) (58:AC) [09:23:54:535]: SOFTWARE RESTRICTION POLICY: Verifying package --> 'C:\\private\\input.msi' against software restriction policy\r\n";
         let summary = MsiInstallLogSummary::from_bytes(input).unwrap();
         assert!(summary.server_package_policy_check_observed);
+        assert!(!summary.server_package_policy_allow_observed);
         assert!(summary.server_records_observed);
+        assert_eq!(summary.server_engine_return, None);
+        assert_eq!(summary.last_action_ended, None);
+        assert!(!serde_json::to_string(&summary).unwrap().contains("private"));
+    }
+
+    #[test]
+    fn package_policy_allow_requires_the_same_server_thread_and_package() {
+        let check = "MSI (s) (D0:EC) [10:31:50:290]: SOFTWARE RESTRICTION POLICY: Verifying package --> 'C:\\private\\input.msi' against software restriction policy\r\n";
+        let allow = "SOFTWARE RESTRICTION POLICY: C:\\private\\input.msi is permitted to run at the 'unrestricted' authorization level.\r\n";
+        let wrong_package = allow.replace("input.msi", "different.msi");
+        let unrelated = format!(
+            "{check}MSI (c) (D0:EC) [10:33:52:353]: {allow}\
+             MSI (s) (D0:ED) [10:33:52:353]: {allow}\
+             MSI (s) (D0:EC) [10:33:52:353]: {wrong_package}"
+        );
+        let summary = MsiInstallLogSummary::from_bytes(unrelated.as_bytes()).unwrap();
+        assert!(!summary.server_package_policy_allow_observed);
+
+        let paired = format!("{unrelated}MSI (s) (D0:EC) [10:33:52:353]: {allow}");
+        let summary = MsiInstallLogSummary::from_bytes(paired.as_bytes()).unwrap();
+        assert!(summary.server_package_policy_allow_observed);
         assert_eq!(summary.server_engine_return, None);
         assert_eq!(summary.last_action_ended, None);
         assert!(!serde_json::to_string(&summary).unwrap().contains("private"));
