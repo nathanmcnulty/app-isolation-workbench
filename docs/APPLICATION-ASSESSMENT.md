@@ -2,8 +2,8 @@
 
 Implementation boundary for the first useful slice of
 [issue #108](https://github.com/nathanmcnulty/app-isolation-workbench/issues/108).
-Execution and native acceptance are in progress. A schema accepting an operation
-does not mean execution implements it.
+The portable CLI slice has the sampled native evidence below. Broader acceptance
+remains open; a schema accepting an operation does not mean execution implements it.
 
 One intake, plan, review/approve, Start, execution, retained-report and package
 path must accept two different external applications without engine changes.
@@ -94,7 +94,8 @@ Protection v4 retains its stricter trustee rules and historical results remain
 read-only under those rules. Source tests alone do not qualify the v5 path.
 Requests use `v0alpha3`; channel bindings/bootstrap use `v0alpha2`. The signature
 envelope and progress protocol retain their existing bytes and meaning.
-These contracts are implemented for qualification; native acceptance remains open.
+These contracts passed the sampled native controls and workflows below; broader
+native acceptance remains open.
 Their exact typed Sandbox CLI protocol is part of plan hashing and approval;
 preparation selects it from the verified Store package without claiming a live
 version observation. Start must observe the same held provider version before
@@ -176,6 +177,49 @@ separate claims.
 
 ## Acceptance
 
+### Sampled native evidence
+
+On source `315391e`, the same pinned CLI, guest agent and common assessment harness
+completed two external workflows in fresh Windows Sandboxes on existing VM107.
+Application names, payloads, SQL/arguments and assertions stayed in external run
+data; there were no production-code changes or application-specific rebuilds
+between fixtures. Both used the same intake, replay export/verification,
+preparation, separate approval/Start, retained report and comparison services.
+
+| Declared workflow | Ordinary and Classic results |
+| --- | --- |
+| Stateless JSON transformation | One launch, three steps and two assertions passed; complete 20-byte stdout, empty stderr |
+| Initialize a supplied empty database, insert rows, query in a separate process | Two launches, six steps and five assertions passed; complete 25-byte query output, empty stderr and an 8,192-byte database |
+
+Independent admission verified 29/30 signatures for the JSON runs and 36/37 for
+the database runs. Actual root images and Medium standard-user/Low AppContainer
+tokens were measured. Every passing trial verified empty owned jobs, account
+cleanup, owned AppContainer-profile cleanup where applicable, exact Sandbox stop
+and two final empty provider lists. Both retained comparisons admitted identical
+project/content/semantic identities with only declared policy selection differing.
+Database full-file hashes and extents matched; complete database bytes were not
+retained for direct byte comparison.
+
+The first database baseline failed opening its initially absent file. Versioned
+CLI source inspection and success with a declared empty seed support an
+initial-condition explanation; no native file-open error trace was collected.
+That authenticated failure remains retained, without an isolation-incompatibility
+claim. A new explicit zero-byte input condition, with
+the same executable/SQL/protection options, required fresh plans and approvals.
+It did not rewrite or replay the failed run. This demonstrates both truthful
+failure reporting and correction through run inputs alone.
+
+Project-owned positive controls passed in both policies. Separate overflow and
+timeout controls authenticated incomplete outcomes without workflow success and
+verified cleanup. Repeated retained Read returned matching full-report hashes and
+lengths for the four passing external runs. Six production sanitized JSON reports/comparisons
+were exported from admitted retained bytes without application/provider calls.
+This qualifies the declared CLI/root-token scope, not every restriction, native
+desktop operation, installer family or arbitrary application. Private raw evidence
+and payloads remain outside Git.
+
+### Broader exit criteria
+
 Prove the driver with project-owned controls before vendor trials. Exercise an
 unchanged engine with stateless JSON and stateful database external run data.
 Retain provenance and source-pinned stage results. Test plan/payload drift,
@@ -226,4 +270,5 @@ The monotonic workflow budget includes setup and prevents late application
 dispatch. Synchronous filesystem/profile/native calls can overrun that budget;
 the separate outer Sandbox watchdog bounds worker lifetime. This is not a hard
 real-time I/O cancellation guarantee. Desktop intake and general installer/GUI
-automation remain separate work; current native acceptance is still pending.
+automation remain separate work; the sampled CLI results do not close broad
+native, Benchmark 2, W4/W5 or production acceptance.

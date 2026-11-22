@@ -1,99 +1,86 @@
 # Working state
 
 Updated 2026-11-21 (America/Anchorage). Effective goal #108 is one application-neutral
-assessment and packaging path demonstrated with two behaviorally different external
-administrator-supplied fixtures through unchanged production code. Preserve #111
-evidence; its legacy application-specific work is paused. Neither external fixture
-has executed.
+assessment and replay path for two different external administrator-supplied
+fixtures. #111 evidence is preserved and its legacy application-specific work is
+paused. Draft PR #112 uses `codex/application-neutral-assessment` in
+`C:\aiw\app-isolation-workbench-108`.
 
-Checkout `C:\aiw\app-isolation-workbench-108`, branch
-`codex/application-neutral-assessment`, draft PR #112. Start with
-`scripts/work-status.ps1`, [assessment](APPLICATION-ASSESSMENT.md) and
-[channel design](ASSESSMENT-EVIDENCE-CHANNEL.md).
+Start with `scripts/work-status.ps1`, [assessment](APPLICATION-ASSESSMENT.md) and
+[channel design](ASSESSMENT-EVIDENCE-CHANNEL.md). Private evidence and source pins
+remain in `C:\aiw\generic-assessment-108`; never commit payloads or raw evidence.
 
-## Current slice
+## Current result
 
-The portable offline x64 CLI path covers protected intake, compilation,
-preparation, separate approval/Start, signed retained reporting/comparison and
-replay packages. Names, payloads and operations are run inputs. Installers/GUI
-workflows, complete descendants/registry/network/DLL/memory coverage, W4/W5 and
-production acceptance remain open.
+Production source `315391e` and the same pinned CLI/agent/common harness served
+both external fixtures without rebuilding or adding product-specific code.
+Protected intake, replay export/verification, separate preparation/approval/Start,
+authenticated retained reports and comparisons completed in fresh Sandboxes on VM107.
 
-Committed candidate 16a58f7 passed 646 affected library tests (19 ignored), two
-integration tests, Clippy, format, governance and independent consequential
-reviews. CI 44965992731 passed all three jobs; the tested merge has the same tree,
-and workspace verification exited 0 in 482.96 seconds. Selected tools are private in
-`C:\aiw\generic-assessment-108`; raw evidence must stay out of Git.
+| External run data | Ordinary | Classic AppContainer |
+| --- | --- | --- |
+| Stateless JSON transformation | 3 steps /2 assertions passed; exact 20-byte output | Same assertions/output passed |
+| Seeded persistent database, two launches | 6 steps /5 assertions passed; 8,192-byte database | Same assertions/query output and full-file hash/extent passed |
 
-R13 used those exact tools for separate limited-user Prepare, approval, Start and
-retained Read on VM107. Independent admission verified 46 final originals
-(156,959 bytes), 23 signatures, trusted Start/session/key/request bindings, all
-15 file and 14 process/thread denial observations, exact outer Sandbox stop,
-two empty final lists and account cleanup. SYSTEM/token/process session0 and the
-fresh standard token/session0 were observed. Protection v4 refused before app
-creation because inherited descriptors contain Owner Rights and 34 service SIDs.
-Retained Read is authenticated NotRun / insufficientEvidence. There is no
-CreateProcessAsUser/PSS/application/job/workflow compatibility credit.
+Independent review verified 29/30 signatures for the JSON runs and 36/37 for the
+database runs. Root tokens were Medium standard user or Low AppContainer with
+empty capabilities. Jobs, accounts, owned profiles and exact Sandbox cleanup
+passed, including two final empty lists for each of the four passing external
+runs. Both comparisons
+are comparable and retain every coverage gap. Database equality is observed full-file
+hash/extent equality; complete database bytes were not retained for direct comparison.
 
-Candidate 16a58f7 adds protection v5 with measured held primary TOKEN_OWNER,
-explicit SY/BA owner resolution and collector-only service SID provenance.
-Historical v4 policy is unchanged. No ACL, rights, session or service changes.
-R14 Ordinary admitted 46 originals /30 signatures: all 29 denial gates, a fresh
-standard Medium process, exit0, complete output, four workflow steps and two
-assertions passed. The owned job emptied and account/Sandbox cleanup passed.
-Retained Read authenticated workflowPassed, but overall insufficientEvidence
-remains because descendant/network enforcement was not measured.
+An earlier database baseline failed with its missing-file initial condition.
+Preserve that authenticated failed baseline separately. Its unused original Classic
+candidate remains approved NotRun/superseded. The new condition supplies an explicit
+zero-byte seed, retains the same
+payload/SQL/protection flags and uses new plans/approvals; it is not a replay or a
+rewritten success. The read-only collector's long-path repair also recollected
+existing evidence without rerunning the application or original retained Read.
 
-R14 Classic used the same exact images and normalized compiled semantics.
-Independent admission verified 46 originals /26 signatures and all 29 denial
-gates, but CreateProcessAsUserW failed before child creation with 0x80070002.
-Profile/account/Sandbox cleanup passed; retained Read authenticated NotRun.
-This is a driver failure, not evidence of application incompatibility. Query-only
-source 3215691 passed focused tests/review/CI and exact-source artifact admission.
-R15 again failed before creation: collector profile lookup returned 0x80070002,
-while standard-user lookup and held-folder open succeeded; both identities opened
-the same image/cwd with execute/traverse access. This supports a caller-context
-hypothesis, not a causal or platform-support claim. The working fix scopes only
-the Classic AsUser call to the checked standard user, then reverts before collector
-inspection/publication; no retry, ACL, privilege, desktop or session change.
-The user-approved fixed SYSTEM collector role remains restricted to fresh Windows
-Sandboxes on existing VM107; applications remain ordinary user/AppContainer.
+Repeated retained Read returned matching full-report hashes and lengths for all
+four passing runs.
+Six exact production sanitized report/comparison JSON files were exported from
+admitted retained bytes with no application/provider calls. This is CLI evidence,
+not native desktop acceptance. The private checkpoint records precise receipts,
+failed attempts and consumed invocations.
 
-Preserve consumed R6-R13 evidence, including R12's 42 originals/25 signatures and
-pre-child WithToken error87. Actor-only R4 admitted 13 originals/16,765 bytes and
-basic Tools/Output visibility. These do not qualify application creation.
-Detailed admission receipts and the current checkpoint remain in the private goal
-directory; do not replay a consumed Start.
+Current source passed focused creation regression, Clippy, format, governance and
+independent boundary reviews. CI 44977826307 passed all three jobs; Workspace
+verification exited 0 in 427.47 seconds with the tested merge tree matching source.
+Documentation-only reconciliation does not require rebuilding those images.
 
-## Next gates
+## Remaining scope
 
-Review/test scoped target-context creation, then build exact-source tools in the
-existing cache and qualify Classic in a fresh Sandbox. Qualify first-party positives,
-negative controls, interruption/exact recovery and provider-zero retained Read.
-Reopen R12 with the new reader. Then run both external recipes using unchanged
-production code and produce comparisons/packages. A broken baseline is not
-candidate incompatibility.
+The supported slice is portable, offline x64 CLI assessment. Desktop intake,
+installers/GUI automation, complete descendants/registry/network/DLL/memory/broker
+coverage, the broader fixture matrix and broad acceptance remain open. Root-token
+and collector-denial measurements do not establish all effective restrictions.
+Benchmark 2, W4/W5 and production acceptance are not closed by these results.
 
 ## Storage and execution
 
-Use only `C:\aiw\environment-probe-20261114\target-static-r1`, >=10 GiB starting
-free and <=8 GiB cache prebuild. Run `scripts/build-storage.ps1` preflight, select
-CARGO_TARGET_DIR explicitly, use --target x86_64-pc-windows-msvc and only the
-canonical target-specific `-C target-feature=+crt-static` flags. Routine dev/test
-profiles disable incremental/full compiler symbols; reject unsafe overrides.
+Reuse only `C:\aiw\environment-probe-20261114\target-static-r1`: >=10 GiB starting
+free and <=8 GiB cache prebuild. Normal scripts use `scripts/build-storage.ps1`,
+honor the caller's target and reject unsafe profile/config/compiler overrides.
+Direct Cargo must copy the normal target/flags: `--target x86_64-pc-windows-msvc`
+and target-specific `-C target-feature=+crt-static`. Both workspace dev/test
+manifests use debug=0/incremental=false.
 
-3215691's consecutive normal dev builds both measured 4,627,595,697 bytes /4,096
-paths with identical images and zero second-pass compiler calls. Release ended
-at 4,627,801,358 bytes /4,096 paths in the same cache; all16 actual compiler calls
-and three selected images passed independent admission. File-length totals can
-count hard-link aliases twice; free-volume samples are separate. PDBs are measured
-separately. Retain selected immutable images and receipts, not build/PDB trees.
+Consecutive normal dev builds each ended at 4,627,812,528 bytes /4,096 paths,
+identical images and zero second-pass compiler calls. Release ended at
+4,627,905,102 bytes; the strict post-trial sample remained identical, with no
+compiler running. All 16 actual compiler commands and three selected images
+passed independent admission. File-length totals may count hard-link aliases;
+free-volume samples/PDB totals are separate. Keep selected images and receipts,
+not repeated build trees. No new build cache was created for fixture trials.
 
-Policy-blocked legacy incremental cleanup and three blocked empty fixtures remain
-untouched; never retry/bypass. Clean owned temporary fixtures in finally after
-releasing leases. No new build cache has been created for the v5 change.
+Policy-blocked legacy cleanup and three blocked empty fixtures remain untouched.
+Automatic approval review also blocked deletion of one unused 53,734-byte QA
+projection; retain it and its blocked-cleanup receipt, with no retry/bypass.
+Owned native-test TEMP fixtures were removed after releasing handles.
 
-Use pinned SSH/SCP for data and reviewed one-shot InteractiveToken/LUA session1
-tasks for controller execution. Verify exact VM/operator and before/after Medium,
-non-elevated actor. No admin SSH assessment, unknown process termination, consumed
-Start replay or unrelated cleanup.
+Use pinned SSH/SCP and reviewed one-shot InteractiveToken/LUA session1 controller
+tasks. The authorized SYSTEM collector stays only inside fresh VM107 Sandboxes;
+applications remain standard user/AppContainer. No admin SSH application run,
+unknown process termination, consumed Start replay or unrelated cleanup.
