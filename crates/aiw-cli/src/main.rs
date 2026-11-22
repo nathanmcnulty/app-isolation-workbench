@@ -354,6 +354,9 @@ enum ApplicationCommand {
         import_receipt: PathBuf,
         #[arg(long)]
         timeout_seconds: u32,
+        /// Keep verbose MSI logging and use the Windows Installer default buffer.
+        #[arg(long)]
+        buffer_install_log: bool,
     },
     /// Compile administrator-supplied workflow data without provider calls or application execution.
     PlanAssessment {
@@ -1906,23 +1909,38 @@ fn run(command: Command) -> Result<()> {
                 scenario,
                 import_receipt,
                 timeout_seconds,
+                buffer_install_log,
             } => {
                 #[cfg(windows)]
                 {
+                    use aiw_admin_workflow::application_installer::MsiInstallLogMode;
+
                     let project = read_project(&project)?;
                     let receipt = read_document(&import_receipt, MAX_CONFIG_BYTES)?;
+                    let log_mode = if buffer_install_log {
+                        MsiInstallLogMode::BufferedVerbose
+                    } else {
+                        MsiInstallLogMode::FlushedVerbose
+                    };
                     write_json(
                         &aiw_admin_workflow::application_installer::plan_msi_install(
                             &project.project,
                             &scenario,
                             &receipt,
                             timeout_seconds,
+                            log_mode,
                         )?,
                     )
                 }
                 #[cfg(not(windows))]
                 {
-                    let _ = (project, scenario, import_receipt, timeout_seconds);
+                    let _ = (
+                        project,
+                        scenario,
+                        import_receipt,
+                        timeout_seconds,
+                        buffer_install_log,
+                    );
                     bail!("MSI install planning requires Windows protected intake")
                 }
             }

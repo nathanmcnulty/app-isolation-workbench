@@ -34,9 +34,12 @@ preview creates no run, approval, installer invocation or provider session.
 
 ### Installer diagnostics
 
-Preview v0alpha2 specifies flushed, guest-local Windows Installer logging and
-an 8 MiB diagnostic read limit. The retained raw log stays private. To inspect
-a captured log without writing out its text:
+Preview v0alpha2 specifies guest-local verbose Windows Installer logging and an
+8 MiB diagnostic read limit. It uses flushed logging by default. Add
+`--buffer-install-log` to review Windows Installer's buffered verbose mode.
+A buffered log can lag the worker's actual stage while the process is running.
+The retained raw log stays private. To inspect a captured log without writing
+out its text:
 
 ```powershell
 aiw application summarize-msi-log --log <private-install.log>
@@ -52,16 +55,18 @@ verify installation.
 
 In fresh offline Windows Sandboxes, the 120-second client deadline expired
 during package trust verification for both the repository control and the
-external holdout. For the control, the trace recorded offline certificate
-revocation checks (`0x80092013`), then `WinVerifyTrust` returned success
-after 121.4 seconds and App Control recorded a matching allow.
+external holdout. Traces for both packages recorded offline certificate
+revocation (`0x80092013`) during trust processing, then `WinVerifyTrust`
+returned success in about 121–122 seconds and App Control recorded a matching
+allow.
 
 At the existing 300-second maximum, the control exited successfully in 173.5
-seconds. Matching transaction events, machine-context registration and two
-installed executable candidates were observed. The holdout progressed into
-Windows Installer actions and reached the deadline without a client exit or
-machine registration. The reviewed deadline covers Windows trust processing
-and the install. The actual completion evidence determines the result.
+seconds, with matching transaction events, machine-context registration and
+two installed executable candidates. The holdout reached `InstallValidate`
+with flushed logging and `ProcessComponents` with buffered logging. Both
+holdout runs reached the deadline without a client exit or machine
+registration. The reviewed deadline covers Windows trust processing and
+installation. The actual completion evidence determines the result.
 
 ## First capability
 

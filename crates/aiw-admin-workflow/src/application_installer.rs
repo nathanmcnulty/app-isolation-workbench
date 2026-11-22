@@ -1,7 +1,8 @@
 //! Review a bounded Windows Installer operation against existing protected intake.
 use aiw_probe::{ApplicationFileImportReceipt, ApplicationInspectionKind};
 use aiw_provider_wsb::msi_diagnostics::{
-    MAX_MSI_INSTALL_LOG_BYTES, MSI_INSTALL_LOG_ARGUMENT, MSI_INSTALL_LOG_PATH,
+    MAX_MSI_INSTALL_LOG_BYTES, MSI_INSTALL_BUFFERED_LOG_ARGUMENT, MSI_INSTALL_LOG_ARGUMENT,
+    MSI_INSTALL_LOG_PATH,
 };
 use aiw_schema::{
     ApplicationArchitecture, ApplicationSource, NetworkIntent, Project, ScenarioStep,
@@ -46,11 +47,18 @@ struct WindowsInstallerOperation {
     reboot_exit_codes: [u32; 2],
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum MsiInstallLogMode {
+    FlushedVerbose,
+    BufferedVerbose,
+}
+
 pub fn plan_msi_install(
     project: &Project,
     scenario_id: &str,
     receipt: &ApplicationFileImportReceipt,
     timeout_seconds: u32,
+    log_mode: MsiInstallLogMode,
 ) -> Result<MsiInstallPreview> {
     let installation = compile_operation(
         project,
@@ -59,6 +67,7 @@ pub fn plan_msi_install(
         &receipt.sha256,
         receipt.size_bytes,
         timeout_seconds,
+        log_mode,
     )?;
     let held =
         aiw_windows_platform::open_verified_application_file_import(receipt).map_err(|_| {
@@ -80,7 +89,7 @@ pub fn plan_msi_install(
         limitations: &[
             "Review only. This preview grants no execution authority and is not an importable run plan.",
             "Architecture and machine scope are requested. Package metadata, embedded media, dependencies, custom actions and actual registration are unmeasured.",
-            "The planned worker keeps flushed Installer logging guest-local. The observation limit caps diagnostic reads.",
+            "The planned worker keeps Installer logging guest-local. The observation limit caps diagnostic reads.",
             "Application entry points, compatibility and effective isolation are unmeasured.",
         ],
     };
@@ -108,6 +117,7 @@ fn compile_operation(
     intake_sha256: &str,
     intake_size: u64,
     timeout_seconds: u32,
+    log_mode: MsiInstallLogMode,
 ) -> Result<WindowsInstallerOperation> {
     if !aiw_schema::validate_project_for_planning(project).is_empty() {
         return Err(blocked(
@@ -210,7 +220,10 @@ fn compile_operation(
             "/qn",
             "/norestart",
             "ALLUSERS=1",
-            MSI_INSTALL_LOG_ARGUMENT,
+            match log_mode {
+                MsiInstallLogMode::FlushedVerbose => MSI_INSTALL_LOG_ARGUMENT,
+                MsiInstallLogMode::BufferedVerbose => MSI_INSTALL_BUFFERED_LOG_ARGUMENT,
+            },
             MSI_INSTALL_LOG_PATH,
         ],
         max_install_log_observation_bytes: MAX_MSI_INSTALL_LOG_BYTES,
@@ -248,6 +261,7 @@ mod tests {
             &"a".repeat(64),
             4096,
             300,
+            MsiInstallLogMode::FlushedVerbose,
         )
     }
 
@@ -283,6 +297,27 @@ mod tests {
     }
 
     #[test]
+    fn buffered_logging_only_changes_the_reviewed_logging_argument() {
+        let project = project();
+        let mut expected = compile(&project).unwrap();
+        expected.arguments[5] = "/L*V";
+        let buffered = compile_operation(
+            &project,
+            "install",
+            ApplicationInspectionKind::Msi,
+            &"a".repeat(64),
+            4096,
+            300,
+            MsiInstallLogMode::BufferedVerbose,
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(&buffered).unwrap(),
+            serde_json::to_value(&expected).unwrap()
+        );
+    }
+
+    #[test]
     fn mismatched_intake_kind_hash_size_scenario_and_timeout_are_refused() {
         let project = project();
         for (scenario, kind, hash, size, timeout) in [
@@ -307,8 +342,16 @@ mod tests {
             ("unknown", ApplicationInspectionKind::Msi, "a", 4096, 30),
         ] {
             assert!(
-                compile_operation(&project, scenario, kind, &hash.repeat(64), size, timeout)
-                    .is_err()
+                compile_operation(
+                    &project,
+                    scenario,
+                    kind,
+                    &hash.repeat(64),
+                    size,
+                    timeout,
+                    MsiInstallLogMode::FlushedVerbose,
+                )
+                .is_err()
             );
         }
     }

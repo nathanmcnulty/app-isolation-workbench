@@ -56,14 +56,14 @@ PR #112 review fix `9de43ed` requires authenticated local Start in both comparis
 lanes and preserves the portable payload depth under the replay wrapper.
 `codex/generic-msi-install-preflight` depends on that draft. The Windows CLI now
 reopens protected MSI intake and previews one bounded offline per-machine install
-from a typed scenario. The preview requests flushed guest-local MSI logging.
-The diagnostic CLI summarizes captured logs, including a same-package policy
-allow. A VM107 trace measured 121.4 seconds of Windows trust verification
-before App Control allowed the control MSI. The 300-second lab runs verified
+from a typed scenario. The operator can review flushed or buffered guest-local
+verbose logging. The CLI summarizes the observed package policy allow.
+VM107 traces measured about 121–122 seconds of Windows trust verification
+before App Control allowed both packages. The 300-second runs verified
 control completion, machine registration and two executable candidates. The
-CMake holdout advanced into installer actions and reached the deadline without
-registering. Separately approved production execution and operator entry-point
-selection remain open. See [installer diagnostics](APPLICATION-ASSESSMENT.md#installer-diagnostics).
+CMake holdout reached `ProcessComponents` with buffered logging and timed out
+without registering. Separately approved production execution and operator
+entry-point selection remain open. See [installer diagnostics](APPLICATION-ASSESSMENT.md#installer-diagnostics).
 
 ## Remaining scope
 

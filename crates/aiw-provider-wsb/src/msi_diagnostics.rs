@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 pub const MSI_INSTALL_LOG_PATH: &str = r"C:\AIW\Tools\install.log";
 pub const MSI_INSTALL_LOG_ARGUMENT: &str = "/L*V!";
+pub const MSI_INSTALL_BUFFERED_LOG_ARGUMENT: &str = "/L*V";
 pub const MAX_MSI_INSTALL_LOG_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Debug, Clone, Deserialize, Eq, PartialEq, Serialize)]
