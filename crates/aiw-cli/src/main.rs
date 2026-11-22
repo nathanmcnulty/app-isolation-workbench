@@ -339,6 +339,17 @@ enum PackageCommand {
 
 #[derive(Debug, Subcommand)]
 enum ApplicationCommand {
+    /// Preview one bounded, offline machine MSI install from existing protected intake.
+    PlanMsiInstall {
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        scenario: String,
+        #[arg(long)]
+        import_receipt: PathBuf,
+        #[arg(long)]
+        timeout_seconds: u32,
+    },
     /// Compile administrator-supplied workflow data without provider calls or application execution.
     PlanAssessment {
         #[arg(long)]
@@ -1878,6 +1889,31 @@ fn run(command: Command) -> Result<()> {
             }
         },
         Command::Application(args) => match args.command {
+            ApplicationCommand::PlanMsiInstall {
+                project,
+                scenario,
+                import_receipt,
+                timeout_seconds,
+            } => {
+                #[cfg(windows)]
+                {
+                    let project = read_project(&project)?;
+                    let receipt = read_document(&import_receipt, MAX_CONFIG_BYTES)?;
+                    write_json(
+                        &aiw_admin_workflow::application_installer::plan_msi_install(
+                            &project.project,
+                            &scenario,
+                            &receipt,
+                            timeout_seconds,
+                        )?,
+                    )
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (project, scenario, import_receipt, timeout_seconds);
+                    bail!("MSI install planning requires Windows protected intake")
+                }
+            }
             ApplicationCommand::PlanAssessment {
                 project,
                 settings,

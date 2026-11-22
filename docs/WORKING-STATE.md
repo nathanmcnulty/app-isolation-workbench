@@ -1,6 +1,6 @@
 # Working state
 
-Updated 2026-11-21 (America/Anchorage). Effective goal #108 is one application-neutral
+Updated 2026-11-22 (UTC). Effective goal #108 is one application-neutral
 assessment and replay path for two different external administrator-supplied
 fixtures. #111 evidence is preserved and its legacy application-specific work is
 paused. Draft PR #112 uses `codex/application-neutral-assessment` in
@@ -49,6 +49,15 @@ Current source passed focused creation regression, Clippy, format, governance an
 independent boundary reviews. CI 44977826307 passed all three jobs; Workspace
 verification exited 0 in 427.47 seconds with the tested merge tree matching source.
 Documentation-only reconciliation does not require rebuilding those images.
+
+## Dependent MSI preview
+
+PR #112 review fix `9de43ed` requires authenticated local Start in both comparison
+lanes and preserves the portable payload depth under the replay wrapper.
+`codex/generic-msi-install-preflight` depends on that draft. The Windows CLI now
+reopens protected MSI intake and previews one bounded offline per-machine install
+from a typed scenario. Guest execution, installed entry-point discovery and
+trusted evidence collection are the next MSI milestone.
 
 ## Remaining scope
 

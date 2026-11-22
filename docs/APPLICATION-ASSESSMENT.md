@@ -10,6 +10,28 @@ path must accept two different external applications without engine changes.
 Names, fixture membership and compiled vendor hashes never select behavior.
 Payloads and generated packages remain outside the repository and AIW distribution.
 
+## Review a machine MSI install
+
+On Windows, use the existing `application import --kind msi` command to create
+protected intake. Preserve download metadata with `--archive-download-metadata`
+when present. In a v0alpha2 project, declare an x64 MSI with the reviewed
+SHA-256, blocked networking, and a scenario containing exactly one `install`
+step. Then preview the selected scenario:
+
+```powershell
+aiw application plan-msi-install --project <project.json> --scenario <scenario-id> --import-receipt <receipt.json> --timeout-seconds 120
+```
+
+The command reopens the protected intake and binds the current receipt, payload
+size and SHA-256 to the project revision. The preview describes a fixed elevated
+guest Windows Installer operation requesting machine scope, quiet install and no
+reboot. It accepts 1–300 seconds and up to 128 MiB. Custom properties, transforms,
+other installer mechanisms, signer requirements, reboot and update/uninstall
+flows are outside this capability. MSI success requires additional worker
+observations. Package architecture, actual registration, dependencies, custom
+actions and application entry points remain unmeasured in this preview. The
+preview creates no run, approval, installer invocation or provider session.
+
 ## First capability
 
 Stage an exact portable manifest into an offline disposable Windows worker and
