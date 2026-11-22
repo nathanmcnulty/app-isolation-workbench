@@ -48,10 +48,14 @@ R14 Classic used the same exact images and normalized compiled semantics.
 Independent admission verified 46 originals /26 signatures and all 29 denial
 gates, but CreateProcessAsUserW failed before child creation with 0x80070002.
 Profile/account/Sandbox cleanup passed; retained Read authenticated NotRun.
-This is a driver failure, not evidence of application incompatibility. A small
-working diagnostic compares query-only profile/image/cwd facts under collector
-and standard identities before one unchanged launch attempt. Failure-only facts
-use the signed launch error; success would not establish why the old source failed.
+This is a driver failure, not evidence of application incompatibility. Query-only
+source 3215691 passed focused tests/review/CI and exact-source artifact admission.
+R15 again failed before creation: collector profile lookup returned 0x80070002,
+while standard-user lookup and held-folder open succeeded; both identities opened
+the same image/cwd with execute/traverse access. This supports a caller-context
+hypothesis, not a causal or platform-support claim. The working fix scopes only
+the Classic AsUser call to the checked standard user, then reverts before collector
+inspection/publication; no retry, ACL, privilege, desktop or session change.
 The user-approved fixed SYSTEM collector role remains restricted to fresh Windows
 Sandboxes on existing VM107; applications remain ordinary user/AppContainer.
 
@@ -63,8 +67,8 @@ directory; do not replay a consumed Start.
 
 ## Next gates
 
-Review/test the query diagnostic, then build exact-source tools in the existing
-cache and diagnose Classic in a fresh Sandbox. Qualify first-party positives,
+Review/test scoped target-context creation, then build exact-source tools in the
+existing cache and qualify Classic in a fresh Sandbox. Qualify first-party positives,
 negative controls, interruption/exact recovery and provider-zero retained Read.
 Reopen R12 with the new reader. Then run both external recipes using unchanged
 production code and produce comparisons/packages. A broken baseline is not
@@ -78,9 +82,9 @@ CARGO_TARGET_DIR explicitly, use --target x86_64-pc-windows-msvc and only the
 canonical target-specific `-C target-feature=+crt-static` flags. Routine dev/test
 profiles disable incremental/full compiler symbols; reject unsafe overrides.
 
-16a58f7's consecutive normal dev builds both measured 4,620,710,209 bytes /4,071
+3215691's consecutive normal dev builds both measured 4,627,595,697 bytes /4,096
 paths with identical images and zero second-pass compiler calls. Release ended
-at 4,620,870,800 bytes /4,071 paths in the same cache; all17 actual compiler calls
+at 4,627,801,358 bytes /4,096 paths in the same cache; all16 actual compiler calls
 and three selected images passed independent admission. File-length totals can
 count hard-link aliases twice; free-volume samples are separate. PDBs are measured
 separately. Retain selected immutable images and receipts, not build/PDB trees.

@@ -249,6 +249,21 @@ pub(super) struct Launch<'a> {
     pub stdout_limit: u64,
     pub stderr_limit: u64,
 }
+// Called only inside the checked, scoped target impersonation. An outer error
+// means creation was not attempted; the inner result is the one native attempt.
+fn checked_target_create(
+    expected_sid: &str,
+    deadline: Instant,
+    create: impl FnOnce() -> windows::core::Result<()>,
+) -> Result<windows::core::Result<()>> {
+    if super::progress::effective_sid()? != expected_sid {
+        return Err("target creation identity differs".into());
+    }
+    if Instant::now() >= deadline {
+        return Err("launch deadline expired before target-context creation".into());
+    }
+    Ok(create())
+}
 fn pe_fields(header: &[u8], file_size: u64) -> Result<(u16, u16, u16)> {
     if header.len() < 64 || &header[..2] != b"MZ" {
         return Err("execution image lacks bounded DOS header".into());
@@ -403,9 +418,10 @@ pub(super) fn launch(spec: Launch<'_>) -> Result<AssessmentProcessObservation> {
     }
     let mut canary = super::suspended_handles::Canary::new()?;
     // SAFETY: explicit held image, quoted argv, held cwd and exact handle list.
-    // The elevated collector always supplies the fresh ordinary user token.
-    // No application is launched with the collector identity or a fallback.
-    let created = unsafe {
+    // The held primary token is always the fresh ordinary user's. Classic also
+    // uses that user's scoped caller context for OS profile/image lookup. Revert
+    // is fail-stop and precedes collector inspection/publication. No fallback.
+    let mut create = || unsafe {
         CreateProcessAsUserW(
             Some(spec.user.token()),
             PCWSTR(image.as_ptr()),
@@ -420,9 +436,36 @@ pub(super) fn launch(spec: Launch<'_>) -> Result<AssessmentProcessObservation> {
             &mut info,
         )
     };
+    let created = if spec.profile.is_some() {
+        match spec.user.impersonate(|| {
+            checked_target_create(&spec.user.context().user_sid, spec.deadline, &mut create)
+                .map_err(crate::GuestMsiExecutionError::Process)
+        }) {
+            Ok(created) => created,
+            Err(error) => {
+                // All fallible scope checks precede the API. No child exists.
+                let restored = super::check_collector(&mut *spec.collector_unimpersonated)
+                    .err()
+                    .unwrap_or_default();
+                let cleanup = canary.close().err().unwrap_or_default();
+                return Err(format!(
+                    "target-context creation refused before API: {error}; {restored}; {cleanup}"
+                ));
+            }
+        }
+    } else {
+        create()
+    };
     if let Err(error) = created {
+        let restored = super::check_collector(&mut *spec.collector_unimpersonated)
+            .err()
+            .unwrap_or_default();
         let cleanup = canary.close().err().unwrap_or_default();
         let mut failure = format!("CreateProcessAsUserW failed: {error}; {cleanup}");
+        if !restored.is_empty() {
+            failure.push_str("; ");
+            failure.push_str(&restored);
+        }
         if let Some(context) = context {
             failure.push_str("; ");
             failure.push_str(&context);
@@ -431,6 +474,19 @@ pub(super) fn launch(spec: Launch<'_>) -> Result<AssessmentProcessObservation> {
     }
     let process = unsafe { OwnedHandle::from_raw_handle(info.hProcess.0) };
     let thread = unsafe { OwnedHandle::from_raw_handle(info.hThread.0) };
+    // Own both handles before any fallible check. This also covers the job-
+    // assignment failure path, which can publish before the checked closure.
+    if let Err(error) = super::check_collector(&mut *spec.collector_unimpersonated) {
+        let stopped = unsafe { TerminateProcess(raw(&process), 1) };
+        let waited = unsafe { WaitForSingleObject(raw(&process), 2000) };
+        if stopped.is_err() || waited != WAIT_OBJECT_0 {
+            std::process::abort();
+        }
+        let cleanup = canary.close().err().unwrap_or_default();
+        return Err(format!(
+            "collector identity after creation refused; suspended child terminated: {error}; {cleanup}"
+        ));
+    }
     let mut result = AssessmentProcessObservation {
         process_id: info.dwProcessId,
         creation_time_100ns: None,
@@ -468,6 +524,13 @@ pub(super) fn launch(spec: Launch<'_>) -> Result<AssessmentProcessObservation> {
         }
     } else {
         let checked = (|| -> Result<()> {
+            super::check_collector(&mut *spec.collector_unimpersonated)?;
+            spec.progress.require_dispatch()?;
+            spec.image.revalidate().map_err(|e| e.to_string())?;
+            held_cwd.revalidate()?;
+            if Instant::now() >= spec.deadline {
+                return Err("launch deadline expired after target-context creation".into());
+            }
             let mut membership = BOOL(0);
             unsafe { IsProcessInJob(raw(&process), Some(job.handle()), &mut membership) }
                 .map_err(|e| e.to_string())?;
@@ -621,6 +684,71 @@ pub(super) fn launch(spec: Launch<'_>) -> Result<AssessmentProcessObservation> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn target_context_creation_refuses_without_identity_and_preserves_single_api_failure() {
+        use windows::Win32::{
+            Security::{TOKEN_DUPLICATE, TOKEN_IMPERSONATE, TOKEN_QUERY},
+            System::Threading::{GetCurrentProcess, OpenProcessToken},
+        };
+        let mut calls = 0;
+        let deadline = Instant::now() + Duration::from_secs(60);
+        super::super::guard_no_impersonation().unwrap();
+        assert!(
+            checked_target_create("S-1-0-0", deadline, || {
+                calls += 1;
+                Ok(())
+            })
+            .is_err()
+        );
+        assert_eq!(calls, 0);
+        // Query/duplicate only our own primary token; no account/profile or
+        // process is created on the host. The callback simulates API failure.
+        let mut token = HANDLE::default();
+        unsafe {
+            OpenProcessToken(
+                GetCurrentProcess(),
+                TOKEN_QUERY | TOKEN_DUPLICATE | TOKEN_IMPERSONATE,
+                &mut token,
+            )
+        }
+        .unwrap();
+        let token = unsafe { OwnedHandle::from_raw_handle(token.0) };
+        crate::guest_standard_user::impersonate_primary_token(&token, || {
+            let expected = super::super::progress::effective_sid()
+                .map_err(crate::GuestMsiExecutionError::Process)?;
+            assert!(
+                checked_target_create("S-1-0-0", deadline, || {
+                    calls += 1;
+                    Ok(())
+                })
+                .is_err()
+            );
+            assert!(
+                checked_target_create(&expected, Instant::now() - Duration::from_secs(1), || {
+                    calls += 1;
+                    Ok(())
+                })
+                .is_err()
+            );
+            assert_eq!(calls, 0);
+            let actual = checked_target_create(&expected, deadline, || {
+                calls += 1;
+                Err(windows::core::Error::from(
+                    windows::core::HRESULT::from_win32(2),
+                ))
+            })
+            .unwrap();
+            assert_eq!(
+                actual.unwrap_err().code(),
+                windows::core::HRESULT::from_win32(2)
+            );
+            assert_eq!(calls, 1);
+            Ok(())
+        })
+        .unwrap();
+        super::super::guard_no_impersonation().unwrap();
+        assert_eq!(calls, 1);
+    }
     #[test]
     fn with_token_command_bound_counts_utf16_and_the_terminating_nul() {
         assert!(validate_command(&wide(OsStr::new(&"a".repeat(1023))).unwrap()).is_ok());

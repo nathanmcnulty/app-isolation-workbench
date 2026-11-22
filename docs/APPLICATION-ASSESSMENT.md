@@ -54,6 +54,16 @@ requires same-session handle inheritance and describes temporary use of assigned
 privileges. No rights grant,
 session reassignment, desktop ACL repair or interactive fallback is permitted.
 
+Classic makes the single AsUser call inside the existing checked standard-user
+impersonation scope, so Windows uses the target user's caller context for lookup.
+The effective SID and deadline are checked immediately before creation. Ordinary
+creation remains direct. Reversion is fail-stop; both returned handles are owned
+immediately, and restored collector identity is checked before either success or
+assignment-failure publication. The owned job contains the suspended process
+before full dispatch/custody revalidation and token/PSS checks permit Resume.
+`collectorUnimpersonated` describes checked collector boundaries, excluding the
+deliberate profile/query/Classic-creation scopes; it is not continuous thread history.
+
 Classic launch diagnostics query the profile folder and image/cwd access under
 the collector and the fresh standard user before the single process-creation
 attempt. Profile lookup follows the caller's identity as documented by
