@@ -379,6 +379,71 @@ registry or vendor asset manifest selects execution:
   not publish the receipt. If the receipt is required, prepare again
   with the reviewed digest. The existing approval and Start steps still apply.
 
+### Verify the replay handoff before a live trial
+
+Desktop review and optional baseline comparison are read-only. A fresh
+candidate review supplies the exact manifest SHA-256 for the preparation
+command. A changed candidate must pass a new review before it can be prepared
+with a new pin.
+
+AIW preparation requires x64 Windows build 26100 or later, available
+virtualization, and one trusted x64 `MicrosoftWindows.WindowsSandbox` Store
+registration for the same Windows account that will run AIW. The generic
+portable assessment accepts CLI versions `0.8.107.0` and `0.8.114.0`.
+The MSI discovery profile requires `0.8.114.0`. AIW verifies the exact
+provider file and its Store catalog. Supply the measured AIW CLI, the
+independently enrolled guest agent and its recorded SHA-256, the reviewed
+package, and an existing local evidence parent.
+
+Check registration from the intended operator account with a read-only query.
+
+```powershell
+Get-AppxPackage -Name MicrosoftWindows.WindowsSandbox |
+    Select-Object Name, Version, Architecture, Status
+```
+
+If the registration is missing, use Microsoft's documented optional-feature
+installation and Store upgrade process on an authorized lab host. Check the
+resulting version against the AIW versions above before preparing. A newer
+Store version needs explicit AIW support before use.
+[Microsoft installation guidance](https://learn.microsoft.com/en-us/windows/security/application-security/application-isolation/windows-sandbox/windows-sandbox-install) ·
+[Microsoft Store upgrade guidance](https://learn.microsoft.com/en-us/windows/security/application-security/application-isolation/windows-sandbox/windows-sandbox-versions)
+
+1. In PowerShell 7.6 or later, set `$aiwCli` to the trusted executable path
+   used in the desktop. Prefix the generated command with `$prepareJson = `
+   to capture its output, then run it manually. On success, parse the result
+   with `$prepared = ($prepareJson -join [Environment]::NewLine) | ConvertFrom-Json`.
+   Check that
+   `approvalRecorded` and `executionStarted` are false and that
+   `run.planSha256` agrees with `proposedApproval.planHash`. For the receipt
+   acceptance check, require `receiptRetention` to be `retained`.
+2. Reopen the run using `$aiwCli`, the trusted executable path entered in
+   the desktop, and the workspace and run ID from the preparation response.
+
+   ```powershell
+   $run = $prepared.run
+   & $aiwCli run status --root $run.workspace --run-id $run.runId
+   & $aiwCli application report-assessment --workspace $run.workspace --run-id $run.runId --include-replay-provenance
+   ```
+
+   Confirm `core.status` is `pendingApproval` with the same plan hash, the
+   report's `evidenceStatus` is `notRun`, and `replayProvenance.status` is `matched`
+   with the reviewed manifest digest and the prepared plan hash.
+3. For a separately authorized live trial, review the exact retained plan
+   in an interactive terminal. Record approval only after confirming the
+   plan and trust changes printed by the CLI. Use the approved operator
+   identity from the preparation review.
+
+   ```powershell
+   & $aiwCli run review-approval --root $run.workspace --run-id $run.runId --approved-by $prepared.proposedApproval.approvedBy --approved-at ([DateTimeOffset]::UtcNow.ToString("o"))
+   ```
+
+   The confirmation is `approve <printed-plan-hash>`. Approval records
+   permission for that plan. A separate `run start` supplies the same
+   workspace and run ID, `run.projectPath` as the project, and the
+   independently enrolled agent hash. Reopen the report after the trial to
+   check the observed workflow, evidence gaps and recorded cleanup.
+
 Use `schema assessment-settings`, `compiled-assessment`,
 `application-assessment-guest-request`, `application-assessment-result`,
 `verified-assessment-evidence` and `generic-application-run-report` for the closed
@@ -395,6 +460,6 @@ failed requirement, not its native cause or whether cleanup completed.
 The monotonic workflow budget includes setup and prevents late application
 dispatch. Synchronous filesystem/profile/native calls can overrun that budget;
 the separate outer Sandbox watchdog bounds worker lifetime. This is not a hard
-real-time I/O cancellation guarantee. Desktop intake and general installer/GUI
-automation remain separate work; the sampled CLI results do not close broad
-native, Benchmark 2, W4/W5 or production acceptance.
+real-time I/O cancellation guarantee. In-desktop preparation and approval,
+general installer/GUI automation, broad native acceptance, Benchmark 2 and
+W4/W5 remain open.

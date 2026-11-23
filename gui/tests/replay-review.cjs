@@ -1,6 +1,9 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
 const vm = require("node:vm");
 const display = require("../ui/display.js");
 const handoff = require("../ui/replay-handoff.js");
@@ -46,6 +49,42 @@ test("handoff carries exact reviewed arguments as PowerShell data", () => {
   assert.throws(() => handoff.buildCommand({path, manifestSha256}, {
     ...preparationInputs, operator: "name\n'@",
   }), /one line/);
+});
+
+test("Windows PowerShell passes the handoff arguments exactly to a native recorder", {
+  skip: process.platform !== "win32",
+}, () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "aiw-replay-arguments-"));
+  const recorder = path.join(directory, "application");
+  const script = path.join(directory, "prepare-text.ps1");
+  const candidatePath = "C:\\Replay folders\\O'Neil & $(literal)\\";
+  const manifestSha256 = "a".repeat(64);
+  try {
+    // Node receives "application" as an owned fixture script in this cwd.
+    // The fixture only returns its arguments. No AIW binary is invoked.
+    fs.writeFileSync(recorder, "process.stdout.write(JSON.stringify(process.argv.slice(2)));");
+    fs.writeFileSync(script, handoff.buildCommand({ path: candidatePath, manifestSha256 }, {
+      ...preparationInputs, cli: process.execPath,
+    }));
+    const observed = spawnSync("pwsh.exe", [
+      "-NoLogo", "-NoProfile", "-NonInteractive", "-File", script,
+    ], { cwd: directory, encoding: "utf8", timeout: 15_000 });
+    assert.ifError(observed.error);
+    assert.equal(observed.status, 0, observed.stderr);
+    assert.deepEqual(JSON.parse(observed.stdout), [
+      "prepare-assessment-package",
+      "--package=" + candidatePath,
+      "--expected-manifest-sha256=" + manifestSha256,
+      "--guest-agent=" + preparationInputs.guestAgent,
+      "--guest-agent-sha256=" + "b".repeat(64),
+      "--evidence-parent=" + preparationInputs.evidenceParent,
+      "--operator=" + preparationInputs.operator,
+    ]);
+  } finally {
+    fs.rmSync(recorder, { force: true });
+    fs.rmSync(script, { force: true });
+    fs.rmdirSync(directory);
+  }
 });
 
 test("replay review uses only read-only package commands and invalidates the pin on input changes", async () => {
