@@ -82,7 +82,13 @@ fn malformed_replay_manifest_reports_a_parse_location_without_writes() {
 }
 
 #[cfg(windows)]
-fn synthetic_replay_package(temp: &TempDir, leaf: &str, revised: bool, argument: &str) -> PathBuf {
+fn synthetic_replay_package(
+    temp: &TempDir,
+    leaf: &str,
+    revised: bool,
+    argument: &str,
+    candidate_id: &str,
+) -> PathBuf {
     use aiw_provider_wsb::assessment::{ASSESSMENT_SETTINGS_SCHEMA, AssessmentSettings};
     use aiw_windows_platform::HeldPortableDirectory;
 
@@ -111,7 +117,10 @@ fn synthetic_replay_package(temp: &TempDir, leaf: &str, revised: bool, argument:
         "isolationIntent":{"runtimeBoundary":"windowsSandbox", "network":"blocked",
             "allowClipboard":false, "allowHostFileAccess":false, "allowHostRegistryAccess":false,
             "requireDescendantCoverage":false},
-        "candidates":[{"id":"ordinary","type":"unpackagedBaseline","config":{"type":"baseline"}}],
+        "candidates":[
+            {"id":"ordinary","type":"unpackagedBaseline","config":{"type":"baseline"}},
+            {"id":"candidate","type":"classicAppContainer","config":{"type":"classicAppContainer","network":"blocked"}}
+        ],
         "scenarios":[{"id":"workflow","description":"Inert fixture",
             "steps":[{"type":"install"},
                      {"type":"launch","entrypoint":"main","arguments":[argument]},
@@ -124,7 +133,7 @@ fn synthetic_replay_package(temp: &TempDir, leaf: &str, revised: bool, argument:
     drop(held);
     let settings: AssessmentSettings = serde_json::from_value(serde_json::json!({
         "schemaVersion": ASSESSMENT_SETTINGS_SCHEMA, "scenarioId":"workflow",
-        "candidateId":"ordinary", "workingDirectory":".",
+        "candidateId":candidate_id, "workingDirectory":".",
         "inputs":[{"id":"data","path":"fixture-input.bin","sizeBytes":input_bytes.len(),
                    "sha256":hex::encode(Sha256::digest(input_bytes))}],
         "assertions":[{"id":"stdout","target":{"type":"stdout","launchStep":1},"expectedSizeBytes": if revised { 1 } else { 0 }}],
@@ -147,8 +156,20 @@ fn synthetic_replay_package(temp: &TempDir, leaf: &str, revised: bool, argument:
 #[cfg(windows)]
 fn replay_comparison_distinguishes_manifest_bytes_from_declared_changes() {
     let temp = TempDir::new();
-    let baseline = synthetic_replay_package(&temp, "baseline", false, "inert-private-argument");
-    let candidate = synthetic_replay_package(&temp, "candidate", false, "inert-private-argument");
+    let baseline = synthetic_replay_package(
+        &temp,
+        "baseline",
+        false,
+        "inert-private-argument",
+        "ordinary",
+    );
+    let candidate = synthetic_replay_package(
+        &temp,
+        "candidate",
+        false,
+        "inert-private-argument",
+        "ordinary",
+    );
     let compare = |baseline: &Path, candidate: &Path| {
         Command::new(aiw())
             .args(["application", "compare-assessment-packages", "--baseline"])
@@ -193,11 +214,39 @@ fn replay_comparison_distinguishes_manifest_bytes_from_declared_changes() {
     );
     assert_eq!(fs::read(&manifest).unwrap(), changed_bytes);
 
+    let changed_mode = synthetic_replay_package(
+        &temp,
+        "changed-mode",
+        false,
+        "inert-private-argument",
+        "candidate",
+    );
+    let declared = |package: &Path| -> Value {
+        serde_json::from_slice(&fs::read(package.join("package.json")).unwrap()).unwrap()
+    };
+    let ordinary = declared(&baseline);
+    let classic = declared(&changed_mode);
+    assert_eq!(ordinary["compiled"]["mode"], "ordinary");
+    assert_eq!(ordinary["compiled"]["settings"]["candidateId"], "ordinary");
+    assert_eq!(classic["compiled"]["mode"], "classicAppContainer");
+    assert_eq!(classic["compiled"]["settings"]["candidateId"], "candidate");
+    let condition_change = succeeded(compare(&baseline, &changed_mode));
+    assert_eq!(
+        condition_change["baseline"]["semanticSha256"],
+        condition_change["candidate"]["semanticSha256"]
+    );
+    let mut conditions_only = manifest_only.clone();
+    for field in ["compiledPlan", "requestedRunConditions"] {
+        conditions_only[field] = serde_json::json!(true);
+    }
+    assert_eq!(condition_change["changes"], conditions_only);
+
     let argument_only = synthetic_replay_package(
         &temp,
         "argument-only",
         false,
         "argument-only-private-marker",
+        "ordinary",
     );
     let compared = succeeded(compare(&baseline, &argument_only));
     let mut expected = manifest_only;
@@ -211,7 +260,13 @@ fn replay_comparison_distinguishes_manifest_bytes_from_declared_changes() {
             .contains("argument-only-private-marker")
     );
 
-    let revised = synthetic_replay_package(&temp, "revised", true, "revised-private-argument");
+    let revised = synthetic_replay_package(
+        &temp,
+        "revised",
+        true,
+        "revised-private-argument",
+        "ordinary",
+    );
     let revised_manifest = fs::read(revised.join("package.json")).unwrap();
     let compared = compare(&baseline, &revised);
     assert_eq!(compare(&baseline, &revised).stdout, compared.stdout);
@@ -274,7 +329,13 @@ fn replay_verification_distinguishes_package_failures() {
     assert_eq!(error["detail"], "package.json is required as a file");
     assert!(!missing_path.join("package.json").exists());
 
-    let package = synthetic_replay_package(&temp, "package", false, "inert-private-argument");
+    let package = synthetic_replay_package(
+        &temp,
+        "package",
+        false,
+        "inert-private-argument",
+        "ordinary",
+    );
     let manifest = package.join("package.json");
     let original_bytes = fs::read(&manifest).unwrap();
     let original: Value = serde_json::from_slice(&original_bytes).unwrap();
