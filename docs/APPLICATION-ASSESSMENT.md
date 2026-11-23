@@ -355,6 +355,10 @@ registry or vendor asset manifest selects execution:
   verifies both packages in place and reports manifest identities and changed
   declaration categories. Changes to ordered steps include argument and exit
   expectation changes. The output describes the plans, with no runtime findings.
+  Add `--include-candidate-review` to see the candidate's declared inputs, steps,
+  requested run conditions and expected outputs alongside the change summary.
+  Use `candidateReview.packageManifestSha256` to pin preparation to the candidate
+  shown in that combined review.
 - To require the exact previously reviewed `package.json` bytes, pass the
   review or comparison's `packageManifestSha256` as
   `--expected-manifest-sha256 <sha256>` to `verify-assessment-package` or

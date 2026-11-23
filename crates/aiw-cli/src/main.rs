@@ -440,6 +440,9 @@ enum ApplicationCommand {
         baseline: PathBuf,
         #[arg(long)]
         candidate: PathBuf,
+        /// Include the compact review of the verified candidate.
+        #[arg(long)]
+        include_candidate_review: bool,
     },
     /// Revalidate a replay package and create fresh review data; never reuse approval or session authority.
     PrepareAssessmentPackage {
@@ -2209,16 +2212,23 @@ fn run_general(command: Command) -> Result<()> {
             ApplicationCommand::CompareAssessmentPackages {
                 baseline,
                 candidate,
+                include_candidate_review,
             } => {
                 #[cfg(windows)]
                 {
-                    write_json(&aiw_admin_workflow::application_package::compare_packages(
-                        &baseline, &candidate,
-                    )?)
+                    use aiw_admin_workflow::application_package::{
+                        compare_packages, compare_packages_with_candidate_review,
+                    };
+                    let comparison = if include_candidate_review {
+                        compare_packages_with_candidate_review(&baseline, &candidate)?
+                    } else {
+                        compare_packages(&baseline, &candidate)?
+                    };
+                    write_json(&comparison)
                 }
                 #[cfg(not(windows))]
                 {
-                    let _ = (baseline, candidate);
+                    let _ = (baseline, candidate, include_candidate_review);
                     bail!("protected package comparison requires Windows")
                 }
             }

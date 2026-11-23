@@ -186,15 +186,20 @@ fn replay_comparison_distinguishes_manifest_bytes_from_declared_changes() {
         "inert-private-argument",
         "ordinary",
     );
-    let compare = |baseline: &Path, candidate: &Path| {
-        Command::new(aiw())
+    let compare_with_review = |baseline: &Path, candidate: &Path, include: bool| {
+        let mut command = Command::new(aiw());
+        command
             .args(["application", "compare-assessment-packages", "--baseline"])
             .arg(baseline)
             .arg("--candidate")
-            .arg(candidate)
-            .output()
-            .unwrap()
+            .arg(candidate);
+        if include {
+            command.arg("--include-candidate-review");
+        }
+        command.output().unwrap()
     };
+    let compare =
+        |baseline: &Path, candidate: &Path| compare_with_review(baseline, candidate, false);
     let succeeded = |output: std::process::Output| {
         assert!(output.status.success(), "{:?}", output.stderr);
         assert!(output.stderr.is_empty());
@@ -299,13 +304,45 @@ fn replay_comparison_distinguishes_manifest_bytes_from_declared_changes() {
         changes["candidate"]["semanticSha256"]
     );
     assert!(!changes.to_string().contains("revised-private-argument"));
+
+    let mut combined = succeeded(compare_with_review(&baseline, &revised, true));
+    assert!(!combined.to_string().contains("revised-private-argument"));
+    let review = combined
+        .as_object_mut()
+        .unwrap()
+        .remove("candidateReview")
+        .unwrap();
+    assert_eq!(combined, changes);
+    for field in [
+        "packageManifestSha256",
+        "portableManifestSha256",
+        "semanticSha256",
+    ] {
+        assert_eq!(review[field], changes["candidate"][field]);
+    }
+    let pin = review["packageManifestSha256"].as_str().unwrap();
+    assert_eq!(pin, hex::encode(Sha256::digest(&revised_manifest)));
+    let standalone_review = succeeded(
+        Command::new(aiw())
+            .args(["application", "verify-assessment-package", "--package"])
+            .arg(&revised)
+            .args(["--format", "review", "--expected-manifest-sha256", pin])
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(review, standalone_review);
     assert_eq!(
         fs::read(revised.join("package.json")).unwrap(),
         revised_manifest
     );
 
     fs::write(revised.join("payload").join("fixture.exe"), b"drift").unwrap();
-    for output in [compare(&baseline, &revised), compare(&revised, &baseline)] {
+    for output in [
+        compare(&baseline, &revised),
+        compare(&revised, &baseline),
+        compare_with_review(&baseline, &revised, true),
+        compare_with_review(&revised, &baseline, true),
+    ] {
         assert_eq!(output.status.code(), Some(1));
         assert!(output.stdout.is_empty());
         let error: Value = serde_json::from_slice(&output.stderr).unwrap();

@@ -327,10 +327,15 @@ pub fn review_package_with_manifest_sha256(
 ) -> Result<ReplayPackageReview> {
     let verified = verify_package_with_manifest_sha256(path, expected_manifest_sha256)?;
     verified.revalidate()?;
-    let compiled = verified.package.compiled;
+    Ok(review_verified_package(&verified))
+}
+
+#[cfg(windows)]
+fn review_verified_package(verified: &VerifiedApplicationReplayPackage) -> ReplayPackageReview {
+    let compiled = &verified.package.compiled;
     let steps = compiled
         .steps
-        .into_iter()
+        .iter()
         .map(|step| match step {
             CompiledAssessmentStep::StagePortable => ReplayReviewStep::StagePortable,
             CompiledAssessmentStep::Launch {
@@ -339,34 +344,39 @@ pub fn review_package_with_manifest_sha256(
                 arguments,
                 ..
             } => ReplayReviewStep::Launch {
-                entrypoint,
-                relative_path: path,
+                entrypoint: entrypoint.clone(),
+                relative_path: path.clone(),
                 argument_count: arguments.len(),
             },
             CompiledAssessmentStep::ExpectExitCode { launch_step, value } => {
-                ReplayReviewStep::ExpectExitCode { launch_step, value }
+                ReplayReviewStep::ExpectExitCode {
+                    launch_step: *launch_step,
+                    value: *value,
+                }
             }
-            CompiledAssessmentStep::ObserveFile { path } => ReplayReviewStep::ObserveFile { path },
+            CompiledAssessmentStep::ObserveFile { path } => {
+                ReplayReviewStep::ObserveFile { path: path.clone() }
+            }
         })
         .collect();
-    Ok(ReplayPackageReview {
+    ReplayPackageReview {
         schema_version: "aiw.dev/application-replay-package-review/v0alpha1",
-        package_schema_version: verified.package.schema_version,
-        package_manifest_sha256: verified.manifest_sha256,
-        portable_manifest_sha256: compiled.portable_manifest_sha256,
-        semantic_sha256: compiled.semantic_sha256,
-        scenario_id: compiled.settings.scenario_id,
-        candidate_id: compiled.settings.candidate_id,
+        package_schema_version: verified.package.schema_version.clone(),
+        package_manifest_sha256: verified.manifest_sha256.clone(),
+        portable_manifest_sha256: compiled.portable_manifest_sha256.clone(),
+        semantic_sha256: compiled.semantic_sha256.clone(),
+        scenario_id: compiled.settings.scenario_id.clone(),
+        candidate_id: compiled.settings.candidate_id.clone(),
         mode: compiled.mode,
         user_context: compiled.user_context,
         network_blocking_requested: compiled.network_blocked,
-        working_directory: compiled.settings.working_directory,
+        working_directory: compiled.settings.working_directory.clone(),
         total_timeout_seconds: compiled.settings.total_timeout_seconds,
         process_timeout_seconds: compiled.settings.process_timeout_seconds,
-        inputs: compiled.settings.inputs,
+        inputs: compiled.settings.inputs.clone(),
         steps,
-        expected_outputs: compiled.settings.assertions,
-    })
+        expected_outputs: compiled.settings.assertions.clone(),
+    }
 }
 
 #[cfg(windows)]
@@ -377,6 +387,8 @@ pub struct ReplayPackageComparison {
     baseline: ReplayPackageIdentity,
     candidate: ReplayPackageIdentity,
     changes: ReplayPackageChanges,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    candidate_review: Option<ReplayPackageReview>,
 }
 
 #[cfg(windows)]
@@ -433,6 +445,24 @@ fn same_requested_conditions(left: &CompiledAssessment, right: &CompiledAssessme
 /// Compare verified declarations while holding both package inventories.
 #[cfg(windows)]
 pub fn compare_packages(baseline: &Path, candidate: &Path) -> Result<ReplayPackageComparison> {
+    compare_packages_inner(baseline, candidate, false)
+}
+
+/// Compare the held snapshots and review that same verified candidate.
+#[cfg(windows)]
+pub fn compare_packages_with_candidate_review(
+    baseline: &Path,
+    candidate: &Path,
+) -> Result<ReplayPackageComparison> {
+    compare_packages_inner(baseline, candidate, true)
+}
+
+#[cfg(windows)]
+fn compare_packages_inner(
+    baseline: &Path,
+    candidate: &Path,
+    include_candidate_review: bool,
+) -> Result<ReplayPackageComparison> {
     let baseline = verify_package(baseline)?;
     let candidate = verify_package(candidate)?;
     baseline.revalidate()?;
@@ -453,6 +483,7 @@ pub fn compare_packages(baseline: &Path, candidate: &Path) -> Result<ReplayPacka
             expected_outputs: left.settings.assertions != right.settings.assertions,
             requested_run_conditions: !same_requested_conditions(left, right),
         },
+        candidate_review: include_candidate_review.then(|| review_verified_package(&candidate)),
     })
 }
 
