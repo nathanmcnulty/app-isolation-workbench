@@ -4009,6 +4009,14 @@ fn emit_anyhow_error(error: &anyhow::Error) {
                 "AIW_REPLAY_PLAN_INVALID",
                 "Review the source project and settings, then export a fresh replay package.",
             ),
+            ReplayValidationError::InventoryMismatch { .. } => (
+                "AIW_REPLAY_INVENTORY_MISMATCH",
+                "Use the complete original export with its exact files and directories, or export the package again.",
+            ),
+            ReplayValidationError::ContentMismatch => (
+                "AIW_REPLAY_CONTENT_MISMATCH",
+                "Restore the original exported file bytes or export a fresh replay package from the reviewed inputs.",
+            ),
         };
         emit_error(&ErrorEnvelope {
             code: code.to_owned(),
