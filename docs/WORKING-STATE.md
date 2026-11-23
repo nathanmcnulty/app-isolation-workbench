@@ -54,6 +54,15 @@ independent boundary reviews. CI 44977826307 passed all three jobs; Workspace
 verification exited 0 in 427.47 seconds with the tested merge tree matching source.
 Documentation-only reconciliation does not require rebuilding those images.
 
+## Offline replay review
+
+CLI and desktop review verify the candidate in place and support an optional
+baseline. The desktop generates the pinned preparation command for manual use.
+Preparation, terminal approval and Start remain separate. The offline checks
+cover comparison, exact argument forwarding and retained provenance on inert
+fixtures. Native validation on the AIW operator account is blocked by a missing
+Windows Sandbox Store registration. See the [live handoff checklist](APPLICATION-ASSESSMENT.md#verify-the-replay-handoff-before-a-live-trial).
+
 ## MSI assessment
 
 The portable assessment merged through #112. The installer slice in #114
@@ -74,7 +83,7 @@ and evidence provenance into a separately reviewed launch plan.
 ## Remaining scope
 
 The measured slices are portable CLI assessment and offline MSI install discovery.
-Desktop intake, installer-backed application launch, GUI automation, complete descendants/registry/network/DLL/memory/broker
+In-desktop preparation and approval, installer-backed application launch, GUI automation, complete descendants/registry/network/DLL/memory/broker
 coverage, the broader fixture matrix and broad acceptance remain open. Root-token
 and collector-denial measurements do not establish all effective restrictions.
 Benchmark 2, W4/W5 and production acceptance are not closed by these results.
