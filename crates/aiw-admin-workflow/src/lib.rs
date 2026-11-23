@@ -12,6 +12,8 @@ use aiw_schema::{ApplicationSource, Project, validate_project_for_planning};
 
 mod admin_progress;
 pub mod application_assessment;
+#[cfg(windows)]
+pub mod application_installer;
 pub mod application_package;
 pub mod approval_review;
 #[cfg(windows)]

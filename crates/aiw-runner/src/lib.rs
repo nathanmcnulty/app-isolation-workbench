@@ -1053,6 +1053,13 @@ fn execute_wsb_golden_probe_with_channel(
                     &context.output_root.join("evidence.jsonl"),
                     aiw_provider_wsb::MAX_APPLICATION_EVIDENCE_BYTES as u64,
                 )?;
+                aiw_provider_wsb::verify_msi_install_discovery(
+                    &evidence_bytes,
+                    &verification.evidence_root_hash,
+                    expected,
+                    &observed,
+                )
+                .map_err(RunnerError::Receipt)?;
                 let token = aiw_provider_wsb::verify_msi_application_token(
                     &evidence_bytes,
                     &verification.evidence_root_hash,
@@ -1829,6 +1836,26 @@ fn recovery_protocol_for_plan(
         }
         return Ok(required.clone());
     }
+    if let Some(required) = plan.actions.iter().find_map(|action| match action {
+        PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
+            provider_protocol, ..
+        } => provider_protocol.as_ref(),
+        _ => None,
+    }) {
+        if required != &aiw_probe::WindowsSandboxCliAdapter::V0_8_114_0.protocol()
+            || transaction.schema_version != session::SESSION_TRANSACTION_SCHEMA_VERSION
+            || transaction.descriptor_sha256.is_some()
+            || transaction
+                .recovery
+                .as_ref()
+                .is_none_or(|binding| &binding.provider_protocol != required)
+        {
+            return Err(RunnerError::Transaction(
+                "install discovery recovery protocol differs from its approved plan".into(),
+            ));
+        }
+        return Ok(required.clone());
+    }
     // Legacy plans never acquire a newer adapter. Only a validated legacy v2
     // transaction may lack recovery; v3 must retain its exact107 binding.
     let legacy = aiw_probe::WindowsSandboxCliAdapter::V0_8_107_0.protocol();
@@ -2066,6 +2093,9 @@ fn build_execution_context(
         .iter()
         .find_map(|action| match action {
             PlannedAction::ExecuteWindowsSandboxApplicationAssessment {
+                provider_protocol, ..
+            }
+            | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
                 provider_protocol, ..
             } => provider_protocol.clone(),
             _ => None,
@@ -3190,13 +3220,21 @@ fn ensure_approval(
                     import_receipt_sha256,
                     application_sha256,
                     scenario_sha256,
+                    provider_protocol,
                     ..
                 },
                 Some(msi),
                 None,
             ) if import_receipt_sha256 == &msi.import_receipt_sha256
                 && application_sha256 == &msi.staged_payload.sha256
-                && scenario_sha256 == &msi.scenario_sha256 =>
+                && scenario_sha256 == &msi.scenario_sha256
+                && provider_protocol
+                    .as_ref()
+                    .map(|protocol| protocol.cli_version.as_str())
+                    == msi
+                        .scenario
+                        .is_generic_install_only()
+                        .then_some("0.8.114.0") =>
             {
                 msi.validate(&request.workspace)
                     .map_err(|_| RunnerError::ApprovalBinding)?;
@@ -5721,10 +5759,7 @@ mod tests {
                 bytes.len() as u64,
             )
         } else {
-            aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
-                &project,
-                "install-launch-close",
-            )
+            aiw_provider_wsb::compile_imported_msi_scenario(&project, "install-launch-close")
         }
         .unwrap();
         let staged_document = document.map(|bytes| {
@@ -5783,6 +5818,7 @@ mod tests {
                 PlannedAction::AssessHost,
                 PlannedAction::PrepareWorkspace,
                 PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
+                    provider_protocol: None,
                     sandbox_plan_sha256: canonical_hash(&start.wsb_plan).unwrap(),
                     provider_sha256: start.provider.sha256.clone(),
                     guest_agent_sha256: start.guest_agent.sha256.clone(),

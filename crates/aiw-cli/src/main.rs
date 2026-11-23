@@ -34,8 +34,8 @@ use aiw_provider_wsb::{
     BambuScenarioCompileError, CompiledBambuScenario, CompiledMsiScenario, ScenarioCompileError,
     WindowsSandboxCliLifecyclePlan, WindowsSandboxCompletionExpectation,
     WindowsSandboxCompletionReceipt, WindowsSandboxCompletionVerification, WindowsSandboxPlan,
-    compile_bambu_studio_info_scenario, compile_notepad_plus_plus_msi_scenario, plan_cli_lifecycle,
-    render_config, validate_host_mappings, verify_completion_receipt,
+    compile_bambu_studio_info_scenario, plan_cli_lifecycle, render_config, validate_host_mappings,
+    verify_completion_receipt,
 };
 use aiw_runner::{
     RunnerError, SessionTransaction, WsbGoldenProbeExecution, WsbGoldenProbeStart,
@@ -339,6 +339,25 @@ enum PackageCommand {
 
 #[derive(Debug, Subcommand)]
 enum ApplicationCommand {
+    /// Read a private Windows Installer log and emit bounded diagnostic observations.
+    SummarizeMsiLog {
+        #[arg(long)]
+        log: PathBuf,
+    },
+    /// Preview one bounded, offline machine MSI install from existing protected intake.
+    PlanMsiInstall {
+        #[arg(long)]
+        project: PathBuf,
+        #[arg(long)]
+        scenario: String,
+        #[arg(long)]
+        import_receipt: PathBuf,
+        #[arg(long)]
+        timeout_seconds: u32,
+        /// Keep verbose MSI logging and use the Windows Installer default buffer.
+        #[arg(long)]
+        buffer_install_log: bool,
+    },
     /// Compile administrator-supplied workflow data without provider calls or application execution.
     PlanAssessment {
         #[arg(long)]
@@ -1451,6 +1470,65 @@ fn main() -> ExitCode {
 
 fn run(command: Command) -> Result<()> {
     match command {
+        // Preparation validation has its own deep stack. Keep it out of the
+        // general dispatcher's frame on Windows debug builds.
+        Command::Run(RunArgs {
+            command:
+                RunCommand::ImportPreparedWsb {
+                    workspace,
+                    project,
+                    guest_agent_sha256,
+                    imported_at,
+                },
+        }) => import_prepared_wsb(&workspace, &project, &guest_agent_sha256, &imported_at),
+        other => run_general(other),
+    }
+}
+
+fn import_prepared_wsb(
+    workspace: &Path,
+    project: &Path,
+    guest_agent_sha256: &str,
+    imported_at: &str,
+) -> Result<()> {
+    let loaded = read_project(project)?;
+    let fallback_run_id = workspace
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("unknown")
+        .to_owned();
+    #[cfg(windows)]
+    {
+        let result = import_windows_sandbox_preparation(
+            workspace,
+            &loaded.project,
+            guest_agent_sha256,
+            imported_at,
+        )
+        .map_err(|source| {
+            anyhow!(RunPreparationImportFailed {
+                run_id: fallback_run_id,
+                source,
+            })
+        })?;
+        write_json(&result)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (loaded, guest_agent_sha256, imported_at);
+        Err(anyhow!(RunOperationUnavailable {
+            code: "AIW_WINDOWS_REQUIRED",
+            summary: "Windows Sandbox preparation import requires Windows",
+            stage: "wsbPreparationImport",
+            remediation: "Import this verified workspace on its original supported Windows host.",
+            detail: "No run state was created and no provider was acquired.",
+            run_id: fallback_run_id,
+        }))
+    }
+}
+
+fn run_general(command: Command) -> Result<()> {
+    match command {
         Command::Admin(args) => match args.command {
             AdminCommand::PrepareSevenzip {
                 evidence,
@@ -1878,6 +1956,53 @@ fn run(command: Command) -> Result<()> {
             }
         },
         Command::Application(args) => match args.command {
+            ApplicationCommand::SummarizeMsiLog { log } => {
+                use aiw_provider_wsb::msi_diagnostics::{
+                    MAX_MSI_INSTALL_LOG_BYTES, MsiInstallLogSummary,
+                };
+                let bytes = read_file_bounded(&log, MAX_MSI_INSTALL_LOG_BYTES as u64)?;
+                write_json(&MsiInstallLogSummary::from_bytes(&bytes).map_err(anyhow::Error::msg)?)
+            }
+            ApplicationCommand::PlanMsiInstall {
+                project,
+                scenario,
+                import_receipt,
+                timeout_seconds,
+                buffer_install_log,
+            } => {
+                #[cfg(windows)]
+                {
+                    use aiw_admin_workflow::application_installer::MsiInstallLogMode;
+
+                    let project = read_project(&project)?;
+                    let receipt = read_document(&import_receipt, MAX_CONFIG_BYTES)?;
+                    let log_mode = if buffer_install_log {
+                        MsiInstallLogMode::BufferedVerbose
+                    } else {
+                        MsiInstallLogMode::FlushedVerbose
+                    };
+                    write_json(
+                        &aiw_admin_workflow::application_installer::plan_msi_install(
+                            &project.project,
+                            &scenario,
+                            &receipt,
+                            timeout_seconds,
+                            log_mode,
+                        )?,
+                    )
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (
+                        project,
+                        scenario,
+                        import_receipt,
+                        timeout_seconds,
+                        buffer_install_log,
+                    );
+                    bail!("MSI install planning requires Windows protected intake")
+                }
+            }
             ApplicationCommand::PlanAssessment {
                 project,
                 settings,
@@ -2550,46 +2675,8 @@ fn run(command: Command) -> Result<()> {
                     }))
                 }
             }
-            RunCommand::ImportPreparedWsb {
-                workspace,
-                project,
-                guest_agent_sha256,
-                imported_at,
-            } => {
-                let loaded = read_project(&project)?;
-                let fallback_run_id = workspace
-                    .file_name()
-                    .and_then(|value| value.to_str())
-                    .unwrap_or("unknown")
-                    .to_owned();
-                #[cfg(windows)]
-                {
-                    let result = import_windows_sandbox_preparation(
-                        &workspace,
-                        &loaded.project,
-                        &guest_agent_sha256,
-                        &imported_at,
-                    )
-                    .map_err(|source| {
-                        anyhow!(RunPreparationImportFailed {
-                            run_id: fallback_run_id,
-                            source,
-                        })
-                    })?;
-                    write_json(&result)
-                }
-                #[cfg(not(windows))]
-                {
-                    let _ = (loaded, guest_agent_sha256, imported_at);
-                    Err(anyhow!(RunOperationUnavailable {
-                        code: "AIW_WINDOWS_REQUIRED",
-                        summary: "Windows Sandbox preparation import requires Windows",
-                        stage: "wsbPreparationImport",
-                        remediation: "Import this verified workspace on its original supported Windows host.",
-                        detail: "No run state was created and no provider was acquired.",
-                        run_id: fallback_run_id,
-                    }))
-                }
+            RunCommand::ImportPreparedWsb { .. } => {
+                unreachable!("preparation import is dispatched before general commands")
             }
             RunCommand::Plan {
                 root,
@@ -3080,7 +3167,8 @@ fn run(command: Command) -> Result<()> {
             }
             ProviderCommand::CompileMsiScenario { project, scenario } => {
                 let loaded = read_project(&project)?;
-                let scenario = compile_notepad_plus_plus_msi_scenario(&loaded.project, &scenario)?;
+                let scenario =
+                    aiw_provider_wsb::compile_imported_msi_scenario(&loaded.project, &scenario)?;
                 write_json(&MsiScenarioCompilation {
                     schema_version: "aiw.dev/msi-scenario-compilation/v0alpha1",
                     project_revision_sha256: project_revision_hash(&loaded.project)?,
@@ -4458,7 +4546,11 @@ mod tests {
         assert_eq!(export.launch_arguments[0], "--export-3mf");
         assert!(export.launch_arguments[1].ends_with("aiw-tetrahedron.3mf"));
         assert!(
-            compile_notepad_plus_plus_msi_scenario(&loaded.project, "local-file-export").is_err()
+            aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
+                &loaded.project,
+                "local-file-export"
+            )
+            .is_err()
         );
         assert_eq!(export.canonical_sha256().unwrap().len(), 64);
     }
@@ -4469,7 +4561,11 @@ mod tests {
         let scenario =
             compile_bambu_studio_info_scenario(&loaded.project, "local-file-info").unwrap();
         assert!(
-            compile_notepad_plus_plus_msi_scenario(&loaded.project, "local-file-info").is_err()
+            aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
+                &loaded.project,
+                "local-file-info"
+            )
+            .is_err()
         );
         let compilation = BambuScenarioCompilation {
             schema_version: "aiw.dev/bambu-scenario-compilation/v0alpha1",
@@ -4493,12 +4589,17 @@ mod tests {
     #[test]
     fn notepad_msi_example_compiles_without_reading_installer() {
         let loaded = read_project(&example_path("notepad-plus-plus-msi.aiw.yaml")).unwrap();
-        let compiled =
-            compile_notepad_plus_plus_msi_scenario(&loaded.project, "install-launch-close")
-                .unwrap();
+        let compiled = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
+            &loaded.project,
+            "install-launch-close",
+        )
+        .unwrap();
         compiled.validate().unwrap();
         assert_eq!(compiled.canonical_sha256().unwrap().len(), 64);
-        assert!(compile_notepad_plus_plus_msi_scenario(&loaded.project, "missing").is_err());
+        assert!(
+            aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(&loaded.project, "missing")
+                .is_err()
+        );
 
         let mut changed_requirements = loaded.project.clone();
         changed_requirements
@@ -4512,10 +4613,13 @@ mod tests {
         );
         assert_eq!(
             compiled.canonical_sha256().unwrap(),
-            compile_notepad_plus_plus_msi_scenario(&changed_requirements, "install-launch-close")
-                .unwrap()
-                .canonical_sha256()
-                .unwrap()
+            aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
+                &changed_requirements,
+                "install-launch-close"
+            )
+            .unwrap()
+            .canonical_sha256()
+            .unwrap()
         );
     }
 

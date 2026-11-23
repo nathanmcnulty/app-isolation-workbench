@@ -1,9 +1,9 @@
 # Working state
 
-Updated 2026-11-21 (America/Anchorage). Effective goal #108 is one application-neutral
+Updated 2026-11-23 (UTC). Effective goal #108 is one application-neutral
 assessment and replay path for two different external administrator-supplied
 fixtures. #111 evidence is preserved and its legacy application-specific work is
-paused. Draft PR #112 uses `codex/application-neutral-assessment` in
+paused. Merged PR #112 used `codex/application-neutral-assessment` in
 `C:\aiw\app-isolation-workbench-108`.
 
 Start with `scripts/work-status.ps1`, [assessment](APPLICATION-ASSESSMENT.md) and
@@ -45,15 +45,36 @@ admitted retained bytes with no application/provider calls. This is CLI evidence
 not native desktop acceptance. The private checkpoint records precise receipts,
 failed attempts and consumed invocations.
 
-Current source passed focused creation regression, Clippy, format, governance and
+The exact #112 portable head cb77844f200f82dff47860c87b881805041a069a passed the
+focused comparison and replay tests, the desktop dependency audit, and all
+three jobs in CI run 45087985035. The dependency fix is present in #114 as well.
+
+The prior source passed focused creation regression, Clippy, format, governance and
 independent boundary reviews. CI 44977826307 passed all three jobs; Workspace
 verification exited 0 in 427.47 seconds with the tested merge tree matching source.
 Documentation-only reconciliation does not require rebuilding those images.
 
+## MSI assessment
+
+The portable assessment merged through #112. The installer slice in #114
+uses protected intake, an exact prepared plan, separate approval, Start and
+retained reporting. Notepad++ and 7-Zip each returned installer exit 0,
+verified fresh machine registration and exact Sandbox cleanup, and reproduced
+two and three hashed executable candidates respectively in retained reports.
+The bounded scan covers registered executable component key paths in Program
+Files. See [installer diagnostics](APPLICATION-ASSESSMENT.md#installer-diagnostics)
+for the earlier timing and CMake observations.
+
+The Windows debug CLI now dispatches preparation import before the general
+command frame. On the same fresh prepared workspace the previous binary hit
+0xC00000FD, while the fixed binary wrote the planning receipt and left the run
+pending approval. The next step is to bind the operator's selected executable
+and evidence provenance into a separately reviewed launch plan.
+
 ## Remaining scope
 
-The supported slice is portable, offline x64 CLI assessment. Desktop intake,
-installers/GUI automation, complete descendants/registry/network/DLL/memory/broker
+The measured slices are portable CLI assessment and offline MSI install discovery.
+Desktop intake, installer-backed application launch, GUI automation, complete descendants/registry/network/DLL/memory/broker
 coverage, the broader fixture matrix and broad acceptance remain open. Root-token
 and collector-denial measurements do not establish all effective restrictions.
 Benchmark 2, W4/W5 and production acceptance are not closed by these results.

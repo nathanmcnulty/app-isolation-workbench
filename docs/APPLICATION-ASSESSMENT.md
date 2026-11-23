@@ -10,6 +10,94 @@ path must accept two different external applications without engine changes.
 Names, fixture membership and compiled vendor hashes never select behavior.
 Payloads and generated packages remain outside the repository and AIW distribution.
 
+## Review a machine MSI install
+
+On Windows, use the existing `application import --kind msi` command to create
+protected intake. Preserve download metadata with `--archive-download-metadata`
+when present. In a v0alpha2 project, declare an x64 MSI with the reviewed
+SHA-256, blocked networking, and a scenario containing exactly one `install`
+step. Then preview the selected scenario:
+
+```powershell
+aiw application plan-msi-install --project <project.json> --scenario <scenario-id> --import-receipt <receipt.json> --timeout-seconds 300
+```
+
+The command reopens the protected intake and binds the current receipt, payload
+size and SHA-256 to the project revision. The preview describes a fixed elevated
+guest Windows Installer operation requesting machine scope, quiet install and no
+reboot. It accepts 1–300 seconds and up to 128 MiB. Custom properties, transforms,
+other installer mechanisms, signer requirements, reboot and update/uninstall
+flows are outside this capability. MSI success requires additional worker
+observations. Package architecture, actual registration, dependencies, custom
+actions and application entry points remain unmeasured in this preview. The
+preview creates no run, approval, installer invocation or provider session.
+
+### Approved MSI installation and discovery
+
+A project can declare one `install` step for an x64 MSI and ask
+`aiw run prepare-wsb-msi` to bind protected intake to a fresh plan. The
+install-discovery profile requires the measured Windows Sandbox 0.8.114.0
+protocol. Its plan discloses machine installation with an elevated worker
+installer, an offline disposable Sandbox, buffered verbose logging and a
+300-second installer deadline. The plan binds the source hash, receipt,
+agent, provider, workspace and compiled scenario. Use
+`run import-prepared-wsb` and `run review-approval` before `run start`.
+Reviewing a preview alone grants no authority.
+
+Start stages an exact verified copy on the guest's local disk. The worker
+reads the package ProductCode before launch and requires a fresh machine
+state. A successful install-only result requires a natural exit code 0 and
+the same ProductCode registered as installed in machine context. The host
+checks the exact-session cleanup and revalidates the completion-verified
+result against the matching evidence record.
+
+Inspect `scenario.installDiscovery` in the Start or retained JSON report.
+The candidate scan queries registered local file key paths for components
+in the reviewed MSI. Each candidate includes the component GUID, an
+executable path relative to `C:\Program Files`, size and held-file SHA-256.
+`candidateScanComplete` describes this bounded key-path scan. Shortcuts,
+non-key-path files and other installation roots are outside this scan.
+Keep the candidate list for an explicit follow-up launch choice. Worker
+observations describe the measured installation. An elevated MSI's custom
+actions share the guest boundary, and the result establishes no effective
+application isolation.
+
+### Installer diagnostics
+
+Preview v0alpha3 specifies guest-local verbose Windows Installer logging and an
+8 MiB diagnostic read limit. It uses flushed logging by default. Add
+`--buffer-install-log` to review Windows Installer's buffered verbose mode.
+A buffered log can lag the worker's actual stage while the process is running.
+The retained raw log stays private. To inspect a captured log without writing
+out its text:
+
+```powershell
+aiw application summarize-msi-log --log <private-install.log>
+```
+
+The summary recognizes a small set of English log records. It reports observed
+client and server records, server-side package policy verification, a matching
+allow record for the same package and server thread, the last recognized action
+records, and separate log engine return codes. It skips unknown records and an
+unfinished final line. Use independent client exit, matching transaction
+events, and machine-context registration for the exact MSI ProductCode to
+verify installation.
+
+In fresh offline Windows Sandboxes, the 120-second client deadline expired
+during package trust verification for both the repository control and the
+external holdout. Traces for both packages recorded offline certificate
+revocation (`0x80092013`) during trust processing, then `WinVerifyTrust`
+returned success in about 121–122 seconds and App Control recorded a matching
+allow.
+
+At the existing 300-second maximum, the control exited successfully in 173.5
+seconds, with matching transaction events, machine-context registration and
+two installed executable candidates. The holdout reached `InstallValidate`
+with flushed logging and `ProcessComponents` with buffered logging. Both
+holdout runs reached the deadline without a client exit or machine
+registration. The reviewed deadline covers Windows trust processing and
+installation. The actual completion evidence determines the result.
+
 ## First capability
 
 Stage an exact portable manifest into an offline disposable Windows worker and
