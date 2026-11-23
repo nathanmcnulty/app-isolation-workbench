@@ -6,6 +6,13 @@ and implementation checklist, not implemented generic support. It expands
 [issue #108](https://github.com/nathanmcnulty/app-isolation-workbench/issues/108)
 and [R0-R5 of the roadmap](ROADMAP.md#current-delivery-sequence).
 
+Implementation update 2026-11-14: [the portable CLI slice](APPLICATION-ASSESSMENT.md)
+adds one capability-selected compiler, guest protocol, protected preparation,
+retained reporting and data-only replay package path. Application identities and
+bytes are external inputs. Native acceptance remains pending; the original audit
+and deletion checklist below remain open for installer/GUI mechanisms and legacy
+execution retirement.
+
 ## Boundary and migration strategy
 
 Use one generic path, extending the existing project/intake/scenario and

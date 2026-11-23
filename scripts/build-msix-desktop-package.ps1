@@ -15,6 +15,8 @@ if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw
 $PSNativeCommandUseErrorActionPreference = $false
 $ErrorActionPreference='Stop';Set-StrictMode -Version Latest
 $repo=Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'build-storage.ps1')
+$buildTarget=(Assert-AiwBuildStoragePolicy -RepositoryRoot $repo).targetDirectory
 function Assert-Source {
  if((& git -C $repo rev-parse HEAD).Trim() -cne $SourceRevision -or @(& git -C $repo status --porcelain=v1 --untracked-files=all).Count -ne 0){throw 'Exact clean source revision required'}
 }
@@ -30,26 +32,27 @@ $originalFlags=[Environment]::GetEnvironmentVariable($flagsName,'Process')
 $originalWorkerSha=[Environment]::GetEnvironmentVariable('AIW_MSIX_WORKER_SHA256','Process')
 $originalTarget=[Environment]::GetEnvironmentVariable('CARGO_TARGET_DIR','Process')
 try {
- [Environment]::SetEnvironmentVariable($flagsName,(@($originalFlags,'-C target-feature=+crt-static')|Where-Object{$_}) -join ' ','Process')
- [Environment]::SetEnvironmentVariable('CARGO_TARGET_DIR',(Join-Path $repo 'target'),'Process')
+ [Environment]::SetEnvironmentVariable($flagsName,'-C target-feature=+crt-static','Process')
+ [Environment]::SetEnvironmentVariable('CARGO_TARGET_DIR',$buildTarget,'Process')
+ $null=Assert-AiwBuildStoragePolicy -RepositoryRoot $repo
  & cargo build --locked --release --target x86_64-pc-windows-msvc -p aiw-msix-worker
  if($LASTEXITCODE -ne 0){throw 'Native production MSIX worker build failed'}
- $workerSha=(Get-FileHash -LiteralPath (Join-Path $repo 'target\x86_64-pc-windows-msvc\release\aiw-msix-worker.exe')).Hash.ToLowerInvariant()
+ $workerSha=(Get-FileHash -LiteralPath (Join-Path $buildTarget 'x86_64-pc-windows-msvc\release\aiw-msix-worker.exe')).Hash.ToLowerInvariant()
  [Environment]::SetEnvironmentVariable('AIW_MSIX_WORKER_SHA256',$workerSha,'Process')
- [Environment]::SetEnvironmentVariable('CARGO_TARGET_DIR',(Join-Path $repo 'gui\target'),'Process')
+ $null=Assert-AiwBuildStoragePolicy -RepositoryRoot $repo
  & cargo +stable build --manifest-path gui/Cargo.toml --locked --release --target x86_64-pc-windows-msvc
  if($LASTEXITCODE -ne 0){throw 'Desktop build failed'}
  Assert-Source
  $null=New-Item -ItemType Directory -Path $output
  $assets=Join-Path $output 'product\msix-worker107';$null=New-Item -ItemType Directory -Path $assets
- Copy-Item -LiteralPath (Join-Path $repo 'target\x86_64-pc-windows-msvc\release\aiw-msix-worker.exe') -Destination (Join-Path $assets 'agent.exe')
+ Copy-Item -LiteralPath (Join-Path $buildTarget 'x86_64-pc-windows-msvc\release\aiw-msix-worker.exe') -Destination (Join-Path $assets 'agent.exe')
  if((Get-FileHash -LiteralPath (Join-Path $assets 'agent.exe')).Hash.ToLowerInvariant() -cne $workerSha){throw 'Copied worker differs from the identity compiled into the desktop'}
  Copy-Item -LiteralPath $Assembly -Destination (Join-Path $assets 'assembly.json')
  Copy-Item -LiteralPath $Signing -Destination (Join-Path $assets 'signing.json')
  foreach($entry in @(@('assembly.json','d7eca3af76598534d29e411b4d4775d61e6ffe11174aa5a171b44bfe2a080c38'),@('signing.json','670e6f9e44211848c305c61261aa2ed6e2c94fac229214ec843cd4c9afab9e80'))){
   if((Get-FileHash -LiteralPath (Join-Path $assets $entry[0])).Hash.ToLowerInvariant() -cne $entry[1]){throw 'Copied fixed metadata differs; preserve failed package'}
  }
- Copy-Item -LiteralPath (Join-Path $repo 'gui\target\x86_64-pc-windows-msvc\release\aiw-desktop.exe') -Destination (Join-Path $output 'aiw-desktop.exe')
+ Copy-Item -LiteralPath (Join-Path $buildTarget 'x86_64-pc-windows-msvc\release\aiw-desktop.exe') -Destination (Join-Path $output 'aiw-desktop.exe')
  Copy-Item -LiteralPath (Join-Path $repo 'LICENSE') -Destination $output
  $readme="Unsigned development desktop with the fixed VM107 MSIX recipe. Production execution requires stable x64 PowerShell Core 7.6+ at C:\Program Files\PowerShell\7\pwsh.exe on controller and worker, the PowerShell.7.6 HTTPS endpoint and a separately approved clean baseline containing both. Consult docs/handoffs/2026-10-24-powershell76/SETUP-AND-ACCEPTANCE.md before setup or native acceptance. Other Sandbox recipes require their separate product assets. Select the exact signed Notepad++8.9.8 MSIX, review the VM recovery/network/account disclosure, approve the exact plan, then Start separately. Complete the console edit when prompted. The backend collects evidence, cold restores VM107 and verifies clean TLS readback before releasing its durable lease. Broader compatibility and isolation remain unmeasured. If recovery needs attention, select the original workspace/run in retained MSIX reports and use Recover VM107 retained lease. This never repeats application execution. Source: $SourceRevision."
  [IO.File]::WriteAllText((Join-Path $output 'README.txt'),$readme,[Text.UTF8Encoding]::new($false))

@@ -194,6 +194,55 @@ pub fn import_portable_directory(
 pub fn verify_portable_directory_import(
     receipt: &PortableDirectoryImportReceipt,
 ) -> Result<PortableDirectoryImportVerification, PortableImportError> {
+    let held = open_verified_portable_directory_import(receipt)?;
+    Ok(held.verification().clone())
+}
+
+/// The same strict verifier with read-only custody retained for its caller.
+/// Dropping this value closes handles only; it never removes or repairs intake.
+pub struct HeldVerifiedPortableDirectoryImport {
+    receipt: PortableDirectoryImportReceipt,
+    verification: PortableDirectoryImportVerification,
+    root: BoundWorkspaceDirectory,
+    source_directory: BoundWorkspaceDirectory,
+    directories: BTreeMap<String, BoundWorkspaceDirectory>,
+    files: BTreeMap<String, BoundWorkspaceFile>,
+    internal_receipt: BoundWorkspaceFile,
+}
+
+impl HeldVerifiedPortableDirectoryImport {
+    pub fn receipt(&self) -> &PortableDirectoryImportReceipt {
+        &self.receipt
+    }
+    pub fn verification(&self) -> &PortableDirectoryImportVerification {
+        &self.verification
+    }
+    pub fn payload_path(&self) -> &Path {
+        self.directories[""].final_path()
+    }
+    pub fn revalidate(&self) -> Result<(), PortableImportError> {
+        self.root.revalidate()?;
+        self.source_directory.revalidate()?;
+        for directory in self.directories.values() {
+            directory.revalidate()?;
+        }
+        for file in self.files.values() {
+            file.revalidate()?;
+        }
+        self.internal_receipt.revalidate()?;
+        // Recheck content, full identity, names, streams and metadata while the
+        // original handles remain held. A matching digest alone is insufficient.
+        let current = open_verified_portable_directory_import(&self.receipt)?;
+        if current.verification != self.verification {
+            return Err(PortableImportError::Drift);
+        }
+        Ok(())
+    }
+}
+
+pub fn open_verified_portable_directory_import(
+    receipt: &PortableDirectoryImportReceipt,
+) -> Result<HeldVerifiedPortableDirectoryImport, PortableImportError> {
     validate_receipt(receipt)?;
     let root = BoundWorkspaceDirectory::reopen_protected(&receipt.intake_root)?;
     require_names(root.as_file(), &[RECEIPT_LEAF, SOURCE_LEAF])?;
@@ -271,7 +320,7 @@ pub fn verify_portable_directory_import(
     internal_receipt.revalidate()?;
     source_directory.revalidate()?;
     root.revalidate()?;
-    Ok(PortableDirectoryImportVerification {
+    let verification = PortableDirectoryImportVerification {
         schema_version: PORTABLE_DIRECTORY_IMPORT_VERIFICATION_SCHEMA.to_owned(),
         receipt_sha256: hex::encode(Sha256::digest(&expected_bytes)),
         intake_root: receipt.intake_root.clone(),
@@ -280,6 +329,15 @@ pub fn verify_portable_directory_import(
         entry_count: receipt.entry_count,
         verified_entries: receipt.entry_count,
         verified: true,
+    };
+    Ok(HeldVerifiedPortableDirectoryImport {
+        receipt: receipt.clone(),
+        verification,
+        root,
+        source_directory,
+        directories,
+        files,
+        internal_receipt,
     })
 }
 
@@ -803,6 +861,27 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn held_verified_intake_retains_file_custody_and_detects_namespace_drift() {
+        let root = Root::new();
+        let source_path = root.0.join("portable");
+        fs::create_dir(&source_path).unwrap();
+        fs::write(source_path.join("app.exe"), b"project-owned-control-bytes").unwrap();
+        let source = HeldPortableDirectory::open(&source_path).unwrap();
+        let receipt = import_portable_directory(&root.0, "held-001", &source).unwrap();
+        let held = open_verified_portable_directory_import(&receipt).unwrap();
+        assert_eq!(held.receipt(), &receipt);
+        held.revalidate().unwrap();
+        let app = held.payload_path().join("app.exe");
+        assert!(OpenOptions::new().write(true).open(&app).is_err());
+        assert!(fs::rename(&app, held.payload_path().join("substitute.exe")).is_err());
+        assert_eq!(fs::read(&app).unwrap(), b"project-owned-control-bytes");
+        // Directory handles are not claimed to freeze every child name. The
+        // retained verifier must detect a newly introduced, unapproved object.
+        fs::write(held.payload_path().join("late.txt"), b"unapproved addition").unwrap();
+        assert!(held.revalidate().is_err());
     }
 
     #[test]

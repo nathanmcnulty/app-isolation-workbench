@@ -476,7 +476,7 @@ fn held_directory_chain_with_sharing(path: &Path, share_access: u32) -> Result<V
     Ok(ancestors)
 }
 
-fn open_absolute_c_root(share_access: u32) -> Result<File, String> {
+pub(crate) fn open_absolute_c_root(share_access: u32) -> Result<File, String> {
     let root = OpenOptions::new()
         .read(true)
         .share_mode(share_access)
@@ -514,7 +514,7 @@ fn open_or_create_directory(parent: &File, leaf: &str) -> Result<File, String> {
     }
 }
 
-fn open_relative_directory(
+pub(crate) fn open_relative_directory(
     parent: &File,
     leaf: &str,
     extra_access: u32,
@@ -590,7 +590,11 @@ fn create_new_file(parent: &File, leaf: &str) -> Result<File, String> {
     Ok(file)
 }
 
-fn open_relative_file(parent: &File, leaf: &str, access: u32) -> Result<Option<File>, String> {
+pub(crate) fn open_relative_file(
+    parent: &File,
+    leaf: &str,
+    access: u32,
+) -> Result<Option<File>, String> {
     match nt_open_relative(
         parent,
         leaf,
@@ -682,7 +686,7 @@ fn raw_handle(file: &File) -> HANDLE {
     HANDLE(file.as_raw_handle() as isize as *mut c_void)
 }
 
-fn file_information(file: &File) -> Result<BY_HANDLE_FILE_INFORMATION, String> {
+pub(crate) fn file_information(file: &File) -> Result<BY_HANDLE_FILE_INFORMATION, String> {
     let mut info = BY_HANDLE_FILE_INFORMATION::default();
     // SAFETY: the borrowed handle and output pointer remain valid for this call.
     unsafe { GetFileInformationByHandle(raw_handle(file), &mut info) }
@@ -690,23 +694,23 @@ fn file_information(file: &File) -> Result<BY_HANDLE_FILE_INFORMATION, String> {
     Ok(info)
 }
 
-fn ordinary_directory(info: &BY_HANDLE_FILE_INFORMATION) -> bool {
+pub(crate) fn ordinary_directory(info: &BY_HANDLE_FILE_INFORMATION) -> bool {
     info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0 != 0
         && info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 == 0
         && info.dwFileAttributes & FILE_ATTRIBUTE_DEVICE.0 == 0
 }
 
-fn ordinary_file(info: &BY_HANDLE_FILE_INFORMATION) -> bool {
+pub(crate) fn ordinary_file(info: &BY_HANDLE_FILE_INFORMATION) -> bool {
     info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0 == 0
         && info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 == 0
         && info.dwFileAttributes & FILE_ATTRIBUTE_DEVICE.0 == 0
 }
 
-fn file_length(info: &BY_HANDLE_FILE_INFORMATION) -> u64 {
+pub(crate) fn file_length(info: &BY_HANDLE_FILE_INFORMATION) -> u64 {
     (u64::from(info.nFileSizeHigh) << 32) | u64::from(info.nFileSizeLow)
 }
 
-fn same_file_information(
+pub(crate) fn same_file_information(
     left: &BY_HANDLE_FILE_INFORMATION,
     right: &BY_HANDLE_FILE_INFORMATION,
 ) -> bool {

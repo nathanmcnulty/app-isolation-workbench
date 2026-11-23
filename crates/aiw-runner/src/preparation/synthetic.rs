@@ -18,11 +18,11 @@ pub(crate) fn readiness() -> WindowsSandboxReadiness {
         }),
         provider_package: Some(WindowsPackageIdentity {
             name: "MicrosoftWindows.WindowsSandbox".to_owned(),
-            full_name: "MicrosoftWindows.WindowsSandbox_1.0.0.0_x64".to_owned(),
+            full_name: format!("MicrosoftWindows.WindowsSandbox_{PINNED_CLI_VERSION}_x64"),
             family_name: "MicrosoftWindows.WindowsSandbox_8wekyb3d8bbwe".to_owned(),
             publisher: "CN=Microsoft Corporation".to_owned(),
             publisher_id: "8wekyb3d8bbwe".to_owned(),
-            version: "1.0.0.0".to_owned(),
+            version: PINNED_CLI_VERSION.to_owned(),
             architecture: "x64".to_owned(),
             signature_kind: "store".to_owned(),
             status_ok: true,

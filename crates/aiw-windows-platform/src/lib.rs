@@ -2,6 +2,20 @@
 
 use aiw_probe::WindowsSandboxReadiness;
 
+/// Narrow cryptographic primitives for the application-assessment channel.
+/// These primitives alone grant no execution or evidence authority.
+#[cfg(windows)]
+#[doc(hidden)]
+pub mod assessment_channel_crypto;
+
+#[cfg(windows)]
+mod guest_assessment;
+#[cfg(windows)]
+pub use guest_assessment::{
+    bootstrap_system_assessment, execute_assessment, execute_authenticated_assessment,
+    publish_assessment_completion,
+};
+
 #[cfg(all(windows, feature = "research-sevenzip"))]
 pub use control_appcontainer::research_sevenzip::run as run_sevenzip_research;
 
@@ -86,13 +100,15 @@ pub use windows_platform::{
 
 #[cfg(windows)]
 pub use workspace::{
-    BoundWorkspaceDirectory, BoundWorkspaceFile, CreatedWorkspaceDirectory, CreatedWorkspaceFile,
-    HeldRunWorkspace, WorkspaceAclPolicy, WorkspaceError,
+    AssessmentChannelFile, BoundWorkspaceDirectory, BoundWorkspaceFile, CreatedWorkspaceDirectory,
+    CreatedWorkspaceFile, HeldAssessmentChannelFile, HeldAssessmentChannelOutput, HeldRunWorkspace,
+    WorkspaceAclPolicy, WorkspaceError,
 };
 
 #[cfg(windows)]
 pub use portable_import::{
-    PortableImportError, import_portable_directory, verify_portable_directory_import,
+    HeldVerifiedPortableDirectoryImport, PortableImportError, import_portable_directory,
+    open_verified_portable_directory_import, verify_portable_directory_import,
 };
 #[cfg(windows)]
 pub use source_import::{
@@ -243,6 +259,12 @@ pub fn inspect_windows_sandbox_static() -> Result<aiw_probe::WindowsSandboxStati
     windows_platform::inspect_windows_sandbox_static()
 }
 
+/// Opt-in, fixed read-only protocol research. Never establishes execution readiness.
+#[cfg(all(windows, feature = "research-sandbox-protocol"))]
+pub fn capture_windows_sandbox_protocol() -> Result<serde_json::Value, String> {
+    windows_platform::capture_windows_sandbox_protocol()
+}
+
 #[must_use]
 pub fn assess_windows_sandbox() -> WindowsSandboxReadiness {
     platform::assess_windows_sandbox()
@@ -299,4 +321,27 @@ mod platform {
             ],
         }
     }
+}
+
+#[cfg(windows)]
+pub fn acquire_windows_sandbox_for_protocol(
+    expected_provider_sha256: &str,
+    expected_protocol: &aiw_probe::WindowsSandboxCliProtocol,
+) -> Result<WindowsSandboxExecutionLease, WindowsSandboxInvocationError> {
+    windows_platform::acquire_windows_sandbox_for_protocol(
+        expected_provider_sha256,
+        expected_protocol,
+    )
+}
+#[cfg(windows)]
+pub fn acquire_windows_sandbox_recovery_for_protocol(
+    start_provider_sha256: &str,
+    persisted_session: CanonicalSandboxId,
+    expected_protocol: &aiw_probe::WindowsSandboxCliProtocol,
+) -> Result<WindowsSandboxRecoveryLease, WindowsSandboxInvocationError> {
+    windows_platform::acquire_windows_sandbox_recovery_for_protocol(
+        start_provider_sha256,
+        persisted_session,
+        expected_protocol,
+    )
 }

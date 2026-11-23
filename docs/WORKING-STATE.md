@@ -1,50 +1,86 @@
 # Working state
 
-Updated 2026-11-08. Current slice: align the application-neutral recovery plan and
-repository/publication scope. Start with `scripts/work-status.ps1`,
-[roadmap](ROADMAP.md), [migration audit](APPLICATION-AGNOSTIC-MIGRATION.md) and
-[release gates](RELEASE-GATES.md). The work layers on local cleanup `df6f329`,
-README PR #107 head `30abe101`, and main `b27942a`; verify current remote state
-before integration. These are source references, not assumptions about today's HEAD.
+Updated 2026-11-21 (America/Anchorage). Effective goal #108 is one application-neutral
+assessment and replay path for two different external administrator-supplied
+fixtures. #111 evidence is preserved and its legacy application-specific work is
+paused. Draft PR #112 uses `codex/application-neutral-assessment` in
+`C:\aiw\app-isolation-workbench-108`.
 
-## Current boundary and next work
+Start with `scripts/work-status.ps1`, [assessment](APPLICATION-ASSESSMENT.md) and
+[channel design](ASSESSMENT-EVIDENCE-CHANNEL.md). Private evidence and source pins
+remain in `C:\aiw\generic-assessment-108`; never commit payloads or raw evidence.
 
-Generic assessment is not implemented. Product-specific execution remains in the
-CLI, desktop, guest, platform, runner and packaging paths. The recovery is one
-capability-selected plan/engine with exact per-run source identity, useful
-assessment before optional packaging, a diverse corpus plus independent holdout,
-and retirement of fixed execution after equivalent regression coverage transfers.
+## Current result
 
-Next implementation: R1's generic plan/capability contract using existing
-`ApplicationSource`, `ScenarioStep` and intake/approval concepts. Begin with inert
-validation and unknown-app/unsupported-operation tests, not another product adapter.
-See [execution packets](EXECUTION-PLAN.md). The roadmap does not authorize a live
-trial, authentication, dependency install, runtime pin change or provider setup.
+Production source `315391e` and the same pinned CLI/agent/common harness served
+both external fixtures without rebuilding or adding product-specific code.
+Protected intake, replay export/verification, separate preparation/approval/Start,
+authenticated retained reports and comparisons completed in fresh Sandboxes on VM107.
 
-Vendor configuration bytes, application MSIX publication and installer-bundling
-assembly are removed in the cleanup. Desktop candidate jobs remain paused until
-an AIW-only layout and publication gates are reviewed. Original native archive
-pins remain strict; synthetic test data is not original acceptance evidence.
+| External run data | Ordinary | Classic AppContainer |
+| --- | --- | --- |
+| Stateless JSON transformation | 3 steps /2 assertions passed; exact 20-byte output | Same assertions/output passed |
+| Seeded persistent database, two launches | 6 steps /5 assertions passed; 8,192-byte database | Same assertions/query output and full-file hash/extent passed |
 
-## Retained evidence pointers
+Independent review verified 29/30 signatures for the JSON runs and 36/37 for the
+database runs. Root tokens were Medium standard user or Low AppContainer with
+empty capabilities. Jobs, accounts, owned profiles and exact Sandbox cleanup
+passed, including two final empty lists for each of the four passing external
+runs. Both comparisons
+are comparable and retain every coverage gap. Database equality is observed full-file
+hash/extent equality; complete database bytes were not retained for direct comparison.
 
-- [Fixed 7-Zip assessment](SEVENZIP-NATIVE-ACCEPTANCE.md): successful comparison
-  and separate cancellation at source `593281a`; broader measurements remain
-  unmeasured. Preserve the earlier failed attempt without inventing its cause.
-- [Paired project-owned controls](PAIRED-NATIVE-APPROVAL.md) and
-  [Results audit](RESULTS-ACCEPTANCE-AUDIT.md): scoped source and native records.
-- [External historical archive tests](../fixtures/msix-lifecycle/README.md):
-  exact native bytes are not distributed with source.
+An earlier database baseline failed with its missing-file initial condition.
+Preserve that authenticated failed baseline separately. Its unused original Classic
+candidate remains approved NotRun/superseded. The new condition supplies an explicit
+zero-byte seed, retains the same
+payload/SQL/protection flags and uses new plans/approvals; it is not a replay or a
+rewritten success. The read-only collector's long-path repair also recollected
+existing evidence without rerunning the application or original retained Read.
 
-Preserve existing VMs, old packages, retained runs and unrelated work. Do not
-rerun applications, recover completed sessions, delete remote releases/history
-or alter retained evidence merely to align documentation.
+Repeated retained Read returned matching full-report hashes and lengths for all
+four passing runs.
+Six exact production sanitized report/comparison JSON files were exported from
+admitted retained bytes with no application/provider calls. This is CLI evidence,
+not native desktop acceptance. The private checkpoint records precise receipts,
+failed attempts and consumed invocations.
 
-## Integration checks
+Current source passed focused creation regression, Clippy, format, governance and
+independent boundary reviews. CI 44977826307 passed all three jobs; Workspace
+verification exited 0 in 427.47 seconds with the tested merge tree matching source.
+Documentation-only reconciliation does not require rebuilding those images.
 
-The documentation change needs link/content/governance review and independent
-exact-head review. The underlying cleanup also changes scripts/tests/assets and
-requires their applicable checks plus required hosted CI before integration.
-This Linux executor can run inert checks with the existing PowerShell runtime;
-Windows-only/native and Rust toolchain checks must be reported separately, not
-inferred from static success. Update this handoff when integration actually lands.
+## Remaining scope
+
+The supported slice is portable, offline x64 CLI assessment. Desktop intake,
+installers/GUI automation, complete descendants/registry/network/DLL/memory/broker
+coverage, the broader fixture matrix and broad acceptance remain open. Root-token
+and collector-denial measurements do not establish all effective restrictions.
+Benchmark 2, W4/W5 and production acceptance are not closed by these results.
+
+## Storage and execution
+
+Reuse only `C:\aiw\environment-probe-20261114\target-static-r1`: >=10 GiB starting
+free and <=8 GiB cache prebuild. Normal scripts use `scripts/build-storage.ps1`,
+honor the caller's target and reject unsafe profile/config/compiler overrides.
+Direct Cargo must copy the normal target/flags: `--target x86_64-pc-windows-msvc`
+and target-specific `-C target-feature=+crt-static`. Both workspace dev/test
+manifests use debug=0/incremental=false.
+
+Consecutive normal dev builds each ended at 4,627,812,528 bytes /4,096 paths,
+identical images and zero second-pass compiler calls. Release ended at
+4,627,905,102 bytes; the strict post-trial sample remained identical, with no
+compiler running. All 16 actual compiler commands and three selected images
+passed independent admission. File-length totals may count hard-link aliases;
+free-volume samples/PDB totals are separate. Keep selected images and receipts,
+not repeated build trees. No new build cache was created for fixture trials.
+
+Policy-blocked legacy cleanup and three blocked empty fixtures remain untouched.
+Automatic approval review also blocked deletion of one unused 53,734-byte QA
+projection; retain it and its blocked-cleanup receipt, with no retry/bypass.
+Owned native-test TEMP fixtures were removed after releasing handles.
+
+Use pinned SSH/SCP and reviewed one-shot InteractiveToken/LUA session1 controller
+tasks. The authorized SYSTEM collector stays only inside fresh VM107 Sandboxes;
+applications remain standard user/AppContainer. No admin SSH application run,
+unknown process termination, consumed Start replay or unrelated cleanup.

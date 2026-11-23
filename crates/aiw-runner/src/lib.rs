@@ -9,9 +9,15 @@
 //! exact-ID `connect`, and exact-ID `stop` argument arrays. It has no shell, elevation, command,
 //! script, URL, or arbitrary policy API.
 
+mod application_report;
+#[cfg(windows)]
+mod assessment_channel_host;
 #[cfg(all(windows, feature = "offline-rehearsal"))]
 pub mod offline_rehearsal;
 mod paired_report;
+pub use application_report::GenericApplicationRunReport;
+#[cfg(windows)]
+pub use application_report::report_windows_sandbox_application_assessment;
 mod sevenzip_report;
 mod sevenzip_report_output;
 #[cfg(test)]
@@ -105,16 +111,18 @@ pub use assessment_report::{
 pub use assessment_report::{
     export_windows_sandbox_msi_document, report_windows_sandbox_msi, report_windows_sandbox_msi_run,
 };
-pub use preparation::{
-    ProviderProtocolObservation, WsbPairedControls, WsbSevenZipAssessment, WsbSevenZipInstaller,
-    build_wsb_paired_controls_preparation, build_wsb_sevenzip_preparation,
-    build_wsb_static_sevenzip_preparation,
-};
 #[cfg(windows)]
 pub use preparation::{
-    import_windows_sandbox_paired_preparation, import_windows_sandbox_sevenzip_preparation,
+    ApplicationAssessmentPreparationInput, import_windows_sandbox_paired_preparation,
+    import_windows_sandbox_sevenzip_preparation, prepare_windows_sandbox_application_assessment,
     prepare_windows_sandbox_paired_controls, prepare_windows_sandbox_sevenzip_assessment,
     verify_windows_sandbox_paired_preparation, verify_windows_sandbox_sevenzip_preparation,
+};
+pub use preparation::{
+    ProviderProtocolObservation, WsbApplicationAssessment, WsbAssessmentInput, WsbPairedControls,
+    WsbSevenZipAssessment, WsbSevenZipInstaller, build_wsb_application_assessment_preparation,
+    build_wsb_paired_controls_preparation, build_wsb_sevenzip_preparation,
+    build_wsb_static_sevenzip_preparation,
 };
 mod session;
 
@@ -202,11 +210,16 @@ pub struct WsbGoldenProbeStart {
     pub paired_controls: Option<WsbPairedControls>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seven_zip: Option<preparation::WsbSevenZipAssessment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub application_assessment: Option<WsbApplicationAssessment>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WsbGoldenProbeExecution {
+    #[serde(skip)]
+    application_observation:
+        Option<Box<aiw_provider_wsb::assessment_evidence::VerifiedAssessmentEvidence>>,
     #[serde(skip)]
     seven_zip_observation: Option<Box<aiw_provider_wsb::sevenzip::SevenZipResult>>,
     #[serde(skip)]
@@ -275,11 +288,19 @@ pub struct WsbImportedMsiExecution {
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum WsbApprovedExecution {
+    ApplicationAssessment(Box<WsbApplicationAssessmentExecution>),
     SevenZip(Box<WsbSevenZipExecution>),
     GoldenProbe(WsbGoldenProbeExecution),
     PairedControls(Box<WsbPairedControlExecution>),
     ImportedMsi(WsbImportedMsiExecution),
     ImportedBambu(Box<WsbBambuExecution>),
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WsbApplicationAssessmentExecution {
+    pub lifecycle: WsbGoldenProbeExecution,
+    pub evidence: aiw_provider_wsb::assessment_evidence::VerifiedAssessmentEvidence,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -447,42 +468,13 @@ pub fn observe_wsb_session_status(layout: &RunLayout) -> Result<WsbSessionStatus
     let provider_bindings: Vec<(&str, &WorkspaceBindingEvidence, &str)> = plan
         .actions
         .iter()
-        .filter_map(|action| match action {
-            PlannedAction::ExecuteWindowsSandboxGoldenProbe {
-                provider_sha256,
-                workspace,
-                workspace_identity_sha256,
-                ..
-            }
-            | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
-                provider_sha256,
-                workspace,
-                workspace_identity_sha256,
-                ..
-            }
-            | PlannedAction::ExecuteWindowsSandboxPairedControls {
-                provider_sha256,
-                workspace,
-                workspace_identity_sha256,
-                ..
-            }
-            | PlannedAction::ExecuteWindowsSandboxSevenZipAssessment {
-                provider_sha256,
-                workspace,
-                workspace_identity_sha256,
-                ..
-            }
-            | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario {
-                provider_sha256,
-                workspace,
-                workspace_identity_sha256,
-                ..
-            } => Some((
-                provider_sha256.as_str(),
-                workspace.as_ref(),
-                workspace_identity_sha256.as_str(),
-            )),
-            _ => None,
+        .filter_map(PlannedAction::windows_sandbox_binding)
+        .map(|binding| {
+            (
+                binding.provider_sha256,
+                binding.workspace,
+                binding.workspace_identity_sha256,
+            )
         })
         .collect();
     let binding_matches = match provider_bindings.as_slice() {
@@ -537,13 +529,27 @@ pub fn observe_wsb_session_status(layout: &RunLayout) -> Result<WsbSessionStatus
 // An empty list is conclusive only after start acknowledgement or an observed
 // exact-session stop. Otherwise a session can appear minutes after timeout.
 fn start_settled(transaction: &session::SessionTransaction) -> bool {
-    transaction.transitions.iter().any(|transition| {
-        transition.state == SessionTransactionState::Active
-            || matches!(
-                transition.reason_code.as_str(),
-                "cleanup-verified-after-stop" | "recovery-stop-verified"
-            )
-    })
+    (channel_start_not_attempted(transaction)
+        && transaction.current_state() == SessionTransactionState::CleanupVerified)
+        || transaction.transitions.iter().any(|transition| {
+            transition.state == SessionTransactionState::Active
+                || matches!(
+                    transition.reason_code.as_str(),
+                    "cleanup-verified-after-stop" | "recovery-stop-verified"
+                )
+        })
+}
+
+fn channel_start_not_attempted(transaction: &SessionTransaction) -> bool {
+    transaction.schema_version == session::AUTHENTICATED_SESSION_TRANSACTION_SCHEMA
+        && transaction
+            .transitions
+            .first()
+            .is_some_and(|t| t.reason_code == "channel-provider-preflight")
+        && !transaction
+            .transitions
+            .iter()
+            .any(|t| t.reason_code == "provider-start-intent")
 }
 
 trait LeaseGuard {}
@@ -726,6 +732,7 @@ impl LeaseBoundary for AlreadyHeldProviderLease {
 
 /// Execute the one approved W1 provider operation.  A success means lifecycle
 /// and receipt correlation succeeded, not that containment has been proven.
+#[cfg(any(test, feature = "offline-rehearsal"))]
 pub(crate) fn execute_wsb_golden_probe(
     request: &WsbGoldenProbeStart,
     readiness: &WindowsSandboxReadiness,
@@ -733,6 +740,30 @@ pub(crate) fn execute_wsb_golden_probe(
     process: &impl ProcessBoundary,
     lease: &impl LeaseBoundary,
     workspace: &impl WorkspaceBoundary,
+) -> Result<WsbGoldenProbeExecution, RunnerError> {
+    execute_wsb_golden_probe_with_channel(
+        request, readiness, layout, process, lease, workspace, None,
+    )
+}
+
+trait AuthenticatedAssessmentChannel {
+    fn wait(
+        &mut self,
+        request: &WsbGoldenProbeStart,
+        layout: &RunLayout,
+        context: &ExecutionContext,
+        store: &TransactionStore<'_>,
+    ) -> Result<(), RunnerError>;
+}
+
+fn execute_wsb_golden_probe_with_channel(
+    request: &WsbGoldenProbeStart,
+    readiness: &WindowsSandboxReadiness,
+    layout: &RunLayout,
+    process: &impl ProcessBoundary,
+    lease: &impl LeaseBoundary,
+    workspace: &impl WorkspaceBoundary,
+    mut channel: Option<&mut dyn AuthenticatedAssessmentChannel>,
 ) -> Result<WsbGoldenProbeExecution, RunnerError> {
     let _lease = lease.try_acquire()?;
     if cancellation_requested(layout)? {
@@ -742,7 +773,14 @@ pub(crate) fn execute_wsb_golden_probe(
     let context = prepare_execution(request, readiness, layout, true)?;
     revalidate_workspace(request, workspace)?;
     let store = TransactionStore::new(layout, context.binding.clone());
-    if store.load_current()?.is_some() {
+    let existing = store.load_current()?;
+    if request.application_assessment.is_some() && channel.is_none() {
+        return Err(RunnerError::ApprovalBinding);
+    }
+    if existing.as_ref().is_some_and(|tx| {
+        channel.is_none() || tx.current_state() != SessionTransactionState::StartIntent
+    }) || (channel.is_some() && existing.is_none())
+    {
         return Err(RunnerError::RecoveryRequired(
             "an earlier provider attempt must be recovered first".to_owned(),
         ));
@@ -771,8 +809,15 @@ pub(crate) fn execute_wsb_golden_probe(
         record_prestart_failure(layout, error.clone())?;
         return Err(error);
     }
-    store.create("approved-start")?;
-    let operation = run_attempt(request, layout, process, &context, &store);
+    if channel.is_none() {
+        store.create("approved-start")?;
+    } else {
+        store.transition(
+            SessionTransactionState::StartIntent,
+            "provider-start-intent",
+        )?;
+    }
+    let operation = run_attempt(request, layout, process, &context, &store, channel.take());
     let cleanup = finalize_attempt(
         request,
         process,
@@ -825,7 +870,38 @@ pub(crate) fn execute_wsb_golden_probe(
     } else {
         None
     };
-    let verification = match bambu_verified {
+    #[cfg(windows)]
+    let application_output_custody = if request.application_assessment.is_some() {
+        Some(finish_cleaned_attempt(layout, || {
+            assessment_channel_host::hold_output(&request.workspace)
+        })?)
+    } else {
+        None
+    };
+    #[cfg(windows)]
+    let authenticated_application = if request.application_assessment.is_some() {
+        Some(finish_cleaned_attempt(layout, || {
+            let held = aiw_windows_platform::HeldRunWorkspace::reopen_bound(&request.workspace)
+                .map_err(|_| RunnerError::Drift)?;
+            let tx = store.load_current()?.ok_or(RunnerError::Drift)?;
+            assessment_channel_host::verify_completed(&held, layout, &context.plan, &tx)
+        })?)
+    } else {
+        None
+    };
+    let authenticated_verification = {
+        #[cfg(windows)]
+        {
+            authenticated_application
+                .as_ref()
+                .map(|a| a.verification.clone())
+        }
+        #[cfg(not(windows))]
+        {
+            None
+        }
+    };
+    let verification = match authenticated_verification.or(bambu_verified) {
         Some(verified) => Ok(verified),
         None => verify_completion_receipt(&context.output_root, &context.completion)
             .map_err(|error| RunnerError::Receipt(error.to_string())),
@@ -833,7 +909,11 @@ pub(crate) fn execute_wsb_golden_probe(
     let verification = match verification {
         Ok(value)
             if value.successful
-                || matches!(context.guest_request, ExecutionGuestRequest::SevenZip(_)) =>
+                || matches!(
+                    context.guest_request,
+                    ExecutionGuestRequest::SevenZip(_)
+                        | ExecutionGuestRequest::ApplicationAssessment(_)
+                ) =>
         {
             value
         }
@@ -910,6 +990,28 @@ pub(crate) fn execute_wsb_golden_probe(
         } else {
             None
         };
+    let application_observation = {
+        #[cfg(windows)]
+        {
+            if let Some(auth) = authenticated_application {
+                if verification.successful != auth.observed.native.driver_completed {
+                    let error = RunnerError::Receipt(
+                        "assessment completion status disagrees with authenticated driver facts"
+                            .into(),
+                    );
+                    record_terminal_failure(layout, error.clone())?;
+                    return Err(error);
+                }
+                Some(Box::new(auth.evidence))
+            } else {
+                None
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            None
+        }
+    };
     let paired_observation = if let ExecutionGuestRequest::PairedControls(expected) =
         &context.guest_request
     {
@@ -1012,7 +1114,8 @@ pub(crate) fn execute_wsb_golden_probe(
                     product_registration,
                 )
             }
-            ExecutionGuestRequest::Golden(_)
+            ExecutionGuestRequest::ApplicationAssessment(_)
+            | ExecutionGuestRequest::Golden(_)
             | ExecutionGuestRequest::ImportedBambu(_)
             | ExecutionGuestRequest::PairedControls(_)
             | ExecutionGuestRequest::SevenZip(_) => (None, None, None, None, None, None),
@@ -1032,6 +1135,12 @@ pub(crate) fn execute_wsb_golden_probe(
             return Err(error);
         }
     };
+    #[cfg(windows)]
+    if let Some(files) = &application_output_custody {
+        finish_cleaned_attempt(layout, || {
+            files.revalidate().map_err(|_| RunnerError::Drift)
+        })?;
+    }
     #[cfg(windows)]
     if let Some(files) = &seven_zip_output_custody {
         finish_cleaned_attempt(layout, || {
@@ -1066,6 +1175,7 @@ pub(crate) fn execute_wsb_golden_probe(
         bambu_observation,
         paired_observation,
         seven_zip_observation,
+        application_observation,
         scenario,
         application_token,
         behavior,
@@ -1096,7 +1206,8 @@ pub fn start_approved_windows_sandbox_golden_probe(
         false,
     )? {
         WsbApprovedExecution::GoldenProbe(result) => Ok(result),
-        WsbApprovedExecution::ImportedMsi(_)
+        WsbApprovedExecution::ApplicationAssessment(_)
+        | WsbApprovedExecution::ImportedMsi(_)
         | WsbApprovedExecution::ImportedBambu(_)
         | WsbApprovedExecution::PairedControls(_)
         | WsbApprovedExecution::SevenZip(_) => Err(RunnerError::ApprovalBinding),
@@ -1196,7 +1307,8 @@ fn start_approved_windows_sandbox_inner(
     if (artifacts.receipt.msi.is_some()
         || artifacts.receipt.bambu.is_some()
         || artifacts.receipt.paired_controls.is_some()
-        || artifacts.receipt.seven_zip.is_some())
+        || artifacts.receipt.seven_zip.is_some()
+        || artifacts.receipt.application_assessment.is_some())
         && !allow_msi
     {
         return Err(RunnerError::ApprovalBinding);
@@ -1208,7 +1320,9 @@ fn start_approved_windows_sandbox_inner(
     }
 
     let request = WsbGoldenProbeStart {
-        schema_version: if artifacts.receipt.seven_zip.is_some() {
+        schema_version: if artifacts.receipt.application_assessment.is_some() {
+            "aiw.dev/wsb-application-assessment-start/v0alpha2"
+        } else if artifacts.receipt.seven_zip.is_some() {
             "aiw.dev/wsb-sevenzip-start/v0alpha1"
         } else if artifacts.receipt.paired_controls.is_some() {
             "aiw.dev/wsb-paired-controls-start/v0alpha1"
@@ -1232,6 +1346,7 @@ fn start_approved_windows_sandbox_inner(
         bambu: artifacts.receipt.bambu.clone(),
         paired_controls: artifacts.receipt.paired_controls.clone(),
         seven_zip: artifacts.receipt.seven_zip.clone(),
+        application_assessment: artifacts.receipt.application_assessment.clone(),
     };
     let approval = layout.read_approval().map_err(journal_error)?;
     if !matches!(
@@ -1251,9 +1366,31 @@ fn start_approved_windows_sandbox_inner(
     }) {
         return Err(RunnerError::ApprovalBinding);
     }
-    let mut native_lease =
-        aiw_windows_platform::acquire_windows_sandbox(&artifacts.receipt.provider.sha256)
-            .map_err(native_invocation_error)?;
+    let mut start_channel = if request.application_assessment.is_some() {
+        let channel = assessment_channel_host::begin_start(
+            &request,
+            &artifacts.run_plan,
+            &layout,
+            held.workspace(),
+        )?;
+        let static_context = build_execution_context(&request, &layout, true)?;
+        if static_context.binding.descriptor_sha256.as_deref()
+            != Some(channel.descriptor_sha256.as_str())
+            || static_context.guest_request.digest() != channel.descriptor.request.request_sha256
+        {
+            return Err(RunnerError::ApprovalBinding);
+        }
+        TransactionStore::new(&layout, static_context.binding)
+            .create("channel-provider-preflight")?;
+        Some(channel)
+    } else {
+        None
+    };
+    let mut native_lease = aiw_windows_platform::acquire_windows_sandbox_for_protocol(
+        &artifacts.receipt.provider.sha256,
+        &artifacts.receipt.provider_protocol,
+    )
+    .map_err(native_invocation_error)?;
     native_lease.retain_diagnostics(create_provider_diagnostics(
         held.workspace(),
         layout.run_id(),
@@ -1272,14 +1409,29 @@ fn start_approved_windows_sandbox_inner(
         }),
         plan: artifacts.wsb_plan,
     };
-    let mut result = execute_wsb_golden_probe(
+    let mut result = execute_wsb_golden_probe_with_channel(
         &request,
         &readiness,
         &layout,
         &process,
         &AlreadyHeldProviderLease,
         held.workspace(),
+        start_channel
+            .as_mut()
+            .map(|channel| channel as &mut dyn AuthenticatedAssessmentChannel),
     )?;
+    if request.application_assessment.is_some() {
+        let evidence = *result
+            .application_observation
+            .take()
+            .ok_or(RunnerError::Drift)?;
+        return Ok(WsbApprovedExecution::ApplicationAssessment(Box::new(
+            WsbApplicationAssessmentExecution {
+                lifecycle: result,
+                evidence,
+            },
+        )));
+    }
     if let Some(assessment) = &request.seven_zip {
         let observations = *result
             .seven_zip_observation
@@ -1380,11 +1532,12 @@ fn start_approved_windows_sandbox_inner(
 pub fn recover_windows_sandbox(layout: &RunLayout) -> Result<WsbRecoveryResult, RunnerError> {
     use aiw_windows_platform::{
         CanonicalSandboxId, HeldRunWorkspace, WsbRecoveryDisposition,
-        acquire_windows_sandbox_recovery,
+        acquire_windows_sandbox_recovery_for_protocol,
     };
 
     // Synthetic rehearsals never establish authority over a real worker.
     let retained = layout.retained_snapshot().map_err(journal_error)?;
+    require_generic_recovery_approval(&retained)?;
     if retained.plan.actions.iter().any(|action| {
         matches!(action,
         PlannedAction::ExecuteWindowsSandboxSevenZipAssessment { profile, .. }
@@ -1422,8 +1575,27 @@ pub fn recover_windows_sandbox(layout: &RunLayout) -> Result<WsbRecoveryResult, 
 
     let session_id =
         CanonicalSandboxId::parse(&transaction.session_id).map_err(native_recovery_error)?;
-    let mut provider = acquire_windows_sandbox_recovery(&transaction.provider_sha256, session_id)
-        .map_err(native_recovery_error)?;
+    let expected_protocol = recovery_protocol_for_plan(&retained.plan, &transaction)?;
+    let channel_preflight = channel_start_not_attempted(&transaction);
+    if channel_preflight && inspection.pending_present() {
+        return Err(RunnerError::RecoveryRequired(
+            "pending channel transaction cannot prove provider Start was never authorized".into(),
+        ));
+    }
+    if transaction.schema_version == session::AUTHENTICATED_SESSION_TRANSACTION_SCHEMA {
+        assessment_channel_host::validate_recovery_authority(
+            &workspace,
+            layout,
+            &retained.plan,
+            &transaction,
+        )?;
+    }
+    let mut provider = acquire_windows_sandbox_recovery_for_protocol(
+        &transaction.provider_sha256,
+        session_id,
+        &expected_protocol,
+    )
+    .map_err(native_recovery_error)?;
     store.discard_pending_after_authority(&inspection)?;
 
     if transaction.current_state() == SessionTransactionState::CleanupVerified {
@@ -1469,7 +1641,12 @@ pub fn recover_windows_sandbox(layout: &RunLayout) -> Result<WsbRecoveryResult, 
         });
     }
 
-    if transaction.current_state() == SessionTransactionState::StartIntent {
+    if transaction.current_state() == SessionTransactionState::StartIntent && channel_preflight {
+        store.transition(
+            SessionTransactionState::CleanupIntent,
+            "channel-preflight-cleanup",
+        )?;
+    } else if transaction.current_state() == SessionTransactionState::StartIntent {
         store.transition(SessionTransactionState::Unknown, "start-outcome-unknown")?;
     }
     let state = store
@@ -1488,8 +1665,40 @@ pub fn recover_windows_sandbox(layout: &RunLayout) -> Result<WsbRecoveryResult, 
         )?;
     }
 
+    if channel_preflight {
+        // The selected ID has never acquired Start authority. A collision or
+        // failed query is not permission to stop that potentially foreign ID.
+        let absent = provider
+            .verify_bound_absent()
+            .map_err(native_recovery_error)?;
+        remove_recovery_request(&workspace, &transaction)?;
+        workspace.revalidate().map_err(|_| RunnerError::Drift)?;
+        store.transition(
+            SessionTransactionState::CleanupVerified,
+            "channel-preflight-cleanup-verified",
+        )?;
+        terminalize_verified_wsb_recovery(layout, &store)?;
+        return Ok(WsbRecoveryResult {
+            schema_version: WSB_RECOVERY_RESULT_SCHEMA_VERSION.into(),
+            run_id: transaction.run_id,
+            session_id: transaction.session_id,
+            state: SessionTransactionState::CleanupVerified,
+            provider_cleanup_verified: true,
+            workspace_cleanup_verified: true,
+            terminalizable: true,
+            mutex_was_abandoned: provider.mutex_was_abandoned(),
+            start_provider_sha256: provider.start_provider_sha256().into(),
+            recovery_provider_sha256: provider.recovery_provider_sha256().into(),
+            provider_drifted: provider.provider_drifted(),
+            session_ids_before: absent.session_ids.clone(),
+            session_ids_after: absent.session_ids,
+            reason_code: "provider-start-not-authorized".into(),
+        });
+    }
     let observed = provider.reconcile().map_err(native_recovery_error)?;
-    if observed.disposition == WsbRecoveryDisposition::AlreadyAbsent && !start_settled(&transaction)
+    if observed.disposition == WsbRecoveryDisposition::AlreadyAbsent
+        && !start_settled(&transaction)
+        && !channel_preflight
     {
         store.transition(
             SessionTransactionState::RecoveryRequired,
@@ -1561,6 +1770,84 @@ pub fn recover_windows_sandbox(layout: &RunLayout) -> Result<WsbRecoveryResult, 
 }
 
 #[cfg(windows)]
+fn require_generic_recovery_approval(
+    retained: &aiw_orchestrator::RetainedRunSnapshot,
+) -> Result<(), RunnerError> {
+    if retained.plan.actions.iter().any(|action| {
+        matches!(
+            action,
+            PlannedAction::ExecuteWindowsSandboxApplicationAssessment { .. }
+        )
+    }) {
+        retained.plan.ensure_current().map_err(journal_error)?;
+        // retained_snapshot supplies an approval only after its committed journal
+        // record and exact plan binding have both been verified.
+        if retained.approval.is_none() {
+            return Err(RunnerError::ApprovalBinding);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn recovery_protocol_for_plan(
+    plan: &RunPlan,
+    transaction: &SessionTransaction,
+) -> Result<aiw_probe::WindowsSandboxCliProtocol, RunnerError> {
+    plan.ensure_current().map_err(journal_error)?;
+    if transaction.plan_hash != plan.hash().map_err(journal_error)?
+        || transaction.run_id != plan.run_id
+        || transaction.project_revision_hash != plan.project_revision_hash
+    {
+        return Err(RunnerError::Transaction(
+            "recovery protocol belongs to a different approved plan".into(),
+        ));
+    }
+    let generic = plan.actions.iter().find_map(|action| match action {
+        PlannedAction::ExecuteWindowsSandboxApplicationAssessment {
+            provider_protocol, ..
+        } => Some(provider_protocol),
+        _ => None,
+    });
+    if let Some(required) = generic {
+        let required = required.as_ref().ok_or_else(|| {
+            RunnerError::Transaction("current generic plan has no exact protocol".into())
+        })?;
+        let binding = transaction.recovery.as_ref().ok_or_else(|| {
+            RunnerError::Transaction(
+                "current generic recovery cannot default a missing protocol".into(),
+            )
+        })?;
+        if transaction.schema_version != session::AUTHENTICATED_SESSION_TRANSACTION_SCHEMA
+            || transaction.descriptor_sha256.is_none()
+            || required.adapter().is_err()
+            || &binding.provider_protocol != required
+        {
+            return Err(RunnerError::Transaction(
+                "persisted recovery protocol differs from the approved generic plan".into(),
+            ));
+        }
+        return Ok(required.clone());
+    }
+    // Legacy plans never acquire a newer adapter. Only a validated legacy v2
+    // transaction may lack recovery; v3 must retain its exact107 binding.
+    let legacy = aiw_probe::WindowsSandboxCliAdapter::V0_8_107_0.protocol();
+    match (
+        transaction.schema_version.as_str(),
+        transaction.recovery.as_ref(),
+    ) {
+        ("aiw.dev/wsb-session-transaction/v0alpha2", None) => Ok(legacy),
+        (session::SESSION_TRANSACTION_SCHEMA_VERSION, Some(binding))
+            if binding.provider_protocol == legacy =>
+        {
+            Ok(legacy)
+        }
+        _ => Err(RunnerError::Transaction(
+            "legacy recovery protocol is absent, mixed or not exact107".into(),
+        )),
+    }
+}
+
 fn recovery_workspace(
     layout: &RunLayout,
     transaction: &SessionTransaction,
@@ -1577,42 +1864,13 @@ fn recovery_workspace(
     let bindings: Vec<(&str, &WorkspaceBindingEvidence, &str)> = plan
         .actions
         .iter()
-        .filter_map(|action| match action {
-            PlannedAction::ExecuteWindowsSandboxGoldenProbe {
-                provider_sha256,
-                workspace,
-                workspace_identity_sha256,
-                ..
-            }
-            | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
-                provider_sha256,
-                workspace,
-                workspace_identity_sha256,
-                ..
-            }
-            | PlannedAction::ExecuteWindowsSandboxPairedControls {
-                provider_sha256,
-                workspace,
-                workspace_identity_sha256,
-                ..
-            }
-            | PlannedAction::ExecuteWindowsSandboxSevenZipAssessment {
-                provider_sha256,
-                workspace,
-                workspace_identity_sha256,
-                ..
-            }
-            | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario {
-                provider_sha256,
-                workspace,
-                workspace_identity_sha256,
-                ..
-            } => Some((
-                provider_sha256.as_str(),
-                workspace.as_ref(),
-                workspace_identity_sha256.as_str(),
-            )),
-            _ => None,
+        .filter_map(PlannedAction::windows_sandbox_binding)
+        .map(|binding| {
+            (
+                binding.provider_sha256,
+                binding.workspace,
+                binding.workspace_identity_sha256,
+            )
         })
         .collect();
     let [(provider_sha256, workspace, workspace_hash)] = bindings.as_slice() else {
@@ -1632,6 +1890,7 @@ fn recovery_workspace(
             "session transaction recovery binding differs from the run plan".to_owned(),
         ));
     }
+    let _required_protocol = recovery_protocol_for_plan(&plan, transaction)?;
     let run_dir = layout.run_dir();
     let selected_root = run_dir
         .parent()
@@ -1678,8 +1937,7 @@ fn remove_recovery_request(
         return Ok(());
     }
     ensure_ordinary_file(&path)?;
-    let current: ExecutionGuestRequest = read_bounded_json(&path, 64 * 1024)?;
-    current.validate()?;
+    let current = read_execution_request(&path)?;
     let (run_id, sandbox_id, config_sha256) = current.binding();
     if current.digest() != transaction.request_sha256
         || request_hash(&current)? != transaction.request_sha256
@@ -1768,6 +2026,24 @@ fn prepare_execution(
     require_empty_output: bool,
 ) -> Result<ExecutionContext, RunnerError> {
     validate_start(request, readiness)?;
+    let context = build_execution_context(request, layout, require_empty_output)?;
+    if context
+        .binding
+        .recovery
+        .as_ref()
+        .map(|r| &r.provider_protocol)
+        != readiness.cli_protocol.as_ref()
+    {
+        return Err(RunnerError::ApprovalBinding);
+    }
+    Ok(context)
+}
+
+fn build_execution_context(
+    request: &WsbGoldenProbeStart,
+    layout: &RunLayout,
+    require_empty_output: bool,
+) -> Result<ExecutionContext, RunnerError> {
     if request.timeout_seconds == 0
         || request.timeout_seconds > 3600
         || request.run_root != request.wsb_plan.workspace_root
@@ -1785,6 +2061,16 @@ fn prepare_execution(
         return Err(RunnerError::ApprovalBinding);
     }
     ensure_approval(&plan, &approval, request)?;
+    let expected_protocol = plan
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            PlannedAction::ExecuteWindowsSandboxApplicationAssessment {
+                provider_protocol, ..
+            } => provider_protocol.clone(),
+            _ => None,
+        })
+        .unwrap_or_else(|| aiw_probe::WindowsSandboxCliAdapter::V0_8_107_0.protocol());
     revalidate_project_revision(&plan, Path::new(&request.project_path))?;
     revalidate_identity(&request.provider)?;
     revalidate_identity(&request.guest_agent)?;
@@ -1830,7 +2116,27 @@ fn prepare_execution(
     {
         return Err(RunnerError::Drift);
     }
-    let guest_request = if let Some(assessment) = &request.seven_zip {
+    let mut descriptor_sha256 = None;
+    let guest_request = if let Some(assessment) = &request.application_assessment {
+        assessment
+            .validate(&request.workspace)
+            .map_err(|error| RunnerError::Preparation(error.to_string()))?;
+        #[cfg(windows)]
+        {
+            let held = aiw_windows_platform::HeldRunWorkspace::reopen_bound(&request.workspace)
+                .map_err(|_| RunnerError::Drift)?;
+            let (descriptor, digest) =
+                assessment_channel_host::read_descriptor(&held, layout, request, &plan)?;
+            descriptor_sha256 = Some(digest);
+            ExecutionGuestRequest::ApplicationAssessment(Box::new(descriptor.request))
+        }
+        #[cfg(not(windows))]
+        {
+            return Err(RunnerError::Readiness(
+                "authenticated assessment requires the native Windows boundary".into(),
+            ));
+        }
+    } else if let Some(assessment) = &request.seven_zip {
         if require_empty_output {
             assessment
                 .validate(&request.workspace, &request.guest_agent)
@@ -1947,7 +2253,14 @@ fn prepare_execution(
     if request.bambu.is_some() {
         add_bambu_artifact_expectation(&mut completion);
     }
+    if request.application_assessment.is_some() {
+        completion.artifacts[0].path = "assessment-result.json".into();
+        completion.artifacts[0].role = aiw_evidence::ArtifactRole::ScenarioResults;
+        completion.artifacts[0].maximum_bytes = 16 * 1024 * 1024;
+        completion.artifacts[1].maximum_bytes = 1024 * 1024;
+    }
     let binding = SessionBinding {
+        descriptor_sha256,
         run_id: plan.run_id.clone(),
         plan_hash: plan.hash().map_err(journal_error)?,
         project_revision_hash: plan.project_revision_hash.clone(),
@@ -1959,10 +2272,7 @@ fn prepare_execution(
         recovery: Some(SessionRecoveryBinding {
             workspace: request.workspace.clone(),
             request_relative_path,
-            provider_protocol: readiness
-                .cli_protocol
-                .clone()
-                .ok_or_else(|| RunnerError::Readiness("CLI protocol is unavailable".to_owned()))?,
+            provider_protocol: expected_protocol,
         }),
     };
     Ok(ExecutionContext {
@@ -1982,6 +2292,7 @@ fn run_attempt(
     process: &impl ProcessBoundary,
     context: &ExecutionContext,
     store: &TransactionStore<'_>,
+    channel: Option<&mut dyn AuthenticatedAssessmentChannel>,
 ) -> Result<(), RunnerError> {
     let provider = Path::new(&request.provider.canonical_path);
     let started = process.invoke(
@@ -2030,7 +2341,11 @@ fn run_attempt(
         layout,
         "W1 Windows Sandbox session identity reconciled and user logon connected",
     )?;
-    wait_for_receipt(layout, &context.output_root, request.timeout_seconds)
+    if let Some(channel) = channel {
+        channel.wait(request, layout, context, store)
+    } else {
+        wait_for_receipt(layout, &context.output_root, request.timeout_seconds)
+    }
 }
 
 fn finalize_attempt(
@@ -2269,7 +2584,6 @@ fn hold_complete_sevenzip_output(
 
 // Called only after exact-session absence and provider quiescence are verified.
 // Every subsequent verification error must leave a durable terminal result.
-#[cfg(any(windows, test))]
 fn finish_cleaned_attempt<T>(
     layout: &RunLayout,
     finish: impl FnOnce() -> Result<T, RunnerError>,
@@ -2281,6 +2595,87 @@ fn finish_cleaned_attempt<T>(
             Err(error)
         }
     }
+}
+
+fn add_application_progress_expectation(
+    output: &Path,
+    expectation: &mut WindowsSandboxCompletionExpectation,
+) -> Result<(), RunnerError> {
+    match fs::symlink_metadata(output.join("assessment-progress.jsonl")) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
+            expectation
+                .artifacts
+                .push(aiw_provider_wsb::CompletionArtifactExpectation {
+                    path: "assessment-progress.jsonl".into(),
+                    role: aiw_evidence::ArtifactRole::DiagnosticLog,
+                    sensitivity: aiw_evidence::DataSensitivity::Confidential,
+                    media_type: "application/x-ndjson".into(),
+                    maximum_bytes: 16 * 1024 * 1024,
+                });
+            Ok(())
+        }
+        _ => Err(RunnerError::Drift),
+    }
+}
+
+fn verify_application_progress_output(
+    output: &Path,
+    request: &aiw_provider_wsb::assessment_request::ApplicationAssessmentGuestRequest,
+    observed: &aiw_provider_wsb::assessment_observation::ApplicationAssessmentResult,
+) -> Result<(), RunnerError> {
+    let path = output.join("assessment-progress.jsonl");
+    match fs::symlink_metadata(&path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let native = &observed.native;
+            if native.driver_completed
+                || !native.steps.is_empty()
+                || !native.assertions.is_empty()
+                || native.standard_context.is_some()
+                || native.windows.is_some()
+                || native.profile_sid.is_some()
+                || !native.collector_access_denials.is_empty()
+            {
+                return Err(RunnerError::Receipt(
+                    "assessment facts lack their durable progress journal".into(),
+                ));
+            }
+            Ok(())
+        }
+        Ok(_) => {
+            let bytes = read_bounded_bytes(&path, 16 * 1024 * 1024)?;
+            aiw_provider_wsb::assessment_evidence::verify_assessment_progress(
+                &bytes, request, observed,
+            )
+            .map(|_| ())
+            .map_err(RunnerError::Receipt)
+        }
+        Err(_) => Err(RunnerError::Drift),
+    }
+}
+
+#[cfg(windows)]
+fn hold_application_output(
+    output: &Path,
+) -> Result<Vec<aiw_windows_platform::HeldApplicationFile>, RunnerError> {
+    let mut files = Vec::new();
+    for (leaf, maximum) in [
+        ("completion.json", 1024 * 1024),
+        ("assessment-result.json", 16 * 1024 * 1024),
+        ("evidence.jsonl", 1024 * 1024),
+        ("assessment-progress.jsonl", 16 * 1024 * 1024),
+    ] {
+        if leaf == "assessment-progress.jsonl"
+            && matches!(fs::symlink_metadata(output.join(leaf)), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+        {
+            continue;
+        }
+        files.push(
+            aiw_windows_platform::HeldApplicationFile::open_bounded(&output.join(leaf), maximum)
+                .map_err(|_| RunnerError::Drift)?,
+        );
+    }
+    Ok(files)
 }
 
 fn record_terminal_failure(layout: &RunLayout, error: RunnerError) -> Result<(), RunnerError> {
@@ -2375,13 +2770,14 @@ fn prepare_request_artifact(
     expected: &ExecutionGuestRequest,
 ) -> Result<(), RunnerError> {
     expected.validate()?;
+    validate_request_family(path, expected)?;
     let pending = request_pending_path(path)?;
     if pending.exists() {
         validate_staging_file(&pending)?;
         fs::remove_file(&pending).map_err(|_| RunnerError::Drift)?;
     }
     if path.exists() {
-        let current: ExecutionGuestRequest = read_bounded_json(path, 64 * 1024)?;
+        let current = read_execution_request(path)?;
         if current != *expected || request_hash(&current)? != current.digest() {
             return Err(RunnerError::Drift);
         }
@@ -2398,7 +2794,8 @@ fn publish_request(
 ) -> Result<(), RunnerError> {
     let mut bytes = serde_json::to_vec(expected).map_err(|_| RunnerError::Drift)?;
     bytes.push(b'\n');
-    if bytes.len() > 64 * 1024 {
+    validate_request_family(path, expected)?;
+    if bytes.len() as u64 > request_artifact_limit(path, false) {
         return Err(RunnerError::Drift);
     }
     let mut file = OpenOptions::new()
@@ -2415,6 +2812,7 @@ fn publish_request(
 }
 
 fn remove_owned_request(path: &Path, expected: &ExecutionGuestRequest) -> Result<(), RunnerError> {
+    validate_request_family(path, expected)?;
     let pending = request_pending_path(path)?;
     if pending.exists() {
         validate_staging_file(&pending)?;
@@ -2424,7 +2822,7 @@ fn remove_owned_request(path: &Path, expected: &ExecutionGuestRequest) -> Result
         return Ok(());
     }
     ensure_ordinary_file(path)?;
-    let current: ExecutionGuestRequest = read_bounded_json(path, 64 * 1024)?;
+    let current = read_execution_request(path)?;
     if current != *expected || request_hash(&current)? != current.digest() {
         return Err(RunnerError::Drift);
     }
@@ -2442,10 +2840,48 @@ fn request_pending_path(path: &Path) -> Result<PathBuf, RunnerError> {
 fn validate_staging_file(path: &Path) -> Result<(), RunnerError> {
     ensure_ordinary_file(path)?;
     let metadata = fs::metadata(path).map_err(|_| RunnerError::Drift)?;
-    if metadata.len() > 64 * 1024 {
+    if metadata.len() > request_artifact_limit(path, true) {
         return Err(RunnerError::Drift);
     }
     Ok(())
+}
+
+fn application_request_path(path: &Path, pending: bool) -> bool {
+    let name = if pending {
+        "assessment-request.json.pending"
+    } else {
+        "assessment-request.json"
+    };
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|actual| actual.eq_ignore_ascii_case(name))
+}
+
+fn request_artifact_limit(path: &Path, pending: bool) -> u64 {
+    if application_request_path(path, pending) {
+        aiw_provider_wsb::assessment_request::APPLICATION_ASSESSMENT_REQUEST_MAX_BYTES
+    } else {
+        64 * 1024
+    }
+}
+
+fn validate_request_family(
+    path: &Path,
+    request: &ExecutionGuestRequest,
+) -> Result<(), RunnerError> {
+    if application_request_path(path, false)
+        != matches!(request, ExecutionGuestRequest::ApplicationAssessment(_))
+    {
+        return Err(RunnerError::Drift);
+    }
+    Ok(())
+}
+
+fn read_execution_request(path: &Path) -> Result<ExecutionGuestRequest, RunnerError> {
+    let request = read_bounded_json(path, request_artifact_limit(path, false))?;
+    validate_request_family(path, &request)?;
+    request.validate()?;
+    Ok(request)
 }
 
 fn read_bounded_json<T: for<'de> Deserialize<'de>>(
@@ -2562,6 +2998,9 @@ struct GuestRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(untagged)]
 enum ExecutionGuestRequest {
+    ApplicationAssessment(
+        Box<aiw_provider_wsb::assessment_request::ApplicationAssessmentGuestRequest>,
+    ),
     SevenZip(Box<aiw_provider_wsb::sevenzip::SevenZipRequest>),
     Golden(Box<GuestRequest>),
     ImportedMsi(Box<aiw_provider_wsb::ImportedMsiGuestRequest>),
@@ -2572,6 +3011,7 @@ enum ExecutionGuestRequest {
 impl ExecutionGuestRequest {
     fn digest(&self) -> &str {
         match self {
+            Self::ApplicationAssessment(v) => &v.request_sha256,
             Self::SevenZip(v) => &v.request_sha256,
             Self::Golden(v) => &v.request_sha256,
             Self::ImportedMsi(v) => &v.request_sha256,
@@ -2581,6 +3021,7 @@ impl ExecutionGuestRequest {
     }
     fn binding(&self) -> (&str, &str, &str) {
         match self {
+            Self::ApplicationAssessment(v) => (&v.run_id, &v.sandbox_id, &v.config_sha256),
             Self::SevenZip(v) => (&v.run_id, &v.sandbox_id, &v.config_sha256),
             Self::Golden(v) => (&v.run_id, &v.sandbox_id, &v.config_sha256),
             Self::ImportedMsi(v) => (&v.run_id, &v.sandbox_id, &v.config_sha256),
@@ -2590,6 +3031,7 @@ impl ExecutionGuestRequest {
     }
     fn validate(&self) -> Result<(), RunnerError> {
         match self {
+            Self::ApplicationAssessment(v) => v.validate().map_err(RunnerError::Preparation),
             Self::SevenZip(v) => v.validate().map_err(|_| RunnerError::Drift),
             Self::Golden(v) => {
                 if v.schema_version != GUEST_REQUEST_SCHEMA
@@ -2663,6 +3105,7 @@ fn ensure_approval(
             PlannedAction::AssessHost,
             PlannedAction::PrepareWorkspace,
             PlannedAction::ExecuteWindowsSandboxGoldenProbe { .. }
+                | PlannedAction::ExecuteWindowsSandboxApplicationAssessment { .. }
                 | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario { .. }
                 | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario { .. }
                 | PlannedAction::ExecuteWindowsSandboxPairedControls { .. }
@@ -2677,6 +3120,7 @@ fn ensure_approval(
         request.bambu.is_some(),
         request.paired_controls.is_some(),
         request.seven_zip.is_some(),
+        request.application_assessment.is_some(),
     ]
     .iter()
     .filter(|v| **v)
@@ -2685,7 +3129,30 @@ fn ensure_approval(
     {
         return Err(RunnerError::ApprovalBinding);
     }
-    if let Some(assessment) = &request.seven_zip {
+    if let Some(assessment) = &request.application_assessment {
+        plan.ensure_current().map_err(journal_error)?;
+        let PlannedAction::ExecuteWindowsSandboxApplicationAssessment {
+            intake_receipt_sha256,
+            source_manifest_sha256,
+            assessment_sha256,
+            ..
+        } = &plan.actions[2]
+        else {
+            return Err(RunnerError::ApprovalBinding);
+        };
+        assessment
+            .validate(&request.workspace)
+            .map_err(|_| RunnerError::ApprovalBinding)?;
+        if intake_receipt_sha256 != &assessment.intake_receipt_sha256
+            || source_manifest_sha256 != &assessment.compiled.portable_manifest_sha256
+            || assessment_sha256
+                != &assessment
+                    .assessment_sha256()
+                    .map_err(|_| RunnerError::ApprovalBinding)?
+        {
+            return Err(RunnerError::ApprovalBinding);
+        }
+    } else if let Some(assessment) = &request.seven_zip {
         let PlannedAction::ExecuteWindowsSandboxSevenZipAssessment {
             profile,
             import_receipt_sha256,
@@ -2759,61 +3226,23 @@ fn ensure_approval(
     let exact = plan
         .actions
         .iter()
-        .filter_map(|action| match action {
-            PlannedAction::ExecuteWindowsSandboxGoldenProbe {
-                sandbox_plan_sha256,
-                provider_sha256,
-                guest_agent_sha256,
-                workspace,
-                workspace_identity_sha256,
-            }
-            | PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
-                sandbox_plan_sha256,
-                provider_sha256,
-                guest_agent_sha256,
-                workspace,
-                workspace_identity_sha256,
-                ..
-            }
-            | PlannedAction::ExecuteWindowsSandboxPairedControls {
-                sandbox_plan_sha256,
-                provider_sha256,
-                guest_agent_sha256,
-                workspace,
-                workspace_identity_sha256,
-                ..
-            }
-            | PlannedAction::ExecuteWindowsSandboxSevenZipAssessment {
-                sandbox_plan_sha256,
-                provider_sha256,
-                guest_agent_sha256,
-                workspace,
-                workspace_identity_sha256,
-                ..
-            }
-            | PlannedAction::ExecuteWindowsSandboxImportedBambuScenario {
-                sandbox_plan_sha256,
-                provider_sha256,
-                guest_agent_sha256,
-                workspace,
-                workspace_identity_sha256,
-                ..
-            } => Some((
-                sandbox_plan_sha256,
-                provider_sha256,
-                guest_agent_sha256,
-                workspace,
-                workspace_identity_sha256,
-            )),
-            _ => None,
+        .filter_map(PlannedAction::windows_sandbox_binding)
+        .map(|binding| {
+            (
+                binding.sandbox_plan_sha256,
+                binding.provider_sha256,
+                binding.guest_agent_sha256,
+                binding.workspace,
+                binding.workspace_identity_sha256,
+            )
         })
         .collect::<Vec<_>>();
     if exact.len() != 1
-        || exact[0].0 != &wsb_hash
-        || exact[0].1 != &request.provider.sha256
-        || exact[0].2 != &request.guest_agent.sha256
-        || exact[0].3.as_ref() != &request.workspace
-        || exact[0].4 != &workspace_hash
+        || exact[0].0 != wsb_hash.as_str()
+        || exact[0].1 != request.provider.sha256.as_str()
+        || exact[0].2 != request.guest_agent.sha256.as_str()
+        || exact[0].3 != &request.workspace
+        || exact[0].4 != workspace_hash.as_str()
         || request.workspace_identity_sha256 != workspace_hash
     {
         return Err(RunnerError::ApprovalBinding);
@@ -2835,7 +3264,9 @@ fn validate_start(
     {
         return Err(RunnerError::Drift);
     }
-    let schema = if request.seven_zip.is_some() {
+    let schema = if request.application_assessment.is_some() {
+        "aiw.dev/wsb-application-assessment-start/v0alpha2"
+    } else if request.seven_zip.is_some() {
         "aiw.dev/wsb-sevenzip-start/v0alpha1"
     } else if request.paired_controls.is_some() {
         "aiw.dev/wsb-paired-controls-start/v0alpha1"
@@ -2900,9 +3331,9 @@ fn validate_start(
             || !fixed_lower_hex(&value.volume_serial_number, 8)
             || !fixed_lower_hex(&value.file_id, 16)
     }) || protocol.is_none_or(|value| {
-        value.cli_version != "0.8.107.0"
-            || value.protocol != "windowsSandboxCli/v0.8.107.0"
-            || value.list_schema != "WindowsSandboxEnvironments/Id"
+        value.adapter().is_err()
+            || reported.version.as_deref() != Some(value.cli_version.as_str())
+            || package.is_none_or(|p| p.version != value.cli_version)
     }) {
         return Err(RunnerError::Readiness(
             "required package, catalog, file, or CLI protocol authority is absent".to_owned(),
@@ -3657,6 +4088,7 @@ mod tests {
             bambu: None,
             paired_controls: None,
             seven_zip: None,
+            application_assessment: None,
         };
         let mut plan = RunPlan::new(
             "w1-run",
@@ -3719,7 +4151,13 @@ mod tests {
             process_architecture: "x86_64".to_owned(),
             virtualization: aiw_probe::ReadinessState::Available,
             sandbox_feature: aiw_probe::ReadinessState::Available,
-            provider_binary: Some(start.provider.clone()),
+            provider_binary: Some({
+                // Static/prepared identity does not claim a CLI observation;
+                // this synthetic readiness does, and must retain its version.
+                let mut observed = start.provider.clone();
+                observed.version = Some("0.8.107.0".into());
+                observed
+            }),
             provider_package: Some(aiw_probe::WindowsPackageIdentity {
                 name: "MicrosoftWindows.WindowsSandbox".to_owned(),
                 full_name: "MicrosoftWindows.WindowsSandbox_0.8.107.0_x64__cw5n1h2txyewy"
@@ -3961,6 +4399,34 @@ mod tests {
             ),
             RunnerError::RecoveryRequired(_)
         ));
+    }
+
+    #[test]
+    fn runtime_readiness_requires_observed_version_and_matching_package_protocol() {
+        let (_root, _layout, start, readiness) = setup();
+        validate_start(&start, &readiness).unwrap();
+
+        for drift in 0..4 {
+            let mut changed = readiness.clone();
+            match drift {
+                0 => changed.provider_binary.as_mut().unwrap().version = None,
+                1 => {
+                    changed.provider_binary.as_mut().unwrap().version = Some("0.8.114.0".into());
+                }
+                2 => changed.provider_package.as_mut().unwrap().version = "0.8.114.0".into(),
+                _ => {
+                    changed.cli_protocol.as_mut().unwrap().protocol =
+                        "windowsSandboxCli/v0.8.114.0".into();
+                }
+            }
+            assert!(
+                matches!(
+                    validate_start(&start, &changed),
+                    Err(RunnerError::Readiness(_))
+                ),
+                "runtime version/package/protocol drift {drift} must refuse"
+            );
+        }
     }
 
     #[test]
@@ -4789,6 +5255,83 @@ mod tests {
     }
 
     #[test]
+    fn recovery_protocol_is_bound_to_generic_approval_not_transaction_claim() {
+        let (_root, layout, _start, _readiness) = setup();
+        let mut plan = layout.read_plan().unwrap();
+        let b = plan.actions[2].windows_sandbox_binding().unwrap();
+        let required = aiw_probe::WindowsSandboxCliAdapter::V0_8_114_0.protocol();
+        let workspace = b.workspace.clone();
+        let provider = b.provider_sha256.to_owned();
+        let workspace_hash = b.workspace_identity_sha256.to_owned();
+        let action = PlannedAction::ExecuteWindowsSandboxApplicationAssessment {
+            provider_protocol: Some(required.clone()),
+            evidence_channel: Some(aiw_probe::APPLICATION_ASSESSMENT_CHANNEL_PROTOCOL.into()),
+            sandbox_plan_sha256: b.sandbox_plan_sha256.into(),
+            provider_sha256: provider.clone(),
+            guest_agent_sha256: b.guest_agent_sha256.into(),
+            workspace: Box::new(workspace.clone()),
+            workspace_identity_sha256: workspace_hash.clone(),
+            intake_receipt_sha256: "1".repeat(64),
+            source_manifest_sha256: "2".repeat(64),
+            assessment_sha256: "3".repeat(64),
+        };
+        plan.schema = aiw_orchestrator::APPLICATION_ASSESSMENT_RUN_PLAN_SCHEMA.into();
+        plan.actions[2] = action;
+        plan.trust_deltas
+            .push(aiw_orchestrator::APPLICATION_ASSESSMENT_TRUST_DELTA.into());
+        plan.ensure_current().unwrap();
+        let mut retained = aiw_orchestrator::RetainedRunSnapshot {
+            plan: plan.clone(),
+            approval: None,
+            status: aiw_orchestrator::RecoveryStatus::PendingApproval {
+                plan_hash: plan.hash().unwrap(),
+                last_sequence: 1,
+            },
+        };
+        assert!(matches!(
+            require_generic_recovery_approval(&retained),
+            Err(RunnerError::ApprovalBinding)
+        ));
+        let approved = ApprovalRecord::for_plan(&plan, "operator", "now").unwrap();
+        retained.approval = Some(approved.clone());
+        retained.status = aiw_orchestrator::RecoveryStatus::Ready {
+            approval: approved,
+            last_sequence: 2,
+        };
+        require_generic_recovery_approval(&retained).unwrap();
+        let mut transaction = SessionTransaction {
+            descriptor_sha256: Some("d".repeat(64)),
+            schema_version: session::AUTHENTICATED_SESSION_TRANSACTION_SCHEMA.into(),
+            run_id: plan.run_id.clone(),
+            plan_hash: plan.hash().unwrap(),
+            project_revision_hash: plan.project_revision_hash.clone(),
+            provider_sha256: provider,
+            config_sha256: "4".repeat(64),
+            session_id: "1782a9f3-4e9a-45ac-abe1-afc8ecf78666".into(),
+            request_sha256: "5".repeat(64),
+            workspace_identity_sha256: workspace_hash,
+            recovery: Some(SessionRecoveryBinding {
+                workspace,
+                request_relative_path: "assessment-request.json".into(),
+                provider_protocol: required.clone(),
+            }),
+            transitions: vec![],
+        };
+        assert_eq!(
+            recovery_protocol_for_plan(&plan, &transaction).unwrap(),
+            required
+        );
+        let same_approved_hash = transaction.plan_hash.clone();
+        transaction.recovery.as_mut().unwrap().provider_protocol =
+            aiw_probe::WindowsSandboxCliAdapter::V0_8_107_0.protocol();
+        assert_eq!(transaction.plan_hash, same_approved_hash);
+        assert!(recovery_protocol_for_plan(&plan, &transaction).is_err());
+        transaction.recovery = None;
+        assert!(recovery_protocol_for_plan(&plan, &transaction).is_err());
+        transaction.schema_version = "aiw.dev/wsb-session-transaction/v0alpha2".into();
+        assert!(recovery_protocol_for_plan(&plan, &transaction).is_err());
+    }
+    #[test]
     fn transaction_rejects_foreign_binding_and_requires_pending_recovery() {
         let (_root, layout, start, readiness) = setup();
         let context = prepare_execution(&start, &readiness, &layout, false).unwrap();
@@ -4982,6 +5525,7 @@ mod tests {
             bambu: None,
             paired_controls: None,
             seven_zip: None,
+            application_assessment: None,
         };
         let native = NativeWsbProcess {
             state: Mutex::new(NativeWsbState {
@@ -5004,7 +5548,7 @@ mod tests {
             prepare_request_artifact(&context.request_path, &context.guest_request).unwrap();
             revalidate_workspace(&start, &workspace).unwrap();
             store.create("approved-start").unwrap();
-            let operation = run_attempt(&start, &layout, &native, &context, &store);
+            let operation = run_attempt(&start, &layout, &native, &context, &store, None);
             finalize_attempt(
                 &start,
                 &native,

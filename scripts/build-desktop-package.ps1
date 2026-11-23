@@ -18,6 +18,7 @@ if (@(Get-PSSession | Where-Object Name -eq 'WinPSCompatSession').Count) { throw
 $PSNativeCommandUseErrorActionPreference = $false
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'build-storage.ps1')
 $previewBuilder = Join-Path $PSScriptRoot 'build-preview-package.ps1'
 $verifier = Join-Path $PSScriptRoot 'verify-desktop-package.ps1'
 $output = [IO.Path]::GetFullPath($OutputDirectory)
@@ -98,7 +99,7 @@ $tempLeaf = "aiw-desktop-package-$([guid]::NewGuid().ToString('N'))"
 if ($tempLeaf -notmatch '^aiw-desktop-package-[0-9a-f]{32}$') { throw 'Temporary staging leaf is not a generated GUID name' }
 $tempRoot = Join-Path $tempParent $tempLeaf
 if ([IO.Path]::GetDirectoryName($tempRoot).TrimEnd('\') -cne $tempParent.TrimEnd('\')) { throw 'Temporary staging root escaped its intended parent' }
-$buildTarget = Join-Path $tempRoot 'build'
+$buildTarget = (Assert-AiwBuildStoragePolicy -RepositoryRoot $repoRoot).targetDirectory
 $builtDesktopSource = Join-Path $buildTarget "$targetTriple\release\aiw-desktop.exe"
 $assessmentPreview = Join-Path $tempRoot 'assessment'
 $interactivePreview = Join-Path $tempRoot 'interactive'
@@ -107,8 +108,8 @@ $buildSucceeded = $false
 try {
     New-Item -ItemType Directory -Path $tempRoot -Force:$false | Out-Null
     Assert-OrdinaryDirectory $tempRoot 'Temporary staging root'
-    New-Item -ItemType Directory -Path $buildTarget -Force:$false | Out-Null
-    Assert-OrdinaryDirectory $buildTarget 'Fresh Cargo target directory'
+    [IO.Directory]::CreateDirectory($buildTarget) | Out-Null
+    Assert-OrdinaryDirectory $buildTarget 'Shared Cargo target directory'
     Push-Location -LiteralPath $repoRoot
     try {
         $targetRustFlagsName = 'CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS'
@@ -124,9 +125,10 @@ try {
             if ($LASTEXITCODE -ne 0) { throw 'GUI Cargo metadata resolution failed' }
             $metadata = $metadataText | ConvertFrom-Json
             $metadataTarget = [IO.Path]::GetFullPath([string]$metadata.target_directory)
-            if (-not $metadataTarget.TrimEnd('\').Equals($buildTarget.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) { throw "GUI Cargo target directory differs from the fresh target: $metadataTarget" }
-            $targetRustFlags = (@($originalTargetRustFlags, '-C target-feature=+crt-static') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ' '
+            if (-not $metadataTarget.TrimEnd('\').Equals($buildTarget.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) { throw "GUI Cargo target directory differs from the shared target: $metadataTarget" }
+            $targetRustFlags = '-C target-feature=+crt-static'
             Set-Item -Path $targetRustFlagsPath -Value $targetRustFlags
+            $null = Assert-AiwBuildStoragePolicy -RepositoryRoot $repoRoot
             & cargo +stable build --manifest-path ([IO.Path]::GetFullPath($guiManifest)) --locked --release --target $targetTriple | Out-Null
             if ($LASTEXITCODE -ne 0) { throw 'release aiw-desktop build failed' }
         }

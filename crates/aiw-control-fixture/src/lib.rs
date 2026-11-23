@@ -37,6 +37,8 @@ enum Mode {
     Token,
     ExpectedFailure,
     ChildToken,
+    /// Fixed five-second workload for disposable-worker deadline controls.
+    Delay,
 }
 
 #[derive(Parser)]
@@ -80,6 +82,7 @@ enum FixtureResult {
         child_token: TokenEvidence,
     },
     Token,
+    DelayCompleted,
     ChildTimeout {
         child_process_id: u32,
         cleanup_verified: bool,
@@ -193,6 +196,10 @@ fn run_mode(mode: Mode, root: &Path) -> Result<FixtureResult, String> {
             message: "control fixture deliberately returned exit code 23",
         }),
         Mode::ChildToken => write_child_token(root),
+        Mode::Delay => {
+            thread::sleep(Duration::from_secs(5));
+            Ok(FixtureResult::DelayCompleted)
+        }
     }
 }
 

@@ -16,6 +16,7 @@ $PSNativeCommandUseErrorActionPreference = $false
 $env:AIW_TEST_PWSH = Join-Path $PSHOME 'pwsh.exe'
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'build-storage.ps1')
 $logRoot = Join-Path ([IO.Path]::GetTempPath()) ('aiw-local-checks-' + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $logRoot | Out-Null
 $results = @()
@@ -52,13 +53,19 @@ try {
         $previousTemp = $env:TEMP
         $previousTmp = $env:TMP
         $testTemp = $null
+        $testTempParent = [IO.Path]::GetTempPath()
         try {
+            if ($program -eq 'cargo' -and $name -ne 'Format') {
+                $null = Assert-AiwBuildStoragePolicy -RepositoryRoot $repoRoot
+            }
             if ($program -eq 'cargo' -and $arguments[0] -eq 'test') {
                 # Native parent-entry checks are bounded. Unrelated files in a
                 # long-lived user TEMP must not determine whether fixtures work.
                 # Keep the fixture root short for Win32 APIs without long-path prefixes.
-                $testTemp = Join-Path ([IO.Path]::GetTempPath()) ('aiwt-' + [guid]::NewGuid().ToString('N').Substring(0, 12))
-                New-Item -ItemType Directory -Path $testTemp | Out-Null
+                $candidateTemp = Join-Path $testTempParent ('aiwt-' + [guid]::NewGuid().ToString('N').Substring(0, 12))
+                New-Item -ItemType Directory -Path $candidateTemp -ErrorAction Stop | Out-Null
+                # Register ownership only after exclusive directory creation succeeds.
+                $testTemp = $candidateTemp
                 $env:TEMP = $testTemp
                 $env:TMP = $testTemp
             }
@@ -68,6 +75,10 @@ try {
         finally {
             $env:TEMP = $previousTemp
             $env:TMP = $previousTmp
+            if ($testTemp) {
+                try { Remove-AiwOwnedTestDirectory -Path $testTemp -Parent $testTempParent }
+                catch { $failure = "$failure Owned test cleanup failed: $($_.Exception.Message)".Trim() }
+            }
         }
         $timer.Stop()
         $record = [ordered]@{
@@ -80,6 +91,7 @@ try {
             stdout = $stdout
             stderr = $stderr
             testTemp = $testTemp
+            testTempRemoved = $null -ne $testTemp -and -not (Test-Path -LiteralPath $testTemp)
         }
         if (!$record.passed) {
             $record.failure = $failure
@@ -135,4 +147,6 @@ $json | Set-Content -LiteralPath (Join-Path $logRoot 'summary.json')
     })
     logs = $logRoot
 } | ConvertTo-Json -Depth 5
-if (!$summary.passed) { exit 1 }
+# A terminating error is required for in-process callers such as verify.ps1.
+# `exit 1` only sets LASTEXITCODE there, which later native commands can erase.
+if (!$summary.passed) { throw 'AIW local checks failed; inspect the emitted summary and log paths' }

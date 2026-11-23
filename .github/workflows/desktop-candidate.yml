@@ -11,6 +11,9 @@ on:
 permissions:
   contents: read
 
+env:
+  CARGO_TARGET_DIR: ${{ github.workspace }}\target
+
 concurrency:
   group: aiw-signed-desktop-candidate
   cancel-in-progress: false
@@ -89,7 +92,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Rust selection failed' }
           $guest = .\scripts\build-guest-agent.ps1 -Profile release | ConvertFrom-Json
           $root = Join-Path $env:RUNNER_TEMP 'aiw-unsigned-desktop'
-          $package = .\scripts\build-desktop-package.ps1 -OutputDirectory $root -SourceRevision $env:SOURCE_REVISION -GuestAgent $guest.artifact -GuestAgentSha256 $guest.sha256 -KeepFailedBuild | ConvertFrom-Json
+          $package = .\scripts\build-desktop-package.ps1 -OutputDirectory $root -SourceRevision $env:SOURCE_REVISION -GuestAgent $guest.artifact -GuestAgentSha256 $guest.sha256 | ConvertFrom-Json
           $signing = Join-Path $env:RUNNER_TEMP 'aiw-signing-inputs'
           $binaries = Join-Path $signing 'binaries'
           New-Item -ItemType Directory -Path $binaries | Out-Null

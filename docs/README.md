@@ -4,6 +4,9 @@ Current direction was reconciled on 2026-11-08. Use these documents together:
 
 - [Roadmap](ROADMAP.md): product decision, intended administrator journey,
   R0-R6 milestones, coverage and provider priorities.
+- [Application-neutral assessment](APPLICATION-ASSESSMENT.md): the first generic
+  portable CLI service path, evidence boundary, replay format and pending native
+  acceptance.
 - [Architecture](ARCHITECTURE.md): implemented components versus target contracts,
   authority, evidence, execution and recovery boundaries.
 - [Application-neutral migration audit](APPLICATION-AGNOSTIC-MIGRATION.md):

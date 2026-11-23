@@ -18,9 +18,23 @@ Use a focused vertical slice. A pull request should deliver one coherent behavio
 Run the local checks from the repository root:
 
 ```powershell
+# Set CARGO_TARGET_DIR to your existing shared cache if it is not already set.
+# Reuse that directory across revisions/worktrees; do not choose a new run path.
 .\scripts\verify.ps1
 .\scripts\audit-dependencies.ps1
 ```
+
+Normal Windows builders require an explicit reusable `CARGO_TARGET_DIR`; they
+never silently create a cache for a new checkout. Select a local ordinary path
+with at least 10 GiB free. Preflight rejects unsafe compiler/profile/config
+overrides and caches larger than 8 GiB. Dev/test profiles in both workspaces use
+`debug=0` and `incremental=false`. Use the same target and flags for consecutive
+builds; `scripts/build-assessment-tools.ps1` records their bytes and effective
+compiler arguments. A budget refusal requires investigation, never automatic
+deletion or another cache. Preserve source, evidence and pinned payloads. Audit
+the exact path and active consumers before removing disposable output. Clean up
+owned temporary fixtures and helper processes on failure as well as success;
+retain small diagnostic logs instead of failed build trees by default.
 
 The verification script is intentionally local and deterministic. Hosted CI runs the same checks on Windows, but CI does not prove that a provider actually isolates an application. A live provider claim requires an explicitly documented Windows 11 24H2 x64 proof with target-token, effective-backend, canary, completeness, and cleanup evidence.
 

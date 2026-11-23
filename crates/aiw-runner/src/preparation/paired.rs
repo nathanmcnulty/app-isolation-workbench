@@ -172,6 +172,9 @@ pub(crate) fn require_receipt_tools(
     path: &Path,
     receipt: &WsbPreparationReceipt,
 ) -> Result<(), WsbPreparationError> {
+    if receipt.application_assessment.is_some() {
+        return super::application_assessment::require_application_tools(path);
+    }
     if receipt.seven_zip.is_some() {
         return super::sevenzip::require_tools(path);
     }
