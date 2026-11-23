@@ -1,7 +1,10 @@
 //! Data-only replay packages. No approvals, sessions, tools or execution credit.
 use super::*;
 #[cfg(windows)]
-use aiw_provider_wsb::assessment::AssessmentSettings;
+use aiw_provider_wsb::assessment::{
+    AssessmentAssertion, AssessmentInput, AssessmentMode, AssessmentSettings,
+    AssessmentUserContext, CompiledAssessmentStep,
+};
 use aiw_provider_wsb::assessment::{CompiledAssessment, compile_assessment};
 #[cfg(windows)]
 use std::collections::{BTreeMap, BTreeSet};
@@ -127,6 +130,7 @@ pub struct VerifiedApplicationReplayPackage {
     pub package: ApplicationReplayPackage,
     pub source: PathBuf,
     pub inputs: BTreeMap<String, PathBuf>,
+    manifest_sha256: String,
     held: aiw_windows_platform::HeldPortableDirectory,
 }
 
@@ -227,7 +231,100 @@ pub fn verify_package(path: &Path) -> Result<VerifiedApplicationReplayPackage> {
         package,
         source: root.join("payload"),
         inputs,
+        manifest_sha256: manifest_file.observation().sha256.clone(),
         held,
+    })
+}
+
+#[cfg(windows)]
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplayPackageReview {
+    schema_version: &'static str,
+    package_schema_version: String,
+    package_manifest_sha256: String,
+    portable_manifest_sha256: String,
+    semantic_sha256: String,
+    scenario_id: String,
+    candidate_id: String,
+    mode: AssessmentMode,
+    user_context: AssessmentUserContext,
+    network_blocking_requested: bool,
+    working_directory: String,
+    total_timeout_seconds: u32,
+    process_timeout_seconds: u32,
+    inputs: Vec<AssessmentInput>,
+    steps: Vec<ReplayReviewStep>,
+    expected_outputs: Vec<AssessmentAssertion>,
+}
+
+#[cfg(windows)]
+#[derive(Debug, Serialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+enum ReplayReviewStep {
+    StagePortable,
+    Launch {
+        entrypoint: String,
+        relative_path: String,
+        argument_count: usize,
+    },
+    ExpectExitCode {
+        launch_step: usize,
+        value: i32,
+    },
+    ObserveFile {
+        path: String,
+    },
+}
+
+/// Review a verified package snapshot without creating a plan, approval or workspace.
+#[cfg(windows)]
+pub fn review_package(path: &Path) -> Result<ReplayPackageReview> {
+    let verified = verify_package(path)?;
+    verified.revalidate()?;
+    let compiled = verified.package.compiled;
+    let steps = compiled
+        .steps
+        .into_iter()
+        .map(|step| match step {
+            CompiledAssessmentStep::StagePortable => ReplayReviewStep::StagePortable,
+            CompiledAssessmentStep::Launch {
+                entrypoint,
+                path,
+                arguments,
+                ..
+            } => ReplayReviewStep::Launch {
+                entrypoint,
+                relative_path: path,
+                argument_count: arguments.len(),
+            },
+            CompiledAssessmentStep::ExpectExitCode { launch_step, value } => {
+                ReplayReviewStep::ExpectExitCode { launch_step, value }
+            }
+            CompiledAssessmentStep::ObserveFile { path } => ReplayReviewStep::ObserveFile { path },
+        })
+        .collect();
+    Ok(ReplayPackageReview {
+        schema_version: "aiw.dev/application-replay-package-review/v0alpha1",
+        package_schema_version: verified.package.schema_version,
+        package_manifest_sha256: verified.manifest_sha256,
+        portable_manifest_sha256: compiled.portable_manifest_sha256,
+        semantic_sha256: compiled.semantic_sha256,
+        scenario_id: compiled.settings.scenario_id,
+        candidate_id: compiled.settings.candidate_id,
+        mode: compiled.mode,
+        user_context: compiled.user_context,
+        network_blocking_requested: compiled.network_blocked,
+        working_directory: compiled.settings.working_directory,
+        total_timeout_seconds: compiled.settings.total_timeout_seconds,
+        process_timeout_seconds: compiled.settings.process_timeout_seconds,
+        inputs: compiled.settings.inputs,
+        steps,
+        expected_outputs: compiled.settings.assertions,
     })
 }
 
