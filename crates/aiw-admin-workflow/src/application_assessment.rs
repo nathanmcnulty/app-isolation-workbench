@@ -94,6 +94,11 @@ pub struct ApplicationAssessmentRun {
 
 impl ApplicationAssessmentRun {
     pub fn validate(&self) -> Result<RunLayout> {
+        let (layout, _) = self.validate_with_plan()?;
+        Ok(layout)
+    }
+
+    fn validate_with_plan(&self) -> Result<(RunLayout, aiw_orchestrator::RunPlan)> {
         if self.schema_version != APPLICATION_RUN_SCHEMA
             || !self.workspace.is_absolute()
             || !self.evidence_root.is_absolute()
@@ -133,7 +138,7 @@ impl ApplicationAssessmentRun {
         {
             bail!("generic assessment source, tool or workspace binding changed");
         }
-        Ok(layout)
+        Ok((layout, snapshot.plan))
     }
 
     pub fn project(&self) -> Result<Project> {
@@ -361,6 +366,13 @@ pub fn open_retained(workspace: &Path, run_id: &str) -> Result<ApplicationAssess
 #[cfg(windows)]
 pub fn report(run: &ApplicationAssessmentRun) -> Result<aiw_runner::GenericApplicationRunReport> {
     run.validate()?;
+    report_validated_run(run)
+}
+
+#[cfg(windows)]
+fn report_validated_run(
+    run: &ApplicationAssessmentRun,
+) -> Result<aiw_runner::GenericApplicationRunReport> {
     aiw_runner::report_windows_sandbox_application_assessment(
         &run.workspace,
         &run.run_id,
@@ -417,13 +429,92 @@ pub fn prepare_package_for_review_with_manifest_sha256(
 }
 
 #[cfg(windows)]
-#[derive(Serialize)]
+const REPLAY_PREPARATION_SCHEMA: &str = "aiw.dev/replay-package-preparation/v0alpha1";
+
+#[cfg(windows)]
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ReplayPackagePreparationEvidence {
+    schema_version: String,
+    run_id: String,
+    plan_sha256: String,
+    package_manifest_sha256: String,
+}
+
+#[cfg(windows)]
+#[derive(Debug, Serialize)]
+#[serde(
+    tag = "status",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ReplayPackageProvenance {
+    Matched {
+        plan_sha256: String,
+        package_manifest_sha256: String,
+    },
+    Missing,
+    Mismatched,
+    Unavailable,
+}
+
+#[cfg(windows)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ReplayPackagePreparationEvidence<'a> {
-    schema_version: &'static str,
-    run_id: &'a str,
-    plan_sha256: &'a str,
-    package_manifest_sha256: &'a str,
+pub struct ApplicationAssessmentProvenanceReport {
+    #[serde(flatten)]
+    pub report: aiw_runner::GenericApplicationRunReport,
+    pub replay_provenance: ReplayPackageProvenance,
+}
+
+#[cfg(windows)]
+pub fn report_with_replay_provenance(
+    run: &ApplicationAssessmentRun,
+) -> Result<ApplicationAssessmentProvenanceReport> {
+    let (_, plan) = run.validate_with_plan()?;
+    let report = report_validated_run(run)?;
+    let replay_provenance = read_replay_provenance(run, &plan);
+    Ok(ApplicationAssessmentProvenanceReport {
+        report,
+        replay_provenance,
+    })
+}
+
+#[cfg(windows)]
+fn read_replay_provenance(
+    run: &ApplicationAssessmentRun,
+    plan: &aiw_orchestrator::RunPlan,
+) -> ReplayPackageProvenance {
+    use ReplayPackageProvenance as Provenance;
+    let Some(aiw_orchestrator::PlannedAction::ExecuteWindowsSandboxApplicationAssessment {
+        workspace,
+        ..
+    }) = plan.actions.get(2)
+    else {
+        return Provenance::Unavailable;
+    };
+    let bytes = match aiw_windows_platform::read_replay_preparation_receipt(&workspace.parent) {
+        Ok(Some(bytes)) => bytes,
+        Ok(None) => return Provenance::Missing,
+        Err(aiw_windows_platform::WorkspaceError::IdentityRejected) => {
+            return Provenance::Mismatched;
+        }
+        Err(_) => return Provenance::Unavailable,
+    };
+    let Ok(receipt) = serde_json::from_slice::<ReplayPackagePreparationEvidence>(&bytes) else {
+        return Provenance::Mismatched;
+    };
+    if receipt.schema_version != REPLAY_PREPARATION_SCHEMA
+        || receipt.run_id != run.run_id
+        || receipt.plan_sha256 != run.plan_sha256
+        || !valid_sha256(&receipt.package_manifest_sha256)
+    {
+        return Provenance::Mismatched;
+    }
+    Provenance::Matched {
+        plan_sha256: receipt.plan_sha256,
+        package_manifest_sha256: receipt.package_manifest_sha256,
+    }
 }
 
 #[cfg(windows)]
@@ -440,10 +531,10 @@ fn retain_replay_package_preparation(
     };
     let run = &prepared.run;
     let bytes = serde_json::to_vec_pretty(&ReplayPackagePreparationEvidence {
-        schema_version: "aiw.dev/replay-package-preparation/v0alpha1",
-        run_id: &run.run_id,
-        plan_sha256: &run.plan_sha256,
-        package_manifest_sha256,
+        schema_version: REPLAY_PREPARATION_SCHEMA.into(),
+        run_id: run.run_id.clone(),
+        plan_sha256: run.plan_sha256.clone(),
+        package_manifest_sha256: package_manifest_sha256.into(),
     })?;
     aiw_windows_platform::publish_replay_preparation_receipt(&workspace.parent, &bytes)?;
     Ok(())
@@ -612,6 +703,23 @@ mod comparison_tests {
         }
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn replay_provenance_extends_the_report_without_changing_its_fields() {
+        let report = completed_report("fixture", AssessmentMode::Ordinary);
+        let existing = serde_json::to_value(&report).unwrap();
+        let mut extended = serde_json::to_value(ApplicationAssessmentProvenanceReport {
+            report,
+            replay_provenance: ReplayPackageProvenance::Missing,
+        })
+        .unwrap();
+        assert_eq!(
+            extended.as_object_mut().unwrap().remove("replayProvenance"),
+            Some(serde_json::json!({"status":"missing"}))
+        );
+        assert_eq!(extended, existing);
+    }
+
     #[test]
     fn comparison_requires_authenticated_start_for_both_retained_reports() {
         let ordinary = completed_report("ordinary", AssessmentMode::Ordinary);
@@ -770,6 +878,11 @@ mod locator_tests {
         let unpinned = output(make_prepared().finish_replay_preparation(None));
         assert!(unpinned.get("receiptRetention").is_none());
 
+        let (_, retained_plan) = run.validate_with_plan().unwrap();
+        let provenance =
+            || serde_json::to_value(read_replay_provenance(&run, &retained_plan)).unwrap();
+        assert_eq!(provenance(), serde_json::json!({"status":"missing"}));
+
         let digest = "3".repeat(64);
         let record = evidence_root.join("replay-package-preparation.json");
         let staged = evidence_root.join("replay-package-preparation.json.pending");
@@ -783,6 +896,7 @@ mod locator_tests {
         assert_eq!(failed["executionStarted"], false);
         assert!(!record.exists());
         assert_eq!(fs::read(&staged).unwrap(), b"foreign staging bytes");
+        assert_eq!(provenance(), serde_json::json!({"status":"missing"}));
         fs::remove_file(&staged).unwrap();
         let recovered: ApplicationAssessmentRun =
             serde_json::from_value(failed["run"].clone()).unwrap();
@@ -811,8 +925,42 @@ mod locator_tests {
         assert_eq!(collision["receiptRetention"], "failed");
         assert_eq!(collision["run"], unpinned["run"]);
         assert!(!staged.exists());
-        assert_eq!(fs::read(record).unwrap(), original_record);
+        assert_eq!(fs::read(&record).unwrap(), original_record);
+        assert_eq!(
+            provenance(),
+            serde_json::json!({
+                "status":"matched",
+                "planSha256":plan_sha256,
+                "packageManifestSha256":digest,
+            })
+        );
+
+        let valid: serde_json::Value = serde_json::from_slice(&original_record).unwrap();
+        for (field, changed) in [
+            ("schemaVersion", serde_json::json!("unknown")),
+            ("runId", serde_json::json!("another-run")),
+            ("planSha256", serde_json::json!("4".repeat(64))),
+            ("packageManifestSha256", serde_json::json!("invalid")),
+            ("extra", serde_json::json!("private value")),
+        ] {
+            let mut invalid = valid.clone();
+            invalid[field] = changed;
+            fs::write(&record, serde_json::to_vec(&invalid).unwrap()).unwrap();
+            assert_eq!(provenance(), serde_json::json!({"status":"mismatched"}));
+        }
+        fs::write(&record, b"{").unwrap();
+        assert_eq!(provenance(), serde_json::json!({"status":"mismatched"}));
+
+        use std::os::windows::fs::OpenOptionsExt;
+        let busy = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&record)
+            .unwrap();
+        assert_eq!(provenance(), serde_json::json!({"status":"unavailable"}));
+        drop(busy);
     }
+
     #[test]
     fn disk_locator_conversion_only_removes_extended_drive_prefix() {
         assert_eq!(

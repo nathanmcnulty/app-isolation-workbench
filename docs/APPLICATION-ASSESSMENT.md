@@ -337,6 +337,13 @@ registry or vendor asset manifest selects execution:
 - `application report-assessment` and `application compare-assessments`: read
   protected retained records, admit receipt/result/progress together, and project
   assertions, coverage and historical cleanup without acquiring a provider.
+  Add `--include-replay-provenance` to `application report-assessment`
+  for a `replayProvenance` field. A `matched` receipt comes from the
+  retained evidence directory and matches the validated run and plan. It
+  shows the recorded package manifest digest. The original package is
+  needed to verify its bytes independently. Other statuses are `missing`
+  for an absent receipt, `mismatched` for a failed identity, format or binding
+  check, and `unavailable` when a receipt check cannot be completed.
 - `application export-assessment-package`, `verify-assessment-package` and
   `prepare-assessment-package`: copy/verify the same external data and prepare
   fresh review. Import never reuses execution authority.

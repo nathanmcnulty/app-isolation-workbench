@@ -393,6 +393,9 @@ enum ApplicationCommand {
         workspace: PathBuf,
         #[arg(long)]
         run_id: String,
+        /// Include the retained replay receipt and its run/plan match status.
+        #[arg(long)]
+        include_replay_provenance: bool,
     },
     /// Compare independently verified retained baseline/candidate workflows without running either.
     CompareAssessments {
@@ -2086,17 +2089,26 @@ fn run_general(command: Command) -> Result<()> {
                     )
                 }
             }
-            ApplicationCommand::ReportAssessment { workspace, run_id } => {
+            ApplicationCommand::ReportAssessment {
+                workspace,
+                run_id,
+                include_replay_provenance,
+            } => {
                 #[cfg(windows)]
                 {
-                    let run = aiw_admin_workflow::application_assessment::open_retained(
-                        &workspace, &run_id,
-                    )?;
-                    write_json(&aiw_admin_workflow::application_assessment::report(&run)?)
+                    use aiw_admin_workflow::application_assessment::{
+                        open_retained, report, report_with_replay_provenance,
+                    };
+                    let run = open_retained(&workspace, &run_id)?;
+                    if include_replay_provenance {
+                        write_json(&report_with_replay_provenance(&run)?)
+                    } else {
+                        write_json(&report(&run)?)
+                    }
                 }
                 #[cfg(not(windows))]
                 {
-                    let _ = (workspace, run_id);
+                    let _ = (workspace, run_id, include_replay_provenance);
                     bail!("protected retained assessment read requires Windows")
                 }
             }
