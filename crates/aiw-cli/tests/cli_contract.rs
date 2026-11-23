@@ -81,11 +81,171 @@ fn malformed_replay_manifest_reports_a_parse_location_without_writes() {
     assert_eq!(fs::read_dir(&package).unwrap().count(), 1);
 }
 
+#[cfg(windows)]
+fn synthetic_replay_package(temp: &TempDir, leaf: &str, revised: bool, argument: &str) -> PathBuf {
+    use aiw_provider_wsb::assessment::{ASSESSMENT_SETTINGS_SCHEMA, AssessmentSettings};
+    use aiw_windows_platform::HeldPortableDirectory;
+
+    let source = temp.path().join(format!("{leaf}-source"));
+    fs::create_dir(&source).unwrap();
+    let payload: &[u8] = if revised {
+        b"inert revised bytes"
+    } else {
+        b"inert fixture bytes"
+    };
+    fs::write(source.join("fixture.exe"), payload).unwrap();
+    let input = temp.path().join(format!("{leaf}-input.bin"));
+    let input_bytes: &[u8] = if revised {
+        b"inert other bytes"
+    } else {
+        b"inert input bytes"
+    };
+    fs::write(&input, input_bytes).unwrap();
+    let held = HeldPortableDirectory::open(&source).unwrap();
+    let project: Project = serde_json::from_value(serde_json::json!({
+        "schemaVersion": aiw_schema::PROJECT_SCHEMA_VERSION, "kind": aiw_schema::PROJECT_KIND,
+        "metadata": {"name":"synthetic", "displayName":"Synthetic fixture", "owner":"local"},
+        "application": {"type":"portableDirectory", "path":"external",
+            "contentManifestSha256":held.manifest().manifest_sha256,"architecture":"x64",
+            "entryPoints":[{"id":"main", "path":"fixture.exe"}]},
+        "isolationIntent":{"runtimeBoundary":"windowsSandbox", "network":"blocked",
+            "allowClipboard":false, "allowHostFileAccess":false, "allowHostRegistryAccess":false,
+            "requireDescendantCoverage":false},
+        "candidates":[{"id":"ordinary","type":"unpackagedBaseline","config":{"type":"baseline"}}],
+        "scenarios":[{"id":"workflow","description":"Inert fixture",
+            "steps":[{"type":"install"},
+                     {"type":"launch","entrypoint":"main","arguments":[argument]},
+                     {"type":"expectExitCode","value":0}]}],
+        "assertions":{"requireEffectiveBackendMatch":true, "requireTargetTokenEvidence":true,
+            "requireExpectedChildCoverage":false, "requireOfflineCanaryDenied":false,
+            "failOnEvidenceTruncation":true}
+    }))
+    .unwrap();
+    drop(held);
+    let settings: AssessmentSettings = serde_json::from_value(serde_json::json!({
+        "schemaVersion": ASSESSMENT_SETTINGS_SCHEMA, "scenarioId":"workflow",
+        "candidateId":"ordinary", "workingDirectory":".",
+        "inputs":[{"id":"data","path":"fixture-input.bin","sizeBytes":input_bytes.len(),
+                   "sha256":hex::encode(Sha256::digest(input_bytes))}],
+        "assertions":[{"id":"stdout","target":{"type":"stdout","launchStep":1},"expectedSizeBytes": if revised { 1 } else { 0 }}],
+        "totalTimeoutSeconds":60,"processTimeoutSeconds": if revised { 21 } else { 20 },"stdoutMaxBytes":4096,
+        "stderrMaxBytes":4096,"fileMaxBytes":8192
+    }))
+    .unwrap();
+    aiw_admin_workflow::application_package::export_package(
+        &project,
+        &settings,
+        &source,
+        &std::collections::BTreeMap::from([("data".to_owned(), input)]),
+        temp.path(),
+        leaf,
+    )
+    .unwrap()
+}
+
+#[test]
+#[cfg(windows)]
+fn replay_comparison_distinguishes_manifest_bytes_from_declared_changes() {
+    let temp = TempDir::new();
+    let baseline = synthetic_replay_package(&temp, "baseline", false, "inert-private-argument");
+    let candidate = synthetic_replay_package(&temp, "candidate", false, "inert-private-argument");
+    let compare = |baseline: &Path, candidate: &Path| {
+        Command::new(aiw())
+            .args(["application", "compare-assessment-packages", "--baseline"])
+            .arg(baseline)
+            .arg("--candidate")
+            .arg(candidate)
+            .output()
+            .unwrap()
+    };
+    let succeeded = |output: std::process::Output| {
+        assert!(output.status.success(), "{:?}", output.stderr);
+        assert!(output.stderr.is_empty());
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()
+    };
+    let exact = succeeded(compare(&baseline, &candidate));
+    assert_eq!(
+        exact["schemaVersion"],
+        "aiw.dev/application-replay-package-comparison/v0alpha1"
+    );
+    assert_eq!(exact["baseline"], exact["candidate"]);
+    let unchanged = serde_json::json!({
+        "manifestBytes": false, "project": false, "compiledPlan": false, "portablePayload": false,
+        "inputs": false, "steps": false, "expectedOutputs": false, "requestedRunConditions": false
+    });
+    assert_eq!(exact["changes"], unchanged);
+
+    let manifest = candidate.join("package.json");
+    let mut changed_bytes = fs::read(&manifest).unwrap();
+    changed_bytes.push(b'\n');
+    fs::write(&manifest, &changed_bytes).unwrap();
+    let whitespace = succeeded(compare(&baseline, &candidate));
+    let mut manifest_only = unchanged;
+    manifest_only["manifestBytes"] = serde_json::json!(true);
+    assert_eq!(whitespace["changes"], manifest_only);
+    assert_eq!(
+        whitespace["baseline"]["semanticSha256"],
+        whitespace["candidate"]["semanticSha256"]
+    );
+    assert_eq!(
+        whitespace["candidate"]["packageManifestSha256"],
+        hex::encode(Sha256::digest(&changed_bytes))
+    );
+    assert_eq!(fs::read(&manifest).unwrap(), changed_bytes);
+
+    let argument_only = synthetic_replay_package(
+        &temp,
+        "argument-only",
+        false,
+        "argument-only-private-marker",
+    );
+    let compared = succeeded(compare(&baseline, &argument_only));
+    let mut expected = manifest_only;
+    for field in ["project", "compiledPlan", "steps"] {
+        expected[field] = serde_json::json!(true);
+    }
+    assert_eq!(compared["changes"], expected);
+    assert!(
+        !compared
+            .to_string()
+            .contains("argument-only-private-marker")
+    );
+
+    let revised = synthetic_replay_package(&temp, "revised", true, "revised-private-argument");
+    let revised_manifest = fs::read(revised.join("package.json")).unwrap();
+    let compared = compare(&baseline, &revised);
+    assert_eq!(compare(&baseline, &revised).stdout, compared.stdout);
+    let changes = succeeded(compared);
+    assert!(
+        changes["changes"]
+            .as_object()
+            .unwrap()
+            .values()
+            .all(|v| *v == true)
+    );
+    assert_ne!(
+        changes["baseline"]["semanticSha256"],
+        changes["candidate"]["semanticSha256"]
+    );
+    assert!(!changes.to_string().contains("revised-private-argument"));
+    assert_eq!(
+        fs::read(revised.join("package.json")).unwrap(),
+        revised_manifest
+    );
+
+    fs::write(revised.join("payload").join("fixture.exe"), b"drift").unwrap();
+    for output in [compare(&baseline, &revised), compare(&revised, &baseline)] {
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty());
+        let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert_eq!(error["code"], "AIW_REPLAY_CONTENT_MISMATCH");
+    }
+}
+
 #[test]
 #[cfg(windows)]
 fn replay_verification_distinguishes_package_failures() {
-    use aiw_provider_wsb::assessment::{ASSESSMENT_SETTINGS_SCHEMA, AssessmentSettings};
-    use aiw_windows_platform::{CreatedWorkspaceDirectory, HeldPortableDirectory};
+    use aiw_windows_platform::CreatedWorkspaceDirectory;
 
     let temp = TempDir::new();
     let verify = |path: &Path| {
@@ -114,52 +274,7 @@ fn replay_verification_distinguishes_package_failures() {
     assert_eq!(error["detail"], "package.json is required as a file");
     assert!(!missing_path.join("package.json").exists());
 
-    let source = temp.path().join("source");
-    fs::create_dir(&source).unwrap();
-    fs::write(source.join("fixture.exe"), b"inert fixture bytes").unwrap();
-    let input = temp.path().join("fixture-input.bin");
-    let input_bytes = b"inert input bytes";
-    fs::write(&input, input_bytes).unwrap();
-    let held = HeldPortableDirectory::open(&source).unwrap();
-    let project: Project = serde_json::from_value(serde_json::json!({
-        "schemaVersion": aiw_schema::PROJECT_SCHEMA_VERSION, "kind": aiw_schema::PROJECT_KIND,
-        "metadata": {"name":"synthetic", "displayName":"Synthetic fixture", "owner":"local"},
-        "application": {"type":"portableDirectory", "path":"external",
-            "contentManifestSha256":held.manifest().manifest_sha256,"architecture":"x64",
-            "entryPoints":[{"id":"main", "path":"fixture.exe"}]},
-        "isolationIntent":{"runtimeBoundary":"windowsSandbox", "network":"blocked",
-            "allowClipboard":false, "allowHostFileAccess":false, "allowHostRegistryAccess":false,
-            "requireDescendantCoverage":false},
-        "candidates":[{"id":"ordinary","type":"unpackagedBaseline","config":{"type":"baseline"}}],
-        "scenarios":[{"id":"workflow","description":"Inert fixture",
-            "steps":[{"type":"install"},
-                     {"type":"launch","entrypoint":"main","arguments":["inert-private-argument"]},
-                     {"type":"expectExitCode","value":0}]}],
-        "assertions":{"requireEffectiveBackendMatch":true, "requireTargetTokenEvidence":true,
-            "requireExpectedChildCoverage":false, "requireOfflineCanaryDenied":false,
-            "failOnEvidenceTruncation":true}
-    }))
-    .unwrap();
-    drop(held);
-    let settings: AssessmentSettings = serde_json::from_value(serde_json::json!({
-        "schemaVersion": ASSESSMENT_SETTINGS_SCHEMA, "scenarioId":"workflow",
-        "candidateId":"ordinary", "workingDirectory":".",
-        "inputs":[{"id":"data","path":"fixture-input.bin","sizeBytes":input_bytes.len(),
-                   "sha256":hex::encode(Sha256::digest(input_bytes))}],
-        "assertions":[{"id":"stdout","target":{"type":"stdout","launchStep":1},"expectedSizeBytes":0}],
-        "totalTimeoutSeconds":60,"processTimeoutSeconds":20,"stdoutMaxBytes":4096,
-        "stderrMaxBytes":4096,"fileMaxBytes":8192
-    }))
-    .unwrap();
-    let package = aiw_admin_workflow::application_package::export_package(
-        &project,
-        &settings,
-        &source,
-        &std::collections::BTreeMap::from([("data".to_owned(), input)]),
-        temp.path(),
-        "package",
-    )
-    .unwrap();
+    let package = synthetic_replay_package(&temp, "package", false, "inert-private-argument");
     let manifest = package.join("package.json");
     let original_bytes = fs::read(&manifest).unwrap();
     let original: Value = serde_json::from_slice(&original_bytes).unwrap();
