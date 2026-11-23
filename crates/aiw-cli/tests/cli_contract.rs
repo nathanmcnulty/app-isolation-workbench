@@ -83,6 +83,106 @@ fn malformed_replay_manifest_reports_a_parse_location_without_writes() {
 
 #[test]
 #[cfg(windows)]
+fn replay_verification_distinguishes_missing_manifest_schema_and_plan() {
+    use aiw_provider_wsb::assessment::{ASSESSMENT_SETTINGS_SCHEMA, AssessmentSettings};
+    use aiw_windows_platform::{CreatedWorkspaceDirectory, HeldPortableDirectory};
+
+    let temp = TempDir::new();
+    let verify = |path: &Path| {
+        Command::new(aiw())
+            .args(["application", "verify-assessment-package", "--package"])
+            .arg(path)
+            .output()
+            .unwrap()
+    };
+    let reject = |path: &Path, code: &str| {
+        let output = verify(path);
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty());
+        let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert_eq!(error["code"], code, "{error}");
+        assert_eq!(error["stage"], "replayValidation");
+        assert_eq!(error["retryable"], false);
+        assert!(!error["remediation"].as_str().unwrap().is_empty());
+        error
+    };
+    let missing = CreatedWorkspaceDirectory::create_protected(temp.path(), "missing").unwrap();
+    let missing_path = missing.final_path().to_path_buf();
+    drop(missing.create_directory_new("payload").unwrap());
+    drop(missing);
+    let error = reject(&missing_path, "AIW_REPLAY_MANIFEST_MISSING");
+    assert_eq!(error["detail"], "package.json is required as a file");
+    assert!(!missing_path.join("package.json").exists());
+
+    let source = temp.path().join("source");
+    fs::create_dir(&source).unwrap();
+    fs::write(source.join("fixture.exe"), b"inert fixture bytes").unwrap();
+    let held = HeldPortableDirectory::open(&source).unwrap();
+    let project: Project = serde_json::from_value(serde_json::json!({
+        "schemaVersion": aiw_schema::PROJECT_SCHEMA_VERSION, "kind": aiw_schema::PROJECT_KIND,
+        "metadata": {"name":"synthetic", "displayName":"Synthetic fixture", "owner":"local"},
+        "application": {"type":"portableDirectory", "path":"external",
+            "contentManifestSha256":held.manifest().manifest_sha256,"architecture":"x64",
+            "entryPoints":[{"id":"main", "path":"fixture.exe"}]},
+        "isolationIntent":{"runtimeBoundary":"windowsSandbox", "network":"blocked",
+            "allowClipboard":false, "allowHostFileAccess":false, "allowHostRegistryAccess":false,
+            "requireDescendantCoverage":false},
+        "candidates":[{"id":"ordinary","type":"unpackagedBaseline","config":{"type":"baseline"}}],
+        "scenarios":[{"id":"workflow","description":"Inert fixture",
+            "steps":[{"type":"install"},{"type":"launch","entrypoint":"main"},
+                     {"type":"expectExitCode","value":0}]}],
+        "assertions":{"requireEffectiveBackendMatch":true, "requireTargetTokenEvidence":true,
+            "requireExpectedChildCoverage":false, "requireOfflineCanaryDenied":false,
+            "failOnEvidenceTruncation":true}
+    }))
+    .unwrap();
+    drop(held);
+    let settings: AssessmentSettings = serde_json::from_value(serde_json::json!({
+        "schemaVersion": ASSESSMENT_SETTINGS_SCHEMA, "scenarioId":"workflow",
+        "candidateId":"ordinary", "workingDirectory":".", "inputs":[],
+        "assertions":[{"id":"stdout","target":{"type":"stdout","launchStep":1},"expectedSizeBytes":0}],
+        "totalTimeoutSeconds":60,"processTimeoutSeconds":20,"stdoutMaxBytes":4096,
+        "stderrMaxBytes":4096,"fileMaxBytes":8192
+    }))
+    .unwrap();
+    let package = aiw_admin_workflow::application_package::export_package(
+        &project,
+        &settings,
+        &source,
+        &Default::default(),
+        temp.path(),
+        "package",
+    )
+    .unwrap();
+    let manifest = package.join("package.json");
+    let original: Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+    let accepted = verify(&package);
+    assert!(accepted.status.success(), "{:?}", accepted.stderr);
+    assert!(accepted.stderr.is_empty());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&accepted.stdout).unwrap(),
+        original
+    );
+
+    let mut unsupported = original.clone();
+    unsupported["schemaVersion"] = serde_json::json!("unrecognized-synthetic-schema");
+    let bytes = serde_json::to_vec(&unsupported).unwrap();
+    fs::write(&manifest, &bytes).unwrap();
+    let error = reject(&package, "AIW_REPLAY_SCHEMA_UNSUPPORTED");
+    assert!(!error.to_string().contains("unrecognized-synthetic-schema"));
+    assert_eq!(fs::read(&manifest).unwrap(), bytes);
+
+    let mut invalid = original;
+    invalid["compiled"]["settings"]["processTimeoutSeconds"] = serde_json::json!(21);
+    let bytes = serde_json::to_vec(&invalid).unwrap();
+    fs::write(&manifest, &bytes).unwrap();
+    let error = reject(&package, "AIW_REPLAY_PLAN_INVALID");
+    assert!(error["detail"].as_str().unwrap().contains("compiled plan"));
+    assert_eq!(fs::read(&manifest).unwrap(), bytes);
+}
+
+#[test]
+#[cfg(windows)]
 fn admin_export_rejects_missing_package_and_guest_drift_before_destination_creation() {
     let temp = TempDir::new();
     let executable = temp.path().join("aiw.exe");

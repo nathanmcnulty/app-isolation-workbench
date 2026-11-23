@@ -49,14 +49,45 @@ fn parse_replay_manifest(
     })
 }
 
+const REPLAY_PACKAGE_SCHEMA: &str = "aiw.dev/application-replay-package/v0alpha1";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplayValidationError {
+    MissingManifest,
+    UnsupportedSchema,
+    InvalidPlan,
+}
+
+impl std::fmt::Display for ReplayValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingManifest => f.write_str("package.json is required as a file"),
+            Self::UnsupportedSchema => {
+                write!(
+                    f,
+                    "package.json schemaVersion must be {REPLAY_PACKAGE_SCHEMA}"
+                )
+            }
+            Self::InvalidPlan => f.write_str(
+                "package.json compiled plan fails validation or differs from the project",
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ReplayValidationError {}
+
 impl ApplicationReplayPackage {
     pub fn validate(&self) -> Result<()> {
-        if self.schema_version != "aiw.dev/application-replay-package/v0alpha1" {
-            bail!("unsupported application replay package");
+        use anyhow::Context;
+
+        if self.schema_version != REPLAY_PACKAGE_SCHEMA {
+            return Err(ReplayValidationError::UnsupportedSchema.into());
         }
         self.compiled
             .validate()
-            .map_err(|e| anyhow!("invalid package plan: {e:?}"))?;
+            .map_err(|e| anyhow!("invalid package plan: {e:?}"))
+            .context(ReplayValidationError::InvalidPlan)?;
         let manifest = aiw_probe::PortableContentManifest {
             schema_version: aiw_probe::PORTABLE_MANIFEST_SCHEMA.into(),
             root_path: "external".into(),
@@ -65,9 +96,10 @@ impl ApplicationReplayPackage {
             manifest_sha256: self.compiled.portable_manifest_sha256.clone(),
         };
         let actual = compile_assessment(&self.project, &self.compiled.settings, &manifest)
-            .map_err(|e| anyhow!("package capabilities blocked: {e:?}"))?;
+            .map_err(|e| anyhow!("package capabilities blocked: {e:?}"))
+            .context(ReplayValidationError::InvalidPlan)?;
         if actual != self.compiled {
-            bail!("package project and compiled workflow differ");
+            return Err(ReplayValidationError::InvalidPlan.into());
         }
         Ok(())
     }
@@ -93,6 +125,14 @@ impl VerifiedApplicationReplayPackage {
 pub fn verify_package(path: &Path) -> Result<VerifiedApplicationReplayPackage> {
     use aiw_probe::PortableContentEntryKind as Kind;
     let held = aiw_windows_platform::HeldPortableDirectory::open_replay_package(path)?;
+    if !held
+        .manifest()
+        .entries
+        .iter()
+        .any(|entry| entry.relative_path == "package.json" && entry.kind == Kind::File)
+    {
+        return Err(ReplayValidationError::MissingManifest.into());
+    }
     let root = PathBuf::from(&held.manifest().root_path);
     let manifest_file = aiw_windows_platform::HeldApplicationFile::open_bounded(
         &root.join("package.json"),
@@ -171,7 +211,7 @@ pub fn export_package(
     let compiled = compile_assessment(project, settings, held.manifest())
         .map_err(|e| anyhow!("package capability blocked: {e:?}"))?;
     let package = ApplicationReplayPackage {
-        schema_version: "aiw.dev/application-replay-package/v0alpha1".into(),
+        schema_version: REPLAY_PACKAGE_SCHEMA.into(),
         project: project.clone(),
         compiled,
     };
@@ -391,7 +431,16 @@ mod tests {
         let mut package = verify_package(&destination).unwrap().package;
         package.project.metadata.display_name = "Another unlisted input".into();
         package.validate().unwrap();
+        package.schema_version = "aiw.dev/application-replay-package/v999".into();
+        assert_eq!(
+            package.validate().unwrap_err().downcast_ref(),
+            Some(&ReplayValidationError::UnsupportedSchema)
+        );
+        package.schema_version = REPLAY_PACKAGE_SCHEMA.into();
         package.compiled.settings.process_timeout_seconds += 1;
-        assert!(package.validate().is_err());
+        assert_eq!(
+            package.validate().unwrap_err().downcast_ref(),
+            Some(&ReplayValidationError::InvalidPlan)
+        );
     }
 }
