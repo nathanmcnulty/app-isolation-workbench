@@ -3,6 +3,50 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 const display = require("../ui/display.js");
+const handoff = require("../ui/replay-handoff.js");
+
+function requestData(command) {
+  const json = command.match(/-InputObject @'\n([\s\S]+)\n'@/)[1];
+  return JSON.parse(json);
+}
+
+const preparationInputs = {
+  cli: "C:\\Tools & review\\aiw.exe",
+  guestAgent: "C:\\Measured tools\\aiw-guest-agent.exe",
+  guestAgentSha256: "B".repeat(64),
+  evidenceParent: "D:\\Evidence set\\",
+  operator: "--operator=O’Neil\u202e & $(kept literal); ' \"",
+};
+
+test("handoff carries exact reviewed arguments as PowerShell data", () => {
+  const path = "C:\\Replay \\O'Neil & $(literal)\\";
+  const manifestSha256 = "a".repeat(64);
+  const command = handoff.buildCommand({path, manifestSha256}, preparationInputs);
+  assert.doesNotMatch(command, /\u202e/u);
+  assert.match(command, /\\u202e/u);
+  assert.deepEqual(requestData(command), {
+    cli: preparationInputs.cli,
+    arguments: [
+      "application", "prepare-assessment-package", "--package=" + path,
+      "--expected-manifest-sha256=" + manifestSha256,
+      "--guest-agent=" + preparationInputs.guestAgent,
+      "--guest-agent-sha256=" + "b".repeat(64),
+      "--evidence-parent=" + preparationInputs.evidenceParent,
+      "--operator=" + preparationInputs.operator,
+    ],
+  });
+  assert.doesNotMatch(command, /review-approval|approve|run start/);
+  assert.throws(() => handoff.buildCommand(null, preparationInputs), /Verify the candidate/);
+  assert.throws(() => handoff.buildCommand({path, manifestSha256}, {
+    ...preparationInputs, guestAgentSha256: "0".repeat(64),
+  }), /independently enrolled/);
+  assert.throws(() => handoff.buildCommand({path, manifestSha256}, {
+    ...preparationInputs, cli: "relative\\aiw.exe",
+  }), /absolute Windows path/);
+  assert.throws(() => handoff.buildCommand({path, manifestSha256}, {
+    ...preparationInputs, operator: "name\n'@",
+  }), /one line/);
+});
 
 test("replay review uses only read-only package commands and invalidates the pin on input changes", async () => {
   const elements = new Map();
@@ -27,7 +71,7 @@ test("replay review uses only read-only package commands and invalidates the pin
   let pending = new Promise((resolve) => { finish = resolve; });
   const context = {
     document: { getElementById: element },
-    window: { AiwDisplay: display, __TAURI__: { core: { invoke: async (name, args) => {
+    window: { AiwDisplay: display, AiwReplayHandoff: handoff, __TAURI__: { core: { invoke: async (name, args) => {
       calls.push({name, args});
       if (name === "choose_input") return selected;
       assert.equal(name, "review_replay_packages");
@@ -36,6 +80,7 @@ test("replay review uses only read-only package commands and invalidates the pin
   };
   vm.runInNewContext(fs.readFileSync(require.resolve("../ui/replay-review.js"), "utf8"), context);
   assert.equal(element("reviewReplay").disabled, true);
+  assert.equal(element("generateReplayCommand").disabled, true);
   await click("chooseReplayCandidate");
   assert.equal(element("reviewReplay").disabled, false);
   const verifying = click("reviewReplay");
@@ -53,6 +98,27 @@ test("replay review uses only read-only package commands and invalidates the pin
   assert.equal(element("replayReviewChanges").hidden, true);
   assert.match(element("replayReviewDetails").textContent, /<b>local fixture<\/b>/);
   assert.equal(element("replayReviewDetails").innerHTML, "untouched");
+  assert.equal(element("generateReplayCommand").disabled, false);
+  for (const [id, input] of Object.entries({
+    replayHandoffCli: "cli",
+    replayHandoffGuestAgent: "guestAgent",
+    replayHandoffAgentSha256: "guestAgentSha256",
+    replayHandoffEvidence: "evidenceParent",
+    replayHandoffOperator: "operator",
+  })) element(id).value = preparationInputs[input];
+
+  const callsBeforeHandoff = calls.length;
+  await click("generateReplayCommand");
+  assert.equal(calls.length, callsBeforeHandoff);
+  assert.equal(element("replayHandoffOutput").hidden, false);
+  const command = element("replayHandoffCommand");
+  assert.ok(requestData(command.value).arguments.includes("--package=" + candidate));
+  assert.ok(requestData(command.value).arguments.includes("--expected-manifest-sha256=" + review.packageManifestSha256));
+  element("replayHandoffOperator").value = "new operator";
+  element("replayHandoffOperator").handlers.input();
+  assert.equal(command.value, "");
+  assert.equal(element("replayHandoffOutput").hidden, true);
+  await click("generateReplayCommand");
 
   selected = null;
   await click("chooseReplayCandidate");
@@ -62,6 +128,8 @@ test("replay review uses only read-only package commands and invalidates the pin
   await click("chooseReplayBaseline");
   assert.equal(element("replayReviewPin").value, "");
   assert.equal(element("replayReviewResult").hidden, true);
+  assert.equal(command.value, "");
+  assert.equal(element("generateReplayCommand").disabled, true);
   pending = Promise.resolve({ candidateReview: review, changes: { inputs: true, steps: false } });
   await click("reviewReplay");
   assert.equal(calls.at(-1).args.baseline, baseline);
@@ -69,11 +137,15 @@ test("replay review uses only read-only package commands and invalidates the pin
   assert.equal(element("replayReviewChanges").textContent, "Changed: inputs");
   assert.equal(element("replayReviewChanges").hidden, false);
 
+  await click("generateReplayCommand");
+  assert.ok(requestData(command.value).arguments.includes("--package=" + candidate));
   pending = { then(_, reject) { reject(new Error("replay file content differs")); } };
   await click("reviewReplay");
   assert.equal(element("replayReviewPin").value, "");
   assert.equal(element("replayReviewResult").hidden, true);
   assert.equal(element("replayReviewStatus").textContent, "replay file content differs");
+  assert.equal(command.value, "");
+  assert.equal(element("generateReplayCommand").disabled, true);
 
   await click("clearReplayBaseline");
   assert.equal(element("replayBaseline").value, "");

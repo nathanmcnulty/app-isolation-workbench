@@ -24,15 +24,35 @@
   const status = $("replayReviewStatus");
   const pin = $("replayReviewPin");
   const changes = $("replayReviewChanges");
+  const generateCommand = $("generateReplayCommand");
+  const handoffCommand = $("replayHandoffCommand");
+  const handoffStatus = $("replayHandoffStatus");
+  const handoffFields = {
+    cli: $("replayHandoffCli"),
+    guestAgent: $("replayHandoffGuestAgent"),
+    guestAgentSha256: $("replayHandoffAgentSha256"),
+    evidenceParent: $("replayHandoffEvidence"),
+    operator: $("replayHandoffOperator"),
+  };
   let busy = false;
+  let reviewedCandidate = null;
+
+  function clearCommand() {
+    handoffCommand.value = "";
+    $("replayHandoffOutput").classList.toggle("hidden", true);
+    handoffStatus.textContent = "";
+  }
 
   function updateControls() {
     chooseCandidate.disabled = chooseBaseline.disabled = busy || !invoke;
     clearBaseline.disabled = busy || !baseline.value;
     reviewButton.disabled = busy || !invoke || !candidate.value;
+    generateCommand.disabled = busy || !reviewedCandidate;
   }
 
   function clearReview(message) {
+    reviewedCandidate = null;
+    clearCommand();
     result.classList.toggle("hidden", true);
     changes.classList.toggle("hidden", true);
     changes.textContent = "";
@@ -78,15 +98,28 @@
     baseline.value = "";
     selectionChanged();
   });
+  Object.values(handoffFields).forEach((field) => field.addEventListener("input", clearCommand));
+  generateCommand.addEventListener("click", () => {
+    if (busy || !reviewedCandidate) return;
+    clearCommand();
+    try {
+      const inputs = Object.fromEntries(Object.entries(handoffFields).map(([name, field]) => [name, field.value]));
+      handoffCommand.value = window.AiwReplayHandoff.buildCommand(reviewedCandidate, inputs);
+      $("replayHandoffOutput").classList.toggle("hidden", false);
+      handoffStatus.textContent = "Preparation command ready for manual review.";
+    } catch (error) {
+      handoffStatus.textContent = clean(error.message);
+    }
+  });
+
   reviewButton.addEventListener("click", () => {
     if (!candidate.value) return;
     return withBusy(async () => {
       clearReview("Verifying the selected packages…");
-      const response = await invoke("review_replay_packages", {
-        candidate: candidate.value,
-        baseline: baseline.value || null,
-      });
+      const selection = { candidate: candidate.value, baseline: baseline.value || null };
+      const response = await invoke("review_replay_packages", selection);
       const review = response.candidateReview || response;
+      reviewedCandidate = { path: selection.candidate, manifestSha256: review.packageManifestSha256 };
       const mode = { ordinary: "Ordinary user", classicAppContainer: "Classic AppContainer" }[review.mode] || review.mode;
       $("replayReviewMode").textContent = clean("Requested mode: " + mode + " · Scenario: " + review.scenarioId);
       if (response.changes) {
