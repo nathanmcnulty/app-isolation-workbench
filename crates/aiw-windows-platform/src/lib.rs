@@ -103,6 +103,7 @@ pub use workspace::{
     AssessmentChannelFile, BoundWorkspaceDirectory, BoundWorkspaceFile, CreatedWorkspaceDirectory,
     CreatedWorkspaceFile, HeldAssessmentChannelFile, HeldAssessmentChannelOutput, HeldRunWorkspace,
     WorkspaceAclPolicy, WorkspaceError, publish_replay_preparation_receipt,
+    read_replay_preparation_receipt,
 };
 
 #[cfg(windows)]

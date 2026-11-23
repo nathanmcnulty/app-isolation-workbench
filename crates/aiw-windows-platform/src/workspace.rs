@@ -14,7 +14,10 @@ use aiw_probe::{
     WindowsFileIdentity, WorkspaceBindingEvidence, workspace_policy_hash,
 };
 use thiserror::Error;
-use windows::Win32::Foundation::{CloseHandle, HANDLE, HLOCAL, LocalFree};
+use windows::Win32::Foundation::{
+    CloseHandle, HANDLE, HLOCAL, LocalFree, STATUS_FILE_IS_A_DIRECTORY,
+    STATUS_OBJECT_NAME_NOT_FOUND,
+};
 use windows::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
     ConvertStringSidToSidW, GetSecurityInfo, SDDL_REVISION_1, SE_FILE_OBJECT,
@@ -114,6 +117,8 @@ pub enum WorkspaceError {
     InvalidLeaf,
     #[error("workspace leaf already exists and will not be adopted or repaired")]
     AlreadyExists,
+    #[error("workspace child is absent")]
+    ChildNotFound,
     #[error("workspace path is a link, reparse point, or changed identity")]
     IdentityRejected,
     #[error("workspace ACL is not protected owner-and-SYSTEM-only full control")]
@@ -129,6 +134,7 @@ pub enum WorkspaceError {
     PartialWorkspace { path: String, detail: String },
 }
 
+const REPLAY_RECEIPT_MAX_BYTES: u64 = 4096;
 const REPLAY_RECEIPT_LEAF: &str = "replay-package-preparation.json";
 const REPLAY_RECEIPT_PENDING: &str = "replay-package-preparation.json.pending";
 
@@ -179,6 +185,40 @@ fn publish_replay_preparation_receipt_with(
         return Err(error);
     }
     Ok(())
+}
+
+/// Read the fixed replay receipt from the retained workspace parent's exact
+/// identity, using an ordinary, read-held file. An absent final leaf is None.
+pub fn read_replay_preparation_receipt(
+    expected_parent: &WindowsFileIdentity,
+) -> Result<Option<Vec<u8>>, WorkspaceError> {
+    let parent = open_held_parent_readonly(Path::new(&expected_parent.final_path))?;
+    if directory_identity(&parent)? != *expected_parent {
+        return Err(WorkspaceError::IdentityRejected);
+    }
+    let file = match open_child_read_authority(&parent, REPLAY_RECEIPT_LEAF, false) {
+        Ok(file) => file,
+        Err(WorkspaceError::ChildNotFound) => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    verify_created_child(&parent, REPLAY_RECEIPT_LEAF, &file, false)?;
+    let size = file
+        .metadata()
+        .map_err(|error| channel_io("replay receipt metadata", error))?
+        .len();
+    if size == 0 || size > REPLAY_RECEIPT_MAX_BYTES {
+        return Err(WorkspaceError::IdentityRejected);
+    }
+    let mut bytes = Vec::with_capacity(size as usize);
+    (&file)
+        .take(REPLAY_RECEIPT_MAX_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| channel_io("replay receipt read", error))?;
+    if bytes.len() as u64 != size || directory_identity(&parent)? != *expected_parent {
+        return Err(WorkspaceError::IdentityRejected);
+    }
+    verify_created_child(&parent, REPLAY_RECEIPT_LEAF, &file, false)?;
+    Ok(Some(bytes))
 }
 
 /// A newly-created workspace whose parent, root, tools, and output directory
@@ -1906,6 +1946,12 @@ fn open_child_read_authority_with_sharing(
             0,
         )
     };
+    if status == STATUS_OBJECT_NAME_NOT_FOUND.0 {
+        return Err(WorkspaceError::ChildNotFound);
+    }
+    if status == STATUS_FILE_IS_A_DIRECTORY.0 {
+        return Err(WorkspaceError::IdentityRejected);
+    }
     if status < 0 || handle.is_null() {
         return Err(WorkspaceError::Native {
             operation: "NtCreateFile(relative-read-authority)",
@@ -2757,6 +2803,43 @@ mod tests {
     }
 
     #[test]
+    fn replay_receipt_reader_requires_bounded_ordinary_single_link_file() {
+        with_channel_fixture(|workspace| {
+            let root = Path::new(&workspace.evidence().parent.final_path).join("receipt-evidence");
+            std::fs::create_dir(&root).unwrap();
+            let expected = directory_identity(&open_held_parent(&root).unwrap()).unwrap();
+            let receipt = root.join(REPLAY_RECEIPT_LEAF);
+            let alias = root.join("other-name");
+            assert_eq!(read_replay_preparation_receipt(&expected).unwrap(), None);
+
+            std::fs::create_dir(&receipt).unwrap();
+            let rejects_identity = || {
+                assert!(matches!(
+                    read_replay_preparation_receipt(&expected),
+                    Err(WorkspaceError::IdentityRejected)
+                ));
+            };
+            rejects_identity();
+            std::fs::remove_dir(&receipt).unwrap();
+
+            std::fs::write(&receipt, vec![b'x'; REPLAY_RECEIPT_MAX_BYTES as usize + 1]).unwrap();
+            rejects_identity();
+            std::fs::remove_file(&receipt).unwrap();
+
+            publish_replay_preparation_receipt(&expected, b"fixture").unwrap();
+            std::fs::hard_link(&receipt, &alias).unwrap();
+            rejects_identity();
+            std::fs::remove_file(alias).unwrap();
+            assert_eq!(
+                read_replay_preparation_receipt(&expected)
+                    .unwrap()
+                    .as_deref(),
+                Some(b"fixture".as_slice())
+            );
+        });
+    }
+
+    #[test]
     fn replay_receipt_refuses_replaced_parent_identity() {
         with_channel_fixture(|workspace| {
             let root = Path::new(&workspace.evidence().parent.final_path);
@@ -2768,6 +2851,10 @@ mod tests {
 
             assert!(matches!(
                 publish_replay_preparation_receipt(&expected, b"complete"),
+                Err(WorkspaceError::IdentityRejected)
+            ));
+            assert!(matches!(
+                read_replay_preparation_receipt(&expected),
                 Err(WorkspaceError::IdentityRejected)
             ));
             assert_eq!(std::fs::read_dir(original).unwrap().count(), 0);

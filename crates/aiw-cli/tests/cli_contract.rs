@@ -48,6 +48,22 @@ fn aiw() -> PathBuf {
 }
 
 #[test]
+fn replay_provenance_is_opt_in_on_the_existing_assessment_report_command() {
+    let output = Command::new(aiw())
+        .args(["application", "report-assessment", "--help"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let help = String::from_utf8(output.stdout).unwrap();
+    assert!(help.contains("--include-replay-provenance"));
+    let usage = help
+        .lines()
+        .find(|line| line.starts_with("Usage:"))
+        .unwrap();
+    assert!(!usage.contains("--include-replay-provenance"));
+}
+
+#[test]
 #[cfg(windows)]
 fn malformed_replay_manifest_reports_a_parse_location_without_writes() {
     let temp = TempDir::new();
