@@ -144,6 +144,10 @@ pub struct VerifiedApplicationReplayPackage {
 
 #[cfg(windows)]
 impl VerifiedApplicationReplayPackage {
+    pub(super) fn manifest_sha256(&self) -> &str {
+        &self.manifest_sha256
+    }
+
     pub fn revalidate(&self) -> Result<()> {
         self.held.revalidate().map_err(Into::into)
     }

@@ -182,6 +182,45 @@ fn normalized_path(value: &str) -> String {
 pub struct PreparedApplicationAssessment {
     pub run: ApplicationAssessmentRun,
     pub review: ApprovalReview,
+    #[cfg(windows)]
+    receipt_retention: Option<ReplayPackageReceiptRetention>,
+}
+
+#[cfg(windows)]
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum ReplayPackageReceiptRetention {
+    Retained,
+    Failed,
+}
+
+#[cfg(windows)]
+impl PreparedApplicationAssessment {
+    pub fn replay_package_output(&self) -> serde_json::Value {
+        let mut output = serde_json::json!({
+            "run": self.run,
+            "recipe": self.review.recipe,
+            "plan": self.review.plan,
+            "proposedApproval": self.review.proposed_approval,
+            "approvalRecorded": false,
+            "executionStarted": false,
+        });
+        if let Some(retention) = self.receipt_retention {
+            output["receiptRetention"] = serde_json::json!(retention);
+        }
+        output
+    }
+
+    fn finish_replay_preparation(mut self, manifest_sha256: Option<&str>) -> Self {
+        self.receipt_retention =
+            manifest_sha256.map(
+                |digest| match retain_replay_package_preparation(&self, digest) {
+                    Ok(()) => ReplayPackageReceiptRetention::Retained,
+                    Err(_) => ReplayPackageReceiptRetention::Failed,
+                },
+            );
+        self
+    }
 }
 
 #[cfg(windows)]
@@ -268,7 +307,11 @@ pub fn prepare_for_review(
         plan: prepared.run_plan,
     };
     run.validate()?;
-    Ok(PreparedApplicationAssessment { run, review })
+    Ok(PreparedApplicationAssessment {
+        run,
+        review,
+        receipt_retention: None,
+    })
 }
 
 pub fn request_cancellation(run: &ApplicationAssessmentRun) -> Result<()> {
@@ -369,7 +412,41 @@ pub fn prepare_package_for_review_with_manifest_sha256(
         identity,
     )?;
     package.revalidate()?;
-    Ok(prepared)
+    Ok(prepared
+        .finish_replay_preparation(expected_manifest_sha256.map(|_| package.manifest_sha256())))
+}
+
+#[cfg(windows)]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReplayPackagePreparationEvidence<'a> {
+    schema_version: &'static str,
+    run_id: &'a str,
+    plan_sha256: &'a str,
+    package_manifest_sha256: &'a str,
+}
+
+#[cfg(windows)]
+fn retain_replay_package_preparation(
+    prepared: &PreparedApplicationAssessment,
+    package_manifest_sha256: &str,
+) -> Result<()> {
+    let Some(aiw_orchestrator::PlannedAction::ExecuteWindowsSandboxApplicationAssessment {
+        workspace,
+        ..
+    }) = prepared.review.plan.actions.get(2)
+    else {
+        bail!("prepared assessment action is absent");
+    };
+    let run = &prepared.run;
+    let bytes = serde_json::to_vec_pretty(&ReplayPackagePreparationEvidence {
+        schema_version: "aiw.dev/replay-package-preparation/v0alpha1",
+        run_id: &run.run_id,
+        plan_sha256: &run.plan_sha256,
+        package_manifest_sha256,
+    })?;
+    aiw_windows_platform::publish_replay_preparation_receipt(&workspace.parent, &bytes)?;
+    Ok(())
 }
 
 #[derive(Debug, Serialize)]
@@ -568,6 +645,174 @@ mod comparison_tests {
 mod locator_tests {
     use super::*;
 
+    #[cfg(windows)]
+    #[test]
+    fn replay_receipt_conflicts_return_a_recoverable_pending_locator() {
+        use aiw_orchestrator::{
+            APPLICATION_ASSESSMENT_TRUST_DELTA, PlannedAction, RecoveryStatus, RunLifecycleKind,
+            WSB_APPLICATION_ASSESSMENT_IMPORT_SCHEMA, WsbPlanningImportReceipt,
+            WsbPlanningImportStatus,
+        };
+        use aiw_windows_platform::HeldRunWorkspace;
+        use std::fs;
+
+        struct FixtureRoot(PathBuf);
+        impl Drop for FixtureRoot {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+
+        let root = std::env::temp_dir().join(format!(
+            "aiw-replay-evidence-{}-{}",
+            std::process::id(),
+            nonce()
+        ));
+        fs::create_dir(&root).unwrap();
+        let owned_root = FixtureRoot(root);
+        let evidence_root = owned_root.0.canonicalize().unwrap();
+        let run_id = "fixture-run";
+        let held = HeldRunWorkspace::create(&evidence_root, run_id).unwrap();
+        let binding = held.evidence().clone();
+        let workspace_path = PathBuf::from(&binding.root.final_path);
+        let workspace = disk_locator_path(&workspace_path).to_path_buf();
+        let workspace_sha256 = lowercase_sha256(
+            &aiw_evidence::canonical_json_bytes(&serde_json::to_value(&binding).unwrap()).unwrap(),
+        );
+        let plan = aiw_orchestrator::RunPlan::new(
+            run_id,
+            "fixture-project",
+            "a".repeat(64),
+            RunLifecycleKind::Assessment,
+            "now",
+            vec![
+                PlannedAction::AssessHost,
+                PlannedAction::PrepareWorkspace,
+                PlannedAction::ExecuteWindowsSandboxApplicationAssessment {
+                    provider_protocol: Some(
+                        aiw_probe::WindowsSandboxCliAdapter::V0_8_107_0.protocol(),
+                    ),
+                    evidence_channel: Some(
+                        aiw_probe::APPLICATION_ASSESSMENT_CHANNEL_PROTOCOL.into(),
+                    ),
+                    sandbox_plan_sha256: "b".repeat(64),
+                    provider_sha256: "c".repeat(64),
+                    guest_agent_sha256: "d".repeat(64),
+                    workspace_identity_sha256: workspace_sha256.clone(),
+                    workspace: Box::new(binding.clone()),
+                    intake_receipt_sha256: "e".repeat(64),
+                    source_manifest_sha256: "f".repeat(64),
+                    assessment_sha256: "1".repeat(64),
+                },
+                PlannedAction::CollectEvidence,
+            ],
+            vec![APPLICATION_ASSESSMENT_TRUST_DELTA.into()],
+        )
+        .unwrap();
+        let plan_sha256 = plan.hash().unwrap();
+        RunLayout::new(&workspace, run_id)
+            .unwrap()
+            .create_or_verify_pending_wsb_import_bound(
+                &held,
+                &plan,
+                &WsbPlanningImportReceipt {
+                    schema_version: WSB_APPLICATION_ASSESSMENT_IMPORT_SCHEMA.into(),
+                    run_id: run_id.into(),
+                    imported_at: "now".into(),
+                    status: WsbPlanningImportStatus::PendingApproval,
+                    project_revision_sha256: plan.project_revision_hash.clone(),
+                    workspace_root: binding.root.final_path.clone(),
+                    workspace_identity_sha256: workspace_sha256,
+                    preparation_receipt_sha256: "2".repeat(64),
+                    run_plan_sha256: plan_sha256.clone(),
+                    windows_sandbox_plan_sha256: "b".repeat(64),
+                    guest_agent_sha256: "d".repeat(64),
+                    provider_sha256: "c".repeat(64),
+                    run_root: binding.root.final_path.clone(),
+                    journal_sequence: 1,
+                    approval_present: false,
+                    provider_acquired: false,
+                    provider_mutated: false,
+                },
+            )
+            .unwrap();
+        drop(held);
+        let run = ApplicationAssessmentRun {
+            schema_version: APPLICATION_RUN_SCHEMA.into(),
+            run_id: run_id.into(),
+            workspace: workspace.clone(),
+            project_path: disk_locator_path(&evidence_root).join("project.json"),
+            evidence_root: disk_locator_path(&evidence_root).to_path_buf(),
+            project_revision_sha256: plan.project_revision_hash.clone(),
+            plan_sha256: plan_sha256.clone(),
+            assessment_sha256: "1".repeat(64),
+            agent_sha256: "d".repeat(64),
+        };
+        let locator = evidence_root.join("application-assessment.json");
+        save_stage(&evidence_root, "application-assessment", &run).unwrap();
+        let original_locator = fs::read(&locator).unwrap();
+        let make_prepared = || PreparedApplicationAssessment {
+            run: run.clone(),
+            review: ApprovalReview {
+                run_id: run_id.into(),
+                workspace: workspace.clone(),
+                evidence_root: run.evidence_root.clone(),
+                recipe: serde_json::json!({}),
+                proposed_approval: ApprovalRecord::for_plan(&plan, "operator", "now").unwrap(),
+                plan: plan.clone(),
+            },
+            receipt_retention: None,
+        };
+        let output = |prepared: PreparedApplicationAssessment| {
+            let bytes = serde_json::to_vec_pretty(&prepared.replay_package_output()).unwrap();
+            serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()
+        };
+        let unpinned = output(make_prepared().finish_replay_preparation(None));
+        assert!(unpinned.get("receiptRetention").is_none());
+
+        let digest = "3".repeat(64);
+        let record = evidence_root.join("replay-package-preparation.json");
+        let staged = evidence_root.join("replay-package-preparation.json.pending");
+        assert!(!record.exists());
+        assert!(!staged.exists());
+        fs::write(&staged, b"foreign staging bytes").unwrap();
+        let failed = output(make_prepared().finish_replay_preparation(Some(&digest)));
+        assert_eq!(failed["receiptRetention"], "failed");
+        assert_eq!(failed["run"], unpinned["run"]);
+        assert_eq!(failed["approvalRecorded"], false);
+        assert_eq!(failed["executionStarted"], false);
+        assert!(!record.exists());
+        assert_eq!(fs::read(&staged).unwrap(), b"foreign staging bytes");
+        fs::remove_file(&staged).unwrap();
+        let recovered: ApplicationAssessmentRun =
+            serde_json::from_value(failed["run"].clone()).unwrap();
+        assert_eq!(recovered, run);
+        assert!(matches!(
+            recovered.validate().unwrap().status().unwrap(),
+            RecoveryStatus::PendingApproval { plan_hash, .. } if plan_hash == plan_sha256
+        ));
+        assert_eq!(fs::read(&locator).unwrap(), original_locator);
+
+        let retained = output(make_prepared().finish_replay_preparation(Some(&digest)));
+        assert_eq!(retained["receiptRetention"], "retained");
+        assert!(!staged.exists());
+        let original_record = fs::read(&record).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&original_record).unwrap(),
+            serde_json::json!({
+                "schemaVersion": "aiw.dev/replay-package-preparation/v0alpha1",
+                "runId": run_id,
+                "planSha256": plan_sha256,
+                "packageManifestSha256": digest,
+            })
+        );
+
+        let collision = output(make_prepared().finish_replay_preparation(Some(&"4".repeat(64))));
+        assert_eq!(collision["receiptRetention"], "failed");
+        assert_eq!(collision["run"], unpinned["run"]);
+        assert!(!staged.exists());
+        assert_eq!(fs::read(record).unwrap(), original_record);
+    }
     #[test]
     fn disk_locator_conversion_only_removes_extended_drive_prefix() {
         assert_eq!(

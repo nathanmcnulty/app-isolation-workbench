@@ -45,7 +45,9 @@ use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use windows::Win32::System::WindowsProgramming::DRIVE_FIXED;
 use windows::core::{PCWSTR, PWSTR};
 
-use crate::exact_dispose::{ExactDisposeError, exact_directory_entry, rename_relative};
+use crate::exact_dispose::{
+    ExactDisposeError, exact_directory_entry, mark_delete, rename_relative,
+};
 use crate::exact_dispose::{
     assessment_channel_completed_roster, assessment_channel_directory_entry,
     assessment_channel_streams_and_eas,
@@ -125,6 +127,58 @@ pub enum WorkspaceError {
     },
     #[error("new workspace requires explicit recovery at {path}: {detail}")]
     PartialWorkspace { path: String, detail: String },
+}
+
+const REPLAY_RECEIPT_LEAF: &str = "replay-package-preparation.json";
+const REPLAY_RECEIPT_PENDING: &str = "replay-package-preparation.json.pending";
+
+/// Publish a complete replay preparation receipt under the retained workspace
+/// parent's identity, without reopening, replacing, or unlinking either leaf
+/// by path.
+pub fn publish_replay_preparation_receipt(
+    expected_parent: &WindowsFileIdentity,
+    bytes: &[u8],
+) -> Result<(), WorkspaceError> {
+    publish_replay_preparation_receipt_with(expected_parent, |file| file.write_all(bytes))
+}
+
+fn publish_replay_preparation_receipt_with(
+    expected_parent: &WindowsFileIdentity,
+    write: impl FnOnce(&mut File) -> std::io::Result<()>,
+) -> Result<(), WorkspaceError> {
+    let parent = open_held_parent(Path::new(&expected_parent.final_path))?;
+    if directory_identity(&parent)? != *expected_parent {
+        return Err(WorkspaceError::IdentityRejected);
+    }
+
+    let mut staged = create_child_handle(
+        &parent,
+        REPLAY_RECEIPT_PENDING,
+        None,
+        false,
+        FILE_CREATE_DISPOSITION,
+        true,
+        true,
+    )?;
+    let result = (|| {
+        write(&mut staged)
+            .and_then(|()| staged.sync_all())
+            .map_err(|error| WorkspaceError::Native {
+                operation: "replay receipt write and flush",
+                detail: error.to_string(),
+            })?;
+        rename_relative(&staged, &parent, std::ffi::OsStr::new(REPLAY_RECEIPT_LEAF))
+            .map_err(rename_error)
+    })();
+    if let Err(error) = result {
+        // The create-new handle still identifies this invocation's file.
+        mark_delete(&staged).map_err(|error| WorkspaceError::Native {
+            operation: "replay receipt staging cleanup",
+            detail: error.to_string(),
+        })?;
+        return Err(error);
+    }
+    Ok(())
 }
 
 /// A newly-created workspace whose parent, root, tools, and output directory
@@ -2660,6 +2714,65 @@ mod tests {
             workspace.output_path().join(kind.leaf()),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn replay_receipt_blocks_staged_replacement_during_write_and_cleanup() {
+        with_channel_fixture(|workspace| {
+            let expected = &workspace.evidence().parent;
+            let root = Path::new(&expected.final_path);
+            let staged = root.join(REPLAY_RECEIPT_PENDING);
+            let published = root.join(REPLAY_RECEIPT_LEAF);
+            let replacement = root.join("replacement.txt");
+            std::fs::write(&replacement, b"foreign").unwrap();
+
+            let result = publish_replay_preparation_receipt_with(expected, |file| {
+                file.write_all(b"partial")?;
+                assert!(!published.exists());
+                assert!(std::fs::rename(&staged, root.join("displaced.txt")).is_err());
+                assert!(std::fs::remove_file(&staged).is_err());
+                assert!(std::fs::rename(&replacement, &staged).is_err());
+                Err(std::io::Error::other("injected write failure"))
+            });
+            assert!(result.is_err());
+            assert!(!staged.exists());
+            assert!(!published.exists());
+            assert_eq!(std::fs::read(&replacement).unwrap(), b"foreign");
+
+            publish_replay_preparation_receipt_with(expected, |file| {
+                file.write_all(b"complete")?;
+                assert!(!published.exists());
+                assert!(std::fs::write(&staged, b"replacement").is_err());
+                assert!(std::fs::rename(&replacement, &staged).is_err());
+                Ok(())
+            })
+            .unwrap();
+            assert!(!staged.exists());
+            assert_eq!(std::fs::read(&published).unwrap(), b"complete");
+            assert!(publish_replay_preparation_receipt(expected, b"collision").is_err());
+            assert!(!staged.exists());
+            assert_eq!(std::fs::read(&published).unwrap(), b"complete");
+            assert_eq!(std::fs::read(replacement).unwrap(), b"foreign");
+        });
+    }
+
+    #[test]
+    fn replay_receipt_refuses_replaced_parent_identity() {
+        with_channel_fixture(|workspace| {
+            let root = Path::new(&workspace.evidence().parent.final_path);
+            let original = root.join("evidence");
+            std::fs::create_dir(&original).unwrap();
+            let expected = directory_identity(&open_held_parent(&original).unwrap()).unwrap();
+            std::fs::rename(&original, root.join("moved")).unwrap();
+            std::fs::create_dir(&original).unwrap();
+
+            assert!(matches!(
+                publish_replay_preparation_receipt(&expected, b"complete"),
+                Err(WorkspaceError::IdentityRejected)
+            ));
+            assert_eq!(std::fs::read_dir(original).unwrap().count(), 0);
+            assert_eq!(std::fs::read_dir(root.join("moved")).unwrap().count(), 0);
+        });
     }
 
     #[test]
