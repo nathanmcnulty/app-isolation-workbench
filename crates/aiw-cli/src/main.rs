@@ -1470,6 +1470,65 @@ fn main() -> ExitCode {
 
 fn run(command: Command) -> Result<()> {
     match command {
+        // Preparation validation has its own deep stack. Keep it out of the
+        // general dispatcher's frame on Windows debug builds.
+        Command::Run(RunArgs {
+            command:
+                RunCommand::ImportPreparedWsb {
+                    workspace,
+                    project,
+                    guest_agent_sha256,
+                    imported_at,
+                },
+        }) => import_prepared_wsb(&workspace, &project, &guest_agent_sha256, &imported_at),
+        other => run_general(other),
+    }
+}
+
+fn import_prepared_wsb(
+    workspace: &Path,
+    project: &Path,
+    guest_agent_sha256: &str,
+    imported_at: &str,
+) -> Result<()> {
+    let loaded = read_project(project)?;
+    let fallback_run_id = workspace
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("unknown")
+        .to_owned();
+    #[cfg(windows)]
+    {
+        let result = import_windows_sandbox_preparation(
+            workspace,
+            &loaded.project,
+            guest_agent_sha256,
+            imported_at,
+        )
+        .map_err(|source| {
+            anyhow!(RunPreparationImportFailed {
+                run_id: fallback_run_id,
+                source,
+            })
+        })?;
+        write_json(&result)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (loaded, guest_agent_sha256, imported_at);
+        Err(anyhow!(RunOperationUnavailable {
+            code: "AIW_WINDOWS_REQUIRED",
+            summary: "Windows Sandbox preparation import requires Windows",
+            stage: "wsbPreparationImport",
+            remediation: "Import this verified workspace on its original supported Windows host.",
+            detail: "No run state was created and no provider was acquired.",
+            run_id: fallback_run_id,
+        }))
+    }
+}
+
+fn run_general(command: Command) -> Result<()> {
+    match command {
         Command::Admin(args) => match args.command {
             AdminCommand::PrepareSevenzip {
                 evidence,
@@ -2616,46 +2675,8 @@ fn run(command: Command) -> Result<()> {
                     }))
                 }
             }
-            RunCommand::ImportPreparedWsb {
-                workspace,
-                project,
-                guest_agent_sha256,
-                imported_at,
-            } => {
-                let loaded = read_project(&project)?;
-                let fallback_run_id = workspace
-                    .file_name()
-                    .and_then(|value| value.to_str())
-                    .unwrap_or("unknown")
-                    .to_owned();
-                #[cfg(windows)]
-                {
-                    let result = import_windows_sandbox_preparation(
-                        &workspace,
-                        &loaded.project,
-                        &guest_agent_sha256,
-                        &imported_at,
-                    )
-                    .map_err(|source| {
-                        anyhow!(RunPreparationImportFailed {
-                            run_id: fallback_run_id,
-                            source,
-                        })
-                    })?;
-                    write_json(&result)
-                }
-                #[cfg(not(windows))]
-                {
-                    let _ = (loaded, guest_agent_sha256, imported_at);
-                    Err(anyhow!(RunOperationUnavailable {
-                        code: "AIW_WINDOWS_REQUIRED",
-                        summary: "Windows Sandbox preparation import requires Windows",
-                        stage: "wsbPreparationImport",
-                        remediation: "Import this verified workspace on its original supported Windows host.",
-                        detail: "No run state was created and no provider was acquired.",
-                        run_id: fallback_run_id,
-                    }))
-                }
+            RunCommand::ImportPreparedWsb { .. } => {
+                unreachable!("preparation import is dispatched before general commands")
             }
             RunCommand::Plan {
                 root,

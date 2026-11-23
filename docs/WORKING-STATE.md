@@ -3,7 +3,7 @@
 Updated 2026-11-23 (UTC). Effective goal #108 is one application-neutral
 assessment and replay path for two different external administrator-supplied
 fixtures. #111 evidence is preserved and its legacy application-specific work is
-paused. Draft PR #112 uses `codex/application-neutral-assessment` in
+paused. Merged PR #112 used `codex/application-neutral-assessment` in
 `C:\aiw\app-isolation-workbench-108`.
 
 Start with `scripts/work-status.ps1`, [assessment](APPLICATION-ASSESSMENT.md) and
@@ -54,36 +54,27 @@ independent boundary reviews. CI 44977826307 passed all three jobs; Workspace
 verification exited 0 in 427.47 seconds with the tested merge tree matching source.
 Documentation-only reconciliation does not require rebuilding those images.
 
-## Dependent MSI assessment
+## MSI assessment
 
-PR #112 review fix `9de43ed` requires authenticated local Start in both comparison
-lanes and preserves the portable payload depth under the replay wrapper.
-`codex/generic-msi-install-preflight` depends on that draft. The Windows CLI now
-reopens protected MSI intake and previews one bounded offline per-machine install
-from a typed scenario. The operator can review flushed or buffered guest-local
-verbose logging. The CLI summarizes the observed package policy allow.
-VM107 traces measured about 121–122 seconds of Windows trust verification
-before App Control allowed both packages. The 300-second runs verified
-control completion, machine registration and two executable candidates. The
-CMake holdout reached `ProcessComponents` with buffered logging and timed out
-without registering. See [installer diagnostics](APPLICATION-ASSESSMENT.md#installer-diagnostics).
+The portable assessment merged through #112. The installer slice in #114
+uses protected intake, an exact prepared plan, separate approval, Start and
+retained reporting. Notepad++ and 7-Zip each returned installer exit 0,
+verified fresh machine registration and exact Sandbox cleanup, and reproduced
+two and three hashed executable candidates respectively in retained reports.
+The bounded scan covers registered executable component key paths in Program
+Files. See [installer diagnostics](APPLICATION-ASSESSMENT.md#installer-diagnostics)
+for the earlier timing and CMake observations.
 
-The install-only profile now uses the prepared plan, separate approval, Start,
-and retained report. In the first approved Notepad++ trial, Start refused the
-unapproved plan. After explicit approval Windows Installer returned 0, machine
-registration changed from absent to installed, and exact Sandbox cleanup passed.
-Retained Read confirmed those observations. Its candidate scan was incomplete.
-A read-only comparison on the control and 7-Zip MSI bytes isolated error 1615 to
-SQL identifier quoting. The corrected queries returned two and three executable
-component key rows respectively. Check #114 for the fresh native validation of
-the corrected scan. The next plan must bind the operator’s chosen path, component,
-size and hash to these observations and remeasure the candidate before a launch
-under the reviewed application token.
+The Windows debug CLI now dispatches preparation import before the general
+command frame. On the same fresh prepared workspace the previous binary hit
+0xC00000FD, while the fixed binary wrote the planning receipt and left the run
+pending approval. The next step is to bind the operator's selected executable
+and evidence provenance into a separately reviewed launch plan.
 
 ## Remaining scope
 
-The supported slice is portable, offline x64 CLI assessment. Desktop intake,
-installers/GUI automation, complete descendants/registry/network/DLL/memory/broker
+The measured slices are portable CLI assessment and offline MSI install discovery.
+Desktop intake, installer-backed application launch, GUI automation, complete descendants/registry/network/DLL/memory/broker
 coverage, the broader fixture matrix and broad acceptance remain open. Root-token
 and collector-denial measurements do not establish all effective restrictions.
 Benchmark 2, W4/W5 and production acceptance are not closed by these results.
