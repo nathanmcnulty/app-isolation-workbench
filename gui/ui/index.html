@@ -47,6 +47,24 @@
     </section>
     <div id="closeWarning" tabindex="-1" class="close-warning hidden" role="status"><strong>Run in progress</strong><span>The window cannot safely close while the backend owns an active workflow. Keep it open until the retained result or recovery instruction appears.</span></div>
 
+    <section class="card" aria-labelledby="replay-review-title">
+      <h2 id="replay-review-title">Review a replay package</h2>
+      <p class="section-intro">Verify the candidate in place. Select a baseline to see what changed.</p>
+      <div class="field-grid">
+        <label class="field"><span>Candidate package</span><div class="input-action"><input id="replayCandidate" type="text" readonly placeholder="Choose a package folder"><button id="chooseReplayCandidate" class="secondary" type="button">Choose folder</button></div></label>
+        <label class="field"><span>Baseline package (optional)</span><div class="input-action"><input id="replayBaseline" type="text" readonly placeholder="Choose a package folder"><button id="chooseReplayBaseline" class="secondary" type="button">Choose folder</button></div></label>
+      </div>
+      <button id="reviewReplay" class="primary" type="button" disabled>Verify and review</button>
+      <button id="clearReplayBaseline" class="secondary" type="button" disabled>Clear baseline</button>
+      <p id="replayReviewStatus" role="status">Choose a candidate package to begin.</p>
+      <div id="replayReviewResult" class="hidden">
+        <p id="replayReviewMode"></p>
+        <p id="replayReviewChanges" class="hidden"></p>
+        <label class="field"><span>Verified candidate manifest SHA-256</span><input id="replayReviewPin" class="mono" type="text" readonly></label>
+        <details class="advanced"><summary>Declared workflow details</summary><pre id="replayReviewDetails"></pre></details>
+      </div>
+    </section>
+
     <section class="card" aria-labelledby="package-title">
       <div class="card-heading"><div><p class="eyebrow">Package</p><h2 id="package-title">Build a Sandbox package</h2></div><span class="step-mark">No execution</span></div>
       <p class="section-intro">Select the supported installer, analyze its identity, then choose a supported isolation recipe. Creating a package does not install the application or prove compatibility.</p>
@@ -147,6 +165,7 @@
   </main>
   <script src="display.js"></script>
   <script src="app.js"></script>
+  <script src="replay-review.js"></script>
   <script src="results.js"></script>
 </body>
 </html>
