@@ -6,6 +6,7 @@ fn main() {
             "export_results",
             "get_state",
             "choose_input",
+            "review_replay_packages",
             "analyze_package",
             "create_package",
             "prepare_workflow",

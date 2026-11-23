@@ -261,6 +261,39 @@ mod desktop {
         returned
     }
     #[tauri::command]
+    async fn review_replay_packages(
+        candidate: PathBuf,
+        baseline: Option<PathBuf>,
+    ) -> std::result::Result<serde_json::Value, String> {
+        use service::application_package::{
+            ReplayValidationError, compare_packages_with_candidate_review, review_package,
+        };
+
+        if !candidate.is_absolute() || baseline.as_ref().is_some_and(|path| !path.is_absolute()) {
+            return Err("Choose the candidate and optional baseline package folders.".into());
+        }
+        tauri::async_runtime::spawn_blocking(move || {
+            if let Some(baseline) = baseline {
+                Ok(serde_json::to_value(
+                    compare_packages_with_candidate_review(&baseline, &candidate)?,
+                )?)
+            } else {
+                Ok(serde_json::to_value(review_package(&candidate)?)?)
+            }
+        })
+        .await
+        .map_err(|_| "The desktop could not finish package verification.".to_owned())?
+        .map_err(|error: anyhow::Error| {
+            error
+                .downcast_ref::<ReplayValidationError>()
+                .map(ToString::to_string)
+                .unwrap_or_else(|| {
+                    "The selected folder could not be verified as a replay package.".into()
+                })
+        })
+    }
+
+    #[tauri::command]
     async fn analyze_package(
         app: tauri::AppHandle,
         c: State<'_, Controller>,
@@ -991,6 +1024,7 @@ mod desktop {
                 export_results,
                 get_state,
                 choose_input,
+                review_replay_packages,
                 analyze_package,
                 create_package,
                 prepare_workflow,
