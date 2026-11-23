@@ -328,6 +328,93 @@ pub fn review_package(path: &Path) -> Result<ReplayPackageReview> {
     })
 }
 
+#[cfg(windows)]
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplayPackageComparison {
+    schema_version: &'static str,
+    baseline: ReplayPackageIdentity,
+    candidate: ReplayPackageIdentity,
+    changes: ReplayPackageChanges,
+}
+
+#[cfg(windows)]
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReplayPackageIdentity {
+    package_manifest_sha256: String,
+    semantic_sha256: String,
+    portable_manifest_sha256: String,
+}
+
+#[cfg(windows)]
+impl From<&VerifiedApplicationReplayPackage> for ReplayPackageIdentity {
+    fn from(verified: &VerifiedApplicationReplayPackage) -> Self {
+        Self {
+            package_manifest_sha256: verified.manifest_sha256.clone(),
+            semantic_sha256: verified.package.compiled.semantic_sha256.clone(),
+            portable_manifest_sha256: verified.package.compiled.portable_manifest_sha256.clone(),
+        }
+    }
+}
+
+#[cfg(windows)]
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReplayPackageChanges {
+    manifest_bytes: bool,
+    project: bool,
+    compiled_plan: bool,
+    portable_payload: bool,
+    inputs: bool,
+    steps: bool,
+    expected_outputs: bool,
+    requested_run_conditions: bool,
+}
+
+#[cfg(windows)]
+fn same_requested_conditions(left: &CompiledAssessment, right: &CompiledAssessment) -> bool {
+    let a = &left.settings;
+    let b = &right.settings;
+    left.mode == right.mode
+        && left.user_context == right.user_context
+        && left.network_blocked == right.network_blocked
+        && a.scenario_id == b.scenario_id
+        && a.candidate_id == b.candidate_id
+        && a.working_directory == b.working_directory
+        && a.total_timeout_seconds == b.total_timeout_seconds
+        && a.process_timeout_seconds == b.process_timeout_seconds
+        && a.stdout_max_bytes == b.stdout_max_bytes
+        && a.stderr_max_bytes == b.stderr_max_bytes
+        && a.file_max_bytes == b.file_max_bytes
+}
+
+/// Compare verified declarations while holding both package inventories.
+#[cfg(windows)]
+pub fn compare_packages(baseline: &Path, candidate: &Path) -> Result<ReplayPackageComparison> {
+    let baseline = verify_package(baseline)?;
+    let candidate = verify_package(candidate)?;
+    baseline.revalidate()?;
+    candidate.revalidate()?;
+    let left = &baseline.package.compiled;
+    let right = &candidate.package.compiled;
+    Ok(ReplayPackageComparison {
+        schema_version: "aiw.dev/application-replay-package-comparison/v0alpha1",
+        baseline: (&baseline).into(),
+        candidate: (&candidate).into(),
+        changes: ReplayPackageChanges {
+            manifest_bytes: baseline.manifest_sha256 != candidate.manifest_sha256,
+            project: baseline.package.project != candidate.package.project,
+            compiled_plan: left != right,
+            portable_payload: left.portable_manifest_sha256 != right.portable_manifest_sha256,
+            inputs: left.settings.inputs != right.settings.inputs,
+            steps: left.steps != right.steps,
+            expected_outputs: left.settings.assertions != right.settings.assertions,
+            requested_run_conditions: !same_requested_conditions(left, right),
+        },
+    })
+}
+
 /// Publish external run data to one fresh protected destination, manifest last.
 #[cfg(windows)]
 pub fn export_package(

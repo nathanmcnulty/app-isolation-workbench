@@ -344,6 +344,10 @@ registry or vendor asset manifest selects execution:
   JSON review bound to the exact `package.json` SHA-256. It shows declared
   inputs, ordered steps, requested run conditions and expected outputs.
   Launch steps show an argument count. Verification reads the package in place.
+- `application compare-assessment-packages --baseline <package> --candidate <package>`
+  verifies both packages in place and reports manifest identities and changed
+  declaration categories. Changes to ordered steps include argument and exit
+  expectation changes. The output describes the plans, with no runtime findings.
 
 Use `schema assessment-settings`, `compiled-assessment`,
 `application-assessment-guest-request`, `application-assessment-result`,

@@ -428,6 +428,13 @@ enum ApplicationCommand {
         #[arg(long, value_enum, default_value_t = ReplayPackageFormat::Json)]
         format: ReplayPackageFormat,
     },
+    /// Compare declared differences between two verified replay packages in place.
+    CompareAssessmentPackages {
+        #[arg(long)]
+        baseline: PathBuf,
+        #[arg(long)]
+        candidate: PathBuf,
+    },
     /// Revalidate a replay package and create fresh review data; never reuse approval or session authority.
     PrepareAssessmentPackage {
         #[arg(long)]
@@ -2170,6 +2177,22 @@ fn run_general(command: Command) -> Result<()> {
                 {
                     let _ = (package, format);
                     bail!("protected package verification requires Windows")
+                }
+            }
+            ApplicationCommand::CompareAssessmentPackages {
+                baseline,
+                candidate,
+            } => {
+                #[cfg(windows)]
+                {
+                    write_json(&aiw_admin_workflow::application_package::compare_packages(
+                        &baseline, &candidate,
+                    )?)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (baseline, candidate);
+                    bail!("protected package comparison requires Windows")
                 }
             }
             ApplicationCommand::PrepareAssessmentPackage {
