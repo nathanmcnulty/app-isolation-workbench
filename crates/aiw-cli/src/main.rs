@@ -2229,9 +2229,7 @@ fn run_general(command: Command) -> Result<()> {
                             &evidence_parent,
                             &operator,
                         )?;
-                    write_json(
-                        &serde_json::json!({"run":prepared.run,"recipe":prepared.review.recipe,"plan":prepared.review.plan,"proposedApproval":prepared.review.proposed_approval,"approvalRecorded":false,"executionStarted":false}),
-                    )
+                    write_json(&prepared.replay_package_output())
                 }
                 #[cfg(not(windows))]
                 {

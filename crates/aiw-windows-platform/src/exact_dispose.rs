@@ -3058,7 +3058,7 @@ fn build_relative_rename_info(
     })
 }
 
-fn mark_delete(file: &File) -> Result<(), ExactDisposeError> {
+pub(crate) fn mark_delete(file: &File) -> Result<(), ExactDisposeError> {
     let info = FILE_DISPOSITION_INFO { DeleteFile: true };
     unsafe {
         SetFileInformationByHandle(

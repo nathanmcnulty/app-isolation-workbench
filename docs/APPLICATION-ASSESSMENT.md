@@ -352,7 +352,13 @@ registry or vendor asset manifest selects execution:
   review or comparison's `packageManifestSha256` as
   `--expected-manifest-sha256 <sha256>` to `verify-assessment-package` or
   `prepare-assessment-package`. Preparation checks the pin before it writes
-  the workspace. A manifest-only edit requires a new review hash.
+  the workspace. A manifest-only edit requires a new review hash. Pinned
+  preparation returns the run locator and `receiptRetention`. A value of
+  `retained` means `replay-package-preparation.json` contains the run ID, plan
+  hash and verified manifest digest. A value of `failed` means preparation
+  completed and the original locator remains usable. This invocation could
+  not publish the receipt. If the receipt is required, prepare again
+  with the reviewed digest. The existing approval and Start steps still apply.
 
 Use `schema assessment-settings`, `compiled-assessment`,
 `application-assessment-guest-request`, `application-assessment-result`,
