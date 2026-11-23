@@ -16,7 +16,7 @@ fn verify_historical_scenario(
             document.input_size_bytes,
         )
     } else {
-        aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(project, &recorded.scenario_id)
+        aiw_provider_wsb::compile_imported_msi_scenario(project, &recorded.scenario_id)
     }
     .map_err(|e| RunnerError::Preparation(e.to_string()))?;
     // Legacy snapshots keep their original semantics; validate against today's
@@ -971,6 +971,13 @@ pub(crate) fn report_windows_sandbox_msi_run_bound(
         &held.output_path().join("evidence.jsonl"),
         aiw_provider_wsb::MAX_APPLICATION_EVIDENCE_BYTES as u64,
     )?;
+    aiw_provider_wsb::verify_msi_install_discovery(
+        &evidence_bytes,
+        &verified.evidence_root_hash,
+        &request,
+        &scenario,
+    )
+    .map_err(RunnerError::Receipt)?;
     let application_token = aiw_provider_wsb::verify_msi_application_token(
         &evidence_bytes,
         &verified.evidence_root_hash,
@@ -1281,11 +1288,9 @@ mod tests {
             "../../../examples/notepad-plus-plus-msi.aiw.yaml"
         ))
         .unwrap();
-        let current = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
-            &project,
-            "install-launch-close",
-        )
-        .unwrap();
+        let current =
+            aiw_provider_wsb::compile_imported_msi_scenario(&project, "install-launch-close")
+                .unwrap();
         for version in 1..=6 {
             let mut recorded = current.clone();
             recorded.schema_version =
@@ -1515,11 +1520,9 @@ mod failure_progress_tests {
             "../../../examples/notepad-plus-plus-msi.aiw.yaml"
         ))
         .unwrap();
-        let scenario = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
-            &project,
-            "install-launch-close",
-        )
-        .unwrap();
+        let scenario =
+            aiw_provider_wsb::compile_imported_msi_scenario(&project, "install-launch-close")
+                .unwrap();
         let request = ImportedMsiGuestRequest::new(
             "failed-stage-test",
             "12345678-1234-abcd-9876-1234567890ab",

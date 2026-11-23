@@ -435,6 +435,30 @@ fn execute_imported_msi_request(request: &ImportedMsiGuestRequest) -> Result<()>
     ensure_output_root(&root)?;
     installer.revalidate()?;
 
+    if request.scenario.is_generic_install_only() {
+        let discovery = aiw_windows_platform::execute_generic_msi_install(
+            &request.scenario,
+            request.installer_size_bytes,
+        )?;
+        installer.revalidate()?;
+        let result = ImportedMsiScenarioResult::discovered(request, discovery)?;
+        result.validate_for_request(request)?;
+        let mut evidence = EvidenceLog::new();
+        evidence.append(EvidenceEvent {
+            observed_utc: "guest-agent-time-not-trusted".into(),
+            kind: "importedMsiScenario".into(),
+            source: "aiw-guest-agent".into(),
+            payload: serde_json::to_value(&result)?,
+        })?;
+        return publish_msi_result(
+            request,
+            &result,
+            evidence,
+            CompletionStatus::Succeeded,
+            None,
+        );
+    }
+
     let attempt =
         aiw_windows_platform::execute_fixed_notepad_plus_plus_msi_attempt_with_observations(
             &request.scenario,
@@ -1170,7 +1194,8 @@ fn read_request(path: &Path) -> Result<GuestRequest> {
             .context("parse strict golden-probe request"),
         Some(
             IMPORTED_MSI_GUEST_REQUEST_SCHEMA_VERSION
-            | aiw_provider_wsb::IMPORTED_MSI_OBSERVATION_REQUEST_SCHEMA_VERSION,
+            | aiw_provider_wsb::IMPORTED_MSI_OBSERVATION_REQUEST_SCHEMA_VERSION
+            | aiw_provider_wsb::GENERIC_INSTALL_REQUEST_VERSION,
         ) => serde_json::from_value(value)
             .map(Box::new)
             .map(GuestRequest::ImportedMsi)

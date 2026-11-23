@@ -131,9 +131,126 @@ impl FixedDocumentExercise {
     }
 }
 
+/// Application-neutral install-only contract. The readonly staging mapping is
+/// the source; Windows Installer uses a worker-local copy held by the agent.
+pub const GENERIC_MSI_INSTALL_PROFILE: &str =
+    "aiw.dev/windows-sandbox/msi-install-discovery/v0alpha1";
+const GENERIC_MSI_SCENARIO_VERSION: &str =
+    "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha12";
+pub const GENERIC_MSI_LOCAL_ROOT: &str = r"C:\AIW\InstallerStage";
+pub const GENERIC_MSI_LOCAL_PACKAGE: &str = r"C:\AIW\InstallerStage\application.msi";
+pub const GENERIC_MSI_LOCAL_LOG: &str = r"C:\AIW\InstallerStage\install.log";
+
+fn generic_install_arguments(buffered: bool) -> Vec<String> {
+    [
+        "/i",
+        GENERIC_MSI_LOCAL_PACKAGE,
+        "/qn",
+        "/norestart",
+        "ALLUSERS=1",
+        if buffered {
+            crate::msi_diagnostics::MSI_INSTALL_BUFFERED_LOG_ARGUMENT
+        } else {
+            crate::msi_diagnostics::MSI_INSTALL_LOG_ARGUMENT
+        },
+        GENERIC_MSI_LOCAL_LOG,
+    ]
+    .map(str::to_owned)
+    .to_vec()
+}
+
+/// Compile an install-only scenario without selecting a discovered executable.
+pub fn compile_generic_msi_install(
+    project: &Project,
+    scenario_id: &str,
+    timeout_seconds: u32,
+    buffered: bool,
+) -> Result<CompiledMsiScenario, ScenarioCompileError> {
+    if !aiw_schema::validate_project_for_planning(project).is_empty() {
+        return Err(ScenarioCompileError::InvalidProject);
+    }
+    require_project_semantics(project)?;
+    if !project.extensions.is_empty()
+        || project.analyst.is_some()
+        || project
+            .candidates
+            .iter()
+            .any(|entry| !entry.extensions.is_empty())
+    {
+        return Err(ScenarioCompileError::UnsupportedProjectSemantics);
+    }
+    let ApplicationSource::Msi(application) = &project.application else {
+        return Err(ScenarioCompileError::UnsupportedApplicationSource);
+    };
+    if application.architecture != ApplicationArchitecture::X64
+        || application.may_reboot
+        || !application.silent_arguments.is_empty()
+        || application.update_uninstall.is_some()
+        || application.expected_signer.is_some()
+    {
+        return Err(ScenarioCompileError::UnsupportedInstallerSemantics);
+    }
+    if !project
+        .scenarios
+        .iter()
+        .any(|scenario| scenario.id == scenario_id && scenario.steps == [ScenarioStep::Install])
+    {
+        return Err(ScenarioCompileError::UnsupportedScenario);
+    }
+    let operation = CompiledMsiScenario {
+        schema_version: GENERIC_MSI_SCENARIO_VERSION.into(),
+        profile: GENERIC_MSI_INSTALL_PROFILE.into(),
+        scenario_id: scenario_id.into(),
+        application_sha256: application.sha256.clone(),
+        installer_path: STAGED_INSTALLER_PATH.into(),
+        install_arguments: generic_install_arguments(buffered),
+        install_timeout_seconds: timeout_seconds,
+        launch_path: String::new(),
+        launch_arguments: Vec::new(),
+        process_image: String::new(),
+        process_wait_timeout_seconds: 0,
+        graceful_close_timeout_seconds: 0,
+        expected_exit_code: 0,
+        document_exercise: None,
+        interactive_session_seconds: None,
+        interactive_document: None,
+    };
+    operation.validate()?;
+    Ok(operation)
+}
+
 impl CompiledMsiScenario {
+    pub fn is_generic_install_only(&self) -> bool {
+        self.profile == GENERIC_MSI_INSTALL_PROFILE
+    }
+
+    fn validate_generic_install(&self) -> Result<(), ScenarioCompileError> {
+        if self.schema_version != GENERIC_MSI_SCENARIO_VERSION
+            || !valid_id(&self.scenario_id)
+            || !lower_hex_sha256(&self.application_sha256)
+            || self.installer_path != STAGED_INSTALLER_PATH
+            || (self.install_arguments != generic_install_arguments(true)
+                && self.install_arguments != generic_install_arguments(false))
+            || !(1..=300).contains(&self.install_timeout_seconds)
+            || !self.launch_path.is_empty()
+            || !self.launch_arguments.is_empty()
+            || !self.process_image.is_empty()
+            || self.process_wait_timeout_seconds != 0
+            || self.graceful_close_timeout_seconds != 0
+            || self.expected_exit_code != 0
+            || self.document_exercise.is_some()
+            || self.interactive_session_seconds.is_some()
+            || self.interactive_document.is_some()
+        {
+            return Err(ScenarioCompileError::InvalidCompiledProfile);
+        }
+        Ok(())
+    }
     /// Validates the fixed profile constants and the copied source binding.
     pub fn validate(&self) -> Result<(), ScenarioCompileError> {
+        if self.is_generic_install_only() {
+            return self.validate_generic_install();
+        }
         let current = self.schema_version == COMPILED_MSI_SCENARIO_SCHEMA_VERSION
             && self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE;
         let legacy_current = self.schema_version == LEGACY_COMPILED_MSI_SCENARIO_SCHEMA_VERSION
@@ -350,6 +467,22 @@ pub enum ScenarioCompileError {
     InvalidCompiledProfile,
     #[error("compiled MSI scenario could not be canonicalized: {0}")]
     Canonicalization(String),
+}
+
+/// Recompile the exact scenario for preparation, approval and Start.
+pub fn compile_imported_msi_scenario(
+    project: &Project,
+    scenario_id: &str,
+) -> Result<CompiledMsiScenario, ScenarioCompileError> {
+    if project
+        .scenarios
+        .iter()
+        .any(|scenario| scenario.id == scenario_id && scenario.steps == [ScenarioStep::Install])
+    {
+        compile_generic_msi_install(project, scenario_id, 300, true)
+    } else {
+        compile_notepad_plus_plus_msi_scenario(project, scenario_id)
+    }
 }
 
 /// Compiles exactly `Install -> Launch -> WaitForProcess -> GracefulClose ->

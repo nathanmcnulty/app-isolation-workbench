@@ -13,6 +13,14 @@ unsafe extern "system" {
     fn MsiViewFetch(view: u32, record: *mut u32) -> u32;
     fn MsiRecordGetStringW(record: u32, field: u32, value: PWSTR, length: *mut u32) -> u32;
     fn MsiCloseHandle(handle: u32) -> u32;
+    fn MsiGetComponentPathExW(
+        product: PCWSTR,
+        component: PCWSTR,
+        user_sid: PCWSTR,
+        context: u32,
+        path: PWSTR,
+        length: *mut u32,
+    ) -> i32;
     fn MsiGetProductInfoExW(
         product: PCWSTR,
         user_sid: PCWSTR,
@@ -185,6 +193,260 @@ impl ProductCapture {
     }
 }
 
+/// Install a fixed, verified MSI in the disposable worker, then inventory the
+/// registered executable key paths. Installation and selection are separate.
+pub fn execute_generic_msi_install(
+    operation: &aiw_provider_wsb::CompiledMsiScenario,
+    expected_bytes: u64,
+) -> Result<aiw_provider_wsb::MsiInstallDiscovery, GuestMsiExecutionError> {
+    use crate::guest_msi::{GuestProcess, complete_process_operation};
+    use aiw_provider_wsb::{GENERIC_MSI_LOCAL_PACKAGE, GENERIC_MSI_LOCAL_ROOT};
+    use std::{
+        fs,
+        io::{self, Read},
+        path::Path,
+        time::Duration,
+    };
+
+    if !operation.is_generic_install_only()
+        || operation.validate().is_err()
+        || !(1..=128 * 1024 * 1024).contains(&expected_bytes)
+    {
+        return Err(failure("install contract", ERROR_INVALID_DATA));
+    }
+    let native = |error: io::Error| GuestMsiExecutionError::Process(error.to_string());
+    fs::create_dir(GENERIC_MSI_LOCAL_ROOT).map_err(native)?;
+    let mut source = fs::File::open(&operation.installer_path).map_err(native)?;
+    let mut output = fs::File::create_new(GENERIC_MSI_LOCAL_PACKAGE).map_err(native)?;
+    if io::copy(
+        &mut io::Read::by_ref(&mut source).take(expected_bytes + 1),
+        &mut output,
+    )
+    .map_err(native)?
+        != expected_bytes
+    {
+        return Err(failure("staged extent", ERROR_INVALID_DATA));
+    }
+    output.sync_all().map_err(native)?;
+    drop(output);
+    let local = crate::HeldApplicationFile::open_bounded(
+        Path::new(GENERIC_MSI_LOCAL_PACKAGE),
+        expected_bytes,
+    )
+    .map_err(|error| GuestMsiExecutionError::Process(error.to_string()))?;
+    if local.observation().sha256 != operation.application_sha256 {
+        return Err(failure("staged digest", ERROR_INVALID_DATA));
+    }
+    let capture = ProductCapture::before_install()?;
+    if capture.before_install != MsiMachineProductState::NotRegistered {
+        return Err(failure(
+            "expected fresh machine registration",
+            ERROR_INVALID_DATA,
+        ));
+    }
+    let process = GuestProcess::start(
+        r"C:\Windows\System32\msiexec.exe",
+        &operation.install_arguments,
+    )?;
+    let exit = process.wait_for_exit(Duration::from_secs(
+        operation.install_timeout_seconds.into(),
+    ));
+    let cleanup = if exit.is_ok() {
+        process.verify_empty_after_success()
+    } else {
+        process.cleanup()
+    };
+    let code = complete_process_operation(exit, cleanup)?;
+    if code != 0 {
+        return Err(GuestMsiExecutionError::Process(format!(
+            "generic MSI exited with {code}"
+        )));
+    }
+    local
+        .revalidate()
+        .map_err(|error| GuestMsiExecutionError::Process(error.to_string()))?;
+    let registration = capture.after_install();
+    if registration.after_install != MsiMachineProductState::Installed {
+        return Err(failure(
+            "completed machine registration",
+            ERROR_INVALID_DATA,
+        ));
+    }
+    let (candidates, candidate_scan_complete) = component_candidates(&registration.product_code);
+    Ok(aiw_provider_wsb::MsiInstallDiscovery {
+        product_code: registration.product_code,
+        before_install: registration.before_install,
+        after_install: registration.after_install,
+        candidates,
+        candidate_scan_complete,
+    })
+}
+
+fn has_pe_header(path: &std::path::Path, extent: u64) -> bool {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut source) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut dos = [0u8; 64];
+    if source.read_exact(&mut dos).is_err() || dos[..2] != *b"MZ" {
+        return false;
+    }
+    let offset = u64::from(u32::from_le_bytes([dos[60], dos[61], dos[62], dos[63]]));
+    let mut prefix = [0u8; 4];
+    (64..=1024 * 1024).contains(&offset)
+        && offset + 4 <= extent
+        && source.seek(SeekFrom::Start(offset)).is_ok()
+        && source.read_exact(&mut prefix).is_ok()
+        && prefix == *b"PE\0\0"
+}
+
+fn component_candidates(product_code: &str) -> (Vec<aiw_provider_wsb::MsiLaunchCandidate>, bool) {
+    use aiw_provider_wsb::{
+        MAX_MSI_CANDIDATE_BYTES, MAX_MSI_LAUNCH_CANDIDATES, MsiLaunchCandidate,
+    };
+    use std::path::Path;
+
+    fn text(record: &MsiHandle, field: u32) -> Option<String> {
+        let mut buffer = [0u16; 260];
+        let mut length = buffer.len() as u32;
+        // SAFETY: a live fetched record, fixed column, and a writable bounded buffer.
+        let result = unsafe {
+            MsiRecordGetStringW(record.0, field, PWSTR(buffer.as_mut_ptr()), &mut length)
+        };
+        let text = buffer.get(..length as usize)?;
+        (result == ERROR_SUCCESS)
+            .then(|| String::from_utf16(text).ok())
+            .flatten()
+    }
+    let mut database = 0;
+    // SAFETY: fixed, read-only file and live output.
+    let code = unsafe {
+        MsiOpenDatabaseW(
+            w!(r"C:\AIW\Tools\application.msi"),
+            PCWSTR::null(),
+            &mut database,
+        )
+    };
+    let Ok(database) = handle_result(code, database, "component database open") else {
+        return (Vec::new(), false);
+    };
+    let mut view = 0;
+    // SAFETY: a live database and a fixed read-only join over component key files.
+    let code = unsafe {
+        MsiDatabaseOpenViewW(
+            database.0,
+            w!(
+                "SELECT `Component`.`ComponentId`, `File`.`FileName` FROM `Component`, `File` WHERE `Component`.`Component` = `File`.`Component_` AND `Component`.`KeyPath` = `File`.`File`"
+            ),
+            &mut view,
+        )
+    };
+    let Ok(view) = handle_result(code, view, "component view open") else {
+        return (Vec::new(), false);
+    };
+    // SAFETY: valid view with no parameter record.
+    if unsafe { MsiViewExecute(view.0, 0) } != ERROR_SUCCESS {
+        return (Vec::new(), false);
+    }
+    let product: Vec<u16> = product_code.encode_utf16().chain(Some(0)).collect();
+    let mut candidates: Vec<MsiLaunchCandidate> = Vec::new();
+    let mut hits = 0;
+    let mut complete = true;
+    for _ in 0..4096 {
+        let mut record = 0;
+        // SAFETY: live executed view and writable record handle.
+        let code = unsafe { MsiViewFetch(view.0, &mut record) };
+        if code == ERROR_NO_MORE_ITEMS {
+            return (candidates, complete);
+        }
+        let Ok(record) = handle_result(code, record, "component fetch") else {
+            break;
+        };
+        let (Some(component), Some(file_name)) = (text(&record, 1), text(&record, 2)) else {
+            complete = false;
+            continue;
+        };
+        if component.is_empty() || !file_name.to_ascii_lowercase().ends_with(".exe") {
+            continue;
+        }
+        hits += 1;
+        if hits > MAX_MSI_LAUNCH_CANDIDATES {
+            break;
+        }
+        let component = component.to_ascii_uppercase();
+        if validate_msi_product_code(&component).is_err() {
+            complete = false;
+            continue;
+        }
+        let identifier: Vec<u16> = component.encode_utf16().chain(Some(0)).collect();
+        let mut buffer = [0u16; 260];
+        let mut length = buffer.len() as u32;
+        // SAFETY: terminated canonical identities, explicit machine context with
+        // null SID, and a fixed writable path buffer.
+        let state = unsafe {
+            MsiGetComponentPathExW(
+                PCWSTR(product.as_ptr()),
+                PCWSTR(identifier.as_ptr()),
+                PCWSTR::null(),
+                MSIINSTALLCONTEXT_MACHINE,
+                PWSTR(buffer.as_mut_ptr()),
+                &mut length,
+            )
+        };
+        if state != 3 {
+            continue;
+        } // INSTALLSTATE_LOCAL
+        let Some(text) = buffer
+            .get(..length as usize)
+            .and_then(|slice| String::from_utf16(slice).ok())
+        else {
+            complete = false;
+            continue;
+        };
+        let path = Path::new(&text);
+        let Ok(relative) = path.strip_prefix(r"C:\Program Files") else {
+            continue;
+        };
+        let Some(relative) = relative.to_str() else {
+            continue;
+        };
+        if relative.is_empty()
+            || relative.len() > 240
+            || !relative.to_ascii_lowercase().ends_with(".exe")
+        {
+            continue;
+        }
+        let Ok(file) = crate::HeldApplicationFile::open_bounded(path, MAX_MSI_CANDIDATE_BYTES)
+        else {
+            complete = false;
+            continue;
+        };
+        let observation = file.observation();
+        let actual = observation
+            .canonical_path
+            .strip_prefix(r"\\?\")
+            .unwrap_or(&observation.canonical_path);
+        if !actual.eq_ignore_ascii_case(&text)
+            || observation.link_count != 1
+            || !has_pe_header(path, observation.size_bytes)
+        {
+            complete = false;
+            continue;
+        }
+        if !candidates
+            .iter()
+            .any(|item| item.relative_path.eq_ignore_ascii_case(relative))
+        {
+            candidates.push(MsiLaunchCandidate {
+                relative_path: relative.into(),
+                component_code: component,
+                sha256: observation.sha256.clone(),
+                size_bytes: observation.size_bytes,
+            });
+        }
+    }
+    (candidates, false)
+}
 #[cfg(test)]
 mod tests {
     use super::*;

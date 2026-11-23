@@ -169,6 +169,8 @@ pub enum PlannedAction {
         workspace_identity_sha256: String,
     },
     ExecuteWindowsSandboxImportedMsiScenario {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider_protocol: Option<aiw_probe::WindowsSandboxCliProtocol>,
         sandbox_plan_sha256: String,
         provider_sha256: String,
         guest_agent_sha256: String,
@@ -4317,7 +4319,18 @@ fn validate_plan_for_read(plan: &RunPlan, historical: bool) -> Result<(), AiwErr
                 import_receipt_sha256,
                 application_sha256,
                 scenario_sha256,
+                provider_protocol,
             } => {
+                if provider_protocol.as_ref().is_some_and(|protocol| {
+                    protocol != &aiw_probe::WindowsSandboxCliAdapter::V0_8_114_0.protocol()
+                }) {
+                    return Err(run_error(
+                        "AIW_PLAN_BINDING_INVALID",
+                        "Install-discovery provider protocol is invalid",
+                        "providerProtocol",
+                        &plan.run_id,
+                    ));
+                }
                 for (field, hash) in [
                     ("sandboxPlanSha256", sandbox_plan_sha256),
                     ("providerSha256", provider_sha256),
@@ -6705,6 +6718,7 @@ mod tests {
             RunLifecycleKind::Assessment,
             "2026-08-29T00:00:00Z",
             vec![PlannedAction::ExecuteWindowsSandboxImportedMsiScenario {
+                provider_protocol: None,
                 sandbox_plan_sha256: "a".repeat(64),
                 provider_sha256: "b".repeat(64),
                 guest_agent_sha256: "c".repeat(64),

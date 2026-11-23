@@ -595,6 +595,7 @@ mod tests {
             graceful_close_requested: true,
             process_closed: true,
             document_transfer: None,
+            install_discovery: None,
         };
         VerifiedTrial {
             id: id.into(),

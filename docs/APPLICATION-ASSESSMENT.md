@@ -32,9 +32,39 @@ observations. Package architecture, actual registration, dependencies, custom
 actions and application entry points remain unmeasured in this preview. The
 preview creates no run, approval, installer invocation or provider session.
 
+### Approved MSI installation and discovery
+
+A project can declare one `install` step for an x64 MSI and ask
+`aiw run prepare-wsb-msi` to bind protected intake to a fresh plan. The
+install-discovery profile requires the measured Windows Sandbox 0.8.114.0
+protocol. Its plan discloses machine installation with an elevated worker
+installer, an offline disposable Sandbox, buffered verbose logging and a
+300-second installer deadline. The plan binds the source hash, receipt,
+agent, provider, workspace and compiled scenario. Use
+`run import-prepared-wsb` and `run review-approval` before `run start`.
+Reviewing a preview alone grants no authority.
+
+Start stages an exact verified copy on the guest's local disk. The worker
+reads the package ProductCode before launch and requires a fresh machine
+state. A successful install-only result requires a natural exit code 0 and
+the same ProductCode registered as installed in machine context. The host
+checks the exact-session cleanup and revalidates the completion-verified
+result against the matching evidence record.
+
+Inspect `scenario.installDiscovery` in the Start or retained JSON report.
+The candidate scan queries registered local file key paths for components
+in the reviewed MSI. Each candidate includes the component GUID, an
+executable path relative to `C:\Program Files`, size and held-file SHA-256.
+`candidateScanComplete` describes this bounded key-path scan. Shortcuts,
+non-key-path files and other installation roots are outside this scan.
+Keep the candidate list for an explicit follow-up launch choice. Worker
+observations describe the measured installation. An elevated MSI's custom
+actions share the guest boundary, and the result establishes no effective
+application isolation.
+
 ### Installer diagnostics
 
-Preview v0alpha2 specifies guest-local verbose Windows Installer logging and an
+Preview v0alpha3 specifies guest-local verbose Windows Installer logging and an
 8 MiB diagnostic read limit. It uses flushed logging by default. Add
 `--buffer-install-log` to review Windows Installer's buffered verbose mode.
 A buffered log can lag the worker's actual stage while the process is running.

@@ -34,8 +34,8 @@ use aiw_provider_wsb::{
     BambuScenarioCompileError, CompiledBambuScenario, CompiledMsiScenario, ScenarioCompileError,
     WindowsSandboxCliLifecyclePlan, WindowsSandboxCompletionExpectation,
     WindowsSandboxCompletionReceipt, WindowsSandboxCompletionVerification, WindowsSandboxPlan,
-    compile_bambu_studio_info_scenario, compile_notepad_plus_plus_msi_scenario, plan_cli_lifecycle,
-    render_config, validate_host_mappings, verify_completion_receipt,
+    compile_bambu_studio_info_scenario, plan_cli_lifecycle, render_config, validate_host_mappings,
+    verify_completion_receipt,
 };
 use aiw_runner::{
     RunnerError, SessionTransaction, WsbGoldenProbeExecution, WsbGoldenProbeStart,
@@ -3146,7 +3146,8 @@ fn run(command: Command) -> Result<()> {
             }
             ProviderCommand::CompileMsiScenario { project, scenario } => {
                 let loaded = read_project(&project)?;
-                let scenario = compile_notepad_plus_plus_msi_scenario(&loaded.project, &scenario)?;
+                let scenario =
+                    aiw_provider_wsb::compile_imported_msi_scenario(&loaded.project, &scenario)?;
                 write_json(&MsiScenarioCompilation {
                     schema_version: "aiw.dev/msi-scenario-compilation/v0alpha1",
                     project_revision_sha256: project_revision_hash(&loaded.project)?,
@@ -4524,7 +4525,11 @@ mod tests {
         assert_eq!(export.launch_arguments[0], "--export-3mf");
         assert!(export.launch_arguments[1].ends_with("aiw-tetrahedron.3mf"));
         assert!(
-            compile_notepad_plus_plus_msi_scenario(&loaded.project, "local-file-export").is_err()
+            aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
+                &loaded.project,
+                "local-file-export"
+            )
+            .is_err()
         );
         assert_eq!(export.canonical_sha256().unwrap().len(), 64);
     }
@@ -4535,7 +4540,11 @@ mod tests {
         let scenario =
             compile_bambu_studio_info_scenario(&loaded.project, "local-file-info").unwrap();
         assert!(
-            compile_notepad_plus_plus_msi_scenario(&loaded.project, "local-file-info").is_err()
+            aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
+                &loaded.project,
+                "local-file-info"
+            )
+            .is_err()
         );
         let compilation = BambuScenarioCompilation {
             schema_version: "aiw.dev/bambu-scenario-compilation/v0alpha1",
@@ -4559,12 +4568,17 @@ mod tests {
     #[test]
     fn notepad_msi_example_compiles_without_reading_installer() {
         let loaded = read_project(&example_path("notepad-plus-plus-msi.aiw.yaml")).unwrap();
-        let compiled =
-            compile_notepad_plus_plus_msi_scenario(&loaded.project, "install-launch-close")
-                .unwrap();
+        let compiled = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
+            &loaded.project,
+            "install-launch-close",
+        )
+        .unwrap();
         compiled.validate().unwrap();
         assert_eq!(compiled.canonical_sha256().unwrap().len(), 64);
-        assert!(compile_notepad_plus_plus_msi_scenario(&loaded.project, "missing").is_err());
+        assert!(
+            aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(&loaded.project, "missing")
+                .is_err()
+        );
 
         let mut changed_requirements = loaded.project.clone();
         changed_requirements
@@ -4578,10 +4592,13 @@ mod tests {
         );
         assert_eq!(
             compiled.canonical_sha256().unwrap(),
-            compile_notepad_plus_plus_msi_scenario(&changed_requirements, "install-launch-close")
-                .unwrap()
-                .canonical_sha256()
-                .unwrap()
+            aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
+                &changed_requirements,
+                "install-launch-close"
+            )
+            .unwrap()
+            .canonical_sha256()
+            .unwrap()
         );
     }
 

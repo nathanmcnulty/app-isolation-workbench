@@ -1,9 +1,8 @@
 //! Review a bounded Windows Installer operation against existing protected intake.
 use aiw_probe::{ApplicationFileImportReceipt, ApplicationInspectionKind};
-use aiw_provider_wsb::msi_diagnostics::{
-    MAX_MSI_INSTALL_LOG_BYTES, MSI_INSTALL_BUFFERED_LOG_ARGUMENT, MSI_INSTALL_LOG_ARGUMENT,
-    MSI_INSTALL_LOG_PATH,
-};
+use aiw_provider_wsb::msi_diagnostics::MAX_MSI_INSTALL_LOG_BYTES;
+#[cfg(test)]
+use aiw_provider_wsb::{GENERIC_MSI_LOCAL_LOG, msi_diagnostics::MSI_INSTALL_LOG_ARGUMENT};
 use aiw_schema::{
     ApplicationArchitecture, ApplicationSource, NetworkIntent, Project, ScenarioStep,
 };
@@ -12,7 +11,8 @@ use serde::Serialize;
 
 const MAX_MSI_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_INSTALL_SECONDS: u32 = 300;
-const GUEST_MSI: &str = r"C:\AIW\Tools\application.msi";
+#[cfg(test)]
+const GUEST_MSI: &str = aiw_provider_wsb::GENERIC_MSI_LOCAL_PACKAGE;
 const UNSUPPORTED: &str = "AIW_MSI_PREVIEW_UNSUPPORTED";
 const INVALID_INPUT: &str = "AIW_MSI_PREVIEW_INPUT_REJECTED";
 const INTAKE_DRIFT: &str = "AIW_MSI_PREVIEW_INTAKE_DRIFT";
@@ -40,7 +40,7 @@ struct WindowsInstallerOperation {
     privilege: &'static str,
     requested_scope: &'static str,
     executable: &'static str,
-    arguments: [&'static str; 7],
+    arguments: Vec<String>,
     max_install_log_observation_bytes: usize,
     timeout_seconds: u32,
     expected_exit_code: u32,
@@ -77,7 +77,7 @@ pub fn plan_msi_install(
             )
         })?;
     let preview = MsiInstallPreview {
-        schema_version: "aiw.dev/msi-install-preview/v0alpha2",
+        schema_version: "aiw.dev/msi-install-preview/v0alpha3",
         project_revision_sha256: aiw_orchestrator::project_revision_hash(project)?,
         scenario_id: scenario_id.into(),
         intake_receipt_sha256: held.verification().receipt_sha256.clone(),
@@ -214,18 +214,14 @@ fn compile_operation(
         privilege: "elevatedInsideWorker",
         requested_scope: "perMachine",
         executable: r"C:\Windows\System32\msiexec.exe",
-        arguments: [
-            "/i",
-            GUEST_MSI,
-            "/qn",
-            "/norestart",
-            "ALLUSERS=1",
-            match log_mode {
-                MsiInstallLogMode::FlushedVerbose => MSI_INSTALL_LOG_ARGUMENT,
-                MsiInstallLogMode::BufferedVerbose => MSI_INSTALL_BUFFERED_LOG_ARGUMENT,
-            },
-            MSI_INSTALL_LOG_PATH,
-        ],
+        arguments: aiw_provider_wsb::compile_generic_msi_install(
+            project,
+            scenario_id,
+            timeout_seconds,
+            matches!(log_mode, MsiInstallLogMode::BufferedVerbose),
+        )
+        .map_err(|error| blocked(UNSUPPORTED, &error.to_string()))?
+        .install_arguments,
         max_install_log_observation_bytes: MAX_MSI_INSTALL_LOG_BYTES,
         timeout_seconds,
         expected_exit_code: 0,
@@ -285,7 +281,7 @@ mod tests {
                 "/norestart",
                 "ALLUSERS=1",
                 MSI_INSTALL_LOG_ARGUMENT,
-                MSI_INSTALL_LOG_PATH,
+                GENERIC_MSI_LOCAL_LOG,
             ]
         );
         assert_eq!(
@@ -300,7 +296,7 @@ mod tests {
     fn buffered_logging_only_changes_the_reviewed_logging_argument() {
         let project = project();
         let mut expected = compile(&project).unwrap();
-        expected.arguments[5] = "/L*V";
+        expected.arguments[5] = "/L*V".into();
         let buffered = compile_operation(
             &project,
             "install",

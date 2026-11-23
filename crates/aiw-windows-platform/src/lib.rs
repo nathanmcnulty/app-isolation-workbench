@@ -239,6 +239,8 @@ mod guest_filesystem;
 #[cfg(windows)]
 mod guest_msi_product;
 #[cfg(windows)]
+pub use guest_msi_product::execute_generic_msi_install;
+#[cfg(windows)]
 mod guest_registry;
 
 #[cfg(windows)]

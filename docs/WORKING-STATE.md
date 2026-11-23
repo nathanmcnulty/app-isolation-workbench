@@ -1,6 +1,6 @@
 # Working state
 
-Updated 2026-11-22 (UTC). Effective goal #108 is one application-neutral
+Updated 2026-11-23 (UTC). Effective goal #108 is one application-neutral
 assessment and replay path for two different external administrator-supplied
 fixtures. #111 evidence is preserved and its legacy application-specific work is
 paused. Draft PR #112 uses `codex/application-neutral-assessment` in
@@ -45,12 +45,16 @@ admitted retained bytes with no application/provider calls. This is CLI evidence
 not native desktop acceptance. The private checkpoint records precise receipts,
 failed attempts and consumed invocations.
 
-Current source passed focused creation regression, Clippy, format, governance and
+The exact #112 portable head cb77844f200f82dff47860c87b881805041a069a passed the
+focused comparison and replay tests, the desktop dependency audit, and all
+three jobs in CI run 45087985035. The dependency fix is present in #114 as well.
+
+The prior source passed focused creation regression, Clippy, format, governance and
 independent boundary reviews. CI 44977826307 passed all three jobs; Workspace
 verification exited 0 in 427.47 seconds with the tested merge tree matching source.
 Documentation-only reconciliation does not require rebuilding those images.
 
-## Dependent MSI preview
+## Dependent MSI assessment
 
 PR #112 review fix `9de43ed` requires authenticated local Start in both comparison
 lanes and preserves the portable payload depth under the replay wrapper.
@@ -62,8 +66,19 @@ VM107 traces measured about 121–122 seconds of Windows trust verification
 before App Control allowed both packages. The 300-second runs verified
 control completion, machine registration and two executable candidates. The
 CMake holdout reached `ProcessComponents` with buffered logging and timed out
-without registering. Separately approved production execution and operator
-entry-point selection remain open. See [installer diagnostics](APPLICATION-ASSESSMENT.md#installer-diagnostics).
+without registering. See [installer diagnostics](APPLICATION-ASSESSMENT.md#installer-diagnostics).
+
+The install-only profile now uses the prepared plan, separate approval, Start,
+and retained report. In the first approved Notepad++ trial, Start refused the
+unapproved plan. After explicit approval Windows Installer returned 0, machine
+registration changed from absent to installed, and exact Sandbox cleanup passed.
+Retained Read confirmed those observations. Its candidate scan was incomplete.
+A read-only comparison on the control and 7-Zip MSI bytes isolated error 1615 to
+SQL identifier quoting. The corrected queries returned two and three executable
+component key rows respectively. Check #114 for the fresh native validation of
+the corrected scan. The next plan must bind the operator’s chosen path, component,
+size and hash to these observations and remeasure the candidate before a launch
+under the reviewed application token.
 
 ## Remaining scope
 

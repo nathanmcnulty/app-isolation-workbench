@@ -63,6 +63,7 @@ pub const WSB_PLANNING_IMPORT_RESULT_SCHEMA_VERSION: &str =
     "aiw.dev/wsb-planning-import-result/v0alpha1";
 
 const READINESS_SCHEMA: &str = "aiw.dev/windows-sandbox-readiness/v0alpha2";
+const INSTALL_DISCOVERY_PREPARATION: &str = "aiw.dev/wsb-preparation-receipt/v0alpha7";
 const PINNED_CLI_VERSION: &str = "0.8.107.0";
 // Historical builders keep their original protocol; generic v2 selects explicitly.
 const PINNED_CLI_PROTOCOL: &str = "windowsSandboxCli/v0.8.107.0";
@@ -86,6 +87,12 @@ fn msi_trust_delta(msi: &WsbMsiApplication) -> String {
     }
 }
 fn msi_execution_trust_delta(msi: &WsbMsiApplication) -> String {
+    if msi.scenario.is_generic_install_only() {
+        return format!(
+            "installs the approved MSI elevated inside one offline disposable Windows Sandbox for up to {} seconds, observes fresh machine registration, and reports executable component candidates for a separate operator choice; installation grants no host execution or trust and selects no executable",
+            msi.scenario.install_timeout_seconds,
+        );
+    }
     if msi.scenario.requires_local_settings() {
         return format!(
             "installs and exercises the approved imported MSI in Windows Sandbox; creates the fresh directory {} as the standard user with inherited permissions and redirects Notepad++ settings there; settings are discarded with the worker; no additional host mappings, network access, capabilities, or ACL grants",
@@ -415,7 +422,13 @@ impl WsbPreparationReceipt {
             os.validate().map_err(WsbPreparationError::Contract)?;
         }
         let deferred = self.provider_protocol_observation.is_some();
-        let expected_schema = if self.application_assessment.is_some() {
+        let install_discovery = self
+            .msi
+            .as_ref()
+            .is_some_and(|msi| msi.scenario.is_generic_install_only());
+        let expected_schema = if install_discovery {
+            INSTALL_DISCOVERY_PREPARATION
+        } else if self.application_assessment.is_some() {
             if historical
                 && matches!(
                     self.schema_version.as_str(),
@@ -559,7 +572,17 @@ impl WsbPreparationReceipt {
                 "historical v1 preparation did not authorize a new protocol".into(),
             ));
         }
+        if install_discovery
+            && (self.provider_protocol
+                != aiw_probe::WindowsSandboxCliAdapter::V0_8_114_0.protocol()
+                || self.provider_package.version != self.provider_protocol.cli_version)
+        {
+            return Err(WsbPreparationError::Readiness(
+                "install discovery requires the qualified exact114 protocol".into(),
+            ));
+        }
         if self.application_assessment.is_none()
+            && !install_discovery
             && self.provider_protocol.cli_version != PINNED_CLI_VERSION
         {
             return Err(WsbPreparationError::Readiness(
@@ -725,9 +748,14 @@ impl PreparedWsbArtifacts {
                     import_receipt_sha256,
                     application_sha256,
                     scenario_sha256,
+                    provider_protocol,
                 },
                 PlannedAction::CollectEvidence,
             ] => self.receipt.msi.as_ref().is_some_and(|msi| {
+                let expected_protocol = msi
+                    .scenario
+                    .is_generic_install_only()
+                    .then_some(&self.receipt.provider_protocol);
                 sandbox_plan_sha256 == &self.receipt.wsb_plan_sha256
                     && provider_sha256 == &self.receipt.provider.sha256
                     && guest_agent_sha256 == &self.receipt.guest_agent.sha256
@@ -736,6 +764,7 @@ impl PreparedWsbArtifacts {
                     && import_receipt_sha256 == &msi.import_receipt_sha256
                     && application_sha256 == &msi.staged_payload.sha256
                     && scenario_sha256 == &msi.scenario_sha256
+                    && provider_protocol.as_ref() == expected_protocol
             }),
             [
                 PlannedAction::AssessHost,
@@ -989,6 +1018,48 @@ fn build_preparation_identity(
     Ok(artifacts)
 }
 
+fn build_msi_base(
+    run_id: &str,
+    project: &Project,
+    readiness: &WindowsSandboxReadiness,
+    workspace: &WorkspaceBindingEvidence,
+    guest_agent: &BinaryIdentity,
+    created_at: &str,
+    discovery: bool,
+) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
+    if !discovery {
+        return build_wsb_preparation(
+            run_id,
+            project,
+            readiness,
+            workspace,
+            guest_agent,
+            created_at,
+        );
+    }
+    let trusted = require_readiness(readiness)?;
+    let protocol = aiw_probe::WindowsSandboxCliAdapter::V0_8_114_0.protocol();
+    if readiness.cli_protocol.as_ref() != Some(&protocol)
+        || trusted.package.version != protocol.cli_version
+    {
+        return Err(WsbPreparationError::Readiness(
+            "install discovery requires the qualified exact114 protocol".into(),
+        ));
+    }
+    build_preparation_identity(
+        run_id,
+        project,
+        workspace,
+        guest_agent,
+        created_at,
+        trusted,
+        &readiness.schema_version,
+        readiness.os_version.as_ref(),
+        &protocol,
+        false,
+    )
+}
+
 pub fn build_wsb_msi_preparation(
     run_id: &str,
     project: &Project,
@@ -1007,7 +1078,7 @@ pub fn build_wsb_msi_preparation(
             document.staged_payload.size_bytes,
         )
     } else {
-        aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(project, &msi.scenario.scenario_id)
+        aiw_provider_wsb::compile_imported_msi_scenario(project, &msi.scenario.scenario_id)
     }
     .map_err(|e| WsbPreparationError::Project(e.to_string()))?;
     if compiled != msi.scenario {
@@ -1015,13 +1086,14 @@ pub fn build_wsb_msi_preparation(
             "compiled scenario differs from project".to_owned(),
         ));
     }
-    let mut artifacts = build_wsb_preparation(
+    let mut artifacts = build_msi_base(
         run_id,
         project,
         readiness,
         workspace,
         guest_agent,
         created_at,
+        msi.scenario.is_generic_install_only(),
     )?;
     artifacts.wsb_plan.probe.output = GUEST_MSI_RESULT.to_owned();
     artifacts.receipt.wsb_plan_sha256 = canonical_hash(&artifacts.wsb_plan)?;
@@ -1043,6 +1115,10 @@ pub fn build_wsb_msi_preparation(
                 import_receipt_sha256: msi.import_receipt_sha256.clone(),
                 application_sha256: msi.staged_payload.sha256.clone(),
                 scenario_sha256: msi.scenario_sha256.clone(),
+                provider_protocol: msi
+                    .scenario
+                    .is_generic_install_only()
+                    .then(|| artifacts.receipt.provider_protocol.clone()),
             },
             PlannedAction::CollectEvidence,
         ],
@@ -1053,7 +1129,9 @@ pub fn build_wsb_msi_preparation(
         .run_plan
         .hash()
         .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
-    artifacts.receipt.schema_version = if msi.launch_profile.is_some() {
+    artifacts.receipt.schema_version = if msi.scenario.is_generic_install_only() {
+        INSTALL_DISCOVERY_PREPARATION.to_owned()
+    } else if msi.launch_profile.is_some() {
         WSB_MSI_PROFILE_PREPARATION_RECEIPT_SCHEMA_VERSION.to_owned()
     } else if msi.required_observations.is_some() {
         WSB_MSI_OBSERVATION_PREPARATION_RECEIPT_SCHEMA_VERSION.to_owned()
@@ -1606,7 +1684,7 @@ fn prepare_bundle(
                     document.observation().size_bytes,
                 )
             } else {
-                aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(project, input.scenario_id)
+                aiw_provider_wsb::compile_imported_msi_scenario(project, input.scenario_id)
             }
             .map_err(|e| WsbPreparationError::Project(e.to_string()))?;
             if input.import_receipt.source_kind != aiw_probe::ApplicationInspectionKind::Msi
@@ -1681,13 +1759,15 @@ fn prepare_bundle(
             None, // The installer is staged only after the base preparation is built.
             staged_document.is_some(),
         )?;
-        let mut artifacts = build_wsb_preparation(
+        let discovery = matches!(&held_application, Some((_, PreparedApplicationScenario::Msi(scenario))) if scenario.is_generic_install_only());
+        let mut artifacts = build_msi_base(
             run_id,
             project,
             &readiness,
             workspace.evidence(),
             &guest_agent,
             created_at,
+            discovery,
         )?;
         let held_staged_application = if let Some((held, scenario)) = &mut held_application {
             let (file_name, expected_receipt) = match (&application_input, &*scenario) {
@@ -1736,12 +1816,9 @@ fn prepare_bundle(
                             }
                             _ => None,
                         },
-                        required_observations: scenario
-                            .interactive_session_seconds
-                            .is_none()
-                            .then_some(
-                                aiw_provider_wsb::MsiRequiredObservations::StandardUserAclV1,
-                            ),
+                        required_observations: (scenario.interactive_session_seconds.is_none()
+                            && !scenario.is_generic_install_only())
+                        .then_some(aiw_provider_wsb::MsiRequiredObservations::StandardUserAclV1),
                         import_receipt: expected_receipt.clone(),
                         import_receipt_sha256: held.verification().receipt_sha256.clone(),
                         scenario: scenario.clone(),
@@ -2138,10 +2215,7 @@ fn open_verified_preparation_with_inspector(
                     document.staged_payload.size_bytes,
                 )
             } else {
-                aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
-                    project,
-                    &msi.scenario.scenario_id,
-                )
+                aiw_provider_wsb::compile_imported_msi_scenario(project, &msi.scenario.scenario_id)
             };
             (
                 &msi.import_receipt,
@@ -3979,11 +4053,9 @@ pub(crate) mod tests {
 
     pub(super) fn fake_msi_application() -> WsbMsiApplication {
         let project = msi_project();
-        let scenario = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
-            &project,
-            "install-launch-close",
-        )
-        .unwrap();
+        let scenario =
+            aiw_provider_wsb::compile_imported_msi_scenario(&project, "install-launch-close")
+                .unwrap();
         let import_receipt = fake_import_receipt(&scenario);
         let import_receipt_sha256 =
             hex::encode(Sha256::digest(serde_json::to_vec(&import_receipt).unwrap()));
@@ -4021,7 +4093,7 @@ pub(crate) mod tests {
         let scenario =
             aiw_provider_wsb::compile_bambu_studio_export_scenario(&project, "export-3mf").unwrap();
         let mut import_receipt = fake_import_receipt(
-            &aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
+            &aiw_provider_wsb::compile_imported_msi_scenario(
                 &msi_project(),
                 "install-launch-close",
             )
@@ -4101,11 +4173,9 @@ pub(crate) mod tests {
         let mut msi = fake_msi_application();
         msi.required_observations =
             Some(aiw_provider_wsb::MsiRequiredObservations::StandardUserAclV1);
-        msi.scenario = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
-            &project,
-            "install-launch-close",
-        )
-        .unwrap();
+        msi.scenario =
+            aiw_provider_wsb::compile_imported_msi_scenario(&project, "install-launch-close")
+                .unwrap();
         msi.scenario_sha256 = msi.scenario.canonical_sha256().unwrap();
         let build = |msi| {
             build_wsb_msi_preparation(
@@ -4375,11 +4445,9 @@ pub(crate) mod tests {
                 timeout_seconds: seconds,
             };
             let mut msi = fake_msi_application();
-            msi.scenario = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
-                &project,
-                "install-launch-close",
-            )
-            .unwrap();
+            msi.scenario =
+                aiw_provider_wsb::compile_imported_msi_scenario(&project, "install-launch-close")
+                    .unwrap();
             msi.scenario_sha256 = msi.scenario.canonical_sha256().unwrap();
             let artifacts = build_wsb_msi_preparation(
                 "run-one",
@@ -4410,11 +4478,9 @@ pub(crate) mod tests {
         };
         arguments.push(aiw_provider_wsb::NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_ARGUMENT.into());
         let mut msi = fake_msi_application();
-        msi.scenario = aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario(
-            &project,
-            "install-launch-close",
-        )
-        .unwrap();
+        msi.scenario =
+            aiw_provider_wsb::compile_imported_msi_scenario(&project, "install-launch-close")
+                .unwrap();
         msi.scenario_sha256 = msi.scenario.canonical_sha256().unwrap();
         let artifacts = build_wsb_msi_preparation(
             "run-one",
