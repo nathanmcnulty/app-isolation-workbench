@@ -299,6 +299,80 @@ fn replay_comparison_distinguishes_manifest_bytes_from_declared_changes() {
 
 #[test]
 #[cfg(windows)]
+fn replay_manifest_pin_rejects_stale_review_before_preparation() {
+    let temp = TempDir::new();
+    let package = synthetic_replay_package(
+        &temp,
+        "pin-test",
+        false,
+        "inert-private-argument",
+        "ordinary",
+    );
+    let manifest = package.join("package.json");
+    let original = fs::read(&manifest).unwrap();
+    let sha256 = hex::encode(Sha256::digest(&original));
+    let verify = |format: &str, expected: Option<&str>| {
+        let mut command = Command::new(aiw());
+        command
+            .args(["application", "verify-assessment-package", "--package"])
+            .arg(&package)
+            .args(["--format", format]);
+        if let Some(expected) = expected {
+            command.args(["--expected-manifest-sha256", expected]);
+        }
+        command.output().unwrap()
+    };
+    let rejected = |output: std::process::Output, code: &str| {
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty());
+        let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert_eq!(error["code"], code, "{error}");
+        assert_eq!(error["stage"], "replayValidation");
+        assert_eq!(error["retryable"], false);
+        assert!(!String::from_utf8_lossy(&output.stderr).contains(&sha256));
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("PRIVATE-INVALID-HASH"));
+    };
+    for format in ["json", "review"] {
+        let pinned = verify(format, Some(&sha256));
+        assert!(pinned.status.success(), "{:?}", pinned.stderr);
+        assert!(pinned.stderr.is_empty());
+        assert_eq!(pinned.stdout, verify(format, None).stdout);
+    }
+    rejected(
+        verify("review", Some("PRIVATE-INVALID-HASH")),
+        "AIW_REPLAY_EXPECTED_MANIFEST_SHA256_INVALID",
+    );
+
+    // A valid package can still differ from the reviewed manifest bytes.
+    let mut changed = original;
+    changed.push(b'\n');
+    fs::write(&manifest, &changed).unwrap();
+    assert!(verify("review", None).status.success());
+    for format in ["json", "review"] {
+        rejected(
+            verify(format, Some(&sha256)),
+            "AIW_REPLAY_MANIFEST_SHA256_MISMATCH",
+        );
+    }
+    let evidence = temp.path().join("evidence");
+    fs::create_dir(&evidence).unwrap();
+    let output = Command::new(aiw())
+        .args(["application", "prepare-assessment-package", "--package"])
+        .arg(&package)
+        .args(["--expected-manifest-sha256", &sha256, "--guest-agent"])
+        .arg(temp.path().join("absent-agent.exe"))
+        .args(["--guest-agent-sha256", &"0".repeat(64), "--evidence-parent"])
+        .arg(&evidence)
+        .args(["--operator", "test-operator"])
+        .output()
+        .unwrap();
+    rejected(output, "AIW_REPLAY_MANIFEST_SHA256_MISMATCH");
+    assert!(fs::read_dir(&evidence).unwrap().next().is_none());
+    assert_eq!(fs::read(&manifest).unwrap(), changed);
+}
+
+#[test]
+#[cfg(windows)]
 fn replay_verification_distinguishes_package_failures() {
     use aiw_windows_platform::CreatedWorkspaceDirectory;
 

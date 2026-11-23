@@ -65,6 +65,8 @@ pub enum ReplayValidationError {
         wrong_kind: usize,
     },
     ContentMismatch,
+    InvalidExpectedManifestSha256,
+    ManifestSha256Mismatch,
 }
 
 impl std::fmt::Display for ReplayValidationError {
@@ -90,6 +92,12 @@ impl std::fmt::Display for ReplayValidationError {
             ),
             Self::ContentMismatch => {
                 f.write_str("replay file size or SHA-256 differs from the reviewed package")
+            }
+            Self::InvalidExpectedManifestSha256 => {
+                f.write_str("expected package manifest hash must be lowercase SHA-256")
+            }
+            Self::ManifestSha256Mismatch => {
+                f.write_str("package.json SHA-256 differs from the supplied review identity")
             }
         }
     }
@@ -144,7 +152,24 @@ impl VerifiedApplicationReplayPackage {
 /// Strict closed inventory, exact hashes and compiler reuse. Never executes.
 #[cfg(windows)]
 pub fn verify_package(path: &Path) -> Result<VerifiedApplicationReplayPackage> {
+    verify_package_with_manifest_sha256(path, None)
+}
+
+/// Verify the package and optionally require its exact reviewed manifest bytes.
+#[cfg(windows)]
+pub fn verify_package_with_manifest_sha256(
+    path: &Path,
+    expected_manifest_sha256: Option<&str>,
+) -> Result<VerifiedApplicationReplayPackage> {
     use aiw_probe::PortableContentEntryKind as Kind;
+    if expected_manifest_sha256.is_some_and(|expected| {
+        expected.len() != 64
+            || !expected
+                .bytes()
+                .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    }) {
+        return Err(ReplayValidationError::InvalidExpectedManifestSha256.into());
+    }
     let held = aiw_windows_platform::HeldPortableDirectory::open_replay_package(path)?;
     if !held
         .manifest()
@@ -227,11 +252,15 @@ pub fn verify_package(path: &Path) -> Result<VerifiedApplicationReplayPackage> {
     }
     manifest_file.revalidate()?;
     held.revalidate()?;
+    let manifest_sha256 = &manifest_file.observation().sha256;
+    if expected_manifest_sha256.is_some_and(|expected| expected != manifest_sha256) {
+        return Err(ReplayValidationError::ManifestSha256Mismatch.into());
+    }
     Ok(VerifiedApplicationReplayPackage {
         package,
         source: root.join("payload"),
         inputs,
-        manifest_sha256: manifest_file.observation().sha256.clone(),
+        manifest_sha256: manifest_sha256.clone(),
         held,
     })
 }
@@ -284,7 +313,15 @@ enum ReplayReviewStep {
 /// Review a verified package snapshot without creating a plan, approval or workspace.
 #[cfg(windows)]
 pub fn review_package(path: &Path) -> Result<ReplayPackageReview> {
-    let verified = verify_package(path)?;
+    review_package_with_manifest_sha256(path, None)
+}
+
+#[cfg(windows)]
+pub fn review_package_with_manifest_sha256(
+    path: &Path,
+    expected_manifest_sha256: Option<&str>,
+) -> Result<ReplayPackageReview> {
+    let verified = verify_package_with_manifest_sha256(path, expected_manifest_sha256)?;
     verified.revalidate()?;
     let compiled = verified.package.compiled;
     let steps = compiled

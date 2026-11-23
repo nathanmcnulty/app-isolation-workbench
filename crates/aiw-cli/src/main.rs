@@ -424,6 +424,9 @@ enum ApplicationCommand {
     VerifyAssessmentPackage {
         #[arg(long)]
         package: PathBuf,
+        /// Require the exact package.json SHA-256 from a prior review or comparison.
+        #[arg(long)]
+        expected_manifest_sha256: Option<String>,
         /// Return the full manifest or a compact verified review.
         #[arg(long, value_enum, default_value_t = ReplayPackageFormat::Json)]
         format: ReplayPackageFormat,
@@ -439,6 +442,9 @@ enum ApplicationCommand {
     PrepareAssessmentPackage {
         #[arg(long)]
         package: PathBuf,
+        /// Require the exact package.json SHA-256 before preparing the workspace.
+        #[arg(long)]
+        expected_manifest_sha256: Option<String>,
         #[arg(long)]
         guest_agent: PathBuf,
         #[arg(long)]
@@ -2160,22 +2166,31 @@ fn run_general(command: Command) -> Result<()> {
                     bail!("protected package export requires Windows")
                 }
             }
-            ApplicationCommand::VerifyAssessmentPackage { package, format } => {
+            ApplicationCommand::VerifyAssessmentPackage {
+                package,
+                expected_manifest_sha256,
+                format,
+            } => {
                 #[cfg(windows)]
                 {
-                    use aiw_admin_workflow::application_package::{review_package, verify_package};
+                    use aiw_admin_workflow::application_package::{
+                        review_package_with_manifest_sha256, verify_package_with_manifest_sha256,
+                    };
+                    let expected = expected_manifest_sha256.as_deref();
                     match format {
                         ReplayPackageFormat::Json => {
-                            let verified = verify_package(&package)?;
+                            let verified = verify_package_with_manifest_sha256(&package, expected)?;
                             verified.revalidate()?;
                             write_json(&verified.package)
                         }
-                        ReplayPackageFormat::Review => write_json(&review_package(&package)?),
+                        ReplayPackageFormat::Review => {
+                            write_json(&review_package_with_manifest_sha256(&package, expected)?)
+                        }
                     }
                 }
                 #[cfg(not(windows))]
                 {
-                    let _ = (package, format);
+                    let _ = (package, expected_manifest_sha256, format);
                     bail!("protected package verification requires Windows")
                 }
             }
@@ -2197,6 +2212,7 @@ fn run_general(command: Command) -> Result<()> {
             }
             ApplicationCommand::PrepareAssessmentPackage {
                 package,
+                expected_manifest_sha256,
                 guest_agent,
                 guest_agent_sha256,
                 evidence_parent,
@@ -2205,8 +2221,9 @@ fn run_general(command: Command) -> Result<()> {
                 #[cfg(windows)]
                 {
                     let prepared =
-                        aiw_admin_workflow::application_assessment::prepare_package_for_review(
+                        aiw_admin_workflow::application_assessment::prepare_package_for_review_with_manifest_sha256(
                             &package,
+                            expected_manifest_sha256.as_deref(),
                             &guest_agent,
                             &guest_agent_sha256,
                             &evidence_parent,
@@ -2220,6 +2237,7 @@ fn run_general(command: Command) -> Result<()> {
                 {
                     let _ = (
                         package,
+                        expected_manifest_sha256,
                         guest_agent,
                         guest_agent_sha256,
                         evidence_parent,
@@ -4053,6 +4071,14 @@ fn emit_anyhow_error(error: &anyhow::Error) {
             ReplayValidationError::ContentMismatch => (
                 "AIW_REPLAY_CONTENT_MISMATCH",
                 "Restore the original exported file bytes or export a fresh replay package from the reviewed inputs.",
+            ),
+            ReplayValidationError::InvalidExpectedManifestSha256 => (
+                "AIW_REPLAY_EXPECTED_MANIFEST_SHA256_INVALID",
+                "Supply the 64-character lowercase packageManifestSha256 from the package review or comparison.",
+            ),
+            ReplayValidationError::ManifestSha256Mismatch => (
+                "AIW_REPLAY_MANIFEST_SHA256_MISMATCH",
+                "Select the package that was reviewed, or review the current package before using its manifest SHA-256.",
             ),
         };
         emit_error(&ErrorEnvelope {
