@@ -424,6 +424,9 @@ enum ApplicationCommand {
     VerifyAssessmentPackage {
         #[arg(long)]
         package: PathBuf,
+        /// Return the full manifest or a compact verified review.
+        #[arg(long, value_enum, default_value_t = ReplayPackageFormat::Json)]
+        format: ReplayPackageFormat,
     },
     /// Revalidate a replay package and create fresh review data; never reuse approval or session authority.
     PrepareAssessmentPackage {
@@ -1417,6 +1420,12 @@ struct LoadedProject {
     project: Project,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum ReplayPackageFormat {
+    Json,
+    Review,
+}
+
 fn main() -> ExitCode {
     let command = match Cli::try_parse() {
         Ok(cli) => cli.command,
@@ -2144,17 +2153,22 @@ fn run_general(command: Command) -> Result<()> {
                     bail!("protected package export requires Windows")
                 }
             }
-            ApplicationCommand::VerifyAssessmentPackage { package } => {
+            ApplicationCommand::VerifyAssessmentPackage { package, format } => {
                 #[cfg(windows)]
                 {
-                    let verified =
-                        aiw_admin_workflow::application_package::verify_package(&package)?;
-                    verified.revalidate()?;
-                    write_json(&verified.package)
+                    use aiw_admin_workflow::application_package::{review_package, verify_package};
+                    match format {
+                        ReplayPackageFormat::Json => {
+                            let verified = verify_package(&package)?;
+                            verified.revalidate()?;
+                            write_json(&verified.package)
+                        }
+                        ReplayPackageFormat::Review => write_json(&review_package(&package)?),
+                    }
                 }
                 #[cfg(not(windows))]
                 {
-                    let _ = package;
+                    let _ = (package, format);
                     bail!("protected package verification requires Windows")
                 }
             }

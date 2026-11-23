@@ -340,6 +340,10 @@ registry or vendor asset manifest selects execution:
 - `application export-assessment-package`, `verify-assessment-package` and
   `prepare-assessment-package`: copy/verify the same external data and prepare
   fresh review. Import never reuses execution authority.
+- Add `--format review` to `verify-assessment-package` for a compact, read-only
+  JSON review bound to the exact `package.json` SHA-256. It shows declared
+  inputs, ordered steps, requested run conditions and expected outputs.
+  Launch steps show an argument count. Verification reads the package in place.
 
 Use `schema assessment-settings`, `compiled-assessment`,
 `application-assessment-guest-request`, `application-assessment-result`,

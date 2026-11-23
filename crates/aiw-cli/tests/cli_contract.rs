@@ -117,6 +117,9 @@ fn replay_verification_distinguishes_package_failures() {
     let source = temp.path().join("source");
     fs::create_dir(&source).unwrap();
     fs::write(source.join("fixture.exe"), b"inert fixture bytes").unwrap();
+    let input = temp.path().join("fixture-input.bin");
+    let input_bytes = b"inert input bytes";
+    fs::write(&input, input_bytes).unwrap();
     let held = HeldPortableDirectory::open(&source).unwrap();
     let project: Project = serde_json::from_value(serde_json::json!({
         "schemaVersion": aiw_schema::PROJECT_SCHEMA_VERSION, "kind": aiw_schema::PROJECT_KIND,
@@ -129,7 +132,8 @@ fn replay_verification_distinguishes_package_failures() {
             "requireDescendantCoverage":false},
         "candidates":[{"id":"ordinary","type":"unpackagedBaseline","config":{"type":"baseline"}}],
         "scenarios":[{"id":"workflow","description":"Inert fixture",
-            "steps":[{"type":"install"},{"type":"launch","entrypoint":"main"},
+            "steps":[{"type":"install"},
+                     {"type":"launch","entrypoint":"main","arguments":["inert-private-argument"]},
                      {"type":"expectExitCode","value":0}]}],
         "assertions":{"requireEffectiveBackendMatch":true, "requireTargetTokenEvidence":true,
             "requireExpectedChildCoverage":false, "requireOfflineCanaryDenied":false,
@@ -139,7 +143,9 @@ fn replay_verification_distinguishes_package_failures() {
     drop(held);
     let settings: AssessmentSettings = serde_json::from_value(serde_json::json!({
         "schemaVersion": ASSESSMENT_SETTINGS_SCHEMA, "scenarioId":"workflow",
-        "candidateId":"ordinary", "workingDirectory":".", "inputs":[],
+        "candidateId":"ordinary", "workingDirectory":".",
+        "inputs":[{"id":"data","path":"fixture-input.bin","sizeBytes":input_bytes.len(),
+                   "sha256":hex::encode(Sha256::digest(input_bytes))}],
         "assertions":[{"id":"stdout","target":{"type":"stdout","launchStep":1},"expectedSizeBytes":0}],
         "totalTimeoutSeconds":60,"processTimeoutSeconds":20,"stdoutMaxBytes":4096,
         "stderrMaxBytes":4096,"fileMaxBytes":8192
@@ -149,19 +155,75 @@ fn replay_verification_distinguishes_package_failures() {
         &project,
         &settings,
         &source,
-        &Default::default(),
+        &std::collections::BTreeMap::from([("data".to_owned(), input)]),
         temp.path(),
         "package",
     )
     .unwrap();
     let manifest = package.join("package.json");
-    let original: Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+    let original_bytes = fs::read(&manifest).unwrap();
+    let original: Value = serde_json::from_slice(&original_bytes).unwrap();
     let accepted = verify(&package);
     assert!(accepted.status.success(), "{:?}", accepted.stderr);
     assert!(accepted.stderr.is_empty());
     assert_eq!(
         serde_json::from_slice::<Value>(&accepted.stdout).unwrap(),
         original
+    );
+
+    let review = || {
+        Command::new(aiw())
+            .args(["application", "verify-assessment-package", "--package"])
+            .arg(&package)
+            .args(["--format", "review"])
+            .output()
+            .unwrap()
+    };
+    let first = review();
+    assert!(first.status.success(), "{:?}", first.stderr);
+    assert!(first.stderr.is_empty());
+    assert_eq!(review().stdout, first.stdout);
+    let reviewed: Value = serde_json::from_slice(&first.stdout).unwrap();
+    assert_eq!(
+        reviewed["schemaVersion"],
+        "aiw.dev/application-replay-package-review/v0alpha1"
+    );
+    assert_eq!(
+        reviewed["packageManifestSha256"],
+        hex::encode(Sha256::digest(&original_bytes))
+    );
+    assert_eq!(
+        reviewed["semanticSha256"],
+        original["compiled"]["semanticSha256"]
+    );
+    assert_eq!(reviewed["mode"], "ordinary");
+    assert_eq!(reviewed["userContext"], "standardUser");
+    assert_eq!(reviewed["networkBlockingRequested"], true);
+    assert_eq!(
+        reviewed["inputs"],
+        original["compiled"]["settings"]["inputs"]
+    );
+    assert_eq!(
+        reviewed["expectedOutputs"],
+        original["compiled"]["settings"]["assertions"]
+    );
+    assert_eq!(reviewed["steps"][1]["argumentCount"], 1);
+    assert_eq!(reviewed["steps"][2]["type"], "expectExitCode");
+    assert_eq!(reviewed["steps"][2]["value"], 0);
+    assert!(!reviewed.to_string().contains("inert-private-argument"));
+    assert_eq!(fs::read(&manifest).unwrap(), original_bytes);
+    assert_eq!(fs::read_dir(&package).unwrap().count(), 3);
+
+    let mut with_whitespace = original_bytes.clone();
+    with_whitespace.push(b'\n');
+    fs::write(&manifest, &with_whitespace).unwrap();
+    let changed = review();
+    assert!(changed.status.success(), "{:?}", changed.stderr);
+    let changed: Value = serde_json::from_slice(&changed.stdout).unwrap();
+    assert_eq!(changed["semanticSha256"], reviewed["semanticSha256"]);
+    assert_eq!(
+        changed["packageManifestSha256"],
+        hex::encode(Sha256::digest(with_whitespace))
     );
 
     let mut unsupported = original.clone();
@@ -204,6 +266,12 @@ fn replay_verification_distinguishes_package_failures() {
         assert!(!error.to_string().contains("fixture.exe"));
         assert_eq!(fs::read(&payload).unwrap(), changed);
     }
+
+    let rejected_review = review();
+    assert_eq!(rejected_review.status.code(), Some(1));
+    assert!(rejected_review.stdout.is_empty());
+    let diagnostic: Value = serde_json::from_slice(&rejected_review.stderr).unwrap();
+    assert_eq!(diagnostic["code"], "AIW_REPLAY_CONTENT_MISMATCH");
 
     // Use the same protected creation path as the exporter before adding the extra.
     let holding = CreatedWorkspaceDirectory::create_protected(temp.path(), "holding").unwrap();
