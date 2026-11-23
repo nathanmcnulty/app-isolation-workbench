@@ -3994,6 +3994,21 @@ fn preparation_import_error_envelope(error: &RunPreparationImportFailed) -> Erro
 
 fn emit_anyhow_error(error: &anyhow::Error) {
     #[cfg(windows)]
+    if let Some(error) =
+        error.downcast_ref::<aiw_admin_workflow::application_package::ReplayManifestParseError>()
+    {
+        emit_error(&ErrorEnvelope {
+            code: "AIW_REPLAY_MANIFEST_PARSE_FAILED".to_owned(),
+            summary: "assessment replay manifest could not be parsed".to_owned(),
+            stage: "replayManifest".to_owned(),
+            run_id: None,
+            retryable: false,
+            remediation: "Inspect package.json at the reported location and regenerate the replay package from its reviewed inputs.".to_owned(),
+            detail: error.to_string(),
+        });
+        return;
+    }
+    #[cfg(windows)]
     if let Some(error) = error.downcast_ref::<PortableImportFailed>() {
         emit_error(&ErrorEnvelope {
             code: if error.verification {

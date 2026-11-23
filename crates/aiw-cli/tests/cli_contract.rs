@@ -49,6 +49,40 @@ fn aiw() -> PathBuf {
 
 #[test]
 #[cfg(windows)]
+fn malformed_replay_manifest_reports_a_parse_location_without_writes() {
+    let temp = TempDir::new();
+    let root =
+        aiw_windows_platform::CreatedWorkspaceDirectory::create_protected(temp.path(), "package")
+            .unwrap();
+    let package = root.final_path().to_path_buf();
+    let manifest = package.join("package.json");
+    let bytes = b"{\n  \"schemaVersion\" = \"synthetic-data\"\n}";
+    let mut file = root.create_file_new("package.json").unwrap();
+    file.as_file_mut().write_all(bytes).unwrap();
+    file.as_file_mut().sync_all().unwrap();
+    drop(file);
+    drop(root);
+
+    let output = Command::new(aiw())
+        .args(["application", "verify-assessment-package", "--package"])
+        .arg(&package)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(error["code"], "AIW_REPLAY_MANIFEST_PARSE_FAILED");
+    assert_eq!(error["stage"], "replayManifest");
+    assert_eq!(error["retryable"], false);
+    let detail = error["detail"].as_str().unwrap();
+    assert!(detail.contains("package.json: invalid JSON syntax at line 2, column "));
+    assert!(!detail.contains("synthetic-data"));
+    assert_eq!(fs::read(&manifest).unwrap(), bytes);
+    assert_eq!(fs::read_dir(&package).unwrap().count(), 1);
+}
+
+#[test]
+#[cfg(windows)]
 fn admin_export_rejects_missing_package_and_guest_drift_before_destination_creation() {
     let temp = TempDir::new();
     let executable = temp.path().join("aiw.exe");

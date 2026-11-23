@@ -14,6 +14,41 @@ pub struct ApplicationReplayPackage {
     pub compiled: CompiledAssessment,
 }
 
+#[derive(Debug)]
+pub struct ReplayManifestParseError {
+    description: &'static str,
+    line: usize,
+    column: usize,
+}
+
+impl std::fmt::Display for ReplayManifestParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "package.json: {} at line {}, column {}",
+            self.description, self.line, self.column
+        )
+    }
+}
+
+impl std::error::Error for ReplayManifestParseError {}
+
+#[cfg(any(windows, test))]
+fn parse_replay_manifest(
+    bytes: &[u8],
+) -> Result<ApplicationReplayPackage, ReplayManifestParseError> {
+    serde_json::from_slice(bytes).map_err(|error| ReplayManifestParseError {
+        description: match error.classify() {
+            serde_json::error::Category::Syntax => "invalid JSON syntax",
+            serde_json::error::Category::Eof => "unexpected end of JSON",
+            serde_json::error::Category::Data => "JSON does not match the replay manifest schema",
+            serde_json::error::Category::Io => "JSON could not be read",
+        },
+        line: error.line(),
+        column: error.column(),
+    })
+}
+
 impl ApplicationReplayPackage {
     pub fn validate(&self) -> Result<()> {
         if self.schema_version != "aiw.dev/application-replay-package/v0alpha1" {
@@ -63,7 +98,7 @@ pub fn verify_package(path: &Path) -> Result<VerifiedApplicationReplayPackage> {
         &root.join("package.json"),
         2 * 1024 * 1024,
     )?;
-    let package: ApplicationReplayPackage = serde_json::from_slice(&read_file_bounded(
+    let package = parse_replay_manifest(&read_file_bounded(
         &root.join("package.json"),
         2 * 1024 * 1024,
     )?)?;
@@ -205,6 +240,30 @@ pub fn export_package(
     let verified = verify_package(&destination)?;
     verified.revalidate()?;
     Ok(destination)
+}
+
+#[cfg(test)]
+#[test]
+fn replay_manifest_parse_errors_distinguish_schema_and_truncation() {
+    let duplicate = b"{\n  \"schemaVersion\": \"v1\",\n  \"schemaVersion\": \"duplicate\"\n}";
+    let error = parse_replay_manifest(duplicate).unwrap_err();
+    assert_eq!(error.line, 3);
+    assert!(error.column > 0);
+    assert_eq!(
+        error.description,
+        "JSON does not match the replay manifest schema"
+    );
+    assert!(!error.to_string().contains("duplicate"));
+
+    let partial = b"{\n  \"schemaVersion\": ";
+    let error = parse_replay_manifest(partial).unwrap_err();
+    assert_eq!(error.line, 2);
+    assert_eq!(error.description, "unexpected end of JSON");
+
+    let syntax = b"{\n  \"schemaVersion\" = \"v1\"\n}";
+    let error = parse_replay_manifest(syntax).unwrap_err();
+    assert_eq!(error.line, 2);
+    assert_eq!(error.description, "invalid JSON syntax");
 }
 
 #[cfg(all(test, windows))]
