@@ -361,9 +361,12 @@ registry or vendor asset manifest selects execution:
   shown in that combined review.
 - In the desktop Workflow view, choose a candidate under **Review a replay
   package** for the same in-place verification and compact review. A baseline
-  adds the change summary. Use the displayed candidate SHA-256 with the CLI's
-  `prepare-assessment-package --expected-manifest-sha256` when ready to prepare
-  a plan for separate approval.
+  adds the change summary. **Prepare from PowerShell** generates a command
+  that carries the reviewed package path and manifest pin into
+  `prepare-assessment-package`. Supply the trusted CLI path, the enrolled
+  agent path and its independently recorded hash, the evidence parent and
+  your operator identity. Run the command manually in PowerShell 7.6 or
+  later. Preparation returns a plan for separate approval and Start.
 - To require the exact previously reviewed `package.json` bytes, pass the
   review or comparison's `packageManifestSha256` as
   `--expected-manifest-sha256 <sha256>` to `verify-assessment-package` or

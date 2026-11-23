@@ -62,6 +62,20 @@
         <p id="replayReviewChanges" class="hidden"></p>
         <label class="field"><span>Verified candidate manifest SHA-256</span><input id="replayReviewPin" class="mono" type="text" readonly></label>
         <details class="advanced"><summary>Declared workflow details</summary><pre id="replayReviewDetails"></pre></details>
+        <details class="advanced">
+          <summary>Prepare from PowerShell</summary>
+          <p class="helper">Enter the trusted AIW CLI and the guest agent SHA-256 from independent enrollment. Run the generated command manually in PowerShell 7.6 or later. Review the returned plan, then approve and Start separately.</p>
+          <div class="field-grid">
+            <label class="field"><span>AIW CLI executable path</span><input id="replayHandoffCli" type="text" spellcheck="false"></label>
+            <label class="field"><span>Enrolled guest agent path</span><input id="replayHandoffGuestAgent" type="text" spellcheck="false"></label>
+            <label class="field"><span>Enrolled guest agent SHA-256</span><input id="replayHandoffAgentSha256" class="mono" type="text" spellcheck="false"></label>
+            <label class="field"><span>Existing evidence parent folder</span><input id="replayHandoffEvidence" type="text" spellcheck="false"></label>
+            <label class="field"><span>Operator identity</span><input id="replayHandoffOperator" type="text"></label>
+          </div>
+          <button id="generateReplayCommand" class="secondary" type="button" disabled>Generate preparation command</button>
+          <p id="replayHandoffStatus" role="status"></p>
+          <label id="replayHandoffOutput" class="field hidden"><span>Pinned preparation command</span><textarea id="replayHandoffCommand" class="mono" rows="12" readonly spellcheck="false"></textarea></label>
+        </details>
       </div>
     </section>
 
@@ -165,6 +179,7 @@
   </main>
   <script src="display.js"></script>
   <script src="app.js"></script>
+  <script src="replay-handoff.js"></script>
   <script src="replay-review.js"></script>
   <script src="results.js"></script>
 </body>
