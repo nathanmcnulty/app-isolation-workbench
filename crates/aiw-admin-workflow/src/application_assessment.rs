@@ -335,7 +335,29 @@ pub fn prepare_package_for_review(
     evidence_parent: &Path,
     identity: &str,
 ) -> Result<PreparedApplicationAssessment> {
-    let package = super::application_package::verify_package(package)?;
+    prepare_package_for_review_with_manifest_sha256(
+        package,
+        None,
+        agent_source,
+        agent_sha256,
+        evidence_parent,
+        identity,
+    )
+}
+
+#[cfg(windows)]
+pub fn prepare_package_for_review_with_manifest_sha256(
+    package: &Path,
+    expected_manifest_sha256: Option<&str>,
+    agent_source: &Path,
+    agent_sha256: &str,
+    evidence_parent: &Path,
+    identity: &str,
+) -> Result<PreparedApplicationAssessment> {
+    let package = super::application_package::verify_package_with_manifest_sha256(
+        package,
+        expected_manifest_sha256,
+    )?;
     let prepared = prepare_for_review(
         &package.package.project,
         &package.package.compiled.settings,

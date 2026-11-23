@@ -348,6 +348,11 @@ registry or vendor asset manifest selects execution:
   verifies both packages in place and reports manifest identities and changed
   declaration categories. Changes to ordered steps include argument and exit
   expectation changes. The output describes the plans, with no runtime findings.
+- To require the exact previously reviewed `package.json` bytes, pass the
+  review or comparison's `packageManifestSha256` as
+  `--expected-manifest-sha256 <sha256>` to `verify-assessment-package` or
+  `prepare-assessment-package`. Preparation checks the pin before it writes
+  the workspace. A manifest-only edit requires a new review hash.
 
 Use `schema assessment-settings`, `compiled-assessment`,
 `application-assessment-guest-request`, `application-assessment-result`,
