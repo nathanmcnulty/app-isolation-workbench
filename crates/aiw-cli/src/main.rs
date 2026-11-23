@@ -3993,6 +3993,34 @@ fn preparation_import_error_envelope(error: &RunPreparationImportFailed) -> Erro
 }
 
 fn emit_anyhow_error(error: &anyhow::Error) {
+    use aiw_admin_workflow::application_package::ReplayValidationError;
+
+    if let Some(error) = error.downcast_ref::<ReplayValidationError>() {
+        let (code, remediation) = match error {
+            ReplayValidationError::MissingManifest => (
+                "AIW_REPLAY_MANIFEST_MISSING",
+                "Select the complete exported package directory or export the package again.",
+            ),
+            ReplayValidationError::UnsupportedSchema => (
+                "AIW_REPLAY_SCHEMA_UNSUPPORTED",
+                "Use an AIW version that supports the package schema or export a compatible package.",
+            ),
+            ReplayValidationError::InvalidPlan => (
+                "AIW_REPLAY_PLAN_INVALID",
+                "Review the source project and settings, then export a fresh replay package.",
+            ),
+        };
+        emit_error(&ErrorEnvelope {
+            code: code.to_owned(),
+            summary: "assessment replay package could not be validated".to_owned(),
+            stage: "replayValidation".to_owned(),
+            run_id: None,
+            retryable: false,
+            remediation: remediation.to_owned(),
+            detail: error.to_string(),
+        });
+        return;
+    }
     #[cfg(windows)]
     if let Some(error) =
         error.downcast_ref::<aiw_admin_workflow::application_package::ReplayManifestParseError>()
