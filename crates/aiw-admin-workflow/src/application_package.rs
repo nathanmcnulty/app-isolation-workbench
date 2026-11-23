@@ -56,6 +56,12 @@ pub enum ReplayValidationError {
     MissingManifest,
     UnsupportedSchema,
     InvalidPlan,
+    InventoryMismatch {
+        missing: usize,
+        unexpected: usize,
+        wrong_kind: usize,
+    },
+    ContentMismatch,
 }
 
 impl std::fmt::Display for ReplayValidationError {
@@ -71,6 +77,17 @@ impl std::fmt::Display for ReplayValidationError {
             Self::InvalidPlan => f.write_str(
                 "package.json compiled plan fails validation or differs from the project",
             ),
+            Self::InventoryMismatch {
+                missing,
+                unexpected,
+                wrong_kind,
+            } => write!(
+                f,
+                "replay inventory differs ({missing} missing, {unexpected} unexpected, {wrong_kind} wrong entry type)"
+            ),
+            Self::ContentMismatch => {
+                f.write_str("replay file size or SHA-256 differs from the reviewed package")
+            }
         }
     }
 }
@@ -181,7 +198,28 @@ pub fn verify_package(path: &Path) -> Result<VerifiedApplicationReplayPackage> {
         })
         .collect();
     if actual != expected {
-        bail!("replay package inventory or content differs; no import or execution performed");
+        let mut missing = 0;
+        let mut wrong_kind = 0;
+        for (path, (kind, _, _)) in &expected {
+            match actual.get(path) {
+                None => missing += 1,
+                Some(entry) if entry.0 != *kind => wrong_kind += 1,
+                Some(_) => {}
+            }
+        }
+        let unexpected = actual
+            .keys()
+            .filter(|path| !expected.contains_key(*path))
+            .count();
+        if missing != 0 || unexpected != 0 || wrong_kind != 0 {
+            return Err(ReplayValidationError::InventoryMismatch {
+                missing,
+                unexpected,
+                wrong_kind,
+            }
+            .into());
+        }
+        return Err(ReplayValidationError::ContentMismatch.into());
     }
     manifest_file.revalidate()?;
     held.revalidate()?;
@@ -382,8 +420,35 @@ mod tests {
         assert!(verify_package(&destination).is_err());
         let second =
             export_package(&project, &settings, &source, &inputs, &root, "second").unwrap();
+        let extra =
+            aiw_windows_platform::CreatedWorkspaceDirectory::create_protected(&root, "extra")
+                .unwrap();
+        let extra_file = extra.final_path().join("extra.bin");
+        let mut file = extra.create_file_new("extra.bin").unwrap();
+        file.as_file_mut().write_all(b"inert").unwrap();
+        file.as_file_mut().sync_all().unwrap();
+        drop(file);
+        drop(extra);
+        let moved = second.join("extra.bin");
+        std::fs::rename(extra_file, &moved).unwrap();
+        let rejected = verify_package(&second).err().unwrap();
+        assert_eq!(
+            rejected.downcast_ref(),
+            Some(&ReplayValidationError::InventoryMismatch {
+                missing: 0,
+                unexpected: 1,
+                wrong_kind: 0,
+            }),
+            "{rejected:#}"
+        );
+        std::fs::remove_file(moved).unwrap();
         std::fs::write(second.join("payload").join("tool.exe"), b"changed payload").unwrap();
-        assert!(verify_package(&second).is_err());
+        let rejected = verify_package(&second).err().unwrap();
+        assert_eq!(
+            rejected.downcast_ref(),
+            Some(&ReplayValidationError::ContentMismatch),
+            "{rejected:#}"
+        );
     }
     #[test]
     fn replay_accepts_a_payload_at_the_portable_depth_limit() {

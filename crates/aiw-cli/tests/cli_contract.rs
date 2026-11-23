@@ -83,7 +83,7 @@ fn malformed_replay_manifest_reports_a_parse_location_without_writes() {
 
 #[test]
 #[cfg(windows)]
-fn replay_verification_distinguishes_missing_manifest_schema_and_plan() {
+fn replay_verification_distinguishes_package_failures() {
     use aiw_provider_wsb::assessment::{ASSESSMENT_SETTINGS_SCHEMA, AssessmentSettings};
     use aiw_windows_platform::{CreatedWorkspaceDirectory, HeldPortableDirectory};
 
@@ -172,13 +172,63 @@ fn replay_verification_distinguishes_missing_manifest_schema_and_plan() {
     assert!(!error.to_string().contains("unrecognized-synthetic-schema"));
     assert_eq!(fs::read(&manifest).unwrap(), bytes);
 
-    let mut invalid = original;
+    let mut invalid = original.clone();
     invalid["compiled"]["settings"]["processTimeoutSeconds"] = serde_json::json!(21);
     let bytes = serde_json::to_vec(&invalid).unwrap();
     fs::write(&manifest, &bytes).unwrap();
     let error = reject(&package, "AIW_REPLAY_PLAN_INVALID");
     assert!(error["detail"].as_str().unwrap().contains("compiled plan"));
     assert_eq!(fs::read(&manifest).unwrap(), bytes);
+
+    fs::write(&manifest, serde_json::to_vec(&original).unwrap()).unwrap();
+    let payload = package.join("payload").join("fixture.exe");
+    let original_payload = fs::read(&payload).unwrap();
+    let extra = package.join("unlisted-private-name.bin");
+    fs::rename(&payload, &extra).unwrap();
+    let error = reject(&package, "AIW_REPLAY_INVENTORY_MISMATCH");
+    assert_eq!(
+        error["detail"],
+        "replay inventory differs (1 missing, 1 unexpected, 0 wrong entry type)"
+    );
+    assert_eq!(fs::read(&extra).unwrap(), original_payload);
+    assert!(!payload.exists());
+    fs::rename(&extra, &payload).unwrap();
+
+    for changed in [&b"short"[..], &b"inert altered bytes"[..]] {
+        fs::write(&payload, changed).unwrap();
+        let error = reject(&package, "AIW_REPLAY_CONTENT_MISMATCH");
+        assert_eq!(
+            error["detail"],
+            "replay file size or SHA-256 differs from the reviewed package"
+        );
+        assert!(!error.to_string().contains("fixture.exe"));
+        assert_eq!(fs::read(&payload).unwrap(), changed);
+    }
+
+    // Use the same protected creation path as the exporter before adding the extra.
+    let holding = CreatedWorkspaceDirectory::create_protected(temp.path(), "holding").unwrap();
+    let extra_source = holding.final_path().join("extra.bin");
+    let mut file = holding.create_file_new("extra.bin").unwrap();
+    file.as_file_mut()
+        .write_all(b"unlisted synthetic content")
+        .unwrap();
+    file.as_file_mut().sync_all().unwrap();
+    drop(file);
+    drop(holding);
+    // Inventory errors take precedence if the package also contains changed bytes.
+    fs::rename(extra_source, &extra).unwrap();
+    let error = reject(&package, "AIW_REPLAY_INVENTORY_MISMATCH");
+    assert_eq!(
+        error["detail"],
+        "replay inventory differs (0 missing, 1 unexpected, 0 wrong entry type)"
+    );
+    assert!(!error.to_string().contains("unlisted-private-name.bin"));
+    fs::remove_file(&extra).unwrap();
+    fs::write(&payload, original_payload).unwrap();
+    let restored = verify(&package);
+    assert!(restored.status.success(), "{:?}", restored.stderr);
+    assert!(restored.stderr.is_empty());
+    assert_eq!(restored.stdout, accepted.stdout);
 }
 
 #[test]
