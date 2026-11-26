@@ -91,6 +91,31 @@ provider cleaned up. A changed executable or missing window fails this run.
 This is a launch smoke check, not an interaction test, isolation verdict, or
 packaging result.
 
+### Keep a reviewed MSI window open for an operator
+
+Use the same verified install-only selection and separately approved fresh
+plan. In the scenario above, replace the graceful-close step with the typed
+operator wait. For example:
+
+```yaml
+- type: waitForUserClose
+  timeoutSeconds: 120
+```
+
+Choose 30 to 600 seconds. The clock starts only after AIW observes the
+launched application's own visible window and checks its standard-user token.
+Set the outer Start timeout to cover installation, window readiness, and this
+session. Interact inside the Sandbox and close the application normally;
+AIW does not send a close message in this mode. An expired wait is an
+unsuccessful attempt, and the process job and Sandbox are cleaned up.
+There is no host file, network or clipboard access. Scratch data stays in
+the Sandbox and is discarded with it.
+
+Use `run report-wsb-msi-run` for the retained report. A successful
+`interactiveSession` proves the window, the standard-user context, natural
+exit, and cleanup. It does not prove which controls someone used, establish
+an isolation verdict, or produce a package.
+
 ### Installer diagnostics
 
 Preview v0alpha3 specifies guest-local verbose Windows Installer logging and an

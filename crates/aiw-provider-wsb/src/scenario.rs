@@ -142,6 +142,8 @@ const GENERIC_MSI_SCENARIO_VERSION: &str =
 const REVIEWED_MSI_LAUNCH_PROFILE: &str = "aiw.dev/windows-sandbox/msi-reviewed-launch/v0alpha1";
 const REVIEWED_MSI_SCENARIO_VERSION: &str =
     "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha13";
+const REVIEWED_MSI_OPERATOR_VERSION: &str =
+    "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha14";
 const MSI_PROGRAM_FILES: &str = r"C:\Program Files";
 pub const GENERIC_MSI_LOCAL_ROOT: &str = r"C:\AIW\InstallerStage";
 pub const GENERIC_MSI_LOCAL_PACKAGE: &str = r"C:\AIW\InstallerStage\application.msi";
@@ -218,7 +220,7 @@ pub fn compile_reviewed_msi_launch(
             image,
             timeout_seconds,
         },
-        ScenarioStep::GracefulClose,
+        close_step,
         ScenarioStep::ExpectExitCode { value: 0 },
     ] = scenario.steps.as_slice()
     else {
@@ -232,12 +234,24 @@ pub fn compile_reviewed_msi_launch(
     {
         return Err(ScenarioCompileError::UnsupportedScenario);
     }
-    operation.schema_version = REVIEWED_MSI_SCENARIO_VERSION.into();
+    let (schema_version, graceful_close, operator_seconds) = match close_step {
+        ScenarioStep::GracefulClose => (
+            REVIEWED_MSI_SCENARIO_VERSION,
+            GRACEFUL_CLOSE_TIMEOUT_SECONDS,
+            None,
+        ),
+        ScenarioStep::WaitForUserClose { timeout_seconds } => {
+            (REVIEWED_MSI_OPERATOR_VERSION, 0, Some(*timeout_seconds))
+        }
+        _ => return Err(ScenarioCompileError::UnsupportedScenario),
+    };
+    operation.schema_version = schema_version.into();
     operation.profile = REVIEWED_MSI_LAUNCH_PROFILE.into();
     operation.launch_path = format!(r"{MSI_PROGRAM_FILES}\{path}");
     operation.process_image = leaf.into();
     operation.process_wait_timeout_seconds = *timeout_seconds;
-    operation.graceful_close_timeout_seconds = GRACEFUL_CLOSE_TIMEOUT_SECONDS;
+    operation.graceful_close_timeout_seconds = graceful_close;
+    operation.interactive_session_seconds = operator_seconds;
     operation.reviewed_entry_point = Some(reviewed.clone());
     operation.validate()?;
     Ok(operation)
@@ -307,6 +321,10 @@ impl CompiledMsiScenario {
         self.profile == REVIEWED_MSI_LAUNCH_PROFILE
     }
 
+    pub fn is_reviewed_operator_session(&self) -> bool {
+        self.is_reviewed_launch() && self.schema_version == REVIEWED_MSI_OPERATOR_VERSION
+    }
+
     fn validate_reviewed_launch(&self) -> Result<(), ScenarioCompileError> {
         let reviewed = self
             .reviewed_entry_point
@@ -316,7 +334,17 @@ impl CompiledMsiScenario {
             .validate_for_installer(&self.application_sha256)
             .map_err(|_| ScenarioCompileError::InvalidCompiledProfile)?;
         let path = &reviewed.candidate.relative_path;
-        if self.schema_version != REVIEWED_MSI_SCENARIO_VERSION
+        let valid_close = if self.is_reviewed_operator_session() {
+            self.graceful_close_timeout_seconds == 0
+                && self
+                    .interactive_session_seconds
+                    .is_some_and(|seconds| (30..=600).contains(&seconds))
+        } else {
+            self.schema_version == REVIEWED_MSI_SCENARIO_VERSION
+                && self.graceful_close_timeout_seconds == GRACEFUL_CLOSE_TIMEOUT_SECONDS
+                && self.interactive_session_seconds.is_none()
+        };
+        if !valid_close
             || !valid_id(&self.scenario_id)
             || self.installer_path != STAGED_INSTALLER_PATH
             || self.install_arguments != generic_install_arguments(true)
@@ -325,10 +353,8 @@ impl CompiledMsiScenario {
             || !self.launch_arguments.is_empty()
             || self.process_image != path.rsplit('\\').next().unwrap_or_default()
             || !(1..=MAX_PROCESS_WAIT_TIMEOUT_SECONDS).contains(&self.process_wait_timeout_seconds)
-            || self.graceful_close_timeout_seconds != GRACEFUL_CLOSE_TIMEOUT_SECONDS
             || self.expected_exit_code != 0
             || self.document_exercise.is_some()
-            || self.interactive_session_seconds.is_some()
             || self.interactive_document.is_some()
         {
             return Err(ScenarioCompileError::InvalidCompiledProfile);
@@ -510,7 +536,8 @@ impl CompiledMsiScenario {
     }
 
     pub fn requires_standard_user(&self) -> bool {
-        self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_PROFILE
+        self.is_reviewed_operator_session()
+            || self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_PROFILE
             || self.requires_document_transfer()
             || self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
             || self.profile == LEGACY_NOTEPAD_PLUS_PLUS_MSI_PROFILE
@@ -845,6 +872,44 @@ mod tests {
             serde_json::from_slice::<CompiledMsiScenario>(&bytes).unwrap(),
             op
         );
+        let mut operator_project = project.clone();
+        operator_project.scenarios[0].steps[3] = ScenarioStep::WaitForUserClose {
+            timeout_seconds: 60,
+        };
+        let operator =
+            compile_reviewed_msi_launch(&operator_project, "first-run", "fresh", &reviewed)
+                .unwrap();
+        assert!(operator.is_reviewed_operator_session());
+        assert!(operator.requires_standard_user());
+        assert_eq!(operator.reviewed_entry_point, op.reviewed_entry_point);
+        assert_eq!(operator.interactive_session_seconds, Some(60));
+        assert_eq!(operator.graceful_close_timeout_seconds, 0);
+        assert_ne!(
+            operator.canonical_sha256().unwrap(),
+            op.canonical_sha256().unwrap()
+        );
+        let mut auto_close_drift = operator.clone();
+        auto_close_drift.graceful_close_timeout_seconds = GRACEFUL_CLOSE_TIMEOUT_SECONDS;
+        assert!(auto_close_drift.validate().is_err());
+        for timeout_seconds in [0, 29, 601] {
+            operator_project.scenarios[0].steps[3] =
+                ScenarioStep::WaitForUserClose { timeout_seconds };
+            assert!(
+                compile_reviewed_msi_launch(&operator_project, "first-run", "fresh", &reviewed)
+                    .is_err()
+            );
+        }
+        let operator_request = crate::ImportedMsiGuestRequest::new(
+            "fresh",
+            "00112233-4455-6677-8899-aabbccddeeff",
+            "1".repeat(64),
+            "2".repeat(64),
+            operator,
+            "a".repeat(64),
+            1024,
+            "3".repeat(64),
+        )
+        .unwrap();
         let mut changed = reviewed.clone();
         changed.source_receipt_sha256 = "f".repeat(64);
         let changed =
@@ -894,6 +959,25 @@ mod tests {
             crate::ImportedMsiScenarioResult::reviewed_launch(&request, discovery.clone(), 42, 0)
                 .unwrap();
         assert!(result.successful());
+        assert!(result.graceful_close_requested);
+        let operator_result = crate::ImportedMsiScenarioResult::reviewed_launch(
+            &operator_request,
+            discovery.clone(),
+            42,
+            0,
+        )
+        .unwrap();
+        assert!(operator_result.process_observed && operator_result.process_closed);
+        assert!(!operator_result.graceful_close_requested);
+        assert!(result.validate_for_request(&operator_request).is_err());
+        assert!(operator_result.validate_for_request(&request).is_err());
+        let mut unexpected_close = operator_result;
+        unexpected_close.graceful_close_requested = true;
+        assert!(
+            unexpected_close
+                .validate_for_request(&operator_request)
+                .is_err()
+        );
         assert!(crate::ImportedMsiScenarioResult::discovered(&request, discovery.clone()).is_err());
         discovery.candidates[0].sha256 = "1".repeat(64);
         assert!(
