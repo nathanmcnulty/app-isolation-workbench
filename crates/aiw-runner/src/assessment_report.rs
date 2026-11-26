@@ -107,6 +107,53 @@ pub struct WsbMsiRecordedExecution {
     pub normalized_sandbox_config_sha256: String,
 }
 
+/// Candidate identity selected from a reverified installation observation.
+/// This record carries provenance for planning and has no launch authority.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WsbMsiEntryPointSelection {
+    pub schema_version: &'static str,
+    pub source_run_id: String,
+    pub source_receipt_sha256: String,
+    pub source_evidence_root_hash: String,
+    pub source_project_revision_sha256: String,
+    pub installer_sha256: String,
+    pub product_code: String,
+    pub candidate: aiw_provider_wsb::MsiLaunchCandidate,
+}
+
+impl WsbMsiAssessmentReport {
+    pub fn select_entry_point(
+        &self,
+        relative_path: &str,
+    ) -> Result<WsbMsiEntryPointSelection, RunnerError> {
+        let discovery = self
+            .scenario
+            .install_discovery
+            .as_ref()
+            .filter(|_| {
+                self.recorded_cleanup_verified
+                    && self.scenario.status
+                        == aiw_provider_wsb::ImportedMsiScenarioStatus::Succeeded
+                    && self.scenario.install_exit_code == 0
+            })
+            .ok_or_else(|| RunnerError::Receipt("run has no verified install discovery".into()))?;
+        let candidate = discovery.select_candidate(relative_path).ok_or_else(|| {
+            RunnerError::Receipt("path is absent from verified candidates".into())
+        })?;
+        Ok(WsbMsiEntryPointSelection {
+            schema_version: "aiw.dev/wsb-msi-entry-point-selection/v0alpha1",
+            source_run_id: self.run_id.clone(),
+            source_receipt_sha256: self.receipt_sha256.clone(),
+            source_evidence_root_hash: self.evidence_root_hash.clone(),
+            source_project_revision_sha256: self.project_revision_sha256.clone(),
+            installer_sha256: self.scenario.installer_sha256.clone(),
+            product_code: discovery.product_code.clone(),
+            candidate: candidate.clone(),
+        })
+    }
+}
+
 pub(crate) fn recorded_execution(
     artifacts: &PreparedWsbArtifacts,
 ) -> Result<WsbMsiRecordedExecution, RunnerError> {

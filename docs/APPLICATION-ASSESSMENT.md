@@ -57,8 +57,11 @@ in the reviewed MSI. Each candidate includes the component GUID, an
 executable path relative to `C:\Program Files`, size and held-file SHA-256.
 `candidateScanComplete` describes this bounded key-path scan. Shortcuts,
 non-key-path files and other installation roots are outside this scan.
-Keep the candidate list for an explicit follow-up launch choice. Worker
-observations describe the measured installation. An elevated MSI's custom
+After inspecting the list, rerun the same retained report command with
+`--select-entry-point <relative-path>` to return exactly one candidate and its
+source run, receipt, evidence and package identities. Use the relative path
+as printed, including its case. Selection is read-only and carries no launch
+approval. Worker observations describe the measured installation. An elevated MSI's custom
 actions share the guest boundary, and the result establishes no effective
 application isolation.
 

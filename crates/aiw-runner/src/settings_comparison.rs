@@ -637,6 +637,51 @@ mod tests {
         }
     }
 
+    #[test]
+    fn msi_entry_point_selection_retains_exact_observation_identity() {
+        use aiw_provider_wsb::MsiMachineProductState::{Installed, NotRegistered};
+
+        let mut report = trial("baseline", false, '1').report;
+        let path = r"Neutral fixture\Tool.exe";
+        assert!(report.select_entry_point(path).is_err());
+        let code = "{A1234567-89AB-CDEF-0123-456789ABCDEF}".to_owned();
+        let candidate = aiw_provider_wsb::MsiLaunchCandidate {
+            component_code: code.clone(),
+            relative_path: path.into(),
+            size_bytes: 1024,
+            sha256: "f".repeat(64),
+        };
+        report.scenario.install_discovery = Some(aiw_provider_wsb::MsiInstallDiscovery {
+            product_code: code.clone(),
+            before_install: NotRegistered,
+            after_install: Installed,
+            candidates: vec![candidate.clone()],
+            candidate_scan_complete: true,
+        });
+
+        let selection = report.select_entry_point(path).unwrap();
+        assert_eq!(selection.candidate, candidate);
+        assert_eq!(selection.product_code, code);
+        assert_eq!(selection.source_run_id, report.run_id);
+        assert_eq!(selection.source_receipt_sha256, report.receipt_sha256);
+        assert_eq!(
+            selection.source_evidence_root_hash,
+            report.evidence_root_hash
+        );
+        assert_eq!(
+            selection.source_project_revision_sha256,
+            report.project_revision_sha256
+        );
+        assert_eq!(selection.installer_sha256, report.scenario.installer_sha256);
+        assert!(report.select_entry_point(&path.to_lowercase()).is_err());
+
+        report.scenario.install_exit_code = 1603;
+        assert!(report.select_entry_point(path).is_err());
+        report.scenario.install_exit_code = 0;
+        report.recorded_cleanup_verified = false;
+        assert!(report.select_entry_point(path).is_err());
+    }
+
     fn valid_trials() -> [VerifiedTrial; 3] {
         [
             trial("baseline", false, '1'),
