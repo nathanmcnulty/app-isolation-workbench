@@ -122,6 +122,32 @@ pub struct WsbMsiEntryPointSelection {
     pub candidate: aiw_provider_wsb::MsiLaunchCandidate,
 }
 
+/// A selection made by reopening and verifying the retained installation.
+/// Cannot be constructed from caller-supplied selection JSON. This is still
+/// evidence only; constructing or using it never approves a fresh run.
+#[cfg(windows)]
+pub struct VerifiedWsbMsiEntryPoint(WsbMsiEntryPointSelection);
+
+#[cfg(windows)]
+impl VerifiedWsbMsiEntryPoint {
+    pub fn selection(&self) -> &WsbMsiEntryPointSelection {
+        &self.0
+    }
+}
+
+#[cfg(windows)]
+pub fn verify_windows_sandbox_msi_entry_point(
+    root: &Path,
+    run_id: &str,
+    project: &Project,
+    expected_guest_agent_sha256: &str,
+    relative_path: &str,
+) -> Result<VerifiedWsbMsiEntryPoint, RunnerError> {
+    report_windows_sandbox_msi(root, run_id, project, expected_guest_agent_sha256)?
+        .select_entry_point(relative_path)
+        .map(VerifiedWsbMsiEntryPoint)
+}
+
 impl WsbMsiAssessmentReport {
     pub fn select_entry_point(
         &self,

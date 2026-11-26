@@ -2896,27 +2896,30 @@ fn run_general(command: Command) -> Result<()> {
                 let loaded = read_project(&project)?;
                 #[cfg(windows)]
                 {
+                    let report_error = |source| {
+                        anyhow!(RunReportFailed {
+                            run_id: run_id.clone(),
+                            source,
+                        })
+                    };
+                    if let Some(path) = select_entry_point {
+                        let verified = aiw_runner::verify_windows_sandbox_msi_entry_point(
+                            &root,
+                            &run_id,
+                            &loaded.project,
+                            &guest_agent_sha256,
+                            &path,
+                        )
+                        .map_err(report_error)?;
+                        return write_json(verified.selection());
+                    }
                     let report = aiw_runner::report_windows_sandbox_msi(
                         &root,
                         &run_id,
                         &loaded.project,
                         &guest_agent_sha256,
                     )
-                    .map_err(|source| {
-                        anyhow!(RunReportFailed {
-                            run_id: run_id.clone(),
-                            source
-                        })
-                    })?;
-                    if let Some(path) = select_entry_point {
-                        let selection = report.select_entry_point(&path).map_err(|source| {
-                            anyhow!(RunReportFailed {
-                                run_id: run_id.clone(),
-                                source,
-                            })
-                        })?;
-                        return write_json(&selection);
-                    }
+                    .map_err(report_error)?;
                     match format {
                         AssessmentReportFormat::Json => write_json(&report),
                         AssessmentReportFormat::Markdown => {

@@ -282,24 +282,6 @@ pub fn execute_generic_msi_install(
     })
 }
 
-fn has_pe_header(path: &std::path::Path, extent: u64) -> bool {
-    use std::io::{Read, Seek, SeekFrom};
-    let Ok(mut source) = std::fs::File::open(path) else {
-        return false;
-    };
-    let mut dos = [0u8; 64];
-    if source.read_exact(&mut dos).is_err() || dos[..2] != *b"MZ" {
-        return false;
-    }
-    let offset = u64::from(u32::from_le_bytes([dos[60], dos[61], dos[62], dos[63]]));
-    let mut prefix = [0u8; 4];
-    (64..=1024 * 1024).contains(&offset)
-        && offset + 4 <= extent
-        && source.seek(SeekFrom::Start(offset)).is_ok()
-        && source.read_exact(&mut prefix).is_ok()
-        && prefix == *b"PE\0\0"
-}
-
 fn component_candidates(product_code: &str) -> (Vec<aiw_provider_wsb::MsiLaunchCandidate>, bool) {
     use aiw_provider_wsb::{
         MAX_MSI_CANDIDATE_BYTES, MAX_MSI_LAUNCH_CANDIDATES, MsiLaunchCandidate,
@@ -428,7 +410,7 @@ fn component_candidates(product_code: &str) -> (Vec<aiw_provider_wsb::MsiLaunchC
             .unwrap_or(&observation.canonical_path);
         if !actual.eq_ignore_ascii_case(&text)
             || observation.link_count != 1
-            || !has_pe_header(path, observation.size_bytes)
+            || !file.has_msi_candidate_pe_signature()
         {
             complete = false;
             continue;
