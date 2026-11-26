@@ -106,6 +106,7 @@ fn prepare_profile(
             launch_profile: None,
             import_receipt: &receipt,
             scenario_id: "install-launch-close",
+            reviewed_entry_point: None,
             document_input: None,
         },
     )

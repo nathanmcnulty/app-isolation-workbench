@@ -177,7 +177,7 @@ pub(super) fn verify_declared_access(plan: &CompiledAssessment) -> Result<()> {
         .map_err(|e| format!("ordinary cwd create-access preflight: {e}"))?;
     Ok(())
 }
-pub(super) struct Directories(Vec<File>);
+pub(crate) struct Directories(Vec<File>);
 impl Directories {
     pub(super) fn collector_probe() -> Result<Self> {
         use windows::Win32::Storage::FileSystem::FILE_SHARE_DELETE;
@@ -200,7 +200,7 @@ impl Directories {
             && a.nFileIndexHigh == b.nFileIndexHigh
             && a.nFileIndexLow == b.nFileIndexLow)
     }
-    pub(super) fn revalidate(&self) -> Result<()> {
+    pub(crate) fn revalidate(&self) -> Result<()> {
         for file in &self.0 {
             let info = relative::file_information(file)?;
             if !relative::ordinary_directory(&info)
@@ -213,7 +213,7 @@ impl Directories {
         }
         Ok(())
     }
-    pub(super) fn hold(path: &Path) -> Result<Self> {
+    pub(crate) fn hold(path: &Path) -> Result<Self> {
         let text = path.to_str().ok_or("directory path encoding")?;
         if !text.starts_with("C:\\") || text.contains('/') {
             return Err("directory must use fixed C-drive namespace".into());

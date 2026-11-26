@@ -42,6 +42,7 @@ fn live_msi_interrupted_completion_rejects_foreign_request_and_recovers() {
             launch_profile: None,
             import_receipt: &receipt,
             scenario_id: "install-launch-close",
+            reviewed_entry_point: None,
             document_input: None,
         },
     )

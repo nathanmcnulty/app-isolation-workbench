@@ -699,32 +699,8 @@ enum RunCommand {
         #[arg(long)]
         scenario: String,
     },
-    PrepareWsbMsi {
-        #[arg(long)]
-        run_id: String,
-        #[arg(long)]
-        project: PathBuf,
-        #[arg(long)]
-        guest_agent: PathBuf,
-        #[arg(long)]
-        guest_agent_sha256: String,
-        #[arg(long)]
-        workspace_parent: PathBuf,
-        #[arg(long)]
-        created_at: String,
-        #[arg(long)]
-        import_receipt: PathBuf,
-        #[arg(long)]
-        scenario: String,
-        /// Optional absolute canonical UTF-8 text file for the interactive transfer profile.
-        #[arg(long)]
-        document_input: Option<PathBuf>,
-        /// Bind an independently verified replay profile into this run's approval.
-        #[arg(long, requires = "launch_profile_sha256")]
-        launch_profile: Option<PathBuf>,
-        #[arg(long, requires = "launch_profile")]
-        launch_profile_sha256: Option<String>,
-    },
+    /// Prepare an exact MSI scenario for a separate approval.
+    PrepareWsbMsi(Box<PrepareWsbMsiArgs>),
     /// Create and verify a fresh Windows Sandbox workspace and approvable plan bundle.
     /// This does not approve, acquire, start, connect, stop, or recover a provider.
     PrepareWsb {
@@ -1512,7 +1488,153 @@ fn run(command: Command) -> Result<()> {
                     imported_at,
                 },
         }) => import_prepared_wsb(&workspace, &project, &guest_agent_sha256, &imported_at),
+        // Native MSI preparation uses substantial stack independently of general dispatch.
+        Command::Run(RunArgs {
+            command: RunCommand::PrepareWsbMsi(args),
+        }) => prepare_wsb_msi(*args),
         other => run_general(other),
+    }
+}
+
+#[derive(clap::Args, Debug)]
+struct PrepareWsbMsiArgs {
+    #[arg(long)]
+    run_id: String,
+    #[arg(long)]
+    project: PathBuf,
+    #[arg(long)]
+    guest_agent: PathBuf,
+    #[arg(long)]
+    guest_agent_sha256: String,
+    #[arg(long)]
+    workspace_parent: PathBuf,
+    #[arg(long)]
+    created_at: String,
+    #[arg(long)]
+    import_receipt: PathBuf,
+    #[arg(long)]
+    scenario: String,
+    /// Optional absolute canonical UTF-8 text file for the interactive transfer profile.
+    #[arg(long)]
+    document_input: Option<PathBuf>,
+    /// Bind an independently verified replay profile into this run's approval.
+    #[arg(long, requires = "launch_profile_sha256")]
+    launch_profile: Option<PathBuf>,
+    #[arg(long, requires = "launch_profile")]
+    launch_profile_sha256: Option<String>,
+    /// Exact Program Files relative path from a completed, verified install run.
+    #[arg(long, requires_all = ["selection_source_root", "selection_source_run", "selection_source_project", "selection_source_agent_sha256"], conflicts_with_all = ["document_input", "launch_profile"])]
+    reviewed_entry_point: Option<String>,
+    #[arg(long, requires = "reviewed_entry_point")]
+    selection_source_root: Option<PathBuf>,
+    #[arg(long, requires = "reviewed_entry_point")]
+    selection_source_run: Option<String>,
+    #[arg(long, requires = "reviewed_entry_point")]
+    selection_source_project: Option<PathBuf>,
+    #[arg(long, requires = "reviewed_entry_point")]
+    selection_source_agent_sha256: Option<String>,
+}
+
+fn prepare_wsb_msi(args: PrepareWsbMsiArgs) -> Result<()> {
+    let PrepareWsbMsiArgs {
+        run_id,
+        project,
+        guest_agent,
+        guest_agent_sha256,
+        workspace_parent,
+        created_at,
+        import_receipt,
+        scenario,
+        document_input,
+        launch_profile,
+        launch_profile_sha256,
+        reviewed_entry_point,
+        selection_source_root,
+        selection_source_run,
+        selection_source_project,
+        selection_source_agent_sha256,
+    } = args;
+    let loaded = read_project(&project)?;
+    let receipt: ApplicationFileImportReceipt = read_document(&import_receipt, MAX_CONFIG_BYTES)?;
+    #[cfg(windows)]
+    {
+        let verified = match (
+            reviewed_entry_point,
+            selection_source_root,
+            selection_source_run,
+            selection_source_project,
+            selection_source_agent_sha256,
+        ) {
+            (None, None, None, None, None) => None,
+            (
+                Some(path),
+                Some(root),
+                Some(source_run),
+                Some(source_project),
+                Some(source_agent),
+            ) => {
+                let loaded_source = read_project(&source_project)?;
+                Some(
+                    aiw_runner::verify_windows_sandbox_msi_entry_point(
+                        &root,
+                        &source_run,
+                        &loaded_source.project,
+                        &source_agent,
+                        &path,
+                    )
+                    .map_err(|source| {
+                        anyhow!(RunReportFailed {
+                            run_id: source_run,
+                            source
+                        })
+                    })?,
+                )
+            }
+            _ => bail!("reviewed MSI launch requires all source selection inputs"),
+        };
+        let profile: Option<aiw_runner::WsbLaunchProfileExport> = launch_profile
+            .as_ref()
+            .map(|path| read_document(path, 1024 * 1024))
+            .transpose()?;
+        let prepared = prepare_windows_sandbox_msi_bundle(
+            &run_id,
+            &loaded.project,
+            &guest_agent,
+            &guest_agent_sha256,
+            &workspace_parent,
+            &created_at,
+            WsbMsiPreparationInput {
+                import_receipt: &receipt,
+                scenario_id: &scenario,
+                reviewed_entry_point: verified.as_ref(),
+                document_input: document_input.as_deref(),
+                launch_profile: profile.as_ref().zip(launch_profile_sha256.as_deref()),
+            },
+        )
+        .map_err(|source| anyhow!(RunPreparationFailed { run_id, source }))?;
+        write_json(&preparation_result(prepared))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (
+            run_id,
+            loaded,
+            guest_agent,
+            guest_agent_sha256,
+            workspace_parent,
+            created_at,
+            receipt,
+            scenario,
+            document_input,
+            launch_profile,
+            launch_profile_sha256,
+            reviewed_entry_point,
+            selection_source_root,
+            selection_source_run,
+            selection_source_project,
+            selection_source_agent_sha256,
+        );
+        bail!("MSI preparation requires Windows")
     }
 }
 
@@ -2610,63 +2732,7 @@ fn run_general(command: Command) -> Result<()> {
                     bail!("Bambu preparation requires Windows")
                 }
             }
-            RunCommand::PrepareWsbMsi {
-                run_id,
-                project,
-                guest_agent,
-                guest_agent_sha256,
-                workspace_parent,
-                created_at,
-                import_receipt,
-                scenario,
-                document_input,
-                launch_profile,
-                launch_profile_sha256,
-            } => {
-                let loaded = read_project(&project)?;
-                let receipt: ApplicationFileImportReceipt =
-                    read_document(&import_receipt, MAX_CONFIG_BYTES)?;
-                #[cfg(windows)]
-                {
-                    let profile: Option<aiw_runner::WsbLaunchProfileExport> = launch_profile
-                        .as_ref()
-                        .map(|path| read_document(path, 1024 * 1024))
-                        .transpose()?;
-                    let prepared = prepare_windows_sandbox_msi_bundle(
-                        &run_id,
-                        &loaded.project,
-                        &guest_agent,
-                        &guest_agent_sha256,
-                        &workspace_parent,
-                        &created_at,
-                        WsbMsiPreparationInput {
-                            import_receipt: &receipt,
-                            scenario_id: &scenario,
-                            document_input: document_input.as_deref(),
-                            launch_profile: profile.as_ref().zip(launch_profile_sha256.as_deref()),
-                        },
-                    )
-                    .map_err(|source| anyhow!(RunPreparationFailed { run_id, source }))?;
-                    write_json(&preparation_result(prepared))
-                }
-                #[cfg(not(windows))]
-                {
-                    let _ = (
-                        run_id,
-                        loaded,
-                        guest_agent,
-                        guest_agent_sha256,
-                        workspace_parent,
-                        created_at,
-                        receipt,
-                        scenario,
-                        document_input,
-                        launch_profile,
-                        launch_profile_sha256,
-                    );
-                    bail!("MSI preparation requires Windows")
-                }
-            }
+            RunCommand::PrepareWsbMsi(args) => prepare_wsb_msi(*args),
             RunCommand::PrepareWsb {
                 run_id,
                 project,
@@ -2896,27 +2962,30 @@ fn run_general(command: Command) -> Result<()> {
                 let loaded = read_project(&project)?;
                 #[cfg(windows)]
                 {
+                    let report_error = |source| {
+                        anyhow!(RunReportFailed {
+                            run_id: run_id.clone(),
+                            source,
+                        })
+                    };
+                    if let Some(path) = select_entry_point {
+                        let verified = aiw_runner::verify_windows_sandbox_msi_entry_point(
+                            &root,
+                            &run_id,
+                            &loaded.project,
+                            &guest_agent_sha256,
+                            &path,
+                        )
+                        .map_err(report_error)?;
+                        return write_json(verified.selection());
+                    }
                     let report = aiw_runner::report_windows_sandbox_msi(
                         &root,
                         &run_id,
                         &loaded.project,
                         &guest_agent_sha256,
                     )
-                    .map_err(|source| {
-                        anyhow!(RunReportFailed {
-                            run_id: run_id.clone(),
-                            source
-                        })
-                    })?;
-                    if let Some(path) = select_entry_point {
-                        let selection = report.select_entry_point(&path).map_err(|source| {
-                            anyhow!(RunReportFailed {
-                                run_id: run_id.clone(),
-                                source,
-                            })
-                        })?;
-                        return write_json(&selection);
-                    }
+                    .map_err(report_error)?;
                     match format {
                         AssessmentReportFormat::Json => write_json(&report),
                         AssessmentReportFormat::Markdown => {

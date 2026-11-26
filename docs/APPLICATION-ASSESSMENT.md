@@ -65,6 +65,32 @@ approval. Worker observations describe the measured installation. An elevated MS
 actions share the guest boundary, and the result establishes no effective
 application isolation.
 
+### Launch a reviewed MSI entry point
+
+For the next run, use the same installer and a new scenario. Declare these
+steps in order: install, launch the exact selected relative executable with no
+arguments, wait for that executable's window, request graceful close, and
+expect exit code 0. Use a new run ID. Pass these additional options to
+`aiw run prepare-wsb-msi`:
+
+```text
+--reviewed-entry-point <relative-path>
+--selection-source-root <completed-install-only-run-directory>
+--selection-source-run <completed-install-only-run-id>
+--selection-source-project <install-only-project.json>
+--selection-source-agent-sha256 <source-run-guest-agent-sha256>
+```
+
+Preparation reopens the retained install-only evidence; it cannot use a loose
+selection JSON or a previous launch as the source. Review and approve the
+fresh plan separately. The new Sandbox reinstalls the exact MSI, checks the
+registered component and its executable bytes, and opens the held image as a
+standard user. Success records that its own window appeared, it closed on
+request with the expected exit code, its process job was empty, and the
+provider cleaned up. A changed executable or missing window fails this run.
+This is a launch smoke check, not an interaction test, isolation verdict, or
+packaging result.
+
 ### Installer diagnostics
 
 Preview v0alpha3 specifies guest-local verbose Windows Installer logging and an

@@ -1064,7 +1064,7 @@ fn assess_notepad(
         }
     };
     save_stage(&evidence_root, "intake-receipt", &receipt)?;
-    let prepared = aiw_runner::prepare_windows_sandbox_msi_bundle(&run_id, &project, &assets.guest_agent, &manifest.guest_agent_sha256, &evidence_root, &now_rfc3339(), aiw_runner::WsbMsiPreparationInput { import_receipt: &receipt, scenario_id: SCENARIO_ID, document_input, launch_profile: launch_profile.as_ref().zip(manifest.launch_profile_sha256.as_deref()) })
+    let prepared = aiw_runner::prepare_windows_sandbox_msi_bundle(&run_id, &project, &assets.guest_agent, &manifest.guest_agent_sha256, &evidence_root, &now_rfc3339(), aiw_runner::WsbMsiPreparationInput { import_receipt: &receipt, scenario_id: SCENARIO_ID, reviewed_entry_point: None, document_input, launch_profile: launch_profile.as_ref().zip(manifest.launch_profile_sha256.as_deref()) })
         .map_err(|error| anyhow!("preparation failed; inspect retained stage output and do not retry this workspace: {error}"))?;
     save_stage(&evidence_root, "preparation", &prepared.receipt)?;
     let workspace = PathBuf::from(&prepared.receipt.workspace.root.final_path);

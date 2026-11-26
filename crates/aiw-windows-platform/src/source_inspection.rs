@@ -281,6 +281,52 @@ pub enum SourceInspectionError {
     Native(String),
 }
 
+fn msi_candidate_pe_signature(
+    extent: u64,
+    mut read_exact: impl FnMut(u64, &mut [u8]) -> bool,
+) -> bool {
+    let mut dos = [0; 64];
+    if extent < dos.len() as u64 || !read_exact(0, &mut dos) || dos[..2] != *b"MZ" {
+        return false;
+    }
+    let offset = u64::from(u32::from_le_bytes([dos[60], dos[61], dos[62], dos[63]]));
+    let mut signature = [0; 4];
+    (64..=1024 * 1024).contains(&offset)
+        && offset + signature.len() as u64 <= extent
+        && read_exact(offset, &mut signature)
+        && signature == *b"PE\0\0"
+}
+
+#[cfg(test)]
+#[test]
+fn msi_candidate_pe_signature_only_reads_complete_bounded_headers() {
+    fn inspect(extent: u64, offset: u32, allow_pe_read: bool) -> (bool, Vec<u64>) {
+        let mut reads = Vec::new();
+        let found = msi_candidate_pe_signature(extent, |at, bytes| {
+            reads.push(at);
+            if at == 0 {
+                bytes[..2].copy_from_slice(b"MZ");
+                bytes[60..64].copy_from_slice(&offset.to_le_bytes());
+                true
+            } else {
+                bytes.copy_from_slice(b"PE\0\0");
+                allow_pe_read
+            }
+        });
+        (found, reads)
+    }
+
+    assert_eq!(inspect(63, 64, true), (false, vec![]));
+    assert_eq!(inspect(67, 64, true), (false, vec![0]));
+    assert_eq!(inspect(68, 63, true), (false, vec![0]));
+    assert_eq!(inspect(68, 64, false), (false, vec![0, 64]));
+    assert_eq!(inspect(68, 64, true), (true, vec![0, 64]));
+    assert_eq!(
+        inspect(2 * 1024 * 1024, 1024 * 1024 + 1, true),
+        (false, vec![0])
+    );
+}
+
 impl HeldApplicationFile {
     pub fn open(path: &Path) -> Result<Self, SourceInspectionError> {
         Self::open_inner(path, false, None)
@@ -362,6 +408,25 @@ impl HeldApplicationFile {
     #[must_use]
     pub fn observation(&self) -> &SourceFileObservation {
         &self.observation
+    }
+
+    /// Inspect the MSI inventory's PE signature from the same held object that
+    /// supplied the path, byte count and digest. Only these 68 bytes are read;
+    /// this is a discovery hint, not authorization to execute the image.
+    pub(crate) fn has_msi_candidate_pe_signature(&self) -> bool {
+        msi_candidate_pe_signature(self.observation.size_bytes, |offset, bytes| {
+            let mut read = 0;
+            while read < bytes.len() {
+                match self
+                    .file
+                    .seek_read(&mut bytes[read..], offset + read as u64)
+                {
+                    Ok(0) | Err(_) => return false,
+                    Ok(count) => read += count,
+                }
+            }
+            true
+        })
     }
 
     /// Native execution-header inspection only. Reads a bounded prefix from

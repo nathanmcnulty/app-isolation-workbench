@@ -2000,3 +2000,19 @@ fn powershell_preserves_structured_stderr_envelope() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[cfg(all(target_os = "windows", target_env = "msvc", target_arch = "x86_64"))]
+#[test]
+fn windows_cli_reserves_measured_native_stack() {
+    let bytes = std::fs::read(env!("CARGO_BIN_EXE_aiw")).unwrap();
+    assert_eq!(&bytes[..2], b"MZ");
+    let pe = u32::from_le_bytes(bytes[0x3c..0x40].try_into().unwrap()) as usize;
+    assert_eq!(&bytes[pe..pe + 4], b"PE\0\0");
+    let optional = pe + 24;
+    assert_eq!(
+        u16::from_le_bytes(bytes[optional..optional + 2].try_into().unwrap()),
+        0x20b
+    );
+    let reserve = u64::from_le_bytes(bytes[optional + 72..optional + 80].try_into().unwrap());
+    assert_eq!(reserve, 8 * 1024 * 1024);
+}

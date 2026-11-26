@@ -104,12 +104,13 @@ mod preparation;
 pub use assessment_report::{
     AssessmentEvidenceGap, FailureProgressEvidence, UnverifiedGuestDiagnostic,
     VerifiedMsiFailureProgress, WSB_MSI_DOCUMENT_EXPORT_SCHEMA_VERSION, WsbMsiAssessmentReport,
-    WsbMsiDocumentExport, WsbMsiInteractiveReport, WsbMsiRecordedExecution, WsbMsiRunReport,
-    WsbMsiUnsuccessfulReport,
+    WsbMsiDocumentExport, WsbMsiEntryPointSelection, WsbMsiInteractiveReport,
+    WsbMsiRecordedExecution, WsbMsiRunReport, WsbMsiUnsuccessfulReport,
 };
 #[cfg(windows)]
 pub use assessment_report::{
-    export_windows_sandbox_msi_document, report_windows_sandbox_msi, report_windows_sandbox_msi_run,
+    VerifiedWsbMsiEntryPoint, export_windows_sandbox_msi_document, report_windows_sandbox_msi,
+    report_windows_sandbox_msi_run, verify_windows_sandbox_msi_entry_point,
 };
 #[cfg(windows)]
 pub use preparation::{
@@ -3231,10 +3232,7 @@ fn ensure_approval(
                 && provider_protocol
                     .as_ref()
                     .map(|protocol| protocol.cli_version.as_str())
-                    == msi
-                        .scenario
-                        .is_generic_install_only()
-                        .then_some("0.8.114.0") =>
+                    == msi.scenario.uses_generic_installer().then_some("0.8.114.0") =>
             {
                 msi.validate(&request.workspace)
                     .map_err(|_| RunnerError::ApprovalBinding)?;

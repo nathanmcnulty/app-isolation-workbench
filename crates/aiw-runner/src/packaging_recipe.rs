@@ -80,6 +80,15 @@ pub(crate) fn inspect_artifacts(
             maximum_document_bytes: Some(aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES),
             lifetime: "The worker is discarded on close or timeout. The staged input and verified output remain in the host run workspace; exporting to another host file requires an explicit command.".into(),
         }
+    } else if scenario.is_reviewed_launch() {
+        WsbMsiRecipeData {
+            mode: "reviewedLaunchSmokeTest".into(),
+            guest_document_path: None,
+            staged_input_path: None,
+            retained_output_path: None,
+            maximum_document_bytes: None,
+            lifetime: "The installed application and its local state are discarded with the worker; receipt-bound launch evidence remains in the host run workspace.".into(),
+        }
     } else if scenario.interactive_session_seconds.is_some() {
         WsbMsiRecipeData {
             mode: "ephemeralInteractiveScratch".into(),

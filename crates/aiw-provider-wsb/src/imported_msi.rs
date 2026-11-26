@@ -21,6 +21,10 @@ pub const GENERIC_INSTALL_REQUEST_VERSION: &str =
     "aiw.dev/windows-sandbox-imported-msi-guest-request/v0alpha3";
 const GENERIC_INSTALL_RESULT_VERSION: &str =
     "aiw.dev/windows-sandbox-imported-msi-scenario-result/v0alpha4";
+pub const REVIEWED_MSI_LAUNCH_REQUEST_VERSION: &str =
+    "aiw.dev/windows-sandbox-imported-msi-guest-request/v0alpha4";
+const REVIEWED_MSI_LAUNCH_RESULT_VERSION: &str =
+    "aiw.dev/windows-sandbox-imported-msi-scenario-result/v0alpha5";
 pub const MAX_MSI_LAUNCH_CANDIDATES: usize = 32;
 pub const MAX_MSI_CANDIDATE_BYTES: u64 = 64 * 1024 * 1024;
 
@@ -31,6 +35,75 @@ pub struct MsiLaunchCandidate {
     pub relative_path: String,
     pub size_bytes: u64,
     pub sha256: String,
+}
+
+impl MsiLaunchCandidate {
+    fn structurally_valid(&self) -> bool {
+        let path = &self.relative_path;
+        crate::validate_msi_product_code(&self.component_code).is_ok()
+            && (1..=MAX_MSI_CANDIDATE_BYTES).contains(&self.size_bytes)
+            && lower_hex_sha256(&self.sha256)
+            && path.len() <= 240
+            && path.to_ascii_lowercase().ends_with(".exe")
+            && !path.contains(['/', ':', '<', '>', '"', '|', '?', '*'])
+            && !path.chars().any(char::is_control)
+            && path
+                .split('\\')
+                .all(|part| !part.is_empty() && !part.ends_with(['.', ' ']))
+    }
+}
+
+pub const MSI_ENTRY_POINT_SELECTION_VERSION: &str =
+    "aiw.dev/wsb-msi-entry-point-selection/v0alpha1";
+
+/// Prior installation evidence for one executable. The shape is validatable
+/// on both host and guest; neither a valid record nor its hash grants launch.
+#[derive(Debug, Clone, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MsiReviewedEntryPoint {
+    pub schema_version: String,
+    pub source_run_id: String,
+    pub source_receipt_sha256: String,
+    pub source_evidence_root_hash: String,
+    pub source_project_revision_sha256: String,
+    pub installer_sha256: String,
+    pub product_code: String,
+    pub candidate: MsiLaunchCandidate,
+}
+
+impl MsiReviewedEntryPoint {
+    /// Bind selection evidence to the exact approved installer in a different
+    /// run. The runner must also independently reopen the source evidence when
+    /// preparing a fresh approval; this guard alone cannot verify provenance.
+    pub fn validate_for_fresh_run(
+        &self,
+        run_id: &str,
+        installer_sha256: &str,
+    ) -> Result<(), ImportedMsiRequestError> {
+        if !valid_id(run_id) || self.source_run_id == run_id {
+            return Err(ImportedMsiRequestError::ScenarioBindingMismatch);
+        }
+        self.validate_for_installer(installer_sha256)
+    }
+
+    pub(crate) fn validate_for_installer(
+        &self,
+        installer_sha256: &str,
+    ) -> Result<(), ImportedMsiRequestError> {
+        if self.schema_version != MSI_ENTRY_POINT_SELECTION_VERSION
+            || !valid_id(&self.source_run_id)
+            || !lower_hex_sha256(&self.source_receipt_sha256)
+            || !lower_hex_sha256(&self.source_evidence_root_hash)
+            || !lower_hex_sha256(&self.source_project_revision_sha256)
+            || !lower_hex_sha256(&self.installer_sha256)
+            || self.installer_sha256 != installer_sha256
+            || crate::validate_msi_product_code(&self.product_code).is_err()
+            || !self.candidate.structurally_valid()
+        {
+            return Err(ImportedMsiRequestError::ScenarioBindingMismatch);
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -54,21 +127,21 @@ pub fn verify_msi_install_discovery(
     result
         .validate_for_request(request)
         .map_err(|error| error.to_string())?;
-    if !request.scenario.is_generic_install_only() {
+    if !(request.scenario.is_generic_install_only() || request.scenario.is_reviewed_launch()) {
         return Ok(());
     }
     let records = crate::application_token::verified_application_records(bytes, evidence_root)?;
     let mut reports = records
         .iter()
         .filter(|record| record.kind == "importedMsiScenario");
-    let report = reports.next().ok_or("missing install-only evidence")?;
+    let report = reports.next().ok_or("missing MSI discovery evidence")?;
     if reports.next().is_some() || report.source != "aiw-guest-agent" {
-        return Err("duplicate or foreign install-only evidence".into());
+        return Err("duplicate or foreign MSI discovery evidence".into());
     }
     let recorded: ImportedMsiScenarioResult =
         serde_json::from_value(report.payload.clone()).map_err(|error| error.to_string())?;
     if recorded != *result {
-        return Err("install-only evidence contradicts the scenario result".into());
+        return Err("MSI discovery evidence contradicts the scenario result".into());
     }
     Ok(())
 }
@@ -99,6 +172,70 @@ fn install_discovery_requires_registration_and_bounded_candidate_paths() {
     );
     assert!(discovery.select_candidate(r"vendor\Tool.exe").is_none());
     assert!(discovery.select_candidate(r"Vendor\.\Tool.exe").is_none());
+    assert_eq!(
+        discovery.match_reviewed_candidate(&discovery.product_code, &candidate),
+        Some(&candidate)
+    );
+    assert!(
+        discovery
+            .match_reviewed_candidate("{B1234567-89AB-CDEF-0123-456789ABCDEF}", &candidate)
+            .is_none()
+    );
+    for change in 0..4 {
+        let mut mismatched = candidate.clone();
+        match change {
+            0 => mismatched.component_code = "{B1234567-89AB-CDEF-0123-456789ABCDEF}".into(),
+            1 => mismatched.relative_path = r"vendor\Tool.exe".into(),
+            2 => mismatched.size_bytes += 1,
+            3 => mismatched.sha256 = "b".repeat(64),
+            _ => unreachable!(),
+        }
+        assert!(
+            discovery
+                .match_reviewed_candidate(&discovery.product_code, &mismatched)
+                .is_none()
+        );
+    }
+    let selection = MsiReviewedEntryPoint {
+        schema_version: MSI_ENTRY_POINT_SELECTION_VERSION.into(),
+        source_run_id: "prior-run".into(),
+        source_receipt_sha256: "b".repeat(64),
+        source_evidence_root_hash: "c".repeat(64),
+        source_project_revision_sha256: "d".repeat(64),
+        installer_sha256: "e".repeat(64),
+        product_code: discovery.product_code.clone(),
+        candidate: candidate.clone(),
+    };
+    assert!(
+        selection
+            .validate_for_fresh_run("new-run", &"e".repeat(64))
+            .is_ok()
+    );
+    assert!(
+        selection
+            .validate_for_fresh_run("prior-run", &"e".repeat(64))
+            .is_err()
+    );
+    assert!(
+        selection
+            .validate_for_fresh_run("new-run", &"f".repeat(64))
+            .is_err()
+    );
+    for field in 0..4 {
+        let mut tampered = selection.clone();
+        match field {
+            0 => tampered.source_receipt_sha256.clear(),
+            1 => tampered.source_project_revision_sha256.clear(),
+            2 => tampered.source_evidence_root_hash.clear(),
+            3 => tampered.candidate.relative_path = r"Vendor\..\Tool.exe".into(),
+            _ => unreachable!(),
+        }
+        assert!(
+            tampered
+                .validate_for_fresh_run("new-run", &"e".repeat(64))
+                .is_err()
+        );
+    }
     discovery.after_install = NotRegistered;
     assert!(discovery.select_candidate(r"Vendor\Tool.exe").is_none());
     assert!(discovery.validate().is_err());
@@ -119,6 +256,22 @@ impl MsiInstallDiscovery {
             .find(|candidate| candidate.relative_path == relative_path)
     }
 
+    /// Match a previously reviewed discovery against this worker's fresh
+    /// observation. The exact product, component, path, size and digest must
+    /// agree. This is evidence matching only: callers still need to hold and
+    /// revalidate the executable that they actually launch.
+    pub fn match_reviewed_candidate(
+        &self,
+        product_code: &str,
+        reviewed: &MsiLaunchCandidate,
+    ) -> Option<&MsiLaunchCandidate> {
+        if self.product_code != product_code {
+            return None;
+        }
+        self.select_candidate(&reviewed.relative_path)
+            .filter(|observed| *observed == reviewed)
+    }
+
     fn validate(&self) -> Result<(), ImportedMsiRequestError> {
         use crate::MsiMachineProductState::{Installed, NotRegistered};
 
@@ -128,18 +281,8 @@ impl MsiInstallDiscovery {
             || self.after_install != Installed
             || self.candidates.len() > MAX_MSI_LAUNCH_CANDIDATES
             || self.candidates.iter().any(|candidate| {
-                let path = &candidate.relative_path;
-                crate::validate_msi_product_code(&candidate.component_code).is_err()
-                    || !(1..=MAX_MSI_CANDIDATE_BYTES).contains(&candidate.size_bytes)
-                    || !lower_hex_sha256(&candidate.sha256)
-                    || path.len() > 240
-                    || !path.to_ascii_lowercase().ends_with(".exe")
-                    || path.contains(['/', ':', '<', '>', '"', '|', '?', '*'])
-                    || path.chars().any(char::is_control)
-                    || path
-                        .split('\\')
-                        .any(|part| part.is_empty() || part.ends_with(['.', ' ']))
-                    || !paths.insert(path.to_lowercase())
+                !candidate.structurally_valid()
+                    || !paths.insert(candidate.relative_path.to_lowercase())
             })
         {
             return Err(ImportedMsiRequestError::InvalidResult);
@@ -194,7 +337,9 @@ impl ImportedMsiGuestRequest {
             .canonical_sha256()
             .map_err(ImportedMsiRequestError::Scenario)?;
         let mut value = Self {
-            schema_version: if scenario.is_generic_install_only() {
+            schema_version: if scenario.is_reviewed_launch() {
+                REVIEWED_MSI_LAUNCH_REQUEST_VERSION
+            } else if scenario.is_generic_install_only() {
                 GENERIC_INSTALL_REQUEST_VERSION
             } else {
                 IMPORTED_MSI_GUEST_REQUEST_SCHEMA_VERSION
@@ -229,7 +374,9 @@ impl ImportedMsiGuestRequest {
     ) -> Result<Self, ImportedMsiRequestError> {
         self.validate()?;
         self.required_observations = required;
-        self.schema_version = if self.scenario.is_generic_install_only() {
+        self.schema_version = if self.scenario.is_reviewed_launch() {
+            REVIEWED_MSI_LAUNCH_REQUEST_VERSION
+        } else if self.scenario.is_generic_install_only() {
             GENERIC_INSTALL_REQUEST_VERSION
         } else if required.is_some() {
             IMPORTED_MSI_OBSERVATION_REQUEST_SCHEMA_VERSION
@@ -266,7 +413,17 @@ impl ImportedMsiGuestRequest {
     }
 
     fn validate_unbound(&self) -> Result<(), ImportedMsiRequestError> {
-        let expected_schema = if self.scenario.is_generic_install_only() {
+        let expected_schema = if self.scenario.is_reviewed_launch() {
+            if self.required_observations.is_some() {
+                return Err(ImportedMsiRequestError::InvalidRequest);
+            }
+            self.scenario
+                .reviewed_entry_point
+                .as_ref()
+                .ok_or(ImportedMsiRequestError::InvalidRequest)?
+                .validate_for_fresh_run(&self.run_id, &self.installer_sha256)?;
+            REVIEWED_MSI_LAUNCH_REQUEST_VERSION
+        } else if self.scenario.is_generic_install_only() {
             if self.required_observations.is_some() {
                 return Err(ImportedMsiRequestError::InvalidRequest);
             }
@@ -409,6 +566,20 @@ impl ImportedMsiScenarioResult {
         Self::complete(request, 0, 0, 0, None, Some(discovery))
     }
 
+    pub fn reviewed_launch(
+        request: &ImportedMsiGuestRequest,
+        discovery: MsiInstallDiscovery,
+        process_id: u32,
+        exit_code: i32,
+    ) -> Result<Self, ImportedMsiRequestError> {
+        if !request.scenario.is_reviewed_launch() {
+            return Err(ImportedMsiRequestError::InvalidRequest);
+        }
+        let result = Self::complete(request, 0, process_id, exit_code, None, Some(discovery))?;
+        result.validate_for_request(request)?;
+        Ok(result)
+    }
+
     fn complete(
         request: &ImportedMsiGuestRequest,
         install_exit_code: i32,
@@ -419,7 +590,9 @@ impl ImportedMsiScenarioResult {
     ) -> Result<Self, ImportedMsiRequestError> {
         let install_only = request.scenario.is_generic_install_only();
         let value = Self {
-            schema_version: if install_only {
+            schema_version: if request.scenario.is_reviewed_launch() {
+                REVIEWED_MSI_LAUNCH_RESULT_VERSION.to_owned()
+            } else if install_only {
                 GENERIC_INSTALL_RESULT_VERSION.to_owned()
             } else if request.scenario.requires_document_transfer() {
                 IMPORTED_MSI_DOCUMENT_SCENARIO_RESULT_SCHEMA_VERSION.to_owned()
@@ -457,10 +630,12 @@ impl ImportedMsiScenarioResult {
         let interactive_document =
             self.schema_version == IMPORTED_MSI_DOCUMENT_SCENARIO_RESULT_SCHEMA_VERSION;
         let install_only = self.schema_version == GENERIC_INSTALL_RESULT_VERSION;
+        let reviewed_launch = self.schema_version == REVIEWED_MSI_LAUNCH_RESULT_VERSION;
         if (self.schema_version != IMPORTED_MSI_SCENARIO_RESULT_SCHEMA_VERSION
             && !interactive
             && !interactive_document
-            && !install_only)
+            && !install_only
+            && !reviewed_launch)
             || !valid_id(&self.run_id)
             || !canonical_sandbox_id(&self.sandbox_id)
             || !lower_hex_sha256(&self.config_sha256)
@@ -477,7 +652,7 @@ impl ImportedMsiScenarioResult {
             || self.process_closed == install_only
             || self.graceful_close_requested
                 == (interactive || interactive_document || install_only)
-            || self.install_discovery.is_some() != install_only
+            || self.install_discovery.is_some() != (install_only || reviewed_launch)
         {
             return Err(ImportedMsiRequestError::InvalidResult);
         }
@@ -508,6 +683,8 @@ impl ImportedMsiScenarioResult {
         if self.run_id != request.run_id
             || (self.schema_version == GENERIC_INSTALL_RESULT_VERSION)
                 != request.scenario.is_generic_install_only()
+            || (self.schema_version == REVIEWED_MSI_LAUNCH_RESULT_VERSION)
+                != request.scenario.is_reviewed_launch()
             || result_interactive != request.scenario.interactive_session_seconds.is_some()
             || (self.schema_version == IMPORTED_MSI_DOCUMENT_SCENARIO_RESULT_SCHEMA_VERSION)
                 != request.scenario.requires_document_transfer()
@@ -521,6 +698,19 @@ impl ImportedMsiScenarioResult {
             || self.launch_exit_code != request.scenario.expected_exit_code
         {
             return Err(ImportedMsiRequestError::ResultBindingMismatch);
+        }
+        if request.scenario.is_reviewed_launch() {
+            let reviewed = request
+                .scenario
+                .reviewed_entry_point
+                .as_ref()
+                .ok_or(ImportedMsiRequestError::ResultBindingMismatch)?;
+            self.install_discovery
+                .as_ref()
+                .and_then(|discovery| {
+                    discovery.match_reviewed_candidate(&reviewed.product_code, &reviewed.candidate)
+                })
+                .ok_or(ImportedMsiRequestError::ResultBindingMismatch)?;
         }
         if request.scenario.requires_document_transfer() {
             let transfer = self
@@ -626,6 +816,7 @@ mod tests {
             interactive_session_seconds: None,
             document_exercise: None,
             interactive_document: None,
+            reviewed_entry_point: None,
         }
     }
 

@@ -390,6 +390,7 @@ mod tests {
                 interactive_session_seconds: None,
                 document_exercise: None,
                 interactive_document: None,
+                reviewed_entry_point: None,
             },
             "c".repeat(64),
             1024,
