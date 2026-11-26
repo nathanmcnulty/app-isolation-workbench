@@ -93,7 +93,14 @@ fn install_discovery_requires_registration_and_bounded_candidate_paths() {
         candidate_scan_complete: true,
     };
     assert!(discovery.validate().is_ok());
+    assert_eq!(
+        discovery.select_candidate(r"Vendor\Tool.exe"),
+        Some(&candidate)
+    );
+    assert!(discovery.select_candidate(r"vendor\Tool.exe").is_none());
+    assert!(discovery.select_candidate(r"Vendor\.\Tool.exe").is_none());
     discovery.after_install = NotRegistered;
+    assert!(discovery.select_candidate(r"Vendor\Tool.exe").is_none());
     assert!(discovery.validate().is_err());
     discovery.after_install = Installed;
     discovery.candidates[0].relative_path = r"Vendor\..\Tool.exe".into();
@@ -103,6 +110,15 @@ fn install_discovery_requires_registration_and_bounded_candidate_paths() {
 }
 
 impl MsiInstallDiscovery {
+    /// Resolve one exact path from a valid discovery. No case or path aliases
+    /// are interpreted as an operator's choice.
+    pub fn select_candidate(&self, relative_path: &str) -> Option<&MsiLaunchCandidate> {
+        self.validate().ok()?;
+        self.candidates
+            .iter()
+            .find(|candidate| candidate.relative_path == relative_path)
+    }
+
     fn validate(&self) -> Result<(), ImportedMsiRequestError> {
         use crate::MsiMachineProductState::{Installed, NotRegistered};
 

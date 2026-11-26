@@ -838,6 +838,9 @@ enum RunCommand {
         project: PathBuf,
         #[arg(long)]
         guest_agent_sha256: String,
+        /// Return one exact recorded executable path and its evidence provenance (JSON).
+        #[arg(long, conflicts_with = "format")]
+        select_entry_point: Option<String>,
         #[arg(long, value_enum, default_value_t = AssessmentReportFormat::Json)]
         format: AssessmentReportFormat,
     },
@@ -2887,6 +2890,7 @@ fn run_general(command: Command) -> Result<()> {
                 run_id,
                 project,
                 guest_agent_sha256,
+                select_entry_point,
                 format,
             } => {
                 let loaded = read_project(&project)?;
@@ -2904,6 +2908,15 @@ fn run_general(command: Command) -> Result<()> {
                             source
                         })
                     })?;
+                    if let Some(path) = select_entry_point {
+                        let selection = report.select_entry_point(&path).map_err(|source| {
+                            anyhow!(RunReportFailed {
+                                run_id: run_id.clone(),
+                                source,
+                            })
+                        })?;
+                        return write_json(&selection);
+                    }
                     match format {
                         AssessmentReportFormat::Json => write_json(&report),
                         AssessmentReportFormat::Markdown => {
@@ -2914,7 +2927,7 @@ fn run_general(command: Command) -> Result<()> {
                 }
                 #[cfg(not(windows))]
                 {
-                    let _ = (root, loaded, guest_agent_sha256, format);
+                    let _ = (root, loaded, guest_agent_sha256, select_entry_point, format);
                     Err(anyhow!(RunOperationUnavailable {
                         code: "AIW_WINDOWS_REQUIRED",
                         summary: "retained Windows workspace verification requires Windows",
