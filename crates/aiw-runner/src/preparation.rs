@@ -1619,8 +1619,8 @@ enum WsbPreparationApplicationInput<'a> {
 
 #[cfg(windows)]
 enum PreparedApplicationScenario {
-    Msi(aiw_provider_wsb::CompiledMsiScenario),
-    Bambu(aiw_provider_wsb::CompiledBambuExportScenario),
+    Msi(Box<aiw_provider_wsb::CompiledMsiScenario>),
+    Bambu(Box<aiw_provider_wsb::CompiledBambuExportScenario>),
 }
 
 #[cfg(windows)]
@@ -1733,7 +1733,7 @@ fn prepare_bundle(
             Some((
                 aiw_windows_platform::open_verified_application_file_import(input.import_receipt)
                     .map_err(|e| WsbPreparationError::Contract(e.to_string()))?,
-                PreparedApplicationScenario::Msi(scenario),
+                PreparedApplicationScenario::Msi(Box::new(scenario)),
             ))
         }
         Some(WsbPreparationApplicationInput::Bambu(input)) => {
@@ -1751,7 +1751,7 @@ fn prepare_bundle(
             Some((
                 aiw_windows_platform::open_verified_application_file_import(input.import_receipt)
                     .map_err(|e| WsbPreparationError::Contract(e.to_string()))?,
-                PreparedApplicationScenario::Bambu(scenario),
+                PreparedApplicationScenario::Bambu(Box::new(scenario)),
             ))
         }
         None => None,
@@ -1856,7 +1856,7 @@ fn prepare_bundle(
                         .then_some(aiw_provider_wsb::MsiRequiredObservations::StandardUserAclV1),
                         import_receipt: expected_receipt.clone(),
                         import_receipt_sha256: held.verification().receipt_sha256.clone(),
-                        scenario: scenario.clone(),
+                        scenario: scenario.as_ref().clone(),
                         scenario_sha256: canonical_hash(scenario)?,
                         staged_payload: BinaryIdentity {
                             canonical_path: provider_path(&staged.final_path().to_string_lossy()),
@@ -1900,7 +1900,7 @@ fn prepare_bundle(
                     let binding = WsbBambuApplication {
                         import_receipt: expected_receipt.clone(),
                         import_receipt_sha256: held.verification().receipt_sha256.clone(),
-                        scenario: scenario.clone(),
+                        scenario: scenario.as_ref().clone(),
                         scenario_sha256: canonical_hash(scenario)?,
                         staged_payload: BinaryIdentity {
                             canonical_path: provider_path(&staged.final_path().to_string_lossy()),

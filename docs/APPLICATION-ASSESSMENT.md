@@ -75,7 +75,7 @@ expect exit code 0. Use a new run ID. Pass these additional options to
 
 ```text
 --reviewed-entry-point <relative-path>
---selection-source-root <protected-workspace-parent>
+--selection-source-root <completed-install-only-run-directory>
 --selection-source-run <completed-install-only-run-id>
 --selection-source-project <install-only-project.json>
 --selection-source-agent-sha256 <source-run-guest-agent-sha256>
