@@ -138,13 +138,13 @@ four-file inventory and exact contents. It neither installs the MSI nor
 authorizes a run. The package does not contain a guest agent, runnable
 approval, prior workspace or raw logs.
 
-Import `application.msi` with normal protected intake. Prepare, review,
-approve and run `install-project.json` in a fresh Sandbox. Check the new
+Import `app.msi` with normal protected intake. Prepare, review,
+approve and run `install.jsn` in a fresh Sandbox. Check the new
 install-only evidence against the same package by adding `--replay-root`,
 `--replay-run-id`, and `--replay-guest-agent-sha256` to the verification
 command. It compares the newly measured product, component, exact path,
 file size and executable hash and rejects the original run as replay.
-Finally use `launch-project.json` and the **new** install-only evidence to
+Finally use `launch.jsn` and the **new** install-only evidence to
 prepare and approve a distinct fresh launch, as above. Match the packaged
 scenario IDs when preparing those runs.
 

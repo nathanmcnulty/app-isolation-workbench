@@ -7,10 +7,11 @@ use aiw_provider_wsb::{
 use aiw_windows_platform::{CreatedWorkspaceDirectory, HeldApplicationFile, HeldPortableDirectory};
 
 const SCHEMA: &str = "aiw.dev/msi-replay-package/v0alpha1";
-const INSTALLER: &str = "application.msi";
-const INSTALL_PROJECT: &str = "install-project.json";
-const LAUNCH_PROJECT: &str = "launch-project.json";
-const MANIFEST: &str = "package.json";
+// Fixed 8.3 names survive ordinary Windows copies without NTFS short-name aliases.
+const INSTALLER: &str = "app.msi";
+const INSTALL_PROJECT: &str = "install.jsn";
+const LAUNCH_PROJECT: &str = "launch.jsn";
+const MANIFEST: &str = "package.jsn";
 const MAX_MSI: u64 = 128 * 1024 * 1024;
 const MAX_JSON: u64 = 2 * 1024 * 1024;
 

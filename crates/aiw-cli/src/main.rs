@@ -3850,10 +3850,10 @@ fn document_format(path: &Path) -> Result<DocumentFormat> {
         .map(str::to_ascii_lowercase)
         .as_deref()
     {
-        Some("json") => Ok(DocumentFormat::Json),
+        Some("json" | "jsn") => Ok(DocumentFormat::Json),
         Some("yaml" | "yml") => Ok(DocumentFormat::Yaml),
         _ => bail!(
-            "unsupported document extension for {}; use .json, .yaml, or .yml",
+            "unsupported document extension for {}; use .json, .jsn, .yaml, or .yml",
             path.display()
         ),
     }
