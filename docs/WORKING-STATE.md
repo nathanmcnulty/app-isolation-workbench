@@ -88,6 +88,7 @@ fresh run verified the same component and hash for `PuTTY\putty.exe`,
 observed its window under a standard-user token, closed it with exit 0,
 and verified cleanup. No connection was attempted. This measures window
 startup and closure, not operator interaction or MSI package replay.
+The overall assessment result remains `insufficientEvidence`.
 
 ## Remaining scope
 
