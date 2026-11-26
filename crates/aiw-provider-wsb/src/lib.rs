@@ -85,7 +85,8 @@ pub use imported_msi::{
     IMPORTED_MSI_SCENARIO_RESULT_SCHEMA_VERSION, ImportedMsiDocumentTransferResult,
     ImportedMsiGuestRequest, ImportedMsiRequestError, ImportedMsiScenarioResult,
     ImportedMsiScenarioStatus, MAX_MSI_CANDIDATE_BYTES, MAX_MSI_LAUNCH_CANDIDATES,
-    MsiInstallDiscovery, MsiLaunchCandidate, verify_msi_install_discovery,
+    MSI_ENTRY_POINT_SELECTION_VERSION, MsiInstallDiscovery, MsiLaunchCandidate,
+    MsiReviewedEntryPoint, REVIEWED_MSI_LAUNCH_REQUEST_VERSION, verify_msi_install_discovery,
 };
 pub use product_registration::{
     IMPORTED_MSI_PRODUCT_REGISTRATION_EVENT, IMPORTED_MSI_PRODUCT_REGISTRATION_SCHEMA_VERSION,
@@ -118,7 +119,7 @@ pub use scenario::{
     NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_DIRECTORY, NOTEPAD_PLUS_PLUS_LOCAL_SETTINGS_PROFILE,
     NOTEPAD_PLUS_PLUS_MSI_PROFILE, ScenarioCompileError, compile_generic_msi_install,
     compile_imported_msi_scenario, compile_notepad_plus_plus_msi_scenario,
-    compile_notepad_plus_plus_msi_scenario_with_document,
+    compile_notepad_plus_plus_msi_scenario_with_document, compile_reviewed_msi_launch,
 };
 pub use stage_progress::{
     IMPORTED_MSI_FAILED_ATTEMPT_SCHEMA, IMPORTED_MSI_FAILED_ATTEMPT_SCHEMA_VERSION,

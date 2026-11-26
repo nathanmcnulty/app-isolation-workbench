@@ -209,6 +209,7 @@ mod tests {
                     }),
                 },
                 interactive_document: None,
+                reviewed_entry_point: None,
             },
             "c".repeat(64),
             1024,

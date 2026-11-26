@@ -208,7 +208,7 @@ pub fn execute_generic_msi_install(
         time::Duration,
     };
 
-    if !operation.is_generic_install_only()
+    if !(operation.is_generic_install_only() || operation.is_reviewed_launch())
         || operation.validate().is_err()
         || !(1..=128 * 1024 * 1024).contains(&expected_bytes)
     {
@@ -282,10 +282,207 @@ pub fn execute_generic_msi_install(
     })
 }
 
-fn component_candidates(product_code: &str) -> (Vec<aiw_provider_wsb::MsiLaunchCandidate>, bool) {
-    use aiw_provider_wsb::{
-        MAX_MSI_CANDIDATE_BYTES, MAX_MSI_LAUNCH_CANDIDATES, MsiLaunchCandidate,
+/// Retain the ordinary directory chain as well as the executable. In
+/// particular the fixed path cannot be rebound by renaming a directory after
+/// the file is hashed. Inventory holds are read-only and never dispatch.
+struct HeldInstalledMsiCandidate {
+    image: crate::HeldApplicationFile,
+    parents: crate::guest_assessment::Directories,
+}
+
+impl HeldInstalledMsiCandidate {
+    fn open(path: &std::path::Path) -> Result<Self, GuestMsiExecutionError> {
+        use std::path::{Component, Path};
+
+        let root = Path::new(r"C:\Program Files");
+        let relative = path
+            .strip_prefix(root)
+            .map_err(|_| failure("candidate outside Program Files", ERROR_INVALID_DATA))?;
+        let parent = path
+            .parent()
+            .filter(|_| {
+                !relative.as_os_str().is_empty()
+                    && relative
+                        .components()
+                        .all(|part| matches!(part, Component::Normal(_)))
+            })
+            .ok_or_else(|| failure("candidate path", ERROR_INVALID_DATA))?;
+        let parents = crate::guest_assessment::Directories::hold(parent)
+            .map_err(GuestMsiExecutionError::Process)?;
+        let image = crate::HeldApplicationFile::open_bounded(
+            path,
+            aiw_provider_wsb::MAX_MSI_CANDIDATE_BYTES,
+        )
+        .map_err(|error| GuestMsiExecutionError::Process(error.to_string()))?;
+        let observation = image.observation();
+        let actual = observation
+            .canonical_path
+            .strip_prefix(r"\\?\")
+            .unwrap_or(&observation.canonical_path);
+        if !path
+            .to_str()
+            .is_some_and(|path| actual.eq_ignore_ascii_case(path))
+            || observation.link_count != 1
+            || !image.has_msi_candidate_pe_signature()
+        {
+            return Err(failure("candidate file identity", ERROR_INVALID_DATA));
+        }
+        parents
+            .revalidate()
+            .map_err(GuestMsiExecutionError::Process)?;
+        Ok(Self { parents, image })
+    }
+}
+
+/// Evidence returned only after the observed process accepts a graceful close
+/// and its job is confirmed empty. Provider teardown remains a separate gate.
+pub struct ReviewedMsiNativeOutcome {
+    pub discovery: aiw_provider_wsb::MsiInstallDiscovery,
+    pub application_token: aiw_token::TokenEvidence,
+    pub process_id: u32,
+    pub exit_code: i32,
+}
+
+/// Runs only inside the already approved disposable worker. The selected
+/// image stays held from fresh measurement through suspended verification,
+/// window observation and job cleanup.
+pub fn execute_reviewed_msi_launch(
+    operation: &aiw_provider_wsb::CompiledMsiScenario,
+    expected_bytes: u64,
+) -> Result<ReviewedMsiNativeOutcome, GuestMsiExecutionError> {
+    use crate::{
+        guest_msi::{GuestProcess, complete_process_operation},
+        guest_standard_user::StandardUserSession,
     };
+    use std::{
+        os::windows::io::AsRawHandle,
+        path::Path,
+        time::{Duration, Instant},
+    };
+    use windows::Win32::{
+        Foundation::HANDLE,
+        System::Threading::{PROCESS_NAME_WIN32, QueryFullProcessImageNameW},
+    };
+
+    if !operation.is_reviewed_launch() || operation.validate().is_err() {
+        return Err(failure("reviewed launch contract", ERROR_INVALID_DATA));
+    }
+    let reviewed = operation
+        .reviewed_entry_point
+        .as_ref()
+        .ok_or_else(|| failure("missing reviewed launch selection", ERROR_INVALID_DATA))?;
+    let discovery = execute_generic_msi_install(operation, expected_bytes)?;
+    let matched = discovery
+        .match_reviewed_candidate(&reviewed.product_code, &reviewed.candidate)
+        .ok_or_else(|| {
+            failure(
+                "fresh registration differs from reviewed candidate",
+                ERROR_INVALID_DATA,
+            )
+        })?;
+    let held = HeldInstalledMsiCandidate::open(Path::new(&operation.launch_path))?;
+    let image = held.image.observation();
+    if image.size_bytes != matched.size_bytes || image.sha256 != matched.sha256 {
+        return Err(failure(
+            "held executable differs from reviewed candidate",
+            ERROR_INVALID_DATA,
+        ));
+    }
+    let ordinary = StandardUserSession::establish()?;
+    let deadline = Instant::now()
+        .checked_add(Duration::from_secs(
+            operation.process_wait_timeout_seconds.into(),
+        ))
+        .ok_or_else(|| failure("launch deadline", ERROR_INVALID_DATA))?;
+    let (application, application_token) = GuestProcess::start_standard_user_checked(
+        &operation.launch_path,
+        &[],
+        &ordinary,
+        |process| {
+            let mut path = [0u16; 1024];
+            let mut len = path.len() as u32;
+            // SAFETY: process is the still-suspended owned handle; path is
+            // writable for the specified length.
+            unsafe {
+                QueryFullProcessImageNameW(
+                    HANDLE(process.as_raw_handle()),
+                    PROCESS_NAME_WIN32,
+                    PWSTR(path.as_mut_ptr()),
+                    &mut len,
+                )
+            }
+            .map_err(|error| GuestMsiExecutionError::Process(error.to_string()))?;
+            let observed = path
+                .get(..len as usize)
+                .and_then(|chars| String::from_utf16(chars).ok())
+                .ok_or_else(|| failure("suspended image path", ERROR_INVALID_DATA))?;
+            if !observed
+                .strip_prefix(r"\\?\")
+                .unwrap_or(&observed)
+                .eq_ignore_ascii_case(&operation.launch_path)
+            {
+                return Err(failure("suspended image path differs", ERROR_INVALID_DATA));
+            }
+            held.parents
+                .revalidate()
+                .map_err(GuestMsiExecutionError::Process)?;
+            held.image
+                .revalidate()
+                .map_err(|error| GuestMsiExecutionError::Process(error.to_string()))?;
+            if Instant::now() >= deadline {
+                return Err(failure(
+                    "launch deadline exceeded before resume",
+                    ERROR_INVALID_DATA,
+                ));
+            }
+            Ok(())
+        },
+    )?;
+    let result = (|| {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(failure("window deadline exceeded", ERROR_INVALID_DATA));
+        }
+        let window = application.wait_for_window(remaining)?;
+        if Instant::now() >= deadline {
+            return Err(failure(
+                "window observed after deadline",
+                ERROR_INVALID_DATA,
+            ));
+        }
+        if application.collect_token()? != application_token {
+            return Err(failure(
+                "application token changed after launch",
+                ERROR_INVALID_DATA,
+            ));
+        }
+        application.request_visible_window_close(window)?;
+        let exit_code = application.wait_for_exit(Duration::from_secs(
+            operation.graceful_close_timeout_seconds.into(),
+        ))?;
+        if exit_code != operation.expected_exit_code {
+            return Err(GuestMsiExecutionError::Process(format!(
+                "reviewed application exited with {exit_code}"
+            )));
+        }
+        Ok(exit_code)
+    })();
+    let cleanup = if result.is_ok() {
+        application.verify_empty_after_success()
+    } else {
+        application.cleanup()
+    };
+    let exit_code = complete_process_operation(result, cleanup)?;
+    Ok(ReviewedMsiNativeOutcome {
+        discovery,
+        application_token,
+        process_id: application.process_id(),
+        exit_code,
+    })
+}
+
+fn component_candidates(product_code: &str) -> (Vec<aiw_provider_wsb::MsiLaunchCandidate>, bool) {
+    use aiw_provider_wsb::{MAX_MSI_LAUNCH_CANDIDATES, MsiLaunchCandidate};
     use std::path::Path;
 
     fn text(record: &MsiHandle, field: u32) -> Option<String> {
@@ -398,23 +595,11 @@ fn component_candidates(product_code: &str) -> (Vec<aiw_provider_wsb::MsiLaunchC
         {
             continue;
         }
-        let Ok(file) = crate::HeldApplicationFile::open_bounded(path, MAX_MSI_CANDIDATE_BYTES)
-        else {
+        let Ok(held) = HeldInstalledMsiCandidate::open(path) else {
             complete = false;
             continue;
         };
-        let observation = file.observation();
-        let actual = observation
-            .canonical_path
-            .strip_prefix(r"\\?\")
-            .unwrap_or(&observation.canonical_path);
-        if !actual.eq_ignore_ascii_case(&text)
-            || observation.link_count != 1
-            || !file.has_msi_candidate_pe_signature()
-        {
-            complete = false;
-            continue;
-        }
+        let observation = held.image.observation();
         if !candidates
             .iter()
             .any(|item| item.relative_path.eq_ignore_ascii_case(relative))
@@ -432,6 +617,19 @@ fn component_candidates(product_code: &str) -> (Vec<aiw_provider_wsb::MsiLaunchC
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn installed_candidate_rejects_outside_and_parent_traversal_paths() {
+        use std::path::Path;
+        for path in [
+            r"C:\Windows\System32\notepad.exe",
+            r"C:\Program Files\..\Windows\System32\notepad.exe",
+            r"C:\Program Files",
+            r"relative.exe",
+        ] {
+            assert!(HeldInstalledMsiCandidate::open(Path::new(path)).is_err());
+        }
+    }
 
     #[test]
     fn product_identity_requires_one_complete_guid() {

@@ -2,12 +2,27 @@ use super::*;
 
 #[cfg(windows)]
 fn verify_historical_scenario(
+    run_id: &str,
     project: &Project,
     recorded: &aiw_provider_wsb::CompiledMsiScenario,
 ) -> Result<(), RunnerError> {
     recorded
         .validate()
         .map_err(|e| RunnerError::Preparation(e.to_string()))?;
+    if let Some(reviewed) = &recorded.reviewed_entry_point {
+        let compiled = aiw_provider_wsb::compile_reviewed_msi_launch(
+            project,
+            &recorded.scenario_id,
+            run_id,
+            reviewed,
+        )
+        .map_err(|e| RunnerError::Preparation(e.to_string()))?;
+        return if &compiled == recorded {
+            Ok(())
+        } else {
+            Err(RunnerError::ApprovalBinding)
+        };
+    }
     let compiled = if let Some(document) = recorded.interactive_document.as_ref() {
         aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario_with_document(
             project,
@@ -109,18 +124,7 @@ pub struct WsbMsiRecordedExecution {
 
 /// Candidate identity selected from a reverified installation observation.
 /// This record carries provenance for planning and has no launch authority.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct WsbMsiEntryPointSelection {
-    pub schema_version: &'static str,
-    pub source_run_id: String,
-    pub source_receipt_sha256: String,
-    pub source_evidence_root_hash: String,
-    pub source_project_revision_sha256: String,
-    pub installer_sha256: String,
-    pub product_code: String,
-    pub candidate: aiw_provider_wsb::MsiLaunchCandidate,
-}
+pub type WsbMsiEntryPointSelection = aiw_provider_wsb::MsiReviewedEntryPoint;
 
 /// A selection made by reopening and verifying the retained installation.
 /// Cannot be constructed from caller-supplied selection JSON. This is still
@@ -159,6 +163,7 @@ impl WsbMsiAssessmentReport {
             .as_ref()
             .filter(|_| {
                 self.recorded_cleanup_verified
+                    && self.scenario.launch_process_id == 0
                     && self.scenario.status
                         == aiw_provider_wsb::ImportedMsiScenarioStatus::Succeeded
                     && self.scenario.install_exit_code == 0
@@ -168,7 +173,7 @@ impl WsbMsiAssessmentReport {
             RunnerError::Receipt("path is absent from verified candidates".into())
         })?;
         Ok(WsbMsiEntryPointSelection {
-            schema_version: "aiw.dev/wsb-msi-entry-point-selection/v0alpha1",
+            schema_version: aiw_provider_wsb::MSI_ENTRY_POINT_SELECTION_VERSION.into(),
             source_run_id: self.run_id.clone(),
             source_receipt_sha256: self.receipt_sha256.clone(),
             source_evidence_root_hash: self.evidence_root_hash.clone(),
@@ -853,7 +858,7 @@ pub(crate) fn report_windows_sandbox_msi_run_bound(
         .msi
         .as_ref()
         .ok_or(RunnerError::ApprovalBinding)?;
-    verify_historical_scenario(project, &msi.scenario)?;
+    verify_historical_scenario(run_id, project, &msi.scenario)?;
     if let Some((receipt, scenario)) = expected {
         if &msi.import_receipt != receipt {
             return Err(RunnerError::ApprovalBinding);
@@ -1378,14 +1383,14 @@ mod tests {
                     aiw_provider_wsb::DOCUMENT_EXERCISE_PATH.to_owned();
             }
             let before = recorded.canonical_sha256().unwrap();
-            verify_historical_scenario(&project, &recorded).unwrap();
+            verify_historical_scenario("fixture", &project, &recorded).unwrap();
             assert_eq!(recorded.canonical_sha256().unwrap(), before);
             let mut changed = recorded.clone();
             changed.application_sha256 = "0".repeat(64);
-            assert!(verify_historical_scenario(&project, &changed).is_err());
+            assert!(verify_historical_scenario("fixture", &project, &changed).is_err());
             if let Some(exercise) = recorded.document_exercise.as_mut() {
                 exercise.document_path = r"C:\foreign\document.txt".to_owned();
-                assert!(verify_historical_scenario(&project, &recorded).is_err());
+                assert!(verify_historical_scenario("fixture", &project, &recorded).is_err());
             }
         }
     }

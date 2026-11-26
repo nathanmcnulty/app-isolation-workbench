@@ -3232,10 +3232,7 @@ fn ensure_approval(
                 && provider_protocol
                     .as_ref()
                     .map(|protocol| protocol.cli_version.as_str())
-                    == msi
-                        .scenario
-                        .is_generic_install_only()
-                        .then_some("0.8.114.0") =>
+                    == msi.scenario.uses_generic_installer().then_some("0.8.114.0") =>
             {
                 msi.validate(&request.workspace)
                     .map_err(|_| RunnerError::ApprovalBinding)?;

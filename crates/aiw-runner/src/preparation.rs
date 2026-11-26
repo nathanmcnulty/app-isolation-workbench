@@ -87,6 +87,12 @@ fn msi_trust_delta(msi: &WsbMsiApplication) -> String {
     }
 }
 fn msi_execution_trust_delta(msi: &WsbMsiApplication) -> String {
+    if let Some(selection) = &msi.scenario.reviewed_entry_point {
+        return format!(
+            "installs the approved MSI elevated in one offline disposable Windows Sandbox, then rechecks the executable selected from run {} and opens exact path {} (SHA-256 {}) as the fresh standard user with no arguments; observes its own window, requests graceful closure, and verifies job cleanup; no host execution, network, or clipboard access",
+            selection.source_run_id, selection.candidate.relative_path, selection.candidate.sha256,
+        );
+    }
     if msi.scenario.is_generic_install_only() {
         return format!(
             "installs the approved MSI elevated inside one offline disposable Windows Sandbox for up to {} seconds, observes fresh machine registration, and reports executable component candidates for a separate operator choice; installation grants no host execution or trust and selects no executable",
@@ -246,6 +252,15 @@ impl WsbMsiApplication {
         &self,
         workspace: &WorkspaceBindingEvidence,
     ) -> Result<(), WsbPreparationError> {
+        if self.scenario.is_reviewed_launch()
+            && (self.launch_profile.is_some()
+                || self.required_observations.is_some()
+                || self.staged_document.is_some())
+        {
+            return Err(WsbPreparationError::Contract(
+                "reviewed MSI launch cannot request a legacy profile, document, or observation override".into(),
+            ));
+        }
         if let Some(profile) = &self.launch_profile {
             crate::launch_profile::verify_profile_hash(profile, &profile.profile_sha256)
                 .map_err(WsbPreparationError::Contract)?;
@@ -425,7 +440,7 @@ impl WsbPreparationReceipt {
         let install_discovery = self
             .msi
             .as_ref()
-            .is_some_and(|msi| msi.scenario.is_generic_install_only());
+            .is_some_and(|msi| msi.scenario.uses_generic_installer());
         let expected_schema = if install_discovery {
             INSTALL_DISCOVERY_PREPARATION
         } else if self.application_assessment.is_some() {
@@ -754,7 +769,7 @@ impl PreparedWsbArtifacts {
             ] => self.receipt.msi.as_ref().is_some_and(|msi| {
                 let expected_protocol = msi
                     .scenario
-                    .is_generic_install_only()
+                    .uses_generic_installer()
                     .then_some(&self.receipt.provider_protocol);
                 sandbox_plan_sha256 == &self.receipt.wsb_plan_sha256
                     && provider_sha256 == &self.receipt.provider.sha256
@@ -1070,7 +1085,14 @@ pub fn build_wsb_msi_preparation(
     msi: WsbMsiApplication,
 ) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
     msi.validate(workspace)?;
-    let compiled = if let Some(document) = &msi.staged_document {
+    let compiled = if let Some(reviewed) = &msi.scenario.reviewed_entry_point {
+        aiw_provider_wsb::compile_reviewed_msi_launch(
+            project,
+            &msi.scenario.scenario_id,
+            run_id,
+            reviewed,
+        )
+    } else if let Some(document) = &msi.staged_document {
         aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario_with_document(
             project,
             &msi.scenario.scenario_id,
@@ -1093,7 +1115,7 @@ pub fn build_wsb_msi_preparation(
         workspace,
         guest_agent,
         created_at,
-        msi.scenario.is_generic_install_only(),
+        msi.scenario.uses_generic_installer(),
     )?;
     artifacts.wsb_plan.probe.output = GUEST_MSI_RESULT.to_owned();
     artifacts.receipt.wsb_plan_sha256 = canonical_hash(&artifacts.wsb_plan)?;
@@ -1117,7 +1139,7 @@ pub fn build_wsb_msi_preparation(
                 scenario_sha256: msi.scenario_sha256.clone(),
                 provider_protocol: msi
                     .scenario
-                    .is_generic_install_only()
+                    .uses_generic_installer()
                     .then(|| artifacts.receipt.provider_protocol.clone()),
             },
             PlannedAction::CollectEvidence,
@@ -1129,7 +1151,7 @@ pub fn build_wsb_msi_preparation(
         .run_plan
         .hash()
         .map_err(|e| WsbPreparationError::Contract(e.to_string()))?;
-    artifacts.receipt.schema_version = if msi.scenario.is_generic_install_only() {
+    artifacts.receipt.schema_version = if msi.scenario.uses_generic_installer() {
         INSTALL_DISCOVERY_PREPARATION.to_owned()
     } else if msi.launch_profile.is_some() {
         WSB_MSI_PROFILE_PREPARATION_RECEIPT_SCHEMA_VERSION.to_owned()
@@ -1578,6 +1600,7 @@ pub fn prepare_windows_sandbox_bundle(
 pub struct WsbMsiPreparationInput<'a> {
     pub import_receipt: &'a aiw_probe::ApplicationFileImportReceipt,
     pub scenario_id: &'a str,
+    pub reviewed_entry_point: Option<&'a crate::VerifiedWsbMsiEntryPoint>,
     pub document_input: Option<&'a Path>,
     pub launch_profile: Option<(&'a crate::WsbLaunchProfileExport, &'a str)>,
 }
@@ -1676,7 +1699,19 @@ fn prepare_bundle(
     };
     let mut held_application = match &application_input {
         Some(WsbPreparationApplicationInput::Msi(input)) => {
-            let scenario = if let Some(document) = held_document_input.as_ref() {
+            let scenario = if let Some(reviewed) = input.reviewed_entry_point {
+                if input.document_input.is_some() || input.launch_profile.is_some() {
+                    return Err(WsbPreparationError::Contract(
+                        "reviewed MSI launch does not accept legacy launch options".into(),
+                    ));
+                }
+                aiw_provider_wsb::compile_reviewed_msi_launch(
+                    project,
+                    input.scenario_id,
+                    run_id,
+                    reviewed.selection(),
+                )
+            } else if let Some(document) = held_document_input.as_ref() {
                 aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario_with_document(
                     project,
                     input.scenario_id,
@@ -1759,7 +1794,7 @@ fn prepare_bundle(
             None, // The installer is staged only after the base preparation is built.
             staged_document.is_some(),
         )?;
-        let discovery = matches!(&held_application, Some((_, PreparedApplicationScenario::Msi(scenario))) if scenario.is_generic_install_only());
+        let discovery = matches!(&held_application, Some((_, PreparedApplicationScenario::Msi(scenario))) if scenario.uses_generic_installer());
         let mut artifacts = build_msi_base(
             run_id,
             project,
@@ -1817,7 +1852,7 @@ fn prepare_bundle(
                             _ => None,
                         },
                         required_observations: (scenario.interactive_session_seconds.is_none()
-                            && !scenario.is_generic_install_only())
+                            && !scenario.uses_generic_installer())
                         .then_some(aiw_provider_wsb::MsiRequiredObservations::StandardUserAclV1),
                         import_receipt: expected_receipt.clone(),
                         import_receipt_sha256: held.verification().receipt_sha256.clone(),
@@ -2207,7 +2242,14 @@ fn open_verified_preparation_with_inspector(
         .msi
         .as_ref()
         .map(|msi| {
-            let compiled = if let Some(document) = &msi.staged_document {
+            let compiled = if let Some(reviewed) = &msi.scenario.reviewed_entry_point {
+                aiw_provider_wsb::compile_reviewed_msi_launch(
+                    project,
+                    &msi.scenario.scenario_id,
+                    &receipt.run_id,
+                    reviewed,
+                )
+            } else if let Some(document) = &msi.staged_document {
                 aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario_with_document(
                     project,
                     &msi.scenario.scenario_id,
@@ -4313,6 +4355,81 @@ pub(crate) mod tests {
         forged.run_plan = legacy.run_plan;
         forged.receipt.run_plan_sha256 = forged.run_plan.hash().unwrap();
         assert!(forged.validate().is_err());
+    }
+
+    #[test]
+    fn reviewed_msi_preparation_binds_exact114_and_prior_selection_in_the_approval() {
+        let mut project = msi_project();
+        let aiw_schema::ApplicationSource::Msi(source) = &mut project.application else {
+            unreachable!()
+        };
+        source.entry_points[0].path = r"Vendor\Tool.exe".into();
+        let aiw_schema::ScenarioStep::WaitForProcess { image, .. } =
+            &mut project.scenarios[0].steps[2]
+        else {
+            unreachable!()
+        };
+        *image = "Tool.exe".into();
+        let mut ready = readiness();
+        let protocol = aiw_probe::WindowsSandboxCliAdapter::V0_8_114_0.protocol();
+        ready.provider_package.as_mut().unwrap().version = protocol.cli_version.clone();
+        ready.provider_binary.as_mut().unwrap().version = Some(protocol.cli_version.clone());
+        ready.cli_protocol = Some(protocol.clone());
+        let mut binding = fake_msi_application();
+        let code = "{A1234567-89AB-CDEF-0123-456789ABCDEF}".to_owned();
+        let reviewed = aiw_provider_wsb::MsiReviewedEntryPoint {
+            schema_version: aiw_provider_wsb::MSI_ENTRY_POINT_SELECTION_VERSION.into(),
+            source_run_id: "prior-run".into(),
+            source_receipt_sha256: "a".repeat(64),
+            source_evidence_root_hash: "b".repeat(64),
+            source_project_revision_sha256: "c".repeat(64),
+            installer_sha256: binding.staged_payload.sha256.clone(),
+            product_code: code.clone(),
+            candidate: aiw_provider_wsb::MsiLaunchCandidate {
+                component_code: code,
+                relative_path: r"Vendor\Tool.exe".into(),
+                size_bytes: 987,
+                sha256: "d".repeat(64),
+            },
+        };
+        binding.scenario = aiw_provider_wsb::compile_reviewed_msi_launch(
+            &project,
+            "install-launch-close",
+            "run-one",
+            &reviewed,
+        )
+        .unwrap();
+        binding.scenario_sha256 = canonical_hash(&binding.scenario).unwrap();
+        let artifacts = build_wsb_msi_preparation(
+            "run-one",
+            &project,
+            &ready,
+            &workspace(),
+            &guest(),
+            "now",
+            binding,
+        )
+        .unwrap();
+        assert!(artifacts.receipt.approval_required);
+        assert!(!artifacts.receipt.provider_acquired);
+        assert_eq!(artifacts.receipt.provider_protocol, protocol);
+        assert!(
+            artifacts
+                .run_plan
+                .trust_deltas
+                .iter()
+                .any(|delta| delta.contains("prior-run")
+                    && delta.contains(r"Vendor\Tool.exe")
+                    && delta.contains(&reviewed.candidate.sha256))
+        );
+        let mut changed = artifacts.clone();
+        let scenario = &mut changed.receipt.msi.as_mut().unwrap().scenario;
+        scenario
+            .reviewed_entry_point
+            .as_mut()
+            .unwrap()
+            .source_receipt_sha256 = "e".repeat(64);
+        assert!(changed.validate().is_err());
     }
 
     #[test]

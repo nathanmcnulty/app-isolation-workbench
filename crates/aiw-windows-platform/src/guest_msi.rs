@@ -1645,6 +1645,15 @@ impl GuestProcess {
         arguments: &[String],
         standard_user: &StandardUserSession,
     ) -> Result<(Self, TokenEvidence), GuestMsiExecutionError> {
+        Self::start_standard_user_checked(path, arguments, standard_user, |_| Ok(()))
+    }
+
+    pub(crate) fn start_standard_user_checked(
+        path: &str,
+        arguments: &[String],
+        standard_user: &StandardUserSession,
+        check_suspended_image: impl FnOnce(&OwnedHandle) -> Result<(), GuestMsiExecutionError>,
+    ) -> Result<(Self, TokenEvidence), GuestMsiExecutionError> {
         let executable = Path::new(path);
         let parent = executable.parent().ok_or_else(|| {
             GuestMsiExecutionError::Process("fixed executable does not have a parent".to_owned())
@@ -1738,6 +1747,9 @@ impl GuestProcess {
             return Err(GuestMsiExecutionError::Process(format!(
                 "AssignProcessToJobObject failed: {error}; cleanup={cleanup:?}"
             )));
+        }
+        if let Err(error) = check_suspended_image(&process) {
+            return complete_process_operation(Err(error), job.terminate_and_verify_empty());
         }
         let previous_suspend_count = unsafe { ResumeThread(raw_handle(&thread)) };
         if previous_suspend_count != 1 {
@@ -1894,7 +1906,7 @@ impl GuestProcess {
                 WAIT_TIMEOUT => {}
                 WAIT_OBJECT_0 => {
                     return Err(GuestMsiExecutionError::Process(
-                        "Notepad++ exited before a window was observed".to_owned(),
+                        "Application exited before a window was observed".to_owned(),
                     ));
                 }
                 _ => {
@@ -1912,7 +1924,7 @@ impl GuestProcess {
                     GetExitCodeThread(raw_handle(&self.initial_thread), &mut thread_exit)
                 };
                 return Err(GuestMsiExecutionError::Process(format!(
-                    "Notepad++ window was not observed before timeout; pid={}, windows={}, inputIdle={input_idle}/{input_idle_error}, threadExit={thread_exit}/{}, jobProcesses={:?}, station={}, agentDesktop={}, childDesktop={}",
+                    "Application window was not observed before timeout; pid={}, windows={}, inputIdle={input_idle}/{input_idle_error}, threadExit={thread_exit}/{}, jobProcesses={:?}, station={}, agentDesktop={}, childDesktop={}",
                     self.process_id,
                     context.matching_windows,
                     thread_query.is_ok(),
@@ -1924,6 +1936,16 @@ impl GuestProcess {
             }
             thread::sleep(Duration::from_millis(25));
         }
+    }
+
+    pub(crate) fn request_visible_window_close(
+        &self,
+        window: HWND,
+    ) -> Result<(), GuestMsiExecutionError> {
+        require_visible_process_window(window, self.process_id, "main window")?;
+        // SAFETY: this window was just rechecked against the held process.
+        unsafe { PostMessageW(Some(window), WM_CLOSE, WPARAM(0), LPARAM(0)) }
+            .map_err(|error| GuestMsiExecutionError::Process(format!("WM_CLOSE failed: {error}")))
     }
 
     pub(crate) fn cleanup(&self) -> Result<(), GuestMsiExecutionError> {

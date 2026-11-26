@@ -3,6 +3,7 @@
 //! pipe readers, held images and journals never run in that user's process.
 mod authenticated;
 mod files;
+pub(crate) use files::Directories;
 mod launch_context;
 mod process;
 mod progress;

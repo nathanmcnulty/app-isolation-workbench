@@ -659,6 +659,13 @@ mod tests {
             candidate_scan_complete: true,
         });
 
+        // A prior launch cannot substitute for the install-only source.
+        assert!(report.select_entry_point(path).is_err());
+        report.scenario.launch_process_id = 0;
+        report.scenario.process_observed = false;
+        report.scenario.graceful_close_requested = false;
+        report.scenario.process_closed = false;
+
         let selection = report.select_entry_point(path).unwrap();
         assert_eq!(selection.candidate, candidate);
         assert_eq!(selection.product_code, code);

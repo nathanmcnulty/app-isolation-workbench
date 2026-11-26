@@ -435,6 +435,46 @@ fn execute_imported_msi_request(request: &ImportedMsiGuestRequest) -> Result<()>
     ensure_output_root(&root)?;
     installer.revalidate()?;
 
+    if request.scenario.is_reviewed_launch() {
+        let outcome = aiw_windows_platform::execute_reviewed_msi_launch(
+            &request.scenario,
+            request.installer_size_bytes,
+        )?;
+        installer.revalidate()?;
+        let result = ImportedMsiScenarioResult::reviewed_launch(
+            request,
+            outcome.discovery,
+            outcome.process_id,
+            outcome.exit_code,
+        )?;
+        let token = aiw_provider_wsb::ImportedMsiApplicationToken::new(
+            request,
+            &result,
+            outcome.application_token,
+        )
+        .map_err(anyhow::Error::msg)?;
+        let mut evidence = EvidenceLog::new();
+        evidence.append(EvidenceEvent {
+            observed_utc: "guest-agent-time-not-trusted".into(),
+            kind: "importedMsiScenario".into(),
+            source: "aiw-guest-agent".into(),
+            payload: serde_json::to_value(&result)?,
+        })?;
+        evidence.append(EvidenceEvent {
+            observed_utc: "guest-agent-time-not-trusted".into(),
+            kind: aiw_provider_wsb::MSI_APPLICATION_TOKEN_EVENT.into(),
+            source: "aiw-guest-agent".into(),
+            payload: serde_json::to_value(&token)?,
+        })?;
+        return publish_msi_result(
+            request,
+            &result,
+            evidence,
+            CompletionStatus::Succeeded,
+            None,
+        );
+    }
+
     if request.scenario.is_generic_install_only() {
         let discovery = aiw_windows_platform::execute_generic_msi_install(
             &request.scenario,
@@ -1195,7 +1235,8 @@ fn read_request(path: &Path) -> Result<GuestRequest> {
         Some(
             IMPORTED_MSI_GUEST_REQUEST_SCHEMA_VERSION
             | aiw_provider_wsb::IMPORTED_MSI_OBSERVATION_REQUEST_SCHEMA_VERSION
-            | aiw_provider_wsb::GENERIC_INSTALL_REQUEST_VERSION,
+            | aiw_provider_wsb::GENERIC_INSTALL_REQUEST_VERSION
+            | aiw_provider_wsb::REVIEWED_MSI_LAUNCH_REQUEST_VERSION,
         ) => serde_json::from_value(value)
             .map(Box::new)
             .map(GuestRequest::ImportedMsi)
@@ -1841,6 +1882,7 @@ mod tests {
                 interactive_session_seconds: None,
                 document_exercise: None,
                 interactive_document: None,
+                reviewed_entry_point: None,
             },
             "a".repeat(64),
             1024,

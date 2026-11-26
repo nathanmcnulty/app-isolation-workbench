@@ -541,6 +541,7 @@ mod tests {
                 )),
             }),
             interactive_document: None,
+            reviewed_entry_point: None,
         };
         ImportedMsiGuestRequest::new(
             "run-one",

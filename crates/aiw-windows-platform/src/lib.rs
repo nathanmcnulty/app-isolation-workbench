@@ -240,7 +240,9 @@ mod guest_filesystem;
 #[cfg(windows)]
 mod guest_msi_product;
 #[cfg(windows)]
-pub use guest_msi_product::execute_generic_msi_install;
+pub use guest_msi_product::{
+    ReviewedMsiNativeOutcome, execute_generic_msi_install, execute_reviewed_msi_launch,
+};
 #[cfg(windows)]
 mod guest_registry;
 

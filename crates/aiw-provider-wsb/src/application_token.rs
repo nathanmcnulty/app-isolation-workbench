@@ -47,6 +47,15 @@ impl ImportedMsiApplicationToken {
         result
             .validate_for_request(request)
             .map_err(|e| e.to_string())?;
+        if request.scenario.is_reviewed_launch()
+            && (self.token.is_elevated
+                || self.token.is_app_container
+                || self.token.integrity.level != aiw_token::IntegrityLevel::Medium)
+        {
+            return Err(
+                "reviewed MSI launch did not use an ordinary medium-integrity token".into(),
+            );
+        }
         if self.schema_version != MSI_APPLICATION_TOKEN_SCHEMA
             || self.run_id != request.run_id
             || self.sandbox_id != request.sandbox_id

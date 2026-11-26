@@ -84,6 +84,8 @@ pub struct CompiledMsiScenario {
     pub interactive_session_seconds: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interactive_document: Option<InteractiveDocumentTransfer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reviewed_entry_point: Option<crate::MsiReviewedEntryPoint>,
 }
 
 /// The only caller supplied value admitted by the interactive transfer
@@ -137,6 +139,10 @@ pub const GENERIC_MSI_INSTALL_PROFILE: &str =
     "aiw.dev/windows-sandbox/msi-install-discovery/v0alpha1";
 const GENERIC_MSI_SCENARIO_VERSION: &str =
     "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha12";
+const REVIEWED_MSI_LAUNCH_PROFILE: &str = "aiw.dev/windows-sandbox/msi-reviewed-launch/v0alpha1";
+const REVIEWED_MSI_SCENARIO_VERSION: &str =
+    "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha13";
+const MSI_PROGRAM_FILES: &str = r"C:\Program Files";
 pub const GENERIC_MSI_LOCAL_ROOT: &str = r"C:\AIW\InstallerStage";
 pub const GENERIC_MSI_LOCAL_PACKAGE: &str = r"C:\AIW\InstallerStage\application.msi";
 pub const GENERIC_MSI_LOCAL_LOG: &str = r"C:\AIW\InstallerStage\install.log";
@@ -166,6 +172,83 @@ pub fn compile_generic_msi_install(
     timeout_seconds: u32,
     buffered: bool,
 ) -> Result<CompiledMsiScenario, ScenarioCompileError> {
+    let operation = generic_msi_operation(project, scenario_id, timeout_seconds, buffered)?;
+    if !project
+        .scenarios
+        .iter()
+        .any(|scenario| scenario.id == scenario_id && scenario.steps == [ScenarioStep::Install])
+    {
+        return Err(ScenarioCompileError::UnsupportedScenario);
+    }
+    operation.validate()?;
+    Ok(operation)
+}
+
+/// Compile the explicit app-neutral sequence. No arbitrary executable path
+/// or command line is carried into the plan. The runner must reverify the
+/// source run before supplying this selection; compilation itself has no
+/// execution authority.
+pub fn compile_reviewed_msi_launch(
+    project: &Project,
+    scenario_id: &str,
+    run_id: &str,
+    reviewed: &crate::MsiReviewedEntryPoint,
+) -> Result<CompiledMsiScenario, ScenarioCompileError> {
+    let mut operation = generic_msi_operation(project, scenario_id, 300, true)?;
+    let ApplicationSource::Msi(application) = &project.application else {
+        return Err(ScenarioCompileError::UnsupportedApplicationSource);
+    };
+    reviewed
+        .validate_for_fresh_run(run_id, &operation.application_sha256)
+        .map_err(|_| ScenarioCompileError::InvalidCompiledProfile)?;
+    let path = &reviewed.candidate.relative_path;
+    let leaf = path.rsplit('\\').next().unwrap_or_default();
+    let scenario = project
+        .scenarios
+        .iter()
+        .find(|scenario| scenario.id == scenario_id)
+        .ok_or(ScenarioCompileError::UnsupportedScenario)?;
+    let [
+        ScenarioStep::Install,
+        ScenarioStep::Launch {
+            entrypoint,
+            arguments,
+        },
+        ScenarioStep::WaitForProcess {
+            image,
+            timeout_seconds,
+        },
+        ScenarioStep::GracefulClose,
+        ScenarioStep::ExpectExitCode { value: 0 },
+    ] = scenario.steps.as_slice()
+    else {
+        return Err(ScenarioCompileError::UnsupportedScenario);
+    };
+    if !arguments.is_empty()
+        || image != leaf
+        || !application.entry_points.iter().any(|entry| {
+            &entry.id == entrypoint && &entry.path == path && entry.arguments.is_empty()
+        })
+    {
+        return Err(ScenarioCompileError::UnsupportedScenario);
+    }
+    operation.schema_version = REVIEWED_MSI_SCENARIO_VERSION.into();
+    operation.profile = REVIEWED_MSI_LAUNCH_PROFILE.into();
+    operation.launch_path = format!(r"{MSI_PROGRAM_FILES}\{path}");
+    operation.process_image = leaf.into();
+    operation.process_wait_timeout_seconds = *timeout_seconds;
+    operation.graceful_close_timeout_seconds = GRACEFUL_CLOSE_TIMEOUT_SECONDS;
+    operation.reviewed_entry_point = Some(reviewed.clone());
+    operation.validate()?;
+    Ok(operation)
+}
+
+fn generic_msi_operation(
+    project: &Project,
+    scenario_id: &str,
+    timeout_seconds: u32,
+    buffered: bool,
+) -> Result<CompiledMsiScenario, ScenarioCompileError> {
     if !aiw_schema::validate_project_for_planning(project).is_empty() {
         return Err(ScenarioCompileError::InvalidProject);
     }
@@ -190,14 +273,7 @@ pub fn compile_generic_msi_install(
     {
         return Err(ScenarioCompileError::UnsupportedInstallerSemantics);
     }
-    if !project
-        .scenarios
-        .iter()
-        .any(|scenario| scenario.id == scenario_id && scenario.steps == [ScenarioStep::Install])
-    {
-        return Err(ScenarioCompileError::UnsupportedScenario);
-    }
-    let operation = CompiledMsiScenario {
+    Ok(CompiledMsiScenario {
         schema_version: GENERIC_MSI_SCENARIO_VERSION.into(),
         profile: GENERIC_MSI_INSTALL_PROFILE.into(),
         scenario_id: scenario_id.into(),
@@ -214,14 +290,50 @@ pub fn compile_generic_msi_install(
         document_exercise: None,
         interactive_session_seconds: None,
         interactive_document: None,
-    };
-    operation.validate()?;
-    Ok(operation)
+        reviewed_entry_point: None,
+    })
 }
 
 impl CompiledMsiScenario {
     pub fn is_generic_install_only(&self) -> bool {
         self.profile == GENERIC_MSI_INSTALL_PROFILE
+    }
+
+    pub fn uses_generic_installer(&self) -> bool {
+        self.is_generic_install_only() || self.is_reviewed_launch()
+    }
+
+    pub fn is_reviewed_launch(&self) -> bool {
+        self.profile == REVIEWED_MSI_LAUNCH_PROFILE
+    }
+
+    fn validate_reviewed_launch(&self) -> Result<(), ScenarioCompileError> {
+        let reviewed = self
+            .reviewed_entry_point
+            .as_ref()
+            .ok_or(ScenarioCompileError::InvalidCompiledProfile)?;
+        reviewed
+            .validate_for_installer(&self.application_sha256)
+            .map_err(|_| ScenarioCompileError::InvalidCompiledProfile)?;
+        let path = &reviewed.candidate.relative_path;
+        if self.schema_version != REVIEWED_MSI_SCENARIO_VERSION
+            || !valid_id(&self.scenario_id)
+            || self.installer_path != STAGED_INSTALLER_PATH
+            || self.install_arguments != generic_install_arguments(true)
+            || self.install_timeout_seconds != 300
+            || self.launch_path != format!(r"{MSI_PROGRAM_FILES}\{path}")
+            || !self.launch_arguments.is_empty()
+            || self.process_image != path.rsplit('\\').next().unwrap_or_default()
+            || !(1..=MAX_PROCESS_WAIT_TIMEOUT_SECONDS).contains(&self.process_wait_timeout_seconds)
+            || self.graceful_close_timeout_seconds != GRACEFUL_CLOSE_TIMEOUT_SECONDS
+            || self.expected_exit_code != 0
+            || self.document_exercise.is_some()
+            || self.interactive_session_seconds.is_some()
+            || self.interactive_document.is_some()
+        {
+            return Err(ScenarioCompileError::InvalidCompiledProfile);
+        }
+        Ok(())
     }
 
     fn validate_generic_install(&self) -> Result<(), ScenarioCompileError> {
@@ -249,7 +361,16 @@ impl CompiledMsiScenario {
     /// Validates the fixed profile constants and the copied source binding.
     pub fn validate(&self) -> Result<(), ScenarioCompileError> {
         if self.is_generic_install_only() {
+            if self.reviewed_entry_point.is_some() {
+                return Err(ScenarioCompileError::InvalidCompiledProfile);
+            }
             return self.validate_generic_install();
+        }
+        if self.is_reviewed_launch() {
+            return self.validate_reviewed_launch();
+        }
+        if self.reviewed_entry_point.is_some() {
+            return Err(ScenarioCompileError::InvalidCompiledProfile);
         }
         let current = self.schema_version == COMPILED_MSI_SCENARIO_SCHEMA_VERSION
             && self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE;
@@ -367,7 +488,8 @@ impl CompiledMsiScenario {
 
     /// The versioned profile is part of the approved scenario hash.
     pub fn requires_application_token(&self) -> bool {
-        self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_PROFILE
+        self.is_reviewed_launch()
+            || self.profile == NOTEPAD_PLUS_PLUS_INTERACTIVE_PROFILE
             || self.requires_document_transfer()
             || self.profile == NOTEPAD_PLUS_PLUS_MSI_PROFILE
             || self.profile == LEGACY_NOTEPAD_PLUS_PLUS_MSI_PROFILE
@@ -587,6 +709,7 @@ pub fn compile_notepad_plus_plus_msi_scenario(
         document_exercise: Some(FixedDocumentExercise::standard_user()),
         interactive_session_seconds: interactive_seconds,
         interactive_document: None,
+        reviewed_entry_point: None,
     };
     if interactive_seconds.is_some() {
         compiled.schema_version = "aiw.dev/windows-sandbox-compiled-msi-scenario/v0alpha7".into();
@@ -686,6 +809,97 @@ fn valid_id(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reviewed_msi_plan_binds_exact_source_entry_and_closed_steps() {
+        let mut project = project();
+        let ApplicationSource::Msi(application) = &mut project.application else {
+            unreachable!()
+        };
+        application.entry_points[0].path = r"Vendor\Tool.exe".into();
+        let ScenarioStep::WaitForProcess { image, .. } = &mut project.scenarios[0].steps[2] else {
+            unreachable!()
+        };
+        *image = "Tool.exe".into();
+        let code = "{A1234567-89AB-CDEF-0123-456789ABCDEF}".to_owned();
+        let reviewed = crate::MsiReviewedEntryPoint {
+            schema_version: crate::MSI_ENTRY_POINT_SELECTION_VERSION.into(),
+            source_run_id: "prior".into(),
+            source_receipt_sha256: "b".repeat(64),
+            source_evidence_root_hash: "c".repeat(64),
+            source_project_revision_sha256: "d".repeat(64),
+            installer_sha256: "a".repeat(64),
+            product_code: code.clone(),
+            candidate: crate::MsiLaunchCandidate {
+                component_code: code,
+                relative_path: r"Vendor\Tool.exe".into(),
+                size_bytes: 1024,
+                sha256: "e".repeat(64),
+            },
+        };
+        let op = compile_reviewed_msi_launch(&project, "first-run", "fresh", &reviewed).unwrap();
+        assert_eq!(op.launch_path, r"C:\Program Files\Vendor\Tool.exe");
+        assert!(op.is_reviewed_launch());
+        let bytes = serde_json::to_vec(&op).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<CompiledMsiScenario>(&bytes).unwrap(),
+            op
+        );
+        let mut changed = reviewed.clone();
+        changed.source_receipt_sha256 = "f".repeat(64);
+        let changed =
+            compile_reviewed_msi_launch(&project, "first-run", "fresh", &changed).unwrap();
+        assert_ne!(
+            op.canonical_sha256().unwrap(),
+            changed.canonical_sha256().unwrap()
+        );
+        assert!(compile_reviewed_msi_launch(&project, "first-run", "prior", &reviewed).is_err());
+        let mut tampered = op.clone();
+        tampered.launch_path = r"C:\Windows\System32\cmd.exe".into();
+        assert!(tampered.validate().is_err());
+        let ScenarioStep::Launch { arguments, .. } = &mut project.scenarios[0].steps[1] else {
+            unreachable!()
+        };
+        arguments.push("unreviewed".into());
+        assert!(compile_reviewed_msi_launch(&project, "first-run", "fresh", &reviewed).is_err());
+        let request = crate::ImportedMsiGuestRequest::new(
+            "fresh",
+            "00112233-4455-6677-8899-aabbccddeeff",
+            "1".repeat(64),
+            "2".repeat(64),
+            op,
+            "a".repeat(64),
+            1024,
+            "3".repeat(64),
+        )
+        .unwrap();
+        assert_eq!(
+            request.schema_version,
+            crate::REVIEWED_MSI_LAUNCH_REQUEST_VERSION
+        );
+        let mut legacy = request.clone();
+        legacy.schema_version = crate::IMPORTED_MSI_GUEST_REQUEST_SCHEMA_VERSION.into();
+        assert!(legacy.recompute_request_sha256().is_err());
+        let mut reused = request.clone();
+        reused.run_id = "prior".into();
+        assert!(reused.recompute_request_sha256().is_err());
+        let mut discovery = crate::MsiInstallDiscovery {
+            product_code: reviewed.product_code.clone(),
+            before_install: crate::MsiMachineProductState::NotRegistered,
+            after_install: crate::MsiMachineProductState::Installed,
+            candidates: vec![reviewed.candidate],
+            candidate_scan_complete: true,
+        };
+        let result =
+            crate::ImportedMsiScenarioResult::reviewed_launch(&request, discovery.clone(), 42, 0)
+                .unwrap();
+        assert!(result.successful());
+        assert!(crate::ImportedMsiScenarioResult::discovered(&request, discovery.clone()).is_err());
+        discovery.candidates[0].sha256 = "1".repeat(64);
+        assert!(
+            crate::ImportedMsiScenarioResult::reviewed_launch(&request, discovery, 42, 0).is_err()
+        );
+    }
 
     fn project() -> Project {
         serde_json::from_value(serde_json::json!({

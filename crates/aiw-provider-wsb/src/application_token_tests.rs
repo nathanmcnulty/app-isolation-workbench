@@ -33,6 +33,7 @@ fn scenario() -> CompiledMsiScenario {
         interactive_session_seconds: None,
         document_exercise: None,
         interactive_document: None,
+        reviewed_entry_point: None,
     }
 }
 

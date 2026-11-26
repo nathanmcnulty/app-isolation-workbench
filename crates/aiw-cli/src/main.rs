@@ -724,6 +724,17 @@ enum RunCommand {
         launch_profile: Option<PathBuf>,
         #[arg(long, requires = "launch_profile")]
         launch_profile_sha256: Option<String>,
+        /// Exact Program Files relative path from a completed, verified install run.
+        #[arg(long, requires_all = ["selection_source_root", "selection_source_run", "selection_source_project", "selection_source_agent_sha256"], conflicts_with_all = ["document_input", "launch_profile"])]
+        reviewed_entry_point: Option<String>,
+        #[arg(long, requires = "reviewed_entry_point")]
+        selection_source_root: Option<PathBuf>,
+        #[arg(long, requires = "reviewed_entry_point")]
+        selection_source_run: Option<String>,
+        #[arg(long, requires = "reviewed_entry_point")]
+        selection_source_project: Option<PathBuf>,
+        #[arg(long, requires = "reviewed_entry_point")]
+        selection_source_agent_sha256: Option<String>,
     },
     /// Create and verify a fresh Windows Sandbox workspace and approvable plan bundle.
     /// This does not approve, acquire, start, connect, stop, or recover a provider.
@@ -2622,12 +2633,51 @@ fn run_general(command: Command) -> Result<()> {
                 document_input,
                 launch_profile,
                 launch_profile_sha256,
+                reviewed_entry_point,
+                selection_source_root,
+                selection_source_run,
+                selection_source_project,
+                selection_source_agent_sha256,
             } => {
                 let loaded = read_project(&project)?;
                 let receipt: ApplicationFileImportReceipt =
                     read_document(&import_receipt, MAX_CONFIG_BYTES)?;
                 #[cfg(windows)]
                 {
+                    let verified = match (
+                        reviewed_entry_point,
+                        selection_source_root,
+                        selection_source_run,
+                        selection_source_project,
+                        selection_source_agent_sha256,
+                    ) {
+                        (None, None, None, None, None) => None,
+                        (
+                            Some(path),
+                            Some(root),
+                            Some(source_run),
+                            Some(source_project),
+                            Some(source_agent),
+                        ) => {
+                            let loaded_source = read_project(&source_project)?;
+                            Some(
+                                aiw_runner::verify_windows_sandbox_msi_entry_point(
+                                    &root,
+                                    &source_run,
+                                    &loaded_source.project,
+                                    &source_agent,
+                                    &path,
+                                )
+                                .map_err(|source| {
+                                    anyhow!(RunReportFailed {
+                                        run_id: source_run,
+                                        source
+                                    })
+                                })?,
+                            )
+                        }
+                        _ => bail!("reviewed MSI launch requires all source selection inputs"),
+                    };
                     let profile: Option<aiw_runner::WsbLaunchProfileExport> = launch_profile
                         .as_ref()
                         .map(|path| read_document(path, 1024 * 1024))
@@ -2642,6 +2692,7 @@ fn run_general(command: Command) -> Result<()> {
                         WsbMsiPreparationInput {
                             import_receipt: &receipt,
                             scenario_id: &scenario,
+                            reviewed_entry_point: verified.as_ref(),
                             document_input: document_input.as_deref(),
                             launch_profile: profile.as_ref().zip(launch_profile_sha256.as_deref()),
                         },
@@ -2663,6 +2714,11 @@ fn run_general(command: Command) -> Result<()> {
                         document_input,
                         launch_profile,
                         launch_profile_sha256,
+                        reviewed_entry_point,
+                        selection_source_root,
+                        selection_source_run,
+                        selection_source_project,
+                        selection_source_agent_sha256,
                     );
                     bail!("MSI preparation requires Windows")
                 }
