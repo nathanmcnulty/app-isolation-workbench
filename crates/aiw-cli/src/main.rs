@@ -408,6 +408,44 @@ enum ApplicationCommand {
         #[arg(long)]
         candidate_run_id: String,
     },
+    /// Export the exact installer and two generic MSI scenarios. No approval or execution.
+    ExportMsiReplayPackage {
+        #[arg(long)]
+        installer: PathBuf,
+        #[arg(long)]
+        install_project: PathBuf,
+        #[arg(long)]
+        install_scenario: String,
+        #[arg(long)]
+        launch_project: PathBuf,
+        #[arg(long)]
+        launch_scenario: String,
+        #[arg(long)]
+        source_root: PathBuf,
+        #[arg(long)]
+        source_run_id: String,
+        #[arg(long)]
+        source_guest_agent_sha256: String,
+        #[arg(long)]
+        entry_point: String,
+        #[arg(long)]
+        output_parent: PathBuf,
+        #[arg(long)]
+        package_id: String,
+    },
+    /// Verify an exact data-only MSI package, or compare fresh install evidence with it.
+    VerifyMsiReplayPackage {
+        #[arg(long)]
+        package: PathBuf,
+        #[arg(long)]
+        expected_manifest_sha256: String,
+        #[arg(long, requires_all = ["replay_run_id", "replay_guest_agent_sha256"])]
+        replay_root: Option<PathBuf>,
+        #[arg(long, requires = "replay_root")]
+        replay_run_id: Option<String>,
+        #[arg(long, requires = "replay_root")]
+        replay_guest_agent_sha256: Option<String>,
+    },
     /// Copy the reviewed external workflow and bytes into a fresh data-only replay package.
     ExportAssessmentPackage {
         #[arg(long)]
@@ -2271,6 +2309,93 @@ fn run_general(command: Command) -> Result<()> {
                         candidate_run_id,
                     );
                     bail!("protected retained comparison requires Windows")
+                }
+            }
+            ApplicationCommand::ExportMsiReplayPackage {
+                installer,
+                install_project,
+                install_scenario,
+                launch_project,
+                launch_scenario,
+                source_root,
+                source_run_id,
+                source_guest_agent_sha256,
+                entry_point,
+                output_parent,
+                package_id,
+            } => {
+                #[cfg(windows)]
+                {
+                    use aiw_admin_workflow::msi_replay_package::{MsiReplayExport, export_package};
+                    let install = read_project(&install_project)?;
+                    let launch = read_project(&launch_project)?;
+                    let selection = aiw_runner::verify_windows_sandbox_msi_entry_point(
+                        &source_root,
+                        &source_run_id,
+                        &install.project,
+                        &source_guest_agent_sha256,
+                        &entry_point,
+                    )?;
+                    write_json(&export_package(MsiReplayExport {
+                        installer: &installer,
+                        install_project: &install.project,
+                        install_scenario: &install_scenario,
+                        launch_project: &launch.project,
+                        launch_scenario: &launch_scenario,
+                        verified_selection: &selection,
+                        output_parent: &output_parent,
+                        package_id: &package_id,
+                    })?)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (
+                        installer,
+                        install_project,
+                        install_scenario,
+                        launch_project,
+                        launch_scenario,
+                        source_root,
+                        source_run_id,
+                        source_guest_agent_sha256,
+                        entry_point,
+                        output_parent,
+                        package_id,
+                    );
+                    bail!("protected MSI replay package export requires Windows")
+                }
+            }
+            ApplicationCommand::VerifyMsiReplayPackage {
+                package,
+                expected_manifest_sha256,
+                replay_root,
+                replay_run_id,
+                replay_guest_agent_sha256,
+            } => {
+                #[cfg(windows)]
+                {
+                    let verified = aiw_admin_workflow::msi_replay_package::verify_package(
+                        &package,
+                        &expected_manifest_sha256,
+                    )?;
+                    match (replay_root, replay_run_id, replay_guest_agent_sha256) {
+                        (Some(root), Some(run), Some(agent)) => {
+                            write_json(&verified.verify_fresh_selection(&root, &run, &agent)?)
+                        }
+                        (None, None, None) => write_json(&verified.review),
+                        _ => bail!("all three replay evidence arguments are required together"),
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (
+                        package,
+                        expected_manifest_sha256,
+                        replay_root,
+                        replay_run_id,
+                        replay_guest_agent_sha256,
+                    );
+                    bail!("protected MSI replay package verification requires Windows")
                 }
             }
             ApplicationCommand::ExportAssessmentPackage {
