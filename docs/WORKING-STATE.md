@@ -1,6 +1,6 @@
 # Working state
 
-Updated 2026-11-23 (UTC). Effective goal #108 is one application-neutral
+Updated 2026-11-26 (UTC). Effective goal #108 is one application-neutral
 assessment and replay path for two different external administrator-supplied
 fixtures. #111 evidence is preserved and its legacy application-specific work is
 paused. Merged PR #112 used `codex/application-neutral-assessment` in
@@ -74,17 +74,29 @@ The bounded scan covers registered executable component key paths in Program
 Files. See [installer diagnostics](APPLICATION-ASSESSMENT.md#installer-diagnostics)
 for the earlier timing and CMake observations.
 
-The Windows debug CLI now dispatches preparation import before the general
-command frame. On the same fresh prepared workspace the previous binary hit
-0xC00000FD, while the fixed binary wrote the planning receipt and left the run
-pending approval. The next step is to bind the operator's selected executable
-and evidence provenance into a separately reviewed launch plan.
+[PR #130](https://github.com/nathanmcnulty/app-isolation-workbench/pull/130)
+adds a separately approved run from the retained install-only selection.
+In native VM107 testing, a repository-built control MSI passed the two
+fresh offline Sandbox runs: installation and executable discovery, then
+reinstallation, exact executable verification, standard-user window
+readiness, graceful close and exact Sandbox cleanup.
+
+The same merged binaries passed with the signed x64 PuTTY 0.85 MSI,
+without any PuTTY-specific production code. The first fresh Sandbox
+discovered six registered executable candidates. A separately approved
+fresh run verified the same component and hash for `PuTTY\putty.exe`,
+observed its window under a standard-user token, closed it with exit 0,
+and verified cleanup. No connection was attempted. This measures window
+startup and closure, not operator interaction or MSI package replay.
+The overall assessment result remains `insufficientEvidence`.
 
 ## Remaining scope
 
-The measured slices are portable CLI assessment and offline MSI install discovery.
-In-desktop preparation and approval, installer-backed application launch, GUI automation, complete descendants/registry/network/DLL/memory/broker
-coverage, the broader fixture matrix and broad acceptance remain open. Root-token
+The measured slices are portable CLI assessment, offline MSI install discovery,
+and reviewed MSI window smoke checks. A generic operator-controlled GUI
+session, MSI packaging and clean-worker replay, in-desktop preparation and
+approval, complete descendants/registry/network/DLL/memory/broker coverage,
+the broader fixture matrix, and broad acceptance remain open. Root-token
 and collector-denial measurements do not establish all effective restrictions.
 Benchmark 2, W4/W5 and production acceptance are not closed by these results.
 
