@@ -334,11 +334,12 @@ impl HeldInstalledMsiCandidate {
     }
 }
 
-/// Evidence returned only after the observed process accepts a graceful close
-/// and its job is confirmed empty. Provider teardown remains a separate gate.
+/// Evidence returned only after the observed process exits and its job is
+/// confirmed empty. Provider teardown remains a separate gate.
 pub struct ReviewedMsiNativeOutcome {
     pub discovery: aiw_provider_wsb::MsiInstallDiscovery,
     pub application_token: aiw_token::TokenEvidence,
+    pub operator_context: Option<aiw_provider_wsb::StandardUserRuntimeContext>,
     pub process_id: u32,
     pub exit_code: i32,
 }
@@ -351,7 +352,7 @@ pub fn execute_reviewed_msi_launch(
     expected_bytes: u64,
 ) -> Result<ReviewedMsiNativeOutcome, GuestMsiExecutionError> {
     use crate::{
-        guest_msi::{GuestProcess, complete_process_operation},
+        guest_msi::{GuestProcess, complete_process_operation, require_visible_process_window},
         guest_standard_user::StandardUserSession,
     };
     use std::{
@@ -456,10 +457,25 @@ pub fn execute_reviewed_msi_launch(
                 ERROR_INVALID_DATA,
             ));
         }
-        application.request_visible_window_close(window)?;
-        let exit_code = application.wait_for_exit(Duration::from_secs(
-            operation.graceful_close_timeout_seconds.into(),
-        ))?;
+        let exit_code = if let Some(seconds) = operation.interactive_session_seconds {
+            require_visible_process_window(
+                window,
+                application.process_id(),
+                "reviewed application window",
+            )?;
+            application
+                .wait_for_exit(Duration::from_secs(seconds.into()))
+                .map_err(|error| {
+                    GuestMsiExecutionError::Process(format!(
+                        "reviewed operator session did not complete: {error}"
+                    ))
+                })?
+        } else {
+            application.request_visible_window_close(window)?;
+            application.wait_for_exit(Duration::from_secs(
+                operation.graceful_close_timeout_seconds.into(),
+            ))?
+        };
         if exit_code != operation.expected_exit_code {
             return Err(GuestMsiExecutionError::Process(format!(
                 "reviewed application exited with {exit_code}"
@@ -476,6 +492,9 @@ pub fn execute_reviewed_msi_launch(
     Ok(ReviewedMsiNativeOutcome {
         discovery,
         application_token,
+        operator_context: operation
+            .is_reviewed_operator_session()
+            .then(|| ordinary.context().clone()),
         process_id: application.process_id(),
         exit_code,
     })

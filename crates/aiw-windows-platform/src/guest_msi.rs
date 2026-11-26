@@ -1159,7 +1159,7 @@ fn find_scintilla_child_window(
     Ok(context.editor)
 }
 
-fn require_visible_process_window(
+pub(crate) fn require_visible_process_window(
     window: HWND,
     process_id: u32,
     role: &str,

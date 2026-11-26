@@ -88,8 +88,15 @@ fn msi_trust_delta(msi: &WsbMsiApplication) -> String {
 }
 fn msi_execution_trust_delta(msi: &WsbMsiApplication) -> String {
     if let Some(selection) = &msi.scenario.reviewed_entry_point {
+        let close = if let Some(seconds) = msi.scenario.interactive_session_seconds {
+            format!(
+                "allows a scratch-only operator session for up to {seconds} seconds after its own window is observed; requires natural exit and verifies job cleanup; scratch data is discarded"
+            )
+        } else {
+            "observes its own window, requests graceful closure, and verifies job cleanup".into()
+        };
         return format!(
-            "installs the approved MSI elevated in one offline disposable Windows Sandbox, then rechecks the executable selected from run {} and opens exact path {} (SHA-256 {}) as the fresh standard user with no arguments; observes its own window, requests graceful closure, and verifies job cleanup; no host execution, network, or clipboard access",
+            "installs the approved MSI elevated in one offline disposable Windows Sandbox, then rechecks the executable selected from run {} and opens exact path {} (SHA-256 {}) as the fresh standard user with no arguments; {close}; no host execution, network, or clipboard access",
             selection.source_run_id, selection.candidate.relative_path, selection.candidate.sha256,
         );
     }

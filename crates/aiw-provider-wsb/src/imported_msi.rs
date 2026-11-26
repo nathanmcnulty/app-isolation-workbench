@@ -25,6 +25,8 @@ pub const REVIEWED_MSI_LAUNCH_REQUEST_VERSION: &str =
     "aiw.dev/windows-sandbox-imported-msi-guest-request/v0alpha4";
 const REVIEWED_MSI_LAUNCH_RESULT_VERSION: &str =
     "aiw.dev/windows-sandbox-imported-msi-scenario-result/v0alpha5";
+const REVIEWED_MSI_OPERATOR_RESULT_VERSION: &str =
+    "aiw.dev/windows-sandbox-imported-msi-scenario-result/v0alpha6";
 pub const MAX_MSI_LAUNCH_CANDIDATES: usize = 32;
 pub const MAX_MSI_CANDIDATE_BYTES: u64 = 64 * 1024 * 1024;
 
@@ -590,7 +592,9 @@ impl ImportedMsiScenarioResult {
     ) -> Result<Self, ImportedMsiRequestError> {
         let install_only = request.scenario.is_generic_install_only();
         let value = Self {
-            schema_version: if request.scenario.is_reviewed_launch() {
+            schema_version: if request.scenario.is_reviewed_operator_session() {
+                REVIEWED_MSI_OPERATOR_RESULT_VERSION.to_owned()
+            } else if request.scenario.is_reviewed_launch() {
                 REVIEWED_MSI_LAUNCH_RESULT_VERSION.to_owned()
             } else if install_only {
                 GENERIC_INSTALL_RESULT_VERSION.to_owned()
@@ -631,11 +635,13 @@ impl ImportedMsiScenarioResult {
             self.schema_version == IMPORTED_MSI_DOCUMENT_SCENARIO_RESULT_SCHEMA_VERSION;
         let install_only = self.schema_version == GENERIC_INSTALL_RESULT_VERSION;
         let reviewed_launch = self.schema_version == REVIEWED_MSI_LAUNCH_RESULT_VERSION;
+        let reviewed_operator = self.schema_version == REVIEWED_MSI_OPERATOR_RESULT_VERSION;
         if (self.schema_version != IMPORTED_MSI_SCENARIO_RESULT_SCHEMA_VERSION
             && !interactive
             && !interactive_document
             && !install_only
-            && !reviewed_launch)
+            && !reviewed_launch
+            && !reviewed_operator)
             || !valid_id(&self.run_id)
             || !canonical_sandbox_id(&self.sandbox_id)
             || !lower_hex_sha256(&self.config_sha256)
@@ -651,8 +657,9 @@ impl ImportedMsiScenarioResult {
             || self.process_observed == install_only
             || self.process_closed == install_only
             || self.graceful_close_requested
-                == (interactive || interactive_document || install_only)
-            || self.install_discovery.is_some() != (install_only || reviewed_launch)
+                == (interactive || interactive_document || install_only || reviewed_operator)
+            || self.install_discovery.is_some()
+                != (install_only || reviewed_launch || reviewed_operator)
         {
             return Err(ImportedMsiRequestError::InvalidResult);
         }
@@ -679,12 +686,16 @@ impl ImportedMsiScenarioResult {
         self.validate()?;
         let result_interactive = self.schema_version
             == "aiw.dev/windows-sandbox-imported-msi-scenario-result/v0alpha2"
-            || self.schema_version == IMPORTED_MSI_DOCUMENT_SCENARIO_RESULT_SCHEMA_VERSION;
+            || self.schema_version == IMPORTED_MSI_DOCUMENT_SCENARIO_RESULT_SCHEMA_VERSION
+            || self.schema_version == REVIEWED_MSI_OPERATOR_RESULT_VERSION;
         if self.run_id != request.run_id
             || (self.schema_version == GENERIC_INSTALL_RESULT_VERSION)
                 != request.scenario.is_generic_install_only()
             || (self.schema_version == REVIEWED_MSI_LAUNCH_RESULT_VERSION)
-                != request.scenario.is_reviewed_launch()
+                != (request.scenario.is_reviewed_launch()
+                    && !request.scenario.is_reviewed_operator_session())
+            || (self.schema_version == REVIEWED_MSI_OPERATOR_RESULT_VERSION)
+                != request.scenario.is_reviewed_operator_session()
             || result_interactive != request.scenario.interactive_session_seconds.is_some()
             || (self.schema_version == IMPORTED_MSI_DOCUMENT_SCENARIO_RESULT_SCHEMA_VERSION)
                 != request.scenario.requires_document_transfer()

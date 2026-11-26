@@ -80,7 +80,7 @@ pub(crate) fn inspect_artifacts(
             maximum_document_bytes: Some(aiw_provider_wsb::MAX_INTERACTIVE_DOCUMENT_BYTES),
             lifetime: "The worker is discarded on close or timeout. The staged input and verified output remain in the host run workspace; exporting to another host file requires an explicit command.".into(),
         }
-    } else if scenario.is_reviewed_launch() {
+    } else if scenario.is_reviewed_launch() && !scenario.is_reviewed_operator_session() {
         WsbMsiRecipeData {
             mode: "reviewedLaunchSmokeTest".into(),
             guest_document_path: None,

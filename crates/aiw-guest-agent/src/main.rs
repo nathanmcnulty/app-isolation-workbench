@@ -466,6 +466,17 @@ fn execute_imported_msi_request(request: &ImportedMsiGuestRequest) -> Result<()>
             source: "aiw-guest-agent".into(),
             payload: serde_json::to_value(&token)?,
         })?;
+        if let Some(context) = outcome.operator_context {
+            let context =
+                aiw_provider_wsb::ImportedMsiRuntimeContext::new(request, &result, &token, context)
+                    .map_err(anyhow::Error::msg)?;
+            evidence.append(EvidenceEvent {
+                observed_utc: "guest-agent-time-not-trusted".into(),
+                kind: aiw_provider_wsb::IMPORTED_MSI_RUNTIME_CONTEXT_EVENT.into(),
+                source: "aiw-guest-agent".into(),
+                payload: serde_json::to_value(&context)?,
+            })?;
+        }
         return publish_msi_result(
             request,
             &result,
