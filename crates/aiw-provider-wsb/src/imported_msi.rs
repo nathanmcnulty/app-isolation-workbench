@@ -99,6 +99,30 @@ fn install_discovery_requires_registration_and_bounded_candidate_paths() {
     );
     assert!(discovery.select_candidate(r"vendor\Tool.exe").is_none());
     assert!(discovery.select_candidate(r"Vendor\.\Tool.exe").is_none());
+    assert_eq!(
+        discovery.match_reviewed_candidate(&discovery.product_code, &candidate),
+        Some(&candidate)
+    );
+    assert!(
+        discovery
+            .match_reviewed_candidate("{B1234567-89AB-CDEF-0123-456789ABCDEF}", &candidate)
+            .is_none()
+    );
+    for change in 0..4 {
+        let mut mismatched = candidate.clone();
+        match change {
+            0 => mismatched.component_code = "{B1234567-89AB-CDEF-0123-456789ABCDEF}".into(),
+            1 => mismatched.relative_path = r"vendor\Tool.exe".into(),
+            2 => mismatched.size_bytes += 1,
+            3 => mismatched.sha256 = "b".repeat(64),
+            _ => unreachable!(),
+        }
+        assert!(
+            discovery
+                .match_reviewed_candidate(&discovery.product_code, &mismatched)
+                .is_none()
+        );
+    }
     discovery.after_install = NotRegistered;
     assert!(discovery.select_candidate(r"Vendor\Tool.exe").is_none());
     assert!(discovery.validate().is_err());
@@ -117,6 +141,22 @@ impl MsiInstallDiscovery {
         self.candidates
             .iter()
             .find(|candidate| candidate.relative_path == relative_path)
+    }
+
+    /// Match a previously reviewed discovery against this worker's fresh
+    /// observation. The exact product, component, path, size and digest must
+    /// agree. This is evidence matching only: callers still need to hold and
+    /// revalidate the executable that they actually launch.
+    pub fn match_reviewed_candidate(
+        &self,
+        product_code: &str,
+        reviewed: &MsiLaunchCandidate,
+    ) -> Option<&MsiLaunchCandidate> {
+        if self.product_code != product_code {
+            return None;
+        }
+        self.select_candidate(&reviewed.relative_path)
+            .filter(|observed| *observed == reviewed)
     }
 
     fn validate(&self) -> Result<(), ImportedMsiRequestError> {
