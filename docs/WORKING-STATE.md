@@ -65,6 +65,10 @@ Windows Sandbox Store registration. See the [live handoff checklist](APPLICATION
 
 ## MSI assessment
 
+Issue #141 hardens the desktop preparation wrapper against trailing flags.
+The [MSI replay workflow](APPLICATION-ASSESSMENT.md#package-and-replay-a-reviewed-msi)
+shows how to add the paired launch entries from the fresh install-only record.
+
 The MSI replay review and pinned PowerShell handoff passed all 32 desktop
 JavaScript tests on AIW, including native argument forwarding. The CLI and
 desktop built, and the Windows tests passed for wrong pins, changed package

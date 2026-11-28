@@ -51,9 +51,9 @@ test("handoff carries exact reviewed arguments as PowerShell data", () => {
   }), /one line/);
 });
 
-test("Windows PowerShell passes the handoff arguments exactly to a native recorder", {
+test("PowerShell on Windows forwards handoff arguments to an inert native recorder", {
   skip: process.platform !== "win32",
-}, () => {
+}, async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "aiw-replay-arguments-"));
   const recorder = path.join(directory, "application");
   const script = path.join(directory, "prepare-text.ps1");
@@ -63,23 +63,61 @@ test("Windows PowerShell passes the handoff arguments exactly to a native record
     // Node receives "application" as an owned fixture script in this cwd.
     // The fixture only returns its arguments. No AIW binary is invoked.
     fs.writeFileSync(recorder, "process.stdout.write(JSON.stringify(process.argv.slice(2)));");
-    fs.writeFileSync(script, handoff.buildCommand({ path: candidatePath, manifestSha256 }, {
+    const inputs = {
       ...preparationInputs, cli: process.execPath,
-    }));
-    const observed = spawnSync("pwsh.exe", [
-      "-NoLogo", "-NoProfile", "-NonInteractive", "-File", script,
-    ], { cwd: directory, encoding: "utf8", timeout: 15_000 });
-    assert.ifError(observed.error);
-    assert.equal(observed.status, 0, observed.stderr);
-    assert.deepEqual(JSON.parse(observed.stdout), [
-      "prepare-assessment-package",
+    };
+    const record = (command) => {
+      fs.writeFileSync(script, command);
+      const observed = spawnSync("pwsh.exe", [
+        "-NoLogo", "-NoProfile", "-NonInteractive", "-File", script,
+      ], { cwd: directory, encoding: "utf8", timeout: 15_000 });
+      assert.ifError(observed.error);
+      return observed;
+    };
+    const commonArguments = [
       "--package=" + candidatePath,
       "--expected-manifest-sha256=" + manifestSha256,
       "--guest-agent=" + preparationInputs.guestAgent,
       "--guest-agent-sha256=" + "b".repeat(64),
       "--evidence-parent=" + preparationInputs.evidenceParent,
-      "--operator=" + preparationInputs.operator,
-    ]);
+    ];
+    const portable = handoff.buildCommand({ path: candidatePath, manifestSha256 }, inputs);
+    const msi = handoff.buildCommand({ type: "msi", path: candidatePath, manifestSha256 }, inputs);
+    const installArguments = ["prepare-msi-replay-package", ...commonArguments];
+    const installReplay = { workspaceRoot: "C:\\Evidence set\\O'Neil & $(literal)\\", runId: "fresh-install-run" };
+    const replayArguments = [
+      "--replay-root=" + installReplay.workspaceRoot,
+      "--replay-run-id=" + installReplay.runId,
+    ];
+
+    await t.test("portable assessment", () => {
+      const observed = record(portable);
+      assert.equal(observed.status, 0, observed.stderr);
+      assert.deepEqual(JSON.parse(observed.stdout), [
+        "prepare-assessment-package", ...commonArguments, "--operator=" + preparationInputs.operator,
+      ]);
+    });
+
+    await t.test("unmodified MSI install-only preparation", () => {
+      const observed = record(msi);
+      assert.equal(observed.status, 0, observed.stderr);
+      assert.deepEqual(JSON.parse(observed.stdout), installArguments);
+    });
+
+    await t.test("MSI launch preparation with both replay arguments in the JSON array", () => {
+      const entries = replayArguments.map((argument) => "    " + JSON.stringify(argument)).join(",\n");
+      const edited = msi.replace("\n  ]\n}", ",\n" + entries + "\n  ]\n}");
+      const observed = record(edited);
+      assert.equal(observed.status, 0, observed.stderr);
+      assert.deepEqual(JSON.parse(observed.stdout), [...installArguments, ...replayArguments]);
+    });
+
+    await t.test("MSI wrapper rejects trailing replay flags before the recorder runs", () => {
+      const observed = record(msi + " --replay-root 'C:\\Fresh install' --replay-run-id fresh-install-run");
+      assert.equal(observed.status, 1, observed.stderr);
+      assert.match(observed.stderr, /Unexpected handoff arguments/);
+      assert.equal(observed.stdout, "");
+    });
   } finally {
     fs.rmSync(recorder, { force: true });
     fs.rmSync(script, { force: true });
