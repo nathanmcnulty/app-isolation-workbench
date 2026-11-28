@@ -446,6 +446,7 @@ fn execute_imported_msi_request(request: &ImportedMsiGuestRequest) -> Result<()>
             outcome.discovery,
             outcome.process_id,
             outcome.exit_code,
+            outcome.graceful_close_requested,
         )?;
         let token = aiw_provider_wsb::ImportedMsiApplicationToken::new(
             request,

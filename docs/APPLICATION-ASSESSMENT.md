@@ -85,9 +85,10 @@ Preparation reopens the retained install-only evidence; it cannot use a loose
 selection JSON or a previous launch as the source. Review and approve the
 fresh plan separately. The new Sandbox reinstalls the exact MSI, checks the
 registered component and its executable bytes, and opens the held image as a
-standard user. Success records that its own window appeared, it closed on
-request with the expected exit code, its process job was empty, and the
-provider cleaned up. A changed executable or missing window fails this run.
+standard user. Success requires observing its own window, successfully posting
+at least one `WM_CLOSE` request, observing the expected exit code, verifying an
+empty process job, and completing provider cleanup. A changed executable,
+missing window, or exit before any close request fails this run.
 New reviewed launch plans allow three minutes for graceful close. AIW sends
 close requests to the verified process's visible, enabled windows, including
 windows that become available after a startup dialog closes. Use an overall

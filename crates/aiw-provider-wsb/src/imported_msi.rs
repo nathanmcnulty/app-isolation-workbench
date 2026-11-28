@@ -551,11 +551,15 @@ impl ImportedMsiScenarioResult {
         launch_exit_code: i32,
         document_transfer: Option<ImportedMsiDocumentTransferResult>,
     ) -> Result<Self, ImportedMsiRequestError> {
+        if request.scenario.is_reviewed_launch() {
+            return Err(ImportedMsiRequestError::InvalidRequest);
+        }
         Self::complete(
             request,
             install_exit_code,
             launch_process_id,
             launch_exit_code,
+            request.scenario.interactive_session_seconds.is_none(),
             document_transfer,
             None,
         )
@@ -565,7 +569,7 @@ impl ImportedMsiScenarioResult {
         request: &ImportedMsiGuestRequest,
         discovery: MsiInstallDiscovery,
     ) -> Result<Self, ImportedMsiRequestError> {
-        Self::complete(request, 0, 0, 0, None, Some(discovery))
+        Self::complete(request, 0, 0, 0, false, None, Some(discovery))
     }
 
     pub fn reviewed_launch(
@@ -573,11 +577,20 @@ impl ImportedMsiScenarioResult {
         discovery: MsiInstallDiscovery,
         process_id: u32,
         exit_code: i32,
+        graceful_close_requested: bool,
     ) -> Result<Self, ImportedMsiRequestError> {
         if !request.scenario.is_reviewed_launch() {
             return Err(ImportedMsiRequestError::InvalidRequest);
         }
-        let result = Self::complete(request, 0, process_id, exit_code, None, Some(discovery))?;
+        let result = Self::complete(
+            request,
+            0,
+            process_id,
+            exit_code,
+            graceful_close_requested,
+            None,
+            Some(discovery),
+        )?;
         result.validate_for_request(request)?;
         Ok(result)
     }
@@ -587,6 +600,7 @@ impl ImportedMsiScenarioResult {
         install_exit_code: i32,
         launch_process_id: u32,
         launch_exit_code: i32,
+        graceful_close_requested: bool,
         document_transfer: Option<ImportedMsiDocumentTransferResult>,
         install_discovery: Option<MsiInstallDiscovery>,
     ) -> Result<Self, ImportedMsiRequestError> {
@@ -618,8 +632,7 @@ impl ImportedMsiScenarioResult {
             launch_process_id,
             launch_exit_code,
             process_observed: !install_only,
-            graceful_close_requested: !install_only
-                && request.scenario.interactive_session_seconds.is_none(),
+            graceful_close_requested,
             process_closed: !install_only,
             document_transfer,
             install_discovery,
