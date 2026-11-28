@@ -12,6 +12,7 @@ const INSTALLER: &str = "app.msi";
 const INSTALL_PROJECT: &str = "install.jsn";
 const LAUNCH_PROJECT: &str = "launch.jsn";
 const MANIFEST: &str = "package.jsn";
+const INTAKE: &str = "installer";
 const MAX_MSI: u64 = 128 * 1024 * 1024;
 const MAX_JSON: u64 = 2 * 1024 * 1024;
 
@@ -114,6 +115,7 @@ impl VerifiedMsiReplay {
         {
             bail!("MSI replay installer changed");
         }
+        aiw_runner::preflight_windows_sandbox_guest_agent(guest_agent, guest_agent_sha256)?;
         let run_id = format!("msi-replay-{}", nonce());
         // Intake verification retains a read-only lease on its immediate
         // parent. Workspace creation needs write authority on a different one.
@@ -123,13 +125,34 @@ impl VerifiedMsiReplay {
         )?;
         let intake_parent_path = intake_parent.final_path().to_path_buf();
         drop(intake_parent);
+        let retained_inputs = |recovery_state: &str, detail: String| {
+            AiwError {
+            code: "AIW_MSI_REPLAY_PREPARATION_INCOMPLETE".into(),
+            summary: "MSI replay preparation failed after creating protected inputs".into(),
+            stage: "msiReplayPreparation".into(),
+            run_id: Some(run_id.clone().into()),
+            retryable: false,
+            remediation: "Preserve the reported paths and inspect their receipts before retrying. Do not approve or start an incomplete replay preparation.".into(),
+            detail: format!(
+                "Protected inputs directory: {}. Installer intake location: {}. {recovery_state} {detail}",
+                intake_parent_path.display(),
+                intake_parent_path.join(INTAKE).display(),
+            ).into(),
+        }
+        };
         let intake = aiw_windows_platform::import_application_file_with_metadata(
             &intake_parent_path,
-            "installer",
+            INTAKE,
             ApplicationInspectionKind::Msi,
             &installer,
             false,
-        )?;
+        )
+        .map_err(|error| {
+            retained_inputs(
+                "Installer intake completion is unconfirmed. No preparation workspace was created.",
+                error.to_string(),
+            )
+        })?;
         let (project, scenario_id) = if verified_entry_point.is_some() {
             (&self.launch_project, manifest.launch_scenario.as_str())
         } else {
@@ -149,7 +172,15 @@ impl VerifiedMsiReplay {
                 document_input: None,
                 launch_profile: None,
             },
-        )?;
+        )
+        .map_err(|error| {
+            let recovery_state = if matches!(error, aiw_runner::WsbPreparationError::WorkspacePreserved { .. }) {
+                "Installer intake is published. The preserved preparation workspace requires inspection."
+            } else {
+                "Installer intake is published. No new preparation workspace was reported."
+            };
+            retained_inputs(recovery_state, error.to_string())
+        })?;
         let workspace = Path::new(&prepared.receipt.workspace.root.final_path);
         aiw_runner::import_windows_sandbox_preparation(
             workspace,
@@ -158,9 +189,9 @@ impl VerifiedMsiReplay {
             &now_rfc3339(),
         )
         .map_err(|error| {
-            anyhow!(
-                "prepared MSI replay workspace {}: {error}",
-                workspace.display()
+            retained_inputs(
+                "Installer intake and preparation are published. Pending-approval import completion is unconfirmed.",
+                format!("Preparation workspace: {}. {error}", workspace.display()),
             )
         })?;
         Ok(prepared)
@@ -358,6 +389,7 @@ pub fn export_package(input: MsiReplayExport<'_>) -> Result<MsiReplayReview> {
 mod tests {
     use super::*;
     use aiw_schema::ScenarioStep;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn selection() -> MsiReviewedEntryPoint {
         MsiReviewedEntryPoint {
@@ -408,18 +440,33 @@ mod tests {
         assert!(compare_fresh_selection(&original, &drift).is_err());
     }
 
-    #[test]
-    fn package_review_rejects_a_wrong_pin_and_changed_payloads() {
-        let root =
-            std::env::temp_dir().join(format!("aiw-msi-test-{}-{}", std::process::id(), nonce()));
-        std::fs::create_dir(&root).unwrap();
-        struct Fixture(PathBuf);
-        impl Drop for Fixture {
-            fn drop(&mut self) {
-                std::fs::remove_dir_all(&self.0).unwrap();
+    struct Fixture(PathBuf);
+
+    impl Fixture {
+        fn new() -> Self {
+            static NEXT: AtomicUsize = AtomicUsize::new(0);
+            let root = std::env::temp_dir().join(format!(
+                "aiw-msi-test-{}-{}-{}",
+                std::process::id(),
+                nonce(),
+                NEXT.fetch_add(1, Ordering::Relaxed),
+            ));
+            std::fs::create_dir(&root).unwrap();
+            Self(root.canonicalize().unwrap())
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let result = std::fs::remove_dir_all(&self.0);
+            if !std::thread::panicking() {
+                result.unwrap();
             }
         }
-        let root = Fixture(root);
+    }
+
+    fn write_package(package: &Path) -> String {
+        std::fs::create_dir(package).unwrap();
         let installer = b"inert fixture bytes";
         let mut original_selection = selection();
         original_selection.installer_sha256 = digest(installer);
@@ -460,22 +507,88 @@ mod tests {
             (LAUNCH_PROJECT, &launch_bytes),
             (MANIFEST, &manifest),
         ] {
-            std::fs::write(root.0.join(name), bytes).unwrap();
+            std::fs::write(package.join(name), bytes).unwrap();
         }
-        let pin = digest(&manifest);
-        assert!(verify_package(&root.0, &"0".repeat(64)).is_err());
-        let verified = verify_package(&root.0, &pin).unwrap();
+        digest(&manifest)
+    }
+
+    #[test]
+    fn package_review_rejects_a_wrong_pin_and_changed_payloads() {
+        let root = Fixture::new();
+        let package = root.0.join("package");
+        let pin = write_package(&package);
+        assert!(verify_package(&package, &"0".repeat(64)).is_err());
+        let verified = verify_package(&package, &pin).unwrap();
         assert_eq!(verified.review.manifest_sha256, pin);
         drop(verified);
 
         for name in [INSTALLER, INSTALL_PROJECT, LAUNCH_PROJECT, MANIFEST] {
-            let path = root.0.join(name);
+            let path = package.join(name);
             let original = std::fs::read(&path).unwrap();
             let mut changed = original.clone();
             changed[0] ^= 1;
             std::fs::write(&path, changed).unwrap();
-            assert!(verify_package(&root.0, &pin).is_err(), "{name}");
+            assert!(verify_package(&package, &pin).is_err(), "{name}");
             std::fs::write(&path, original).unwrap();
         }
+    }
+
+    #[test]
+    fn replay_wrong_guest_agent_pin_does_not_publish_intake() {
+        let root = Fixture::new();
+        let package = root.0.join("package");
+        let verified = verify_package(&package, &write_package(&package)).unwrap();
+        let guest_agent = root.0.join("agent.exe");
+        std::fs::write(&guest_agent, b"inert guest-agent fixture").unwrap();
+        let evidence = root.0.join("evidence");
+        std::fs::create_dir(&evidence).unwrap();
+
+        for _ in 0..2 {
+            let error = verified
+                .prepare(&guest_agent, &"0".repeat(64), &evidence, None)
+                .unwrap_err();
+            assert!(matches!(
+                error.downcast_ref::<aiw_runner::WsbPreparationError>(),
+                Some(aiw_runner::WsbPreparationError::GuestAgent(detail))
+                    if detail.contains("does not match the expected guest-agent identity")
+            ));
+            assert!(evidence.read_dir().unwrap().next().is_none());
+        }
+    }
+
+    #[test]
+    fn replay_reports_published_intake_when_planning_fails() {
+        let root = Fixture::new();
+        let package = root.0.join("package");
+        let mut verified = verify_package(&package, &write_package(&package)).unwrap();
+        // Force the runner's planning validator to fail before inspecting Sandbox readiness.
+        verified.install_project.metadata.id.clear();
+        let guest_agent = root.0.join("agent.exe");
+        let agent_bytes = b"inert guest-agent fixture";
+        std::fs::write(&guest_agent, agent_bytes).unwrap();
+        let evidence = root.0.join("evidence");
+        std::fs::create_dir(&evidence).unwrap();
+
+        let error = verified
+            .prepare(&guest_agent, &digest(agent_bytes), &evidence, None)
+            .unwrap_err()
+            .downcast::<AiwError>()
+            .unwrap();
+        assert_eq!(&*error.code, "AIW_MSI_REPLAY_PREPARATION_INCOMPLETE");
+        assert!(!error.retryable);
+        let run_id = error.run_id.as_deref().unwrap();
+        let inputs = evidence.join(format!("{run_id}-inputs"));
+        let intake = inputs.join(INTAKE).canonicalize().unwrap();
+        assert!(intake.join("intake.json").is_file());
+        let intake = intake.to_str().unwrap().trim_start_matches(r"\\?\");
+        assert!(error.detail.contains(intake));
+        assert!(error.detail.contains("Installer intake is published"));
+        assert!(error.detail.contains("project is not valid for planning"));
+        assert!(
+            error
+                .detail
+                .contains("No new preparation workspace was reported")
+        );
+        assert_eq!(evidence.read_dir().unwrap().count(), 1);
     }
 }

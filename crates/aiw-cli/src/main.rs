@@ -2436,7 +2436,27 @@ fn run_general(command: Command) -> Result<()> {
                         &evidence_parent,
                         replay_root.as_deref().zip(replay_run_id.as_deref()),
                     )?;
-                    write_json(&preparation_result(prepared))
+                    let result = preparation_result(prepared);
+                    write_json(&result).map_err(|_| {
+                        let intake = result
+                            .receipt
+                            .msi
+                            .as_ref()
+                            .map(|msi| msi.import_receipt.intake_root.final_path.as_str())
+                            .unwrap_or("see the preparation receipt");
+                        AiwError {
+                            code: "AIW_MSI_REPLAY_RESULT_OUTPUT_FAILED".into(),
+                            summary: "MSI replay preparation completed but its result could not be written".into(),
+                            stage: "msiReplayPreparation".into(),
+                            run_id: Some(result.run_id.into()),
+                            retryable: false,
+                            remediation: "Use the retained workspace and run ID to review the pending approval.".into(),
+                            detail: format!(
+                                "Preparation workspace: {}. Installer intake location: {intake}. Planning import completed and is pending approval.",
+                                result.workspace_root,
+                            ).into(),
+                        }.into()
+                    })
                 }
                 #[cfg(not(windows))]
                 {

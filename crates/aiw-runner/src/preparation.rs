@@ -2710,6 +2710,16 @@ fn stage_guest_agent(
 }
 
 #[cfg(windows)]
+/// Check the enrolled source identity before a caller publishes preparation inputs.
+/// Bundle preparation independently reopens and verifies the file it stages.
+pub fn preflight_windows_sandbox_guest_agent(
+    source: &Path,
+    expected_sha256: &str,
+) -> Result<(), WsbPreparationError> {
+    open_guest_agent_source(source, expected_sha256).map(drop)
+}
+
+#[cfg(windows)]
 struct HeldGuestAgentSource {
     file: std::fs::File,
     size_bytes: u64,
@@ -3938,8 +3948,17 @@ pub(crate) mod tests {
         let expected = hex::encode(Sha256::digest(b"fixed guest agent"));
         let held = open_guest_agent_source(&source, &expected).unwrap();
         assert_eq!(held.sha256, expected);
+        assert!(
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(&source)
+                .is_err()
+        );
         drop(held);
         assert!(open_guest_agent_source(&source, &"0".repeat(64)).is_err());
+        std::fs::write(&source, b"changed guest agent").unwrap();
+        assert!(open_guest_agent_source(&source, &expected).is_err());
+        std::fs::write(&source, b"fixed guest agent").unwrap();
 
         let link = temp.0.join("agent-link.exe");
         if symlink_file(&source, &link).is_ok() {
