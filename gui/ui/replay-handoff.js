@@ -28,19 +28,19 @@
       throw new Error("Enter the independently enrolled guest agent SHA-256.");
     }
     const evidenceParent = absolutePath(inputs.evidenceParent.trim(), "The evidence parent");
-    const operator = requiredText(inputs.operator.trim(), "The operator identity");
+    const msi = review.type === "msi";
     const request = {
       cli,
       arguments: [
-        "application", "prepare-assessment-package",
+        "application", msi ? "prepare-msi-replay-package" : "prepare-assessment-package",
         "--package=" + absolutePath(review.path, "The reviewed package"),
         "--expected-manifest-sha256=" + review.manifestSha256,
         "--guest-agent=" + guestAgent,
         "--guest-agent-sha256=" + guestAgentSha256,
         "--evidence-parent=" + evidenceParent,
-        "--operator=" + operator,
       ],
     };
+    if (!msi) request.arguments.push("--operator=" + requiredText(inputs.operator.trim(), "The operator identity"));
 
     // Operator values enter PowerShell as JSON data and then native arguments.
     // Quoting and other shell syntax inside a value remain literal.

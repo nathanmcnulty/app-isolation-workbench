@@ -49,16 +49,20 @@
 
     <section class="card" aria-labelledby="replay-review-title">
       <h2 id="replay-review-title">Review a replay package</h2>
-      <p class="section-intro">Verify the candidate in place. Select a baseline to see what changed.</p>
+      <p class="section-intro">Verify the candidate in place. Portable packages support baseline comparison. MSI packages require the manifest SHA-256 supplied separately from the package.</p>
       <div class="field-grid">
+        <label class="field"><span>Package type</span><select id="replayType"><option value="portable">Portable assessment</option><option value="msi">MSI replay</option></select></label>
         <label class="field"><span>Candidate package</span><div class="input-action"><input id="replayCandidate" type="text" readonly placeholder="Choose a package folder"><button id="chooseReplayCandidate" class="secondary" type="button">Choose folder</button></div></label>
-        <label class="field"><span>Baseline package (optional)</span><div class="input-action"><input id="replayBaseline" type="text" readonly placeholder="Choose a package folder"><button id="chooseReplayBaseline" class="secondary" type="button">Choose folder</button></div></label>
+        <label id="replayBaselineField" class="field"><span>Baseline package (optional)</span><div class="input-action"><input id="replayBaseline" type="text" readonly placeholder="Choose a package folder"><button id="chooseReplayBaseline" class="secondary" type="button">Choose folder</button></div></label>
+        <label id="replayExpectedHashField" class="field hidden"><span>Independently supplied manifest SHA-256</span><input id="replayExpectedHash" class="mono" type="text" spellcheck="false"></label>
       </div>
       <button id="reviewReplay" class="primary" type="button" disabled>Verify and review</button>
       <button id="clearReplayBaseline" class="secondary" type="button" disabled>Clear baseline</button>
       <p id="replayReviewStatus" role="status">Choose a candidate package to begin.</p>
       <div id="replayReviewResult" class="hidden">
         <p id="replayReviewMode"></p>
+        <p id="replayMsiInstaller" class="hidden"></p>
+        <p id="replayMsiEntryPoint" class="hidden"></p>
         <p id="replayReviewChanges" class="hidden"></p>
         <label class="field"><span>Verified candidate manifest SHA-256</span><input id="replayReviewPin" class="mono" type="text" readonly></label>
         <details class="advanced"><summary>Declared workflow details</summary><pre id="replayReviewDetails"></pre></details>
@@ -70,7 +74,7 @@
             <label class="field"><span>Enrolled guest agent path</span><input id="replayHandoffGuestAgent" type="text" spellcheck="false"></label>
             <label class="field"><span>Enrolled guest agent SHA-256</span><input id="replayHandoffAgentSha256" class="mono" type="text" spellcheck="false"></label>
             <label class="field"><span>Existing evidence parent folder</span><input id="replayHandoffEvidence" type="text" spellcheck="false"></label>
-            <label class="field"><span>Operator identity</span><input id="replayHandoffOperator" type="text"></label>
+          <label id="replayHandoffOperatorField" class="field"><span>Operator identity</span><input id="replayHandoffOperator" type="text"></label>
           </div>
           <button id="generateReplayCommand" class="secondary" type="button" disabled>Generate preparation command</button>
           <p id="replayHandoffStatus" role="status"></p>

@@ -20,6 +20,12 @@
   const reviewButton = $("reviewReplay");
   const candidate = $("replayCandidate");
   const baseline = $("replayBaseline");
+  const packageType = $("replayType");
+  const expectedHash = $("replayExpectedHash");
+  const isMsi = () => packageType.value === "msi";
+  const manifestPin = () => expectedHash.value.trim().toLowerCase();
+  const installer = $("replayMsiInstaller");
+  const entryPoint = $("replayMsiEntryPoint");
   const result = $("replayReviewResult");
   const status = $("replayReviewStatus");
   const pin = $("replayReviewPin");
@@ -44,9 +50,16 @@
   }
 
   function updateControls() {
+    const msi = isMsi();
+    packageType.disabled = expectedHash.disabled = busy || !invoke;
+    $("replayExpectedHashField").classList.toggle("hidden", !msi);
+    $("replayBaselineField").classList.toggle("hidden", msi);
+    $("replayHandoffOperatorField").classList.toggle("hidden", msi);
+    clearBaseline.classList.toggle("hidden", msi);
     chooseCandidate.disabled = chooseBaseline.disabled = busy || !invoke;
-    clearBaseline.disabled = busy || !baseline.value;
-    reviewButton.disabled = busy || !invoke || !candidate.value;
+    chooseBaseline.disabled ||= msi;
+    clearBaseline.disabled = busy || msi || !baseline.value;
+    reviewButton.disabled = busy || !invoke || !candidate.value || (msi && !/^[a-f0-9]{64}$/.test(manifestPin()));
     generateCommand.disabled = busy || !reviewedCandidate;
   }
 
@@ -58,6 +71,10 @@
     changes.textContent = "";
     $("replayReviewMode").textContent = "";
     $("replayReviewDetails").textContent = "";
+    for (const field of [installer, entryPoint]) {
+      field.textContent = "";
+      field.classList.toggle("hidden", true);
+    }
     pin.value = "";
     status.textContent = message;
   }
@@ -92,6 +109,8 @@
   }
 
   chooseCandidate.addEventListener("click", () => choose(candidate));
+  packageType.addEventListener("change", selectionChanged);
+  expectedHash.addEventListener("input", selectionChanged);
   chooseBaseline.addEventListener("click", () => choose(baseline));
   clearBaseline.addEventListener("click", () => {
     if (busy) return;
@@ -113,9 +132,27 @@
   });
 
   reviewButton.addEventListener("click", () => {
-    if (!candidate.value) return;
+    if (reviewButton.disabled) return;
     return withBusy(async () => {
       clearReview("Verifying the selected packages…");
+      if (isMsi()) {
+        const review = await invoke("review_msi_replay_package", {
+          candidate: candidate.value, expectedManifestSha256: manifestPin(),
+        });
+        const manifest = review.manifest;
+        const selection = manifest.originalSelection;
+        reviewedCandidate = { type: "msi", path: candidate.value, manifestSha256: review.manifestSha256 };
+        $("replayReviewMode").textContent = clean("Install-only preparation · Scenario: " + manifest.installScenario);
+        installer.textContent = clean(`Installer: app.msi · ${manifest.installerSizeBytes} bytes · SHA-256 ${selection.installerSha256}`);
+        entryPoint.textContent = clean(`Reviewed entry point: ${selection.candidate.relativePath} · SHA-256 ${selection.candidate.sha256}`);
+        installer.classList.toggle("hidden", false);
+        entryPoint.classList.toggle("hidden", false);
+        pin.value = review.manifestSha256;
+        $("replayReviewDetails").textContent = clean(JSON.stringify(review, null, 2));
+        status.textContent = "MSI package verified. A fresh install must match the reviewed entry point before launch.";
+        result.classList.toggle("hidden", false);
+        return;
+      }
       const selection = { candidate: candidate.value, baseline: baseline.value || null };
       const response = await invoke("review_replay_packages", selection);
       const review = response.candidateReview || response;

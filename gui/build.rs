@@ -7,6 +7,7 @@ fn main() {
             "get_state",
             "choose_input",
             "review_replay_packages",
+            "review_msi_replay_package",
             "analyze_package",
             "create_package",
             "prepare_workflow",
