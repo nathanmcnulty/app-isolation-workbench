@@ -116,6 +116,38 @@ Use `run report-wsb-msi-run` for the retained report. A successful
 exit, and cleanup. It does not prove which controls someone used, establish
 an isolation verdict, or produce a package.
 
+### Package and replay a reviewed MSI
+
+`application export-msi-replay-package` reopens a completed install-only
+report for the requested entry point and copies the exact MSI plus the
+install and launch projects into a new protected directory. For example:
+
+```powershell
+aiw application export-msi-replay-package --installer <approved.msi> `
+  --install-project <install.json> --install-scenario <id> `
+  --launch-project <launch.json> --launch-scenario <id> `
+  --source-root <verified-install-workspace> --source-run-id <install-run> `
+  --source-guest-agent-sha256 <verified-agent-sha> --entry-point <relative-path> `
+  --output-parent <existing-absolute-directory> --package-id <new-directory>
+```
+
+Keep the returned `manifestSha256` separately. On the replay machine, use
+`application verify-msi-replay-package --package <path>` with
+`--expected-manifest-sha256 <pinned-digest>`. Verification checks the whole
+four-file inventory and exact contents. It neither installs the MSI nor
+authorizes a run. The package does not contain a guest agent, runnable
+approval, prior workspace or raw logs.
+
+Import `app.msi` with normal protected intake. Prepare, review,
+approve and run `install.jsn` in a fresh Sandbox. Check the new
+install-only evidence against the same package by adding `--replay-root`,
+`--replay-run-id`, and `--replay-guest-agent-sha256` to the verification
+command. It compares the newly measured product, component, exact path,
+file size and executable hash and rejects the original run as replay.
+Finally use `launch.jsn` and the **new** install-only evidence to
+prepare and approve a distinct fresh launch, as above. Match the packaged
+scenario IDs when preparing those runs.
+
 ### Installer diagnostics
 
 Preview v0alpha3 specifies guest-local verbose Windows Installer logging and an
