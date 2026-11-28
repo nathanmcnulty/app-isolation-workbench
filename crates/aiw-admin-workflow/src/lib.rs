@@ -19,6 +19,8 @@ pub mod approval_review;
 #[cfg(windows)]
 mod installer_inspection;
 #[cfg(windows)]
+pub mod msi_replay_package;
+#[cfg(windows)]
 pub mod msix;
 pub mod packaging;
 pub mod paired;
