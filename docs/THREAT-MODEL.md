@@ -113,6 +113,20 @@ COM/IPC and credential brokers outside the workload boundary require separately
 identified enforcement and tests. Local account/session separation does not prove
 cloud identity attribution. See the [October 7 review gates](MXC-TRAJECTORY-REVIEW-2026-10-07.md#security-and-evidence-gates-to-add-to-benchmark-2).
 
+## Reviewed MSI replay
+
+Desktop MSI replay review reads only the exact package inventory and requires a
+manifest SHA-256 obtained separately from the bundle. The review and generated
+PowerShell command grant no run authority. Preparation rechecks the pin and
+payload before protected intake and imports a pending plan for separate
+approval and Start. Launch preparation also reopens retained evidence from a
+different install-only run and compares the product and executable identity
+with the reviewed package.
+
+The close budget is bound to the approved scenario. The guest limits close
+requests to visible windows owned by the verified application process and
+requires the expected process exit and cleanup before reporting success.
+
 ## MSIX recovery export authority
 
 MSIX recovery must retain the authoritative run-owned profile evidence before

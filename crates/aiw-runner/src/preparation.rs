@@ -92,6 +92,11 @@ fn msi_execution_trust_delta(msi: &WsbMsiApplication) -> String {
             format!(
                 "allows a scratch-only operator session for up to {seconds} seconds after its own window is observed; requires natural exit and verifies job cleanup; scratch data is discarded"
             )
+        } else if msi.scenario.closes_reviewed_window_sequence() {
+            format!(
+                "observes its own window, requests graceful closure of the application's visible windows for up to {} seconds, and verifies job cleanup",
+                msi.scenario.graceful_close_timeout_seconds,
+            )
         } else {
             "observes its own window, requests graceful closure, and verifies job cleanup".into()
         };
@@ -1092,13 +1097,8 @@ pub fn build_wsb_msi_preparation(
     msi: WsbMsiApplication,
 ) -> Result<PreparedWsbArtifacts, WsbPreparationError> {
     msi.validate(workspace)?;
-    let compiled = if let Some(reviewed) = &msi.scenario.reviewed_entry_point {
-        aiw_provider_wsb::compile_reviewed_msi_launch(
-            project,
-            &msi.scenario.scenario_id,
-            run_id,
-            reviewed,
-        )
+    let compiled = if msi.scenario.reviewed_entry_point.is_some() {
+        msi.scenario.recompile_reviewed_launch(project, run_id)
     } else if let Some(document) = &msi.staged_document {
         aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario_with_document(
             project,
@@ -2249,13 +2249,9 @@ fn open_verified_preparation_with_inspector(
         .msi
         .as_ref()
         .map(|msi| {
-            let compiled = if let Some(reviewed) = &msi.scenario.reviewed_entry_point {
-                aiw_provider_wsb::compile_reviewed_msi_launch(
-                    project,
-                    &msi.scenario.scenario_id,
-                    &receipt.run_id,
-                    reviewed,
-                )
+            let compiled = if msi.scenario.reviewed_entry_point.is_some() {
+                msi.scenario
+                    .recompile_reviewed_launch(project, &receipt.run_id)
             } else if let Some(document) = &msi.staged_document {
                 aiw_provider_wsb::compile_notepad_plus_plus_msi_scenario_with_document(
                     project,

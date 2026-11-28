@@ -9,14 +9,10 @@ fn verify_historical_scenario(
     recorded
         .validate()
         .map_err(|e| RunnerError::Preparation(e.to_string()))?;
-    if let Some(reviewed) = &recorded.reviewed_entry_point {
-        let compiled = aiw_provider_wsb::compile_reviewed_msi_launch(
-            project,
-            &recorded.scenario_id,
-            run_id,
-            reviewed,
-        )
-        .map_err(|e| RunnerError::Preparation(e.to_string()))?;
+    if recorded.reviewed_entry_point.is_some() {
+        let compiled = recorded
+            .recompile_reviewed_launch(project, run_id)
+            .map_err(|e| RunnerError::Preparation(e.to_string()))?;
         return if &compiled == recorded {
             Ok(())
         } else {
