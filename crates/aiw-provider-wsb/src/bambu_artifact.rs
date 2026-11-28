@@ -329,7 +329,7 @@ where
                         .to_owned(),
                 );
             }
-            Event::Text(text) if text.contains(&b'&') => {
+            Event::Text(text) if text.contains('&') => {
                 return Err("3MF XML must not contain entity references".to_owned());
             }
             Event::Eof => break,
@@ -396,7 +396,7 @@ fn parse_model_xml(bytes: &[u8]) -> Result<Vec<ModelElement>, String> {
                         .to_owned(),
                 );
             }
-            Event::Text(text) if text.contains(&b'&') => {
+            Event::Text(text) if text.contains('&') => {
                 return Err("3MF XML must not contain entity references".to_owned());
             }
             Event::Eof => break,
@@ -415,9 +415,7 @@ fn raw_attribute_names(element: &BytesStart<'_>) -> Result<BTreeSet<String>, Str
     let mut names = BTreeSet::new();
     for attribute in element.attributes().with_checks(true) {
         let attribute = attribute.map_err(|error| format!("invalid XML attribute: {error}"))?;
-        let name = std::str::from_utf8(attribute.key.as_ref())
-            .map_err(|_| "3MF XML attribute is not UTF-8")?
-            .to_owned();
+        let name = attribute.key.as_ref().to_owned();
         if !names.insert(name) {
             return Err("3MF XML has duplicate attribute names".to_owned());
         }
@@ -530,18 +528,14 @@ fn exactly_one_named_child(
 }
 
 fn element_parts(element: &BytesStart<'_>) -> Result<(String, BTreeMap<String, String>), String> {
-    let raw_name = std::str::from_utf8(element.name().as_ref())
-        .map_err(|_| "3MF XML element is not UTF-8")?
-        .to_owned();
+    let raw_name = element.name().as_ref().to_owned();
     if raw_name.contains(':') {
         return Err("3MF XML must not use prefixed element names".to_owned());
     }
     let mut attributes = BTreeMap::new();
     for attribute in element.attributes().with_checks(true) {
         let attribute = attribute.map_err(|error| format!("invalid XML attribute: {error}"))?;
-        let key = std::str::from_utf8(attribute.key.as_ref())
-            .map_err(|_| "3MF XML attribute is not UTF-8")?
-            .to_owned();
+        let key = attribute.key.as_ref().to_owned();
         let value = attribute
             .normalized_value(XmlVersion::Implicit1_0)
             .map_err(|error| format!("invalid XML attribute value: {error}"))?
