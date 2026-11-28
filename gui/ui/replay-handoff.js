@@ -48,6 +48,9 @@
       (character) => "\\u" + character.charCodeAt(0).toString(16).padStart(4, "0"));
     return [
       "& {",
+      "  if ($args.Count -ne 0) {",
+      "    throw 'Unexpected handoff arguments. Put CLI options inside the embedded JSON arguments array.'",
+      "  }",
       "  $PSNativeCommandArgumentPassing = 'Standard'",
       "  $aiwPreparation = ConvertFrom-Json -InputObject @'",
       json,

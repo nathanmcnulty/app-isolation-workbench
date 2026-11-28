@@ -149,8 +149,9 @@ path and hash. **Prepare from PowerShell** generates
 `application prepare-msi-replay-package` with the reviewed path and pin.
 Run it manually on the worker using an independently enrolled guest agent.
 It rechecks the package, creates protected installer intake, and imports
-the prepared install-only plan in a fresh workspace. Use the returned
-`workspaceRoot` and `runId` for `run review-approval` and `run start`.
+the prepared install-only plan in a fresh workspace. Save the preparation
+JSON and use its `workspaceRoot` and `runId` for `run review-approval` and
+`run start`.
 For Start, pass `install.jsn` from the reviewed bundle as the project and
 use the same independently enrolled guest agent SHA-256.
 
@@ -159,10 +160,25 @@ install-only evidence against the same package by adding `--replay-root`,
 `--replay-run-id`, and `--replay-guest-agent-sha256` to the verification
 command. It compares the newly measured product, component, exact path,
 file size and executable hash and rejects the original run as replay.
-To prepare the packaged launch, use the same pinned preparation command
-with `--replay-root` and `--replay-run-id` from the new install-only run.
-Preparation reopens the evidence with the supplied agent hash and requires
-that same match before creating launch intake or plans. Review the new
+To prepare the packaged launch, load the saved preparation JSON for the fresh
+install-only run that just passed verification. In PowerShell, generate the two
+JSON string entries from that record:
+
+```powershell
+$installReplay = Get-Content -Raw -LiteralPath (Read-Host 'Path to the fresh install-only preparation JSON') | ConvertFrom-Json
+(ConvertTo-Json -Compress ('--replay-root=' + $installReplay.workspaceRoot)) + ','
+ConvertTo-Json -Compress ('--replay-run-id=' + $installReplay.runId)
+```
+
+In a copy of the same pinned desktop command, find the embedded JSON
+`"arguments"` array. Add a comma to the end of the `"--evidence-parent=..."`
+line, then paste both generated lines before the array's closing `]`. Keep
+the existing package, pin, guest agent and evidence parent entries. Arguments
+after the wrapper's closing `}` are rejected before the CLI runs.
+
+Run the edited command. Preparation reopens the evidence with the supplied
+agent hash and requires the same match before creating launch intake or plans.
+Use the new preparation result's `workspaceRoot` and `runId` to review the
 launch plan, then approve and Start it separately with `launch.jsn`.
 
 #### VM107 desktop replay trial
