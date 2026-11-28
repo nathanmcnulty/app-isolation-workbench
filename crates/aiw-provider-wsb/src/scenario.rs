@@ -997,16 +997,32 @@ mod tests {
             candidates: vec![reviewed.candidate],
             candidate_scan_complete: true,
         };
-        let result =
-            crate::ImportedMsiScenarioResult::reviewed_launch(&request, discovery.clone(), 42, 0)
-                .unwrap();
+        let result = crate::ImportedMsiScenarioResult::reviewed_launch(
+            &request,
+            discovery.clone(),
+            42,
+            0,
+            true,
+        )
+        .unwrap();
         assert!(result.successful());
         assert!(result.graceful_close_requested);
+        assert_eq!(
+            crate::ImportedMsiScenarioResult::reviewed_launch(
+                &request,
+                discovery.clone(),
+                42,
+                0,
+                false,
+            ),
+            Err(crate::ImportedMsiRequestError::InvalidResult),
+        );
         let operator_result = crate::ImportedMsiScenarioResult::reviewed_launch(
             &operator_request,
             discovery.clone(),
             42,
             0,
+            false,
         )
         .unwrap();
         assert!(operator_result.process_observed && operator_result.process_closed);
@@ -1023,7 +1039,8 @@ mod tests {
         assert!(crate::ImportedMsiScenarioResult::discovered(&request, discovery.clone()).is_err());
         discovery.candidates[0].sha256 = "1".repeat(64);
         assert!(
-            crate::ImportedMsiScenarioResult::reviewed_launch(&request, discovery, 42, 0).is_err()
+            crate::ImportedMsiScenarioResult::reviewed_launch(&request, discovery, 42, 0, true)
+                .is_err()
         );
     }
 

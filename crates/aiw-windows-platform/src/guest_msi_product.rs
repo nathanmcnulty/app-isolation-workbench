@@ -342,6 +342,7 @@ pub struct ReviewedMsiNativeOutcome {
     pub operator_context: Option<aiw_provider_wsb::StandardUserRuntimeContext>,
     pub process_id: u32,
     pub exit_code: i32,
+    pub graceful_close_requested: bool,
 }
 
 /// Runs only inside the already approved disposable worker. The selected
@@ -457,42 +458,46 @@ pub fn execute_reviewed_msi_launch(
                 ERROR_INVALID_DATA,
             ));
         }
-        let exit_code = if let Some(seconds) = operation.interactive_session_seconds {
-            require_visible_process_window(
-                window,
-                application.process_id(),
-                "reviewed application window",
-            )?;
-            application
-                .wait_for_exit(Duration::from_secs(seconds.into()))
-                .map_err(|error| {
-                    GuestMsiExecutionError::Process(format!(
-                        "reviewed operator session did not complete: {error}"
-                    ))
-                })?
-        } else if operation.closes_reviewed_window_sequence() {
-            application.close_reviewed_windows(Duration::from_secs(
-                operation.graceful_close_timeout_seconds.into(),
-            ))?
-        } else {
-            application.request_visible_window_close(window)?;
-            application.wait_for_exit(Duration::from_secs(
-                operation.graceful_close_timeout_seconds.into(),
-            ))?
-        };
+        let (exit_code, graceful_close_requested) =
+            if let Some(seconds) = operation.interactive_session_seconds {
+                require_visible_process_window(
+                    window,
+                    application.process_id(),
+                    "reviewed application window",
+                )?;
+                let exit_code = application
+                    .wait_for_exit(Duration::from_secs(seconds.into()))
+                    .map_err(|error| {
+                        GuestMsiExecutionError::Process(format!(
+                            "reviewed operator session did not complete: {error}"
+                        ))
+                    })?;
+                (exit_code, false)
+            } else if operation.closes_reviewed_window_sequence() {
+                let exit_code = application.close_reviewed_windows(Duration::from_secs(
+                    operation.graceful_close_timeout_seconds.into(),
+                ))?;
+                (exit_code, true)
+            } else {
+                application.request_visible_window_close(window)?;
+                let exit_code = application.wait_for_exit(Duration::from_secs(
+                    operation.graceful_close_timeout_seconds.into(),
+                ))?;
+                (exit_code, true)
+            };
         if exit_code != operation.expected_exit_code {
             return Err(GuestMsiExecutionError::Process(format!(
                 "reviewed application exited with {exit_code}"
             )));
         }
-        Ok(exit_code)
+        Ok((exit_code, graceful_close_requested))
     })();
     let cleanup = if result.is_ok() {
         application.verify_empty_after_success()
     } else {
         application.cleanup()
     };
-    let exit_code = complete_process_operation(result, cleanup)?;
+    let (exit_code, graceful_close_requested) = complete_process_operation(result, cleanup)?;
     Ok(ReviewedMsiNativeOutcome {
         discovery,
         application_token,
@@ -501,6 +506,7 @@ pub fn execute_reviewed_msi_launch(
             .then(|| ordinary.context().clone()),
         process_id: application.process_id(),
         exit_code,
+        graceful_close_requested,
     })
 }
 

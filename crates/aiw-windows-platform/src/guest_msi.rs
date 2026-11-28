@@ -1971,6 +1971,12 @@ impl GuestProcess {
             let remaining = deadline.saturating_duration_since(Instant::now());
             let millis = remaining.as_millis().min(200) as u32;
             match unsafe { WaitForSingleObject(raw_handle(&self.process), millis) } {
+                WAIT_OBJECT_0 if requested.is_empty() => {
+                    return Err(GuestMsiExecutionError::Process(format!(
+                        "reviewed application exited with {} before any WM_CLOSE request was posted",
+                        self.wait_for_exit(Duration::from_secs(1))?,
+                    )));
+                }
                 WAIT_OBJECT_0 => return self.wait_for_exit(Duration::from_secs(1)),
                 WAIT_TIMEOUT => {}
                 _ => {
