@@ -148,8 +148,12 @@ verified view shows the installer hash and size and the reviewed executable
 path and hash. **Prepare from PowerShell** generates
 `application prepare-msi-replay-package` with the reviewed path and pin.
 Run it manually on the worker using an independently enrolled guest agent.
-It rechecks the package, creates protected installer intake, and imports
-the prepared install-only plan in a fresh workspace. Use the returned
+It rechecks the package and guest agent before creating protected installer
+intake. The runner independently verifies the held guest-agent file when
+preparing the bundle, then imports the prepared install-only plan in a fresh
+workspace. If preparation fails after creating protected inputs, preserve the
+exact paths reported in the error and inspect the receipts and reported
+completion state before retrying. Use the returned
 `workspaceRoot` and `runId` for `run review-approval` and `run start`.
 For Start, pass `install.jsn` from the reviewed bundle as the project and
 use the same independently enrolled guest agent SHA-256.

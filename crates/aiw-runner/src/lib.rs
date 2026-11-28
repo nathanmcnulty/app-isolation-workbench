@@ -140,8 +140,9 @@ pub use preparation::{
 #[cfg(windows)]
 pub use preparation::{
     WsbBambuPreparationInput, WsbMsiPreparationInput, import_windows_sandbox_preparation,
-    prepare_windows_sandbox_bambu_bundle, prepare_windows_sandbox_bundle,
-    prepare_windows_sandbox_msi_bundle, verify_windows_sandbox_preparation,
+    preflight_windows_sandbox_guest_agent, prepare_windows_sandbox_bambu_bundle,
+    prepare_windows_sandbox_bundle, prepare_windows_sandbox_msi_bundle,
+    verify_windows_sandbox_preparation,
 };
 
 pub use sandbox_bundle::{
