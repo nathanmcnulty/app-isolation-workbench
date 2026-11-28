@@ -3459,7 +3459,7 @@ fn revalidate_project_revision(plan: &RunPlan, path: &Path) -> Result<(), Runner
         .map(str::to_ascii_lowercase)
         .as_deref()
     {
-        Some("json") => serde_json::from_slice(&bytes).map_err(|_| RunnerError::Drift)?,
+        Some("json" | "jsn") => serde_json::from_slice(&bytes).map_err(|_| RunnerError::Drift)?,
         Some("yaml") | Some("yml") => {
             serde_yaml::from_slice(&bytes).map_err(|_| RunnerError::Drift)?
         }
@@ -5456,6 +5456,23 @@ mod tests {
         assert!(
             wait_for_receipt(&RunLayout::new(&root.0, "missing").unwrap(), &root.0, 0).is_err()
         );
+    }
+
+    #[test]
+    fn copied_short_json_project_names_are_revalidated_before_provider_start() {
+        let (root, layout, start, _readiness) = setup();
+        let original = fs::read(&start.project_path).unwrap();
+        let mut project: Project = serde_yaml::from_slice(&original).unwrap();
+        let packaged = root.0.join("install.jsn");
+        fs::write(&packaged, serde_json::to_vec_pretty(&project).unwrap()).unwrap();
+        let plan = layout.read_plan().unwrap();
+        assert!(revalidate_project_revision(&plan, &packaged).is_ok());
+        project.metadata.owner = "changed-owner".into();
+        fs::write(&packaged, serde_json::to_vec_pretty(&project).unwrap()).unwrap();
+        assert!(matches!(
+            revalidate_project_revision(&plan, &packaged),
+            Err(RunnerError::Drift)
+        ));
     }
 
     #[test]
