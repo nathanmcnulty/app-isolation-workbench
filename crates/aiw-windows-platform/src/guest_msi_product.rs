@@ -470,6 +470,10 @@ pub fn execute_reviewed_msi_launch(
                         "reviewed operator session did not complete: {error}"
                     ))
                 })?
+        } else if operation.closes_reviewed_window_sequence() {
+            application.close_reviewed_windows(Duration::from_secs(
+                operation.graceful_close_timeout_seconds.into(),
+            ))?
         } else {
             application.request_visible_window_close(window)?;
             application.wait_for_exit(Duration::from_secs(

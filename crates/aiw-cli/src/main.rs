@@ -446,6 +446,23 @@ enum ApplicationCommand {
         #[arg(long, requires = "replay_root")]
         replay_guest_agent_sha256: Option<String>,
     },
+    /// Reverify a pinned MSI package and prepare discovery or a launch from matching fresh evidence.
+    PrepareMsiReplayPackage {
+        #[arg(long)]
+        package: PathBuf,
+        #[arg(long)]
+        expected_manifest_sha256: String,
+        #[arg(long)]
+        guest_agent: PathBuf,
+        #[arg(long)]
+        guest_agent_sha256: String,
+        #[arg(long)]
+        evidence_parent: PathBuf,
+        #[arg(long, requires = "replay_run_id")]
+        replay_root: Option<PathBuf>,
+        #[arg(long, requires = "replay_root")]
+        replay_run_id: Option<String>,
+    },
     /// Copy the reviewed external workflow and bytes into a fresh data-only replay package.
     ExportAssessmentPackage {
         #[arg(long)]
@@ -2382,7 +2399,7 @@ fn run_general(command: Command) -> Result<()> {
                         (Some(root), Some(run), Some(agent)) => {
                             write_json(&verified.verify_fresh_selection(&root, &run, &agent)?)
                         }
-                        (None, None, None) => write_json(&verified.review),
+                        (None, None, None) => write_json(&verified.into_review()),
                         _ => bail!("all three replay evidence arguments are required together"),
                     }
                 }
@@ -2396,6 +2413,43 @@ fn run_general(command: Command) -> Result<()> {
                         replay_guest_agent_sha256,
                     );
                     bail!("protected MSI replay package verification requires Windows")
+                }
+            }
+            ApplicationCommand::PrepareMsiReplayPackage {
+                package,
+                expected_manifest_sha256,
+                guest_agent,
+                guest_agent_sha256,
+                evidence_parent,
+                replay_root,
+                replay_run_id,
+            } => {
+                #[cfg(windows)]
+                {
+                    let verified = aiw_admin_workflow::msi_replay_package::verify_package(
+                        &package,
+                        &expected_manifest_sha256,
+                    )?;
+                    let prepared = verified.prepare(
+                        &guest_agent,
+                        &guest_agent_sha256,
+                        &evidence_parent,
+                        replay_root.as_deref().zip(replay_run_id.as_deref()),
+                    )?;
+                    write_json(&preparation_result(prepared))
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (
+                        package,
+                        expected_manifest_sha256,
+                        guest_agent,
+                        guest_agent_sha256,
+                        evidence_parent,
+                        replay_root,
+                        replay_run_id,
+                    );
+                    bail!("protected MSI replay package preparation requires Windows")
                 }
             }
             ApplicationCommand::ExportAssessmentPackage {

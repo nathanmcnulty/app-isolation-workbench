@@ -88,6 +88,10 @@ registered component and its executable bytes, and opens the held image as a
 standard user. Success records that its own window appeared, it closed on
 request with the expected exit code, its process job was empty, and the
 provider cleaned up. A changed executable or missing window fails this run.
+New reviewed launch plans allow three minutes for graceful close. AIW sends
+close requests to the verified process's visible, enabled windows, including
+windows that become available after a startup dialog closes. Use an overall
+Start timeout that covers installation, window readiness, closure and cleanup.
 This is a launch smoke check, not an interaction test, isolation verdict, or
 packaging result.
 
@@ -138,15 +142,68 @@ four-file inventory and exact contents. It neither installs the MSI nor
 authorizes a run. The package does not contain a guest agent, runnable
 approval, prior workspace or raw logs.
 
-Import `app.msi` with normal protected intake. Prepare, review,
-approve and run `install.jsn` in a fresh Sandbox. Check the new
+In desktop **Workflow → Review a replay package**, select **MSI replay**,
+choose the bundle, and enter the separately supplied manifest SHA-256. The
+verified view shows the installer hash and size and the reviewed executable
+path and hash. **Prepare from PowerShell** generates
+`application prepare-msi-replay-package` with the reviewed path and pin.
+Run it manually on the worker using an independently enrolled guest agent.
+It rechecks the package, creates protected installer intake, and imports
+the prepared install-only plan in a fresh workspace. Use the returned
+`workspaceRoot` and `runId` for `run review-approval` and `run start`.
+For Start, pass `install.jsn` from the reviewed bundle as the project and
+use the same independently enrolled guest agent SHA-256.
+
+After the approved install-only run completes in a fresh Sandbox, check its
 install-only evidence against the same package by adding `--replay-root`,
 `--replay-run-id`, and `--replay-guest-agent-sha256` to the verification
 command. It compares the newly measured product, component, exact path,
 file size and executable hash and rejects the original run as replay.
-Finally use `launch.jsn` and the **new** install-only evidence to
-prepare and approve a distinct fresh launch, as above. Match the packaged
-scenario IDs when preparing those runs.
+To prepare the packaged launch, use the same pinned preparation command
+with `--replay-root` and `--replay-run-id` from the new install-only run.
+Preparation reopens the evidence with the supplied agent hash and requires
+that same match before creating launch intake or plans. Review the new
+launch plan, then approve and Start it separately with `launch.jsn`.
+
+#### VM107 desktop replay trial
+
+The Windows build used a fresh checkout based on `3c057ac`. The external
+fixture was VideoLAN VLC 3.0.23 x64 MSI, 60,608,512 bytes, with publisher
+SHA-256 `bc4b902a480b98a4a5479327a7f210f06369a59bf727649e320faba5b4ef1f5e`.
+AIW used the generic MSI scenarios for discovery and launch. [VideoLAN release files](https://download.videolan.org/pub/videolan/vlc/3.0.23/win64/).
+
+The source discovery run `external-msi-source-20261128-r2` returned
+installer exit 0, observed fresh machine registration, found two executable
+components, and verified Sandbox cleanup. Workbench on VM107 rejected an
+incorrect manifest pin, then displayed the independently supplied bundle pin
+`c366f98823be48670ba9ddfb4b362ffaa79d8adc5d407f7aa994a004631d0179` and
+`VideoLAN\VLC\vlc.exe` with SHA-256
+`bfa5740f028a8f310ca01c779bbc5f2f1b435c41539c54de592f715bb0c10389`.
+The CLI used the native Workflow handoff arguments to create
+`msi-replay-1795853618748862300` in pending approval. The trial driver
+reopened that run's typed preparation records after its output-capture
+deadline elapsed. Approval and Start occurred as separate operations.
+The replay ran in a different Sandbox, returned installer exit 0, observed
+fresh machine registration, reproduced both executable component identities,
+and verified exact Sandbox cleanup.
+Using that retained replay evidence, a separately pinned test bundle with a
+different expected executable SHA-256 failed launch preparation with
+`AIW_MSI_REPLAY_ENTRY_POINT_MISMATCH`. The refusal left the run directories
+unchanged.
+The intact bundle prepared a separately approved launch bound to the
+replayed executable. The third Sandbox run
+`msi-replay-1795854733784572800` reached the graceful-close wait but
+timed out after 15 seconds. No successful launch result was admitted.
+AIW stopped the exact Sandbox and both final provider lists were empty.
+Private evidence is under `C:\aiw\MsiReplayDesktop-20261128`.
+
+The follow-up run `vlc-graceful-close-180-20261128` reused the verified replay
+selection and the same VLC installer. The new plan allowed three minutes for
+graceful close and could close successive visible windows of the verified
+process. VLC opened as a standard user and exited with code 0 after graceful
+close was requested. The retained report verified cleanup, and both final
+provider listings were empty. Evidence is under
+`C:\aiw\MsiGracefulClose-20261128`.
 
 ### Installer diagnostics
 

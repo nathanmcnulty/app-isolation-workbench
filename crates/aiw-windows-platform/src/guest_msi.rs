@@ -41,6 +41,7 @@ use windows::Win32::System::Threading::{
     PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
     ResumeThread, STARTUPINFOW, TerminateProcess, WaitForSingleObject,
 };
+use windows::Win32::UI::Input::KeyboardAndMouse::IsWindowEnabled;
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumChildWindows, EnumWindows, GetClassNameW, GetWindowThreadProcessId, IsWindowVisible,
     PostMessageW, SMTO_ABORTIFHUNG, SMTO_BLOCK, SMTO_ERRORONEXIT, SendMessageTimeoutW, WM_CHAR,
@@ -1885,20 +1886,7 @@ impl GuestProcess {
             )
         })?;
         loop {
-            let mut context = WindowSearch {
-                process_id: self.process_id,
-                window: None,
-                matching_windows: 0,
-            };
-            unsafe {
-                EnumWindows(
-                    Some(find_window_for_process),
-                    LPARAM((&mut context as *mut WindowSearch) as isize),
-                )
-            }
-            .map_err(|error| {
-                GuestMsiExecutionError::Process(format!("EnumWindows failed: {error}"))
-            })?;
+            let context = self.find_visible_window(None)?;
             if let Some(window) = context.window {
                 return Ok(window);
             }
@@ -1946,6 +1934,57 @@ impl GuestProcess {
         // SAFETY: this window was just rechecked against the held process.
         unsafe { PostMessageW(Some(window), WM_CLOSE, WPARAM(0), LPARAM(0)) }
             .map_err(|error| GuestMsiExecutionError::Process(format!("WM_CLOSE failed: {error}")))
+    }
+
+    fn find_visible_window<'a>(
+        &self,
+        already_closed: Option<&'a [HWND]>,
+    ) -> Result<WindowSearch<'a>, GuestMsiExecutionError> {
+        let mut search = WindowSearch {
+            process_id: self.process_id,
+            window: None,
+            matching_windows: 0,
+            already_closed,
+        };
+        // SAFETY: EnumWindows invokes callbacks synchronously while search is borrowed.
+        unsafe {
+            EnumWindows(
+                Some(find_window_for_process),
+                LPARAM((&mut search as *mut WindowSearch<'_>) as isize),
+            )
+        }
+        .map_err(|error| GuestMsiExecutionError::Process(format!("EnumWindows failed: {error}")))?;
+        Ok(search)
+    }
+
+    pub(crate) fn close_reviewed_windows(
+        &self,
+        timeout: Duration,
+    ) -> Result<i32, GuestMsiExecutionError> {
+        let deadline = Instant::now() + timeout;
+        let mut requested = Vec::new();
+        while Instant::now() < deadline {
+            if let Some(window) = self.find_visible_window(Some(&requested))?.window {
+                self.request_visible_window_close(window)?;
+                requested.push(window);
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let millis = remaining.as_millis().min(200) as u32;
+            match unsafe { WaitForSingleObject(raw_handle(&self.process), millis) } {
+                WAIT_OBJECT_0 => return self.wait_for_exit(Duration::from_secs(1)),
+                WAIT_TIMEOUT => {}
+                _ => {
+                    return Err(GuestMsiExecutionError::Process(
+                        "could not observe the reviewed application closing".to_owned(),
+                    ));
+                }
+            }
+        }
+        Err(GuestMsiExecutionError::Process(format!(
+            "reviewed application did not exit within {} seconds after {} window close requests",
+            timeout.as_secs(),
+            requested.len(),
+        )))
     }
 
     pub(crate) fn cleanup(&self) -> Result<(), GuestMsiExecutionError> {
@@ -2147,14 +2186,15 @@ impl ScenarioJob {
     }
 }
 
-struct WindowSearch {
+struct WindowSearch<'a> {
     process_id: u32,
     window: Option<HWND>,
     matching_windows: u32,
+    already_closed: Option<&'a [HWND]>,
 }
 
 unsafe extern "system" fn find_window_for_process(window: HWND, value: LPARAM) -> BOOL {
-    let context = unsafe { &mut *(value.0 as *mut WindowSearch) };
+    let context = unsafe { &mut *(value.0 as *mut WindowSearch<'_>) };
     let mut process_id = 0u32;
     unsafe { GetWindowThreadProcessId(window, Some(&mut process_id)) };
     if process_id == context.process_id {
@@ -2163,6 +2203,9 @@ unsafe extern "system" fn find_window_for_process(window: HWND, value: LPARAM) -
     if process_id == context.process_id
         && context.window.is_none()
         && unsafe { IsWindowVisible(window) }.as_bool()
+        && context.already_closed.is_none_or(|windows| {
+            !windows.contains(&window) && unsafe { IsWindowEnabled(window) }.as_bool()
+        })
     {
         context.window = Some(window);
     }

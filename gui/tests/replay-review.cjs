@@ -113,7 +113,7 @@ test("replay review uses only read-only package commands and invalidates the pin
     window: { AiwDisplay: display, AiwReplayHandoff: handoff, __TAURI__: { core: { invoke: async (name, args) => {
       calls.push({name, args});
       if (name === "choose_input") return selected;
-      assert.equal(name, "review_replay_packages");
+      assert.ok(["review_replay_packages", "review_msi_replay_package"].includes(name));
       return pending;
     } } } },
   };
@@ -190,4 +190,58 @@ test("replay review uses only read-only package commands and invalidates the pin
   assert.equal(element("replayBaseline").value, "");
   assert.equal(element("clearReplayBaseline").disabled, true);
   assert.equal(calls.every(({name}) => ["choose_input", "review_replay_packages"].includes(name)), true);
+
+  const type = element("replayType");
+  const hash = element("replayExpectedHash");
+  type.value = "msi";
+  type.handlers.change();
+  assert.equal(element("reviewReplay").disabled, true);
+  assert.equal(element("chooseReplayBaseline").disabled, true);
+  hash.value = "b".repeat(64);
+  hash.handlers.input();
+  pending = { then(_, reject) { reject(new Error("MSI replay package inventory or manifest hash differs")); } };
+  await click("reviewReplay");
+  assert.equal(calls.at(-1).name, "review_msi_replay_package");
+  assert.equal(calls.at(-1).args.expectedManifestSha256, "b".repeat(64));
+  assert.equal(element("generateReplayCommand").disabled, true);
+  assert.match(element("replayReviewStatus").textContent, /manifest hash differs/);
+
+  hash.value = "A".repeat(64);
+  hash.handlers.input();
+  pending = Promise.resolve({
+    manifestSha256: "a".repeat(64),
+    manifest: {
+      installerSizeBytes: 4096, installScenario: "discover",
+      originalSelection: {
+        installerSha256: "c".repeat(64),
+        candidate: { relativePath: "Example\\Tool.exe", sha256: "d".repeat(64) },
+      },
+    },
+  });
+  await click("reviewReplay");
+  assert.equal(calls.at(-1).args.expectedManifestSha256, "a".repeat(64));
+  assert.equal(calls.at(-1).args.baseline, undefined);
+  assert.match(element("replayMsiInstaller").textContent, /app\.msi.*4096.*c{64}/);
+  assert.match(element("replayMsiEntryPoint").textContent, /Example\\Tool\.exe.*d{64}/);
+  const callsBeforeMsiHandoff = calls.length;
+  await click("generateReplayCommand");
+  assert.equal(calls.length, callsBeforeMsiHandoff);
+  const args = requestData(command.value).arguments;
+  assert.deepEqual(args.slice(0, 4), [
+    "application", "prepare-msi-replay-package", "--package=" + candidate,
+    "--expected-manifest-sha256=" + "a".repeat(64),
+  ]);
+  assert.equal(args.some((arg) => arg.startsWith("--operator=")), false);
+
+  hash.value = "b".repeat(64);
+  hash.handlers.input();
+  assert.equal(command.value, "");
+  assert.equal(element("generateReplayCommand").disabled, true);
+  pending = { then(_, reject) { reject(new Error("MSI replay package payload or project differs")); } };
+  await click("reviewReplay");
+  assert.equal(element("replayReviewResult").hidden, true);
+  assert.equal(element("replayMsiInstaller").hidden, true);
+  assert.equal(command.value, "");
+  assert.equal(element("generateReplayCommand").disabled, true);
+  assert.equal(element("replayReviewStatus").textContent, "MSI replay package payload or project differs");
 });

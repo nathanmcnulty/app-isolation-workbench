@@ -58,6 +58,7 @@ const INSTALL_TIMEOUT_SECONDS: u32 = 120;
 const CURRENT_INSTALL_TIMEOUT_SECONDS: u32 = 300;
 const MAX_PROCESS_WAIT_TIMEOUT_SECONDS: u32 = 60;
 const GRACEFUL_CLOSE_TIMEOUT_SECONDS: u32 = 15;
+const REVIEWED_MSI_GRACEFUL_CLOSE_TIMEOUT_SECONDS: u32 = 180;
 
 /// A fully resolved, non-executable description of the one supported MSI
 /// scenario.  Public fields are validated before use or hashing so callers
@@ -237,7 +238,7 @@ pub fn compile_reviewed_msi_launch(
     let (schema_version, graceful_close, operator_seconds) = match close_step {
         ScenarioStep::GracefulClose => (
             REVIEWED_MSI_SCENARIO_VERSION,
-            GRACEFUL_CLOSE_TIMEOUT_SECONDS,
+            REVIEWED_MSI_GRACEFUL_CLOSE_TIMEOUT_SECONDS,
             None,
         ),
         ScenarioStep::WaitForUserClose { timeout_seconds } => {
@@ -309,6 +310,29 @@ fn generic_msi_operation(
 }
 
 impl CompiledMsiScenario {
+    pub fn closes_reviewed_window_sequence(&self) -> bool {
+        self.graceful_close_timeout_seconds == REVIEWED_MSI_GRACEFUL_CLOSE_TIMEOUT_SECONDS
+    }
+
+    /// Recompile a retained reviewed launch using its validated close budget.
+    pub fn recompile_reviewed_launch(
+        &self,
+        project: &Project,
+        run_id: &str,
+    ) -> Result<Self, ScenarioCompileError> {
+        self.validate_reviewed_launch()?;
+        let reviewed = self
+            .reviewed_entry_point
+            .as_ref()
+            .ok_or(ScenarioCompileError::InvalidCompiledProfile)?;
+        let mut compiled =
+            compile_reviewed_msi_launch(project, &self.scenario_id, run_id, reviewed)?;
+        if !compiled.is_reviewed_operator_session() && !self.is_reviewed_operator_session() {
+            compiled.graceful_close_timeout_seconds = self.graceful_close_timeout_seconds;
+        }
+        Ok(compiled)
+    }
+
     pub fn is_generic_install_only(&self) -> bool {
         self.profile == GENERIC_MSI_INSTALL_PROFILE
     }
@@ -341,7 +365,10 @@ impl CompiledMsiScenario {
                     .is_some_and(|seconds| (30..=600).contains(&seconds))
         } else {
             self.schema_version == REVIEWED_MSI_SCENARIO_VERSION
-                && self.graceful_close_timeout_seconds == GRACEFUL_CLOSE_TIMEOUT_SECONDS
+                && matches!(
+                    self.graceful_close_timeout_seconds,
+                    GRACEFUL_CLOSE_TIMEOUT_SECONDS | REVIEWED_MSI_GRACEFUL_CLOSE_TIMEOUT_SECONDS
+                )
                 && self.interactive_session_seconds.is_none()
         };
         if !valid_close
@@ -867,6 +894,21 @@ mod tests {
         let op = compile_reviewed_msi_launch(&project, "first-run", "fresh", &reviewed).unwrap();
         assert_eq!(op.launch_path, r"C:\Program Files\Vendor\Tool.exe");
         assert!(op.is_reviewed_launch());
+        assert_eq!(op.graceful_close_timeout_seconds, 180);
+        let mut previous = op.clone();
+        previous.graceful_close_timeout_seconds = 15;
+        assert_eq!(
+            previous
+                .recompile_reviewed_launch(&project, "fresh")
+                .unwrap(),
+            previous
+        );
+        previous.graceful_close_timeout_seconds = 181;
+        assert!(
+            previous
+                .recompile_reviewed_launch(&project, "fresh")
+                .is_err()
+        );
         let bytes = serde_json::to_vec(&op).unwrap();
         assert_eq!(
             serde_json::from_slice::<CompiledMsiScenario>(&bytes).unwrap(),

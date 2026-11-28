@@ -65,6 +65,19 @@ Windows Sandbox Store registration. See the [live handoff checklist](APPLICATION
 
 ## MSI assessment
 
+The MSI replay review and pinned PowerShell handoff passed all 32 desktop
+JavaScript tests on AIW, including native argument forwarding. The CLI and
+desktop built, and the Windows tests passed for wrong pins, changed package
+files, entry-point comparison and portable replay. On VM107, VLC 3.0.23
+discovery and exact Sandbox cleanup passed. The native Workflow view
+rejected a wrong pin and generated the handoff from the verified VLC bundle.
+Replay in a second Sandbox reproduced both executable identities and
+verified cleanup. The live mismatch check refused launch preparation before
+creating a workspace. The first VLC launch timed out. The fresh follow-up
+used the three-minute close policy, opened VLC as a standard user, and
+verified graceful exit 0 and exact Sandbox cleanup. Follow-up evidence is in
+`C:\aiw\MsiGracefulClose-20261128`. See [the MSI replay workflow](APPLICATION-ASSESSMENT.md#package-and-replay-a-reviewed-msi).
+
 The portable assessment merged through #112. The installer slice in #114
 uses protected intake, an exact prepared plan, separate approval, Start and
 retained reporting. Notepad++ and 7-Zip each returned installer exit 0,
@@ -94,7 +107,7 @@ The overall assessment result remains `insufficientEvidence`.
 
 The measured slices are portable CLI assessment, offline MSI install discovery,
 and reviewed MSI window smoke checks. A generic operator-controlled GUI
-session, MSI packaging and clean-worker replay, in-desktop preparation and
+session, broader MSI replay coverage, in-desktop preparation and
 approval, complete descendants/registry/network/DLL/memory/broker coverage,
 the broader fixture matrix, and broad acceptance remain open. Root-token
 and collector-denial measurements do not establish all effective restrictions.

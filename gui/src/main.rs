@@ -294,6 +294,23 @@ mod desktop {
     }
 
     #[tauri::command]
+    async fn review_msi_replay_package(
+        candidate: PathBuf,
+        expected_manifest_sha256: String,
+    ) -> std::result::Result<service::msi_replay_package::MsiReplayReview, String> {
+        if !candidate.is_absolute() {
+            return Err("Choose the MSI replay package folder.".into());
+        }
+        tauri::async_runtime::spawn_blocking(move || {
+            service::msi_replay_package::verify_package(&candidate, &expected_manifest_sha256)
+                .map(service::msi_replay_package::VerifiedMsiReplay::into_review)
+                .map_err(|error| error.to_string())
+        })
+        .await
+        .map_err(|_| "The desktop could not finish MSI package verification.".to_owned())?
+    }
+
+    #[tauri::command]
     async fn analyze_package(
         app: tauri::AppHandle,
         c: State<'_, Controller>,
@@ -1025,6 +1042,7 @@ mod desktop {
                 get_state,
                 choose_input,
                 review_replay_packages,
+                review_msi_replay_package,
                 analyze_package,
                 create_package,
                 prepare_workflow,
